@@ -1,0 +1,70 @@
+{
+  "_note": "Window-relative click targets for the RODE app, MAXIMIZED to 1920x1080 (window at 0,0, so window-relative == screen coords). Format: screen -> { target: [x, y] }. Extend as more screens are mapped. Used by gui_drive.py `tap <screen.target>` so we click known controls WITHOUT a screenshot-to-find step. Verify navigation with a small crop shot (gui_drive tapshot).",
+  "_verified": "2026-06-18: home/device/deviceconfig/output/processing/monitor/compellor confirmed by driving. monitor/multitrack sidebar can reset to Headphones - use tapshot + retry. 2026-08-25 (phase 2, Pro II): the home/device/audiosetup/chanpanel coords below RE-MEASURED and all confirmed by driving; the older 2026-06-18 home/device coords were STALE (device_tile was [156,120], really [274,208]).",
+
+  "home": {
+    "device_tile": [274, 208]
+  },
+  "device": {
+    "audio_setup": [794, 530],
+    "device_config": [1230, 530],
+    "smart_pads": [1668, 530],
+    "transfer_recordings": [794, 890]
+  },
+  "_audiosetup_note": "The drag-and-drop fader grid. Strips are the nine tiles along y=320 (strip 1 = fader 1 at x=608); the gear on each strip opens that CHANNEL PANEL at y=376. The source palette is below: mics on y=650, stereo sources on y=860. Dragging a palette source onto an occupied strip SWAPS the two sources, and the app rewrites both chains.",
+  "audiosetup": {
+    "strip1": [608, 320], "strip2": [756, 320], "strip3": [906, 320],
+    "strip4": [1058, 320], "strip5": [1208, 320], "strip6": [1358, 320],
+    "strip7": [1544, 320], "strip8": [1696, 320], "strip9": [1846, 320],
+    "gear1": [608, 376], "gear2": [756, 376], "gear3": [906, 376],
+    "gear4": [1058, 376], "gear5": [1208, 376], "gear6": [1358, 376],
+    "gear7": [1544, 376], "gear8": [1696, 376], "gear9": [1846, 376],
+    "pal_mic1": [940, 650], "pal_mic2": [1132, 650], "pal_mic3": [1326, 650],
+    "pal_mic4": [1520, 650],
+    "pal_bluetooth": [878, 860], "pal_usb1": [1056, 860], "pal_chat": [1230, 860],
+    "pal_usb2": [1408, 860], "pal_smartpads": [1584, 860]
+  },
+  "chanpanel": {
+    "close": [614, 282],
+    "prev_channel": [1146, 290], "next_channel": [1318, 290],
+    "tab_processing": [1396, 412], "tab_effects": [1698, 412],
+    "presets": [1396, 888], "advanced": [1698, 888],
+    "preset_slot1": [1534, 428], "preset_slot2": [1534, 528], "preset_slot3": [1534, 628]
+  },
+  "deviceconfig": {
+    "tab_output": [578, 110],
+    "tab_display": [1112, 110],
+    "tab_system": [1648, 110]
+  },
+  "output": {
+    "headphones": [410, 238],
+    "monitor": [410, 304],
+    "routing": [410, 372],
+    "listen": [410, 438],
+    "multitrack": [410, 502],
+    "processing": [410, 570]
+  },
+  "processing": {
+    "master_compellor": [1238, 264],
+    "output_delay": [1238, 354]
+  },
+  "monitor": {
+    "automute_output": [1236, 206],
+    "automute_bt": [1236, 386],
+    "fixed_output": [1235, 565]
+  },
+  "multitrack": {
+    "tab_recording": [1042, 210],
+    "tab_usb1_output": [1238, 210],
+    "tab_usb1_input": [1432, 210],
+    "mode_off": [1060, 304],
+    "mode_prefader": [1238, 304],
+    "mode_postfader": [1418, 304]
+  },
+  "compellor": {
+    "power": [1072, 604]
+  },
+  "panel": {
+    "back": [760, 394]
+  }
+}

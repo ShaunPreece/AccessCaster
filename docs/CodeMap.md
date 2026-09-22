@@ -1,0 +1,585 @@
+# AccessCaster: code map
+
+Where things are, so a session can jump to the right code instead of reading the codebase.
+**Update the PROSE in the SAME edit that adds, deletes, renames or moves a file, type or member.**
+
+**EVERY NUMBER IN THIS FILE IS GENERATED. Do not edit one by hand:**
+
+    python DevTools/codemap_lines.py            rewrite them from the source
+    python DevTools/codemap_lines.py --check    report drift and exit 1, change nothing
+
+That covers the `name` (NNN) line references, the line counts in the table below, and the DevTools
+file count. It touches nothing else, so everything this file SAYS is still written by a person.
+
+Maintained by hand these numbers go stale within the DAY: measured at 96 of 96 wrong, drifting by up
+to 755 lines, because one day's work moves `server.py` and `app.js` by hundreds of lines. A
+confidently wrong line number costs more than none at all, since you jump, land somewhere else, and
+grep anyway, having been misled first. Run `--check` before you trust a number, and run the tool
+after a session that moved code.
+
+--------------------------------------------------------------------------------
+## Project/ (the app)
+
+| file | lines | what it owns |
+|---|---|---|
+| `server.py` | 10784 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
+| `soundpad.py` | 3081 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. Pad records are found by windowing the dump on `padName`: `_pad_windows` is the ONE anchor pass and `_pad_field` reads one field inside a window (pass `default=_ABSENT` to tell a missing field from an undecodable one). `_sanitise_stack` is the ONE effect-stack cleaner, with `validate_fx_stack` (must not be empty) and `_sanitise_stack_loose` (may be) over it. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. |
+| `rcp_transfer.py` | 1453 | Record BUILDERS and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. Also the pad-volume mount gate: `find_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats) and `quiet_drive_errors` (kills Windows' modal drive box). |
+| `app_settings.py` | 217 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
+| `channels.py` | 1182 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
+| `devices.py` | 1105 | Device models and caps: `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec`, `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
+| `autostart.py` | 169 | "Start when you sign in": the HKCU Run value, SHARED WITH `installer.iss` (same key, name and command - `test_autostart.py` asserts it). `state()`, `set_enabled()`, `started_at_login()` (the `--startup` flag `tray.main` reads to come up with no page). Refuses from a source run. **`LEGACY_VALUE_NAME` is the pre-rename value "Access Caster"**: `read_value` falls back to it so a machine that has not been upgraded still reads as ON, and `set_enabled` deletes it whichever way it is called, because two entries naming the same exe start the app twice at sign-in. `installer.iss` deletes it too, ungated by the task. |
+| `profiles.py` | 881 | Save, restore, `device_snapshot`, `UNIT_KEY`, `_apply_v2`. The routing matrix is captured as a MIX SCHEME (`routing.mix_scheme`, via `routing_schemes.capture`); the three older matrix keys are written for old builds only. |
+| `tones.py` | 139 | The announcer's non-speech cues: two-note WAVs (falling = muted, rising = unmuted) generated into the user data dir. `tone_path(name)` makes one on demand and replaces any earlier shape, which is what `TONE_VERSION` in the file name is for. Played by the speech worker through SAPI, so they inherit the announcer's output device. |
+| `routing_schemes.py` | 426 | Mix schemes: `capture` (`only=<output key>` makes a ONE-OUTPUT preset), `apply`, `describe`, `scope_text` (the "(every output)" / "(Chat only)" suffix the dropdown reads, derived per desk), `builtins` (normal / chat-mic-only / chat-normal), the flat JSON store. Keyed by output and source KEY. |
+| `meters.py` | 1039 | WASAPI metering, `Watcher`, `_EngineWaker`, `trusted_ceiling`, `level_note`, endpoint volume, `_default_endpoint_name` (both `default_playback_name` and `default_recording_name`). |
+| `pad_records.py` | 581 | Pad record encode/decode. |
+| `recorder.py` | 633 | Recorder state, storage volumes, marker drop, elapsed time, the recordings list (`read_recordings` / `parse_recording`), the gated delete (`SEL_RECORDINGS`, `DELETE_PROVEN`, `build_delete_request`), **the spoken wording in TWO forms that must not be confused - `STATE_LABEL` / `STATE_SPOKEN` for what the desk IS doing, and `spoken_change(was, now, medium)` for what just HAPPENED** (a drive going in or out is only tellable from the transition; see PROJECT_GUIDE part 2), and the labels for BOTH multitrack destinations (`MULTITRACK_LABEL` = the unit's, `USB_MULTITRACK_LABEL` = this computer's) and **ALL THREE of the Recording page's hints** (`MULTITRACK_HINT`, `RECORDING_FORMAT_HINT`, `BYPASS_HINT` / `BYPASS_NEEDS_MULTITRACK`) plus `RECORDING_FORMAT_LABEL` (WAV vs MP3 - TWO members only; see PROJECT_GUIDE before adding a third). The browser holds none of this wording. |
+| `shows.py` | 388 | The DESK'S own backup (not profiles): `SEL_SHOWCONTROL` 0x28E, `read_shows` (newest first, sorted on `showSnapshotIndex`), `find_by_snapshot`, `read_current`, `send_export` / `send_import` / `send_new_from_default` / `send_delete`, `wait_for`, `error_message`, `restore_fingerprint`. **The handle is the snapshot index, never the uid (positional) and never the uuid (names the show, so backups collide).** **`restore_fingerprint` is how an import proves it ACTED**: the uuid already equals the target in the ordinary case and the command field self-clears to its idle value, so only the desk state can answer. |
+| `model_tree.py` | 266 | **THE PARSER, and it OWNS THAT MODULE NAME.** The dump is a self-describing tree; this reads it and every byte is accounted for. `Node` (with `path()` and `address()`), `parse`, `walk`, plus `instances` / `find_property` which only `DevTools/probe_path_write.py` and `tree_tool.py` call - they are the tool-facing half and are NOT dead. **`parse_record` decodes ONE addressed record** (the shape of both our writes and the desk's pushes) and RAISES on anything malformed, deliberately, because `rcp_read._push_record_len` uses it as a test rather than a decoder. Moved out of DevTools 29th August 2026 because it is the app's reader, not a probing tool. The command line over it is `DevTools/tree_tool.py`, named differently ON PURPOSE: while both were called model_tree.py, `import model_tree` picked whichever came first on sys.path and the tool imported itself. |
+| `rcp_read.py` | 966 | Model dump reading, ALL of it served from ONE cached tree parse per dump (`_index`, which indexes `by_name` AND `by_path`). **`read_model_raw` ENDS ON THE LENGTH THE DUMP DECLARES and SKIPS asynchronous push frames** (`_push_record_len`); `_last_read` records what the last dump did, `bounded_by` saying "length" or the "silence" fallback. Both are load-bearing - see "Reading the model dump" in `PROJECT_GUIDE.md` part 2 - and `DevTools/test_read_under_push_live.py` is their proof. **`values(blob, name, kind=None)` is THE way to read a list of values and `first(...)` the way to read one** (first MEANINGFUL: it skips None and "", keeps False and 0); `find_all` under them returns (value, kind) pairs and is for positional reads that need the kind. **`node_at(blob, path)` / `path_value(blob, path, name, default)` are the ADDRESSED reads** - the counterpart to the `build_*` writers, and what anything belonging to ONE channel must use; `MISSING` is their "no such property" sentinel, distinct from a real None/0/False. Also `iter_properties`, `snapshot_properties`, `block_value`, `iter_block_properties`, `master_processing` (the master Compellor + delay block the Routing page and a profile share), and `_read_matrix` (ONE grid read, with `read_matrix_state` / `read_matrix_levels` over it). `read_settings` is a RAW STREAM-ORDER diagnostic, not a per-channel read. The old flat walk survives as `_legacy_walk` + its two `_legacy_iter_*` views, used only when a dump will not parse. **`PushListener` is how a command's result is now learned: LISTEN, do not re-dump the tree until the answer shows up.** Own read-only handle, no HID lock, dump frames filtered by `_push_record_len`, frames queued from the moment it opens (open it BEFORE the write - the burst starts 0.02 s after). `wait_for(name, timeout, match=)` for the answer, `wait_until_quiet()` for "the desk has finished", which is a DIFFERENT question - see part 2 of the guide. `lost` is a hint that the desk left the bus, never a proof. |
+| `rcp_hid.py` | 414 | HID transport and the lock. **`open_handle(iface, purpose)` / `close_handle` / the `handle` context manager are how EVERY handle in the app is opened**, so the diagnostic log can say who holds the device and for how long; twelve call sites wrote `hid.device()` + `open_path` for themselves until 21st September 2026, and `hid` is now imported HERE ALONE. `purpose` is named after the job ("model dump", "pad create", "announcer"), because the log is read by somebody asking what the app was doing. |
+| `diagnostics.py` | 414 | **THE DIAGNOSTIC LOG**, `%LOCALAPPDATA%\AccessCaster\logs\diagnostic.log` with one rollover. `start()` (called ONLY from `server._bring_up_server`, which every entry point funnels through, so the file has exactly one writer), `event(kind, detail, **fields)`, `command(rec, why)` (decodes a report-3 record to `property = value at [path]`), the `phase` context manager (start / end / how long), `flush`, `stop`, `log_path`, `folder`. It TEES stdout and stderr, which is what makes every existing `print` visible in the windowed build, and installs `sys.excepthook`, `threading.excepthook` and `faulthandler`. Identical events collapse into one `repeated ... xN` line; the FIRST of anything is always written immediately. Silent until `start()`, so the offline suites and DevTools write nothing. |
+| `autogain.py` | 139 | Auto gain measurement and the gain decision, off a WINDOWS endpoint (`chat_endpoint` -> `measure_endpoint` -> `verdict`). The multitrack-pair approach it used first is gone (30th August 2026): `MultitrackMeter`, `PAIR_ORDER` and `measure` were dead. |
+| `hotkeys.py` | 532 | **The Win32 half of global keyboard shortcuts, and it knows nothing about the desk.** `MODIFIERS`, `KEYS` (incl. `KEY_DASH` / `KEY_EQUALS`, the two at the end of the number row the pad scheme uses), **`DEFAULT_MODS` = Ctrl+Alt+Shift, the ONE chord the whole app ships on** (read its comment before changing it: it moved off Ctrl+Alt+Windows because that chord cannot have the digits), `combo_text`, `parse_binding` (the validation, incl. "must carry Ctrl, Alt or Windows"), `HotkeyManager` (holds the USER'S LIST of {id, command, mods, key, enabled, speak}: `load`, `saveable`, `add`, **`add_scheme`** (lays a whole named SET onto an existing list, which `load(defaults=)` may never do), `remove`, `get`, `set_binding`, `set_enabled`, `state`, `start`/`stop`/`reload`, and the `_pump` thread that both registers and pumps). It calls out to a `runner` and a `labeller`; what a command MEANS is `commands.py`. |
+| `commands.py` | 489 | **The catalogue of everything a shortcut can be pointed at, GENERATED from the app's own spec tables** (channels, faders, pads, mix schemes, presets) - never hand-written. `catalogue()`, `label_for()`, `run()` (splits the id on the FIRST DOT), `CATEGORIES`, `LEVEL_STEP`, `PAD_TYPES` (all three kinds since MIDI), **`speaks_by_default`** (the ONE place that decides a shortcut arrives silent; pad firing does), `_pad_control_commands` (bank / slot / what-is-playing, no model dump so they render instantly) vs `_pad_commands` (one per real pad, needs a dump). Imports `server` INSIDE the functions, because server imports this. |
+| `midi_out.py` | 232 | **The desk's own USB MIDI port, and the ONLY way to play a sound pad.** winmm through ctypes, no package and no driver. `ports` / `find_port` (prefix match: Windows truncates a port name at 31 chars), module-level `send_cc` / `press_pad` / `release_pad` / `play_pad` over ONE long-lived shared handle (lazy open, one reopen on a failed send, which is what a replug looks like), `MidiOut` as a context manager for tools, `close`, and `midi_enabled()` which is FOR TOOLS ONLY - the app arms MIDI at the point of use and leaves it on. **CC 35 is play-a-pad and the MIDI CHANNEL is which pad**, within the current bank; the bank is an ordinary HID write (`soundpad.select_bank`). |
+| `tray.py` | 239 | pywin32 system-tray entry point (this is what ships). Menu: Open, Announcer, **Diagnostic log** (`_open_log`, which opens the file in NOTEPAD rather than handing it to the shell - a `.log` often has no registered handler and `os.startfile` would open the "how do you want to open this" chooser, a dialog with nothing in it to read), Quit. |
+| `paths.py` | 74 | `%LOCALAPPDATA%\AccessCaster` and friends. |
+| `page.py` | 62 | `render_index()`: splices `static/help.html` into `static/index.html` at the `<!-- INCLUDE help.html -->` marker, cached on both files' mtimes. **Server-side, not a browser fetch**, so the delivered DOM is identical to the section being written out inline and neither the router's focus target nor `buildStaticTabs` can race it. **Both servers go through it** - `server.py` and `DevTools/ui_probe.py` - or the probe's checks would see a page with no Help & About in it. Raises if the marker is gone rather than serving the page without its Help section. |
+| `version.py` | 194 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
+| `say.ps1` | 92 | SAPI speech, and it SELF-GATES on the foreground window (silent when Claudio has focus), so it is always safe to call. |
+| `say_worker.ps1` | 130 | The speaking half `say.ps1` hands off to. |
+
+### server.py landmarks
+
+- Specs that drive read + write + UI + profile from one place: `PROCESSING_CONTROLS` (173),
+  `UNIT_SETTINGS` (840), `_PRESET_PROPS` (4391).
+- Global shortcuts. The KEYS are `hotkeys.py`, the CATALOGUE is `commands.py`, and the two meet only
+  in `hotkey_manager()`. Here: the actions the catalogue calls into (`_hk_announcer`, `_hk_record`,
+  `_hk_mics` with `_hk_muted_mics` above it, `_hk_state`, `_hk_window`),
+  `_hotkey_defaults()` (what a fresh install gets) and `_pad_hotkey_scheme()` (the pad half on its
+  own, so `action_add_pad_shortcuts` can offer it to a list that already exists),
+  `_HOTKEY_V1_COMMANDS` + `_hotkeys_migrate` (carries an old settings file across),
+  `_hotkey_label` (cached, because the catalogue can touch the desk), `hotkey_state`,
+  `hotkey_commands` (the only part that reads the desk), `action_set_hotkey`, `action_add_hotkey`,
+  `action_delete_hotkey`, `action_set_hotkeys_enabled`. Registered in `_bring_up_server` under
+  `shortcuts=`, released in `stop_server`.
+- **Firing a pad from a shortcut.** `_hk_fire_pad` dispatches PER PAD by type: `_hk_pad_play`
+  (sound, over MIDI, selecting the bank first) or `_hk_pad_toggle` (voice FX / mixer, over HID,
+  state in `_hk_pads_on`). Entry points `_hk_pad` (a pinned padIdx), `_hk_pad_slot` (pad N of the
+  current bank), `_hk_bank_step`, `_hk_playing_now`. Around them: the pad cache (`_hk_pad_map` /
+  `_hk_refresh_pads` / `_hk_pad_entry` / `_hk_maybe_refresh_pads` / `_hk_pads_stale` / `_hk_pad_verify`,
+  the "did the RIGHT pad fire" check on the HID path only) - **the cache is a TTL plus explicit
+  invalidation, never a refresh per press; the per-press version is what made pad firing flaky**;
+  the bank cache (`_hk_note_bank` / `_hk_current_bank`); the MIDI arming (`_hk_arm_midi` /
+  `_hk_rearm_midi`, once per session, re-armed after a profile restore); HOLD-mode notes
+  (`_hk_pads_held`, `_hk_release_held_pads`, `_hk_release_held`); and the silent play tracking
+  (`_hk_note_pad_progress` / `_hk_note_pad_active` / `_hk_play_snapshot` / `_hk_playing_from_model`,
+  fed from `_ann_handle_report` and never spoken).
+- Device state and overview: `read_device_state` (330), `device_overview` (1155),
+  `_overview_routing` (1063), `_wireless_mics` (303), `read_device_status` (1270).
+- Recording: `read_recorder` (571), `action_record` (665), `action_drop_marker` (740),
+  `_recorder_watcher` (469), `_recorder_sentence` (611), `action_delete_recording` (782, gated on
+  `recorder.DELETE_PROVEN`), `_recorder_payload` (518, the ONE builder
+  for the page and for every transport reply), `_recorder_state_changed` (420, the Watcher's
+  callback: it words the change via `recorder.spoken_change` and owns the announcer suspend/restore
+  round a take), `action_set_usb_multitrack` and
+  `action_set_processing_bypass` / `action_set_usb_bypass` (the USB pair is ROUTING's:
+  `/api/routing/usb-multitrack` and `/api/routing/usb-bypass`, built by `loadRouting` into the
+  `usb` tab and valued by `applyRoutingValues`). Writers in `rcp_transfer`:
+  `set_recording_processing_bypass`, `set_usb_multitrack_mode`, `set_usb_multitrack_bypass`, all on
+  `SEL_OUTPUT_GLOBAL` 0x0D beside `set_multitrack_mode`.
+- Remote access (the token gate): `access_token` / `new_access_token` (settings.json,
+  `remote_token`), `_lan_address`, `read_access`, `action_new_access_token`, and in the handler
+  `_token_offered` / `_authorised` / `_refuse`. **Local requests bypass it; `/api/access` and
+  `/api/access/new` are in `LOCAL_ONLY_ROUTES` so the key never leaves this machine.** The page load
+  is the only place the cookie is set.
+- Network: `read_network_status` (1362), `action_join_wifi` (1635), `action_set_bt_visible` (1708),
+  `_network_write_gate` (1836).
+- Announcer: `_announce_loop` (3185), `_ann_handle_report` (2500), `_ann_seed_layout` (2727),
+  `_ann_publish_level` (3134), `_ann_publish_mute` (3163), `_ann_publish_solo` (3861),
+  `_ann_mark_self_write` (3093), `_ann_is_self_echo` (3102), `_suspend_announcer_for_record` (3282).
+- Auto gain: `_autogain_run` (3952), `_ChatIsolation` (4068), `_autogain_restore_processing` (4163).
+- Per-channel level check: `action_channel_level_check` (5855), `_chan_check_stop` (5792),
+  `_level_check_summary` (5719).
+- Meters and the Windows level: `read_meters` (5452), `action_set_input_level` (5555),
+  `action_meter_watch` (5685).
+- Faders and chains: `action_set_fader` (5179), `action_reset_faders` (6007),
+  `_follow_chains` (4707), `_read_fader_vector` (4899), `_tidy_fader_target` (5134).
+- Per-fader mute and solo (the Levels tab's rows): `action_set_fader_mute`, `action_set_fader_solo`,
+  read from `fader_levels_live`; browser half is `onFaderMute` / `onFaderSolo` / `onClearFaderSolos`.
+  By FADER rather than by channel name, so an empty strip and a linked pair both work.
+- Stereo-linked inputs: `action_set_stereo_link`, `stereo_link_state`, `_stereo_link_gate` and
+  `_carry_mute` (which puts back the mute the desk clears when it rearranges a layout). The pair
+  table is `devices.FaderSpec.stereo_pairs` and `rcp_transfer.STEREO_LINK_PAIRS`; the browser half is
+  `buildStereoLinks` / `onStereoLink` / `applyStereoValues` in `app.js`.
+- Routing: `routing_model` (6269), `action_set_cross_point` (6697), `action_reset_all_outputs`
+  (5072, now a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6198, which
+  since 29th August 2026 applies a profile's `routing.mix_scheme` through `routing_schemes.apply`
+  and keeps the old index-keyed branch only for profiles saved before that).
+- Mix schemes: `_apply_scheme` (6747, the ONE apply path: gate, lock, write, wording),
+  `read_routing_schemes` (6780), `action_apply_routing_scheme` (6813),
+  `action_save_routing_scheme` (6827), `action_delete_routing_scheme` (6855). The format and the
+  writes are in `routing_schemes.py`.
+- **Background jobs, all four on ONE class: `_BackgroundJob` (`start` / `status` / `busy` /
+  `step` / `tick`).** The instances are `_profile_job`, `_restore_job`, `_show_job` and
+  `_pad_restore_job`; each `action_*` passes a `work(job)` that RETURNS its result dict and the
+  class writes the finish, including turning a crash into a sentence. There were four hand-written
+  copies of this state machine and six copies of the finish block until 30th August 2026. `step`
+  reports without advancing the count, `tick` advances it; `phrase(msg, n, total)` words a counted
+  step. The page only ever reads `message`, `done` and `ok`.
+- **`wake_channels` (+ `/api/channels/wake`): the dead-mic fix.** Nudges each mic gain one step and
+  straight back after every reset and import, because a show import never re-programs the ANALOG
+  mic preamp and leaves the channel ~55 dB down while the model reads perfect. Nothing can detect
+  it by reading; see `PROJECT_GUIDE.md` part 2 before touching this.
+- ONE backup, both mechanisms underneath: `action_backup_now`, `action_restore_backup` (**always the profile since 21st September 2026**: the show import crashes the desk about 1 in 6, see its docstring), `backup_restore_plan` (what the confirmation dialog says, including `warnings` - what the backup will leave you unable to hear, via `_restore_silence_warnings`), `_removable_volume_ready`, `_backup_wording`.
+- Profiles and the as-found baseline: `snapshot_profile` (7169), `restore_profile` (7318, and it
+  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7240),
+  `action_baseline_save` (7272).
+- The desk's own Shows (all after `restore_profile`): `read_show_state` (the page payload, and the
+  ONE place the two option labels are built), `show_job_status`, `_run_show_job` (one job state for
+  all four, since they are mutually exclusive), `_shows_write_gate`, `_export_and_wait`,
+  `_reset_and_wait`, `_clean_restore_reset` (refuses to reset if the backup did not land),
+  `action_show_export` / `action_show_import` / `action_show_delete` (a thin wrapper over
+  `_show_delete_work`, which the unified delete also runs so both halves share one job) /
+  `action_show_reset`.
+- **THE BACKUPS PAGE, which is the ONE thing the page calls**, and the mechanisms above are what it
+  picks between: `read_backups` (the whole list in ONE device read - profiles, their paired shows,
+  and shows the unit made with no profile beside them), `action_backup_now` (a show when there is
+  storage, ALWAYS a profile, paired under one name), `backup_restore_plan` (which half WOULD run,
+  for the dialog), `action_restore_backup` (`clean=True` forces the profile path; the reply's `via`
+  says which job to poll), `action_delete_backup` (both halves, `_delete_show_then_profile`, with
+  the as-found two-step asked BEFORE anything is deleted).
+- Wifi scanning: `parse_scan_slot` (the `<SSID>----<security>` split, from the RIGHT since an SSID
+  may contain hyphens), `action_scan_wifi`, `WIFI_SCAN_SLOTS` / `WIFI_SCAN_SETTLE_S`. Sits just
+  above `_network_write_gate`.
+- Capability gates, one per risky write family, and all but one now a one-liner over **`_cap_gate`**
+  (which holds the shared reasoning: a selector proven on a Pro II is NOT proven on a Duo, and a
+  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4818),
+  `_matrix_write_gate` (6632), `_output_write_gate` (6640), `_network_write_gate`,
+  `_shows_write_gate`. **`_level_write_gate` (5263) keeps its own body** because it has a SECOND
+  condition beyond the cap: the device must also carry confirmed faderLevel selectors. Each keeps
+  its own refusal sentence, because what the user can and cannot do differs per family.
+  `_chain_follow_on` (4697) is not a gate of this kind.
+- **`_pad_write` is the shape of every live pad edit**: range-check the grid, take the HID lock,
+  run the call, turn a crash into a sentence. Seventeen `action_set_pad_*` / `action_clear_pad` /
+  `action_assign_fx` functions had these eight lines written out verbatim. `invalid=` is a refusal
+  for a value it cannot check itself (checked AFTER the range and BEFORE the lock);
+  `plain_value_error=True` surfaces a ValueError's own text, which soundpad writes as a finished
+  user-facing sentence.
+- Lifecycle: `_bring_up_server` (10632), `_close_previous_instances` (10596), `_client_watchdog` (134),
+  `Handler` (10132).
+
+--------------------------------------------------------------------------------
+## Project/static (the web UI)
+
+`app.js` 8456 lines, `index.html` 2852, `style.css` 313.
+
+**`help.html` is the Help & About page (Alt+7), spliced into `index.html` by `Project/page.py` where
+the `<!-- INCLUDE help.html -->` marker sits.** A fragment, not a page. It is the only part of the UI
+that is prose rather than markup, and the app's ONLY statement of what it cannot do (the Limitations
+tab was retired into its intro). `buildStaticTabs` builds its tab strip exactly as when it was
+inline, because what the browser receives is unchanged.
+
+- Tabs: **`wireTabStrip` is the ONE tab strip** - the roving tabindex, the arrow/Home/End keys, the
+  remembered tab, the "focus the tab before you hide the pane focus is in" rule, and the panel's own
+  tab stop. `buildTabs` (291, JS-built pages) and `buildStaticTabs` (351, pages written in
+  index.html) are thin adapters over it and differ only in where the panes come from: built, or
+  found in the document. They were duplicated line for line, twelve-line accessibility comment and
+  all, until 30th August 2026 - the worst widget in the app to keep two copies of, since every rule
+  in it came from a screen-reader pass. Also `tabSection` (324, sub-headings inside a merged tab),
+  `setPanelTabStop` (150).
+- **Staged dropdowns (anything that changes the desk's audio): `makeStagedSelect`, `markStaged`,
+  `setStagedValue` (the ONLY place a device value is recorded; reaches its button via
+  `sel.stagedApply`), `blockStaged`.** Used by fader assignment, the output mix mode, headphone
+  type, USB multitrack, what to record, and mic type. `makeSelectRow` is the unstaged one, for
+  dropdowns that only change what you are looking at.
+- Rebuild guards: `fillOptions` (2982), `rebuildIfChanged` (3010), `setLevelValue` (5220),
+  `markLevelsUnread` (5198), `applyUnitSettingValues` (1353).
+- Live region: `announce` (18). It REPLACES, it does not queue.
+- Confirm modal: **`confirmAction`** (was `confirmPad` until 30th August 2026; generic,
+  used by pads, mix schemes, deleting a recording and the access link). DOM ids are still
+  `pad-confirm-*`.
+- Remote access panel: `loadAccess` / `wireAccess` (Device > **Remote access**, its own tab, last
+  on the strip). `SUPPORT_URL` + `wireSupport` (Help & About > Support this project) are next to
+  `wireAboutTabs`.
+- App shell: `summariseOverview` + `speakStartupSummary` (the spoken startup state, by exception),
+  and `loadVersionBeforeRender`, which the first render awaits so the app heading carries the version
+  before focus lands on it. Pinned by `DevTools/ui_checks_shell.js`.
+- Keyboard: `bindPageBoundary` (8286, the end-of-page hard stop).
+- Router: `render` (8039). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
+  so an opening window starts on the current page's nav link, and a route change takes the default
+  and focuses the section's h1.
+- Page loaders: `loadVersion` (468, `/api/version`, called from init so the Help & About version is
+  there without visiting Device), `loadStatus` (495), `loadOverview` (805), `loadChannels` (2078),
+  `renderChannelPanel` (2180), `loadPads` (3080), `loadMonmixOutput` (4975),
+  `loadFaderLevels` (5022), `buildMatrix` (5343), `onMatrixOutputChange` (5503, which also words each
+  source switch, including the source that matches the output).
+- Mix schemes: `wireSchemes` (5628), `loadSchemes` (5644, fills the dropdown; option values are
+  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (5729).
+- Recording: `fillRecordingList` (7463), `fillRecordingDeleteChoices` (7489),
+  `onDeleteRecording` (7509). Everything on that page speaks through `setRecState`, the page's
+  ONE live region.
+- Builders: `buildLevelSlider` (5234), `buildScaleFields` (3566), `buildTriggerFields` (3731),
+  `buildBackChannelList` (3531), `renderCustomFxList` (4290), `fillSpeechChoices` (1634).
+- Specs: `REC_TRANSPORT` (7166). Never delete a `label:` key from one.
+- Progress dialogs: `pollProfileJob` (6292).
+- The desk's own Shows (after `doRestore`): `loadShows`, `selectedShow` (returns the SENTENCE form
+  of the name, not the option text), `openShowConfirm` (one dialog, three actions), `doShowConfirmed`,
+  `onShowExport`, `runShowJob`. Option values are snapshot indexes; `data-short-label` carries the
+  sentence form.
+- Wifi scanning: `onWifiScan`, `onScanPick` (fills the NAME box rather than being a second source of
+  truth for it).
+- Keyboard shortcuts (Device page, tab key `shortcuts`): `wireHotkeys` (all the listeners, called
+  from init), `loadHotkeys`, `applyHotkeyState` (the ONE place a payload becomes the whole tab),
+  `hotkeyPickLabel`, `currentHotkey`, `showHotkey` (values only, and it skips the focused control),
+  `hotkeyRowStatus`, `saveHotkey`, `forceHotkeyValues` (puts the FAILING row back, which
+  `showHotkey` deliberately cannot), `onHotkeysEnabledToggle`, and the dialogs:
+  `onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm` / `onHotkeyDeleteOpen` /
+  `onHotkeyDeleteConfirm` / `closeHotkeyDialog`. The editor's controls are STATIC in index.html.
+- `dropRetiredGroupState` (8405) drops the whole retired `accesscaster.groups` key.
+
+Page shortcuts (this line was STALE and is corrected 30th August 2026; the menu was reordered on the
+29th, `bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,
+Alt+4 Recording, Alt+5 Profiles, Alt+6 Device, Alt+7 Help &amp; About (renamed from "About" on the
+30th; the route key is still `about` and the section is still `sec-about`).
+
+--------------------------------------------------------------------------------
+## DevTools/ (118 files; the ones worth knowing)
+
+**Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
+gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
+else) plus `ui_checks_<page>.js`: about, baseline, boundary, chantabs, device, levelcheck, network,
+appsettings, boundary, chantabs, device, levelcheck, network,
+pads, padsbus, readonly, recording, routing, solo, **staged**, wireless, backups.
+**`probeLog()` CARRIES THE POST BODY, not just the path** (2nd September 2026), so a check can ask
+WHAT the page tried to write rather than only that it tried: "the wireless mute posts to its own
+endpoint" passes just as happily when the page sends the wrong channel name. `ui_checks_pads.js` is the fullest
+template, and **it needs `--timeout 420`**: at the default 90 it reports "the page never reported
+back within 90s", which reads like a broken page and is only 97 checks taking their time (measured
+2nd September 2026, against an unmodified `app.js`, after that message sent a session hunting a
+regression that was not there). **`ui_checks_staged.js` covers TWO pages and must be run twice**, `--route routing` and
+`--route channels`: it proves that every audio-changing dropdown writes nothing when arrowed and
+writes exactly once from its Apply.
+**Every checks file must end with `await probeDone();` inside `run()` AND the `run().catch(...)`
+launcher**, or the run dies as "the page never reported back within 90s" with no clue why.
+**A CHECKS FILE MUST NOT NAME A CHANNEL THAT ONLY ONE DESK HAS.** `solo` and `levelcheck` both
+hard-coded `Mic3`, which a Duo does not have (its source 2 is the Headset), so on that desk they
+reported six and three failures reading exactly like the control had gone missing - the same trap
+`test_announcer.py` pins the desk to avoid. Both now pick the highest-numbered mic out of
+`channel-select`, and a wide check derives its "everywhere else" list the same way. Fixed 2nd
+September 2026; grep a new checks file for `Mic3` / `Mic4` before trusting a pass on one desk.
+`ui_checks_padsbus.js` covers the SMART pads bus being a channel with a chain but no level; it was
+written for the Pro II and passes unchanged on a Duo since the bus was added there.
+`ui_checks_wireless.js` covers the wireless mic mute: on the mics only, told apart from the channel
+mute by name AND description, posting to its own endpoint with the channel it is on.
+**`ui_checks_readonly.js` NEEDS A GENERATED FIXTURE AND CANNOT RUN WITHOUT ONE.** It is the check
+that no capability-gated control uses the raw `disabled` attribute, and no desk in existence reaches
+those branches (all six gates are ON for both), so run `python DevTools/make_readonly_stub.py` first
+- it takes what the ATTACHED desk really answers and flips only the gates - then pass
+`--stub DevTools/_probe_stub_readonly.json --route routing`. The fixture is gitignored like every
+other `_probe_stub_*.json`: the repo carries the checks, not a snapshot of one machine's desk.
+**EACH SUITE'S OWN HEADER GIVES ITS COMMAND LINE, AND SOME NEED MORE THAN `--route`.** `baseline`
+needs **`--offer-baseline`**, or the probe answers `/api/baseline/status` with "nothing to offer",
+the first-run dialog correctly never opens, and the suite reports four failures that are not real
+(done, and reported as a bug, 29th August 2026).
+**`baseline` IS ALSO SINGLE-USE AND CONSUMES REAL STATE.** One of its checks DECLINES the offer, and
+declining is remembered per desk in `%LOCALAPPDATA%\AccessCaster\settings.json` under
+`baseline_asked`. So it passes 29 of 29 the FIRST time and fails the same four ever after, and it
+has silently used up that desk's genuine first-run offer. To re-run it, remove the desk's hardware
+id from that list first (and put the user's own state back afterwards if you did not mean to spend
+it - done on 29th August 2026, id `0E17-72A4`). **`pads` needs about TWENTY MINUTES**
+(`--timeout 1400`; 97 checks): so many of its checks trigger a fresh pad-grid read off the desk that
+it really is that slow, and it was twice called hung at 300 s and 420 s. **`device` needs
+`--timeout 600`** (122 checks; it reads a different part of the desk per tab and does not finish in
+the default 90 s). Results are only posted at `probeDone`, so a slow run and a hung one are
+indistinguishable from outside.
+**THE LESSON THAT COST AN HOUR: run a suite the way its own header says, and give it time, before
+calling it broken.** Both of the "pre-existing failures" chased on 29th August 2026 were one set of
+arguments swept across every suite.
+
+**Global keyboard shortcuts.** `test_hotkeys.py` (offline, no desk: the validation rules, real
+registration with Windows, dispatch by posting WM_HOTKEY at the pump, our own clash detection,
+re-binding, the master switch, and what gets persisted). `test_hotkey_actions_live.py` (the ACTIONS
+against the desk; stop the service first, and `--record` to include the recording pair).
+`press_keys.py` presses REAL keys, which is the only way to prove registration rather than dispatch
+- and it uses `keybd_event`, because SendInput injects nothing from an RDP session here.
+`probe_free_chords.py` asks Windows which modifier chords will actually give up a key, by
+registering and immediately unregistering. **It is the only authority on that**: `RegisterHotKey`
+refuses without saying who holds the key, and the obvious guess is often wrong (Ctrl+Alt+Win+digit
+looked like Windows and was Shaun's own webcam app). **Stop our server first**, or the keys we hold
+read as taken.
+
+**Playing pads from a shortcut.** `test_pad_shortcuts_live.py` drives the shortcut layer against the
+attached desk and checks the SPOKEN RESULT of each branch, because that sentence is all the feedback
+a shortcut gives. It runs its own announcer, since the tracking under test lives in the push handler,
+and it silences the desk at BOTH ends - a playing sound pad survives an ordinary teardown, and one
+left over makes the next run's first press a stop rather than a start.
+`probe_pad_timeline.py` is the pad-TIMING tool and the only trustworthy one: a reader thread
+timestamps every push while the main thread presses at known times, so nothing is inferred from a
+rate measured in a gap. Three earlier probes were deleted for getting that wrong.
+
+**Offline Python suites, no device - 24 of them:** `test_announcer`, `test_announcer_suspend`,
+`test_autostart`, `test_baseline`, `test_chain`, `test_duo_parity`, `test_fader_chains`, `test_half_connected`,
+`test_hotkeys`, `test_input_read`, `test_latched_pads`, `test_level_check`, `test_meters_ceiling`,
+`test_app_settings` (the export allow-list: **that the remote-access token cannot leave in the
+file**, and that an import merges rather than replacing this machine's own token),
+`test_pad_actions`, `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
+`test_restore_warnings`, `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`.
+**An offline suite that asks which desk it is on must PIN one** with
+`devices.force_device(devices.PRO2)` at the top, or it answers from the USB port and fails on the
+wrong machine. `test_announcer`, `test_shows_sim` and `test_level_check` do.
+**`test_input_read.py` covers the ADDRESSED input read** (`channels.input_value`) on both desks,
+including the exact Duo mis-attribution, a falsy override beating the table, and a guard that
+`input_slot` has not come back. It carries a small ENCODER for the model grammar, so it builds
+synthetic dumps rather than shipping a capture (a real dump holds the wifi PSK).
+`test_input_read_live.py` is its hardware half: writes each mic's gain in turn, asserts the others
+did not move, restores. Safe with a mic connected - it writes gain only, never phantom.
+**`test_restore_mic_order_live.py` now asserts the CHAIN as well as the gain** survives a restore
+that changes the voicing.
+**`test_duo_caps_live.py` exercises EVERY capability the attached desk has ON** (the Duo plan's A5):
+mic gain / polarity / line level / mic type, a processing module and a float param, channel mute, a
+fader source swap, a stereo link and unlink, a matrix cross-point and its level, a soundpad create
+and clear, monitor mute, and the whole Device settings page. Each writes, diffs the WHOLE tree,
+restores and diffs again, so
+an unexpected change is visible rather than inferred. `--only NAME` runs one. **It judges by the
+diff, NOT by occurrence counts**: on a Duo a first write CREATES the property, so a count is not a
+pass condition. It never sleeps a fixed time (`settled` polls until two whole-tree reads agree) and
+it excludes `encoderColour`, which is derived live state that decays on a timer - both were sources
+of failures that looked like flakiness. It also re-checks that all 20 unit-setting addresses still
+resolve on the attached desk, and never touches the `disableAll*` trio.
+**Two hooks carry the writes the desk does not undo for you.** `restore_extra(before)` runs after the
+restore write, for a value the desk DRAGS others along with (the mic voicing replaces the strip's
+whole chain; `outputMonFixed` unmutes the monitor). `ignore={names}` exempts a write-only trigger
+from the restore assertion but still PRINTS it, so it can never hide. Passes end to end on a Pro II,
+31st August 2026.
+**`test_usb_drop_live.py` isolates ONE LAYER AT A TIME for the USB drop**, the fault where a desk goes off
+the bus and only a physical replug returns it. `--layers` composes any of `handles1`, `handles2`,
+`poll`, `export`, `exportonly` and `app` (that last one exclusive, and it is the CONTROL: if every
+layer is clean and the app still drops, the layer list is wrong). No layers means the command alone.
+Presence comes from PowerShell `Get-PnpDevice`, NOT `hid.enumerate`, which opens each device on
+Windows and would put traffic inside the window that has to stay quiet; it is also a separate
+process, which is what makes it valid for the `app` layer. Every trial proves the reset RAN by
+reading the new show uuid, so "no drop" can never be "no reset", and it stops dead on the first drop.
+**EACH TRIAL IS AN UNBACKED FACTORY RESET, so expendable desks only.** Result 3rd September 2026: 45
+resets, every layer clean.
+
+**`probe_show_push.py` answers what the desk PUSHES for a show command**, which is what the listening
+design was built on. `--export` or `--reset`, and it prints the frame timings, the name histogram, and
+a whole-tree diff either side. It never listens across its own dumps (536 frames of model would read
+as a flood of pushes), so the order is snapshot, listen, send, capture, stop, snapshot.
+
+**`ui_checks_shows_storage.js` pins what the Profiles page hides when the desk has nowhere to write**
+(`python DevTools/ui_probe.py --checks DevTools/ui_checks_shows_storage.js --route profiles`). It
+BRANCHES on what the attached desk really reports, so on a Pro II with a drive in it checks the
+opposite - that nothing is over-hidden. The check that matters is that the factory reset is NOT
+hidden with the backup controls.
+**`test_fader_chains.py` covers the off-fader chain store and all three `_follow_chains` cases**
+(moved / left / returned), including a return that does not land being parked again. It mocks
+`channels.write_chain` and points `_paths.data_path` at a scratch file, so it never touches the
+user's real parked chains.
+**`test_pad_actions.py` covers `server._pad_write` and all seventeen pad actions over it** (the
+range guard, `invalid` landing BEFORE the device lock, a crash becoming a sentence,
+`plain_value_error`). Added 30th August 2026 with the helper, because the audit found that family
+had NO offline coverage at all - the most numerous action family in the app, and not one test
+called any of it.
+**`test_specs.py` is where "two tables that must agree" checks live.** Today that is the unit
+settings: `rcp_transfer.UNIT_SETTING_SEL` is the single source of which ones exist, and every entry
+is either on the Device page or in `server.UNIT_SETTINGS_NOT_ON_PAGE` with a reason. Put any future
+cross-table invariant here rather than in a new file. `test_shows.py` also carries `fake_blob`, which builds a
+synthetic model stream, so show parsing is testable with no device at all.
+**`test_shows_sim.py` drives the REAL `server.action_show_*` against a FakeDesk with faults
+injected** (an export that does nothing, an import the unit rejects, a reset that does not take).
+It is the only cover the import, the factory reset and the clean restore have, since none of them
+can run on a desk whose every backup holds the loaded show. It proves the DECISIONS, never the
+bytes: the load-bearing case is that a failed backup must abort the reset with the desk untouched.
+
+**A SUITE THAT TOUCHES THE DESK IS NAMED `_live`, WITHOUT EXCEPTION.** The name is what everything
+else filters on - a sweep of "the offline suites", and `DevTools/_bootstrap`, which blocks device
+writes for `test_*` and hands the licence back for `test_*_live`. A live suite under a plain name
+gets run by both as though it were safe, and it writes to whatever desk is plugged in.
+**IT IS NOT THEORETICAL AND A COMMENT DOES NOT PREVENT IT** (21st September 2026): `test_unit_settings`
+and `test_network_scan` carried exactly this warning, in this file, and were still swept up as
+offline nine times in one afternoon. Each pass muted Mic 2, unmuted it and saved a profile on a
+desk being worked at, and every pass reported ALL CHECKS PASSED. Both are now `_live`.
+**THE BOOTSTRAP GUARD DOES NOT COVER THIS CASE, which is why the NAME has to.** It refuses writes
+inside the test's own process; a suite that drives the running server over HTTP does its writing in
+the SERVER's process, where nothing is a test. The diagnostic log is the way to check after the
+fact: run the sweep, and if `%LOCALAPPDATA%\AccessCaster\logs\diagnostic.log` gains a line, an
+"offline" suite reached the desk.
+
+**Live device tests (write, read back, restore):** `test_unit_settings_live`,
+`test_pad_trigger_live`, `test_recorder_live`,
+`test_player_live` (loads a file into the unit's own player and watches for movement),
+`test_eq_q_live`, `test_meters_live`, `test_network_scan_live` (needs `--wifi` / `--bt` and exits 2
+without them),
+`test_flush_verify_live` (the licence for the fast flush: write a pad, leave transfer mode,
+re-enter, md5 it back off the desk),
+`test_schemes_live` (captures the mixes, drives Chat, puts them back, proves the matrix and the
+property counts are unchanged; needs the server stopped),
+`test_monitor_output_live` (EAR TEST on the rear line outs, `--block on|off`; one block per run and
+it counts down first, and its docstring carries why both of those are non-negotiable),
+`test_mic_type_gain_live` (steps a mic through every voicing and records the gain each one applies:
+the table behind the restore's write order. Restores gain, type AND instrument gain),
+`test_restore_mic_order_live` (drives `profiles._apply_v2` itself on one channel from the state a
+factory reset leaves, so the ordering fix is proven through the real code without a reset),
+`test_clean_restore_live` (**FACTORY-RESETS THE DESK**, refuses without `--yes`: the whole clean
+restore through the HTTP API with a 6467-property diff, then imports the backup it took to put the
+desk back and diffs that too),
+`test_hotkey_actions_live` (the shortcut ACTIONS against the desk; stop the service first, and
+`--record` to include the recording pair),
+`test_read_under_push_live` (**the model read against a desk that is deliberately pushing**: fires a
+pad over MIDI, then asserts the read is prompt, the same length and the same tree structure as a
+quiet one, that the push filter fires on real pushes and never on dump content, and that frames go on
+arriving after the burst. Also runs the PRE-FIX loop on purpose, on a cut-down ceiling, so both
+faults stay demonstrated. Read-only apart from `systemMidiControl`, which it restores; needs nobody
+at the desk).
+
+**Six of these were DELETED in commit b05ed8f and their ANSWERS are the reason they are gone.** The
+paragraph above carried their descriptions with the names stripped out, so it read as four
+sentence-fragments belonging to nothing; repaired 30th August 2026. Do not rewrite these tests
+expecting a new answer:
+- `test_storage_mount_live` - walked every `transferModeType` x `storageVolumeTransfer` pair and
+  reported what Windows mounts. The answer is "pad storage, always". See the mounting question in
+  The route, if there is one, is the gadget LUN rather than another transfer mode.
+- `test_device_meters_live` - sampled all 22 METER nodes quiet and then while speaking through the
+  desk, and refused to judge them until a Windows-side witness endpoint passed first. Answer as of
+  29th August 2026: **meter values are not in the model dump**, which is why metering reads Windows
+  audio endpoints instead.
+- `test_recording_quality` and `test_recording_quality_takes` - what the two bypasses and the
+  quality field do, the second by MAKING REAL RECORDINGS (one take per `recordingCompressionQuality`
+  value, same phrase and duration each time) and reading the format out of `recordingContent`'s
+  path. Answer: WAV and MP3, two values, and it is `recorder.RECORDING_FORMAT_LABEL` now.
+- `test_tone_live` - wrote `toneGeneration` on TEST 0x290 and measured the main-mix endpoint.
+- `test_voxlab_derive` - the VoxLab knob derivation, now in `channels.VOXLAB_KNOB_PROPS`.
+
+**Address and selector work:** **`tree_tool.py` FIRST - it parses the dump as the tree it actually
+is and gives any node its real address (`--find`, `--prop`, `--anchors`); `probe_path_write.py` is
+the path-addressed probe that goes with it (LANDED / STRAY / NOTHING), and `block_order.py` is what
+proved the flat walk was fitting around a structure it could not see.** Then the older flat tools:
+`selector_predict.py` (the model, 15 of 15 anchors),
+`selector_map.py` (header to selector, everything derivable), `selector_from_push.py` (a pushed
+record names its own selector),
+`probe_derived_write.py`, `cap_probe.py` (drive one control with USBPcap running),
+`model_diff.py` (block-aware snapshot / diff of all 6436 property occurrences, `snap` / `diff` /
+`watch`; the tool for "the desk just did something, what changed?"), `transfer_volumes.py` (what
+Transfer Mode actually mounts, per `transferModeType` value),
+**`firmware_dig.py` - THE DESK'S OWN FIRMWARE, and it outranks every other source.** A dump shows
+what the desk PUBLISHES, the RODE app shows what the app KNOWS, the firmware shows what the desk
+DOES. RODE publish it: `update.rode.com/manifest.json` names `rcp2/<version>/app.zip` (the two Linux
+binaries, md5 published beside it and verified) and `os.tar.gz` (the whole OS, 169 MB, not fetched).
+The image is RODE's, so it lives OUTSIDE the repo at `C:\Users\shaun\rode-firmware` and is never
+committed. `rc_audio_mixer` is the engine that speaks report-3 to us; `rc_gui_juce` is the
+TOUCHSCREEN, so every screen we cannot reach is readable there. It is what turned the clock from a
+dead end into a route (`ntpdate pool.ntp.org`).
+**`app_name_table.py` - THE SAFE NAME ENUMERATOR, and read this before anyone proposes guessing a
+property name at the desk.** The protocol's names sit in one contiguous block inside the RODE app's
+binary; it anchors on names the desk publishes, takes the region they span and reads the lot. 666
+names against the desk's 472, so it carries block names, enum values AND properties the desk does
+not publish (`systemLanguage`, `channelPanMode`, `hardwareLayout`, `debugMode`, `clock24Hour`,
+`padProgressRequestSignal`, the `phoneBook*` family, and blocks like DUCKER, RADIO, THEME).
+Writing a guessed name at the desk appends a stray only a factory reset clears; reading the table
+costs nothing.
+`analyse_clean_restore.py` (offline, no device: diffs two dumps by TREE PATH and sorts every
+difference into by-design / pads / "came back as the FACTORY value" / real. That last split is what
+killed the timing theory. It knows the by-design rules, so a clean run means clean).
+
+**`probe_dead_props.py` and `probe_dead_props_write.py`** check the guide's PROVED INACTIVE list
+against whichever desk is attached. The first is read-only: block, address, occurrence count and
+resting value for each, which is how the Duo was shown to carry all of them at the same addresses
+as the Pro 2. The second writes each one that takes a single operand, classifies the result
+SWALLOWED / STORED / SIDE EFFECT / STRAY, and restores it. **It skips `toneGeneration` and
+`emergencyMuteActive` unless `--include-audible`**, because their proof needs a listener, and it
+never writes a `pair` property, because guessing an operand layout is how a stray gets appended.
+This is what found `btDoScan` alive.
+
+**`check_exclusive_bind.py`** settles the two TCP facts the single-instance lock rests on, on port
+8791 so it never disturbs a running app: that `allow_reuse_address = 1` really does let two servers
+share a port on Windows, and that `= 0` still rebinds straight after a clean stop with traffic
+behind it (the TIME_WAIT regression the change could have caused). Offline, no device. See
+`PROJECT_GUIDE.md` part 2 under the server's lifecycle.
+
+**`check_notes.py` enforces the private notes' own rules, the ones a script can settle**: an entry that is
+really a cleanup, a status column creeping back into `PARITY.md`, `Now / Next` past 150 lines, a
+session-summary heading, em dashes, and any file named that no longer exists. Run
+`python DevTools/check_notes.py --check` before finishing a session. It does not check taste; it
+catches the specific ways these files have gone wrong before.
+
+**Generated documents, all four regenerable with a `--check` drift guard that exits 1:**
+**`property_list.py` -> `docs/PROPERTY_LIST_<DESK>.md`** (every property the DESK
+publishes, names and types only, never values; reads the connected desk, read-only, and runs fine
+alongside the app's server. It is the RAW MATERIAL, and it feeds `property_coverage.py` and
+`test_specs.py`. `--check` compares the NAME SET, not the counts, because counts move with ordinary
+use while a new NAME is either a firmware update or a STRAY),
+`property_coverage.py` and `profile_coverage.py` write their per-desk reports into the private
+notes, and **`codemap_lines.py` -> the NUMBERS IN THIS FILE** (the
+`name` (NNN) references, the table's line counts, the DevTools file count). Run
+`python DevTools/codemap_lines.py` after a session that moved code; never edit one of those numbers
+by hand. It touches no prose.
+
+**`audit_code.py`** is the stdlib code audit: syntax, unused imports, dead top-level functions
+across `Project/`, with the reference sweep widened to `DevTools/` so a function only a probe calls
+is not called dead. **It audited NOTHING until 30th August 2026** - it globbed `*.py` in the cwd and
+its docstring said to run it from the repo root, which has none, so it printed a clean pass over
+zero files. Run it from anywhere now.
+
+`run_dev_server.py`, `wifi_join.py` (password on stdin; strips the BOM PowerShell adds on a pipe),
+`screen_shot.ps1` (**photographs the desk's touchscreen** with the Insta360 webcam; records a
+five-second clip and keeps the LAST frame, because a single-frame grab is always out of focus),
+`check_drive_recordings.py` (WAV cue
+points, and it needs the drive in THIS PC, not the desk), `midi_monitor.py`,
+`midi_out.py` (**the only way to PLAY a pad from software**: the desk's class-compliant "MIDI
+function" port through winmm/ctypes, no package. `midi_enabled()` turns `systemMidiControl` on and
+puts it back, `MidiOut().play_pad(n)` fires one. CC number is the FUNCTION, MIDI channel is WHICH
+pad. Run it directly to list ports or fire a pad), `state_observatory.py`
+(`listen` takes no `--raw`), `gui_drive.py` +
+`ui_map.json` (drive the RODE app), `duo_probe.py` (read-only bring-up probe for any new desk),
+`announcer_echo_check.py`, `audit_code.py`.
+
+**Two cap-opening probes, and both are worth reading before writing another one.**
+`duo_stereo_probe.py` asks whether a stereo PAIR CODE is live on a Duo, and `--control CODE` is the
+half that matters: it runs the same write against a source the desk cannot have (3 = Mic 4), because
+the engine's model is device-agnostic and will answer either one identically. Two verdicts died
+before that control was added. `duo_network_probe.py` does structure-then-engine on the NETWORK
+block: it identifies root child 0x10, checks every property the app writes is on it, then cycles the
+radio and watches the DESK drop and regain its own IP address. `--skip-radio` leaves the radio alone.
+
+**Device writers, the small accidental-damage surface:** `bt_probe`, `gui_drive`, `inject_button`,
+`inject_encoder`, `inject_fader`, plus the live tests above.
+
+--------------------------------------------------------------------------------
+## Build and assets
+
+- `ProjectBuilds/build_installer.ps1` -> `Output/AccessCasterSetup-v<version>.exe`. Four steps:
+  icon, RELEASE NOTES, PyInstaller freeze, Inno Setup compile. Uses `AccessCaster.spec`
+  (PyInstaller), `installer.iss` (Inno Setup 6), `gen_icon.py` (pillow).
+  Entry point is `tray.py`; user data lives in `%LOCALAPPDATA%\AccessCaster`.
+- `ProjectBuilds/make_release_notes.py` -> `Project/ReleaseNotes.html`, generated from
+  `version.py` HISTORY (a LIST, not prose) and gitignored because it is derived. The spec bundles it
+  and `installer.iss` offers it as a ticked post-install action. HTML for heading navigation.
+- `ProjectAssets/`: `mic_presets.json` (factory presets, module flags included),
+  `fx_recipes.json` (voice-FX recipes, shared by both desks), `APP_WALKTHROUGH.txt`,
+  `RODE_APP_SECTIONS.txt`.
+
+--------------------------------------------------------------------------------
+## docs/ (the reference documents, and this file is one of them)
+
+`PROJECT_GUIDE.md` is the one to read first, and the one written for somebody who did not write
+this code: what the protocol turned out to be, how it was worked out, how the app is layered, and
+the traps. Part 1 is the narrative, part 2 the invariants. Keep it free of session detail.
+
+`RODECASTER_PROTOCOL.txt`, beside this file, is the definitive byte-level spec:
+looked up rather than read.
+
+`PARITY.md` is the parity TARGET, every feature the desk and the app have, and it deliberately
+carries no status, because a hand-kept status column rots. `SOUNDPADS.md` is the single source of
+truth for pad and voice-FX work and is the first thing to read before touching either.
+`PROPERTY_LIST_<DESK>.md` is GENERATED, one per desk, by `DevTools/property_list.py`: every property
+that desk publishes, names and types only.
+
+**THE DEVELOPMENT NOTES ARE NOT IN THIS REPO AND ARE NOT PUBLIC.** What shipped and why, what is
+open right now, the per-device work logs and the generated coverage reports live in a private
+sibling repo, reached by `_bootstrap.notes_path`. Nothing in them is needed to understand the
+hardware or the code, which is what the files here are for. `_bootstrap.docs_path` is the public
+counterpart, and choosing the wrong one of the two either publishes a note or hides a finding.

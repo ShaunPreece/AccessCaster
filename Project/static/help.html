@@ -1,0 +1,1251 @@
+﻿<!-- AccessCaster - the Help & About page (Alt+7).
+
+     A FRAGMENT, NOT A PAGE: no <html>, <head> or <body>. It is spliced into index.html where the
+     INCLUDE marker sits, by page.render_index, which both server.py and DevTools/ui_probe.py serve
+     through. Opening this file on its own shows a partial document, which is expected.
+
+     It lives apart from index.html because it is ~900 lines of prose with no controls in it: the
+     one part of the UI that is a document rather than markup. Editing it cannot disturb the app's
+     own structure, and index.html is that much shorter to work in.
+
+     THE TAB PANES BELOW ARE STILL BUILT BY buildStaticTabs IN app.js, exactly as when this was
+     inline. Nothing about the delivered DOM changes, so nothing about the focus order or the tab
+     strip does either. -->
+    <!-- About -------------------------------------------------------------- -->
+    <section class="app-section" id="sec-about" hidden>
+      <h1 id="h-about" tabindex="-1">Help &amp; About</h1>
+      <!-- The version comes from Project/version.py, fetched once at startup by loadVersion() in
+           app.js. It used to arrive only with the Device page's status read, so this line said
+           "unknown" to anyone who came straight here. -->
+      <p class="hint">Version <span id="app-version">unknown</span>. Developed by Shaun Preece.</p>
+
+      <!-- THE AUTHOR'S OWN WORDS, kept in the first person on purpose: this is the one part of the
+           app that is a person talking rather than a manual.
+           WHAT IS STILL MISSING IS THE SHORT LIST BELOW, and it is the ONLY copy of it. Do not
+           start a second one somewhere else: a separate Limitations page goes stale precisely
+           because the same facts live in two places. Detail on individual gaps belongs in the Help
+           guide, beside the page it affects.
+
+           IT NEEDS ITS OWN HEADING, and without one the intro is effectively absent: H-key
+           navigation goes from the page's h1 straight to the selected pane's h2, and Tab goes
+           straight to the tab strip, because prose is not focusable - so it is reachable only by
+           arrowing through it. An h2 here also keeps the level order honest: page h1, this h2 and
+           each pane's h2 as siblings. -->
+      <h2 id="h-about-intro">About AccessCaster</h2>
+      <p>
+        AccessCaster lets you use your RODECaster (Pro 2 or Duo) audio desk without the RODE
+        software, and to a large degree without ever touching the unit's touchscreen.
+      </p>
+      <p>
+        As a blind screen reader user, I found the official RODE software was not usable enough for
+        me: I needed help every time I wanted to set the desk up or change a setting.
+      </p>
+      <p>
+        With AccessCaster I can control and adjust most of the desk's features, including
+        processing, routing, recording, SMART pad management, and device settings such as wifi and
+        Bluetooth connections, all of it accessible to a screen reader. I have also added things the
+        desk does not give you at all: spoken announcements for every button on the unit, fader
+        positions read out as you move them, and keyboard shortcuts you can put on over 100 of the
+        app's commands, such as starting a recording or loading a mic processing preset.
+      </p>
+      <p>
+        The app was built with Claude Code, and took many months of capturing the USB traffic
+        between the RODE app and my own RODECaster Pro 2 to work out how the desk talks. I have
+        tried to keep the code as clean and efficient as I can, and I now use this app exclusively
+        to run my desk. The interface is HTML rather than a native Windows one, so that moving it to
+        a Mac later on is straightforward.
+      </p>
+      <p>
+        There are things AccessCaster cannot do, and they fall into two quite different groups. The
+        first I am still working on. The second I am not, because the unit does not offer them over
+        the USB cable at all, and no software on this computer can change that: they are here so you
+        know where the edge is rather than waiting for something that is not coming.
+      </p>
+      <p>Still to come:</p>
+      <ul class="about-list">
+        <li>Recording, and the desk's own backups (Shows), on a Duo. Both are switched on and both
+          are answered by the unit, but no Duo I can reach has a card or a drive in it, so nobody has
+          yet watched one make a recording or write a backup. Put storage in a Duo and it should
+          simply work; until somebody has done it, I am not going to tell you it does. Recording
+          matters more on a Duo than it sounds, because a Duo has no record button on it at all.
+          Everything else a Duo used to be locked out of now works there: the unit settings, the
+          virtual fader and monitor levels, the network settings, stereo linking, and a channel's
+          processing following it to a new fader.</li>
+        <li>Listening back to a recording, or copying one off. Starting, stopping, marking and
+          deleting all work, as do what gets recorded and whether it is saved as WAV or MP3. The
+          recordings drive does not appear on this computer over the unit's cable, so today a take is
+          fetched by taking the drive out and plugging it in here, where it is an ordinary removable
+          disk.</li>
+        <li>Backing up your Bluetooth pairings, your wifi network and a wireless mic pairing. A
+          backup can neither save nor restore any of them, so they are the settings you would have
+          to put back by hand after a factory reset. Joining a wifi network and making the unit
+          discoverable are both in the app, on the Device page under Wireless connections; the
+          Bluetooth pairing itself is made from the phone.</li>
+      </ul>
+      <p>Not coming, because the unit does not expose them:</p>
+      <ul class="about-list">
+        <li>Searching for Bluetooth devices or starting a pairing from this end. Making the unit
+          discoverable, and pairing from your phone, does work. The radio simply ignores the request
+          when it arrives over USB; this was tested three separate ways rather than assumed.</li>
+        <li>Setting the unit's date and time. It sets its own clock over the internet, and the only
+          way to change it by hand is the touchscreen.</li>
+        <li>Setting a fixed IP address. This is the unit's own limitation rather than mine, and it
+          was tested on the desk rather than assumed: it reports the address, subnet and gateway it
+          currently has, but gives no way to set them.</li>
+        <li>Recording straight onto a pad. The unit reboots when asked to, every time, so this one
+          is deliberately not offered.</li>
+        <li>Installing a firmware update. That still needs RODE Central.</li>
+        <li>Reading the unit's own level meters. The level readings come from the audio it sends
+          this computer over USB instead, which is close but is not the same meter.</li>
+      </ul>
+      <p>
+        AccessCaster is not endorsed by, associated with, or supported by RODE. It is an
+        independent project, and RODE have had no hand in it. I have taken every precaution I can to
+        make sure the code is safe and that nothing it does to the desk cannot be undone, but it
+        talks directly to your hardware, so you use it at your own risk.
+      </p>
+      <p>
+        Have fun, and I hope it helps.<br>
+        Shaun.
+      </p>
+
+
+      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs
+           in app.js). One div.cat-tab per tab, carrying the tab's
+           key and its title for the strip; app.js builds the strip above this panel and shows
+           exactly one pane at a time. Panes after the first carry `hidden` in the markup, so a JS
+           failure leaves the page showing something rather than nothing.
+           This page is text only: no controls, no device reads, so its tabs have no onSelect and
+           each panel becomes a tab stop in its own right (setPanelTabStop), which is what puts the
+           Tab key inside the panel instead of past it. -->
+      <div id="about-panel" class="cat-panel" role="tabpanel">
+
+      <div class="cat-tab" data-tab-key="can" data-tab-title="What it can control">
+      <h2 id="can-do-heading">What AccessCaster can control</h2>
+      <p class="hint">
+        The features that are working today. Everything here goes over the same USB connection the
+        RODE software uses, and every value you see has been read back off the unit, so what the app
+        shows is the desk's live state rather than the last command somebody sent it. Changes made on
+        the unit itself show up here too.
+      </p>
+      <ul class="about-list" aria-labelledby="can-do-heading">
+        <li>Mute on every channel, the same mute as the button on the unit, so you can silence a channel from a phone or another room. Muting on the unit shows here too.</li>
+        <li>Listen (solo) on every channel, the same solo as the button on the unit: it sends just that channel to your headphones and leaves your mixes, the recording and anything you are streaming alone. A Clear every solo button sits beside it, so you never have to work out which channel left the desk sounding dead.</li>
+        <li>Muting a RODE wireless microphone at the transmitter, from the mic's own channel: not the same as muting the channel, which would leave an open mic in the room still feeding the desk.</li>
+        <li>Per-channel settings: mic gain, 48V phantom power, polarity and mic type on each mic, plus the line level on the other channels (such as Bluetooth, USB, Headset and Chat).</li>
+        <li>Setting a mic's gain by ear rather than by eye: talk for half a minute and the app measures the channel and sets the gain for you, with an undo if you do not like it. There is also a level check on every channel that speaks the level as you go and then the loudest it got, with the fader taken out of the reading.</li>
+        <li>Full on-board processing on every input channel: equaliser, compressor, noise gate, de-esser, high-pass filter, tone shaping and pan, with ready-made mic presets and your own saved presets. The SMART pads mix is the exception, and that is the unit's own limit rather than ours: it has a mute, a solo and a fader, and the unit applies no processing to it.</li>
+        <li>Per-channel voice effects (reverb and echo) and their settings.</li>
+        <li>Master output processing: the Master Compellor and an output delay for lining audio up with video.</li>
+        <li>Fader assignment for every fader on your unit, with a one-press reset to the default layout.</li>
+        <li>Output routing: each output's mix (Main Mix, Mix Minus, or a custom per-source mix), read live from the unit, plus mix presets, which save the whole set of mixes under a name so you can put them all back in one press.</li>
+        <li>Monitor mix levels: set how loud each source is in any one output, separately from the recording.</li>
+        <li>The virtual fader levels and the monitor speaker level, which have no physical fader to grab.</li>
+        <li>A one-press reset of every output mix back to its normal state.</li>
+        <li>What the unit sends this computer over USB (one mixed pair or every channel separately), monitor and Bluetooth auto-mute, and headphone type.</li>
+        <li>Muting a whole output: the monitor speakers, or the Bluetooth send, plus the level a paired phone hears from the desk. None of these touch your mixes, your recording or your streams, only what somebody hears.</li>
+        <li>The unit's own recorder: start, pause, resume and stop, drop a marker while you record, hear what it is doing and how long it has been going, read the list of what is already on the card or drive, and delete a recording you no longer want. What it records, a single mixed track or every channel on its own, is set here too, as is whether it saves a full-quality WAV or a smaller MP3.</li>
+        <li>How the unit's clock is shown: 24-hour or 12-hour, daylight saving, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
+        <li>Level meters in words: a background watch that stays quiet until it has news, telling you when a stream clips or goes silent, and an optional level spoken on a timer while you set gains. Read from the unit's USB audio streams through Windows rather than from the unit's own meters.</li>
+        <li>SMART pads: put sounds, voice effects, mixer actions or MIDI triggers on any pad; rename, and set volume, colour, loop and restart behaviour; trim a sound and fade it in and out; clear one pad or all of them; and build your own custom voice effect with a live preview. Mixer pads add latching or momentary triggering, and Back Channel pads let you pick who is in the off-air room. You can also copy a pad's sound back to this computer, and tidy up sound files no pad plays any more.</li>
+        <li>Backups: one list and one button. The unit keeps its own complete copy on its card or drive when there is one, this computer keeps the settings and pads either way, and a restore uses whichever is still there. Either written over what is on the desk, or with the unit reset to factory first so it matches the backup exactly.</li>
+        <li>The unit's own backups: back the whole desk up to the recordings drive in seconds, delete the ones you no longer want, and start again from factory settings without needing the unit's touchscreen wizard. Restoring one of these the unit's own way is the fallback for a backup this computer has no copy of, and the dialog tells you when that is the case.</li>
+        <li>A Current state summary of the whole desk in one place: what is muted or soloed, every fader level, anything unusual about the routing, and the pad bank.</li>
+        <li>Hardware status the touchscreen would otherwise keep to itself: whether a memory card is in and how much room is left, the recorder, the firmware, and whether a network cable is in.</li>
+        <li>Wireless connections in one place: turning the unit's wifi on, scanning for networks and joining one, making the unit discoverable so a phone can pair with it, and what wireless mics the unit can see.</li>
+        <li>The settings the unit otherwise offers only on its touchscreen: screen brightness and whether it sets itself, how long before the screen dims, how brightly the buttons are lit, the meter style, haptic feedback, whether the record button pauses or stops, the listen mode, and the monitor output's fixed level. A backup holds them.</li>
+        <li>Spoken announcements of what the unit is doing: every physical button press, the banks, the encoder, and fader and level moves read out as you make them, in a voice, at a volume and through an audio output of your choosing.</li>
+        <li>Keyboard shortcuts that work anywhere in Windows, whatever program you are in, built from a catalogue of over 100 things the app can do. You start with five of your own plus the SMART pad keys, and add or remove whichever you want.</li>
+        <li>Playing SMART pads from the keyboard: the number row plays the pads of the bank the unit is on, two more keys step through the banks, and one more says what is playing and how long is left. Sound pads, voice effects and mixer pads alike, with no need to reach the unit.</li>
+        <li>Control from a phone or another computer on the same network, over an access link that keeps everyone else on that network out. The computer the unit is plugged into never needs the link, and you can make a new one at any time to lock out a device you have shared it with.</li>
+        <li>Device info: connection, firmware and network status, and the MIDI control unlock that lets an external MIDI app or controller drive the desk.</li>
+      </ul>
+      </div>
+
+      <!-- THERE IS NO LIMITATIONS TAB. Its content is the short list in the intro above, which is
+           the only copy. The four gaps only worth stating beside the control they affect live in
+           the Help guide instead: headphone 3 and 4 under Routing, the touchscreen factory reset
+           under Profiles, Remote Desktop under Level warnings, and the timezone under Unit
+           settings. -->
+      <div class="cat-tab" data-tab-key="help" data-tab-title="Help" hidden>
+      <h2 id="help-heading">Help: what each page is for</h2>
+      <p class="hint">
+        A plain-language guide to every page and what is on it. Use the links at the
+        top, or Alt and the number shown. Press H in your screen reader to jump between
+        the pages below.
+      </p>
+      <p class="hint">
+        When the app opens, you start on its own heading at the very top, which names the app and
+        the version you are running. Underneath it, the unit you are connected to is read out as
+        soon as it has been found, and again if it is ever unplugged. The page links are one Tab
+        below, and the page itself is one press of H away. Moving to another page puts you on that
+        page's heading. One more control sits after the last page link, on every page: a button that
+        turns dark mode off and on, whose label tells you which way it is set.
+      </p>
+      <p class="hint">
+        One thing worth knowing about the Tab key: the end of a page is a hard stop. Tab on the last
+        control does not wrap round to the top, it stays where it is and plays a short low tone, so
+        you can tell you have reached the end rather than quietly finding yourself back at the
+        beginning. Shift and Tab still walks backwards, and headings, landmarks, the links at the top
+        and Alt with a number all still get you anywhere on the page.
+      </p>
+      <p class="hint">
+        And one about dropdowns. Any dropdown that changes what you HEAR waits for an Apply button,
+        and nothing is sent to the unit until you press it. That is because arrowing through a
+        closed dropdown is how a screen reader reads one, and every one of those presses counts as a
+        choice: without the Apply, browsing the mic type list would put your mic through four
+        different preamps on the way past. Usually the button sits directly after its own dropdown;
+        where two dropdowns are really one decision, as on the Recording page, they share a single
+        Apply that follows both and sends only what you changed. Each dropdown's own description
+        says which Apply it is waiting for. Dropdowns that only change what you are LOOKING at, such
+        as which channel or which output you are working on, act straight away and have no Apply,
+        because there is nothing to undo. Switches are instant too: you cannot change one by
+        arrowing past it.
+      </p>
+
+      <h3>Where everything is on a RODECaster Pro 2</h3>
+      <p>
+        The desk as it sits in front of you, described from where you are sitting. The Duo is
+        below.
+      </p>
+      <dl class="help-list">
+        <dt>The landmark</dt>
+        <dd>The touchscreen. It is in the top left and it stands proud of the surface like a wedge,
+          so it is the easiest thing on the desk to find by feel. Everything else is described from
+          it.</dd>
+        <dt>Top left</dt>
+        <dd>The RODE logo in the corner, and just below it, on its own, the round REC button.</dd>
+        <dt>Top right</dt>
+        <dd>Four small knobs in a row: the headphone volumes, 1 on the left through to 4 on the
+          right. Below them, at the left of that group, the one large knob, which is the
+          encoder.</dd>
+        <dt>The faders</dt>
+        <dd>Six of them across the lower half, left to right, faders 1 to 6. Each has a square
+          button above it, that channel's button: pressing it hands the encoder to that channel, so
+          the big knob then sets that channel's gain or level, and pressing it again hands the
+          encoder back. Below each fader are two small buttons side by side: listen on the left,
+          mute on the right.</dd>
+        <dt>The SMART pads</dt>
+        <dd>Eight pads down the right-hand side, in two columns of four. They are numbered down the
+          columns, not across the rows: the top left pad is 1, with 2, 3 and 4 below it, and the top
+          right pad is 5, with 6, 7 and 8 below that. Directly underneath them, two buttons:
+          previous bank on the left, next bank on the right.</dd>
+        <dt>The back panel</dt>
+        <dd>
+          Left to right as you sit in front of the desk, so the far left end is microphone input 1
+          and the far right end is the power. In order: the four combo XLR inputs, 1 to 4; the two
+          monitor outputs, which are stacked one above the other, left on top and right below; the
+          four headphone jacks, a block of two rows of two, 1 and 2 along the top and 3 and 4
+          directly beneath them; then USB 2 and USB 1; then the ethernet socket, with the microSD
+          card slot in the same recess directly above it; then a security lock slot; and last the
+          power inlet, a USB-C mounted vertically rather than flat, with the round power button at
+          the very end. Worth knowing, because this app talks to the unit over one cable and not the
+          other: USB 1 is the nearer of the two to the power end.
+        </dd>
+        <dt>What is not on the desk</dt>
+        <dd>Faders 7, 8 and 9 have no physical fader: they are USB 1, USB 1 Chat and USB 2, and they
+          exist on the touchscreen and in this app only.</dd>
+      </dl>
+
+      <h3>Where everything is on a RODECaster Duo</h3>
+      <p>
+        The same desk in a smaller frame: half the inputs, two thirds of the pads, and the same
+        arrangement in the same places.
+      </p>
+      <dl class="help-list">
+        <dt>The landmark</dt>
+        <dd>The touchscreen, which fills the left half of the top surface. Everything else is
+          described from it.</dd>
+        <dt>There is no REC button</dt>
+        <dd>The Duo has no record button anywhere on it, so on this desk the touchscreen, or this
+          app, is the only way to start a recording.</dd>
+        <dt>Top right</dt>
+        <dd>Two small knobs side by side: the headphone volumes, 1 on the left and 2 on the right.
+          Below them, the one large knob, which is the encoder.</dd>
+        <dt>The faders</dt>
+        <dd>Four of them, left to right, faders 1 to 4, under the screen. Above the row of faders is
+          a row of four square buttons, one per fader: pressing one hands the encoder to that
+          channel, so the big knob then sets that channel's gain or level, and pressing it again
+          hands the encoder back. Below each fader are two small buttons side by side: listen on the
+          left, mute on the right.</dd>
+        <dt>The SMART pads</dt>
+        <dd>Six pads down the right-hand side, in two columns of three. They are numbered down the
+          columns, not across the rows: the top left pad is 1, with 2 and 3 below it, and the top
+          right pad is 4, with 5 and 6 below that. Directly underneath them, two buttons: previous
+          bank on the left, next bank on the right.</dd>
+        <dt>The front edge</dt>
+        <dd>One 3.5mm socket, which is the headset input: a headset's microphone and its earpieces
+          on the one plug. It hears the same mix as headphone output 1.</dd>
+        <dt>The back panel</dt>
+        <dd>
+          Left to right as you sit in front of the desk, so the far left end is microphone input 1
+          and the far right end is the power. In order: the two combo XLR inputs, 1 and 2; the two
+          monitor outputs, stacked one above the other, left on top and right below; the two
+          headphone jacks, also stacked, 1 on top and 2 below; then USB 2 and USB 1; then the
+          ethernet socket, with the microSD card slot in the same recess directly above it; then a
+          security lock slot; and last the power inlet, a USB-C mounted vertically, with the red
+          power button at the very end.
+        </dd>
+        <dt>What is not on the desk</dt>
+        <dd>The Duo has nine faders and only four you can put a finger on, so faders 5 to 9 live on
+          the touchscreen and in this app only. By default the four physical ones carry Mic 1,
+          Mic 2, Bluetooth and the SMART pads; of the five you cannot reach, four carry the headset
+          input, USB 1, Chat and USB 2, and the ninth ships empty for you to put something on.</dd>
+      </dl>
+
+      <h3>Channels and Processing (Alt+1)</h3>
+      <p>
+        Pick one channel and set everything for it in one place. This covers every input
+        channel your unit has: its microphones and its line channels (such as Bluetooth,
+        USB, Headset and Chat), plus the SMART pads mix, which has a mute and a solo here but no
+        level and no processing: its level is its own fader, and the unit applies no processing to
+        the pads. The list of channels matches the device you are connected to.
+      </p>
+      <dl class="help-list">
+        <dt>Channel</dt>
+        <dd>Choose which channel you are working on. The controls below change to match it. This
+          one acts straight away and has no Apply: it changes what you are looking at, not what
+          the desk is doing.</dd>
+        <dt>Tabs</dt>
+        <dd>
+          Everything under the channel is on a tab strip: Channel settings, Presets, Processing,
+          Equaliser, Dynamics, Tone and pan, and Effects on a mic. Any other channel has five of
+          those, without Presets or Effects. The SMART pads mix has only Channel settings, because
+          the unit applies no processing to it at all. The strip is one tab stop; move along it with the left and right arrow keys,
+          Home and End for the ends, and the panel below follows as you go. Only the tab you are
+          on is on the page, so nothing else is in your tab order or in heading navigation. Where
+          a tab holds more than one thing (Dynamics holds the compressor, the noise gate and the
+          de-esser) each keeps its own heading, so H walks you to it. The tab you leave off on is
+          remembered, on this channel, the next channel and the next time you start the app.
+        </dd>
+        <dt>Channel settings</dt>
+        <dd>
+          Mute comes first on every channel: it is the same mute as the button on the unit, so it
+          silences that channel in every mix, including the recording, and pressing the button on
+          the unit changes it here too. Listen (solo) is next to it, with a Clear every solo button
+          beside that. On a mic there is then a third switch, Mute the wireless mic, which is a
+          different thing again and is explained below. Then for mics: gain (how hard the unit drives
+          the signal, too low sounds quiet and too high distorts), 48V phantom power, polarity, and
+          mic type. The line channels, Bluetooth, USB, Headset and Chat, have a level instead.
+        </dd>
+        <dt>Mute and Listen, and the difference</dt>
+        <dd>
+          Mute silences that channel for everybody: your headphones, the other outputs, the
+          recording and anything you are streaming. Listen (solo) is the opposite and it is
+          headphone-only: it sends just that channel to your headphones and leaves every mix, the
+          recording and your streams exactly as they were. That makes it the safe way to check a
+          mic mid-show, but the desk gives no clue you have left it on, so while anything is soloed
+          you will not hear the app's announcements either. Clear every solo is the way back, and
+          it is right there so you never have to work out which channel did it.
+        </dd>
+        <dt>Mute the wireless mic, and why it is not the same as Mute</dt>
+        <dd>
+          This one is for a RODE wireless microphone paired to the channel, and it mutes the
+          TRANSMITTER rather than the channel. The difference matters when somebody walks off still
+          wearing one: muting the channel leaves an open microphone in the room feeding the desk,
+          while muting the transmitter means nothing arrives at all. It only appears on mic
+          channels, because nothing can be paired to a USB, Bluetooth or Chat channel. If no
+          wireless mic is paired there is nothing for it to reach, so the app tells you the mute was
+          sent rather than claiming the mic went quiet.
+        </dd>
+        <dt>48V phantom power, in one line</dt>
+        <dd>
+          Condenser microphones need power sent up the mic cable to work at all, and that is what
+          48V is. A dynamic mic (a PodMic, an SM7B, most broadcast mics) does not need it and is
+          not harmed by it. If a condenser is plugged in and silent, this switch is the first thing
+          to check.
+        </dd>
+        <dt>Set gain automatically</dt>
+        <dd>
+          Mics only, and it is the accessible version of the one studio job that is normally done
+          by eye: talk, watch a meter, turn the knob. Press it, talk normally for half a minute, and
+          the app measures what arrived and sets the gain to match, telling you what it changed and
+          offering an undo. Speak at the volume you will actually use, not louder.
+        </dd>
+        <dt>Check this channel's level</dt>
+        <dd>
+          On every channel except Chat. It speaks the level as it goes, for half a minute unless you
+          have changed the length on the Level warnings tab, and then tells you the loudest it got.
+          The fader position is taken out of the reading, so it answers "is this channel arriving at
+          a sensible level" rather than telling you where you have the fader set. The fader does have
+          to be up far enough for the channel to reach the Chat mix, which is what the check listens
+          on; with it right down there is nothing to hear, and the check says so and tells you to
+          bring it up. Use it on a phone on Bluetooth or a computer on USB as well as on mics, since
+          those arrive at a level nobody chose either.
+        </dd>
+        <dt>Mic type</dt>
+        <dd>
+          Which microphone is on that input. The unit uses it to set the preamp up, and choosing one
+          also loads that mic's own default gain, so expect the Level slider to move when you apply
+          it. Nothing happens until you press Apply mic type.
+        </dd>
+        <dt>Processing presets</dt>
+        <dd>
+          Mics only. Load a ready-made voicing like Podcast Studio, or save the current
+          settings as your own preset. Choosing in the list changes nothing on the unit until
+          you press Apply this preset, so you can move through the list freely.
+        </dd>
+        <dt>Processing and modules</dt>
+        <dd>
+          The studio chain. Switch it on as a whole or module by module: equaliser
+          (tone), compressor (evens out loud and quiet parts), noise gate (cuts hiss
+          between words), de-esser (tames harsh "s" sounds), high-pass filter (removes
+          low rumble), tone shaping and pan. Each of those has its own group of sliders
+          below this one. There is also an Advanced processing switch here: with it off the
+          unit works the modules out from Depth, Sparkle and Punch, so their values move on
+          their own, and its own hint on the page explains what changes.
+        </dd>
+        <dt>Echo and Reverb</dt>
+        <dd>Mics only. The two channel effects, each with its own switch and settings.</dd>
+      </dl>
+
+      <h3>Routing (Alt+2)</h3>
+      <p>Where every sound goes: what each output can hear, and at what level.</p>
+      <dl class="help-list">
+        <dt>Tabs</dt>
+        <dd>
+          This page is a tab strip of four: Output mixes (which also holds mix presets and Reset all
+          output mixes), Faders, Levels (the fader and monitor levels, the output mutes, auto-mute,
+          the monitor mix levels and the headphone types), and Master Mix (the Compellor, the output
+          delay and what the unit sends this computer over USB).
+          Arrow left and right along the strip, Home and End for the ends, and only the tab you are
+          on is on the page. Opening a tab reads that tab's settings from the unit, so the values
+          are always current, and the tab you leave off on is remembered.
+        </dd>
+        <dt>Output mixes</dt>
+        <dd>
+          The heart of routing. Every output (your headphones, USB to a computer, the Chat channel
+          to callers, the Bluetooth send to a phone, and so on) carries its own mix, and they are
+          separate from one another: changing what a caller hears does not change what you hear.
+          Main Mix is everyone. Mix Minus is everyone except that output's own source. Custom lets
+          you include or exclude each source for that one output by hand. Pick an output at the top
+          and the list below shows the real mix, read live from the unit. The output you pick acts
+          straight away, since it only changes what you are looking at; the mix you choose for it
+          waits for Apply.
+        </dd>
+        <dt>What Mix Minus actually means</dt>
+        <dd>
+          It is the answer to feedback and echo on a call. Say a guest is on the phone over
+          Bluetooth. Whatever the guest says comes INTO the desk on the Bluetooth channel, and if
+          the desk sends its full mix back out to them, their own voice goes with it and they hear
+          themselves a fraction of a second late, which is horrible to talk over. Mix Minus sends
+          them the mix MINUS themselves: they hear you, your co-host and the pads, but not their own
+          voice. The same applies to a caller on Chat or on USB. That is why the caller outputs
+          offer Mix Minus and your headphones do not: you are not a source arriving on your own
+          headphone output, so there is nothing to leave out.
+        </dd>
+        <dt>Building a mix minus by hand</dt>
+        <dd>
+          On a Custom mix, an output's own source is in the list like any other, worded "back into
+          itself". Untick it and you have a mix minus you control: everything else about that mix
+          stays yours. This is what you want with a second computer on USB 2. You hear it in your
+          headphones, because that is a different output, but its own sound does not go back down the
+          USB it arrived on, so nothing over there hears itself repeated. Mix Minus mode does the
+          same leaving-out for you but decides the rest of the mix itself, which is why the hand-built
+          version exists.
+        </dd>
+        <dt>Mix presets</dt>
+        <dd>
+          Output mixes saved under a name: which sources each output carries and at what level, put
+          back in one press. It is not a backup of the desk and never touches your channels, processing or
+          pads.
+        </dd>
+        <dt>Which outputs a preset touches, and why it is in its name</dt>
+        <dd>
+          Every preset in the list ends with its scope, because that is the thing you need to know
+          before you choose one. "(every output)" rewrites the whole desk, so anything you have set
+          by hand on another output goes back to what the preset holds. "(Chat only)", or any other
+          output's name, touches that one mix and leaves the rest exactly as they are, which makes it
+          the kind you can safely use in the middle of a show. The scope is worked out from the
+          preset itself each time the list is read, so it is right even for a preset saved on the
+          other RODECaster.
+        </dd>
+        <dt>The three built-in presets</dt>
+        <dd>
+          "Everything normal" puts every output back, the same thing as Reset all output mixes below,
+          and it asks you to confirm because it wipes mixes you set by hand. "Chat = my mic only"
+          sends a co-host on the Chat output just Mic 1 and nothing else, which is what you want when
+          your screen reader is going into the mix and they should not hear it. "Chat back to normal"
+          undoes that one, putting Chat back on its proper mix minus. The last two touch Chat alone.
+        </dd>
+        <dt>Saving your own</dt>
+        <dd>
+          Type a name, then choose which of the two save buttons you want. "Save every output's mix
+          as a preset" stores the whole desk. "Save only the [output] mix as a preset" stores just the
+          output you have chosen at the top of this tab, and its label always names that output, so
+          it says what it will do without your having to check anything else. The one-output kind is
+          worth knowing about: it is the only sort that cannot disturb a mix you are listening to, and
+          it is the only sort worth putting on a keyboard shortcut.
+        </dd>
+        <dt>Reset all output mixes</dt>
+        <dd>
+          Puts every output back to its normal mix in one go, and every source back in and
+          following the faders. Use it if a headphone output has been left on a Custom mix,
+          which stops the Mute buttons silencing a channel in your own headphones. It wipes
+          any custom mixes you have set, so save a mix preset or back the unit up first. You are asked to
+          confirm.
+        </dd>
+        <dt>Fader assignment</dt>
+        <dd>
+          Choose which channel sits on each fader (your unit's physical faders plus its
+          virtual ones), each one labelled with which kind it is. Every fader can be reassigned,
+          mic faders included. Putting a channel where another already sits swaps them, so you can
+          rearrange your layout. Nothing is sent until you press that fader's own Apply button. A
+          reset puts the standard layout back. A channel's processing moves with it, on both
+          units.
+        </dd>
+        <dt>Fader and monitor levels</dt>
+        <dd>
+          The levels with no physical fader to grab: the virtual faders and the monitor speaker
+          level. Both units. If the encoder seems to have stopped working, a channel button has
+          taken it: the announcer says which channel, and pressing that same button again gives
+          the encoder back to these levels.
+          Each virtual fader carries its mute and solo here as well, because those two have no
+          control on the unit at all. If the desk ever sounds dead for no reason, a solo left on is
+          the first thing to suspect, and "Clear all solos" on that tab is the one-press way out.
+        </dd>
+        <dt>Output mutes and the Bluetooth level</dt>
+        <dd>
+          These silence a whole OUTPUT, which is not the same as muting a channel: your mixes, the
+          recording and anything you are streaming carry on untouched, and only what somebody hears
+          goes quiet. There is one for the monitor speakers and one for the Bluetooth send, plus the
+          level a paired phone hears from the desk. Worth keeping straight: the Bluetooth OUTPUT is
+          what the phone hears from you, and the Bluetooth CHANNEL, on the Channels page, is what
+          you hear from the phone.
+        </dd>
+        <dt>Auto-mute</dt>
+        <dd>
+          Two anti-feedback safety switches, on the Levels tab under the two manual mutes they
+          automate. Monitor auto-mute silences your speakers whenever a mic fader is raised, so the
+          mic does not pick the speakers up and squeal. Bluetooth auto-mute does the same for the
+          Bluetooth output when a mic goes live. Leave both on if you use speakers or take calls.
+        </dd>
+        <dt>Master Mix</dt>
+        <dd>
+          Two things, both about the whole mix on its way out. Master output processing affects
+          everyone, so adjust with care: the Master Compellor is an output compressor that evens out
+          and glues the mix together, and output delay holds the main outputs back by up to two
+          seconds to line audio up with video. USB output is what the unit sends this computer,
+          which is what any program here hears from the desk, whether it is recording, streaming or
+          in a call: either the mixed pair, or every channel separately so a program on this
+          computer can record them apart. It does not change what the unit writes to its own card or
+          drive, which is on the Recording page.
+        </dd>
+        <dt>Monitor mix levels</dt>
+        <dd>
+          Set how loud each source is in one chosen output, without changing the others
+          or the recording. For example, make your own mic quieter in your headphones
+          while everyone else stays the same. Reset puts that output back to following the
+          faders.
+        </dd>
+        <dt>Headphones</dt>
+        <dd>
+          The headphone type for Headphone 1 and Headphone 2, applied with the button beside each
+          one. On a Pro 2, headphone outputs 3 and 4 are not reachable yet. High sensitivity is
+          intended for quieter headphones and can be loud, so change with care.
+        </dd>
+      </dl>
+
+      <h3>SMART pads (Alt+3)</h3>
+      <p>
+        The SMART pads across the banks: what each pad does, plus a custom effect builder. This page
+        sets pads up rather than playing them. To PRESS a pad, use a keyboard shortcut: the number
+        row plays the pads of the bank the unit is on, and every kind of pad works, sound pads
+        included. See Keyboard shortcuts on the Device page.
+      </p>
+      <dl class="help-list">
+        <dt>Tabs</dt>
+        <dd>
+          The pad you are working on is chosen above the strip, because the first two tabs act on it.
+          They are split by how they behave: everything on Pad Settings takes effect the
+          moment you change it, and nothing on Reassign happens until you press Apply. Then Voice
+          effects, which is the effect builder and changes no pad at all: it saves an effect to the
+          list you then pick from on Reassign. Last is Maintenance, which is jobs on the whole grid,
+          with one exception, the pad export, which acts on the pad you chose above.
+          Arrow left and right along the strip, Home and
+          End for the ends, and only the tab you are on is on the page. Opening Pad Settings or
+          Reassign reads the pads from the unit again, and the tab you leave off on is remembered.
+        </dd>
+        <dt>Pad Settings</dt>
+        <dd>
+          The chosen pad as it is now: its name (with a Rename button, the one thing here that
+          needs pressing), volume, colour, how it plays, whether a press restarts it, and looping.
+          A mixer pad also gets its trigger mode, and a Back Channel pad who is in the room. Each
+          one writes to the unit as you change it, so there is no Apply. An empty pad has no
+          settings, so it says so and offers a button through to Reassign.
+        </dd>
+        <dt>Trim and fade (sound pads)</dt>
+        <dd>
+          Four points as a percentage of the whole sound: where playback starts, where it fades up
+          to, where it fades down from, and where it stops. So a bed that should come in gently over
+          its first quarter is Start 0, Fade in until 25. Leave a fade point on the same percentage
+          as the start or the stop for no fade at that end, and if a fade point ends up outside the
+          part being played the page tells you, because the unit accepts it and simply does nothing.
+          Percentages rather than seconds because the unit does not report how long a sound is.
+        </dd>
+        <dt>Fade times and censor sound (mixer pads)</dt>
+        <dd>
+          A Fade pad carries how many seconds it takes to fade the mix down and back up, and whether
+          your own mic is left out of the fade so you can still be heard. A Censor pad can use a
+          sound of your own instead of the built-in beep, though that sound has to be put on the unit
+          itself; the page says whether one is there.
+        </dd>
+        <dt>What a MIDI trigger pad sends</dt>
+        <dd>
+          On a MIDI trigger pad, Settings also carries the mapping: the message type (Control Change
+          or Note), the control or note number, the MIDI channel, the value sent when you press and
+          when you release, and whether it latches (press on, press again off) or is momentary (on
+          only while held). Out of the box a pad sends a Control Change on its own number counting
+          from zero, so bank 1 pad 1 is 0, on channel 1, with 127 pressed and 0 released. Those
+          numbers only take effect with the custom mapping switched on, and switching it off puts the
+          pad back on the default WITHOUT keeping what you typed, which is how the unit itself
+          behaves.
+        </dd>
+        <dt>Reassign</dt>
+        <dd>
+          What the pad does: a sound of your own, a voice effect, a mixer action or a MIDI trigger.
+          Nothing here touches the pad until you press Apply, the last control before Clear this
+          pad, so until then the pad carries on as it is and Settings still describes it. A
+          successful Apply moves you to Settings for the new content, since volume and looping are
+          usually the next thing you want.
+        </dd>
+        <dt>Mixer actions explained</dt>
+        <dd>
+          Censor lays a beep over everything; Trash Talk cuts your audio to callers while
+          you still hear them; Fade In and Fade Out ramp the mix up or down; Back Channel
+          is off-air talkback; Ducking lowers everyone but the host.
+        </dd>
+        <dt>Create a custom voice effect</dt>
+        <dd>
+          Build your own voice effect from reverb, echo and more, give it a name and save
+          it; it then joins the voice-effect list ready to put on any pad. Live preview
+          lets you hear it on your own mic as you build, and only touches the mic while it
+          is switched on.
+        </dd>
+        <dt>Your saved effects</dt>
+        <dd>The effects you have made, with a delete for each. Deleting one takes it off the list
+          you choose from; it does not change any pad it is already on.</dd>
+        <dt>Pad maintenance</dt>
+        <dd>
+          Jobs that act on the whole grid rather than on the pad chosen at the top, and every one
+          that changes the unit asks you to confirm first. Clear all pads empties every sound,
+          voice-effect, mixer and MIDI pad in one go, leaving the built-in System pads alone.
+          Anything that copies sounds to the unit takes minutes rather than seconds, because each
+          one goes over one pad at a time.
+        </dd>
+        <dt>Restore the factory voice effects, Censor and Ducking</dt>
+        <dd>
+          For when you have overwritten one of the six factory voice effects, or the Censor or
+          Ducking pad, and want it back. Only those eight pad positions are touched; everything past
+          pad 16 is left alone.
+          <p>
+            <strong>It cannot bring the factory SOUNDS back</strong>, and nothing in AccessCaster
+            can. Those eight WAV files belong to RODE and live on the unit itself rather than in
+            this app. Two things do bring them back: restoring a backup taken while they were still
+            on the unit, which changes nothing else you have not asked for; or Start again from
+            factory settings on the Backups page, which puts the whole unit back to how it left the
+            factory. Try a backup first, because the factory reset occasionally leaves the unit
+            needing its power pulled before it comes back.
+          </p>
+        </dd>
+        <dt>Export a pad's sound, and open the exports folder</dt>
+        <dd>
+          The exception on the Maintenance tab: these two act on the pad you chose at the top rather
+          than on the whole grid, and neither asks you to confirm, because neither changes the unit.
+          The export copies that pad's sound into your Documents folder, under AccessCaster, Pad
+          exports, named after the pad. Use it
+          when the unit holds the only copy of a sound, or to edit one and put it back. Only sound
+          pads have a file to export: a voice effect is a recipe the unit builds, not a recording.
+        </dd>
+        <dt>Tidy up unused pad audio</dt>
+        <dd>
+          Deletes sound files from the unit that no pad plays any more. Replacing a pad's sound used
+          to leave the old file behind, and it adds up. The app now clears up after itself when you
+          replace a pad, restore the defaults, clear all pads or restore a backup with pads, so
+          this is for what older versions left behind, or after clearing pads one at a time. It only
+          ever removes files no pad points at, so nothing you can currently play is touched.
+        </dd>
+      </dl>
+
+      <h3>Recording (Alt+4)</h3>
+      <p>
+        Start, pause and stop the unit's own recorder, see where it will record to, and read what
+        is already on the card or drive. It is a plain page rather than a tab strip, so Stop is
+        always two keystrokes away. Recording started or stopped on the unit itself shows up here
+        too, and is spoken if announcements are on.
+      </p>
+      <dl class="help-list">
+        <dt>What to record</dt>
+        <dd>First on the page, because it is the one decision here you cannot fix afterwards: press
+          record on the wrong setting and the tracks you wanted do not exist. "Mixed track only"
+          gives you one stereo file. The two separate-track choices give you that same mixed file AS
+          WELL AS one file per channel, not instead of it, so nothing is lost by choosing them
+          except space: about seven times as much, measured. On a Pro 2 that is ten files, the
+          mix plus Combo 1 to 4, Bluetooth, Sounds, USB 1 Main, USB 1 Chat and USB 2. Pre-fader
+          ignores where your faders are, so a guest who was too quiet on the night can be brought up
+          later; post-fader keeps your fader moves, so the tracks sound as the show did. This is
+          what the unit writes to its own card or drive; what it sends this computer over USB is a
+          separate setting, on Routing under Master Mix.</dd>
+        <dt>Save recordings as</dt>
+        <dd>Underneath it, and the other thing you cannot change after the take: whether the unit
+          writes a WAV or an MP3. WAV is uncompressed 24-bit, 48 kHz, and about eighteen times the
+          size, which is what you want if the recording is going to be edited. MP3 is 128 kbps,
+          which is fine for speech and fits far more on the card. There are only these two; the unit
+          offers no in-between quality. This is the mixed stereo file only. If you are recording
+          separate tracks, those are always 24-bit WAV whatever you choose here, so choosing MP3
+          gives you lossless tracks to work on plus a small mix to listen back to. A backup
+          remembers your choice.</dd>
+        <dt>Apply recording settings</dt>
+        <dd>One button for both of the dropdowns above, because they are really one decision. Change
+          either or both, then press it; it only sends what you actually changed, and it stays
+          unavailable while there is nothing waiting. Neither dropdown does anything to the unit
+          until you press it, which is what lets you arrow through the choices safely.</dd>
+        <dt>Record the separate tracks raw</dt>
+        <dd>Last of the four, and unlike the two dropdowns it takes effect the moment you switch it,
+          with no Apply: a switch cannot be changed by arrowing past it, so there is nothing to
+          protect you from. It decides what is IN the separate tracks, not how many you get or what
+          format they are. Off, each track carries that channel's own processing, the EQ, compressor
+          and gate. On, the tracks are the bare microphone or input, so you can do that work yourself
+          afterwards. The mixed file always keeps the processing whichever way this is set, so the
+          usual reason to turn it on is that you intend to edit properly later and would rather not
+          have the unit's decisions baked in. It is only available once you have chosen and applied
+          one of the separate-track modes, since it does nothing at all while only the mixed track is
+          being made, and it says so while it is unavailable.</dd>
+        <dt>The record button</dt>
+        <dd>Its label follows the unit: Start recording, then Pause, then Resume recording. Every
+          press reads the unit back before reporting, so what it says has happened really has.</dd>
+        <dt>Announcements while recording</dt>
+        <dd>With "Switch announcements off while recording" on, which is the default, spoken
+          announcements stop when recording starts and come back when it stops, because anything
+          played out loud is picked up by the microphones whichever output it goes to. Turn it off
+          if your announcements go to headphones the microphones cannot hear, and you would rather
+          keep hearing the unit during a take. If you had announcements switched off already,
+          nothing changes either way. Your
+          screen reader is separate and keeps talking, so if it is playing through the unit it goes
+          into the recording: the usual answer is a second pair of headphones or earbuds on your
+          computer's own output, with the announcement output on the Device page set to match.</dd>
+        <dt>Drop a marker</dt>
+        <dd>Puts a marker at the point you are at, so you can find that moment again when you edit.
+          It goes into the recording as a standard marker, which editors show as a label or cue.
+          Only available while recording, since a marker needs a position.</dd>
+        <dt>Recording status</dt>
+        <dd>Says what the recorder is doing, and how long it has been going, without changing
+          anything. The elapsed time is counted by AccessCaster from the moment recording started,
+          because the unit does not report a running time of its own; if it was already recording
+          when the app started, it says so rather than giving a number that would be wrong.</dd>
+        <dt>Where it records to</dt>
+        <dd>The unit records to a memory card or to a USB drive in its second USB port, and needs
+          one of them before it will record at all. Its own internal storage holds the SMART pad
+          sounds and cannot take a recording. The state line at the top of the page names where it
+          will go and how much room is left, given as recording TIME rather than megabytes, worked
+          out from the unit's own data rate, so it answers whether your show fits. It also warns you
+          when a drive is nearly full. The full storage picture, card by card, is on the Device page
+          under Hardware, which is where you go to look at it deliberately.</dd>
+        <dt>Recordings on the unit</dt>
+        <dd>What is already recorded, newest first, with the date and length. Below the list you can
+          choose one and delete it from the card or drive; you are asked to confirm first, and it
+          cannot be undone. To copy a recording off, take the card or drive to a computer.</dd>
+      </dl>
+
+      <h3>Backups (Alt+5)</h3>
+      <p>
+        One list of everything you can put the unit back from, and one button that makes another.
+      </p>
+      <dl class="help-list">
+        <dt>What a backup holds, and where it lives</dt>
+        <dd>
+          Channels, processing, routing, the fader layout, the unit's own settings, and every SMART
+          pad with its sound. Two things are left out on purpose: which channels are muted, since
+          putting a mute back could silence somebody at the worst moment, and passwords, so your
+          wifi is never stored and never restored.
+          Underneath, a backup is kept in two places at once when it can be. The unit writes its own
+          complete copy to the card or drive, which goes back in seconds, and this computer keeps a
+          copy of the settings and pads, which survives the drive being pulled, erased or filled.
+          You never have to choose between them: one name covers both. Restoring uses this
+          computer's copy, because asking the unit to load its own can crash it - see Known issues,
+          "The unit can lock up when it restores its own backup". The unit's copy is still made, and
+          is still there if it is ever needed.
+        </dd>
+        <dt>Back up the unit now</dt>
+        <dd>
+          Opens a dialog that starts on the name box. Type a name and press Back up. Backing up is
+          quick: the unit's own copy and the settings are both a matter of seconds, and the pads add
+          about a second each. Restoring is the slow direction, not this one. Saving to a name you have used before
+          replaces that backup. With no card or drive in the unit there is nowhere for its own copy
+          to go, and the backup is made on this computer alone; the line under the button says which
+          you are getting.
+        </dd>
+        <dt>The list, and what each entry says</dt>
+        <dd>
+          Every backup you can restore from, whichever half holds it. An entry marked "made on the
+          unit" was taken at the touchscreen or by RODE's own software, so there is no copy of it on
+          this computer - which makes it the one kind that still has to be restored the unit's own
+          way, and the dialog says so before you press anything.
+          One may be marked "as found": that is how your desk was before this app changed anything.
+        </dd>
+        <dt>Restore selected backup</dt>
+        <dd>
+          Opens a dialog naming the backup, which tells you how it will be put back and roughly how
+          long that takes. Pressing Restore there is the confirmation, and a progress dialog reports
+          each step. Restoring moves the monitor speaker level, so turn speakers down first.
+          What comes back: MIDI, every channel with its levels and, on mics, phantom, polarity, mic
+          type and effects, the full processing chain, all routing including the fader layout, the
+          virtual fader levels and the monitor level, the output mixes and every output's own source
+          levels, what the recorder makes and whether it writes WAV or MP3, auto-mutes, each
+          headphone output's type, the Master Compellor and output delay, and the unit's own
+          settings from the Device page. The SMART pads come back too, each with its play mode, a
+          mixer pad's trigger and which channels a Back Channel pad carries. Mutes are left out on
+          purpose, and passwords are never stored, so wifi is not restored.
+        </dd>
+        <dt>Settings the backup does not cover</dt>
+        <dd>
+          Your saved settings go back and nothing else is touched. There used to be a "reset the
+          unit to factory first" option here, which cleared everything the backup does not hold
+          before restoring on top. It has been removed: it used the same part of the unit's firmware
+          that crashes it, and that is not a risk worth carrying on an everyday action. Resetting to
+          factory settings is still available on its own, where choosing it is the whole point.
+        </dd>
+        <dt>Rename selected backup</dt>
+        <dd>Changes the name on this computer, keeping everything in it including the pad sounds. If
+          another backup already uses the name, the dialog stays open and tells you, so nothing is
+          overwritten by accident. A backup made on the unit cannot be renamed: the unit names its
+          own after whichever show was loaded and offers no way to change it.</dd>
+        <dt>Delete selected backup</dt>
+        <dd>Removes it from both places at once, this computer's copy and the unit's own, so you are
+          not left with a copy on the drive under a name the app no longer lists. You confirm in a
+          dialog that names it first. It cannot be undone, and it changes nothing about how the unit
+          is set up now. The as-found backup asks twice, because it is the only record of how your
+          desk arrived.</dd>
+        <dt>The as-found backup</dt>
+        <dd>The first time AccessCaster meets a unit it offers to back it up exactly as it was,
+          before the app has changed anything. It is an ordinary backup, just marked as this one,
+          and it is the only record of how your desk was set up before you started. A line under the
+          list says whether you have one, and lets you add the SMART pads to it later if you skipped
+          them at the time.</dd>
+        <dt>While a backup or restore is running</dt>
+        <dd>The progress dialog cannot be dismissed: there is no Close button and Escape does
+          nothing, because the unit is being read or written and stopping half way would leave it in
+          a state nobody asked for. Close appears as soon as the job finishes, and the result is left
+          on the page after you close it. If the app loses contact with the device service, or the
+          unit reports nothing new for over two minutes, the dialog gives up waiting and lets you
+          close it rather than holding you there.</dd>
+        <dt>Start again from factory settings</dt>
+        <dd>Puts every setting and every SMART pad back to how the unit left the factory. Your wifi,
+          the language and the analytics answer are not part of it, and neither are the recordings
+          on the drive. The unit backs itself up first, ticked by default, and that backup is the
+          only way back, so leave it ticked unless you are sure. It also rebuilds RODE's eight
+          factory pad sounds from the unit's own firmware, which is the only way to get those back
+          once a pad has been replaced: the app does not carry copies of them. This is not the unit's own factory
+          reset: that one runs a setup wizard afterwards that only works by touchscreen, which is
+          exactly the thing this app exists to avoid.</dd>
+        <dt>While a save or restore is running</dt>
+        <dd>The progress dialog cannot be dismissed: there is no Close button and Escape does
+          nothing, because the unit is being read or written and stopping half way would leave it in
+          a state nobody asked for. Close appears as soon as the job finishes, and the result is left
+          on the Backups page after you close it. If the app loses contact with the device service,
+          or the unit reports nothing new for over two minutes, the dialog gives up waiting and lets
+          you close it rather than holding you there.</dd>
+        <dt>This app's own settings</dt>
+        <dd>
+          Last on the page, and the one part of it that is about AccessCaster rather than the unit.
+          Your keyboard shortcuts, your announcement preferences and your level warnings belong to
+          the app, so no backup of the desk carries them and reinstalling would lose them: "Save this app's
+          settings to a file" writes them all into one small file you can keep somewhere safe or
+          copy to another computer, and "Restore these settings" reads one back, with your shortcuts
+          working again straight away and no restart. The file holds nothing about the desk and no
+          access link, so it is safe to email to yourself. Anything in it naming a voice or an audio
+          output this computer has not got is left alone and said out loud rather than applied to
+          nothing. There is also a switch here to start AccessCaster when you sign in to Windows,
+          which is the same thing the installer offered to set up, for your own Windows account
+          only: it starts in the system tray without opening this page, so your shortcut keys work
+          from the moment you sign in.
+        </dd>
+      </dl>
+
+      <h3>Device (Alt+6)</h3>
+      <p>The unit's current state, its hardware status, its own settings, and the global switches.</p>
+      <dl class="help-list">
+        <dt>Tabs</dt>
+        <dd>This page is a tab strip of eight: Current state, Hardware, Unit settings,
+          Announcements, Keyboard shortcuts, Level warnings, Wireless connections and Remote
+          access. Arrow left and right along the strip, Home and
+          End for the ends, and only the tab you are on is on the page. Opening a tab reads that part
+          of the unit, so the values are always current, and the tab you leave off on is remembered.</dd>
+        <dt>Current state</dt>
+        <dd>The whole desk in one summary, read from the unit each time you open this tab: what is
+          muted or soloed, every fader level and the monitor level, anything unusual about the
+          routing, and the pad bank. Mute, solo and routing appear only when there is something to
+          report, so a short line means all is well. This is the place to look when something
+          sounds wrong, instead of hunting across the other pages.</dd>
+        <dt>Hardware status</dt>
+        <dd>Things the touchscreen would otherwise keep to itself: whether a memory card is in and
+          how much room is left, the recorder, the firmware version, and whether a network cable is
+          in. For wireless mics, see the Wireless connections tab, which has all the radios
+          together. Last on this tab, under its own heading, is a technical section for
+          troubleshooting: whether the unit is found, its hardware id and status bytes, and a
+          low-level list of the USB interfaces seen.</dd>
+        <dt>Remote access from another device</dt>
+        <dd>The last tab, and the one thing on this page that is about the app rather than the
+          unit. AccessCaster
+          serves its page to your whole network so you can control the desk from a phone in another
+          room, which is genuinely useful and stays. The access link is what stops that being open
+          to anyone else on the network: open it once on the phone and that device is remembered,
+          so reloading and coming back later both work. This computer never needs the link and is
+          unaffected by it. Treat the link like a password, because anyone who has it has full
+          control of the desk. "Make a new link" stops the old one working everywhere you have sent
+          it, which is what you want if you shared it at a venue. Two honest limits: the link can
+          only be read on this computer, not from the phone itself, and it travels unencrypted, so
+          it protects you from a stranger finding the address rather than from someone who can
+          already read your network's traffic.</dd>
+        <dt>Unit settings</dt>
+        <dd>The settings the unit otherwise offers only on its touchscreen: screen brightness and
+          whether the unit sets it itself, how long before the screen dims, how brightly the buttons
+          are lit when active and when not, the meter style, haptic feedback, whether the record
+          button pauses or stops, the listen mode, and the monitor output's fixed level. Listen mode
+          is worth a word: pre-fader listen hears a soloed channel at its own level whatever its
+          fader is doing, which is what you want for checking a mic that is currently faded down;
+          after-fader listen hears it as the fader has it set, so a fader all the way down means
+          silence. Then the clock settings
+          (24-hour, daylight saving, and whether the time shows on the unit's screen), and three
+          lockouts that can lock the unit's physical buttons or silence every headphone or line
+          output. The time itself and the timezone are not here: the unit sets its own clock over
+          the network, and the only manual way in is its touchscreen. Daylight saving is the one it
+          will not do for itself, so it needs changing twice a year, and until it is changed every
+          recording is stamped an hour out. They are read from the unit
+          each time you open the tab, and a backup holds them and puts them back. They work on
+          both units. Last on the tab is the MIDI switch:
+          turning it on lets an external MIDI app or controller handle mute, faders, listen and
+          record over MIDI, without RODE Central. That one works on both units.</dd>
+        <dt>Announcements</dt>
+        <dd>Headed "Announce Interactions on Mixer" once you are on the tab. It speaks each
+          physical control aloud as you use it, so you know what it did without the
+          touchscreen. Mute and solo say which channel and whether it is now on or off, and catch
+          changes made anywhere, not just here. Bank changes are announced, as is what the encoder is
+          set to when you press and release it, and pressing a channel button says what the encoder
+          will then adjust; press and HOLD the encoder and the unit mutes the selected channel, which
+          you hear as a mute rather than as a change of selection. A second switch adds levels, spoken
+          as you move them: whatever you turn is announced by name, so the encoder set to a channel
+          gives you that channel's gain in decibels rather than the monitor, each update interrupts
+          the last so it keeps up with you, and the closing value is confirmed by name when you stop.
+          A muted channel is announced as muted rather than with a level. The volume slider
+          sets how loud announcements are, for when the announcer talks over what you are listening
+          to while riding the faders; it affects these announcements only, never your Windows volume
+          or the unit's audio, and it is remembered between sessions. You can also choose which
+          installed speech VOICE reads them, and which audio OUTPUT they come out of. Both apply to
+          these announcements only: your screen reader keeps its own voice and its own output, the
+          Windows default output is not moved, and no other program is affected. The output choice
+          matters because the default output here is usually the RODECaster itself, so announcements
+          arrive on USB 1 and vanish when you solo another channel or mute USB 1, as well as landing
+          in your recording; sending them to your computer's own speakers or headphones instead keeps
+          them audible and out of the mix. Changing either one speaks a sample through it, so you
+          hear what you have picked, and both are remembered. A button beside them reads both lists
+          again, for when you have plugged headphones in or installed a new voice since the page
+          loaded.</dd>
+        <dt>Speak the desk's state when the app opens</dt>
+        <dd>On the same tab. When the app opens it tells you what is WRONG with the desk and only
+          that: anything muted or soloed, a voice-effect pad left switched on, a recording already
+          running, a drive nearly full, or an output not on its usual mix. On a desk with nothing to
+          report it is one sentence saying so. The full picture, every fader level included, stays
+          on the Device page under Current state.</dd>
+        <dt>Play a tone for mute instead of speaking it</dt>
+        <dd>Also on that tab, and off unless you turn it on. A mute is usually pressed in the middle
+          of something, and a spoken sentence finishes after the moment it was describing, so a short
+          cue says it faster: two notes falling means muted, two notes rising means unmuted. Turning
+          it on plays both, in that order, so you hear which is which. What you give up is the
+          channel name, which a cue cannot carry, so leave it off if you need to know WHICH channel
+          was muted rather than that one was.</dd>
+        <dt>Keyboard shortcuts</dt>
+        <dd>Shortcuts that work anywhere in Windows, whatever program you are in, and even with this
+          window closed, for as long as AccessCaster is running. The list is yours to build: Add
+          offers a catalogue of over 100 commands, sorted into kinds (channels, levels, recording,
+          pads, outputs, mixes, the unit and the app itself), so anything you can do on a page you
+          can put on a key. Delete removes one. Every shortcut the app ships is on the same three
+          keys, Ctrl, Alt and Shift held together, so there is only ever one thing to hold and the
+          key you press decides what happens. A new install starts with five of its own: turn
+          announcements off and on, mute every mic and open them again (the cough key), start or
+          stop a recording, hear what the unit is doing, and bring this window to the front. The
+          SMART pad keys are there from the start too, described below. "Add the SMART pad
+          shortcuts" is for anyone who has cleared them, or who had a list from before they
+          shipped: your own choices are never overwritten, so a set you have changed has to be
+          asked for again rather than being put back for you.
+          Pick a shortcut from the dropdown, which names it and says which keys it is on, and the
+          settings below are for that one: which keys to hold, which key to press, whether to use it
+          at all, and whether it says what it did. A shortcut has to include Ctrl, Alt or Windows, so
+          it cannot take a plain key away from your screen reader; if another program already owns
+          the combination you pick, this page says so rather than leaving you with a key that does
+          nothing. The cough key opens again only the mics it muted, so it never puts a channel live
+          that you had shut yourself. Levels come in pairs, up and down, because a key cannot ask how
+          far. Nothing that cannot be undone is offered at all.
+          Each shortcut normally speaks what it did, because when you press one you will be looking
+          at something else, and each can be told to stay quiet instead. The announcements one is
+          always silent when it turns announcements OFF: the reason to reach for it is usually that
+          announcements are going into a recording, and saying so into that recording would be the
+          very thing you were stopping. Anything that FAILS speaks whatever you have set. There is
+          one switch at the top that releases the lot.
+          Every kind of pad can be put on a key, sound pads included.</dd>
+        <dt>Playing pads from the keyboard</dt>
+        <dd>The pad set is one row of keys you can find by touch, on Ctrl, Alt and Shift like
+          everything else. The NUMBER KEYS 1 to 8 play the pads of the bank the unit is on, so
+          eight keys reach every pad on the unit rather than only the first eight; on a RODECaster
+          Duo it is 1 to 6, because a Duo has six pads in a bank. DASH and EQUALS, at the end of the
+          same row, step down and up a bank and say which bank you have landed on, including when
+          you are already at the first or last. P says what is playing, how far through it is and
+          how long is left.
+          You can also put ONE particular pad on a key, from the Add list, and that one stays with
+          that pad wherever the unit is: useful for a jingle you always want under the same finger.
+          The number keys are the opposite, and both are worth having.
+          These keys do NOT speak what they did, unlike the rest, because the pad itself is the
+          feedback and it is usually going out on air. You can turn speech on for any of them.
+          A pad still fails out loud.
+          What a SECOND press does is the pad's own setting, made on the SMART pads page or on the unit,
+          not something this app decides: Toggle stops the sound, One Shot starts it again from the
+          beginning, and Hold plays for as long as you leave it, until you press the key again.
+          A voice effect or a mixer pad switches on and off instead, and stays on until you press
+          again, exactly as it does on the unit.
+          The first time you play a sound pad in a session the app switches the unit's MIDI control
+          on and says so once. That is the only way to make the unit play a sound, and it is the
+          same switch as the one on the Device page, so you can turn it off there when you are
+          done. Restoring a backup can switch it off again, and the next pad you press turns it
+          back on.</dd>
+        <dt>Level warnings</dt>
+        <dd>The watch that speaks up while you work, and the Windows level it depends on. If you
+          want to check one channel before a take, use "Check this channel's level" on the Channels
+          page instead: this tab watches a whole stream. Pick which of the unit's audio
+          streams to watch, set the Windows recording level for it, which is a hidden multiplier on
+          everything measured, then turn on a background watch that stays quiet unless it has news:
+          it can say when the stream clips, and when it goes silent or
+          comes back, with how long a gap counts as silence. It can also speak the level on a timer,
+          which is off by default and is meant for setting gains rather than for use during a
+          recording. Two things to know. It reads the unit as a USB AUDIO DEVICE, through Windows,
+          not over the control connection, so it is not the unit's own meter and will not match it
+          exactly. And it is the only part of this app that does not work over Remote Desktop:
+          Windows gives each session its own audio devices, so from a remote session the unit's
+          streams are not there to read. The page says so when that happens.</dd>
+        <dt>Wireless connections</dt>
+        <dd>Every radio link the unit can make, in one place. "Scan for networks" takes a few
+          seconds and then offers what it found in a list, saying for each whether it needs a
+          password and which one the unit is already set to; picking one fills in the network name
+          below, which you can also just type. The unit reports ten networks at most and never
+          reports hidden ones, so typing the name is sometimes the only way. Joining takes up to 45
+          seconds and can only be done at the computer the unit is plugged into. Bluetooth has one
+          switch, which makes the unit discoverable so you can pair from the phone's own Bluetooth
+          screen; the unit stops being discoverable again after a few minutes. Then the wireless
+          mics the unit can see and their battery levels, and under those, what the unit reports:
+          the network it is on, its address, what a scan last found, and which Bluetooth devices are
+          paired. Two things are missing here, and both are the unit ignoring the request when it
+          arrives over USB: searching for Bluetooth devices, and starting a pairing from this end. A
+          fixed IP address is not offered either, and that one is the unit's own limitation: it
+          reports its address but gives nothing to set it with. The Bluetooth CHANNEL, meaning what you hear from a
+          paired phone, is on the Channels page, and what the phone hears back from the desk is the
+          Bluetooth output on the Routing page.</dd>
+      </dl>
+
+      <h3>Help &amp; About (Alt+7)</h3>
+      <p>
+        This page. Above the tabs is what the app is and who wrote it, with a short list of what it
+        still cannot do. Then four tabs: What it can control, Help, which is this guide, Known
+        issues, which is the faults I know about and what to do about each, and Support this
+        project, which is a link to my website if you would like to help and is otherwise
+        ignorable. Arrow left and right along the strip, Home and End for the ends, and
+        only the tab you are on is on the page. Nothing here is read from the unit, so opening a tab
+        changes nothing, and the tab you leave off on is remembered.
+      </p>
+
+      <h3>The app itself: the tray icon and this window</h3>
+      <p>
+        AccessCaster is two things: a program that sits in the notification area, and this page,
+        which is how you drive it. Closing this window does NOT close the app, and that is the
+        point: the program carries on running, your keyboard shortcuts carry on working from
+        whatever you are doing, and the announcer carries on telling you what the unit is up to. It
+        is also why one window is all there is; opening the app again brings this one back rather
+        than starting a second copy.
+      </p>
+      <p>
+        Reach the icon with the Windows key and B, then arrow to AccessCaster and press the
+        applications key or Enter. Its menu holds three things: Open AccessCaster, which brings this
+        page back, Announcer, which switches spoken announcements off and on and is ticked while
+        they are on, and Quit, which stops the program properly, shortcut keys and all.
+      </p>
+
+      <h3>If the unit stops responding</h3>
+      <p>
+        Every so often the RØDECaster drops off the USB connection by itself. It is a fault in the
+        unit rather than in this app, nothing is lost when it happens, and it is most likely just
+        after a factory reset, which is the moment the unit rebuilds its USB connection from
+        scratch.
+      </p>
+      <dl class="help-list">
+        <dt>What it looks like</dt>
+        <dd>Every control stops working and the app says it cannot find the unit, or that it is half
+          connected. Your audio may carry on regardless, because the desk keeps mixing whatever it is
+          doing and a second computer on the other USB socket has its own connection, so silence is
+          not the signal to watch for. The desk itself is fine; it is only the connection to this
+          computer that has gone.</dd>
+        <dt>What to do first</dt>
+        <dd>Unplug the USB cable in the socket nearest the power inlet, wait a few seconds, and plug
+          it back in. That is the socket this app talks to the unit over, and the other one carries
+          audio only. Do not skip the wait: putting it straight back in is what fails most often.</dd>
+        <dt>If that does not work</dt>
+        <dd>Try it once or twice more. A replug is simply another attempt at the same thing, and it
+          can take more than one. Give it a good few seconds out each time.</dd>
+        <dt>If it still will not appear</dt>
+        <dd>This is RØDE's own procedure for a unit that will not come back. Disconnect the power,
+          press and hold the red button on the back for sixty seconds, then reconnect the power
+          supply on its own, with no other cables, and press the red button to switch the unit on.
+          Add the rest of your cables once it has started up.</dd>
+        <dt>What it does not affect</dt>
+        <dd>Your settings, your pads and your recordings. Nothing is lost by a dropout, and nothing
+          needs restoring afterwards. If it happened during a factory reset, the reset itself almost
+          certainly went through, and the list on the Backups page will show it once the unit is
+          back.</dd>
+      </dl>
+      </div>
+
+      <!-- KNOWN ISSUES. The bar for this tab is deliberately high: a fault has to be REAL, one a
+           user can actually meet, and something they can either fix or at least recognise. Two
+           rules keep it from becoming a second Limitations tab (retired for going stale).
+           IT IS NOT A DUPLICATE OF HELP. Help's "If the unit stops responding" is what to DO; this
+           is what is KNOWN to be wrong and how often. The recovery steps stay in one place and this
+           points at them.
+           NOTHING THE APP ALREADY REPAIRS BY ITSELF BELONGS HERE, or the reader is warned about a
+           fault they cannot reach: the voice-effect entry is here precisely because a reset driven
+           from somewhere else skips the repair. -->
+      <div class="cat-tab" data-tab-key="issues" data-tab-title="Known issues" hidden>
+      <h2 id="issues-heading">Known issues</h2>
+      <p class="hint">
+        Faults I know about and have measured, so you can recognise one rather than wonder whether
+        it is something you have done. All of these are the unit's own behaviour rather than
+        something this app does to it.
+      </p>
+
+      <h3>The unit can drop off the USB connection when you reset it</h3>
+      <p>
+        About one time in five, a reset ends with the RØDECaster leaving the USB connection and not
+        coming back on its own. I have reproduced it on my own Pro 2, and the reset command by
+        itself is enough: nothing else has to be going on, no other software has to be running, and
+        it happens just the same with nothing plugged into the unit's second USB socket. It is not
+        this app holding the connection open, which was the obvious suspect and was ruled out with
+        a test that holds nothing open at all.
+      </p>
+      <dl class="help-list">
+        <dt>What you will see</dt>
+        <dd>Every control stops working and the app says it cannot find the unit, or that it is half
+          connected. Your audio may carry on regardless, so silence is not the signal to watch
+          for.</dd>
+        <dt>What to do</dt>
+        <dd>Unplug the USB cable in the socket nearest the power inlet, wait a few seconds, and plug
+          it back in. The Help tab, under "If the unit stops responding", has the rest of it,
+          including RØDE's own procedure for a unit that will not come back at all.</dd>
+        <dt>What it costs you</dt>
+        <dd>Nothing. The reset itself goes through, and no settings, pads or recordings are lost by
+          the drop. The list on the Backups page will show it once the unit is back.</dd>
+      </dl>
+
+      <h3>The unit can lock up when it restores its own backup, so this app no longer asks it to</h3>
+      <p>
+        Measured across a whole day on my own Pro 2, on 21st September 2026, with the app logging
+        every command it sent. Restoring from the unit's own copy of a backup crashed it five times
+        in thirty-one attempts, on three different backups. Restoring from this computer's copy did
+        not fail once in nine attempts, including four long ones back to back.
+      </p>
+      <p>
+        <strong>So the Restore button now always uses this computer's copy.</strong> Backing up has
+        not changed: the unit still makes its own copy alongside, because backing up has never
+        caused this, and that copy is there if it is ever needed. Only the way a backup is read
+        back has changed. It takes about two minutes instead of a few seconds, and it restores a
+        little less, which is a price worth paying to not have this happen to you.
+      </p>
+      <p>
+        <strong>This is the unit's own fault, not something this app does wrong.</strong> It
+        crashes inside its own firmware while it reloads its settings, and once it did that with a
+        tone left looping on the headphone output. Nothing the app sends is incorrect, and no change to the app prevents
+        it, which is why avoiding it is the only fix available. I am still working on it, and if a
+        way is found to do it safely the faster route will come back.
+      </p>
+      <dl class="help-list">
+        <dt>Why it matters more than it sounds</dt>
+        <dd>If your screen reader plays through the RODECaster, a unit that stops responding takes
+          your speech with it until it is back. That is the reason this was worth changing rather
+          than warning about.</dd>
+        <dt>What it looks like</dt>
+        <dd>Audio stops and every control stops answering. Once, it also left a single tone
+          repeating on the headphones, so that can happen but do not wait for it. Windows may still
+          list the unit for a minute afterwards, so the unit disappearing from your sound settings
+          is not the first sign.</dd>
+        <dt>What to do if it happens</dt>
+        <dd>Unplugging the USB cable will probably not be enough, because the unit itself has
+          stopped rather than the connection. Pull the power lead, wait half a minute, and plug it
+          back in.</dd>
+        <dt>What it costs you</dt>
+        <dd>Nothing is lost. The restore goes through before the unit stops answering, and the
+          backups on the drive are untouched. Check your monitor speaker level when it comes back,
+          because a restore moves it.</dd>
+        <dt>Where it can still happen</dt>
+        <dd>Two places, both of which you have to choose deliberately. Resetting the unit to factory
+          settings uses the same part of its firmware. And a backup the unit made on its own, with
+          no copy on this computer beside it, can only be restored the unit's own way; the Restore
+          dialog tells you when that is the case.</dd>
+      </dl>
+
+      <h3>Voice effect pads that do nothing, after a reset from somewhere else</h3>
+      <p>
+        When the unit loads its default show, the six factory voice effect pads come back with the
+        right name, type and colour, but the effects themselves do not come back with them. The pads
+        read exactly as they should, and the unit accepts the press and shows the pad as engaged,
+        but your voice is unchanged.
+      </p>
+      <dl class="help-list">
+        <dt>When it happens</dt>
+        <dd>Only when the desk is reset by something other than this app: its own touchscreen, RØDE's
+          software, or another tool. "Start again from factory settings" on the Backups page
+          rebuilds the six effects as part of the reset, and so does restoring a backup with
+          "Reset them to factory first", so you will not meet it there.</dd>
+        <dt>How to recognise it</dt>
+        <dd>The SMART pads page says so in as many words: six voice-effect pads have no effect to
+          play, so they do nothing. Nothing on the unit's own screen shows the fault at all, and a
+          keyboard shortcut on one of those pads still reports the effect as on, because the press
+          is accepted; there is simply nothing behind it to play.</dd>
+        <dt>The fix</dt>
+        <dd>On the SMART pads page, Maintenance tab, choose "Restore the factory voice effects, Censor and Ducking". It
+          rebuilds those six, and the Censor and Ducking pads with them, because all eight can be
+          rebuilt from settings alone with no sound file needed. That means pads 9 to 16 are cleared
+          and recreated, so move anything of your own off those positions first. Nothing past pad 16
+          is touched. It takes two or three minutes, and it is
+          worth an ear-check on each one afterwards.</dd>
+      </dl>
+      </div>
+
+      <!-- SUPPORT, and the link is DELIBERATELY AN ANCHOR RATHER THAN A BUTTON. Going to an
+           external site is what a link is for, so a screen reader announces it as a link and the
+           usual open-in-new-tab habits work. With `SUPPORT_URL` in app.js empty, the anchor keeps
+           NO href: that keeps it out of the tab order entirely rather than parking an
+           unavailable control in the way, and the paragraph below says plainly that it is not set
+           up yet. wireSupport() adds the href and unhides the link the moment a URL exists.
+           LAST on the strip: it is the tab you visit deliberately and least often. -->
+      <div class="cat-tab" data-tab-key="support" data-tab-title="Support this project" hidden>
+      <h2 id="support-heading">Support this project</h2>
+      <p>
+        AccessCaster is free, and it always will be. I built it because I needed it: the desk is
+        superb and almost none of it was reachable with a screen reader.
+      </p>
+      <p>
+        If it has been useful to you, and you would like to help me keep working on it and on other
+        accessible projects, there is a page for that on my website, Slight Perception. There is no
+        obligation at all, nothing is held back behind it, and nothing in the app changes either
+        way.
+      </p>
+      <p id="support-not-yet" class="hint">
+        The link is not set up just yet. It will appear here when it is.
+      </p>
+      <p><a id="support-link" class="support-link" hidden>Support the project at slightperception.com
+        (opens in your browser)</a></p>
+      <p>
+        Either way, the most useful thing you can send me is a report of something that does not
+        work with your screen reader. That is what makes the app better for everybody.<br>
+        Shaun.
+      </p>
+      </div>
+
+      </div>
+
+</section>

@@ -1,0 +1,1965 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AccessCaster - RODECaster controller</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  <div class="app-header">
+    <!-- THE APP'S OWN HEADING, AND WHERE FOCUS LANDS WHEN THE WINDOW OPENS. Never `aria-hidden`
+         decoration: it is the first thing you hear, and it answers
+         "which app, and which build" in the one place everybody passes through. That question is
+         not idle here: the installed build serves its own bundled copy of these files, so "am I
+         looking at today's code" has been asked more than once.
+
+         TWO LEVEL-1 HEADINGS PER PAGE IS DELIBERATE. Each section keeps its own h1, so pressing 1
+         cycles the app then the page. The tidy alternative - app as h1, pages as h2 - pushes every
+         tab pane's h2 down a level across the whole app, which is a large re-level for a semantic
+         nicety. The two sit in different places, header and main, and this one never changes.
+
+         THE VERSION IS PART OF THE HEADING TEXT and is written by loadVersion BEFORE the first
+         render, deliberately: a heading whose text changes after focus has landed is not re-read,
+         so filling it in late would mean nobody ever hears the number. -->
+    <h1 id="app-title" class="brand" tabindex="-1">AccessCaster</h1>
+    <!-- THE DESK, AND WHY IT IS NOT IN THE HEADING ABOVE. Finding the unit is a USB enumeration, so
+         the answer arrives after focus has already landed. A live region is read WHEN IT CHANGES,
+         which is exactly what a heading will not do, so this reads itself out when the answer comes
+         and again if the unit is unplugged or drops off the bus mid-session. Wording comes from the
+         server's `headline`, never composed here: the server owns every other device sentence. -->
+    <p id="app-device" class="brand-device" role="status">Looking for your RODECaster...</p>
+
+    <!-- Navigation: a plain list of links (no menu roles). Reads the same in
+         every screen reader, with Alt+digit global shortcuts and N-of-M position. -->
+    <nav aria-label="Main">
+      <ul class="navlist" role="list">
+        <!-- ORDER: the pages used DURING a session come first, and the three you visit
+             deliberately - Profiles, Device, About - sit at the end in that order, with Recording
+             at 4 ahead of Profiles. The Alt+digit shortcuts follow the list positions, so
+             bindShortcuts must match this order exactly. -->
+        <li><a class="navlink" href="#/channels"   data-route="channels"   aria-keyshortcuts="Alt+1">Channels and Processing</a></li>
+        <li><a class="navlink" href="#/routing"    data-route="routing"    aria-keyshortcuts="Alt+2">Routing</a></li>
+        <li><a class="navlink" href="#/pads"       data-route="pads"       aria-keyshortcuts="Alt+3">SMART pads</a></li>
+        <li><a class="navlink" href="#/recording"  data-route="recording"  aria-keyshortcuts="Alt+4">Recording</a></li>
+        <li><a class="navlink" href="#/profiles"   data-route="profiles"   aria-keyshortcuts="Alt+5">Backups</a></li>
+        <li><a class="navlink" href="#/status"     data-route="status"     aria-keyshortcuts="Alt+6">Device</a></li>
+        <li><a class="navlink" href="#/about"      data-route="about"      aria-keyshortcuts="Alt+7">Help &amp; About</a></li>
+      </ul>
+    </nav>
+
+    <button type="button" class="theme-toggle" id="theme-toggle">
+      <span class="theme-toggle-label">Dark mode currently on. Press to turn off.</span>
+    </button>
+    <span id="theme-toggle-status" class="sr-only" role="status" aria-live="polite"></span>
+  </div>
+
+  <!-- NO role="group" ANYWHERE ON THESE PAGES, deliberately. A named group is announced on the way
+       in, before the control you were heading for, and again as "out of grouping" on the way out.
+       Every section here sits under a heading that says the same thing, and a heading is free until
+       you go looking for it. -->
+  <main id="main-content" tabindex="-1">
+
+    <!-- Device -------------------------------------------------------------- -->
+    <section class="app-section" id="sec-status" hidden>
+      <h1 id="h-status" tabindex="-1">Device</h1>
+      <p id="status-line">
+        Checking for the RODECaster...
+      </p>
+
+      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs in
+           app.js). One div.cat-tab per tab, carrying the tab's key
+           and its title for the strip; app.js builds the strip above this panel and shows exactly one
+           pane at a time. The panes stay IN the document (hidden, so no screen reader, no tab order,
+           no heading navigation) rather than being built and destroyed, because every control here is
+           wired by id once at startup.
+           Current state is FIRST because it is the whole reason the page exists. The app does NOT
+           open on it: it opens on Channels and speaks the desk's state at startup instead (app.js
+           speakStartupSummary), so this tab is
+           where you come for the detail behind that sentence. Its heading is written by
+           loadOverview() so it names the connected desk (Pro II or Duo), not a fixed model. -->
+      <div id="device-panel" class="cat-panel" role="tabpanel">
+
+        <div class="cat-tab" data-tab-key="state" data-tab-title="Current state">
+          <h2 id="ov-heading">Current state</h2>
+          <!-- NO INTRO PARAGRAPH. Explaining what the report is and why it is by exception is a
+               thing you read once and then hear on every single visit
+               before the report you came for. The Help page says it (the "Current state" entry
+               under Alt+8), and the report itself is the answer. -->
+          <div id="ov-body" role="status" aria-live="polite" aria-atomic="true">
+            <p>Reading the unit...</p>
+          </div>
+        </div>
+
+        <div class="cat-tab" data-tab-key="hardware" data-tab-title="Hardware" hidden>
+          <h2 id="dev-h-state">Hardware status</h2>
+          <!-- NO INTRO PARAGRAPH, same reason as Current state above: it would list what the
+               report below is about to say, so it is heard twice on every visit. The Help page
+               keeps it. The Refresh button carries no aria-describedby either: a describedby
+               pointing at a deleted id is worse than none, and "Refresh unit state" needs no
+               explaining. -->
+          <p>
+            <button type="button" class="secondary" id="dev-state-btn">Refresh unit state</button>
+          </p>
+          <div id="dev-state" role="status" aria-live="polite" aria-atomic="true"></div>
+
+          <!-- Firmware and the wired network live here rather than on Wireless connections.
+               Neither is something you connect: they are facts
+               the unit reports about itself, which is what this tab is for. A dl rather than
+               sentences in the live region above, because both are single values you look up. -->
+          <h3 id="dev-h-fw">Firmware and wired network</h3>
+          <dl id="dev-fw-details" aria-labelledby="dev-h-fw">
+            <dt>Firmware</dt>
+            <dd id="dev-firmware">Unknown</dd>
+            <dt>Wired network</dt>
+            <dd id="dev-wired">Unknown</dd>
+          </dl>
+
+          <!-- THE TECHNICAL FACTS BELONG HERE, not on a tab of their own: they are the same kind
+               of thing this tab already holds, what the unit is rather than anything you can change,
+               and a tab for them costs a stop on the strip on every pass. They stay LAST and under
+               their own h3, so the daily reading is what you meet
+               first and the diagnostics are one H away when something is wrong. -->
+          <h3 id="dev-h-usb">USB interfaces (technical)</h3>
+          <dl id="status-details" aria-labelledby="dev-h-usb">
+            <dt>Connection</dt>
+            <dd id="status-connection">Unknown</dd>
+            <dt>Hardware id</dt>
+            <dd id="status-hardware">Unknown</dd>
+            <dt>Status bytes</dt>
+            <dd id="status-info">Unknown</dd>
+          </dl>
+          <p class="hint">A low-level list of the USB interfaces seen, for troubleshooting.</p>
+          <ul id="interfaces-list" aria-label="USB interfaces">
+            <li>Loading...</li>
+          </ul>
+        </div>
+
+        <!-- The unit's OWN settings, otherwise reachable only from the touchscreen; their write
+             addresses are captured and read-back verified. The controls are BUILT IN JS
+             from the server's spec (loadUnitSettings), so labels, choices and help text come from one
+             definition that the profile backup shares. Read whenever the tab is opened. -->
+        <div class="cat-tab" data-tab-key="unit" data-tab-title="Unit settings" hidden>
+          <h2 id="dev-h-unit">Unit settings</h2>
+          <!-- ONE LINE. A paragraph naming the settings below it makes each one heard twice: once
+               in a list you cannot act on and again on the control itself, which carries its own
+               help. This says the only part the controls do NOT - that these are the touchscreen's
+               settings. The lockout warnings are on the lockout switches, and the Help page has the
+               full account. -->
+          <p id="dev-unit-note" class="note">
+            The settings you would otherwise reach through the unit's touchscreen.
+          </p>
+          <div id="dev-unit-controls"></div>
+          <p id="dev-unit-status" role="status" aria-live="polite"></p>
+
+          <!-- MIDI IS NOT WORTH A TAB FOR ONE SWITCH. It is a setting of the unit like the rest of
+               this tab, so it costs a heading here instead of a stop on the strip.
+               It is LAST and separate on purpose: everything above comes from the unit
+               settings spec (one definition drives the read, the write, the control and the
+               profile), while this one has its own captured write (rcp_transfer.set_midi_control)
+               and its own place in a profile. Its VALUE now comes from the same settings read, so
+               the tab still makes exactly one call. -->
+          <h3 id="midi-heading">MIDI control</h3>
+          <p id="midi-note" class="note">
+            Turning MIDI control on lets an external MIDI app or controller handle mute,
+            faders, listen and record over MIDI, without RODE Central.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="midi-toggle" aria-describedby="midi-note">
+              <span>Enable MIDI control</span>
+            </label>
+          </p>
+        </div>
+
+        <div class="cat-tab" data-tab-key="speak" data-tab-title="Announcements" hidden>
+          <!-- The heading is what the tab DOES, and it is more than buttons: faders, the encoder
+               and the banks are all announced, and so are changes made on the unit rather than
+               here. Do not narrow it to "Announce button presses". -->
+          <h2 id="announce-heading">Announce Interactions on Mixer</h2>
+          <!-- What survives the cull is the part no control below says: that changes made ON THE
+               UNIT are caught, not just the ones made here. The rest of the old paragraph listed
+               what each switch already announces, and the Help page keeps the full account. -->
+          <p id="announce-note" class="note">
+            Mute and solo are announced by channel and state, for example "Mic 2 muted", including
+            changes made on the unit itself rather than here. Bank changes, channel buttons and what
+            the encoder is set to are announced too.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-toggle" aria-describedby="announce-note">
+              <span>Announce button presses aloud</span>
+            </label>
+          </p>
+          <p id="announce-levels-note" class="note">
+            Whatever you turn is announced by name, so the encoder set to a channel gives you that
+            channel and its gain in decibels, not the monitor. A muted channel is announced as muted
+            rather than with a level.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-levels-toggle" aria-describedby="announce-levels-note">
+              <span>Announce fader and monitor levels aloud</span>
+            </label>
+          </p>
+          <p id="announce-startup-summary-note" class="note">
+            When the app opens it can tell you what is wrong with the desk, and only that: anything
+            muted or soloed, a voice-effect pad left switched on, a recording already running, a
+            drive nearly full, or an output not on its usual mix. On a desk with nothing to report it
+            is one sentence saying so. The full picture, including every fader level, stays on the
+            Device page.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-startup-summary-toggle"
+                     aria-describedby="announce-startup-summary-note">
+              <span>Speak the desk's state when the app opens</span>
+            </label>
+          </p>
+          <p id="announce-mute-tones-note" class="note">
+            A mute is pressed in the middle of something, and a spoken sentence finishes after the
+            moment it was describing. A short cue says it faster: two notes FALLING means muted, two
+            notes RISING means unmuted. Turning this on plays both, in that order, so you hear which
+            is which. The trade is the channel name, which a cue cannot carry, so leave it off if you
+            need to know which channel was muted rather than that one was.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-mute-tones-toggle"
+                     aria-describedby="announce-mute-tones-note">
+              <span>Play a tone for mute instead of speaking it</span>
+            </label>
+          </p>
+          <div class="field">
+            <label for="announce-voice">Announcement voice</label>
+            <select id="announce-voice" aria-describedby="announce-voice-help"></select>
+            <span id="announce-voice-help" class="hint">
+              Which of the computer's installed speech voices reads announcements out. Choosing one
+              speaks a sample in it straight away, so you can hear what you have picked. This is only
+              for these announcements: your screen reader keeps its own voice. The list is whatever
+              Windows has installed, so if you install another voice it appears here.
+            </span>
+          </div>
+          <div class="field">
+            <label for="announce-output">Where announcements play</label>
+            <select id="announce-output" aria-describedby="announce-output-help"></select>
+            <span id="announce-output-help" class="hint">
+              Which audio output these announcements come out of. This changes OUR speech only: it
+              does not move the Windows default output, and it does not affect your screen reader or
+              any other program. It matters because the default output on this machine is usually the
+              RODECaster itself, so announcements arrive on USB 1 and disappear the moment you solo
+              another channel or mute USB 1. Monitor auto-mute does it too: with that on, the unit
+              silences the speakers whenever a mic is live, so an announcement can reach your
+              headphones and not the room, or the other way round, depending on what you had just
+              pressed. Pointing them at a different output, your computer's own
+              speakers or headphones, keeps them audible whatever the desk is doing, and keeps them
+              out of your recording and your stream.
+            </span>
+          </div>
+          <p>
+            <button type="button" class="secondary" id="announce-devices-refresh"
+                    aria-describedby="announce-devices-help">Refresh voices and outputs</button>
+            <span id="announce-devices-help" class="hint">
+              Read the two lists above again, after plugging in headphones or installing a voice.
+            </span>
+          </p>
+          <p id="announce-speech-status" role="status" aria-live="polite"></p>
+          <div class="field">
+            <label for="announce-volume">Announcement volume</label>
+            <input type="range" id="announce-volume" min="0" max="100" step="5" value="100"
+                   aria-describedby="announce-volume-help">
+            <span id="announce-volume-value" class="proc-value">100%</span>
+            <span id="announce-volume-help" class="hint">
+              How loud announcements are, from 0 to 100 percent. Turn it down if the announcer talks
+              over what you are listening to while you ride the faders. This changes ONLY these
+              announcements: it does not touch your Windows volume, any other program, or the unit's
+              own audio. It applies a moment after you stop moving it, and the confirmation is spoken
+              at the new level so you can hear what you have chosen. At 0 the announcer stays on but
+              says nothing aloud.
+            </span>
+          </div>
+        </div>
+
+        <!-- KEYBOARD SHORTCUTS. Next to Announcements because the first shortcut is the announcer's
+             own on/off switch, and that is the case the whole tab exists for: the announcer talking
+             over a guest is something you deal with NOW, from whatever program you are in, not after
+             finding this window and this tab.
+             ONE CHOOSER AND ONE EDITOR, never a row per shortcut: ten shortcuts x seven controls
+             is about seventy controls to walk past, every one of them the same seven again under a
+             different name. Instead: pick the shortcut from a dropdown, edit the one below it.
+             Seven controls instead of seventy, and the dropdown doubles as the at-a-glance list
+             because each option carries its own combination.
+             NO ADD OR DELETE BUTTONS: the list of commands is fixed by what the app can do, and the
+             five pad slots are already the "add" mechanism. Switching a shortcut off IS the delete.
+             THE LIST IS YOURS, NOT OURS: any property the app can offer anywhere else can appear
+             in the catalogue of available commands. So
+             the dropdown holds the shortcuts you have ADDED, and Add offers a catalogue that
+             `Project/commands.py` GENERATES from the app's own spec tables - channels, faders,
+             pads, mix schemes, presets. Add a control to the app and it can be put on a key without
+             anyone editing this page.
+             THE CONTROLS BELOW ARE STATIC: they are the same few whatever is selected, so they are
+             written once here and wired once at startup, and picking a different shortcut only
+             changes their VALUES - it never rebuilds a control a screen reader may be sitting in.
+             NO "PRESS THE KEYS YOU WANT" CAPTURE FIELD, deliberately. That is the usual way to set a
+             shortcut and it is hostile to a screen reader: the field swallows the keys the screen
+             reader needs, and you cannot hear what you just typed. Checkboxes and a dropdown say the
+             same thing, are readable, and can be checked BEFORE anything is registered. -->
+        <div class="cat-tab" data-tab-key="shortcuts" data-tab-title="Keyboard shortcuts" hidden>
+          <h2 id="hotkeys-heading">Keyboard shortcuts</h2>
+          <p id="hotkeys-note" class="note">
+            These work anywhere in Windows, whatever program you are in and even with this window
+            closed, for as long as AccessCaster is running. Each one needs Ctrl, Alt or Windows in
+            it, so it cannot take a plain key away from your screen reader, and each normally speaks
+            what it did, because when you press it you will be looking at something else.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="hotkeys-enabled" aria-describedby="hotkeys-enabled-help">
+              <span>Use keyboard shortcuts</span>
+            </label>
+          </p>
+          <p id="hotkeys-enabled-help" class="hint">
+            Turning this off releases every combination, so they go back to whatever other programs
+            do with them.
+          </p>
+
+          <div class="field">
+            <label for="hotkey-pick">Your shortcuts</label>
+            <!-- NO HINT AT ALL. A hint is for a control that is not obvious, or one that affects
+                 something else; a labelled dropdown whose options name themselves is neither. -->
+            <select id="hotkey-pick"></select>
+          </div>
+          <p>
+            <button type="button" class="secondary" id="hotkey-add-btn">Add a shortcut</button>
+            <button type="button" class="secondary" id="hotkey-delete-btn">Delete this shortcut</button>
+            <button type="button" class="secondary" id="hotkey-add-pads-btn"
+                    aria-describedby="hotkey-add-pads-help">Add the SMART pad shortcuts</button>
+          </p>
+          <!-- WHY THIS BUTTON EXISTS AT ALL. The shipped set is only ever laid down on a machine
+               that has saved nothing, because re-applying it would undo somebody's deliberate
+               deletion on every start. That rule is right, and it also means a set added in a later
+               version can never reach anyone who had already set their keys. So the pad scheme is
+               offered rather than imposed, and pressing it twice is safe. -->
+          <p id="hotkey-add-pads-help" class="hint">
+            Puts the whole pad set on the number row in one go, on Ctrl, Alt and Shift like
+            everything else: the number keys play the pads of the bank the unit is on, Dash and
+            Equals step down and up a bank, and P says what is playing. Anything you have already
+            set is left alone, and if another program has one of these keys the shortcut says so
+            rather than failing quietly.
+          </p>
+          <!-- A PAD FOLLOWS ITS OWN TRIGGER SETTING, which is a desk setting and not ours, so a
+               second press does different things on different pads. Said here rather than left to
+               be discovered, because "it started again instead of stopping" reads as a bug. -->
+          <p class="hint">
+            What a second press does is the pad's own setting, made on the SMART pads page or on
+            the unit.
+            A sound pad set to Toggle stops, one set to One Shot starts again from the beginning,
+            and one set to Hold plays until you press the key again. A mixer pad follows its own
+            trigger setting the same way.
+          </p>
+
+          <fieldset class="hotkey" id="hotkey-editor">
+            <legend id="hotkey-editor-name">Shortcut</legend>
+
+            <p id="hotkey-mods-label" class="hint">Keys to hold</p>
+            <div role="group" aria-labelledby="hotkey-mods-label" id="hotkey-mods">
+              <p class="field">
+                <label class="switch"><input type="checkbox" id="hotkey-mod-ctrl"><span>Ctrl</span></label>
+              </p>
+              <p class="field">
+                <label class="switch"><input type="checkbox" id="hotkey-mod-alt"><span>Alt</span></label>
+              </p>
+              <p class="field">
+                <label class="switch"><input type="checkbox" id="hotkey-mod-win"><span>Windows</span></label>
+              </p>
+              <p class="field">
+                <label class="switch"><input type="checkbox" id="hotkey-mod-shift"><span>Shift</span></label>
+              </p>
+            </div>
+
+            <div class="field">
+              <label for="hotkey-key">Key to press</label>
+              <select id="hotkey-key"></select>
+            </div>
+
+            <!-- "Disable this shortcut", NOT "Use this shortcut", which sounds like it will run the
+                 shortcut now. So the switch is INVERTED against
+                 the server's `enabled` - ticked means off. showHotkey and saveHotkey are the only
+                 two places that translate, and they are commented; do not add a third. -->
+            <p class="field">
+              <label class="switch">
+                <input type="checkbox" id="hotkey-off"><span>Disable this shortcut</span>
+              </label>
+            </p>
+            <p class="field">
+              <label class="switch">
+                <input type="checkbox" id="hotkey-speak">
+                <span>Speak keyboard shortcut when pressed</span>
+              </label>
+            </p>
+            <p id="hotkey-detail-status" class="hint"></p>
+          </fieldset>
+
+          <p id="hotkeys-status" role="status" aria-live="polite"></p>
+        </div>
+        <!-- LEVELS. Its own tab rather than part of Announcements, because it answers a different
+             question: Announcements is about the unit's CONTROLS, this is about its AUDIO. It is
+             also the one part of the app that does not work over Remote Desktop, which needs
+             somewhere of its own to be explained. -->
+        <!-- NOT called "Levels": nothing here is a meter you read, it is the background watch and
+             the Windows input level that watch depends on, so the name says warnings. The meter
+             itself is on Channels. -->
+        <div class="cat-tab" data-tab-key="levels" data-tab-title="Level warnings" hidden>
+          <h2 id="meter-heading">Level warnings</h2>
+          <!-- What this reads, and why it will not match the unit's own meters exactly, is on the
+               Help page. The tab itself just does the job. -->
+          <p id="meter-note" class="note">
+            Levels on the unit's audio streams, as Windows sees them.
+          </p>
+          <p id="meter-status" role="status" aria-live="polite"></p>
+
+          <!-- THE CHECK ITSELF LIVES ON CHANNELS; this tab keeps the stream chooser because the
+               background watch below needs it.
+               Why: every stream this desk offers is a MIX. "Microphone (RODECaster Pro II
+               Main Stereo)" is all four mics, both USB returns and Bluetooth at once, so a check
+               here could say "something is reaching the computer" and never "Mic 2 is right" -
+               which is the question you actually have. On Channels the server isolates the one
+               channel on a temporary Chat mix and takes the fader out of the reading, so the number
+               means something. Nothing was lost: it is the same check, on a smaller thing. -->
+          <h3 id="meter-h-stream">Which stream to watch</h3>
+          <div>
+            <div class="field">
+              <label for="meter-stream">Audio device to watch</label>
+              <select id="meter-stream"></select>
+            </div>
+            <p class="hint" id="meter-check-hint">
+              To check one channel, use Check this channel's level on the Channels page.
+            </p>
+          </div>
+
+          <!-- Windows' own level for the metered stream. It sits between the check and the
+               warnings because it is what makes both of them mean anything: it is a hidden
+               multiplier on every reading, and getting it wrong damages recordings while the
+               unit's own meters look perfectly healthy. -->
+          <h3 id="meter-h-input">Windows level</h3>
+          <div id="meter-input-level"></div>
+
+          <h3 id="meter-h-watch">Warn me while I work</h3>
+          <div>
+            <p class="hint" id="meter-watch-hint">
+              Watches in the background and speaks only when something needs saying.
+            </p>
+            <div id="meter-watch-controls"></div>
+            <p id="meter-watch-status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <!-- NOT called "Network": that name says cables and IP addresses, and Bluetooth then reads
+             as an intruder with the pairing switch misfiled. WIRELESS CONNECTIONS is what the tab
+             is - every radio link this unit can make, wifi, Bluetooth and wireless mics. Firmware
+             and the wired network sit on Hardware instead, because neither is a connection you
+             make. The rule, so this does not split the first time a wireless mic turns up: a radio
+             link to another device
+             lives here INCLUDING its readout, while the audio LEVEL for that link stays with its
+             channel. The tab KEY stays "network" - it is the remembered-tab id and the API path. -->
+        <div class="cat-tab" data-tab-key="network" data-tab-title="Wireless connections" hidden>
+          <h2 id="net-heading">Wireless connections</h2>
+          <p id="net-status">
+            Loading from the device...
+          </p>
+
+          <!-- THE CONTROLS COME FIRST, and the read-only details are below them: what you can DO,
+               then what the unit reports. Joining a network and making the unit discoverable are
+               both proven from here, so this tab is not the list of facts it would otherwise be. -->
+          <h3 id="net-h-wifi">WiFi</h3>
+          <div>
+            <p class="hint" id="net-wifi-hint">
+              Turn the unit's wifi on or off, and join a network.
+            </p>
+            <p class="field">
+              <label class="switch">
+                <input type="checkbox" id="net-wifi-toggle" aria-describedby="net-wifi-hint">
+                <span>WiFi on</span>
+              </label>
+            </p>
+            <!-- SCAN, then PICK. The typed box below stays, and is not a fallback nobody needs:
+                 the unit reports ten networks at most
+                 and a hidden network never appears at all, so a name you can type is sometimes the
+                 only way in. Choosing from the list fills that box in rather than replacing it,
+                 which keeps ONE place where the name being joined can be read back and corrected.
+                 The list starts empty and the button says so; nothing is scanned until asked. -->
+            <p>
+              <button type="button" id="net-scan-btn" aria-describedby="net-scan-hint">
+                Scan for networks
+              </button>
+              <span class="hint" id="net-scan-hint">
+                Takes a few seconds. The unit reports up to ten networks and does not report hidden
+                ones, so type the name below if the one you want is missing.
+              </span>
+            </p>
+            <div class="field" id="net-scan-row" hidden>
+              <label for="net-scan-list">Networks found</label>
+              <select id="net-scan-list" aria-describedby="net-scan-hint"></select>
+            </div>
+            <div class="field">
+              <label for="net-join-ssid">Network name</label>
+              <input type="text" id="net-join-ssid" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="net-join-psk">Password</label>
+              <input type="password" id="net-join-psk" autocomplete="off">
+              <!-- NOT `aria-describedby` ON ANYTHING. Attach this paragraph to the name field, the
+                   password field and the Join button and four sentences are read out three times
+                   while moving through three controls. It sits here and is read in normal reading
+                   order, once; the labels say what each box is, which is what a label is for. -->
+              <span class="hint" id="net-join-hint">
+                Type the network name exactly, capitals included, and leave the password empty for
+                an open network. Joining takes up to 45 seconds, and can only be done at the
+                computer the unit is plugged into, not from a phone. The password is sent to the
+                unit and is not kept by AccessCaster.
+              </span>
+            </div>
+            <p>
+              <button type="button" id="net-join-btn">
+                Join this network
+              </button>
+            </p>
+          </div>
+
+          <h3 id="net-h-bt">Bluetooth</h3>
+          <div>
+            <p class="hint" id="net-bt-hint">
+              Switch this on, then pair from the phone's own Bluetooth screen. The unit stops being
+              discoverable on its own after a few minutes.
+            </p>
+            <p class="field">
+              <label class="switch">
+                <input type="checkbox" id="net-bt-toggle" aria-describedby="net-bt-hint">
+                <span>Let other devices find this unit</span>
+              </label>
+            </p>
+          </div>
+
+          <p id="net-write-status" role="status" aria-live="polite"></p>
+
+          <!-- The third radio. A READING, not a control: the unit pairs its own transmitters and
+               picks the Wireless mic type on the channel itself. It belongs with the other radios,
+               not on Hardware beside the memory card, where nobody would look for it. -->
+          <h3 id="net-h-mics">Wireless microphones</h3>
+          <div>
+            <p class="hint" id="net-mics-hint">
+              RODE wireless transmitters the unit can see, and how much battery each has left.
+              Pairing one is done on the transmitter and the unit, and the channel picks the
+              Wireless mic type by itself when one connects.
+            </p>
+            <!-- DELIBERATELY NOT A LIVE REGION, and net-write-status stays the only one on this
+                 tab. This is painted by the tab's arrival read, exactly like the dl below it, and a
+                 second live region here would fire at the same moment as the reply to a join, which
+                 is the one message on this tab worth hearing in full. -->
+            <div id="net-mics">
+              <p>Not read yet.</p>
+            </div>
+          </div>
+
+          <h3 id="net-h-details">What the unit reports</h3>
+          <dl id="net-details" aria-labelledby="net-h-details">
+            <dt>WiFi network</dt>
+            <dd id="net-wifi-ssid">Unknown</dd>
+            <dt>WiFi connected</dt>
+            <dd id="net-wifi-connected">Unknown</dd>
+            <dt>WiFi IP address</dt>
+            <dd id="net-wifi-ip">Unknown</dd>
+            <dt>WiFi networks last scanned for</dt>
+            <dd id="net-wifi-scan">Unknown</dd>
+            <dt>Bluetooth</dt>
+            <dd id="net-bt">Unknown</dd>
+            <dt>Bluetooth discoverable</dt>
+            <dd id="net-bt-visible">Unknown</dd>
+            <dt>Bluetooth paired devices</dt>
+            <dd id="net-bt-paired">Unknown</dd>
+            <dt>Bluetooth devices last scanned for</dt>
+            <dd id="net-bt-scan">Unknown</dd>
+          </dl>
+          <!-- What is STILL read-only, said plainly and with the reason. Three things on this tab
+               are writable, so what is left is scanning, pairing and static IP, and the honest
+               reason is that the unit does not act on them, not that we are afraid to try. -->
+          <p id="net-readonly" class="hint"></p>
+        </div>
+
+
+        <!-- ITS OWN TAB, not part of Hardware: that tab is about what the UNIT is, and this is
+             about how you reach the APP. Compare the MIDI switch, which is folded away from a tab of
+             its own precisely because it HAS a correct home to fold into. This has none, so a tab is
+             the only right answer. LAST on the strip: least often visited, and it leaves every
+             remembered tab position where it was. -->
+        <div class="cat-tab" data-tab-key="access" data-tab-title="Remote access" hidden>
+          <h2 id="dev-h-access">Remote access from another device</h2>
+          <p class="hint" id="dev-access-note">Checking.</p>
+          <div class="field">
+            <label for="dev-access-url">Access link</label>
+            <input type="text" id="dev-access-url" readonly aria-describedby="dev-access-note">
+          </div>
+          <p>
+            <button type="button" class="secondary" id="dev-access-copy">Copy the link</button>
+            <button type="button" class="secondary" id="dev-access-new"
+                    aria-describedby="dev-access-new-hint">Make a new link</button>
+          </p>
+          <p class="hint" id="dev-access-new-hint">
+            Making a new link stops the old one working, which is what you want if you have shared
+            it with someone who should no longer have it. You are asked to confirm.
+          </p>
+          <p class="hint" id="dev-access-warning"></p>
+          <p id="dev-access-status" role="status" aria-live="polite"></p>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Channels and Processing (adaptive: mics + Bluetooth/USB/Chat) ------- -->
+    <!-- One section: pick a channel and its applicable controls plus full
+         processing are shown, mirroring the RODE app's per-channel panel. -->
+    <section class="app-section" id="sec-channels" hidden>
+      <h1 id="h-channels" tabindex="-1">Channels and Processing</h1>
+      <!-- NO PER-PAGE "this page is a tab strip, use the arrow keys" PARAGRAPH. Five of them say
+           the same thing, on every page, to somebody who learnt it on the first one, and a tab strip
+           built to the APG pattern announces itself - role, position and count - so the instruction
+           tells a screen-reader user what their screen reader has just told them. The two
+           facts those paragraphs carried that were NOT navigation (Mute versus Listen, and
+           Settings being live while Reassign waits for Apply) were already in Help & About
+           word for word, and stay there. Do not reintroduce them per page. -->
+      <p id="mixer-note" class="note" role="note">Loading...</p>
+      <div class="field">
+        <label for="channel-select">Channel</label>
+        <select id="channel-select" name="channel-select"
+                aria-describedby="channel-select-hint"></select>
+        <!-- NO PREVIOUS / NEXT CHANNEL BUTTONS. They work and earn nothing: their whole point is
+             "you do not have to go back up to the dropdown", and they would sit directly beside the
+             dropdown, so from inside the panel you travel back up to reach them anyway. Stepping
+             channels is only worth having as a keyboard shortcut usable from anywhere on the
+             page. -->
+      </div>
+      <p id="channel-select-hint" class="hint">
+        Choose a channel to view and change its settings.
+      </p>
+      <p id="channel-status" role="status" aria-live="polite"></p>
+      <div id="channel-panel"></div>
+    </section>
+
+    <!-- Routing ------------------------------------------------------------ -->
+    <section class="app-section" id="sec-routing" hidden>
+      <h1 id="h-routing" tabindex="-1">Routing</h1>
+      <p id="routing-note" class="note" role="note">Loading...</p>
+      <p id="routing-status"></p>
+
+      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs in
+           app.js). One div.cat-tab per tab, carrying the tab's key
+           and its title for the strip; app.js builds the strip above this panel and shows exactly one
+           pane at a time. The panes stay IN the document (hidden, so no screen reader, no tab order,
+           no heading navigation) rather than being built and destroyed, because every control here is
+           wired by id once at startup.
+           Each pane opens with the h2 that names the category. Where a tab merges old groups, the
+           extra groups keep an h3 plus a carrying the same name, so H still lands on
+           Headphones or Auto-mute. Heading levels never skip: page h1, pane h2, sub-group h3. -->
+      <div id="routing-panel" class="cat-panel" role="tabpanel">
+
+        <div class="cat-tab" data-tab-key="mixes" data-tab-title="Output mixes">
+          <h2 id="rt-h-mixes">Output mixes</h2>
+          <!-- Overwritten by the server's own note (app.js buildMatrix), which carries the
+               read-only wording for a device that cannot write the matrix. Keep the two in step. -->
+          <p id="routing-matrix-note" class="hint">
+            Each output carries its own mix. Pick an output to see and change it.
+          </p>
+          <div class="field">
+            <label for="matrix-output">Output to configure</label>
+            <select id="matrix-output"></select>
+          </div>
+          <!-- STAGED behind Apply. This dropdown changes what an output CARRIES, and a closed
+               select fires on every arrow press, so writing on change means reading the list
+               rebuilds the mix. "Output to configure" above is not staged, and deliberately: it only changes
+               what you are looking at. -->
+          <div class="field">
+            <label for="matrix-mode">Mix for this output</label>
+            <!-- NOT described by the hint below: a description is re-read as the value changes, so
+                 the staged warning would be spoken between every option. -->
+            <select id="matrix-mode"></select>
+            <span id="matrix-mode-now" class="hint"></span>
+            <button type="button" class="secondary" id="matrix-mode-apply">
+              Apply mix for this output
+            </button>
+          </div>
+          <!-- WHAT THE APPLIED MIX MEANS, in one line, and it lives OUTSIDE the source fieldset
+               because that fieldset is hidden on anything but Custom. -->
+          <p id="matrix-mix-summary" class="hint"></p>
+          <fieldset id="matrix-sources" hidden>
+            <legend>Sources for the selected output</legend>
+            <p id="matrix-sources-note" class="hint">
+              Loading the current mix from the device...
+            </p>
+            <div id="matrix-sources-list"></div>
+          </fieldset>
+          <p id="matrix-status"></p>
+
+          <!-- MIX SCHEMES. The Chat presets are built-in SCHEMES rather than buttons of their own,
+               so there is one control for "put the mixes how I want them" instead of a growing row
+               of preset buttons. The list and every description come from
+               the server (/api/routing/schemes), which builds the built-ins from the CONNECTED
+               desk, so nothing here names an output this device does not have. -->
+          <h3 id="rt-h-schemes">Mix presets</h3>
+          <div>
+            <p id="schemes-note" class="hint">
+              The output mixes saved under a name: which sources each output carries, and at what
+              level. Not a profile: it never touches your channels, processing or pads.
+            </p>
+            <div class="field">
+              <!-- DELIBERATELY NOT described-by the line below. That paragraph CHANGES with the
+                   selection, and changing the description of a focused control makes a screen reader
+                   announce the description on its own, so arriving back at the dropdown reads the
+                   hint instead of the scheme you are on. The dropdown says
+                   the scheme's name, which is what a dropdown is for; the description belongs to
+                   the buttons that act on it, and is read when you Tab to them. -->
+              <label for="scheme-select">Mix preset</label>
+              <select id="scheme-select"></select>
+            </div>
+            <p id="scheme-description" class="hint"></p>
+            <p>
+              <button type="button" class="secondary" id="scheme-apply-btn"
+                      aria-describedby="scheme-description">Apply this preset</button>
+              <button type="button" class="secondary" id="scheme-delete-btn"
+                      aria-describedby="scheme-description">Delete this preset</button>
+            </p>
+            <div class="field">
+              <label for="scheme-name">Name for a new preset</label>
+              <input type="text" id="scheme-name" name="scheme-name" maxlength="40"
+                     autocomplete="off" aria-describedby="scheme-save-help">
+              <span id="scheme-save-help" class="hint">
+                Saves the mixes as they are now, levels included. Every output, or just the one
+                chosen above: each button says which, and the list says it back to you when you
+                choose a preset later. 1 to 40 letters, digits, spaces, dashes or underscores. An
+                existing preset of that name is replaced, and you are asked first.
+              </span>
+            </div>
+            <!-- TWO SAVE BUTTONS, NOT A SCOPE DROPDOWN. Each label says what
+                 that button saves, and the second one NAMES the output chosen at the top of this
+                 tab, so there is no separate control whose state you have to check before pressing.
+                 The one-output kind is what the built-in Chat presets are, and it is the only kind
+                 that is safe to apply mid-show, because it cannot disturb a mix you are listening
+                 to. updateSchemeSaveOutputLabel keeps the second label in step with the output. -->
+            <p>
+              <button type="button" class="secondary" id="scheme-save-btn"
+                      aria-describedby="scheme-save-help">Save every output's mix as a preset</button>
+              <button type="button" class="secondary" id="scheme-save-output-btn"
+                      aria-describedby="scheme-save-help">Save only this output's mix as a
+                preset</button>
+            </p>
+            <!-- NOT a live region. Adding role="status" here puts the SAME words in two polite
+                 regions at the same moment, and the result goes unspoken: you press Apply and hear
+                 nothing but the button's label again. One voice: announce() says it, this line
+                 shows it. -->
+            <p id="scheme-status"></p>
+          </div>
+
+          <h3 id="rt-h-resetmixes">Reset all output mixes</h3>
+          <div>
+            <p id="reset-outputs-help" class="hint">
+              Puts every output back to its normal mix in one go: your headphones, the monitor
+              speaker, the recording and USB 1 back to Main Mix, and Bluetooth, Chat, USB 2 and
+              CallMe back to Mix Minus. It also puts every source back in each output and back to
+              following the faders. Use this if a headphone output has been left on a Custom mix,
+              which stops the Mute buttons silencing a channel in your own headphones. These are
+              sensible everyday settings rather than the unit's exact factory state, and this wipes
+              any custom mixes you have set, including "Chat = my mic only", so save a mix preset or
+              a profile first if you want to keep them. You are asked to confirm. This
+              button is the "Everything normal" mix preset above; the two do exactly the same
+              thing.
+            </p>
+            <p>
+              <button type="button" class="secondary" id="reset-outputs-btn"
+                      aria-describedby="reset-outputs-help">Reset all output mixes</button>
+            </p>
+            <p id="reset-outputs-status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <div class="cat-tab" data-tab-key="faders" data-tab-title="Faders" hidden>
+          <h2 id="rt-h-faders">Fader assignment</h2>
+          <p id="routing-inputs-note" class="hint">
+            Choose which channel sits on each fader. Every fader can be reassigned, mic faders
+            included; each one is labelled with whether it is a physical or a virtual fader.
+            Putting a channel on a fader that already holds it elsewhere swaps the two, so you
+            can rearrange your layout. A channel's processing and effects move with it on both
+            units, so a voicing stays with its channel wherever you put it.
+            Nothing is sent to the unit until you press that fader's own Apply button, so you can
+            arrow through the choices safely. The current layout is read from the unit every time
+            you open this tab.
+          </p>
+          <div id="routing-inputs" aria-describedby="routing-inputs-note"></div>
+          <p>
+            <button type="button" id="faders-reset-btn" aria-describedby="faders-reset-help">
+              Reset faders to default
+            </button>
+            <span id="faders-reset-help" class="hint">
+              Puts your unit's standard fader layout back (its default channel for each fader).
+            </span>
+          </p>
+          <p id="faders-reset-status" role="status" aria-live="polite"></p>
+
+          <h3 id="rt-h-stereo">Stereo linked inputs</h3>
+          <p id="stereo-note" class="hint">
+            Link two inputs that are next to each other and they share one fader, panned hard left
+            and right, so a stereo source (a keyboard, a pair of overheads, a stereo mic) rides on a
+            single fader with both sides matched. Only neighbouring MIC inputs can be linked, so a
+            Pro 2 offers 1 and 2, 2 and 3, or 3 and 4, while a Duo has the one pair, 1 and 2,
+            because its third input is the headset jack. The switches below are built from your own
+            unit, so what you see is what it has. Linking frees the second input's fader; when
+            you unlink, that input goes back onto a free fader and its processing comes back with
+            it. Each switch takes effect on the unit as soon as you toggle it.
+          </p>
+          <div id="stereo-links" aria-describedby="stereo-note"></div>
+          <p id="stereo-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="cat-tab" data-tab-key="levels" data-tab-title="Levels" hidden>
+          <h2 id="rt-h-levels">Fader and monitor levels</h2>
+          <!-- SHORT, and do not write that a virtual fader has "no knob and no buttons on the
+               unit": the encoder DOES reach a virtual fader's level, and it is only the mute and
+               solo that have no hardware. What each control does in detail is on Help & About;
+               these lines say what the tab is and what has no hardware. -->
+          <p id="fader-levels-note" class="hint">
+            The virtual fader and monitor speaker levels, which have no fader on the unit. Read when
+            you open the tab, and sent as you move them.
+          </p>
+          <p id="fader-strip-note" class="hint">
+            Each virtual fader has its mute and solo here too: the unit's encoder reaches its level,
+            but nothing on the unit reaches its mute or solo. Mute silences that channel everywhere,
+            recordings and streams included. Solo changes your headphones only.
+          </p>
+          <div id="fader-levels" aria-describedby="fader-levels-note fader-strip-note"></div>
+          <p>
+            <button type="button" class="secondary" id="fader-levels-refresh">Read levels from device</button>
+            <button type="button" class="secondary" id="fader-solos-clear">Clear all solos</button>
+          </p>
+          <!-- NO "Free the encoder" button: the desk frees it itself, because the holding channel
+               button toggles. See app.js. -->
+
+          <p id="fader-levels-status" role="status" aria-live="polite"></p>
+
+          <!-- Output mutes and the Bluetooth send level: selectors from the block rule, all three
+               proven by a read-back-verified write. They sit here rather than on the Device page
+               because they are levels, and the monitor level they belong beside is on this tab. -->
+          <h3 id="rt-h-outmute">Output mutes and Bluetooth level</h3>
+          <div>
+            <p id="routing-outmute-note" class="hint">
+              These silence a whole OUTPUT, which is not the same as muting a channel. Nothing here
+              changes your mixes, your recording or anything you are streaming: only what somebody
+              hears. The Bluetooth output is what a paired phone hears FROM the desk, which is the
+              opposite direction to the Bluetooth channel on the Channels page.
+            </p>
+            <div id="routing-outmutes" aria-describedby="routing-outmute-note"></div>
+            <p id="routing-outmute-status" role="status" aria-live="polite"></p>
+          </div>
+
+          <!-- AUTO-MUTE LIVES HERE, not on a tab of its own. It is an automatic version of the two
+               manual mutes directly above it, so everything that silences an output is in one place
+               and Routing stays at four tabs. -->
+          <h3 id="rt-h-automute">Auto-mute</h3>
+          <div>
+            <p class="hint" id="rt-automute-hint">
+              Auto-mute drops the monitor or Bluetooth output automatically when a microphone is
+              live, so the unit's own speakers cannot feed back into the mics.
+            </p>
+            <div id="routing-automute" aria-describedby="rt-automute-hint"></div>
+          </div>
+
+          <h3 id="monmix-heading">Monitor mix levels</h3>
+          <div>
+            <p id="monmix-note" class="hint"></p>
+            <div class="field">
+              <label for="monmix-output">Output to adjust</label>
+              <select id="monmix-output"></select>
+              <span id="monmix-mode" class="hint" role="status" aria-live="polite"></span>
+            </div>
+            <div id="monmix-sliders" aria-describedby="monmix-note"></div>
+            <p>
+              <button type="button" id="monmix-reset-btn">Reset this output to follow the faders</button>
+            </p>
+            <p id="monmix-status" role="status" aria-live="polite"></p>
+          </div>
+
+          <h3 id="rt-h-hp">Headphones</h3>
+          <div>
+            <p id="routing-hp-note" class="hint">
+              High sensitivity increases headphone output level. It can be loud; change with care.
+            </p>
+            <div id="routing-headphones" aria-describedby="routing-hp-note"></div>
+          </div>
+        </div>
+
+        <!-- MASTER MIX. Two sections: what the whole mix goes through (the Compellor and the
+             delay), and what that mix is sent to this computer as. USB audio does NOT get a tab of
+             its own - both halves are the main mix on its way out, and one tab fewer on the strip is
+             one fewer arrow press to everything past it. The tab KEY stays "master" so a remembered
+             position still lands here.
+             The USB half is Routing's rather than the Recording page's, for the reason the
+             property name gives away: `outputMultiMode` is in the OUTPUT block, RODE files it under
+             Outputs, and it never touches the unit's own recorder. -->
+        <div class="cat-tab" data-tab-key="master" data-tab-title="Master Mix" hidden>
+          <h2 id="rt-h-master">Master Mix</h2>
+
+          <h3 id="rt-h-masterproc">Master output processing</h3>
+          <p id="routing-master-note" class="hint">
+            The Master Compellor is an output compressor that evens out and glues your whole
+            mix; it applies to the Main Mix outputs only. Output delay holds all Main Mix
+            outputs back by up to 2000 milliseconds to line audio up with video. These change
+            your main output for everyone, so adjust with care.
+          </p>
+          <div id="routing-master" aria-describedby="routing-master-note"></div>
+
+          <h3 id="rt-h-usb">USB output</h3>
+          <p class="hint" id="rt-usb-hint">
+            What the unit sends this computer over its main USB connection: what any program here
+            hears from the unit, whether it is recording, streaming or in a call. It does not change
+            what the unit writes to its own card or drive: that is on the Recording page, Alt plus 4.
+          </p>
+          <div id="routing-usb" aria-describedby="rt-usb-hint"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SMART pads --------------------------------------------------------- -->
+    <section class="app-section" id="sec-pads" hidden>
+      <h1 id="h-pads" tabindex="-1">SMART pads</h1>
+      <p id="pads-note" class="note" role="note"></p>
+      <p id="pads-health" role="status" aria-live="polite"></p>
+
+
+      <!-- PAGE CONTEXT, deliberately ABOVE the strip: this dropdown decides what every tab acts
+           on, so putting it inside a tab would mean arrowing back to it, and worse, editing a pad
+           you cannot see from where you are. -->
+      <div class="field">
+        <label for="pad-ed-select">Pad</label>
+        <select id="pad-ed-select" name="pad"></select>
+        <span class="hint">
+          Each choice reads out as bank, pad number, then what is on it, so you can arrow
+          straight to the pad you want.
+        </span>
+      </div>
+
+      <!-- Page-level status for the current pad, OUTSIDE the panel so a message survives a tab
+           change (an Apply on Reassign moves you to Settings, and its message must still be there
+           to read). Deliberately NOT a live region: every code path that writes here also calls
+           announce(), and having both meant each pad edit was spoken twice. Keep that pairing
+           (setText plus announce) for anything new that writes to it. -->
+      <p id="pad-ed-status"></p>
+
+      <!-- TAB PANES (see buildStaticTabs in app.js). One
+           div.cat-tab per tab, carrying the tab's key and its title for the strip; app.js builds the
+           strip above this panel and shows exactly one pane at a time. The panes stay IN the
+           document (hidden, so no screen reader, no tab order, no heading navigation) rather than
+           being built and destroyed, because every control here is wired by id once at startup.
+           THE SPLIT IS BY BEHAVIOUR: Settings is all live with no Apply, Reassign is all deferred
+           with one Apply. That is what replaced the old single "Edit a pad" form, where an Apply
+           button sat among controls it did not apply to and the live settings vanished behind a
+           "pending" note whenever the type dropdown was moved. -->
+      <div id="pads-panel" class="cat-panel" role="tabpanel">
+
+        <!-- Live, in-place settings for the pad as it is now: volume, play mode, loop and restart
+             for a sound pad; the trigger mode and Back Channel members for a mixer pad. Each
+             writes to the device as you change it. An empty pad has no settings, so it says so and
+             offers a way through to Reassign. -->
+        <div class="cat-tab" data-tab-key="settings" data-tab-title="Pad Settings">
+        <h2 id="pad-h-settings">Settings for this pad</h2>
+        <p class="hint" id="pad-ed-settings-help">
+          Each of these takes effect as soon as you change it, except the name, which needs the
+          Rename button beside it. There is no Apply button on this tab. To change what the pad
+          does, or to empty it, use the Reassign tab.
+        </p>
+
+        <div id="pad-ed-empty" hidden>
+          <p class="note" id="pad-ed-empty-note">
+            This pad is empty, so it has no settings yet. Put a sound, a voice effect, a mixer
+            action or a MIDI trigger on it from the Reassign tab, then come back here to set its
+            volume, colour and how it plays. The button below takes you to that tab.
+          </p>
+          <p>
+            <button type="button" id="pad-ed-goto-reassign" aria-describedby="pad-ed-empty-note">
+              Put something on this pad
+            </button>
+          </p>
+        </div>
+
+      <div id="pad-ed-settings" hidden>
+        <div class="field">
+          <label for="pad-ed-name">Name</label>
+          <input type="text" id="pad-ed-name" maxlength="40" autocomplete="off">
+          <button type="button" id="pad-ed-name-btn">Rename</button>
+        </div>
+        <div class="field" id="pad-ed-volume-row">
+          <label for="pad-ed-volume">Volume in decibels</label>
+          <input type="range" id="pad-ed-volume" min="-60" max="12" step="0.5"
+                 aria-describedby="pad-ed-volume-help">
+          <span id="pad-ed-volume-help" class="hint">
+            Slide to set how loud the pad plays, from minus 60 up to plus 12 decibels. It
+            applies a moment after you stop moving it.
+          </span>
+        </div>
+        <div class="field">
+          <label for="pad-ed-colour">Colour</label>
+          <!-- Named colours, filled from the device payload (soundpad.PAD_COLOUR_NAME). It used to
+               be a bare 0-11 number box, which told a screen-reader user nothing about the colour
+               they were choosing. -->
+          <select id="pad-ed-colour"></select>
+        </div>
+        <div class="field" id="pad-ed-playmode-row">
+          <label for="pad-ed-playmode">How the pad plays</label>
+          <select id="pad-ed-playmode"></select>
+          <span class="hint">
+            Toggle means one press starts the sound and the next press stops it. Hold means it
+            plays only while you hold the pad down. One Shot means each press replays it from
+            the beginning and it cannot be stopped, so Loop is turned off in that mode.
+          </span>
+        </div>
+        <p class="field" id="pad-ed-replay-row">
+          <label class="switch">
+            <input type="checkbox" id="pad-ed-replay">
+            <span>Restart from the beginning on each press</span>
+          </label>
+        </p>
+        <p class="field" id="pad-ed-loop-row">
+          <label class="switch">
+            <input type="checkbox" id="pad-ed-loop">
+            <span>Loop: repeat until stopped</span>
+          </label>
+        </p>
+
+        <!-- Mixer-action pads only: how the pad triggers, and (Back Channel only) who is in
+             the off-air room. Both write straight to the pad, like the settings above. -->
+        <div class="field" id="pad-ed-mixer-trigger-row" hidden>
+          <label for="pad-ed-mixer-trigger">How the pad triggers</label>
+          <select id="pad-ed-mixer-trigger"></select>
+          <span class="hint">
+            Latching means one press turns the action on and the next press turns it off.
+            Momentary means it is only on while you hold the pad down.
+          </span>
+        </div>
+
+        <!-- SOUND pads only: the trim and fade envelope. Four positions through the sound, built in
+             JS from the server's spec (soundpad.ENV_EDIT). Percent, not seconds: the desk does not
+             report a file's duration, and percent reads and arrows sensibly. -->
+        <fieldset id="pad-ed-env-row" class="field" hidden aria-describedby="pad-ed-env-help">
+          <legend>Trim and fade</legend>
+          <p class="hint" id="pad-ed-env-help">
+            Where in the sound the pad starts and stops, and where it fades up and down, each as a
+            percentage of the whole sound. Leave a fade point on the same percentage as the start or
+            the stop for no fade at that end. Each change takes effect straight away.
+          </p>
+          <div id="pad-ed-env-fields"></div>
+          <p class="hint" id="pad-ed-env-note" role="note"></p>
+        </fieldset>
+
+        <!-- FADE mixer pads only: how long the fade takes, and whether the host is left out of it. -->
+        <fieldset id="pad-ed-fade-row" class="field" hidden aria-describedby="pad-ed-fade-help">
+          <legend>Fade times</legend>
+          <p class="hint" id="pad-ed-fade-help">
+            How long this pad takes to fade the mix down and back up, in seconds. Each change takes
+            effect straight away.
+          </p>
+          <div id="pad-ed-fade-fields"></div>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="pad-ed-fade-host">
+              <span>Leave the host's mic out of the fade</span>
+            </label>
+          </p>
+        </fieldset>
+
+        <!-- CENSOR mixer pads only. -->
+        <fieldset id="pad-ed-censor-row" class="field" hidden
+                  aria-describedby="pad-ed-censor-help">
+          <legend>Censor sound</legend>
+          <p class="hint" id="pad-ed-censor-help">
+            A Censor pad normally lays the built-in beep over everything. It can use a sound of your
+            own instead, but that sound has to be put on the unit itself; this app does not upload
+            one, so switching this on without one leaves the pad with nothing to play.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="pad-ed-censor-custom">
+              <span>Use my own sound instead of the beep</span>
+            </label>
+          </p>
+          <p class="hint" id="pad-ed-censor-file" role="note"></p>
+        </fieldset>
+
+        <!-- MIDI trigger pads only: WHAT the pad sends. The controls are BUILT IN JS from the
+             server's spec (soundpad.TRIGGER_EDIT, in the /api/soundpads payload), so the labels,
+             help text and limits come from the same definition the write validation and the profile
+             use. Live edits, like everything else on this tab. -->
+        <fieldset id="pad-ed-trigger-row" class="field" hidden
+                  aria-describedby="pad-ed-trigger-help">
+          <legend>What this pad sends</legend>
+          <p class="hint" id="pad-ed-trigger-help">
+            A MIDI trigger pad sends one MIDI message to your computer when you press it, so
+            software on the computer can react to a pad on the desk. Out of the box that is a
+            Control Change on the pad's own number, counting from zero, on channel 1, with 127 when
+            pressed and 0 when released. Switch on the custom mapping below to change any of that.
+            Each change takes effect straight away.
+          </p>
+          <p class="hint" id="pad-ed-trigger-custom-help">
+            Switching the custom mapping OFF puts the pad back on the default and does not keep the
+            numbers you had set, so it is not undone by switching it on again. The unit itself works
+            that way; it is not a limit of this app.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="pad-ed-trigger-custom"
+                     aria-describedby="pad-ed-trigger-custom-help">
+              <span>Use a custom mapping instead of the default</span>
+            </label>
+          </p>
+          <div id="pad-ed-trigger-fields"></div>
+          <p class="hint" id="pad-ed-trigger-current" role="note"></p>
+        </fieldset>
+
+        <fieldset id="pad-ed-backchannel-row" class="field" hidden
+                  aria-describedby="pad-ed-backchannel-help">
+          <legend>Who is in the Back Channel</legend>
+          <p class="hint" id="pad-ed-backchannel-help">
+            Back Channel is a private talkback room. While the pad is on, everyone ticked here,
+            plus Mic 1, is taken out of the main mix, so nothing they say is recorded, streamed
+            or heard by anyone else, and instead they hear each other. Mic 1 is always included,
+            so tick the people you want to talk to. Tick nothing and the pad does nothing.
+            Each tick applies straight away.
+          </p>
+          <div id="pad-ed-backchannel-list"></div>
+        </fieldset>
+      </div>
+        </div>
+
+        <!-- REASSIGN: nothing here touches the device until Apply, which is deliberately the last
+             control before Clear this pad. Because this tab holds no live control at all, there is
+             no longer any need to hide the pad's own settings while a type change is staged: they
+             are on the other tab, describing what the pad still is until you press Apply. -->
+        <div class="cat-tab" data-tab-key="reassign" data-tab-title="Reassign" hidden>
+        <h2 id="pad-h-reassign">Change what this pad does</h2>
+        <p class="hint" id="pad-ed-content-help">
+          Nothing on this tab changes the pad until you press Apply, at the end of the tab. Until
+          then the pad carries on doing what it does now, and the Settings tab still describes it.
+          Apply moves you to Settings for the new content, since volume and looping are usually the
+          next thing you want.
+        </p>
+
+      <div class="field">
+        <label for="pad-ed-type">What this pad does</label>
+        <select id="pad-ed-type" name="type"
+                aria-describedby="pad-ed-type-note pad-ed-content-help">
+          <option value="empty">Empty</option>
+          <option value="sound">Sound</option>
+          <option value="fx">Voice effect</option>
+          <option value="mixer">Mixer action</option>
+          <option value="trigger">MIDI trigger</option>
+        </select>
+        <!-- NOT a live region. It is rewritten every time the pad dropdown changes, and as a
+             live region that meant every arrow key through the pad list queued "Currently:
+             Sound: Music Bed", which spoke over the option you had just moved to and left the
+             bank and pad number lagging behind. It is a description of the type dropdown, so it
+             is announced when you land THERE (aria-describedby) instead. -->
+        <span id="pad-ed-type-note" class="hint"></span>
+      </div>
+
+      <!-- Type-specific options. Only the group matching the chosen type is shown; the
+           others carry the hidden attribute so they are out of the screen-reader tree. -->
+      <div id="pad-ed-grp-sound" class="pad-grp" hidden>
+        <div class="field">
+          <label for="pad-ed-file">Sound file (WAV or MP3)</label>
+          <input type="file" id="pad-ed-file"
+                 accept=".wav,.mp3,audio/wav,audio/x-wav,audio/mpeg">
+          <span class="hint">
+            Written to the pad exactly as it is, with no quality loss. Choose a file and
+            press Apply to put it on the pad. New sounds restart on each press by default;
+            you can change that and turn on Loop on the Settings tab once it is created.
+          </span>
+        </div>
+      </div>
+
+      <div id="pad-ed-grp-fx" class="pad-grp" hidden>
+        <div class="field">
+          <label for="pad-ed-fx">Voice effect</label>
+          <select id="pad-ed-fx"></select>
+          <span class="hint">
+            A factory voice effect, or one of your own from the Voice effects tab. Press Apply to
+            put it on the pad.
+          </span>
+        </div>
+      </div>
+
+      <div id="pad-ed-grp-mixer" class="pad-grp" hidden>
+        <div class="field">
+          <label for="pad-ed-mixer-mode">Mixer action</label>
+          <select id="pad-ed-mixer-mode"></select>
+          <span class="hint">
+            Censor (a beep over everything), Trash Talk (cut your audio to callers), Fade
+            In or Out, Back Channel (off-air talkback), or Ducking (lower everyone but the
+            host). Press Apply to put it on the pad. Afterwards, the Settings tab lets you
+            choose how it triggers, and for Back Channel, who is in the room.
+          </span>
+        </div>
+      </div>
+
+      <div id="pad-ed-grp-trigger" class="pad-grp" hidden>
+        <p class="hint">
+          A MIDI trigger sends a MIDI message to your computer when the pad is pressed,
+          using a default mapping. Press Apply to put it on the pad.
+        </p>
+      </div>
+
+      <p id="pad-ed-apply-row" hidden>
+        <button type="button" class="primary" id="pad-ed-apply-btn"
+                aria-describedby="pad-ed-content-help">Apply</button>
+      </p>
+
+      <h3>Empty this pad</h3>
+      <p class="hint" id="pad-ed-clear-help">
+        Takes whatever is on the pad off it, leaving it empty. You are asked to confirm first, and
+        it is reversible by setting the pad again.
+      </p>
+      <p>
+        <button type="button" id="pad-ed-clear-btn"
+                aria-describedby="pad-ed-clear-help">Clear this pad</button>
+      </p>
+        </div>
+
+        <div class="cat-tab" data-tab-key="fx" data-tab-title="Voice effects" hidden>
+        <h2 id="fx-create-heading">Create a custom voice effect</h2>
+
+      <p class="hint" id="fx-create-help">
+        Build your own voice effect. Switch on one or more of the effects below and set each
+        one to taste. Each effect starts with a single simple control; open its Advanced
+        controls for the full set. Give the effect a name and press Save. It then joins the
+        Voice effect list on the Reassign tab, ready to put on any pad. Saving does not change
+        any pad.
+      </p>
+
+      <!-- Live preview: engage the in-progress effect on the live mic so changes are heard
+           in realtime. Off by default; it only touches the mic when switched on. -->
+      <div class="field" id="fx-preview-row">
+        <label class="switch">
+          <input type="checkbox" id="fx-preview-toggle" aria-describedby="fx-preview-status">
+          <span>Live preview: hear changes on your mic as you build</span>
+        </label>
+      </div>
+      <div class="field" id="fx-preview-mic-row">
+        <label for="fx-preview-mic">Preview through</label>
+        <select id="fx-preview-mic">
+          <option value="1">Mic 1</option>
+          <option value="2">Mic 2</option>
+          <option value="3">Mic 3</option>
+          <option value="4">Mic 4</option>
+        </select>
+        <span class="hint">Mic 1 is the tested default. Talk into this mic to hear the effect.</span>
+      </div>
+      <p id="fx-preview-status" class="hint" role="status" aria-live="polite"></p>
+
+      <!-- The per-effect controls (one fieldset per engine) are built by app.js so every
+           slider gets a self-describing accessible name, e.g. "Reverb amount". -->
+      <div id="fx-create-effects"></div>
+
+      <div class="field">
+        <label for="fx-create-name">Effect name</label>
+        <input type="text" id="fx-create-name" maxlength="40" autocomplete="off"
+               placeholder="My voice effect">
+      </div>
+      <div class="field">
+        <label for="fx-create-colour">Pad colour</label>
+        <select id="fx-create-colour"></select>
+      </div>
+      <p>
+        <button type="button" class="primary" id="fx-create-save">Save effect</button>
+      </p>
+      <p id="fx-create-status" role="status" aria-live="polite"></p>
+
+      <h3 id="fx-custom-heading">Your saved effects</h3>
+      <p class="hint" id="fx-custom-help">
+        Effects you have created. Delete removes one from this list and from the Voice effect
+        list on the Reassign tab; it does not change any pad it is already on.
+      </p>
+      <ul id="fx-custom-list" class="fx-custom-list" aria-labelledby="fx-custom-heading"></ul>
+        </div>
+
+        <div class="cat-tab" data-tab-key="maint" data-tab-title="Maintenance" hidden>
+        <h2 id="grp-pad-maint">Pad maintenance</h2>
+        <p class="note">
+          Jobs that act on the whole grid rather than on the pad chosen above, and each asks you to
+          confirm before it does anything. The two exports are the exception: they act on the pad
+          chosen above and ask nothing, because neither changes the unit.
+        </p>
+
+      <h3>Clear all pads</h3>
+      <p class="hint" id="clear-all-help">
+        Empties every soundpad, voice-effect, mixer-action and MIDI pad on the grid. The built-in
+        System pads (the fader and scene controls) are left alone. This is reversible only by
+        setting the pads again, so you are asked to confirm first.
+      </p>
+      <p>
+        <button type="button" class="secondary" id="clear-all-btn" aria-describedby="clear-all-help">
+          Clear all pads
+        </button>
+      </p>
+      <p id="clear-all-status" role="status" aria-live="polite"></p>
+
+      <h3>Restore the factory voice effects, Censor and Ducking</h3>
+      <p class="hint" id="restore-fx-help">
+        Puts the six factory voice effects back on their own pads, and the Censor and Ducking pads
+        with them, each with its factory name, colour and settings. Only those eight pad positions
+        are touched: everything past pad 16 is left alone, and so are the factory sounds, which this
+        cannot restore. Those live on the unit itself and come back when you restore a backup that
+        has them, or when you start again from factory settings. It overwrites whatever is on those
+        eight pads now, so you are asked to confirm first. It takes two or three minutes: each pad
+        is cleared and rebuilt one at a time, and the unit needs a moment between each.
+      </p>
+      <p>
+        <button type="button" class="secondary" id="restore-fx-btn"
+                aria-describedby="restore-fx-help">
+          Restore the factory voice effects, Censor and Ducking
+        </button>
+      </p>
+      <p id="restore-fx-status" role="status" aria-live="polite"></p>
+
+      <h3>Export a pad's sound to your computer</h3>
+      <p class="hint" id="export-pad-help">
+        Copies the sound from the pad chosen at the top of this page into your Documents folder,
+        under AccessCaster, Pad exports, named after the pad. Nothing on the unit is changed. Only
+        sound pads have a file to export: a voice effect is a recipe the unit builds, not a
+        recording. Use this to get a sound off the unit if it is the only copy you have left, or to
+        edit it and put it back.
+      </p>
+      <p>
+        <button type="button" class="secondary" id="export-pad-btn"
+                aria-describedby="export-pad-help">
+          Export this pad's sound
+        </button>
+        <button type="button" class="secondary" id="open-exports-btn">
+          Open the exports folder
+        </button>
+      </p>
+      <p id="export-pad-status" role="status" aria-live="polite"></p>
+
+      <h3>Tidy up unused pad audio</h3>
+      <p class="hint" id="tidy-audio-help">
+        Deletes sound files from the unit that no pad plays any more, which frees up its pad
+        storage. Most of the time there is nothing to find: replacing a pad, restoring the pad
+        defaults, clearing all pads and restoring a profile with pads all clear up after themselves.
+        What this catches is clearing pads one at a time, which leaves each sound behind, and any
+        leftovers already on the unit. It only ever removes files no pad points at, so nothing you
+        can currently play is touched, and it cannot be undone.
+      </p>
+      <p>
+        <button type="button" class="secondary" id="tidy-audio-btn"
+                aria-describedby="tidy-audio-help">
+          Tidy up unused pad audio
+        </button>
+      </p>
+      <p id="tidy-audio-status" role="status" aria-live="polite"></p>
+        </div>
+
+      </div>
+</section>
+
+    <!-- Profiles ----------------------------------------------------------- -->
+    <section class="app-section" id="sec-profiles" hidden>
+      <h1 id="h-profiles" tabindex="-1">Backups</h1>
+      <!-- THE ROUTE IS STILL "profiles" and the section is still #sec-profiles, deliberately: the
+           remembered-tab keys, the access link and anyone's bookmark all carry it, and renaming a
+           route to match a heading would break them for a word. -->
+      <p class="note" role="note">
+        A backup holds the unit's settings and your SMART pads: channels, processing, routing,
+        faders, the unit's own settings, and every pad with its sound. Two things are left out on
+        purpose: which channels are muted, since putting a mute back could silence someone at the
+        worst moment, and passwords, so wifi and phone-call credentials are never stored.
+      </p>
+      <!-- Two groups, split by what the controls DO: one makes a new profile, the other acts on
+           the one picked in the dropdown. Every action button says what it acts on, so it still
+           makes sense read on its own when tabbed to, away from the heading above it. -->
+      <h2 id="h-prof-new">Back up the unit</h2>
+      <!-- ONE BUTTON, AND THE TWO MECHANISMS STAY UNDER IT. `action_backup_now` writes the unit's
+           own show when there is a card or drive to put one on, ALWAYS saves a profile here, and
+           pairs the two under the name typed here. The user is told what their backup can do, never
+           which mechanisms ran: see `_backup_wording`. The state line below says whether the unit's
+           own half is available, because that is the one part they can change by plugging a drive
+           in. -->
+      <p class="profile-actions">
+        <button type="button" class="primary" id="profile-save-open">Back up the unit now</button>
+      </p>
+      <p id="backup-state" class="hint">Checking.</p>
+
+      <h2 id="h-prof-manage">Your backups</h2>
+      <div class="field">
+        <label for="profile-select">Backup</label>
+        <select id="profile-select" aria-describedby="profile-list-hint"></select>
+        <span id="profile-list-hint" class="hint"></span>
+      </div>
+      <!-- What the SELECTED backup holds, updated on every change of selection. Not on the select's
+           aria-describedby, for the same reason the mix presets are not: a description that changes
+           under a focused control is re-announced over the option you just landed on. -->
+      <p id="backup-detail" class="hint"></p>
+      <p class="profile-actions">
+        <!-- NO aria-describedby ON THESE. Pointing it at the list hint makes every button read out
+             "10 saved profiles" after its own label. The count belongs on the DROPDOWN, and the
+             reason a
+             button is unavailable is carried separately by setAvailable / unavailableReason, which
+             speaks it when the button is used. -->
+        <!-- RESTORE CARRIES THE DETAIL LINE as its description, and the other two do not. Tabbing
+             goes list, then buttons, so a Details line sitting loose on the page is never on the
+             route anyone takes. It hangs off Restore alone because that is the press it informs;
+             on all three it would be the same paragraph read three times. -->
+        <button type="button" class="secondary" id="profile-restore-open"
+                aria-describedby="backup-detail">Restore selected backup</button>
+        <button type="button" class="secondary" id="profile-rename-open">Rename selected backup</button>
+        <button type="button" class="secondary" id="profile-delete-open">Delete selected backup</button>
+      </p>
+
+      <!-- THE AS-FOUND BACKUP GETS NO <h2> OF ITS OWN: it is already in the saved backups dropdown
+           and it is not a second profile. The LINE still earns its
+           place, because the dropdown cannot say the three things it says: whether a baseline exists
+           at all, whether its SMART pads were included, and the button to finish it off if they were
+           not. That button has nowhere else to live: an ordinary save would turn a record of how the
+           unit WAS into a record of today, which is the one thing a baseline must never become.
+
+           It sits AFTER the action row, not between the dropdown and its buttons, so the main task
+           is not interrupted; and it is NOT in the select's aria-describedby, which is where
+           verbosity like "10 saved profiles" creeps in. Filled by refreshBaselinePanel on every visit
+           to this page, since taking or deleting a backup changes the answer. -->
+      <p id="baseline-state" class="hint">Checking.</p>
+      <p class="profile-actions">
+        <button type="button" class="secondary" id="baseline-add-pads" hidden
+                aria-describedby="baseline-state">Add SMART pads to the as-found backup</button>
+      </p>
+      <!-- Deliberately NOT a live region: results are announced once, at the moment they happen,
+           by the dialog that did the work. A second live region here would repeat every one. -->
+      <p id="profile-last-result" class="hint"></p>
+
+      <!-- THERE IS NO SEPARATE "The unit's own backups (Shows)" SECTION, and no second list, export,
+           restore or delete. That shape puts the two mechanisms in the user's face - two headings,
+           two lists and two "back up" buttons for one intention, with no way to tell from either
+           list which would actually put the desk back. One list above does it, the kind of each
+           entry is the page's business, and `action_backup_now` / `action_restore_backup` pick the
+           mechanism. The four granular /api/shows routes stay on the server: the clean profile
+           restore drives them, and so does the factory reset's own backup. -->
+
+      <!-- The software factory reset. Worded as what it DOES rather than as "reset", which sounds
+           reversible.
+           A HEADING DOES NOT SEPARATE IT IN THE TAB ORDER. Tab SKIPS headings; they serve H-key
+           navigation only, so "its own heading, so it is never one Tab away from Restore" is not
+           true of anything. The real tab order is Restore, Delete, then this. WHAT PROTECTS IT is the confirmation dialog
+           (openShowConfirm("reset")), which names the action, spells out what is lost and what is
+           kept, and opens with focus on Cancel. Do not re-argue the tab order in markup: a
+           focusable decoy to pad the gap would be worse than the thing it guards against. -->
+      <h2 id="h-show-reset">Start again from factory settings</h2>
+      <p class="note" role="note">
+        This puts every setting and every SMART pad back to how the unit left the factory. Your
+        wifi, the language and the analytics answer are not part of it and are left alone, and so
+        are the recordings on the drive.
+        <!-- WHETHER THIS CAN BE UNDONE DEPENDS ON THERE BEING A DRIVE IN, so it cannot be stated
+             flatly in the markup: "the unit backs itself up first, so this can be undone" is false
+             on a unit with no card or drive, which is every Duo and any Pro II with the drive out.
+             Set by loadShows. -->
+        <span id="reset-undo-note">The unit backs itself up first, so this can be undone by
+          restoring that backup.</span>
+        It does not use the unit's touchscreen setup wizard, so nothing is
+        left needing a sighted person to tap through.
+      </p>
+      <p class="profile-actions">
+        <button type="button" class="secondary" id="show-reset-btn">Start again from factory
+          settings</button>
+      </p>
+
+      <!-- THIS APP's OWN SETTINGS. Deliberately NOT part of a profile: a profile is restored onto a
+           desk, often somebody else's, and quietly replacing their key bindings as a side effect of
+           restoring a mixer would be a nasty surprise. Two separate things, two separate buttons.
+           It lives on this page because this is where backup lives, and the case it exists for is
+           "I am moving to another computer", which is what someone comes to this page to solve. -->
+      <h2 id="h-appsettings">This app's own settings</h2>
+
+      <!-- START AT SIGN-IN. The same HKCU Run value the installer's checkbox writes, so this is the
+           way back for anyone who did not tick it. "You" is load-bearing:
+           the entry is per-user on purpose, because the server holds a fixed port and a machine-wide
+           one would start an instance for every account that signs in. -->
+      <p class="field">
+        <label class="switch">
+          <input type="checkbox" id="autostart-switch" aria-describedby="autostart-hint">
+          <span>Start AccessCaster when you sign in to Windows</span>
+        </label>
+      </p>
+      <p class="hint" id="autostart-hint">
+        It starts in the system tray without opening this page, so your shortcut keys work from the
+        moment you sign in. Only for your own Windows account.
+      </p>
+
+      <p class="note" role="note">
+        Your keyboard shortcuts, announcement preferences and level warnings belong to AccessCaster
+        rather than to the unit, so no profile carries them and reinstalling would lose them. Saving
+        them here writes one small file you can copy to another computer or keep somewhere safe. It
+        contains nothing about the desk and no remote-access token, so it is safe to email to
+        yourself.
+      </p>
+      <!-- A PLAIN PARAGRAPH, AND NOT DESCRIBED-BY ANYTHING. Make it role="status" as well as
+           spoken by announce() and named by the Save button's description, and one save is read out
+           three times in full. The guide already forbids the same words in a status line and
+           announce(); the third voice is the description, which a screen reader re-reads when focus
+           comes back to the button after setBusy. This
+           section speaks through announce(); the line is here to be READ, not spoken. -->
+      <p id="appsettings-state"></p>
+      <p class="profile-actions">
+        <button type="button" class="primary"
+                id="appsettings-export-btn">Save this app's settings to a file</button>
+        <button type="button" class="secondary" id="appsettings-open-btn">Open the folder</button>
+      </p>
+
+      <div class="field">
+        <label for="appsettings-file">Restore from a saved settings file</label>
+        <input type="file" id="appsettings-file" accept=".json,application/json"
+               aria-describedby="appsettings-import-hint">
+        <p class="hint" id="appsettings-import-hint">
+          Choose a file, then press Restore. Your shortcuts start working straight away, without
+          restarting. Anything naming a voice or an audio device this computer has not got is left
+          alone and said out loud, rather than being applied to nothing.
+        </p>
+      </div>
+      <p class="profile-actions">
+        <button type="button" class="secondary" id="appsettings-import-btn"
+                aria-describedby="appsettings-import-hint">Restore these settings</button>
+      </p>
+
+</section>
+
+    <!-- Recording ---------------------------------------------------------- -->
+    <!-- A PLAIN PAGE, not a tab strip, and that is deliberate: this is the one page in the app
+         somebody may need to reach in a hurry and act on in two keystrokes. Three headings, one
+         screenful, no navigation between you and the Stop button. Same call as Profiles.
+         The state line sits ABOVE everything because it is the answer to the only question this
+         page really exists to answer: is it recording? -->
+    <section class="app-section" id="sec-recording" hidden>
+      <h1 id="h-recording" tabindex="-1">Recording</h1>
+      <p id="rec-note" class="note" role="note">
+        Start, pause and stop the unit's recorder. Changes made on the unit itself show up here too.
+      </p>
+      <p id="rec-state" role="status" aria-live="polite" aria-atomic="true">Reading the unit...</p>
+
+      <!-- Everything below is hidden when the unit has nowhere to record, so the page is one
+           message rather than three sections of nothing. The state line above says what to do
+           about it. Shown and hidden only when a card or drive is physically put in or taken out,
+           never while somebody is reading. -->
+      <!-- What happens to spoken audio during a take. Our own announcements are switched off
+           automatically; the screen reader is the part we cannot switch off, and the note says so
+           only when the computer's default output really is the unit. A plain note, not a live
+           region: the state line already speaks, and two regions talking over each other is the
+           fault this page was built to avoid. -->
+      <p id="rec-announcer-warn" class="note" role="note" hidden></p>
+
+      <!-- NOTHING ON THIS PAGE IS EVER HIDDEN. An earlier version hid everything when the unit had
+           nowhere to record, which left the page with no focusable content at all, so Tab from the
+           heading went straight out of it and it read as broken. A unit with no drive in still has
+           settings worth changing; the transport says why it cannot be used instead. -->
+      <div id="rec-usable">
+
+      <!-- WHAT TO RECORD COMES FIRST, before the transport. It is the decision
+           you make BEFORE a take, and it is the one thing on this page you cannot fix afterwards:
+           press record on the wrong setting and the tracks you wanted do not exist. -->
+      <h2 id="rec-h-dest">What to record</h2>
+      <div>
+        <div id="rec-multitrack"></div>
+        <!-- WHAT IT IS WRITTEN AS, beside what it contains. Both are pre-take decisions that cannot
+             be fixed afterwards, which is why they share this section rather than sitting in a
+             settings block. Its own host div so rebuildIfChanged keys on its own option list. -->
+        <div id="rec-format"></div>
+        <!-- THE OTHER MULTITRACK IS NOT ON THIS PAGE, and this line is why the page does not read
+             as if it is missing one. The unit has two independent multitrack settings - what it
+             writes to the card or drive, and what it sends this computer over USB - and RODE calls
+             both of them "Multitrack" on one settings screen. The USB one is an OUTPUT, so it
+             belongs on Routing; putting it here rebuilds the exact confusion that keeping Routing's
+             tab named Auto-mute rather than Recording avoids. A pointer, not a control. -->
+        <p class="hint" id="rec-usb-pointer">
+          This is what the unit writes to its card or drive. What it sends this computer over USB is
+          a separate setting, on Routing, Alt plus 2, under Master Mix.
+        </p>
+      </div>
+
+      <!-- TWO buttons, not three. The first one's label follows the state (Start recording, then
+           Pause, then Resume), which is the ordinary transport pattern and reads better than a
+           separate Pause button added to avoid a label changing under the reader. The live region
+           above announces every outcome, so a label change is never the only signal that something
+           happened. -->
+      <h2 id="rec-h-transport">Start and stop</h2>
+      <div>
+        <p class="rec-actions">
+          <button type="button" id="rec-start">Start recording</button>
+          <button type="button" class="secondary" id="rec-marker">Drop a marker</button>
+          <button type="button" class="secondary" id="rec-stop">Stop recording</button>
+          <button type="button" class="secondary" id="rec-check">Recording status</button>
+        </p>
+        <!-- A CHOICE, not a policy. Most people do not want announcements in the recording, so it
+             defaults to on; somebody whose announcements already go to a separate output is not
+             putting anything into the take and would rather keep hearing the unit. -->
+        <p class="field">
+          <label class="switch">
+            <input type="checkbox" id="rec-mute-announcer" aria-describedby="rec-mute-hint">
+            <span>Switch announcements off while recording</span>
+          </label>
+        </p>
+        <!-- NAME THE MECHANISM, NOT ONE EXAMPLE. Headphones are only one way announcements stay
+             out of a take; the real mechanism is ROUTING - where the announcements are sent - and
+             it covers being picked up by a microphone in the room AND being fed into the mix over
+             USB. -->
+        <p class="hint" id="rec-mute-hint">
+          If off, announcements may be heard in the recording, depending on where you have them
+          routed.
+        </p>
+      </div>
+
+      <h2 id="rec-h-list">Recordings on the unit</h2>
+      <div>
+        <p class="hint" id="rec-list-hint">
+          Newest first. To copy them off, take the card or drive to a computer.
+        </p>
+        <ul id="rec-list" aria-labelledby="rec-h-list">
+          <li>Reading the unit...</li>
+        </ul>
+        <!-- DELETE. The list above is for reading, this is for acting: a list item is not a control
+             and must not become one, so the choice is made in a proper labelled dropdown. The
+             server decides whether this can work at all (payload can_delete / delete_note) and the
+             reason is attached to the button, so a disabled control always says why. -->
+        <div class="field">
+          <label for="rec-delete-select">Recording to delete</label>
+          <select id="rec-delete-select" aria-describedby="rec-delete-hint"></select>
+        </div>
+        <p class="hint" id="rec-delete-hint">
+          Deletes it from the card or drive. This cannot be undone; you are asked to confirm.
+        </p>
+        <p>
+          <button type="button" class="secondary" id="rec-delete-btn"
+                  aria-describedby="rec-delete-hint">Delete this recording</button>
+        </p>
+        <!-- NO LIVE REGION HERE. This page has exactly one (the state line at the top), because two
+             regions talking over each other is the fault it was built to avoid. Every outcome,
+             deleting included, is spoken there. -->
+      </div>
+      </div>
+    </section>
+
+    <!-- HELP & ABOUT (Alt+7) IS IN static/help.html AND IS SPLICED IN HERE by page.render_index.
+         Server-side rather than fetched by the browser on purpose: this page's h1 is the route's
+         focus target and buildStaticTabs reads its panes at startup, so a fetch would race both.
+         What the browser receives is identical to having the section written out below. -->
+    <!-- INCLUDE help.html -->
+
+  </main>
+
+  <footer class="app-footer">
+    <p>AccessCaster - accessible control for the RODECaster Pro 2 and Duo.</p>
+    <!-- A REAL LINK, not the bare text. A URL written as plain text is read out character group by
+         character group and cannot be followed; as an anchor it is one item in the links list and
+         one press to open. The visible text is the address itself, which is what was asked for. -->
+    <p>Developed by Shaun Preece.
+      <a href="https://www.slightperception.com">www.slightperception.com</a></p>
+  </footer>
+
+  <!-- Save profile: the details form only. Pressing Save closes this and opens the shared
+       progress dialog below. -->
+  <dialog id="save-dialog" aria-labelledby="save-dialog-title">
+    <h2 id="save-dialog-title" tabindex="-1">Back up the unit</h2>
+    <form id="profile-save-form">
+      <div class="field">
+        <label for="profile-name">Name for this backup</label>
+        <input type="text" id="profile-name" name="name" maxlength="40"
+               autocomplete="off" aria-describedby="profile-name-help">
+        <span id="profile-name-help" class="hint">
+          Letters, digits, spaces, dashes or underscores. Up to 40 characters. An existing
+          backup of the same name is replaced. The unit's own backups are named by the unit and
+          cannot be renamed, which is why yours is the name you will see.
+        </span>
+      </div>
+      <!-- NO "Include SMART pads" TICK: a backup always carries the pads. The unit's own half
+           carries them whatever we do, so a profile without them would make the two halves disagree
+           about what one named backup holds, and taking them costs about a second a pad (measured),
+           which is not worth a question. Putting them back is the slow half, and the restore dialog
+           says so. -->
+      <div class="dialog-actions">
+        <button type="button" id="save-cancel-btn">Cancel</button>
+        <button type="submit" class="primary" id="profile-save-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- FIRST RUN: offer to record the unit as it was found, before this app has changed anything.
+       An alertdialog, not a banner or a page section: it is a decision that interrupts, it is asked
+       exactly once per unit, and the answer stops being available the moment something is changed.
+       Opened from app.js when /api/baseline/status says to offer.
+
+       The pad checkbox defaults ON here and OFF on an ordinary save, because this is the only copy
+       that will ever exist of the pads as they shipped: worth the wait once, not every time. -->
+  <dialog id="baseline-dialog" role="alertdialog" aria-labelledby="baseline-dialog-title"
+          aria-describedby="baseline-dialog-desc">
+    <h2 id="baseline-dialog-title" tabindex="-1">Back up this unit as you found it</h2>
+    <p id="baseline-dialog-desc">
+      This looks like the first time AccessCaster has seen this
+      <span id="baseline-device-name">unit</span>. Before anything is changed, it can save the
+      unit's current settings as a profile called
+      "<span id="baseline-suggested-name"></span>", so there is always a way back to how it
+      is right now. Starting again from factory settings only ever gets you to how the unit left
+      the factory, which is not the same as how it came to you, so once a setting is changed this
+      is the only way back. It is only offered once per unit.
+    </p>
+    <p class="field">
+      <label class="switch">
+        <input type="checkbox" id="baseline-include-pads" checked
+               aria-describedby="baseline-pads-help">
+        <span>Include SMART pads (sounds and layout)</span>
+      </label>
+      <span id="baseline-pads-help" class="hint">
+        Recommended, and quicker than it sounds: each pad's sound file is copied off the unit at
+        about <span id="baseline-pad-seconds">1</span> second per pad, so a full grid adds seconds
+        rather than minutes. It is the only copy you will have of the pads as they came. If you turn this off,
+        the settings are still saved now and you can add the pads to this same backup later from the
+        Backups page.
+      </span>
+    </p>
+    <div class="dialog-actions">
+      <button type="button" id="baseline-skip-btn">Not now</button>
+      <button type="button" class="primary" id="baseline-save-btn">Back up now</button>
+    </div>
+  </dialog>
+
+  <!-- Restore profile: the confirmation only, carrying the overwrite warning, so pressing Restore
+       here IS the informed confirmation and there is no second nag. The profile was picked on the
+       page, so this only names it back and quotes the time its pad count actually implies. -->
+  <!-- BOTH PARAGRAPHS ARE IN aria-describedby, and that is load-bearing. A dialog is read once, on
+       open, and only what it is described by is read, so a second paragraph left outside it is
+       never spoken - and that is the one saying which half will do the work. Both are written by
+       openRestoreDialog BEFORE showModal, for the same reason.
+       NEITHER PARAGRAPH IS STATIC. Profile language (leaving other pads alone, clearing the grid
+       first) is wrong whenever the unit's own copy is doing the job, so the wording follows the
+       half that will run. -->
+  <dialog id="restore-dialog" aria-labelledby="restore-dialog-title"
+          aria-describedby="restore-form-desc restore-time-estimate">
+    <h2 id="restore-dialog-title" tabindex="-1">Restore backup</h2>
+    <p id="restore-form-desc"></p>
+    <p id="restore-time-estimate"></p>
+
+    <!-- CLEAN vs MERGE. Two genuinely different operations, named by what they DO rather than by
+         jargon, and offered as radio buttons because the choice must be made deliberately: a
+         checkbox called "clean" would be skipped past and the destructive one is not a default.
+         A native fieldset/legend with real radios, so every screen reader announces the group name,
+         the option and "1 of 2" without any ARIA. Merge is checked, because leaving settings alone
+         is the safe choice and the one that matches what a restore has always done. -->
+    <fieldset id="restore-mode-field">
+      <legend>What to do with settings the backup does not cover</legend>
+      <p class="hint" id="restore-mode-hint">
+        This computer's copy holds the settings the app can read and write. The unit has others it
+        cannot, such as a paired Bluetooth phone or a pad's own censor sound.
+      </p>
+      <div class="field-radio">
+        <input type="radio" name="restore-mode" id="restore-mode-merge" value="merge" checked
+               aria-describedby="restore-mode-merge-desc">
+        <label for="restore-mode-merge">Leave them as they are</label>
+        <span class="hint" id="restore-mode-merge-desc">Puts your saved settings back and changes
+          nothing else. Best for putting a show back.</span>
+      </div>
+      <div class="field-radio">
+        <input type="radio" name="restore-mode" id="restore-mode-clean" value="clean"
+               aria-describedby="restore-mode-clean-desc">
+        <label for="restore-mode-clean">Reset them to factory first</label>
+        <span class="hint" id="restore-mode-clean-desc">The unit backs itself up, goes back to
+          factory settings, then your settings are put on top, so it ends up exactly as the backup
+          describes. Anything the profile does not cover is lost rather than left. Slower, because
+          the pads are put back twice.</span>
+      </div>
+    </fieldset>
+
+    <div class="dialog-actions">
+      <button type="button" id="restore-cancel-btn">Cancel</button>
+      <button type="button" class="primary" id="restore-confirm-btn">Restore</button>
+    </div>
+  </dialog>
+
+  <!-- The unit's own Shows: one confirmation dialog, reused for restore, delete and the factory
+       reset, with the wording swapped per action. role="alertdialog" because every one of the three
+       is destructive and the description must be announced on open, not browsed for. -->
+  <dialog id="show-confirm-dialog" role="alertdialog"
+          aria-labelledby="show-confirm-title" aria-describedby="show-confirm-desc">
+    <h2 id="show-confirm-title" tabindex="-1">Restore show</h2>
+    <p id="show-confirm-desc"></p>
+    <!-- Shown only for the factory reset, where a backup is the only way back. Ticked, and untick
+         is a deliberate act. -->
+    <div class="field-check" id="show-backup-row" hidden>
+      <input type="checkbox" id="show-backup-first" checked
+             aria-describedby="show-backup-first-desc">
+      <label for="show-backup-first">Back the unit up first, so this can be undone</label>
+      <span class="hint" id="show-backup-first-desc">Takes about a second and about 24 megabytes on
+        the recordings drive. Without it there is no way back to how the unit is now.</span>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" id="show-confirm-cancel">Cancel</button>
+      <button type="button" class="primary" id="show-confirm-go">Restore</button>
+    </div>
+  </dialog>
+
+  <!-- ONE shared progress dialog for both the save and the restore.
+       WHY IT IS A SEPARATE DIALOG, not a second pane inside those two: a `hidden` pane revealed in
+       place is invisible to a screen reader that has already built its buffer for the open dialog,
+       so the live region is never tracked AND browsing the dialog finds nothing at all - a whole
+       restore runs with only the heading announced. A dialog whose content is present and VISIBLE at the moment it opens
+       has none of that: the live region is registered, and what you read is what is there.
+       While a job runs this cannot be dismissed (Escape swallowed, Close hidden), because a device
+       read or write cannot be abandoned half way. -->
+  <dialog id="progress-dialog" aria-labelledby="progress-dialog-title">
+    <h2 id="progress-dialog-title" tabindex="-1">Working</h2>
+    <p id="progress-dialog-step" role="status" aria-live="polite">Starting.</p>
+    <p id="progress-dialog-hint" class="hint">
+      Leave this open until it finishes. It cannot be stopped part way, so there is no Close button
+      until it is done.
+    </p>
+    <div class="dialog-actions">
+      <button type="button" class="primary" id="progress-close-btn" hidden>Close</button>
+    </div>
+  </dialog>
+
+  <!-- Rename profile: one pane, since renaming a folder is instant and there is no progress to
+       report. A failure (name taken, bad characters) keeps the dialog OPEN and puts the reason on
+       the field itself, rather than closing and leaving the user to guess what happened. -->
+  <!-- ADD A SHORTCUT. Two dropdowns, not one: the catalogue runs to well over a hundred entries on
+       a full desk (every channel's mute and solo, every fader up and down, every pad, every saved
+       mix), and one flat list of that is unusable by ear. Category first, then what is in it.
+       The command list is rebuilt when the category changes, which is safe here because focus is on
+       the category dropdown at that moment - the rule is that nothing may replace a subtree a
+       screen reader is SITTING IN, and the list it rebuilds is the other control. -->
+  <dialog id="hotkey-add-dialog" aria-labelledby="hotkey-add-title">
+    <!-- NO INTRO PARAGRAPH, and FOCUS GOES TO THE FIRST DROPDOWN, not the heading. With both, it
+         opens by reading the dialog's name, the whole intro, both field labels, the heading and the
+         name again. The two dropdowns say what to do by themselves; landing on the first one is the
+         shortest path to doing it. -->
+    <h2 id="hotkey-add-title">Add a shortcut</h2>
+    <div class="field">
+      <label for="hotkey-add-category">Command type</label>
+      <select id="hotkey-add-category"></select>
+    </div>
+    <div class="field">
+      <label for="hotkey-add-command">What it does</label>
+      <select id="hotkey-add-command"></select>
+    </div>
+    <p id="hotkey-add-status" class="hint" role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button type="button" id="hotkey-add-cancel">Cancel</button>
+      <button type="button" class="primary" id="hotkey-add-confirm">Add</button>
+    </div>
+  </dialog>
+
+  <!-- Deleting a shortcut: a true alertdialog. It is instant, though not destructive to the desk,
+       and the thing being deleted has to be named back. -->
+  <dialog id="hotkey-delete-dialog" role="alertdialog" aria-labelledby="hotkey-delete-title"
+          aria-describedby="hotkey-delete-desc">
+    <h2 id="hotkey-delete-title" tabindex="-1">Delete this shortcut?</h2>
+    <p id="hotkey-delete-desc">
+      This removes the shortcut for "<span id="hotkey-delete-name"></span>" and gives its keys back
+      to whatever else uses them. Nothing on the unit changes, and you can add it again.
+    </p>
+    <div class="dialog-actions">
+      <button type="button" id="hotkey-delete-cancel">Cancel</button>
+      <button type="button" class="primary" id="hotkey-delete-confirm">Delete</button>
+    </div>
+  </dialog>
+
+  <dialog id="rename-dialog" aria-labelledby="rename-dialog-title">
+    <h2 id="rename-dialog-title" tabindex="-1">Rename profile</h2>
+    <form id="profile-rename-form">
+      <div class="field">
+        <label for="profile-new-name">New name for "<span id="rename-dialog-old"></span>"</label>
+        <input type="text" id="profile-new-name" maxlength="40" autocomplete="off"
+               aria-describedby="rename-name-help rename-error">
+        <span id="rename-name-help" class="hint">
+          Letters, digits, spaces, dashes or underscores. Up to 40 characters.
+        </span>
+      </div>
+      <p id="rename-error" class="status-err" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="rename-cancel-btn">Cancel</button>
+        <button type="submit" class="primary" id="rename-confirm-btn">Rename</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Delete profile: a true alertdialog, one pane, because deleting is instant and irreversible.
+       The profile was picked on the page, so this only has to name it back and take one press. No
+       form element, so nothing here can be submitted by a stray Enter. -->
+  <dialog id="delete-dialog" role="alertdialog" aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-desc">
+    <h2 id="delete-dialog-title" tabindex="-1">Delete profile?</h2>
+    <p id="delete-dialog-desc">
+      This permanently deletes the profile "<span id="delete-dialog-name"></span>" from this
+      computer, including any pad sounds saved with it. It cannot be undone, and it does not
+      change anything on the unit.
+    </p>
+    <p id="delete-error" class="status-err" role="alert"></p>
+    <div class="dialog-actions">
+      <button type="button" id="delete-cancel-btn">Cancel</button>
+      <button type="button" class="primary" id="delete-confirm-btn">Delete</button>
+    </div>
+  </dialog>
+
+  <!-- Confirmation modal for a destructive pad change (replacing or clearing content). -->
+  <dialog id="pad-confirm-dialog" role="alertdialog"
+          aria-labelledby="pad-confirm-title" aria-describedby="pad-confirm-desc">
+    <h2 id="pad-confirm-title">Replace this pad?</h2>
+    <p id="pad-confirm-desc"></p>
+    <div class="dialog-actions">
+      <button type="button" id="pad-confirm-cancel">Cancel</button>
+      <button type="button" class="primary" id="pad-confirm-ok">Replace</button>
+    </div>
+  </dialog>
+
+  <!-- AUTO GAIN: three dialogs, not one, and that is the whole reason there are three.
+       NVDA never reads content revealed INSIDE an already-open dialog, so a single dialog that
+       changed from "about to start" to "talk now" to "here is the result" would leave a
+       screen-reader user hearing only the first of the three. Each phase opens its own. -->
+  <dialog id="ag-confirm-dialog" role="alertdialog"
+          aria-labelledby="ag-confirm-title" aria-describedby="ag-confirm-desc">
+    <h2 id="ag-confirm-title">Set this gain automatically?</h2>
+    <p id="ag-confirm-desc"></p>
+    <div class="dialog-actions">
+      <button type="button" id="ag-confirm-cancel">Cancel</button>
+      <button type="button" class="primary" id="ag-confirm-ok">Start</button>
+    </div>
+  </dialog>
+
+  <dialog id="ag-progress-dialog" role="alertdialog"
+          aria-labelledby="ag-progress-title" aria-describedby="ag-progress-desc">
+    <h2 id="ag-progress-title">Setting the gain</h2>
+    <!-- The ONLY live region in this dialog. It counts down and says when to talk; nothing else
+         speaks, because the microphone being measured would hear it. -->
+    <p id="ag-progress-desc" role="status" aria-live="polite" aria-atomic="true"></p>
+    <div class="dialog-actions">
+      <button type="button" id="ag-progress-stop">Stop</button>
+    </div>
+  </dialog>
+
+  <dialog id="ag-result-dialog" role="alertdialog"
+          aria-labelledby="ag-result-title" aria-describedby="ag-result-desc">
+    <h2 id="ag-result-title">Gain set</h2>
+    <p id="ag-result-desc"></p>
+    <div class="dialog-actions">
+      <button type="button" id="ag-result-undo">Undo</button>
+      <button type="button" class="primary" id="ag-result-close">OK</button>
+    </div>
+  </dialog>
+
+  <!-- Live regions: route changes, polite results, assertive errors. -->
+  <div id="route-announcer" role="status" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+  <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="alert-region" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

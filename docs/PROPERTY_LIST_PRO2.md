@@ -1,0 +1,566 @@
+# Property list: everything the desk publishes
+
+GENERATED FILE - do not hand-edit. Regenerate with `python DevTools/property_list.py`
+(reads the connected desk; read-only, no writes, safe to run while the app is running).
+`--check` exits 1 if the set of NAMES has changed, which is also how a stray shows up.
+
+**This is the raw material, not a to-do list and not a record of what we have built.** It
+says what the desk EXPOSES. What we are aiming to build is `PARITY.md`; which of these
+properties the app actually touches is the per-desk coverage report in the private notes.
+
+**8 properties below are marked PROVED INACTIVE.** Each was written, read
+back and shown to do nothing on real hardware, and each has a promising name, which is
+the whole trap - they are the ones most likely to be picked up as new work. The reasons
+come from `PROJECT_GUIDE.md`; do not re-test them, and do not copy the list anywhere.
+**THE MEASUREMENTS ARE NOT PER-DESK.** One list covers both, because the Pro 2 and the
+Duo run the same firmware and publish the same property names, and because every reason
+here is an engine behaviour rather than anything about the hardware. A property proved
+dead on one desk has not separately been proved dead on the other.
+
+**NAMES AND TYPES ONLY, no values, deliberately.** The dump carries the wifi PSK and the SIP
+password in plain text, so values are never written here and this file is safe to share.
+`wifiPSK` appears as a NAME, which is all a reader needs to know it exists.
+
+Read from a **RODECaster Pro 2**, firmware 1.7.3.
+**472 properties, 55 block types.**
+
+The occurrence count hints at SCOPE and moves with ordinary use, so treat it as a shape
+rather than a number: x1 is global, and a count matching a block's instance count below
+means one per fader, per pad, per input slot or per matrix cell. Type `?` means the value
+did not decode in this dump, which is usually an action or trigger property that carries
+nothing at rest.
+
+--------------------------------------------------------------------------------
+## Blocks (tree groupings, not settable properties)
+
+- `APP` x1
+- `AUDIO` x1
+- `BUILD` x1
+- `CHANNEL` x10
+- `CURRENTSHOW` x1
+- `DUCKER` x1
+- `EFFECTS_PARAMETERS` x18
+- `EMERGENCYMUTE` x1
+- `ENCODER` x1
+- `FADER` x9
+- `FXPRESET` x3
+- `FXPRESETS` x1
+- `GUI` x1
+- `HEADPHONE` x4
+- `INPUTSOURCE` x30
+- `MASTERCHANNEL` x1
+- `METER` x22
+- `MIX` x390
+- `MIXMINUSES` x13
+- `NETWORK` x1
+- `OUTPUT` x1
+- `PAD` x24
+- `PADBUTTON` x64
+- `PADEFFECTS` x1
+- `PADRECORDER` x1
+- `PHYSICALINTERFACE` x1
+- `PLAYER` x1
+- `POT` x4
+- `RADIO` x1
+- `RADIORX` x1
+- `RADIOTX` x2
+- `RCSYNCMIX` x126
+- `RCSYNCMIXMINUES` x14
+- `RECBUTTON` x1
+- `RECORDER` x1
+- `RECORDING` x1
+- `RECORDINGS` x1
+- `Rodecaster` x1
+- `SHOW` x5
+- `SHOWCONTROL` x1
+- `SHOWS` x1
+- `SIPADVANCED` x1
+- `SIPCALLING` x1
+- `SIPCALLSLOTS` x3
+- `SIPPHONEBOOKARRAY` x1
+- `SIPREGISTRATION` x2
+- `SOLOMUTEBUTTON` x6
+- `SOUNDPADS` x1
+- `STORAGEVOLUME` x3
+- `STREAMERXMIXPRESET` x10
+- `STREAMERXSTREAMMIX` x30
+- `SYSTEM` x1
+- `TEST` x1
+- `THEME` x1
+- `WIFISCANRESULT` x15
+
+--------------------------------------------------------------------------------
+## Properties
+
+- `activeButtonsBrightness` - int, x1
+- `activeStreamerXMixPreset` - int, x1
+- `allLEDSWhite` - int, x1
+- `aphexAEMix` - float, x10
+- `aphexAETune` - float, x10
+- `aphexBBDrive` - float, x10
+- `aphexBBTune` - float, x10
+- `aphexOn` - bool, x10
+- `appCompression` - int, x1
+- `appMonitorMix` - int, x1
+- `appOutputDevice` - str, x1
+- `appRecording` - int, x1
+- `appUpdateAvailable` - bool, x1
+- `assignableMeterSource` - int, x1
+- `audioBufferSize` - int, x1
+- `audioInputChannels` - int, x1
+- `audioInputLatency` - int, x1
+- `audioOuputLatency` - int, x1
+- `audioOutputChannels` - int, x1
+- `audioSampleRate` - float, x1
+- `autoBrightness` - bool, x1
+- `autoReconnect` - bool, x1
+- `badPadDetected` - bool, x1
+- `boardType` - int, x1
+- `broadcastMeters` - bool, x1  **PROVED INACTIVE**: no dump values, no pushes.
+- `btConnectedAddress` - str, x1
+- `btConnectedType` - int, x1
+- `btDoConnect` - str, x1
+- `btDoDisconnect` - str, x1
+- `btDoPair` - str, x1
+- `btDoScan` - bool, x1
+- `btDoUnPair` - str, x1
+- `btPairCode` - str, x1
+- `btPairedNumber1` - str, x1
+- `btPairedNumber2` - str, x1
+- `btPairedNumber3` - str, x1
+- `btPairedNumber4` - str, x1
+- `btPairedNumber5` - str, x1
+- `btScan1` - str, x1
+- `btScan10` - str, x1
+- `btScan2` - str, x1
+- `btScan3` - str, x1
+- `btScan4` - str, x1
+- `btScan5` - str, x1
+- `btScan6` - str, x1
+- `btScan7` - str, x1
+- `btScan8` - str, x1
+- `btScan9` - str, x1
+- `btVisible` - bool, x1
+- `buildCallMeVersion` - str, x1
+- `buildGuiModulesGitSha` - str, x1
+- `buildGuiVersion` - str, x1
+- `buildMixerModulesGitSha` - str, x1
+- `buildMixerVersion` - str, x1
+- `cellAPN` - str, x1
+- `cellEnabled` - bool, x1
+- `cellGateway` - str, x1
+- `cellIpAddress` - str, x1
+- `cellSubnetMask` - str, x1
+- `cellUSBFound` - bool, x1
+- `channelAdvancedProcessing` - bool, x10
+- `channelBypassProcessing` - bool, x10
+- `channelCueEnable` - bool, x10
+- `channelCurrentFxPreset` - int, x10
+- `channelDepth` - float, x10
+- `channelInputSource` - int, x10
+- `channelListenSource` - int, x10
+- `channelOutputMute` - bool, x10
+- `channelPan` - float, x10
+- `channelPanL` - float, x10
+- `channelPanOn` - bool, x10
+- `channelPanR` - float, x10
+- `channelPunch` - float, x10
+- `channelSparkle` - float, x10
+- `channelTalkbackEnable` - bool, x10
+- `channelWirelessMute` - bool, x10
+- `compressorAttack` - float, x10
+- `compressorGain` - float, x10
+- `compressorOn` - bool, x10
+- `compressorRatio` - float, x10
+- `compressorRelease` - float, x10
+- `compressorThreshold` - float, x10
+- `currentShowIcon` - int, x1
+- `currentShowName` - str, x1
+- `currentShowUUID` - str, x1
+- `deesserAttack` - float, x10
+- `deesserFrequency` - float, x10
+- `deesserGain` - float, x10
+- `deesserOn` - bool, x10
+- `deesserRatio` - float, x10
+- `deesserRelease` - float, x10
+- `deesserThreshold` - float, x10
+- `disableAllHeadphoneOutputs` - bool, x1
+- `disableAllLineoutOutputs` - bool, x1
+- `disableAllPhysicalButtons` - bool, x1
+- `distortionIntensity` - float, x17
+- `distortionOn` - bool, x17
+- `downloadCancelRequested` - bool, x1
+- `downloadInitiateRequested` - bool, x1
+- `dtmfMode` - str, x1
+- `duckerDepth` - float, x1
+- `echoDecay` - float, x17
+- `echoDelay` - float, x17
+- `echoHighCut` - float, x17
+- `echoLowCut` - float, x17
+- `echoMix` - float, x17
+- `echoOn` - bool, x18
+- `effectsIdx` - int, x18
+- `emergencyMuteActive` - bool, x1  **PROVED INACTIVE**: a pad kept playing, and audibly: re-checked 22nd September 2026 with `padActive` confirming a pad was genuinely playing at the moment the flag was set.
+- `enableRFCDuplication` - bool, x1
+- `enableVideoStream` - bool, x1
+- `encoderColour` - int, x1
+- `encoderPressed` - bool, x1
+- `encoderSignal` - pair, x1
+- `engineMode` - int, x1
+- `eqHighBell` - float, x10
+- `eqHighGain` - float, x10
+- `eqHighOn` - bool, x10
+- `eqHighQ` - float, x10
+- `eqLowGain` - float, x10
+- `eqLowOn` - bool, x10
+- `eqLowQ` - float, x10
+- `eqLowShelf` - float, x10
+- `eqMidBell` - float, x10
+- `eqMidGain` - float, x10
+- `eqMidOn` - bool, x10
+- `eqMidQ` - float, x10
+- `eqOn` - bool, x10
+- `eqParamModeHigh` - int, x1
+- `eqParamModeLow` - int, x1
+- `eqParamModeMid` - int, x1
+- `faderLevel` - int, x9
+- `faderMax` - int, x9
+- `faderMin` - int, x9
+- `forceCodecChoice` - bool, x1
+- `fxPresetContents` - str, x3
+- `fxPresetIdx` - int, x3
+- `gateway` - str, x1
+- `headphoneColour` - str, x4
+- `headphoneType` - int, x4
+- `hpfFrequency` - float, x10
+- `hpfHigherOn` - bool, x10
+- `hpfLowerOn` - bool, x10
+- `hpfOn` - bool, x10
+- `hpfSlope` - float, x10
+- `hwScreenBrightness` - int, x1
+- `inactiveButtonsBrightness` - int, x1
+- `incomingAudioRouting` - str, x1
+- `incomingNameFilter` - bool, x1
+- `inputColour` - str, x30
+- `inputDigitalGain` - int, x30
+- `inputId` - int, x30
+- `inputInstrumentGain` - int, x30
+- `inputMicrophoneGain` - int, x30
+- `inputMicrophoneType` - int, x30
+- `inputPhaseFlip` - bool, x30
+- `inputPower` - int, x30
+- `inputRcvAudioSourceType` - int, x30
+- `inputSipCallSlot` - int, x30
+- `inputType` - int, x30
+- `inputWirelessSN` - str, x30
+- `ipAddress` - str, x1
+- `lang` - str, x1
+- `lastRecordingID` - int, x1
+- `masterCompellorAttack` - float, x1
+- `masterCompellorGain` - float, x1
+- `masterCompellorOn` - bool, x1
+- `masterCompellorRelease` - float, x1
+- `masterCompellorThreshold` - float, x1
+- `masterDelayOn` - bool, x1
+- `masterDelaySeconds` - float, x1
+- `meterLevelL` - float, x22
+- `meterLevelR` - float, x22
+- `meterPeakL` - float, x22
+- `meterPeakR` - float, x22
+- `meterStereo` - bool, x22
+- `metering` - int, x1
+- `mixDisabled` - bool, x516
+- `mixLevelWithAnchor` - str, x516
+- `mixLink` - bool, x516
+- `mixLinkRequest` - bool, x516
+- `mixMute` - bool, x516
+- `mixRcSyncLevelRequest` - float, x126
+- `mixUnlinkRequest` - bool/pair, x516
+- `mutePressed` - bool, x6
+- `noiseGateAttack` - float, x10
+- `noiseGateHold` - float, x10
+- `noiseGateHysteresis` - float, x10
+- `noiseGateOn` - bool, x10
+- `noiseGateRange` - float, x10
+- `noiseGateRelease` - float, x10
+- `noiseGateThreshold` - float, x10
+- `nonHTTPSInterface` - bool, x1
+- `onOffSw` - int, x1
+- `osUpdateAvailable` - bool, x1
+- `outputBTAutoMute` - bool, x1
+- `outputBTAutoMuteActive` - bool, x1
+- `outputBTLevel` - float, x1
+- `outputBTMute` - bool, x1
+- `outputMixMinus` - int, x27
+- `outputMonAutoMute` - bool, x1
+- `outputMonAutoMuteActive` - bool, x1
+- `outputMonFixed` - bool, x1
+- `outputMonLevel` - float, x1
+- `outputMonMute` - bool, x1
+- `outputMultiBypass` - bool, x1
+- `outputMultiMode` - int, x1
+- `outputPrefader` - bool, x1
+- `padActive` - bool, x24
+- `padActiveEdit` - int, x1
+- `padButtonPressed` - bool, x64
+- `padButtonPreview` - bool, x64
+- `padColourIndex` - int, x24
+- `padEffectInput` - int, x24
+- `padEffectTriggerMode` - int, x24
+- `padEnvFadeIn` - float, x24
+- `padEnvFadeOut` - float, x24
+- `padEnvStart` - float, x24
+- `padEnvStop` - float, x24
+- `padFilePath` - str, x24
+- `padGain` - float, x24
+- `padIdx` - int, x24
+- `padIsInternal` - bool, x24
+- `padLoop` - bool, x24
+- `padMixerBackChannelBluetooth` - bool, x24
+- `padMixerBackChannelCallMe1` - bool, x24
+- `padMixerBackChannelCallMe2` - bool, x24
+- `padMixerBackChannelCallMe3` - bool, x24
+- `padMixerBackChannelMic2` - bool, x24
+- `padMixerBackChannelMic3` - bool, x24
+- `padMixerBackChannelMic4` - bool, x24
+- `padMixerBackChannelUsb1Comms` - bool, x24
+- `padMixerBackChannelUsb2Main` - bool, x24
+- `padMixerCensorCustom` - bool, x24
+- `padMixerCensorFilePath` - str, x24
+- `padMixerFadeExcludeHost` - bool, x24
+- `padMixerFadeInSeconds` - float, x24
+- `padMixerFadeOutSeconds` - float, x24
+- `padMixerMode` - int, x24
+- `padMixerTriggerMode` - int, x24
+- `padName` - str, x24
+- `padPlayMode` - int, x24
+- `padProgress` - float, x24
+- `padRCVSyncPadType` - int, x24
+- `padRecordClear` - pair, x1
+- `padRecordIdx` - int, x1  **PROVED INACTIVE**: PADRECORDER stores and never acts.
+- `padRecordMemoryFull` - pair, x1
+- `padRecordSeconds` - float, x1
+- `padRecordState` - int, x1
+- `padRecordStateRequest` - pair, x1  **PROVED INACTIVE**.
+- `padReplay` - bool, x24
+- `padSIPCallSlot` - int, x24
+- `padSIPFlashState` - int, x24
+- `padSIPPhoneBookEntry` - int, x24
+- `padSIPQdLock` - bool, x24
+- `padTriggerChannel` - int, x24
+- `padTriggerControl` - int, x24
+- `padTriggerCustom` - bool, x24
+- `padTriggerMode` - int, x24
+- `padTriggerOff` - int, x24
+- `padTriggerOn` - int, x24
+- `padTriggerSend` - int, x24
+- `padTriggerType` - int, x24
+- `padType` - int, x24
+- `pitchShiftOn` - bool, x17
+- `pitchShiftSemitones` - float, x17
+- `playerCurrentPositionTime` - float, x1
+- `playerEnvFadeIn` - float, x1
+- `playerEnvFadeOut` - float, x1
+- `playerEnvStart` - float, x1
+- `playerEnvStop` - float, x1
+- `playerFilePath` - str, x1
+- `playerFileSize` - float, x1
+- `playerJumpToSample` - pair, x1
+- `playerProgress` - float, x1
+- `playerSpeed` - int, x1
+- `playerState` - int, x1
+- `potLevel` - int, x4
+- `potMax` - int, x4
+- `potMin` - int, x4
+- `powerOffRequest` - bool, x1
+- `presenterMode` - bool, x1
+- `presenterSoftware` - int, x1
+- `primaryDns` - str, x1
+- `radioPair` - int, x1
+- `radioPaired` - int, x1
+- `radioUnpair` - str, x1
+- `rcSyncChannelAssign` - str, x1
+- `rcSyncChannelSwap` - str, x1
+- `rcSyncDeviceModel` - int, x1
+- `rcSyncModeRequest` - bool, x1
+- `rcSyncState` - int, x1
+- `recButtonPressed` - int, x1
+- `receiveJitterBufferMax` - int, x1
+- `receiveJitterBufferMin` - int, x1
+- `recordBytesPerSecond` - int, x1
+- `recordState` - int, x1
+- `recordTimeMs` - int, x1
+- `recordingCompressionQuality` - int, x1
+- `recordingContent` - str, x1
+- `recordingMultitrackMode` - int, x1
+- `recordingProcessingBypass` - bool, x1
+- `recordingTotalCount` - int, x1
+- `recordingTotalDuration` - float, x1
+- `recordingUID` - int, x1
+- `remountPadStorage` - bool, x1
+- `requestDeleteUID` - int, x1
+- `requestDropMarker` - int64, x1
+- `requestRecordState` - int, x1
+- `reverbHighCut` - float, x17
+- `reverbLowCut` - float, x17
+- `reverbMix` - float, x17
+- `reverbModel` - float, x17
+- `reverbOn` - bool, x18
+- `robotLevel` - float, x17
+- `robotMix` - float, x17
+- `robotOn` - bool, x17
+- `rodeCallQuality` - str, x1
+- `rxRadioId` - str, x1
+- `screenBrightness` - int, x1
+- `screenDimAfterSeconds` - int, x1
+- `screenTouched` - bool, x1
+- `secondaryDns` - str, x1
+- `selectedBank` - int, x1
+- `shareAnom` - bool, x1
+- `shareResource` - bool, x1
+- `showControlDelete` - int, x1
+- `showControlExport` - bool, x1
+- `showControlExportImport` - int, x1
+- `showControlImport` - int, x1
+- `showControlLastError` - int, x1
+- `showControlLockoutCentral` - bool, x1
+- `showControlNewFromDefault` - bool, x1
+- `showControlNewFromDefaultMuted` - bool, x1
+- `showControlProgress` - float, x1
+- `showControlUpdating` - bool, x1
+- `showIcon` - int, x5
+- `showLastModification` - int64, x5
+- `showName` - str, x5
+- `showSnapshotIndex` - int, x5
+- `showStorageType` - int, x5
+- `showUID` - int, x5
+- `showUUID` - str, x5
+- `sipAccountAuthUsername` - str, x1
+- `sipAccountDomain` - str, x1
+- `sipAccountPassword` - str, x1
+- `sipAccountProxyAddress` - str, x1
+- `sipAccountRegister` - str, x1
+- `sipAccountTransport` - str, x1
+- `sipAccountUsername` - str, x1
+- `sipCallHostingEnabled` - bool, x1
+- `sipCallHostingToggleEnabled` - bool, x1
+- `sipCallRating` - str, x1
+- `sipCallSlotId` - int, x3
+- `sipIncomingCallAccept` - str, x1
+- `sipIncomingCallDetails` - str, x1
+- `sipLicenceCheck` - bool, x1
+- `sipLicenceMode` - int, x1
+- `sipLicenceRenewal` - str, x1
+- `sipNATTraversalMode` - str, x1
+- `sipNATTraversalPassword` - str, x1
+- `sipNATTraversalServer` - str, x1
+- `sipNATTraversalUsername` - str, x1
+- `sipOutgoingCallDetails` - str, x1
+- `sipRegistrationDetails` - str, x2
+- `sipRegistrationIndex` - int, x2
+- `sipRegistrationIsRegistered` - bool, x2
+- `sipRemainingCalltime` - int, x1
+- `sipRemainingWebCalltime` - int, x1
+- `sipRenewalDate` - str, x1
+- `sipRodeCode` - str, x1
+- `sipSlotCallAddress` - str, x3
+- `sipSlotCallBitrate` - float, x3
+- `sipSlotCallDisconnect` - pair, x3
+- `sipSlotCallExtend` - bool, x3
+- `sipSlotCallIsHost` - bool, x3
+- `sipSlotCallJitter` - float, x3
+- `sipSlotCallMode` - int, x3
+- `sipSlotCallPacketLoss` - float, x3
+- `sipSlotCallQuality` - int, x3
+- `sipSlotCallState` - str, x3
+- `sipSlotCallUUID` - str, x3
+- `sipSlotPendingCallSetup` - int, x1
+- `sipUnitName` - str, x1
+- `sipWebPassword` - str, x1
+- `soloPressed` - bool, x6
+- `staticIpSet` - bool, x1  **PROVED INACTIVE**: a flag with no operands; the address fields are read-only reports.
+- `storageVolumeCapacity` - int/int64, x3
+- `storageVolumeEject` - bool, x3
+- `storageVolumeErase` - bool, x3
+- `storageVolumeFormatted` - bool, x3
+- `storageVolumeFree` - int/int64, x3
+- `storageVolumeInserted` - bool, x3
+- `storageVolumeMounted` - bool, x3
+- `storageVolumeName` - str, x3
+- `storageVolumeRecDestination` - bool, x3
+- `storageVolumeState` - str, x3
+- `storageVolumeTransfer` - bool, x2  **PROVED INACTIVE**: mounts nothing at any transferModeType 0-8.
+- `streamerXPresetCreated` - bool, x10
+- `streamerXPresetName` - str, x10
+- `streammixmixLevel` - float, x30
+- `subnetMask` - str, x1
+- `systemBetaMode` - bool, x1
+- `systemChannelSelected` - int, x1
+- `systemDateTime24h` - bool, x1
+- `systemDateTimeDaylightSavings` - bool, x1
+- `systemDateTimeOnHome` - bool, x1
+- `systemDateTimezone` - int, x1  **PROVED INACTIVE**: applied by the touchscreen, not the engine.
+- `systemFirmwareVersion` - str, x1
+- `systemHapticSetting` - int, x1
+- `systemMainMode` - int, x1
+- `systemMidiControl` - int, x1
+- `systemMixSelected` - int, x1
+- `systemName` - str, x1
+- `systemRecButtonSetting` - int, x1
+- `systemSerialNumber` - str, x1
+- `themeId` - int, x1
+- `toneGeneration` - int, x1  **PROVED INACTIVE**: no sound at 1, 2, 3, 440, 1000 or 255, re-proved 22nd September 2026 on a clean tree with the listening path proved first - a pad playing loudly through HP1 - because the original reading was taken while a stray existed.
+- `transferModeType` - int, x1
+- `txBatteryLevel` - int, x2
+- `txChargingState` - bool, x2
+- `txConnected` - bool, x2
+- `txConnectionId` - int, x2
+- `txDeviceSN` - str, x2
+- `txDeviceType` - int, x2
+- `txGainAssist` - int, x2
+- `txPad` - bool, x2
+- `txRecord` - bool, x2
+- `txRemoteMute` - bool, x2
+- `txRssi` - int, x2
+- `txSignalQuality` - int, x2
+- `unifyMode` - bool, x1
+- `updateCheckRequested` - bool, x1
+- `updateChecking` - bool, x1
+- `updateComplete` - bool, x1
+- `updateDownloadProgress` - int, x1
+- `updateDownloaded` - bool, x1
+- `updateInitiateRequested` - bool, x1
+- `updateInstalledProgress` - int, x1
+- `updateNoInternet` - bool, x1
+- `updateRebootRequested` - bool, x1
+- `updateResetAfterFWURequested` - bool, x1
+- `updateResetAppRequested` - bool, x1
+- `updateResetDeviceRequested` - bool, x1
+- `updateVersion` - str, x1
+- `updateViaUSB` - bool, x1
+- `usb1Connected` - bool, x1
+- `usbHostOnUsb2` - int, x1
+- `usbHostUnspportedFirmware` - bool, x1
+- `usbNumberPad` - bool, x1
+- `voiceDisguiseOn` - bool, x17
+- `wifi` - bool, x1
+- `wifiDHCP` - bool, x1
+- `wifiGateway` - str, x1
+- `wifiIncorrectPSK` - bool, x1
+- `wifiIpAddress` - str, x1
+- `wifiPSK` - str, x1
+- `wifiSSID` - str, x1
+- `wifiScan` - bool, x1
+- `wifiScan1` - str, x1
+- `wifiScan10` - str, x1
+- `wifiScan2` - str, x1
+- `wifiScan3` - str, x1
+- `wifiScan4` - str, x1
+- `wifiScan5` - str, x1
+- `wifiScan6` - str, x1
+- `wifiScan7` - str, x1
+- `wifiScan8` - str, x1
+- `wifiScan9` - str, x1
+- `wifiScanResultSSID` - str, x15
+- `wifiSubnetMask` - str, x1
+- `wiredConnected` - bool, x1

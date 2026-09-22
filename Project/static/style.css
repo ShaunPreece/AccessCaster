@@ -1,0 +1,319 @@
+/* AccessCaster - accessible app shell + controls.
+   Dark is the default theme; a toggle switches to light (saved in localStorage).
+   High contrast, large hit targets, visible focus. Colour is never the only
+   signal; every state is also in text for screen-reader users. Built on the
+   AccessibleLayoutGenericHandover pattern (nav links + section router). */
+
+:root,
+:root[data-theme="dark"] {
+  --bg:#16181d;      --surface:#1e2128;  --surface-2:#262a33;
+  --text:#e8eaed;    --muted:#a8aeb6;
+  --border:#2f343c;
+  --accent:#6ea8fe;  --accent-soft:#34406a;  --accent-fg:#04101f;
+  --focus-ring:#6ea8fe;
+  --ok:#7ee081;      --warn:#ffd166;  --err:#ff8a8a;
+}
+:root[data-theme="light"] {
+  --bg:#f7f7f8;      --surface:#ffffff;  --surface-2:#f1f2f4;
+  --text:#1f2328;    --muted:#54606c;
+  --border:#d0d7de;
+  /* MEASURED, not picked: #0d5bd1 is 5.71:1 against the page and 6.11:1 on a card, and white on it
+     is 6.11:1, so link text and the accent-backed buttons both clear the 4.5:1 AA bar. The obvious
+     brighter blue #0b6efd gives only 4.21:1 on the page and fails every link in this theme.
+     The focus ring stays at the brighter blue on purpose: it is a 3px outline, judged as a
+     non-text element against the 3:1 bar, and it has to stay visible on the accent itself. */
+  --accent:#0d5bd1;  --accent-soft:#e6ecff;  --accent-fg:#ffffff;
+  --focus-ring:#0b6efd;
+  --ok:#1a7f37;      --warn:#9a6700;  --err:#b42318;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition:none !important; animation:none !important; }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, "Segoe UI", Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--text);
+}
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+
+/* ---- Skip link + screen-reader-only ---- */
+.skip-link {
+  position: absolute; left: -999px; top: 0;
+  background: var(--accent); color: var(--accent-fg);
+  padding: 0.6rem 1rem; font-weight: 700; z-index: 200; text-decoration: none;
+}
+.skip-link:focus { left: 0.5rem; top: 0.5rem; }
+
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---- Header + navigation (a plain list of links) ---- */
+.app-header {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem;
+  padding: 0.6rem 1.25rem; border-bottom: 2px solid var(--border);
+  background: var(--surface);
+}
+/* The app title is an H1 now, so its browser margins have to go or the header grows a blank band.
+   Sized here rather than left at heading defaults: it is chrome, and it must not out-shout the
+   page heading below it. */
+.brand { font-weight: 700; font-size: 1.25rem; margin: 0 0.5rem 0 0; }
+/* The desk line sits under the title and is deliberately quiet: it is a live region that speaks for
+   itself, so on screen it should read as a caption rather than compete with the nav. */
+.brand-device { margin: 0 0.5rem 0 0; font-size: 0.85rem; color: var(--muted); }
+/* Both together take one column of the flex row, so the nav still sits beside them. */
+.app-header > .brand, .app-header > .brand-device { flex: 0 0 auto; }
+
+.navlist {
+  list-style: none; display: flex; gap: 0.25rem;
+  padding: 0; margin: 0; flex-wrap: wrap; align-items: center;
+}
+.navlink {
+  display: inline-flex; align-items: center;
+  padding: 0.55rem 0.9rem; text-decoration: none; color: inherit;
+  border-radius: 6px; background: var(--surface); border: 1px solid var(--border);
+  min-height: 44px; font: inherit; cursor: pointer;
+}
+.navlink:hover { background: var(--surface-2); }
+.navlink:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 2px;
+}
+.navlink[aria-current="page"] {
+  background: var(--accent-soft); font-weight: 700;
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.theme-toggle {
+  margin-left: auto; min-height: 44px; padding: 0.5rem 0.9rem; font: inherit;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+.theme-toggle:hover { background: var(--surface-2); }
+.theme-toggle:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---- Main + sections ---- */
+#main-content { max-width: 60rem; margin: 0 auto; padding: 1.25rem 1.25rem 2rem; }
+.app-section h1 {
+  font-size: 1.6rem; margin: 0 0 0.8rem;
+  border-bottom: 2px solid var(--border); padding-bottom: 0.3rem;
+}
+h1[tabindex="-1"]:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 4px; border-radius: 4px;
+}
+h2 { font-size: 1.2rem; margin: 1.2rem 0 0.5rem; }
+
+.app-footer {
+  padding: 1rem 1.25rem; border-top: 1px solid var(--border);
+  text-align: center; color: var(--muted); font-size: 0.9rem;
+}
+
+/* ---- Buttons (two-tier) ---- */
+button {
+  font-size: 1rem; font-family: inherit; min-height: 44px;
+  padding: 0.55rem 1rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+button:hover { background: var(--surface-2); }
+button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* A control that is BUSY (its write is in flight) is marked aria-disabled rather than disabled:
+   the real disabled attribute blurs the element, which strands a screen-reader user. Same look. */
+[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+button.primary {
+  background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700;
+}
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+button.secondary { background: var(--surface); }
+
+/* ---- Fields, notes, hints, switches ---- */
+.field { margin: 0.6rem 0; }
+.field > label { display: inline-block; margin-right: 0.5rem; font-weight: 600; }
+.note { color: var(--muted); }
+.hint { color: var(--muted); font-size: 0.9rem; display: block; margin: 0.2rem 0 0; }
+/* A hint reporting that something is MISSING rather than describing what is there (no as-found
+   backup at all, or one whose SMART pads were skipped). The colour is emphasis ONLY - the wording
+   says what is wrong on its own, because a colour tells a screen reader nothing. */
+.warn-text { color: var(--warn); }
+/* A control plus its own .hint description (the unit settings, a channel's Mute). Grouped so the
+   description sits with its control rather than floating between two of them. */
+.field-block { margin: 0.9rem 0; }
+.field-block > .field { margin-top: 0; }
+
+.switch { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; cursor: pointer; }
+.switch input[type="checkbox"] { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); }
+
+select {
+  font-size: 1rem; padding: 0.5rem; min-height: 44px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+input[type="number"] {
+  font-size: 1rem; padding: 0.4rem 0.5rem; min-height: 44px; width: 6rem;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+input[type="file"] { font-size: 1rem; color: var(--text); padding: 0.3rem 0; }
+
+/* ---- Status section ---- */
+#status-details {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1rem; margin: 0.5rem 0;
+}
+#status-details dt { font-weight: 600; color: var(--muted); }
+#status-details dd { margin: 0; }
+.status-ok { color: var(--ok); font-weight: 700; }
+.status-err { color: var(--err); font-weight: 700; }
+
+/* ---- Mic channels ---- */
+fieldset.channel {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
+}
+fieldset.channel legend { font-weight: 700; padding: 0 0.4rem; }
+
+/* ---- Keyboard shortcuts (one fieldset per shortcut) ---- */
+fieldset.hotkey {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
+}
+fieldset.hotkey legend { font-weight: 700; padding: 0 0.4rem; }
+/* The four modifiers read as one row of choices rather than four separate settings. */
+fieldset.hotkey [role="group"] { display: flex; gap: 1rem; flex-wrap: wrap; }
+fieldset.hotkey [role="group"] .field { margin: 0.2rem 0; }
+
+/* ---- Custom voice-FX creator ---- */
+fieldset.fx-eff {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
+}
+fieldset.fx-eff legend { font-weight: 700; padding: 0 0.4rem; }
+.fx-ctl { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.fx-ctl > label { min-width: 11rem; }
+.fx-ctl input[type="range"] {
+  flex: 1 1 12rem; min-width: 10rem; height: 44px; accent-color: var(--accent);
+}
+.fx-ctl input[type="range"]:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 3px;
+}
+.fx-ctl-value { min-width: 5rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fx-adv-toggle {
+  margin: 0.3rem 0; background: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; color: inherit;
+}
+.fx-adv { margin: 0.3rem 0 0.2rem 0.6rem; padding-left: 0.6rem; border-left: 2px solid var(--border); }
+.fx-custom-list { list-style: none; padding: 0; margin: 0.3rem 0; }
+.fx-custom-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); max-width: 28rem;
+}
+
+/* ---- Channel processing: grouped sliders ----
+   NO `.proc-group` OR `.ac-group` RULES HERE, because neither class has any markup left to style:
+   a sub-group is a plain h3 plus an unnamed wrapper (tabSection in app.js). A NAMED group is
+   announced on the way in and again on the way out, which is what those classes cost. */
+.proc-field { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.proc-field > label { min-width: 9rem; }
+.proc-field input[type="range"] {
+  flex: 1 1 12rem; min-width: 10rem; height: 44px; accent-color: var(--accent);
+}
+.proc-field input[type="range"]:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 3px;
+}
+.proc-value {
+  min-width: 4.5rem; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+
+/* ---- Tab strips (see buildTabs in app.js) ----
+   ONE ROW, NEVER WRAPPED: a wrapped tab row is a maze for anyone zoomed in or with low vision, so
+   the categories are merged to fit and a narrow window scrolls the strip sideways instead. That
+   changes nothing for a screen reader, which sees the tabs whether or not they are on screen.
+   The selected tab is marked by more than colour: it joins onto the panel below it (its bottom
+   border is the panel's background), so the grouping is visible without relying on hue. */
+.cat-list {
+  display: flex; flex-direction: row; gap: 0.2rem; flex-wrap: nowrap;
+  overflow-x: auto; border-bottom: 2px solid var(--border);
+  padding: 0.2rem 0 0; margin: 0.8rem 0 0;
+}
+.cat-list [role="tab"] {
+  background: transparent; border: 1px solid transparent; border-bottom: none;
+  border-radius: 8px 8px 0 0; font-weight: 600; padding: 0.45rem 0.8rem;
+  white-space: nowrap;
+}
+.cat-list [role="tab"]:hover { background: var(--surface-2); }
+.cat-list [role="tab"][aria-selected="true"] {
+  background: var(--surface); border-color: var(--border);
+  box-shadow: 0 2px 0 0 var(--surface);
+  color: var(--accent);
+}
+.cat-list [role="tab"]:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.cat-panel {
+  border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px;
+  background: var(--surface); padding: 0.6rem 0.9rem 0.9rem;
+}
+/* A panel with no controls in it takes tabindex="0" (see setPanelTabStop), so it needs a focus ring
+   of its own or a sighted keyboard user cannot tell where the focus went. */
+.cat-panel:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+/* The panel heading is built by buildTabs on a JS page (a direct child of the panel) and written in
+   index.html on a static one, where it opens the pane div (see buildStaticTabs). */
+.cat-panel > h2,
+.cat-panel > .cat-tab > h2 { font-size: 1.05rem; margin: 0.2rem 0 0.5rem; }
+.cat-panel h3 { font-size: 0.95rem; margin: 1rem 0 0.3rem; }
+.cat-panel h2 + h3 { margin-top: 0.3rem; }   /* a sub-group that opens the panel, not one after content */
+.cat-panel > .cat-tab > .field:first-child { margin-top: 0; }
+
+/* ---- Misc ---- */
+details summary { cursor: pointer; padding: 0.3rem 0; }
+ul { padding-left: 1.25rem; }
+.help-list dt { font-weight: 700; margin-top: 0.7rem; }
+.help-list dd { margin: 0.2rem 0 0; }
+.about-list { margin: 0.4rem 0 1.1rem; }
+.about-list li { margin: 0.35rem 0; }
+code, kbd { font-family: ui-monospace, Consolas, monospace; }
+
+/* ---- Modal dialogs ----
+   Themed rather than left on the browser default, which is a white box with dark text and
+   fails contrast badly in the dark theme. Buttons sit in a row at the end of the dialog. */
+dialog {
+  max-width: 34rem;
+  padding: 1rem 1.2rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog h2 { margin-top: 0; }
+dialog h2:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.dialog-actions {
+  display: flex; gap: 0.6rem; flex-wrap: wrap;
+  margin-top: 1rem;
+}
+.profile-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+
+/* ---- High contrast / forced colours ---- */
+@media (forced-colors: active) {
+  .navlink, .theme-toggle, button { border: 1px solid ButtonText; }
+  .navlink:focus-visible, .theme-toggle:focus-visible, button:focus-visible {
+    outline: 3px solid Highlight; outline-offset: 2px;
+  }
+  .navlink[aria-current="page"] {
+    background: Highlight; color: HighlightText; box-shadow: none; border-color: HighlightText;
+  }
+}
+
+@media (max-width: 40rem) {
+  .proc-field > label { min-width: 100%; }
+  .theme-toggle { margin-left: 0; }
+}

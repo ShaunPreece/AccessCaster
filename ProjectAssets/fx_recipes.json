@@ -1,0 +1,100 @@
+{
+  "Voice Disguise": {
+    "padIdx": 8,
+    "colour": 8,
+    "stack": {
+      "voiceDisguise": {}
+    }
+  },
+  "Megaphone": {
+    "padIdx": 9,
+    "colour": 9,
+    "stack": {
+      "reverb": {
+        "reverbMix": 0.5,
+        "reverbLowCut": 0.30000001192092896,
+        "reverbHighCut": 0.0,
+        "reverbModel": 0.4000000059604645
+      },
+      "echo": {
+        "echoLowCut": 0.4000000059604645,
+        "echoHighCut": 0.5,
+        "echoDelay": 0.10000000149011612,
+        "echoMix": 0.10000000149011612,
+        "echoDecay": 0.10000000149011612
+      },
+      "distortion": {
+        "distortionIntensity": 0.699999988079071
+      }
+    }
+  },
+  "Large Robot": {
+    "padIdx": 10,
+    "colour": 10,
+    "stack": {
+      "robot": {
+        "robotMix": 0.6666666865348816,
+        "robotLevel": 0.0
+      }
+    }
+  },
+  "Pitch Up": {
+    "padIdx": 12,
+    "colour": 0,
+    "stack": {
+      "pitchShift": {
+        "pitchShiftSemitones": 7.0
+      }
+    }
+  },
+  "Monster": {
+    "padIdx": 13,
+    "colour": 1,
+    "stack": {
+      "reverb": {
+        "reverbMix": 0.699999988079071,
+        "reverbLowCut": 0.20000000298023224,
+        "reverbHighCut": 0.5,
+        "reverbModel": 0.800000011920929
+      },
+      "pitchShift": {
+        "pitchShiftSemitones": -8.0
+      }
+    }
+  },
+  "Small Robot": {
+    "padIdx": 14,
+    "colour": 2,
+    "stack": {
+      "robot": {
+        "robotMix": 0.0,
+        "robotLevel": 0.0
+      }
+    }
+  },
+  "Reverb": {
+    "padIdx": null,
+    "colour": 3,
+    "stack": {
+      "reverb": {
+        "reverbMix": 0.5,
+        "reverbLowCut": 0.6661456227302551,
+        "reverbHighCut": 0.3333245515823364,
+        "reverbModel": 0.6000000238418579
+      }
+    }
+  },
+  "Echo": {
+    "padIdx": null,
+    "colour": 4,
+    "stack": {
+      "echo": {
+        "echoLowCut": 0.5,
+        "echoHighCut": 0.5,
+        "echoDelay": 0.16500000655651093,
+        "echoMix": 0.5,
+        "echoDecay": 0.5
+      }
+    }
+  }
+}

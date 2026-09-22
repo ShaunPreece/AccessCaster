@@ -1,0 +1,185 @@
+POSSIBLE LEADS: things we could not settle, that you might be able to
+=====================================================================
+
+This project reverse-engineered the RODECaster Pro 2 and Duo control protocol from one
+Pro 2 and one Duo, on two Windows PCs, in one building. A lot of what is left open is
+open only because of that: no second unit, no SD card, no wireless transmitter, nobody
+to listen at the right moment.
+
+If you have this repo and a desk, several of these are minutes of work for you and
+impossible for us. Every one below is written so you can run it without reading the rest
+of the project first. Findings are welcome; so are negatives, which are worth as much.
+
+Read `RODECASTER_PROTOCOL.txt` for the byte-level protocol and `docs/PROJECT_GUIDE.md`
+part 2 for the invariants before writing anything to a desk.
+
+
+BEFORE YOU WRITE ANYTHING TO A DESK
+-----------------------------------
+
+**Never sweep properties.** The desk publishes `powerOffRequest`,
+`updateInitiateRequested`, `updateRebootRequested`, `updateResetDeviceRequested` and
+`disableAllPhysicalButtons`. "Write each one and read it back" would reboot the unit,
+start a firmware update, or lock its front panel. `updateRebootRequested` is confirmed
+to reboot the desk.
+
+**Never write on an unconfirmed selector.** Selectors are reused across regions, so a
+wrong address does not politely miss: the record lands on some object anyway, and can
+append a STRAY node. A stray reads back exactly like a real property, accepts writes,
+and does nothing - and it is only cleared by a factory reset. One of the leads below
+exists because a stray silently invalidated a whole session's results.
+
+**A factory reset can take the unit off the USB bus**, about one time in five on the
+firmware we tested (1.7.3). It is a fault in the unit rather than in any host software,
+it does not recover by replugging USB, and the power lead has to come out. Back up first
+and expect it.
+
+
+LEAD 1: Bluetooth scanning works on a Duo and not on a Pro 2. Is that every Pro 2?
+---------------------------------------------------------------------------------
+
+**What we found.** Writing `btDoScan` = true on a RODECaster Duo fills `btScan1` with
+`'<MAC address> - <device name>'` for a discoverable device in range. On a Pro 2, the
+same write with the same code returns nothing: a Pixel phone on its Bluetooth screen, a
+fresh false-to-true transition, sixty seconds, no slot filled.
+
+**Both easy explanations are dead.** The Pro 2's radio is alive - a phone paired to it
+and played audio through it minutes before the test. And it does publish Bluetooth state
+into the model - `btConnectedAddress` read back the phone's address while connected.
+
+**What we cannot tell.** Whether that is our particular Pro 2 or every Pro 2. One unit
+cannot answer it.
+
+**What to run.** Write `btDoScan` = true on the NETWORK block with something
+unambiguously discoverable nearby - an Android phone on its Bluetooth settings screen is
+the most reliable target. Wait up to a minute, then read `btScan1` through `btScan10`.
+Report either result.
+
+**Why it matters.** Bluetooth pairing on these desks is touchscreen-only, so a blind
+owner cannot do it at all. A working scan is the way in to an accessible pairing flow.
+The rest of the family - `btDoPair`, `btPairCode`, `btDoConnect`, `btDoDisconnect`,
+`btDoUnPair` - has never been tested on either desk and must not be assumed dead because
+the scan looked dead.
+
+**Two things to know before you start.** The flag does NOT clear itself, so write it
+back to false when you are done, and toggle it false before true to force a fresh
+transition. And `btPairedNumber1` through `5` stay empty even with a phone genuinely
+paired, so do not use them to check whether pairing worked.
+
+
+LEAD 2: does a Duo do anything useful with storage?
+---------------------------------------------------
+
+The recorder and show-backup code paths are built for the Duo and the engine answers
+both, byte-clean, but **nobody here has ever put a card or drive in a Duo**, so nothing
+has been witnessed working.
+
+Three things surface the moment somebody does: whether slot 1 is a usable storage port on
+a Duo at all, whether it pushes `recordState` the way a Pro 2 does, and whether a Duo
+show carries what a Pro 2 show carries.
+
+Any Duo owner with a card can answer all three in one sitting.
+
+
+LEAD 3: the USB dropout. Is it your unit too?
+---------------------------------------------
+
+The commands that make the unit reload its whole settings tree -
+`showControlNewFromDefault` (factory reset) and `showControlImport` (load a show backup)
+- leave it unresponsive roughly one time in five. Measured here: 2 failures in 9 resets
+and 5 in 31 imports, against 0 failures in 9 full profile restores, which are far heavier
+operations over the same interface.
+
+The unit stays electrically present on the bus for about a minute answering nothing, then
+Windows surprise-removes it. Replugging USB does not recover it; only pulling the mains
+does, and it returns about 26 seconds after power is restored.
+
+**What would help.** The same trials on a different unit, ideally on a different host.
+Ten factory resets from the unit's own touchscreen with all third-party software closed
+would be even better, because it takes every line of our code out of the picture. And if
+it happens on Windows, the System event log entry: `Kernel-PnP` event 1010 naming
+`VID_19F7`, followed by 1011 about 22 seconds later.
+
+Expect roughly 1 in 5, so three clean runs prove nothing: ten leaves about an 11% chance
+of seeing nothing by luck alone.
+
+
+LEAD 4: can anything make the desk expose its recordings over USB?
+------------------------------------------------------------------
+
+The recordings drive does not mount over the desk's USB cable. `storageVolumeTransfer`
+mounts nothing at any `transferModeType` from 0 to 8.
+
+The firmware names the mechanism: storage is exposed by binding a FILE to a USB gadget
+LUN (`.../mass_storage.usb0/lun.0/file`), and the engine only ever binds the pad image or
+the update image - never the recordings partition. So the question is no longer "which
+transfer mode" but "can anything we send make it bind a different file".
+
+"You have to unplug the drive" is an acceptable answer. We just have not proved it.
+
+
+LEAD 5: wireless mic telemetry has never seen a real transmitter
+-----------------------------------------------------------------
+
+`txConnected`, `txBatteryLevel`, `txRssi` and the rest of that family are read and
+surfaced, but nothing has ever been paired here, so only the "two slots, both off" branch
+has ever run and every reading carries an unproven flag.
+
+Anyone with a RODE wireless transmitter can settle the read path, and can also confirm by
+ear whether muting a transmitter from software actually mutes it. That write is built.
+
+
+LEAD 6: is the Duo's Headset channel a microphone or a line input?
+-------------------------------------------------------------------
+
+We classify the Duo's source 2 (the 3.5mm TRRS headset jack) as a line input, and its
+Level control writes `inputDigitalGain`, which reads 0.
+
+But its node looks exactly like a microphone's: `inputType` 0, `inputMicrophoneGain` 50,
+`inputPower`, `inputMicrophoneType`. RODE's own guide calls it "a dedicated headset input
+channel ... to control the headset microphone's input level".
+
+So the Level control may be writing the wrong PROPERTY at the right address. An engine
+probe moved `inputPower` there but did NOT move the gain, where Mic 1 and Mic 2 both do.
+
+**This needs an actual headset in the 3.5mm jack**, which nobody here has. Reading the
+model again will not help: an empty mic input reads identically to this.
+
+
+LEAD 7: properties nothing uses, and nobody knows what they do
+---------------------------------------------------------------
+
+Readable, present in a factory dump, and unclaimed: `appOutputDevice` (string, empty),
+`appMonitorMix`, `appRecording`, and `eqParamModeHigh` / `Mid` / `Low`. The names suggest
+they hold RODE's own app's preferences on the desk's behalf, which would make them inert
+for anyone else. The three `eqParamMode` values sit beside `debugMode` and `metering`, so
+a touchscreen presentation setting is more likely than anything audible.
+
+Also unclaimed and more promising: `systemName`, `assignableMeterSource`, `presenterMode`
+/ `presenterSoftware`, `shareAnom` / `shareResource`.
+
+One write and a read-back settles each. Mind the sweep warning at the top.
+
+
+LEAD 8: `padRecordStateRequest`
+--------------------------------
+
+The desk has a PADRECORDER block - recording straight to a sound pad. Our reading is that
+it stores values and never acts on them, but that verdict was reached in a session where
+a stray existed, and a stray accepts writes and does nothing. So it may never have been
+tested at all.
+
+It is a `pair` property, meaning it carries two operands, and we have not worked out the
+layout. Do not guess one: a malformed write is how strays get made. Work it out from a
+capture of RODE's own software first.
+
+
+WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT
+-------------------------------------------------
+
+`docs/PROJECT_GUIDE.md` part 2 has the full list with the mechanism for each. The short
+version of the dead ends: `toneGeneration` makes no sound at any value; `broadcastMeters`
+never carries anything; `emergencyMuteActive` does not mute a playing pad;
+`staticIpSet` is a flag with no operands; `systemDateTimezone` is applied by the
+touchscreen rather than the engine; the desk's own player is touchscreen-bound; and a
+show does not carry Bluetooth pairing.

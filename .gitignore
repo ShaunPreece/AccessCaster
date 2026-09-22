@@ -1,0 +1,83 @@
+# Large USB captures - exceed GitHub's 100 MB per-file limit; kept locally only.
+*.pcap
+captures/
+
+# Raw device-model snapshots + capture-server runtime files. These are full device
+# dumps (they contain wifi/SIP/Bluetooth state in plaintext) and transient control
+# files, so they are kept LOCAL ONLY and never committed. The decoded, reviewed output
+# we DO version is fx_recipes.json (effect parameters only, no secrets).
+cap_control/
+# Raw model dumps carry plaintext wifi SSIDs + SIP account data. Never commit any .bin
+# dump or a full decoded model snapshot. Targeted, reviewed extracts (duo_*_result.json)
+# are clean and stay versioned.
+*.bin
+
+# THE WORKING NOTES LIVE IN A PRIVATE SIBLING REPO, `Claude Projects\_Notes\Access Caster\`, so
+# this one can be public. These entries are a safety net, not the mechanism: the files are not here
+# at all. A note written back into this folder by mistake must never reach a public remote, because
+# a pushed note cannot be taken back.
+#
+# WHAT IS PUBLIC IS THE FINDINGS AND WHAT IS PRIVATE IS THE CONVERSATION. The hardware findings are
+# tracked, in `docs/`: they belong with the code and were only ever private because the notes moved
+# out wholesale. Anything carrying decisions, quotes or open work stays in the private repo. So
+# `docs/` is NOT listed here and `ProjectMemory/` stays denied outright - nothing public should be
+# written under the old notes name.
+ProjectMemory/
+ProjectNotes.md
+PICKUP.md
+
+# External reference clone (someone else's RODECaster control project), kept locally
+# for reference but not part of this repo.
+reference-rodecaster-control/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backups / editor cruft
+*.bak
+*.tmp
+
+# Runtime logs (server, monitors) - transient.
+*.log
+
+# Format-tolerance test audio (~35 MB of self-identifying clips) + scratch test WAVs.
+# The intentionally-versioned factory sounds live in "default sfx/" (NOT ignored).
+/fmt_test/
+/Promo Bed.wav
+
+# Scratch API-response dump (not source).
+/sp.json
+
+# Packaging build artifacts (PyInstaller + Inno Setup output). The spec, installer.iss and
+# build script (in ProjectBuilds/) ARE versioned; their generated output is not. Everything
+# generated lands UNDER ProjectBuilds/ (dist/, build/ and Output/) because build_installer.ps1
+# passes --distpath and --workpath; the two root entries stay only to catch a hand-run
+# `pyinstaller`, which still defaults to the working directory.
+/build/
+/dist/
+/ProjectBuilds/build/
+/ProjectBuilds/dist/
+/Output/
+/ProjectBuilds/Output/
+# The exe's Windows version resource, GENERATED from Project/version.py by AccessCaster.spec on
+# every build. Committing it would put the version number in a SECOND place, which is the one thing
+# version.py's single-source-of-truth rule forbids.
+/ProjectBuilds/version_info.generated.txt
+
+# Raw USB capture "fossils" used only by pad_records.py self-tests; not used by the app and
+# superseded by the from-scratch builders. Kept locally, not uploaded.
+*.pkl
+# Claude Code per-project settings (may contain machine-specific permission paths).
+.claude/
+
+# ui_probe fixtures generated from the connected desk (--stub). Regenerable in one command, see
+# the header of DevTools/ui_checks_baseline.js, so the repo carries the checks, not the snapshot.
+DevTools/_probe_stub_*.json
+
+# Scratch space for webcam grabs and throwaway diffs. Never committed.
+.tmpwork/
+
+# Generated at build time from Project/version.py HISTORY
+/Project/ReleaseNotes.html
