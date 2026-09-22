@@ -38,6 +38,12 @@ HISTORY = [
          "AccessCaster version 2.52 released to public. Thanks to Michael Babcock and Steven Scott "
          "for testing and feedback."),
 
+        ("The headphone knobs tell you where they are",
+         "The headphone level knobs on the unit have no notch or marker, so there is no way to tell "
+         "by touch how far up one is set. AccessCaster now reads the level out as you turn one, the "
+         "same way it does a fader. It follows your level announcement setting, so if you have "
+         "those switched off the knobs stay quiet too."),
+
         ("One Backups page, and one list instead of two",
          "The Profiles page is now the Backups page, and it has one list instead of two. Before, "
          "your own saved profiles and the unit's own backups sat in separate sections with separate "
@@ -53,16 +59,17 @@ HISTORY = [
          "day on my own Pro 2, with the app recording every command it sent: restoring the unit's "
          "own copy crashed it five times in thirty-one attempts, across three different backups. "
          "Restoring from this computer's copy did not fail once in nine. When it crashes, audio "
-         "stops with a tone often left repeating in the headphones, every control stops answering, "
+         "stops, every control stops answering, "
          "and unplugging the USB cable is not enough - the power lead has to come out, because the "
          "unit itself has stopped rather than the connection. If your screen reader plays through "
          "the RODECaster, you lose your speech until it is back, which is why this was worth "
          "changing rather than warning about. So the Restore button now always uses this "
          "computer's copy. It takes about two minutes instead of a few seconds and restores a "
          "little less. Backing up has not changed: the unit still makes its own copy alongside, "
-         "because backing up has never caused this. This is the unit's own fault rather than "
-         "anything the app does wrong, and I am still working on it; if a safe way is found, the "
-         "faster route will come back. Two places can still reach it, and you have to choose them "
+         "because backing up has never caused this. Everything points to the unit rather than "
+         "anything the app does wrong, though so far that is one desk on one computer, so I am not "
+         "claiming it as settled. I am still working on it; if a safe way is found, the faster "
+         "route will come back. Two places can still reach it, and you have to choose them "
          "deliberately: resetting the unit to factory settings, and restoring a backup the unit "
          "made on its own with no copy on this computer beside it. The dialog tells you when that "
          "is the case."),
@@ -104,6 +111,12 @@ HISTORY = [
          "listening to, which makes it the one worth putting on a keyboard shortcut for use "
          "mid-show. Presets you saved before this still cover every output, because that is what "
          "they have always done, and they now say so in the list."),
+
+        ("A log of what the app has done",
+         "The tray menu has a Diagnostic log entry. It opens a plain text record of what "
+         "AccessCaster has sent to the unit and what came back. You do not need it day to day; it "
+         "is there for when something goes wrong and you want to say what actually happened rather "
+         "than describe it from memory."),
     ]),
     ("2.51", [
         ("The app is one word now: AccessCaster",
