@@ -10701,7 +10701,8 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
         try:
             mgr = hotkey_manager()
             mgr.start()
-            live = [a["combo"] for a in mgr.state()["actions"] if a["enabled"] and not a["problem"]]
+            live = [a["combo"] for a in mgr.state()["shortcuts"]
+                    if a["enabled"] and not a["problem"]]
             print(f"Keyboard shortcuts registered: {len(live)}.")
         except Exception as exc:
             print(f"Keyboard shortcuts unavailable: {exc}")
