@@ -822,8 +822,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   moves the DSP chain ONLY, never the matrix. **Get this backwards and every custom mix silently
   sends the wrong channels** - nothing errors, nothing looks broken, and the first you know is a
   guest hearing themselves. The read formula is `index = row_stride * source + output`.
-- **A DESK IS IDENTIFIED BY ITS USB SERIAL, NOT BY WHAT `VER` RETURNS.** The serial (`GV0064612` on
-  Shaun's Pro II) survived eight factory resets and a power cycle on 16th September 2026 and comes
+- **A DESK IS IDENTIFIED BY ITS USB SERIAL, NOT BY WHAT `VER` RETURNS.** The serial (`GVxxxxxxx` on
+  the Pro II here) survived eight factory resets and a power cycle on 16th September 2026 and comes
   free with the enumeration, without opening anything. `VER` read `FBB9-CBE2` that afternoon and
   `0576-FC06` by the evening, so everything filed under it - applied mic presets, the baseline
   offer, parked chains - was being silently orphaned. It is kept as `version_id` because it MOVING
