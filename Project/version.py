@@ -29,10 +29,22 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.52"
+__version__ = "2.53"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.53", [
+        ("The routing screen works again after the unit's 1.7.6 update",
+         "RODE's firmware 1.7.6 broke the Routing page. It stopped showing your mix and said the "
+         "matrix had changed shape, as though a caller were connected, and the fader levels lost "
+         "their reference points with it. Nothing was actually wrong with your unit or your "
+         "settings. AccessCaster was counting the unit's cross-points in a way that also swept up a "
+         "second, unrelated grid belonging to RODECaster Sync, and 1.7.6 made that grid bigger to "
+         "support the RODECaster Video. AccessCaster now counts only the grid it means, so the page "
+         "reads correctly and will not be thrown by RODE adding another Sync device later. This "
+         "affects the Duo the same way, so take this update before you take 1.7.6."),
+    ]),
+
     ("2.52", [
         ("AccessCaster is public",
          "AccessCaster version 2.52 released to public. Thanks to Michael Babcock and Steven Scott "

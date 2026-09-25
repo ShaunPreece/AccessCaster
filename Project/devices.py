@@ -38,8 +38,13 @@ class MatrixSpec:
 
     The model-dump stream carries one mixDisabled/mixMute/mixLevelWithAnchor block
     per cross-point. read index into that flat list = row_stride * source + output.
-      cell_count    : expected number of blocks (a guard - if the live count differs
-                      the matrix changed shape, e.g. a SIP caller, so reads refuse).
+      block         : the dump block holding the grid. MUST be named, and every read
+                      scoped to it with rcp_read.block_values: RCSYNCMIX carries the
+                      same cross-point names, so an unscoped read concatenates two
+                      grids and RODE resizing the RC Sync one moves the total while
+                      the routing matrix stands still.
+      cell_count    : expected number of blocks IN `block` (a guard - if the live count
+                      differs the matrix changed shape, e.g. a SIP caller, so reads refuse).
       output_count  : number of outputs (read_output_modes yields this many).
       source_indices: the channelInputSource codes we EXPOSE as matrix rows.
       row_stride    : blocks per source in the flat list (Pro II = 13).
@@ -48,6 +53,7 @@ class MatrixSpec:
     output_count: int
     source_indices: tuple
     row_stride: int
+    block: str = "MIX"
     # UI LABEL MAPS (device-specific). The read code above only needs the numbers; these carry
     # the human-readable names so the routing screen labels the Duo's real sources/outputs
     # (e.g. source code 2 = "Headset" on the Duo, not "Mic 3" as on the Pro II) instead of the
@@ -761,7 +767,7 @@ PRO2 = DeviceModel(
     channels=("Mic1", "Mic2", "Mic3", "Mic4", "Bluetooth", "SMARTpads",
               "USB1", "Chat", "USB2"),
     mic_input_format="channel",
-    matrix=MatrixSpec(cell_count=516, output_count=11,
+    matrix=MatrixSpec(cell_count=390, output_count=11,
                       source_indices=(0, 1, 2, 3, 7, 8, 9, 10, 11), row_stride=13,
                       sources=PRO2_MATRIX_SOURCES, outputs=PRO2_MATRIX_OUTPUTS),
     # "chain_follow": a fader move also MOVES that channel's processing/effects chain to the strip
@@ -871,13 +877,13 @@ DUO = DeviceModel(
     # (output = fast axis, stride 1); source stride = 13. Real exposed sources (non-placeholder at
     # baseline) = 0,1,2,7,8,9,10,11 (Mic1/Mic2/Headset/USB1/Chat/USB2/BT/SMART); the Pro II set minus
     # src3 (no Mic3/Mic4 on the Duo). See RODECASTER_PROTOCOL.txt section 5 (routing matrix).
-    matrix=MatrixSpec(cell_count=516, output_count=13,
+    matrix=MatrixSpec(cell_count=390, output_count=13,
                       source_indices=(0, 1, 2, 7, 8, 9, 10, 11),   # CONFIRMED on hardware
                       row_stride=13,                               # CONFIRMED (13*source+output)
                       sources=DUO_MATRIX_SOURCES, outputs=DUO_MATRIX_OUTPUTS),
     # input_mic_write ON (format captured + byte-verified). "processing" + "channel_read" ON (both
     # hardware-confirmed, on a stray-free desk). "matrix_read" is ON (formula verified on hardware,
-    # see the matrix note above; cell_count guard set to 516).
+    # see the matrix note above; cell_count guard set to the MIX block's 390).
     # "matrix_write" is ON (confirmed on hardware): a reversible live test via our
     # own code - HP1 -> Custom (outputMixMinus 0x31 -> mode 2), excluded then re-included Bluetooth on
     # HP1 (cross-point selector 0x4c + 13*10 + 0 = 0xCE, mixDisabled[130] toggled True then False),

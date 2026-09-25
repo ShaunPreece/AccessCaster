@@ -622,6 +622,21 @@ def block_value(blob: bytes, block: str, name: str, instance: int = 0):
     return None
 
 
+def block_values(blob: bytes, block: str, name: str, kind: str | None = None) -> list:
+    """Every value of `name` inside ONE block, in stream order - the block-scoped `values`.
+
+    POSITIONAL READS OF A SHARED NAME MUST USE THIS, NOT `values`. `MIX` and `RCSYNCMIX` carry the
+    same six cross-point names, so `values` returns both grids concatenated and its length is the
+    sum of two independent shapes. Anything indexing by `row_stride * source + output`, or checking
+    a grid's size, means one of those blocks and has to say which: the RC Sync grid resizes when
+    RODE add a device to Sync, which changes that total without the routing matrix moving at all.
+
+    `kind` filters exactly as in `values`; pass None to keep every occurrence when indices matter.
+    """
+    return [v for hdr, prop, v, k in iter_block_properties(blob)
+            if hdr == block and prop == name and (kind is None or k == kind)]
+
+
 MISSING = object()
 """Sentinel for path_value: "this node does not carry that property at all".
 
@@ -790,10 +805,17 @@ def read_settings() -> dict:
 # See RODECASTER_PROTOCOL.txt section 5.
 
 # Matrix shape (sources exposed, healthy mixDisabled block count, output count, read
-# stride) is now per-device in devices.py (Pro II: 9 sources, 516 blocks, 11 outputs,
+# stride) is per-device in devices.py (Pro II: 9 sources, 390 blocks, 11 outputs,
 # stride 13). The block-count is a guard: if the live count differs the matrix changed
 # shape (a SIP caller activated hidden cross-points) so we refuse rather than read by a
 # now-wrong index. The read formula is index = row_stride * source + output.
+#
+# COUNT THE MIX BLOCK ONLY (block_values, not values). RCSYNCMIX carries the same six
+# cross-point names, so an unscoped read returns both grids concatenated: 390 + 153 here.
+# That total tracks how many devices RC Sync supports, which has nothing to do with the
+# routing matrix, and a firmware adding one silently trips the guard.
+# _stable_key below is the deliberate exception - it compares whole dumps for equality
+# and never indexes, so the extra cells only widen what it notices.
 
 
 def _stable_key(b: bytes):
@@ -886,6 +908,9 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
       * the block count - if the matrix changes SHAPE (a live SIP caller activates hidden
         cross-points) the grid order shifts, so every cell would be attributed to the wrong pair.
     A refusal comes back as ok False with a sentence, never as a wrong grid.
+
+    The count is taken from `m.block` alone. RCSYNCMIX carries the same cross-point names, so an
+    unscoped read sums two grids and the guard then fires on RC Sync gaining a device.
     """
     dev = devices.get_active_device()
     m = dev.matrix
@@ -895,7 +920,7 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
                                    f"{dev.name}, so {cannot} cannot be shown reliably yet."))
     if blob is None:
         blob = read_model_stable()
-    raw = values(blob, prop)
+    raw = block_values(blob, m.block, prop)
     modes_all = read_output_modes(blob)
     if len(raw) != m.cell_count or len(modes_all) < m.output_count:
         return dict(empty, reason=("The matrix changed shape (a phone caller may be connected), "

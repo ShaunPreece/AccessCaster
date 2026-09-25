@@ -174,6 +174,36 @@ layout. Do not guess one: a malformed write is how strays get made. Work it out 
 capture of RODE's own software first.
 
 
+LEAD 9: Icecast streaming, if you hold a paid CallMe licence
+------------------------------------------------------------
+
+Firmware 1.7.4 added Icecast streaming, and 1.7.6 publishes the whole configuration as
+ordinary properties in the SIPADVANCED block: icecastAddress, icecastPort (8000),
+icecastMountpoint ("stream"), icecastUsername ("source"), icecastPassword, icecastTLS,
+icecastBitrate (128000), icecastConnect (the trigger) and icecastState (the read-back).
+The engine builds a connect request shaped
+{"dest":"...","codec":"...","transport":"...","bitrate":N,"sip_slot":N} and the
+destination takes a URL scheme, icecast:// or icecasts:// (also rtsp:// and rtsps://).
+
+The settings UI is a TOUCHSCREEN page, titled "CallMe Icecast" in rc_gui_juce, and the
+desktop app does not offer it. Touch is not on the USB bus, so there is nothing to
+capture and no way to drive it from a host.
+
+Two things we could not settle, both needing something we do not have:
+
+  * SIPADVANCED has no confirmed write selector, and nothing may guess one (a wrong
+    selector appends a stray, which reads back like a real property, does nothing, and
+    clears only on a factory reset). The firmware's own name table puts SIPADVANCED
+    second from last, immediately before OAUTH, which is a route to deriving it - but
+    selectors count block INSTANCES, not block types, so table position alone is not
+    the answer.
+  * Whether Icecast needs a paid tier at all. The firmware carries three: "RODE CallMe
+    Lite" (the basic service, active on an unlicensed desk), "RODE CallMe", and "RODE
+    CallMe Pro", sold through account.rode.com. We found no gate on the Icecast page
+    specifically, and we have no licence to test with. If you hold one, the cheap test
+    is whether icecastConnect is accepted and what icecastState says afterwards.
+
+
 WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT
 -------------------------------------------------
 

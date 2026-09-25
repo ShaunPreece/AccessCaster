@@ -46,11 +46,12 @@ public without publishing it.
   property that desk publishes, names and types only. The raw material; regenerate with
   `DevTools/property_list.py`, which writes the file for whichever desk is attached. Device-scoped
   since 31st August 2026, because a single shared file was silently overwritten by whichever desk
-  was plugged in. **The Duo's names are a SUBSET of the Pro II's, not a match** (measured 22nd
-  September 2026, 463 against 472, both on firmware 1.7.3): the nine extra are all `show*` /
-  `recording*`, which a desk publishes only with storage attached that has shows on it, so the gap
-  is the Duo here having no card in rather than a capability difference. An earlier claim of
-  "identical, 463 each" predates the Pro II's drive going in.
+  was plugged in. **The Duo's names are a SUBSET of the Pro II's, not a match**, and the gap is
+  STORAGE AND FIRMWARE rather than capability. On equal firmware (1.7.3, measured 22nd September
+  2026) it was 463 against 472, the nine extra all `show*` / `recording*`, which a desk publishes
+  only with storage attached that has shows on it. It is now 463 against 499 because the Pro II
+  went to 1.7.6, which adds the Icecast set and the OAUTH block. Compare a count only against a
+  desk on the same firmware. An earlier claim of "identical, 463 each" predates the drive going in.
 - `docs/PARITY.md`: the parity TARGET, every feature the desk and app have. No status, by
   design, so it does not go stale. What is LEFT to build is in `ProjectNotes.md`.
 - **A PUBLIC FILE MUST NOT CITE A PRIVATE ONE.** Anything in `docs/` is read by strangers, so a

@@ -27,7 +27,7 @@ the hardware, which is what this file is for.
 
 Nothing here is official. RODE publish no protocol documentation; all of it was worked out from
 captured USB traffic, the RODE app's own binary, and the published firmware image. It is accurate as
-of firmware 1.7.3 on a RODECaster Pro II and a RODECaster Duo.
+of firmware 1.7.6 on a RODECaster Pro II and 1.7.3 on a RODECaster Duo.
 
 --------------------------------------------------------------------------------
 # PART 1: HOW IT WORKS
@@ -836,8 +836,19 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   pairing the desk's own UI cannot make.
 - **`inputInstrumentGain` IS a stored setting**, though: selecting Instrument sets it to 20 and
   switching away does not clear it.
-- **`mixLink` is NOT per-cross-point link state.** It reads True on 508 of 516 cells while the proven
-  level-vs-anchor inference says 114. Keep the inference.
+- **`mixLink` is NOT per-cross-point link state.** It reads True on 383 of the MIX block's 390 cells
+  while the proven level-vs-anchor inference says 114. Keep the inference.
+
+- **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
+  (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names
+  (`mixDisabled`, `mixMute`, `mixLevelWithAnchor`, `mixLink`, `mixLinkRequest`, `mixUnlinkRequest`)
+  and follows MIX in the stream, so an unscoped read returns both grids concatenated and its length
+  is the sum of two unrelated shapes. That is what the old `cell_count=516` was: 390 + RCSYNCMIX's
+  126. RCSYNCMIX is sized by how many devices RODECaster Sync supports, so adding one resizes it -
+  fw 1.7.6 took it to 153, total 543 - and every matrix read then refuses with "the matrix changed
+  shape" on a grid that never moved. `MatrixSpec.block` names the block for exactly this reason.
+  The `_stable_key` fingerprint is the one deliberate exception: it compares whole dumps and never
+  indexes, so the extra cells only widen what it notices.
 
 ## Soundpads
 

@@ -69,7 +69,7 @@ DIFFERENCES AT A GLANCE (detail in the sections that follow):
   Physical faders            9                         9
   Processing strip index     PINNED per channel        DYNAMIC (resolved from
                              (does not move)           channelInputSource)
-  Routing matrix cells       516 (fw 1.7.3)            516 (fw 1.7.3)
+  Routing matrix cells       390 in MIX                390 in MIX
   Matrix internal stride     13                        13
   Exposed outputs            11 (HP1-4, Monitor, REC,  9 (HP1-2, Monitor, REC,
                              BT, USB1, Chat, USB2,     BT, USB1, Chat, USB2,
@@ -91,6 +91,17 @@ section 7, are IDENTICAL on both units unless a per-device note says otherwise.
 Vendor ID: 0x19F7 (RODE).
 
 Product IDs:  Pro II = 0x0037,  Duo = 0x0050.
+
+A DESK BEING FLASHED RE-ENUMERATES AS PID 0x0030 AND IS NOT GONE. During a
+firmware update the unit drops its normal identity and comes back under the same
+vendor ID as PID 0x0030: a composite device exposing a mass-storage interface and
+a vendor HID interface, carrying the SAME USB serial as the desk. It answers
+nothing on the command protocol. Observed on a Pro II taking 1.7.6: a spell as
+0x0030, then about 70 seconds with no RODE device on the bus at all, then back as
+0x0037 with the new version in systemFirmwareVersion. Host software should treat
+both 0x0030 and the gap after it as
+"busy, updating, wait" rather than as a disconnect, and must not prompt the user
+to replug: pulling power mid-flash is the one way to brick the unit.
 
 The control interface on BOTH units is a vendor-defined HID interface, MI_09,
 usage page 0xFF00, usage 0x01, product string "HID Interface". It answers the
@@ -359,7 +370,7 @@ driven), though the VIRTUAL faders' levels ARE writable (6.1).
 ----------
 Channels: 9, in this FIXED read/selector order:
     Mic1, Mic2, Mic3, Mic4, Bluetooth, SMARTpads, USB1, Chat, USB2
-Faders: 9. Routing matrix: 516 cells (fw 1.7.3), internal stride 13, 11 exposed
+Faders: 9. Routing matrix: 390 cells in MIX, internal stride 13, 11 exposed
 outputs. Headphones: 4 outputs (headphoneType x4). SMART pads: 8 pads x 8 banks =
 64 slots (56 user-assignable, banks 1-7; system pads at padIdx 56-63).
 
@@ -386,7 +397,7 @@ Strips / faders: 10 logical strips (physical/virtual fader split not confirmed).
     default_vector=None; the "fader_write" cap is OFF for the Duo so set/reset-faders
     refuse rather than write a guessed layout - GAP-1).
     faderLevel (9 faders); faderMin/Max 0/127;  potLevel (4 pots)
-Routing matrix: 516 cells (fw 1.7.3), internal stride 13, 13 outputs; exposed
+Routing matrix: 390 cells in MIX, internal stride 13, 13 outputs; exposed
     sources 0,1,2,7,8,9,10,11. (The 247 cells seen earlier was the fw-1.6.8 dump;
     the 1.7.3 update grew the matrix to the full shape.)
 Outputs / headphones: 13 outputs internally; 4 headphoneType slots in the model
@@ -665,8 +676,21 @@ READ-BACK: on the correctly assembled (report-id-stripped) stream, the excluded
 flag for cell (output, source) is the (13*source + output)-th mixDisabled value,
 i.e. (selector - 76). Output modes are read by anchoring on the "MIXMINUSES\x00"
 section header and taking the int after it. A safety guard should refuse to read
-the matrix if the mixDisabled block count is not 516, because a live SIP caller
+the matrix if the mixDisabled block count is not 390, because a live SIP caller
 changes the matrix shape.
+
+COUNT THAT BLOCK, NOT THE NAME. The grid is the MIX section, 390 cells on both
+desks. RCSYNCMIX is a SEPARATE grid that reuses the same six cross-point names
+(mixDisabled, mixMute, mixLevelWithAnchor, mixLink, mixLinkRequest,
+mixUnlinkRequest), and it sits immediately after MIX in the stream. So a reader
+that collects a cross-point name across the whole dump gets both grids
+concatenated, and its total is the sum of two unrelated shapes: 516 on fw 1.7.3
+(390 + 126) and 543 on fw 1.7.6 (390 + 153). RCSYNCMIX is sized by how many
+devices RODECaster Sync supports, so it grows when RODE add one - 1.7.6 added the
+RODECaster Video and Video S - while the routing matrix does not move at all.
+Guard on the MIX count alone or a firmware that has nothing to do with routing
+will trip it. The indexing formula is unaffected either way: MIX comes first, and
+13*source + output never reaches beyond it.
 
 5.4 GLOBAL OUTPUT + MASTER-PROCESSING BLOCKS (three global selectors)
 ---------------------------------------------------------------------
@@ -1344,7 +1368,7 @@ Channel proc/effects        01 01 01 01 <s>         proc 0x1C+idx / fx 0x26  Pro
 Input mic gain/P48/pol/type 01 01 01 02 <s> 02      0x6E + source_code       BOTH desks; the
   and line inputDigitalGain                         = INPUTSOURCE[code]      Duo's old 0x48
                                                                              form is inert
-Routing cross-point         mixDisabled / mixLevel  0x4C + 13*src + out      516 cells both
+Routing cross-point         mixDisabled / mixLevel  0x4C + 13*src + out      390 cells in MIX
   outputMixMinus (mode)                             0x31 + output_index      both
 Global output block         01 01 01 01 0D          recordingMultitrackMode  + mon/BT auto-mute
   outputPrefader                                    0x0D (bool)              Listen: F=after-fader

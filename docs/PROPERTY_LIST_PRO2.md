@@ -12,17 +12,21 @@ properties the app actually touches is the per-desk coverage report in the priva
 back and shown to do nothing on real hardware, and each has a promising name, which is
 the whole trap - they are the ones most likely to be picked up as new work. The reasons
 come from `PROJECT_GUIDE.md`; do not re-test them, and do not copy the list anywhere.
-**THE MEASUREMENTS ARE NOT PER-DESK.** One list covers both, because the Pro 2 and the
-Duo run the same firmware and publish the same property names, and because every reason
-here is an engine behaviour rather than anything about the hardware. A property proved
-dead on one desk has not separately been proved dead on the other.
+**THE MEASUREMENTS ARE NOT PER-DESK.** The dead list covers both desks, because every
+reason here is an engine behaviour rather than anything about the hardware. A property
+proved dead on one desk has not separately been proved dead on the other.
+
+**THE NAMES ARE per-desk AND PER-FIRMWARE**, which is why there is a file each. A desk
+publishes `show*` and `recording*` only with storage attached that holds shows, and a
+firmware update adds names: 1.7.4 brought the Icecast set and 1.7.6 the OAUTH block. So a
+shorter list is usually this desk's storage or its firmware, not a missing capability.
 
 **NAMES AND TYPES ONLY, no values, deliberately.** The dump carries the wifi PSK and the SIP
 password in plain text, so values are never written here and this file is safe to share.
 `wifiPSK` appears as a NAME, which is all a reader needs to know it exists.
 
-Read from a **RODECaster Pro 2**, firmware 1.7.3.
-**472 properties, 55 block types.**
+Read from a **RODECaster Pro 2**, firmware 1.7.6.
+**499 properties, 57 block types.**
 
 The occurrence count hints at SCOPE and moves with ordinary use, so treat it as a shape
 rather than a number: x1 is global, and a count matching a block's instance count below
@@ -53,6 +57,7 @@ nothing at rest.
 - `MIX` x390
 - `MIXMINUSES` x13
 - `NETWORK` x1
+- `OAUTH` x1
 - `OUTPUT` x1
 - `PAD` x24
 - `PADBUTTON` x64
@@ -61,11 +66,12 @@ nothing at rest.
 - `PHYSICALINTERFACE` x1
 - `PLAYER` x1
 - `POT` x4
+- `PROXY` x1
 - `RADIO` x1
 - `RADIORX` x1
 - `RADIOTX` x2
-- `RCSYNCMIX` x126
-- `RCSYNCMIXMINUES` x14
+- `RCSYNCMIX` x153
+- `RCSYNCMIXMINUES` x17
 - `RECBUTTON` x1
 - `RECORDER` x1
 - `RECORDING` x1
@@ -168,6 +174,8 @@ nothing at rest.
 - `channelSparkle` - float, x10
 - `channelTalkbackEnable` - bool, x10
 - `channelWirelessMute` - bool, x10
+- `cloudUploadCancelUID` - int, x1
+- `cloudUploadRequestUID` - int, x1
 - `compressorAttack` - float, x10
 - `compressorGain` - float, x10
 - `compressorOn` - bool, x10
@@ -223,6 +231,7 @@ nothing at rest.
 - `eqParamModeHigh` - int, x1
 - `eqParamModeLow` - int, x1
 - `eqParamModeMid` - int, x1
+- `errorMessage` - str, x1
 - `faderLevel` - int, x9
 - `faderMax` - int, x9
 - `faderMin` - int, x9
@@ -230,6 +239,7 @@ nothing at rest.
 - `fxPresetContents` - str, x3
 - `fxPresetIdx` - int, x3
 - `gateway` - str, x1
+- `hasValidToken` - bool, x1
 - `headphoneColour` - str, x4
 - `headphoneType` - int, x4
 - `hpfFrequency` - float, x10
@@ -238,6 +248,15 @@ nothing at rest.
 - `hpfOn` - bool, x10
 - `hpfSlope` - float, x10
 - `hwScreenBrightness` - int, x1
+- `icecastAddress` - str, x1
+- `icecastBitrate` - int, x1
+- `icecastConnect` - bool, x1
+- `icecastMountpoint` - str, x1
+- `icecastPassword` - str, x1
+- `icecastPort` - int, x1
+- `icecastState` - str, x1
+- `icecastTLS` - bool, x1
+- `icecastUsername` - str, x1
 - `inactiveButtonsBrightness` - int, x1
 - `incomingAudioRouting` - str, x1
 - `incomingNameFilter` - bool, x1
@@ -269,13 +288,13 @@ nothing at rest.
 - `meterPeakR` - float, x22
 - `meterStereo` - bool, x22
 - `metering` - int, x1
-- `mixDisabled` - bool, x516
-- `mixLevelWithAnchor` - str, x516
-- `mixLink` - bool, x516
-- `mixLinkRequest` - bool, x516
-- `mixMute` - bool, x516
-- `mixRcSyncLevelRequest` - float, x126
-- `mixUnlinkRequest` - bool/pair, x516
+- `mixDisabled` - bool, x543
+- `mixLevelWithAnchor` - str, x543
+- `mixLink` - bool, x543
+- `mixLinkRequest` - bool, x543
+- `mixMute` - bool, x543
+- `mixRcSyncLevelRequest` - float, x543
+- `mixUnlinkRequest` - bool, x543
 - `mutePressed` - bool, x6
 - `noiseGateAttack` - float, x10
 - `noiseGateHold` - float, x10
@@ -291,7 +310,7 @@ nothing at rest.
 - `outputBTAutoMuteActive` - bool, x1
 - `outputBTLevel` - float, x1
 - `outputBTMute` - bool, x1
-- `outputMixMinus` - int, x27
+- `outputMixMinus` - int, x30
 - `outputMonAutoMute` - bool, x1
 - `outputMonAutoMuteActive` - bool, x1
 - `outputMonFixed` - bool, x1
@@ -376,9 +395,15 @@ nothing at rest.
 - `presenterMode` - bool, x1
 - `presenterSoftware` - int, x1
 - `primaryDns` - str, x1
+- `proxyAddress` - str, x1
+- `proxyEnabled` - bool, x1
+- `proxyPassword` - str, x1
+- `proxyPort` - int, x1
+- `proxyUsername` - str, x1
 - `radioPair` - int, x1
 - `radioPaired` - int, x1
 - `radioUnpair` - str, x1
+- `rcSyncCaptureMode` - bool, x1
 - `rcSyncChannelAssign` - str, x1
 - `rcSyncChannelSwap` - str, x1
 - `rcSyncDeviceModel` - int, x1
@@ -401,6 +426,9 @@ nothing at rest.
 - `requestDeleteUID` - int, x1
 - `requestDropMarker` - int64, x1
 - `requestRecordState` - int, x1
+- `requestSignIn` - bool, x1
+- `requestSignOut` - bool, x1
+- `responsePending` - bool, x1
 - `reverbHighCut` - float, x17
 - `reverbLowCut` - float, x17
 - `reverbMix` - float, x17
@@ -444,6 +472,7 @@ nothing at rest.
 - `sipAccountUsername` - str, x1
 - `sipCallHostingEnabled` - bool, x1
 - `sipCallHostingToggleEnabled` - bool, x1
+- `sipCallKeepalive` - bool, x1
 - `sipCallRating` - str, x1
 - `sipCallSlotId` - int, x3
 - `sipIncomingCallAccept` - str, x1
@@ -503,7 +532,7 @@ nothing at rest.
 - `systemFirmwareVersion` - str, x1
 - `systemHapticSetting` - int, x1
 - `systemMainMode` - int, x1
-- `systemMidiControl` - int, x1
+- `systemMidiControl` - bool, x1
 - `systemMixSelected` - int, x1
 - `systemName` - str, x1
 - `systemRecButtonSetting` - int, x1
@@ -542,6 +571,10 @@ nothing at rest.
 - `usbHostOnUsb2` - int, x1
 - `usbHostUnspportedFirmware` - bool, x1
 - `usbNumberPad` - bool, x1
+- `userCode` - str, x1
+- `userName` - str, x1
+- `verificationURL` - str, x1
+- `verificationURLBare` - str, x1
 - `voiceDisguiseOn` - bool, x17
 - `wifi` - bool, x1
 - `wifiDHCP` - bool, x1

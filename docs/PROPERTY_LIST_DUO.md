@@ -12,10 +12,14 @@ properties the app actually touches is the per-desk coverage report in the priva
 back and shown to do nothing on real hardware, and each has a promising name, which is
 the whole trap - they are the ones most likely to be picked up as new work. The reasons
 come from `PROJECT_GUIDE.md`; do not re-test them, and do not copy the list anywhere.
-**THE MEASUREMENTS ARE NOT PER-DESK.** One list covers both, because the Pro 2 and the
-Duo run the same firmware and publish the same property names, and because every reason
-here is an engine behaviour rather than anything about the hardware. A property proved
-dead on one desk has not separately been proved dead on the other.
+**THE MEASUREMENTS ARE NOT PER-DESK.** The dead list covers both desks, because every
+reason here is an engine behaviour rather than anything about the hardware. A property
+proved dead on one desk has not separately been proved dead on the other.
+
+**THE NAMES ARE per-desk AND PER-FIRMWARE**, which is why there is a file each. A desk
+publishes `show*` and `recording*` only with storage attached that holds shows, and a
+firmware update adds names: 1.7.4 brought the Icecast set and 1.7.6 the OAUTH block. So a
+shorter list is usually this desk's storage or its firmware, not a missing capability.
 
 **NAMES AND TYPES ONLY, no values, deliberately.** The dump carries the wifi PSK and the SIP
 password in plain text, so values are never written here and this file is safe to share.

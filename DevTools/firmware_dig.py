@@ -12,12 +12,15 @@ two Linux binaries) and `os.tar.gz` (the whole OS, 169 MB). The zip's md5 is pub
 this project verified it. The firmware is RODE's, so it lives OUTSIDE the repo, at
 `C:\\Users\\shaun\\rode-firmware`, and is never committed.
 
-    C:\\Users\\shaun\\rode-firmware\\app-1.7.3\\usr\\bin\\rc_audio_mixer   the engine: owns the
+    C:\\Users\\shaun\\rode-firmware\\app-1.7.6\\usr\\bin\\rc_audio_mixer   the engine: owns the
                                                                           property tree and speaks
                                                                           report-3 to us
-    C:\\Users\\shaun\\rode-firmware\\app-1.7.3\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE
+    C:\\Users\\shaun\\rode-firmware\\app-1.7.6\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE
                                                                           app: every screen we
                                                                           cannot reach lives here
+
+Keep the unpacked directory's version in the name and point ACCESSCASTER_FIRMWARE at an older one to
+compare releases: the diff between two images is what dates a feature to a firmware.
 
 Usage:
     python DevTools/firmware_dig.py ntpdate settimeofday       # context around each match
@@ -37,10 +40,23 @@ import _bootstrap  # noqa: F401
 import rcp_read
 from model_tree import parse, walk
 
-# The unpacked firmware, which is RODE's and is never in this repo. Point ACCESSCASTER_FIRMWARE
-# at the `usr/bin` inside an unpacked app image, or drop one beside the repo as `rode-firmware`.
-FW = Path(os.environ.get("ACCESSCASTER_FIRMWARE")
-          or _bootstrap.repo_path("..", "rode-firmware", "app-1.7.3", "usr", "bin"))
+# The unpacked firmware, which is RODE's and is never in this repo. Point ACCESSCASTER_FIRMWARE at
+# the `usr/bin` inside an unpacked app image; otherwise the newest `app-*` under either of the two
+# places an image gets unpacked - beside the repo, or in the home directory - wins, so a session
+# that fetches a new release reads it without editing this file.
+_FW_ROOTS = (Path(_bootstrap.repo_path("..", "rode-firmware")),
+             Path.home() / "rode-firmware")
+
+
+def _newest_image() -> Path:
+    found = sorted((d for root in _FW_ROOTS if root.is_dir()
+                    for d in root.glob("app-*") if (d / "usr" / "bin").is_dir()),
+                   key=lambda d: d.name)
+    return (found[-1] / "usr" / "bin") if found else _FW_ROOTS[0]
+
+
+FW = Path(os.environ["ACCESSCASTER_FIRMWARE"]) if os.environ.get("ACCESSCASTER_FIRMWARE") \
+    else _newest_image()
 BINARIES = ("rc_audio_mixer", "rc_gui_juce")
 IDENT = re.compile(rb"[a-zA-Z][A-Za-z0-9]{3,44}")
 PAD = 12000

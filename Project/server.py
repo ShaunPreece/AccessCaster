@@ -1184,7 +1184,7 @@ def device_overview() -> dict:
 
     # The anchor lookup, guarded on the matrix keeping its expected shape - the same guard
     # rcp_read uses, because a connected SIP caller shifts the grid and every index would be wrong.
-    cells = rcp_read.values(blob, "mixLevelWithAnchor")
+    cells = rcp_read.block_values(blob, dev.matrix.block, "mixLevelWithAnchor")
     shape_ok = len(cells) == dev.matrix.cell_count
 
     def anchor_pct(source_code):
@@ -4099,7 +4099,7 @@ class _ChatIsolation:
     def _snapshot(self):
         blob = rcp_read.read_model_stable(fresh=True)
         m = devices.get_active_device().matrix
-        excl = [bool(v) for v in rcp_read.values(blob, "mixDisabled", "bool")]
+        excl = [bool(v) for v in rcp_read.block_values(blob, m.block, "mixDisabled", "bool")]
         if len(excl) != m.cell_count:
             raise RuntimeError("the unit's mix grid is not the shape this expects "
                                "(a phone caller may be connected)")
