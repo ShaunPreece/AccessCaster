@@ -4847,6 +4847,28 @@ async function loadRouting() {
     routingCtl.usbMode = um.sel;
     usbBox.appendChild(um.row);
 
+    // EXPANDED, the INPUT direction of the same setting. Staged for the same reason as the mode
+    // above and one more: turning it OFF makes the unit unassign every extended input from its
+    // fader, and that layout does not come back by turning it on again. A select rather than a
+    // switch because the two states need naming - "off" does not say what you lose.
+    const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends",
+      data.usb_expanded_labels || [], {
+        applyText: "Apply what this computer sends",
+        onApply: async (sel, btn) => {
+          const res = await routingPost("/api/routing/usb-expanded",
+                                        { on: sel.value === "true" }, btn);
+          if (res.ok) setStagedValue(sel, sel.value, null);
+        },
+      });
+    const expHint = document.createElement("span");
+    expHint.className = "hint";
+    expHint.id = "routing-usb-expanded-hint";
+    expHint.textContent = data.usb_expanded_hint || "";
+    exp.sel.setAttribute("aria-describedby", "routing-usb-expanded-hint");
+    exp.row.appendChild(expHint);
+    routingCtl.usbExpanded = exp.sel;
+    usbBox.appendChild(exp.row);
+
     const ub = makeSwitchRow("routing-usb-bypass", "Send the separate tracks raw", (input) => {
       sendBypass("/api/routing/usb-bypass", input, (msg) => announce(msg, false));
     });
@@ -5985,6 +6007,9 @@ function applyRoutingValues(v) {
   if (v.stereo) applyStereoValues(v.stereo);
   if (routingCtl.usbMode && v.usb_multitrack !== null && v.usb_multitrack !== undefined)
     setStagedValue(routingCtl.usbMode, v.usb_multitrack, null);
+  // String, because the option values came from JSON booleans and a select's value always is one.
+  if (routingCtl.usbExpanded && v.usb_expanded !== null && v.usb_expanded !== undefined)
+    setStagedValue(routingCtl.usbExpanded, String(!!v.usb_expanded), null);
   applyBypass(routingCtl.usbBypass, routingCtl.usbBypassHint, v,
               v.usb_processing_bypass, v.usb_multitrack);
   // v.multitrack is still sent by /api/routing and is deliberately not applied here any more:

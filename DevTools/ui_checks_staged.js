@@ -143,6 +143,14 @@ async function runRouting() {
     check("what this computer receives has an Apply", !!usb.btn);
     await checkOne(usb, "/api/routing/usb-multitrack");
   }
+  // Staged for a harder reason than the mode: turning Expanded off makes the unit unassign every
+  // extended input from its fader, so an accidental arrow press costs a layout, not just a pause.
+  const exp = { sel: el("routing-usb-expanded"), btn: el("routing-usb-expanded-apply"),
+                hint: el("routing-usb-expanded-now") };
+  if (exp.sel) {
+    check("what this computer sends has an Apply", !!exp.btn);
+    await checkOne(exp, "/api/routing/usb-expanded");
+  }
 }
 
 run().catch(async (e) => {

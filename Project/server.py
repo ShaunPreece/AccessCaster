@@ -6324,6 +6324,8 @@ def read_routing_live() -> dict:
     # All headphoneType values in dump order (GAP-6), mapped positionally to the device's outputs.
     headphone_types = [v for v in rcp_read.values(blob, "headphoneType")
                        if v is not None and v != ""]
+    usb_mode, usb_expanded = recorder.split_usb_multitrack(
+        rcp_read.first(blob, "outputMultiMode", "int"))
     return {
         "ok": True,
         "input_sources": input_sources,
@@ -6339,7 +6341,13 @@ def read_routing_live() -> dict:
         # USB audio, this page's own tab. Read by KIND as well as by name:
         # both fields are single-instance, and matching the type is what stops a same-named field
         # elsewhere in the dump being read as this one.
-        "usb_multitrack": rcp_read.first(blob, "outputMultiMode", "int"),
+        # SPLIT, because the one property holds the output mode and the input mode (recorder.py).
+        # Sending the raw value would make the browser show "Just the mix" for a desk that is
+        # actually in Expanded.
+        "usb_multitrack": usb_mode,
+        "usb_expanded": usb_expanded,
+        "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
+        "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
         "usb_processing_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
         "bypass_hint": recorder.BYPASS_HINT,
@@ -6434,11 +6442,41 @@ def action_set_usb_multitrack(mode: int) -> dict:
     if mode not in recorder.USB_MULTITRACK_LABEL:
         return {"ok": False, "message": f"USB multitrack mode {mode} is not valid."}
     with _hid_lock:
-        rcp_transfer.set_usb_multitrack_mode(mode)
+        # READ FIRST so the input half is carried through. The desk holds both in one property, so
+        # writing the mode alone would take a desk out of Expanded without being asked to.
+        _, expanded = recorder.split_usb_multitrack(
+            rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
+        rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(mode, expanded))
     return {"ok": True,
             "message": (f"This computer will now receive "
                         f"{recorder.USB_MULTITRACK_LABEL[mode].lower()}. The unit's audio devices "
                         f"drop out for a couple of seconds while it changes over.")}
+
+
+def action_set_usb_expanded(on: bool) -> dict:
+    """The USB 1 INPUT half of the same property: Standard, or Expanded with four more app inputs.
+
+    THE REPLY CARRIES BOTH COSTS, because neither is visible from the app. Like the output mode
+    above, the change re-advertises the desk's whole USB audio function and the audio devices
+    vanish for a second or two. Turning it OFF additionally makes the desk unassign every extended
+    input from its fader, which is a layout the operator built and cannot get back by turning it on
+    again, so that half says so plainly."""
+    gate = _output_write_gate()
+    if gate is not None:
+        return gate
+    if on is None:
+        return {"ok": False, "message": "Expanded needs on or off."}
+    with _hid_lock:
+        mode, _ = recorder.split_usb_multitrack(
+            rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
+        rcp_transfer.set_usb_multitrack_mode(
+            recorder.join_usb_multitrack(mode or 0, bool(on)))
+    tail = ("" if on else
+            " Anything you had assigned to Game, Music, A or B has been taken off its fader.")
+    return {"ok": True,
+            "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
+                        f"The unit's audio devices drop out for a couple of seconds while it "
+                        f"changes over.{tail}")}
 
 
 def _bypass_sentence(where: str, on: bool) -> str:
@@ -10062,6 +10100,7 @@ POST_ROUTES = {
     # USB audio is ROUTING's, not the recorder's: it is an output, and it never
     # touches the drive, the transport or the recordings list. Same OUTPUT selector either way.
     "/api/routing/usb-multitrack": (action_set_usb_multitrack, [(int, "mode", -1)]),
+    "/api/routing/usb-expanded": (action_set_usb_expanded, [(bool, "on", None)]),
     "/api/routing/usb-bypass": (action_set_usb_bypass, [(bool, "on", None)]),
     "/api/recorder/processing-bypass": (action_set_processing_bypass, [(bool, "on", None)]),
     "/api/routing/automute": (action_set_auto_mute, [(str, "which", ""), (bool, "on", None)]),

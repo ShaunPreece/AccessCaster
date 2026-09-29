@@ -543,6 +543,21 @@ check("a profile taken before these existed writes none of them",
       + args_of(calls_none, "set_usb_multitrack_bypass"), [])
 check("and that is not a failure", res_none["errs"], [])
 
+# EXPANDED rides in the same property, so the restore must COMPOSE the two halves into one write.
+# Restoring them separately would take two USB re-enumerations and let the second undo the first,
+# and dropping the flag would put the desk back to Standard without being asked to.
+calls_exp, _ = apply_pro2(profile(usb_multitrack=2, usb_expanded=True))
+check("Expanded composes into the output mode: post-fader plus expanded is 5",
+      args_of(calls_exp, "set_usb_multitrack_mode"), [(5,)])
+calls_std, _ = apply_pro2(profile(usb_multitrack=2, usb_expanded=False))
+check("and Standard is the bare mode again",
+      args_of(calls_std, "set_usb_multitrack_mode"), [(2,)])
+# THE BACKWARDS-COMPATIBLE CASE, and it is the common one: every profile saved before Expanded was
+# known holds a bare 0-2 and no flag, which is exactly "that mode, Standard".
+calls_old, _ = apply_pro2(profile(usb_multitrack=1))
+check("a profile with no expanded key restores as Standard",
+      args_of(calls_old, "set_usb_multitrack_mode"), [(1,)])
+
 print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is deliberate")
 # The Duo HAS the output_write cap, so it gets these four. That is the right answer rather than a
 # hole: they all sit on the OUTPUT block 0x0D, which is confirmed on BOTH desks (rcp_transfer's own

@@ -192,6 +192,47 @@ USB_MULTITRACK_LABEL = {
     2: "Every channel, post-fader",
 }
 
+# EXPANDED: `outputMultiMode` IS TWO SETTINGS IN ONE VALUE, and RODE's own app shows them as two
+# tabs. The label map above is the USB 1 OUTPUT half; adding 3 puts the USB 1 INPUT into Expanded.
+# All six measured on a Pro II, fw 1.7.6:
+#   0 Off/Standard   1 Pre-Fader/Standard   2 Post-Fader/Standard
+#   3 Off/Expanded   4 Pre-Fader/Expanded   5 Post-Fader/Expanded
+#
+# COMPOSED, NEVER GUARDED. A guard would have to be remembered at every call site and the cost of
+# forgetting is invisible to whoever forgets: writing a bare output mode onto a desk in Expanded
+# drops it to Standard, and the desk then unassigns every extended input the operator had put on a
+# fader. Splitting the value into the two fields it really holds makes that unreachable instead.
+USB_EXPANDED_OFFSET = 3
+
+
+def split_usb_multitrack(value):
+    """`outputMultiMode` -> (output mode 0-2, expanded bool). None in, (None, None) out, so an
+    offline read propagates rather than reading as Off."""
+    if value is None:
+        return None, None
+    value = int(value)
+    expanded = value >= USB_EXPANDED_OFFSET
+    return (value - USB_EXPANDED_OFFSET if expanded else value), expanded
+
+
+def join_usb_multitrack(mode, expanded) -> int:
+    """(output mode 0-2, expanded bool) -> the `outputMultiMode` value to write."""
+    return int(mode) + (USB_EXPANDED_OFFSET if expanded else 0)
+
+
+# Named for what ARRIVES, like every other label here, because "Expanded" alone says nothing about
+# what you get and the state it names is invisible without the driver.
+USB_EXPANDED_LABEL = {
+    False: "Main and Chat only",
+    True: "Main, Chat and four separate app inputs",
+}
+USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more inputs, Game, Music, "
+                     "A and B, each assignable to its own fader, so one program can be faded "
+                     "without the rest. The four names are interchangeable labels, not different "
+                     "kinds of input. It needs RODE's Virtual Devices driver installed here or the "
+                     "four arrive silent, it stops the RODECaster ASIO driver working, and turning "
+                     "it back off unassigns whatever you put on those faders.")
+
 # What the two processing-bypass switches mean, in RODE's own terms and ours.
 #
 # RODE's guide: "When recording in multitrack, you can choose to exclude processing from your

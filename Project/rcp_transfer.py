@@ -651,6 +651,11 @@ def set_usb_multitrack_mode(mode: int) -> int:
     2=Post-Fader, the same three the recorder uses (RODE presents both under one Multitrack
     screen, one section per destination).
 
+    **TAKES THE COMPOSED VALUE, 0-5.** The property also carries the USB 1 INPUT mode in the same
+    int: +3 means Expanded. Compose with `recorder.join_usb_multitrack` rather than passing a bare
+    output mode, or a desk in Expanded is silently dropped back to Standard and unassigns every
+    extended input on a fader.
+
     **Switching this RE-ENUMERATES the desk's whole USB audio function** - measured:
     all four endpoints drop for a second or two and Windows moves the default device. Every caller
     must say so before doing it, and anything that flips this to reach an endpoint must restore the

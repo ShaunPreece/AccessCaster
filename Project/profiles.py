@@ -33,6 +33,7 @@ import channels
 import devices
 import rcp_read
 import rcp_transfer
+import recorder
 import routing_schemes
 from paths import data_path
 
@@ -329,7 +330,11 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             # contains but not whether it is a WAV or an MP3 has backed up half the decision, and
             # neither half is recoverable once the take exists.
             "recording_format": first("recordingCompressionQuality"),
-            "usb_multitrack": first("outputMultiMode"),
+            # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). An OLD profile
+            # holds a bare 0-2 in `usb_multitrack` and no `usb_expanded`, which reads correctly as
+            # "that output mode, Standard" - true of every profile saved before Expanded was known.
+            "usb_multitrack": recorder.split_usb_multitrack(first("outputMultiMode"))[0],
+            "usb_expanded": recorder.split_usb_multitrack(first("outputMultiMode"))[1],
             "usb_processing_bypass": first("outputMultiBypass"),
             "monitor_auto_mute": first("outputMonAutoMute"),
             "bt_auto_mute": first("outputBTAutoMute"),
@@ -737,6 +742,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     # device without the cap we SKIP them (and tell the user) rather than write blindly. Fader
     # source writes above are channelInputSource and stay allowed (verified on both desks).
     _MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_multitrack",
+                        "usb_expanded",
                         "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",
                         "headphone_type", "headphone_types", "compellor_on", "compellor_threshold",
                         "compellor_attack", "compellor_release", "compellor_gain", "delay_on")
@@ -760,12 +766,14 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
         # RODECaster input and output on the machine drops for a second or two. Restored anyway
         # rather than skipped - a profile that saves a setting and quietly declines to put it back
         # is the mismatch this project has already been caught by once - but announced first.
+        # ONE WRITE FOR BOTH HALVES, because the desk keeps them in one property. Restoring them
+        # separately would take two re-enumerations and let the second undo the first.
         if (r.get("usb_multitrack") is not None
                 and int(r["usb_multitrack"]) in rcp_transfer.MULTITRACK_MODES):
             step("Setting what the unit sends this computer. Its audio devices will drop out for "
                  "a couple of seconds.")
-            w("USB multitrack", lambda v=r["usb_multitrack"]:
-              rcp_transfer.set_usb_multitrack_mode(int(v)))
+            w("USB multitrack", lambda v=recorder.join_usb_multitrack(
+                r["usb_multitrack"], r.get("usb_expanded")): rcp_transfer.set_usb_multitrack_mode(v))
         if r.get("usb_processing_bypass") is not None:
             w("raw USB multitrack", lambda v=r["usb_processing_bypass"]:
               rcp_transfer.set_usb_multitrack_bypass(bool(v)))
