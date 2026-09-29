@@ -205,7 +205,7 @@ def _static_proc_index(channel) -> int:
 def _ui_entry_for(dev, channel):
     """Map `channel` (a device ui-channel NAME, or a 1-based PROC_CHANNEL_ORDER index / mic number)
     to the active device's ui_channels entry, or None if the device does not expose it there."""
-    cmap = {c["name"]: c for c in dev.ui_channels}
+    cmap = {c["name"]: c for c in dev.ui_channels_for(usb_expanded())}
     if isinstance(channel, str):
         return cmap.get(channel)
     if isinstance(channel, int) and 1 <= channel <= len(PROC_CHANNEL_ORDER):
@@ -714,7 +714,8 @@ def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
 def line_level_channels(dev=None) -> list:
     """The channel names that take a Level: every non-mic, non-bus input this desk exposes."""
     dev = dev or devices.get_active_device()
-    return [c["name"] for c in (dev.ui_channels or ()) if c.get("kind") == "line"]
+    return [c["name"] for c in dev.ui_channels_for(usb_expanded())
+            if c.get("kind") == "line"]
 
 
 def set_channel_level(channel_name: str, db: int) -> int:
@@ -725,7 +726,7 @@ def set_channel_level(channel_name: str, db: int) -> int:
         raise RuntimeError(
             f"Channel Level (inputDigitalGain) is not supported on the {dev.name} yet - "
             f"its write format has not been decoded.")
-    ch = next((c for c in (dev.ui_channels or ())
+    ch = next((c for c in dev.ui_channels_for(usb_expanded())
                if c.get("kind") == "line" and c["name"] == channel_name), None)
     if ch is None:
         raise ValueError(
@@ -785,7 +786,7 @@ UI_CHANNELS = devices.PRO2.ui_channels
 
 def active_ui_channels() -> tuple:
     """The connected device's UI channels (falls back to the Pro II layout when offline)."""
-    return devices.get_active_device().ui_channels
+    return devices.get_active_device().ui_channels_for(usb_expanded())
 
 
 def ui_channel_map() -> dict:
@@ -1145,7 +1146,7 @@ def read_channels(blob: bytes | None = None) -> list:
         return input_value(blob, ch, prop, dev)
 
     out = []
-    for ch in dev.ui_channels:
+    for ch in dev.ui_channels_for(usb_expanded()):
         pi = proc_index(ch)
         # A BUS HAS NO PROCESSING, and this is where that is decided - see the note on
         # devices.PRO2_UI_CHANNELS. The strip PUBLISHES a whole chain and the desk accepts writes to
@@ -1154,6 +1155,13 @@ def read_channels(blob: bytes | None = None) -> list:
         chain = ch["kind"] != "bus"
         rec = {
             "name": ch["name"], "label": ch["label"], "kind": ch["kind"],
+            # WHETHER IT HAS A STRIP AT ALL, which is a DIFFERENT thing from the desk not
+            # reporting its state and needs different words. Mute, solo and processing are all
+            # per-STRIP, so a source on no fader has none of them - and "the unit did not report
+            # this" sends somebody looking for a fault when the answer is "put it on a fader".
+            # True of Expanded's four until they are assigned, and of a Duo's Mic 2 while combo
+            # linked.
+            "on_fader": pi is not None,
             "muted": at(mutes, pi),
             "solo": at(solos, pi),
             "processing_on": (None if not chain or at(bypass, pi) is None

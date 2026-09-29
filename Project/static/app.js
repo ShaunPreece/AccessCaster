@@ -2185,6 +2185,19 @@ let channelTabs = null;
    every tab acts on; inside tab one you would have to arrow back to it, and could end up editing a
    channel you cannot see from where you are.
    Only the layout changed here; every control still writes exactly the property it did before. */
+// WHY A CONTROL IS DEAD, in the words that let somebody act on it. A channel with no fader has
+// no strip, so it has no mute, no solo and no processing - and saying "the unit did not report
+// this" there sends a screen-reader user hunting for a fault instead of to the Routing page.
+// Expanded's four virtual inputs arrive in exactly that state, and so does a Duo's Mic 2 while it
+// is combo linked.
+function noStripNote(ch, what) {
+  if (ch.on_fader === false) {
+    return ` ${ch.label} is not on a fader, so it has no ${what}. Put it on a fader on the`
+      + " Routing page.";
+  }
+  return "";
+}
+
 function renderChannelPanel(name) {
   const host = document.getElementById("channel-panel");
   host.innerHTML = "";
@@ -2372,8 +2385,9 @@ function buildChannelMute(ch) {
   // costs more here than anywhere else on the page. That the unit's own button does the same thing
   // is on the Help page.
   hint.textContent = "Silences this channel everywhere, including the recording."
-    + (ch.muted === null || ch.muted === undefined
-      ? " The unit did not report this channel's mute state, so this shows unmuted." : "");
+    + (ch.on_fader === false ? noStripNote(ch, "mute")
+      : (ch.muted === null || ch.muted === undefined
+        ? " The unit did not report this channel's mute state, so this shows unmuted." : ""));
   wrap.appendChild(hint);
   return wrap;
 }
@@ -2411,8 +2425,9 @@ function buildChannelSolo(ch) {
   // because announcements arriving on USB 1 are not what you are soloing.
   hint.textContent = "Sends only this channel to your headphones. Care: while anything is soloed "
     + "you will not hear announcements."
-    + (ch.solo === null || ch.solo === undefined
-      ? " The unit did not report this channel's solo state, so this shows off." : "");
+    + (ch.on_fader === false ? noStripNote(ch, "solo")
+      : (ch.solo === null || ch.solo === undefined
+        ? " The unit did not report this channel's solo state, so this shows off." : ""));
   wrap.appendChild(hint);
 
   const clear = document.createElement("button");

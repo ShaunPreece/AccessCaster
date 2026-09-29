@@ -596,9 +596,22 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **NAMED ALWAYS, ASSIGNABLE ONLY IN EXPANDED**, and both halves are load-bearing. A fader keeps
   whatever code it was given, so a desk that leaves Expanded can still hold one and the announcer
   would otherwise say "0 percent, Source 12" out loud; and offering them in Standard puts an input
-  on a fader that can never carry audio. `FaderSpec.labels_for` / `code_set_for` are the pair, fed
-  by `channels.usb_expanded()`. **The dropdown and the write gate must come from the same call**,
-  or a source is offered and then refused.
+  on a fader that can never carry audio. Every `*_for(expanded)` accessor is that pair, fed by
+  `channels.usb_expanded()`. **The list that OFFERS and the list that ACTS must come from the same
+  call**, or a source is offered and then refused, or a matrix row is drawn with no state behind
+  it. Both of those happened during the day this was built.
+- **THERE IS ONE CHANNEL TABLE PER DESK, `devices.CHANNELS_PRO2` / `CHANNELS_DUO`, AND EVERY
+  CHANNEL LIST IS A VIEW OVER IT.** The fader dropdown, the Channels page, the matrix rows and the
+  matrix row INDICES were four hand-written lists spelling out the same codes and labels, with
+  nothing comparing them. Adding the Virtual Devices updated two of the four, which left the
+  routing matrix naming USB 1 after a Windows device that no longer existed and offering no rows
+  for the four at all. **Adding an input is now one `Channel` entry**; which surfaces it appears on
+  is stated per entry, because membership genuinely differs (CallMe 1 takes a fader and has neither
+  a channel strip nor a matrix row). `test_specs.py` asserts the surfaces agree and that the grid
+  reads exactly the rows the page offers.
+  **`Channel.key` IS STORED USER DATA** - profiles, mix schemes and the applied-preset record all
+  save it - so renaming a key orphans somebody's saved settings. Rename the `label`, which is the
+  thing displayed.
 - **USB 1 IS NOT "MAIN STEREO" IN EXPANDED.** The channel carries the `System (RØDECaster)` virtual
   device there, with the other four alongside it, so `FaderSpec.expanded_relabel` renames it to
   "USB 1 (System)". A label naming a Windows device the person no longer has is worse than a plain

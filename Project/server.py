@@ -1077,7 +1077,10 @@ def _overview_routing(blob: bytes) -> dict:
         return {"ok": False, "reason": state.get("reason") or "The routing could not be read.",
                 "notes": []}
     mode_names = {0: "Main Mix", 1: "Mix Minus", 2: "Custom"}
-    src_label = {s["index"]: s["label"] for s in (dev.matrix.sources or ())}
+    # Wide, and mode-aware for the label: a note about a cross-point must name it whatever
+    # mode we think the desk is in.
+    src_label = {s["index"]: s["label"]
+                 for s in (dev.matrix.sources_for(channels.usb_expanded()) or ())}
     notes = []
     for out in (dev.matrix.outputs or ()):
         o = out["index"]
@@ -2411,7 +2414,7 @@ def _ann_source_label(source_code: int) -> str:
         lbl = devices.get_active_device().fader.labels_for(channels.usb_expanded()).get(source_code)
         if lbl:
             return lbl
-        for s in devices.get_active_device().matrix.sources:
+        for s in devices.get_active_device().matrix.sources_for(True):
             if s.get("index") == source_code:
                 return s.get("label") or f"source {source_code}"
     except Exception:
@@ -2887,7 +2890,11 @@ def _ann_gain_label(path, is_mic: bool):
         return f"Mic {channels.mic_channel_number(entry)} gain"
     if entry.get("kind") != "line":
         return None
-    return f"{entry.get('label') or entry.get('name')} input level"
+    # RESOLVED from the wide set above, NAMED from the current mode: the entry that an address
+    # matches is fixed, what it is called is not.
+    label = (dev.fader.labels_for(channels.usb_expanded()).get(entry.get("source_code"))
+             or entry.get("label") or entry.get("name"))
+    return f"{label} input level"
 
 
 def _ann_at_limit(st: dict, delta: int) -> bool:
@@ -5924,7 +5931,7 @@ def _chan_check_stop(speak: bool = True, run_id: int = None) -> str:
 
 def _chan_check_source(name: str):
     """The matrix source a channel name refers to, or (None, reason)."""
-    src = next((s for s in _active_matrix().sources if s["key"] == name), None)
+    src = next((s for s in _active_matrix().sources_for(True) if s["key"] == name), None)
     if src is None:
         return None, f"{name} is not a channel this unit exposes to the mixes."
     # CHAT IS THE ONE CHANNEL THIS CANNOT DO, and the reason is the mechanism rather than a rule:
@@ -6157,7 +6164,8 @@ def _monitor_outputs():
 
 def _monitor_sources():
     """(index, label) for each matrix source on the connected device (device-labelled)."""
-    return [(s["index"], s["label"]) for s in _active_matrix().sources]
+    return [(s["index"], s["label"])
+            for s in _active_matrix().sources_for(channels.usb_expanded())]
 
 
 def monitor_mix_model() -> dict:
@@ -6752,7 +6760,7 @@ def _matrix_output(idx: int):
 
 
 def _matrix_source(idx: int):
-    return next((s for s in _active_matrix().sources if s["index"] == idx), None)
+    return next((s for s in _active_matrix().sources_for(True) if s["index"] == idx), None)
 
 
 def _matrix_write_gate():
@@ -6783,7 +6791,8 @@ def matrix_model() -> dict:
     """Static layout of the output mix matrix for the UI, for the CONNECTED device."""
     m = _active_matrix()
     outputs = m.outputs or devices.PRO2.matrix.outputs
-    sources = m.sources or devices.PRO2.matrix.sources
+    sources = (m.sources_for(channels.usb_expanded())
+               or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
     read_only = _matrix_write_gate() is not None
     # This note IS rendered (app.js buildMatrix overwrites the static hint with it), so the
     # read-only variant actually reaches the Duo instead of the page promising writes it cannot do.
@@ -6853,7 +6862,7 @@ def read_matrix_live() -> dict:
         return {"ok": False, "message": st["reason"]}
     # Map source code -> UI source key using the CONNECTED device's matrix labels, so the Duo's
     # code 2 resolves to "Headset" (its own key) rather than the Pro II's "Mic3".
-    idx2key = {s["index"]: s["key"] for s in _active_matrix().sources}
+    idx2key = {s["index"]: s["key"] for s in _active_matrix().sources_for(True)}
     excluded = {str(o): {idx2key.get(s, str(s)): bool(v) for s, v in srcs.items()}
                 for o, srcs in st["excluded"].items()}
     modes = {str(o): v for o, v in st.get("modes", {}).items()}

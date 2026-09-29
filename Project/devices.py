@@ -69,7 +69,34 @@ class MatrixSpec:
     # (index == matrix column; mixminus = whether the output offers a Mix-Minus mode). Order is
     # the reading order for the UI. {s["index"] for s in sources} must equal set(source_indices).
     sources: tuple = ()
+    # Rows that exist only in Expanded. KEPT OUT OF `sources` on purpose: a mix scheme and a
+    # profile both record the matrix BY KEY off `sources`, so widening it would change the shape
+    # of saved user data according to which mode the desk happened to be in when it was saved.
+    # The page asks `sources_for` instead. The grid itself is unaffected either way - it carries
+    # 30 source rows on the wire in both modes, which is why these are addressable at all.
+    expanded_sources: tuple = ()
+    # {code: label} for a row whose MEANING changes in Expanded, off the same channel table that
+    # feeds FaderSpec.expanded_relabel. Carried here too so the matrix cannot drift from the
+    # Channels page, which is the exact fault this whole table exists to make impossible.
+    expanded_relabel: tuple = ()
     outputs: tuple = ()
+
+    def source_indices_for(self, expanded: bool) -> tuple:
+        """The codes the GRID READ should walk. Must stay in step with `sources_for`, which is
+        why both come off the same table."""
+        return tuple(self.source_indices) + (
+            tuple(s["index"] for s in self.expanded_sources) if expanded else ())
+
+    def sources_for(self, expanded: bool) -> tuple:
+        """The matrix rows to SHOW. Expanded adds Game, Music, A and B and renames USB 1; they are
+        real cross-points in both modes, but offering four dead rows across every output is a lot
+        of grid for a screen reader to walk past for nothing."""
+        rows = tuple(self.sources) + (tuple(self.expanded_sources) if expanded else ())
+        if not expanded:
+            return rows
+        renames = dict(self.expanded_relabel)
+        return tuple(dict(r, label=renames[r["index"]]) if r["index"] in renames else r
+                     for r in rows)
 
 
 @dataclass(frozen=True)
@@ -378,6 +405,172 @@ HEADPHONE_TYPES = HeadphoneTypeSpec(
 # ever puts it to use) but deliberately keep vector_len unset so restore still writes only 9 - writing
 # slot 9 would show the layout-tidy logic a duplicated source it never meets today.
 #
+# --- THE ONE CHANNEL TABLE ---------------------------------------------------------------------
+# EVERY INPUT THIS DESK CAN CARRY, WRITTEN ONCE. The three lists the app used to keep - the fader
+# dropdown, the Channels page and the routing-matrix rows - are now VIEWS over this, derived below.
+#
+# WHY IT IS ONE TABLE. Those three each spelled out the same source code and the same label, and
+# nothing checked them against each other, so adding an input meant remembering three places and
+# a rename meant remembering three more. Measured, 29th September 2026: adding RODE's four Virtual
+# Devices updated two of the three, which left the routing matrix naming USB 1 after a Windows
+# device that no longer exists and offering no rows at all for the four new inputs. That is not a
+# mistake anyone can be careful enough to avoid; the structure has to make it impossible.
+#
+# ADDING AN INPUT IS NOW ONE ENTRY. Which surfaces it appears on is stated per entry, because
+# membership genuinely differs - CallMe 1 can go on a fader but has no channel strip and no matrix
+# row - and a flag that says so is checkable where three separate omissions are not.
+@dataclass(frozen=True)
+class Channel:
+    """One input, and everything the app needs to know about it.
+
+      code  : the `channelInputSource` value, which is also its index into the desk's INPUTSOURCE
+              table. The one identifier the DESK uses.
+      key   : the stable identifier WE use. Profiles, mix schemes and the applied-preset record
+              all store this, so **renaming a key silently orphans saved user data** - rename the
+              label instead, which is what is displayed.
+      kind  : "mic" (gain, phantom, polarity, type, effects), "line" (a Level), or "bus" (mute and
+              solo only - see the SMART pads note below; a bus has no Level and no processing).
+      expanded_only / expanded_label : Expanded is RODE's Virtual Devices mode, which adds four
+              inputs and changes what USB 1 carries. See FaderSpec.expanded_sources.
+    """
+
+    code: int
+    key: str
+    label: str
+    kind: str
+    on_faders: bool = True
+    on_channels_page: bool = True
+    in_matrix: bool = True
+    expanded_only: bool = False
+    expanded_label: str = ""
+
+
+def _ui_channel_view(table) -> tuple:
+    """The Channels page's list, IN TABLE ORDER. The order is what a screen reader walks, so it is
+    the table's own order rather than anything derived."""
+    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code}
+                 for c in table if c.on_channels_page and not c.expanded_only)
+
+
+def _expanded_ui_channel_view(table) -> tuple:
+    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code}
+                 for c in table if c.on_channels_page and c.expanded_only)
+
+
+def _matrix_index_view(table) -> tuple:
+    """Just the codes of the matrix rows, in code order. The grid read walks these; `sources`
+    carries the same set with labels for the UI, and the two cannot disagree now that both come
+    from one table - which the docstring above has always required and nothing used to check."""
+    return tuple(c.code for c in sorted(table, key=lambda c: c.code)
+                 if c.in_matrix and not c.expanded_only)
+
+
+def _expanded_matrix_index_view(table) -> tuple:
+    return tuple(c.code for c in sorted(table, key=lambda c: c.code)
+                 if c.in_matrix and c.expanded_only)
+
+
+def _matrix_source_view(table) -> tuple:
+    """The matrix rows, IN CODE ORDER, because a row's position is its source index on the wire."""
+    return tuple({"index": c.code, "key": c.key, "label": c.label}
+                 for c in sorted(table, key=lambda c: c.code)
+                 if c.in_matrix and not c.expanded_only)
+
+
+def _expanded_matrix_source_view(table) -> tuple:
+    return tuple({"index": c.code, "key": c.key, "label": c.label}
+                 for c in sorted(table, key=lambda c: c.code)
+                 if c.in_matrix and c.expanded_only)
+
+
+def _assignable_view(table) -> tuple:
+    """(code, label) for the fader dropdown, IN CODE ORDER - which is also the gap-fill order used
+    when tidying a messy layout, so it wants to be the desk's own numbering and not a UI whim."""
+    return tuple((c.code, c.label) for c in sorted(table, key=lambda c: c.code)
+                 if c.on_faders and not c.expanded_only)
+
+
+def _expanded_assignable_view(table) -> tuple:
+    return tuple((c.code, c.label) for c in sorted(table, key=lambda c: c.code)
+                 if c.on_faders and c.expanded_only)
+
+
+def _relabel_view(table) -> tuple:
+    """{code: label} for channels whose MEANING changes in Expanded."""
+    return tuple((c.code, c.expanded_label) for c in table if c.expanded_label)
+
+
+# RODE's Virtual Devices: source codes measured on hardware 29th September 2026, each written to a
+# fader and read back. Shared by both desks - a code is a position in the firmware's
+# InputSourceType enum and both run the same binary, the argument that settles the pair codes too.
+# Not independently measured on a Duo; `DevTools/input_sources.py` against one would confirm it.
+# The four are functionally identical by RODE's own account, so the ORDER is theirs (guide and
+# driver INF) and costs a label if wrong, never an address.
+_VIRTUAL_DEVICES = (
+    Channel(12, "Game", "Game", "line", expanded_only=True),
+    Channel(13, "Music", "Music", "line", expanded_only=True),
+    Channel(14, "VirtualA", "Virtual A", "line", expanded_only=True),
+    Channel(15, "VirtualB", "Virtual B", "line", expanded_only=True),
+)
+
+CHANNELS_PRO2 = (
+    Channel(0, "Mic1", "Mic 1", "mic"),
+    Channel(1, "Mic2", "Mic 2", "mic"),
+    Channel(2, "Mic3", "Mic 3", "mic"),
+    Channel(3, "Mic4", "Mic 4", "mic"),
+    Channel(10, "Bluetooth", "Bluetooth", "line"),
+    # In Expanded the computer no longer sends one stereo mix down USB 1: the channel carries the
+    # System virtual device, with Game, Music, A and B alongside it. Naming it after a Windows
+    # device the person no longer has is worse than naming it plainly, and this is read aloud on
+    # every encoder turn.
+    Channel(7, "USB1", "USB 1 (Main Stereo)", "line", expanded_label="USB 1 (System)"),
+    Channel(8, "Chat", "Chat", "line"),
+    Channel(9, "USB2", "USB 2 (Secondary)", "line"),
+    # THE SMART PADS BUS IS A CHANNEL, BUT NOT A PROCESSED ONE. It sits on a strip and that strip
+    # PUBLISHES a full chain: it reads channelCurrentFxPreset -1 with channelBypassProcessing
+    # False, and every parameter on it accepts a write, lands, reads back and restores byte-clean.
+    # NONE OF THAT IS PROOF.
+    #
+    # SETTLED BY EAR ON BOTH DESKS: the chain does NOTHING to the pads audio. Pan hard over moves
+    # nothing, against a same-listener, same-headphones control where pan on Mic 2 moves the voice
+    # to one ear; maximum HPF, full EQ cuts, a slammed noise gate and zero make-up gain are all
+    # inaudible. **RODE's own guide says so** ("You can add processing to any audio channel except
+    # the SMART pads") and so does their app, which offers no processing for it. A write landing
+    # at its own address proves an address is live, never that it reaches audio.
+    # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
+    # channels.read_channels, which is where that is enforced, and app.js renderChannelPanel.
+    # DO NOT PUT THE CHAIN BACK on the strength of a write reading back cleanly. It will.
+    #
+    # Its level is its FADER, not inputDigitalGain (slot 11 reads a flat 0 while every real line
+    # slot carries a value), so offering a Level slider would offer a control we have not shown to
+    # do anything.
+    Channel(11, "SMARTpads", "SMART pads", "bus"),
+    # ASSIGNABLE TO A FADER AND NOWHERE ELSE, deliberately. Its source code is unconfirmed and the
+    # tenth strip currently resolves to source 9, which USB 2 already claims - so a strip lookup
+    # for it would silently land on USB 2's chain, and a matrix row would index the wrong grid
+    # line. Needs its own capture before it earns either.
+    Channel(16, "CallMe1", "CallMe 1", "line", on_channels_page=False, in_matrix=False),
+) + _VIRTUAL_DEVICES
+
+CHANNELS_DUO = (
+    Channel(0, "Mic1", "Mic 1", "mic"),
+    Channel(1, "Mic2", "Mic 2", "mic"),
+    # Source 2 is the 3.5mm TRRS HEADSET jack on a Duo, where it is Mic 3 on a Pro II. Classed
+    # "line" and its Level writes inputDigitalGain; the desk's own INPUTSOURCE node for it looks
+    # like a MIC's, which is an open question - see PROJECT_GUIDE part 2. Nobody has had a headset
+    # in that jack to settle it by ear.
+    Channel(2, "Headset", "Headset", "line"),
+    Channel(7, "USB1", "USB 1", "line"),
+    Channel(8, "Chat", "Chat", "line"),
+    Channel(9, "USB2", "USB 2", "line"),
+    Channel(10, "Bluetooth", "Bluetooth", "line"),
+    # Mute is EAR-PROVEN here and only the mute: the pads go silent and come back, and the desk
+    # mutes all 13 of source 11's cross-points on its own. The processing chain does nothing on
+    # this desk either - see CHANNELS_PRO2 above.
+    Channel(11, "SMARTpads", "SMART pads", "bus"),
+    Channel(16, "CallMe1", "CallMe 1", "line", on_channels_page=False, in_matrix=False),
+) + _VIRTUAL_DEVICES
+
 PRO2_FADERS = FaderSpec(
     count=9, physical=6, capture_len=10,
     # Virtual faders 7/8/9 (indices 6-8) carry a settable level; faders 1-6 are analog pots. The
@@ -385,11 +578,7 @@ PRO2_FADERS = FaderSpec(
     # anything naming them here.
     # (code, label): codes are channelInputSource values (mics read as 0-3). 10 assignable
     # sources over 9 faders, so one is always off-fader - exactly the Pro II behaviour.
-    assignable=(
-        (0, "Mic 1"), (1, "Mic 2"), (2, "Mic 3"), (3, "Mic 4"),
-        (7, "USB 1 (Main Stereo)"), (8, "Chat"), (9, "USB 2 (Secondary)"),
-        (10, "Bluetooth"), (11, "SMART pads"), (16, "CallMe 1"),
-    ),
+    assignable=_assignable_view(CHANNELS_PRO2),
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
     # All three codes captured from the RODE app on hardware.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4")),
@@ -401,10 +590,10 @@ PRO2_FADERS = FaderSpec(
     # prints that table. The ORDER is RODE's own, from their user guide and their driver's INF,
     # and is not independently measured; it costs a label if wrong, never a wrong address, and
     # RODE say the four are functionally identical anyway.
-    expanded_sources=((12, "Game"), (13, "Music"), (14, "Virtual A"), (15, "Virtual B")),
+    expanded_sources=_expanded_assignable_view(CHANNELS_PRO2),
     # In Expanded the computer no longer sends one stereo mix, so naming USB 1 after a Windows
     # device that has gone is worse than not naming it at all.
-    expanded_relabel=((7, "USB 1 (System)"),),
+    expanded_relabel=_relabel_view(CHANNELS_PRO2),
     default_vector=(0, 1, 2, 3, 10, 11, 7, 8, 9),   # confirmed clean default
 )
 
@@ -446,11 +635,7 @@ PRO2_FADERS = FaderSpec(
 # live-tested).
 DUO_FADERS = FaderSpec(
     count=9, physical=4, vector_len=10,
-    assignable=(
-        (0, "Mic 1"), (1, "Mic 2"), (2, "Headset"),
-        (7, "USB 1"), (8, "Chat"), (9, "USB 2"),
-        (10, "Bluetooth"), (11, "SMART pads"), (16, "CallMe 1"),
-    ),
+    assignable=_assignable_view(CHANNELS_DUO),
     # ONE legal pair, and it is one because of what the Duo's inputs ARE, not caution. Pair codes are
     # positions in the firmware's InputSourceType enum, and both desks run the SAME binary, so code 4
     # is "1 + 2" everywhere.
@@ -476,7 +661,7 @@ DUO_FADERS = FaderSpec(
     # Expanded and it is where the mode was found. NOT measured on a Duo, and the way to measure it
     # is `DevTools/input_sources.py` with one attached - four codes carrying a colour and a digital
     # gain of -12 is the signature.
-    expanded_sources=((12, "Game"), (13, "Music"), (14, "Virtual A"), (15, "Virtual B")),
+    expanded_sources=_expanded_assignable_view(CHANNELS_DUO),
     default_vector=(0, 1, 10, 11, 2, 7, 8, 9, -1, 9),
 )
 
@@ -582,6 +767,12 @@ class DeviceModel:
     #                 entry on both desks, and two names for one number is what makes a POSITIONAL
     #                 input read look reasonable.
     ui_channels: tuple = ()
+    # The same shape of entry for channels that EXIST ONLY IN EXPANDED. Kept apart rather than
+    # flagged inside `ui_channels`, so every caller that has no business knowing about the mode
+    # keeps the plain tuple and cannot accidentally offer a channel the desk is not carrying.
+    # Reach for both through `ui_channels_for`. The fader side does the same thing with
+    # `FaderSpec.expanded_sources`, and for the same reason.
+    expanded_ui_channels: tuple = ()
     # SMART-pad grid shape (see PadSpec). Defaults to the Pro II 8-per-bank grid so offline /
     # unknown-device code paths keep Pro II behaviour.
     pad: PadSpec = PadSpec(pads_per_bank=8)
@@ -637,7 +828,33 @@ class DeviceModel:
             code = int(list(path)[0]) - self.input_table_base
         except Exception:
             return None
-        return next((c for c in (self.ui_channels or ()) if c.get("source_code") == code), None)
+        return next((c for c in self.every_ui_channel
+                     if c.get("source_code") == code), None)
+
+    @property
+    def every_ui_channel(self) -> tuple:
+        """Every channel this desk can ever carry, whatever mode it is in, WITHOUT any relabel.
+
+        FOR RESOLVING, NOT FOR DISPLAY, and that distinction is what `channel_for_input_path`
+        needs: an address that resolves to Game is Game whatever mode we happen to think we are
+        in, so a push must never fail to name a channel because a cached flag says otherwise. Take
+        the LABEL from `ui_channels_for` instead - resolving with the wide set and then displaying
+        its label is how the Standard-mode announcer came to say "USB 1 (System)"."""
+        return tuple(self.ui_channels) + tuple(self.expanded_ui_channels)
+
+    def ui_channels_for(self, expanded: bool) -> tuple:
+        """The channel list to SHOW, given whether the desk is in Expanded.
+
+        THE RELABEL COMES FROM `fader.expanded_relabel` rather than a second table of its own.
+        Both are keyed by source code and both answer "what is this channel called in Expanded",
+        so two tables would be one rename away from the Channels page and the Routing page calling
+        the same input different things."""
+        out = tuple(self.ui_channels) + (tuple(self.expanded_ui_channels) if expanded else ())
+        if not expanded:
+            return out
+        renames = dict(self.fader.expanded_relabel)
+        return tuple(dict(c, label=renames[c["source_code"]])
+                     if c.get("source_code") in renames else c for c in out)
 
     @property
     def slug(self) -> str:
@@ -670,40 +887,20 @@ class DeviceModel:
 # USB 1's audio, so slot 1 processes whatever sits on STRIP 1. On the DEFAULT layout the dynamic
 # lookup returns the same indices a pinned map does (0,1,2,3,4,-,6,7,8), so a pinned map looks
 # correct until faders are moved.
-PRO2_UI_CHANNELS = (
-    {"name": "Mic1", "label": "Mic 1", "kind": "mic", "source_code": 0},
-    {"name": "Mic2", "label": "Mic 2", "kind": "mic", "source_code": 1},
-    {"name": "Mic3", "label": "Mic 3", "kind": "mic", "source_code": 2},
-    {"name": "Mic4", "label": "Mic 4", "kind": "mic", "source_code": 3},
-    {"name": "Bluetooth", "label": "Bluetooth", "kind": "line", "source_code": 10},
-    {"name": "USB1", "label": "USB 1 (Main Stereo)", "kind": "line", "source_code": 7},
-    {"name": "Chat", "label": "Chat", "kind": "line", "source_code": 8},
-    {"name": "USB2", "label": "USB 2 (Secondary)", "kind": "line", "source_code": 9},
-    # THE SMART PADS BUS IS A CHANNEL, BUT NOT A PROCESSED ONE. It sits on a strip (source 11,
-    # strip 5 in the default layout) and that strip PUBLISHES a full chain: it reads
-    # channelCurrentFxPreset -1 with channelBypassProcessing False, and every parameter on it accepts
-    # a write, lands, reads back and restores byte-clean. NONE OF THAT IS PROOF.
-    #
-    # SETTLED BY EAR ON BOTH DESKS: the chain does NOTHING to the pads audio. Pan hard over moves
-    # nothing, against a same-listener, same-headphones control where pan on Mic 2 moves the voice
-    # to one ear; maximum HPF, full EQ cuts, a slammed noise gate and zero make-up gain are all
-    # inaudible. **RODE's own guide says so** ("You can add processing to any audio channel except
-    # the SMART pads") and so does their app, which offers no processing for it. A write landing at
-    # its own address proves an address is live, never that it reaches audio.
-    # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
-    # channels.read_channels, which is where that is enforced, and app.js renderChannelPanel.
-    # DO NOT PUT THE CHAIN BACK on the strength of a write reading back cleanly. It will.
-    #
-    # kind "bus": mute and solo only. NO level, NO processing and no mic controls. Its
-    # level is its FADER, not inputDigitalGain (slot 11 reads a flat 0 while every real line slot
-    # carries a value), so offering a Level slider would be offering a control we have not shown to
-    # do anything.
-    #
-    # CallMe1 is in the same position and is deliberately NOT added: its source code is unconfirmed,
-    # and the tenth strip currently resolves to source 9, which USB 2 already claims - so a strip
-    # lookup for it would silently land on USB 2's chain. Needs its own capture first.
-    {"name": "SMARTpads", "label": "SMART pads", "kind": "bus", "source_code": 11},
-)
+PRO2_UI_CHANNELS = _ui_channel_view(CHANNELS_PRO2)
+
+# RODE's Virtual Devices, present only while the desk is in Expanded (source codes measured on
+# hardware; see FaderSpec.expanded_sources). Kind "line", like USB 1 and Chat, because that is what
+# they are: a stereo feed arriving over the same USB cable. Each has its own INPUTSOURCE node
+# carrying `inputDigitalGain`, so the Level control addresses the same property at the same kind of
+# address as every other line input, and the processing chain is the ordinary per-STRIP one.
+#
+# THE LEVEL IS PROVEN ON HARDWARE and the processing is not. A write reaching its own address and
+# reading back is never proof that it reaches audio - the SMART pads bus is the standing example,
+# and it is why that one is kind "bus". These four are treated as ordinary line inputs because they
+# arrive on the same cable as USB 1, which is processed; if one turns out to be inaudible, the
+# entry to change is here.
+EXPANDED_UI_CHANNELS = _expanded_ui_channel_view(CHANNELS_PRO2)
 
 # Duo read map, against the stray-free fw-1.7.3 reference dump.
 # INPUT values are read and written BY ADDRESS (DeviceModel.input_path), not by array position, and
@@ -720,27 +917,7 @@ PRO2_UI_CHANNELS = (
 # Mic1 -> strip 0 -> proc idx 0 is CONFIRMED (capture). Mic2 (source 1) is combo-linked/hidden and
 # not on any strip in the default layout, so its proc index resolves to None (processing fields read
 # as None) while its input values still read.
-DUO_UI_CHANNELS = (
-    {"name": "Mic1", "label": "Mic 1", "kind": "mic", "source_code": 0},
-    {"name": "Mic2", "label": "Mic 2", "kind": "mic", "source_code": 1},
-    {"name": "Headset", "label": "Headset", "kind": "line", "source_code": 2},
-    {"name": "USB1", "label": "USB 1", "kind": "line", "source_code": 7},
-    {"name": "Chat", "label": "Chat", "kind": "line", "source_code": 8},
-    {"name": "USB2", "label": "USB 2", "kind": "line", "source_code": 9},
-    {"name": "Bluetooth", "label": "Bluetooth", "kind": "line", "source_code": 10},
-    # THE SMART PADS BUS, and it matters MORE on this desk than on a Pro II: the Duo drives it from
-    # a PHYSICAL fader (vector index 3 in the shipped layout, one of the four RODE names), so
-    # leaving it out gives its owner a strip they can grab but cannot mute, solo or process from the
-    # app. Nothing extra has to be proven - kind "bus" already means
-    # "chain and mute/solo, no input level" everywhere that reads it (channels.read_channels,
-    # app.js fillChannelSettings), the strip lookup is the same channelInputSource.index(11) the other
-    # Duo channels use, and its processing selector is the ordinary proc_sel_base + strip.
-    # Its level is the FADER, not inputDigitalGain, exactly as on the Pro II - see PRO2_UI_CHANNELS.
-    # EAR-PROVEN, and only the MUTE is real: the pads go silent and come back, and the desk mutes
-    # all 13 of source 11's cross-points on its own. The PROCESSING chain does nothing on this desk
-    # either - see PRO2_UI_CHANNELS above.
-    {"name": "SMARTpads", "label": "SMART pads", "kind": "bus", "source_code": 11},
-)
+DUO_UI_CHANNELS = _ui_channel_view(CHANNELS_DUO)
 
 
 # --- Routing-matrix UI label maps (see MatrixSpec.sources / .outputs) ----------
@@ -748,17 +925,8 @@ DUO_UI_CHANNELS = (
 # so the routing screen is device-aware. The 9 confirmed sources + 11 confirmed outputs (indices
 # match rcp_transfer.CROSS_POINT_SOURCE_INDEX / CROSS_POINT_OUTPUT_INDEX; the inferred CallMe2/3
 # slots stay unexposed, exactly as before).
-PRO2_MATRIX_SOURCES = (
-    {"index": 0, "key": "Mic1", "label": "Mic 1"},
-    {"index": 1, "key": "Mic2", "label": "Mic 2"},
-    {"index": 2, "key": "Mic3", "label": "Mic 3"},
-    {"index": 3, "key": "Mic4", "label": "Mic 4"},
-    {"index": 7, "key": "USB1", "label": "USB 1 (Main Stereo)"},
-    {"index": 8, "key": "Chat", "label": "Chat"},
-    {"index": 9, "key": "USB2", "label": "USB 2 (Secondary)"},
-    {"index": 10, "key": "Bluetooth", "label": "Bluetooth"},
-    {"index": 11, "key": "SMARTpads", "label": "SMART pads"},
-)
+PRO2_MATRIX_SOURCES = _matrix_source_view(CHANNELS_PRO2)
+PRO2_MATRIX_EXPANDED_SOURCES = _expanded_matrix_source_view(CHANNELS_PRO2)
 # "default_mode" (0 Main Mix / 1 Mix Minus / 2 Custom) is the mode "Reset all output mixes" puts
 # each output back to.
 #
@@ -792,16 +960,8 @@ PRO2_MATRIX_OUTPUTS = (
 # (mode selector 0x31 + output_index). The Duo's other output identities beyond HP1/HP2 are not
 # yet captured, and matrix WRITES are gated off anyway (devices.DUO.caps lacks "matrix_write"), so
 # the matrix screen is read-only on the Duo and we expose only what is confirmed rather than guess.
-DUO_MATRIX_SOURCES = (
-    {"index": 0, "key": "Mic1", "label": "Mic 1"},
-    {"index": 1, "key": "Mic2", "label": "Mic 2"},
-    {"index": 2, "key": "Headset", "label": "Headset"},
-    {"index": 7, "key": "USB1", "label": "USB 1"},
-    {"index": 8, "key": "Chat", "label": "Chat"},
-    {"index": 9, "key": "USB2", "label": "USB 2"},
-    {"index": 10, "key": "Bluetooth", "label": "Bluetooth"},
-    {"index": 11, "key": "SMARTpads", "label": "SMART pads"},
-)
+DUO_MATRIX_SOURCES = _matrix_source_view(CHANNELS_DUO)
+DUO_MATRIX_EXPANDED_SOURCES = _expanded_matrix_source_view(CHANNELS_DUO)
 # CONFIRMED on hardware, by driving the RODECaster App's Output > Routing screen: the Duo
 # exposes NINE outputs. It has no Headphone 3/4 (only two headphone jacks), so it SKIPS Pro II indices
 # 2 and 3, but keeps the SAME internal indexing for the rest - proven by the clean-dump outputMixMinus
@@ -833,8 +993,10 @@ PRO2 = DeviceModel(
               "USB1", "Chat", "USB2"),
     mic_input_format="channel",
     matrix=MatrixSpec(cell_count=390, output_count=11,
-                      source_indices=(0, 1, 2, 3, 7, 8, 9, 10, 11), row_stride=13,
-                      sources=PRO2_MATRIX_SOURCES, outputs=PRO2_MATRIX_OUTPUTS),
+                      source_indices=_matrix_index_view(CHANNELS_PRO2), row_stride=13,
+                      sources=PRO2_MATRIX_SOURCES,
+    expanded_sources=PRO2_MATRIX_EXPANDED_SOURCES,
+    expanded_relabel=_relabel_view(CHANNELS_PRO2), outputs=PRO2_MATRIX_OUTPUTS),
     # "chain_follow": a fader move also MOVES that channel's processing/effects chain to the strip
     # it landed on. On both desks. The Duo's "empty strip (-1) and a duplicated source" is not a
     # reason to withhold it: the duplicate sits in the 10th vector slot, which is not a fader and
@@ -875,6 +1037,7 @@ PRO2 = DeviceModel(
     proc_sel_base=0x1C,
     fx_sel_base=0x26,
     ui_channels=PRO2_UI_CHANNELS,
+    expanded_ui_channels=EXPANDED_UI_CHANNELS,
     pad=PadSpec(pads_per_bank=8),   # 8 pads/bank x 8 banks = 64 slots; system pads 56-63
     fader=PRO2_FADERS,
     input_strips=PRO2_INPUT_STRIPS,
@@ -943,9 +1106,11 @@ DUO = DeviceModel(
     # baseline) = 0,1,2,7,8,9,10,11 (Mic1/Mic2/Headset/USB1/Chat/USB2/BT/SMART); the Pro II set minus
     # src3 (no Mic3/Mic4 on the Duo). See RODECASTER_PROTOCOL.txt section 5 (routing matrix).
     matrix=MatrixSpec(cell_count=390, output_count=13,
-                      source_indices=(0, 1, 2, 7, 8, 9, 10, 11),   # CONFIRMED on hardware
+                      source_indices=_matrix_index_view(CHANNELS_DUO),  # CONFIRMED on hardware
                       row_stride=13,                               # CONFIRMED (13*source+output)
-                      sources=DUO_MATRIX_SOURCES, outputs=DUO_MATRIX_OUTPUTS),
+                      sources=DUO_MATRIX_SOURCES,
+    expanded_sources=DUO_MATRIX_EXPANDED_SOURCES,
+    expanded_relabel=_relabel_view(CHANNELS_DUO), outputs=DUO_MATRIX_OUTPUTS),
     # input_mic_write ON (format captured + byte-verified). "processing" + "channel_read" ON (both
     # hardware-confirmed, on a stray-free desk). "matrix_read" is ON (formula verified on hardware,
     # see the matrix note above; cell_count guard set to the MIX block's 390).
@@ -1070,6 +1235,7 @@ DUO = DeviceModel(
     proc_sel_base=0x1C,
     fx_sel_base=0x26,
     ui_channels=DUO_UI_CHANNELS,
+    expanded_ui_channels=EXPANDED_UI_CHANNELS,
     # 6 pads/bank x 8 banks = 48 slots; system pads at padIdx 42-47 (bank 8). CONFIRMED read-only.
     pad=PadSpec(pads_per_bank=6),
     # Fader vector is 10 entries (10 logical strips); code 2 = Headset (not Mic 3); no Mic3/Mic4.

@@ -319,5 +319,60 @@ check("USB 1 is renamed in Expanded, since Main Stereo is not what the computer 
 check("and a relabel never changes what may be written",
       devices.PRO2.fader.code_set_for(True) >= devices.PRO2.fader.code_set_for(False))
 
+
+# --- ONE CHANNEL TABLE, AND THE THREE SURFACES DERIVED FROM IT ------------------------------
+# The fader dropdown, the Channels page and the routing-matrix rows used to be three hand-written
+# lists that each spelled out the same codes and labels. Nothing compared them, so adding RODE's
+# four Virtual Devices updated two of the three and left the matrix naming USB 1 after a Windows
+# device that no longer existed, with no rows for the four at all. They are now views over
+# devices.CHANNELS_<DESK>. These checks are what stops a fourth list growing back.
+print("\nTHE CHANNEL TABLE IS THE ONLY LIST")
+for _dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices.CHANNELS_DUO)):
+    _n = _dev.name
+    _by_code = {c.code: c for c in _table}
+    check(f"{_n}: no code appears twice", len(_by_code) == len(_table))
+    check(f"{_n}: no key appears twice", len({c.key for c in _table}) == len(_table))
+    check(f"{_n}: every kind is one we handle",
+          {c.kind for c in _table} <= {"mic", "line", "bus"}, {c.kind for c in _table})
+    # The three surfaces must AGREE about any channel they share. This is the whole point.
+    _fader = dict(_dev.fader.labels_for(False))
+    _page = {c["source_code"]: c["label"] for c in _dev.ui_channels}
+    _grid = {s["index"]: s["label"] for s in _dev.matrix.sources}
+    _shared = set(_fader) & set(_page) & set(_grid)
+    check(f"{_n}: the three surfaces label every shared channel identically",
+          all(_fader[c] == _page[c] == _grid[c] for c in _shared),
+          {c: (_fader[c], _page[c], _grid[c]) for c in _shared
+           if not _fader[c] == _page[c] == _grid[c]})
+    check(f"{_n}: and they agree in Expanded too",
+          all(_dev.fader.labels_for(True)[c]
+              == {x["source_code"]: x["label"] for x in _dev.ui_channels_for(True)}[c]
+              == {s["index"]: s["label"] for s in _dev.matrix.sources_for(True)}[c]
+              for c in _shared))
+    # Membership is per entry and stated, so a surface cannot silently miss a channel.
+    check(f"{_n}: every channel-page entry comes from the table",
+          {c["source_code"] for c in _dev.ui_channels}
+          == {c.code for c in _table if c.on_channels_page and not c.expanded_only})
+    check(f"{_n}: every matrix row comes from the table",
+          {s["index"] for s in _dev.matrix.sources}
+          == {c.code for c in _table if c.in_matrix and not c.expanded_only})
+    check(f"{_n}: every assignable code comes from the table",
+          set(_dev.fader.code_set)
+          == {c.code for c in _table if c.on_faders and not c.expanded_only})
+    # The four reach ALL THREE in Expanded, which is the failure that prompted the table.
+    _virtual = {c.code for c in _table if c.expanded_only}
+    check(f"{_n}: Expanded's four reach the faders",
+          _virtual <= set(_dev.fader.code_set_for(True)))
+    check(f"{_n}: ...the Channels page",
+          _virtual <= {c["source_code"] for c in _dev.ui_channels_for(True)})
+    check(f"{_n}: ...and the routing matrix",
+          _virtual <= {s["index"] for s in _dev.matrix.sources_for(True)})
+    # THE ROWS THE GRID READS AND THE ROWS THE PAGE OFFERS. MatrixSpec has always required these
+    # to match and nothing checked it, which is how the four came to be offered as rows with no
+    # state behind them for half an hour.
+    for _exp in (False, True):
+        check(f"{_n}: the grid read walks exactly the rows offered (expanded={_exp})",
+              tuple(_dev.matrix.source_indices_for(_exp))
+              == tuple(s["index"] for s in _dev.matrix.sources_for(_exp)))
+
 print(f"\n{'ALL SPEC CHECKS PASSED' if not FAILED else str(len(FAILED)) + ' CHECK(S) FAILED'}")
 raise SystemExit(1 if FAILED else 0)
