@@ -57,7 +57,7 @@ public without publishing it.
 - **A PUBLIC FILE MUST NOT CITE A PRIVATE ONE.** Anything in `docs/` is read by strangers, so a
   pointer to `ProjectNotes.md`, `Completed.md`, `DUO_SUPPORT.md` or a coverage report is a dead
   link for them. State the fact instead. Check with:
-  `grep -nE "ProjectNotes|Completed\.md|DUO_SUPPORT|PROFILE_COVERAGE|PROPERTY_COVERAGE" docs/*`
+  `grep -nE "ProjectNotes|Completed\.md|DUO_SUPPORT|PROFILE_COVERAGE|PROPERTY_COVERAGE|RodeDocs" docs/*`
   (`docs/*`, not `docs/*.md`: the protocol spec and the leads file are `.txt`.)
 - `docs/POSSIBLE_LEADS.txt`: what we could NOT settle, written FOR A STRANGER WITH HARDWARE WE DO
   NOT HAVE - a second Pro 2, a Duo with a card, a wireless transmitter, a headset for the 3.5mm

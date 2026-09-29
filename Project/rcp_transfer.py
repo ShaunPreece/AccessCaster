@@ -659,8 +659,17 @@ def set_usb_multitrack_mode(mode: int) -> int:
     **Switching this RE-ENUMERATES the desk's whole USB audio function** - measured:
     all four endpoints drop for a second or two and Windows moves the default device. Every caller
     must say so before doing it, and anything that flips this to reach an endpoint must restore the
-    previous mode afterwards."""
-    return send_record(build_global_prop_int("outputMultiMode", SEL_OUTPUT_GLOBAL, int(mode)))
+    previous mode afterwards.
+
+    **IT RETURNS ONLY WHEN THE DESK IS BACK**, which is why this is not a bare send_record. The
+    desk is off the bus about 60 ms after the write, so anything sent in the next couple of seconds
+    is simply lost: a profile restore measured 27 settings failing with "no control interface", and
+    told the user their desk was unplugged. See `rcp_hid.wait_for_reenumeration`; a write the desk
+    ignores because it already holds that value costs a fraction of a second here and no more."""
+    before = find_control_interface()
+    n = send_record(build_global_prop_int("outputMultiMode", SEL_OUTPUT_GLOBAL, int(mode)))
+    rcp_hid.wait_for_reenumeration(before)
+    return n
 
 
 def set_usb_multitrack_bypass(on: bool) -> int:

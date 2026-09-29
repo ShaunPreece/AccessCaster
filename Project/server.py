@@ -2795,6 +2795,14 @@ def _ann_seed_layout(st: dict) -> None:
         if bank:
             st["bank"] = bank[0]
             _hk_note_bank(bank[0])
+        # ...and THE USB AUDIO MODE, which is seeded for the opposite reason to the three above:
+        # not to keep a resting value quiet, but so a reconnect can tell that it MOVED. The desk
+        # can drop out of Expanded on its own (measured: off the bus unprompted, back two seconds
+        # later in Standard with the setting reset), and the change is invisible - the operator's
+        # extended inputs are simply gone off their faders and their computer's audio has
+        # rearranged itself. The push cannot carry this: the desk leaves the bus as it changes, so
+        # any push is sent into the gap. Comparing across the reconnect is the only way to see it.
+        st["usb_mode"] = rcp_read.first(blob, "outputMultiMode", "int")
     except Exception:
         pass
     st["known"] = known
@@ -3197,6 +3205,31 @@ def _ann_publish_mute(strip_idx: int, on: bool) -> None:
         pass
 
 
+def _ann_usb_mode_change(was, now) -> str:
+    """What to say when the USB audio mode is not what it was before the desk left the bus.
+
+    Empty when it has not moved, so the caller falls back to its own wording.
+
+    IT NAMES THE HALF THAT CHANGED, not both. A re-enumeration resets the whole property, but
+    reciting two settings when one moved buries the one that matters, and Expanded going away is
+    the consequential half: the operator's Game, Music, A and B inputs come off their faders and
+    every RODECaster device on the computer is renamed under it. Spoken rather than shown because
+    the desk does this unprompted, when nobody is looking at the app.
+    """
+    if was is None or now is None or was == now:
+        return ""
+    was_mode, was_exp = recorder.split_usb_multitrack(was)
+    now_mode, now_exp = recorder.split_usb_multitrack(now)
+    if was_exp != now_exp:
+        return ("USB input is now Expanded." if now_exp else
+                "The unit has left Expanded USB input. Game, Music, A and B are off their faders.")
+    # A value outside the six measured ones is still worth SAYING, just not naming: going silent on
+    # an unknown would hide exactly the case nobody has seen before.
+    label = recorder.USB_MULTITRACK_LABEL.get(now_mode)
+    return (f"USB output to this computer is now {label.lower()}." if label else
+            "The unit's USB audio mode has changed.")
+
+
 def _announce_loop() -> None:
     global _ann_live_state
     iface = rcp_transfer.find_control_interface()
@@ -3249,8 +3282,10 @@ def _announce_loop() -> None:
             elif time.time() - lost_at >= _ANN_RECONNECT_SPEAK_AFTER_S:
                 # Back after a real gap. Re-seed first: mutes, levels and the fader layout can all
                 # have moved while we were deaf, and Expanded mode reassigns sources as it goes.
+                was_usb = st.get("usb_mode")
                 _ann_seed_layout(st)
-                _ann_say("Control announcer reconnected.")
+                _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
+                         or "Control announcer reconnected.")
         try:
             rep = dev.read(256, timeout_ms=200)
         except Exception as exc:

@@ -592,6 +592,23 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the reopen was tried on the old path for ever, and to a screen-reader user that is
   indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
   "Control announcer reconnected", because silence is the one thing that cannot be interpreted.
+- **A WRITE THAT RECONFIGURES USB AUDIO MUST WAIT FOR THE DESK TO COME BACK, OR THE WRITES BEHIND
+  IT ARE LOST.** The desk is off the bus about 60 ms after `outputMultiMode` lands and back 1.7 to
+  2.5 s later, so anything sent in between goes nowhere and is reported as "no control interface",
+  which reads to the user as their desk being unplugged. Measured on a profile restore carrying
+  `usb_expanded`: 480 settings applied and **27 silently lost**, among them both headphone types
+  and the whole Compellor set; with the wait, 507 applied and none lost.
+  `rcp_transfer.set_usb_multitrack_mode` therefore ends in `rcp_hid.wait_for_reenumeration`, and
+  the caller keeps its device lock across it, because nothing else could have succeeded in that
+  window anyway. **Watching the OLD path die is what tells a real re-enumeration from a write the
+  desk ignored**, so writing a value it already holds costs a fraction of a second and no more.
+- **THE ANNOUNCER SAYS WHEN THE USB MODE MOVED WHILE IT WAS DEAF, AND A PUSH CANNOT DO THIS JOB.**
+  The desk can leave Expanded unprompted (measured: off the bus with nothing written to it for
+  nine minutes, back two seconds later in Standard with the setting reset), and it changes as it
+  leaves the bus, so any push announcing it is sent into the gap. `_ann_seed_layout` therefore
+  records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
+  reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
+  and B inputs come off their faders and every RODECaster device on the computer is renamed.
 - **THE DEVICE MODEL IS RESOLVED FROM THAT SAME PRODUCT ID, SO IT IS ONLY RIGHT IN MODE 0.**
   `devices.DEVICES` knows `0x0037` (Pro II) and `0x0050` (Duo) and nothing else, so any desk in a
   non-zero `outputMultiMode` falls through to `DEFAULT`. That is harmless on a Pro II, which IS the
@@ -612,11 +629,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   service names endpoints from the attached desk at runtime, which is how `Fader1` to `Fader9` arise.
   The four playback devices it can name are `system output`, `game`, `music`, `virtual a` and
   `virtual b`, each also carrying a capitalised display form.
-- **ONLY ONE OF THE FIVE PLAYBACK ENDPOINTS APPEARS, AND WHAT GATES THE OTHER FOUR IS UNKNOWN.** With
-  Expanded on, the desk's USB 1 input presents 10 channels, five stereo pairs, so the hardware side
-  is ready and the gap is in RODE's service. Neither the registry nor ProgramData holds any config
-  for them, and the desk publishes no property for it: of everything a Pro II carries, only
-  `outputMultiMode` and `appOutputDevice` touch this at all.
+- **ONE PLAYBACK ENDPOINT IS THE DESIGN, AND THE OTHER FOUR ARE CHOSEN PER APPLICATION.** RODE's own
+  guide says it: with Expanded on, `System (RØDECaster)` REPLACES `RODECaster Pro II Main` as the
+  computer's output device, and Game, Music, A and B are picked in Windows' Settings > System >
+  Sound > App Volume Device Preferences, one per running program. So a desk showing a single
+  playback device is working, not short of four, and there is nothing to diagnose. The four are
+  interchangeable labels rather than different kinds of input, and the desk's USB 1 input carries
+  them as five stereo pairs on one 10-channel stream.
+  **RODE DOCUMENT A REBOOT AFTER INSTALLING THE DRIVER, NOT A REPLUG.** A replug is what was
+  measured here and it does work; the reboot is what a user should be told, because it is their
+  instruction. Their driver also has a tray icon carrying a Latency setting, Ultra-low by default
+  and droppable to Low if the computer cannot keep up.
 - **A WINDOWS ENDPOINT RENAME DOES NOT SURVIVE TOGGLING EXPANDED, AND THE OLD NAME LINGERS DEAD.**
   Re-enumeration creates a fresh instance with a numeric prefix, `Speakers (2- RODECaster Pro II
   Main Multitrack)`, while the previous one stays listed and silent. So anything that stores a
@@ -1142,9 +1165,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **RODE'S OWN DUO GUIDE UNDERSTATES THE FADERS: it says four physical and THREE virtual, seven in
   total.** The desk on firmware 1.7.3 has NINE (four physical, five virtual), which is what its model
   publishes - nine FADER nodes - and what RODE's release notes for 1.7.3 describe. The guide page was
-  simply not updated. It is stored at `RodeDocs/rodecaster_duo_guide/`, so read it for how
-  the hardware is laid out and NOT for counts; a count read off it once already produced a wrong
-  fader model. The same page is still the authority on the headset: one 3.5mm TRRS jack on the front,
+  simply not updated. RODE's guide, at `rode.com/en-us/user-guides/rodecaster-duo`, is worth reading
+  for how the hardware is laid out and NOT for counts; a count read off it once already produced a
+  wrong fader model. The same page is still the authority on the headset: one 3.5mm TRRS jack on the front,
   whose microphone is its own input channel and whose earpieces share the Headphone 1 mix and are
   turned up with the Headphone 1 encoder.
 - **THE ANNOUNCER MUST READ A PUSHED ADDRESS IN FULL, not just its low byte** (`_ann_addr_path`).

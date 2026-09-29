@@ -231,7 +231,13 @@ USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more in
                      "without the rest. The four names are interchangeable labels, not different "
                      "kinds of input. It needs RODE's Virtual Devices driver installed here or the "
                      "four arrive silent, it stops the RODECaster ASIO driver working, and turning "
-                     "it back off unassigns whatever you put on those faders.")
+                     "it back off unassigns whatever you put on those faders. "
+                     # THE TWO WINDOWS STEPS, because the feature does nothing without them and
+                     # neither is discoverable from this app or from the desk. RODE's own guide is
+                     # the source for both.
+                     "In Windows, set your sound output to System (RODECaster) rather than Main, "
+                     "then send a program to one of the four in Settings, System, Sound, App "
+                     "volume and device preferences, with that program running.")
 
 # What the two processing-bypass switches mean, in RODE's own terms and ours.
 #

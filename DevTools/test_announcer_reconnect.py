@@ -77,6 +77,7 @@ class Rig:
         self.seeded = 0
         self.dev = None
         self.speak_after = speak_after
+        self.seeded_mode = None   # outputMultiMode a re-seed would read; None = unreadable
 
     # -- the stubs the loop calls --------------------------------------------
     def find(self, *a, **k):
@@ -93,8 +94,9 @@ class Rig:
     def say(self, text):
         self.said.append(text)
 
-    def seed(self, _st):
+    def seed(self, st):
         self.seeded += 1
+        st["usb_mode"] = self.seeded_mode      # what a real dump would have found
 
     def re_enumerate(self, to_iface, gap):
         """Take the desk off the bus, wait, and bring it back as a different USB device."""
@@ -166,6 +168,29 @@ with Rig(speak_after=0.05) as rig:
     time.sleep(0.4)
     check("no handle is opened while nothing is on the bus", len(rig.opened), 1)
     check("and it is still running, ready for a replug", rig.thread.is_alive(), True)
+
+print("\nA USB MODE THAT MOVED WHILE WE WERE DEAF IS SAID, NOT SWALLOWED")
+# The desk can drop out of Expanded on its own, and the change is otherwise invisible: the push
+# announcing it is sent while the desk is off the bus, so only a comparison across the reconnect
+# can see it. 5 is post-fader multitrack plus Expanded, 2 is the same output mode without it.
+check("leaving Expanded names the faders that were lost",
+      "off their faders" in server._ann_usb_mode_change(5, 2), True)
+check("entering it says so", server._ann_usb_mode_change(2, 5), "USB input is now Expanded.")
+check("an output-mode change names the new mode",
+      server._ann_usb_mode_change(0, 2),
+      "USB output to this computer is now every channel, post-fader.")
+check("an unchanged mode says nothing, so a plain reconnect is not narrated",
+      server._ann_usb_mode_change(5, 5), "")
+check("and an unreadable mode never speaks a guess", server._ann_usb_mode_change(None, 2), "")
+
+rig = Rig(speak_after=0.05)
+rig.seeded_mode = 5                       # the desk was in Expanded when the announcer started
+with rig:
+    rig.seeded_mode = 2                   # ...and comes back out of it, as one did unprompted
+    rig.re_enumerate(EXPANDED, gap=0.3)
+    time.sleep(0.5)
+    check("the reconnect reports the change instead of just saying it is back",
+          "off their faders" in rig.said[-1], True)
 
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",

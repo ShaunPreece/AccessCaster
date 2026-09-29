@@ -260,6 +260,71 @@ def handle(iface: RodeInterface, purpose: str):
         close_handle(dev, purpose)
 
 
+# ---- WAITING OUT A RE-ENUMERATION ----------------------------------------------------------
+# Reconfiguring the desk's USB audio function takes it off the bus for about two and a half
+# seconds, and it returns under a DIFFERENT product id and path, because the id encodes that
+# configuration. Measured on a Pro II, fw 1.7.6: gone 60 ms after the write, back at t+2.5 s.
+REENUM_EXPECT_S = 1.0        # how long to watch for it to LEAVE before deciding it never will
+REENUM_TIMEOUT_S = 20.0      # how long to then wait for it to come BACK
+REENUM_SETTLE_S = 0.3        # ... and a breath after that, so the next write does not race it
+
+
+def _path_opens(iface: RodeInterface) -> bool:
+    """Whether a handle can still be had on this exact path. A liveness probe, not a job.
+
+    Deliberately NOT through open_handle: it runs many times a second and would bury the
+    diagnostic log in opens and closes nobody asked a question about."""
+    try:
+        dev = hid.device()
+        dev.open_path(iface.path)
+    except Exception:
+        return False
+    try:
+        dev.close()
+    except Exception:
+        pass
+    return True
+
+
+def wait_for_reenumeration(before: Optional[RodeInterface],
+                           expect_s: float = REENUM_EXPECT_S,
+                           timeout_s: float = REENUM_TIMEOUT_S) -> bool:
+    """Block until the desk is back on the bus after a write that reconfigures its USB audio.
+
+    WITHOUT THIS, THE WRITES THAT FOLLOW ARE SENT INTO THE GAP AND LOST. A profile restore
+    measured 27 settings failing with "no control interface" in the 1.2 s after it set
+    `outputMultiMode`, and they are reported to the user as though the desk had been unplugged.
+
+    `before` is the interface as it was BEFORE the write, and watching that exact path die is how
+    a real re-enumeration is told from a write the desk ignored: writing a value it already holds
+    changes nothing, so a desk still answering after `expect_s` is not going anywhere and this
+    returns at once. Returns False only on `timeout_s` elapsing with nothing back, which is the
+    dropout the desk does not recover from without a replug.
+
+    The caller should hold whatever device lock it already has across this. Nothing else could
+    have succeeded during the gap anyway, and letting other work start against an absent desk is
+    how the lost writes happen in the first place.
+    """
+    at = time.monotonic()
+    if before is not None:
+        while _path_opens(before):
+            if time.monotonic() - at >= expect_s:
+                return True                     # it never left: no re-enumeration to wait out
+            time.sleep(0.05)
+    while time.monotonic() - at < timeout_s:
+        iface = find_control_interface()
+        if iface is not None and _path_opens(iface):
+            time.sleep(REENUM_SETTLE_S)
+            diagnostics.event("device.reenumerated", "back on the bus",
+                              took=f"{time.monotonic() - at:.1f}s",
+                              pid=f"0x{iface.product_id:04x}")
+            return True
+        time.sleep(0.2)
+    diagnostics.event("device.reenumerate_timeout", "the desk did not come back",
+                      waited=f"{timeout_s:.0f}s")
+    return False
+
+
 class RodeCaster:
     """A thin, safe wrapper around one open control interface.
 

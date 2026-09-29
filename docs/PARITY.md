@@ -12,7 +12,7 @@ stale, because the desk's feature set barely changes, so this file can be truste
 a way the old table could not be trusted a fortnight on.
 
 **WHERE IT CAME FROM, because it changes how much to trust a line.** Built 19th June 2026 from a
-full read of the official user guide (`RodeDocs/rodecaster_guide/`), later cross-checked
+full read of RODE's own user guide at `rode.com/en-us/user-guides/rodecaster-pro-ii`, later cross-checked
 against the desk's own property table and against a self-drive sweep of the app's screens. The guide
 was a good map of the TERRITORY and an unreliable map of the MECHANISM: it was silent on roughly one
 feature in eight (anything with no control of its own, and readable state generally), and wrong
