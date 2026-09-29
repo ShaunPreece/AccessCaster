@@ -1913,11 +1913,26 @@ def action_set_midi(on: bool) -> dict:
 # DO NOT go back to opening and closing the handle around each poll to avoid two concurrent handles:
 # closing FLUSHES the input queue, so every press landing in the gap is dropped and bank/mute/solo
 # announcements go intermittent. A persistent handle has no deaf windows and no open/close churn.
+#
+# THE HANDLE IS REOPENED ON A FRESHLY RESOLVED INTERFACE, never on a remembered one. The desk
+# re-enumerates on `outputMultiMode`, `engineMode` and `systemMainMode`, all of which the app itself
+# writes, and comes back under a different USB product id and path.
 import re as _re
 
 _announce_on = threading.Event()
 _announce_thread = None
 _ANN_NAME = _re.compile(rb"[A-Za-z][A-Za-z0-9_]{3,}")
+
+# Reconnect pacing. Quick at first, so a momentarily busy handle costs nothing audible and a
+# re-enumeration (about 2.5 s) is picked up as soon as the desk is back; slow after that, because
+# every attempt re-enumerates the USB HID tree and a desk off the bus may never return without a
+# replug.
+_ANN_RETRY_S = 0.3
+_ANN_RETRY_SLOW_S = 2.0
+_ANN_RETRY_FAST_TRIES = 15
+# A reconnect is only worth speaking about when the gap was long enough to have swallowed a press.
+# Coming straight back on the next pass is not news.
+_ANN_RECONNECT_SPEAK_AFTER_S = 1.0
 
 # The server runs under pythonw (no console), so any console subprocess we spawn would flash a
 # window and steal focus. CREATE_NO_WINDOW keeps these helpers invisible. Does NOT apply to the
@@ -3193,6 +3208,8 @@ def _announce_loop() -> None:
     # close: input reports are delivered to this handle's own queue regardless of the
     # pad/mixer writes, so there are no deaf windows where a press gets dropped.
     dev = None
+    misses = 0                        # consecutive failed opens, for the backoff below
+    lost_at = 0.0
     st = {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0,
           "known": {}, "muted": {}, "enc_pos": None, "enc_down_at": None, "enc_hold": False,
           "said": {}}
@@ -3201,12 +3218,26 @@ def _announce_loop() -> None:
     _ann_live_state = st              # publish it so our own writes can keep the caches current
     while _announce_on.is_set():
         if dev is None:
+            if iface is None:
+                iface = rcp_transfer.find_control_interface()
             try:
-                dev = rcp_hid.open_handle(iface, "announcer")
+                dev = rcp_hid.open_handle(iface, "announcer") if iface is not None else None
             except Exception as exc:
                 diagnostics.event("device.open_failed", "announcer", error=f"{exc}")
-                time.sleep(0.3)                            # device busy/absent; retry shortly
+                dev = None
+            if dev is None:
+                # THE CACHED PATH GOES STALE ON A RE-ENUMERATION, so it is dropped after any failed
+                # open and re-resolved on the next pass. The desk returns as a DIFFERENT USB product
+                # id - the id encodes the audio configuration, so `outputMultiMode` changes it - and
+                # a handle re-opened on the old path fails for ever. Holding the path was what left
+                # the announcer retrying silently until the app was restarted, which to a
+                # screen-reader user is indistinguishable from the app having died.
+                iface = None
+                misses += 1
+                time.sleep(_ANN_RETRY_S if misses <= _ANN_RETRY_FAST_TRIES
+                           else _ANN_RETRY_SLOW_S)
                 continue
+            misses = 0
             if not announced_on:
                 # Quiet when the RECORDER is putting announcements back: the stop phrase already
                 # says they are back on, and the pump keeps only the newest phrase, so a greeting
@@ -3215,12 +3246,18 @@ def _announce_loop() -> None:
                     _ann_say("Control announcer is on.")
                 _ann_quiet_start.clear()
                 announced_on = True
+            elif time.time() - lost_at >= _ANN_RECONNECT_SPEAK_AFTER_S:
+                # Back after a real gap. Re-seed first: mutes, levels and the fader layout can all
+                # have moved while we were deaf, and Expanded mode reassigns sources as it goes.
+                _ann_seed_layout(st)
+                _ann_say("Control announcer reconnected.")
         try:
             rep = dev.read(256, timeout_ms=200)
         except Exception as exc:
             diagnostics.event("device.lost", "announcer read failed", error=f"{exc}")
             rcp_hid.close_handle(dev, "announcer")
             dev = None                                     # reopen on the next pass
+            lost_at = time.time()
             time.sleep(0.3)
             continue
         try:

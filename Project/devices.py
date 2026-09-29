@@ -28,6 +28,13 @@ from typing import Optional
 import rcp_hid
 
 # Known RODECaster USB product ids on the vendor control interface (MI_09).
+#
+# THESE ARE THE IDS IN THE DEFAULT AUDIO CONFIGURATION ONLY, so the table below is incomplete by
+# construction: the product id encodes the USB audio configuration, and a desk re-enumerates under
+# a different one whenever `outputMultiMode` changes (a Pro II reads 0x0092, 0x0078 or 0x0094 in
+# its other modes). An unknown id therefore falls through to DEFAULT rather than naming the desk,
+# which is right for a Pro II and wrong for a Duo in Expanded. Identifying by the dump's own
+# `systemName` is the fix; see `device_from_system_name` below and PROJECT_GUIDE part 2.
 PID_PRO2 = 0x0037
 PID_DUO = 0x0050
 

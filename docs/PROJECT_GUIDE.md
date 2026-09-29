@@ -581,7 +581,47 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   extended input the user had put on a fader. The desk's own app warns before doing either.
 - **EXPANDED ADDS NO BLOCKS TO THE MODEL.** Byte length is 156825 in both states on a Pro II, so
   Game, Music, A and B are existing slots in the ten-wide strip space rather than new inputs. Their
-  `channelInputSource` codes are NOT yet read.
+  `channelInputSource` codes are NOT yet read; the known codes are 0-3, 7, 8, 9, 10 and 11, leaving
+  4, 5 and 6 unclaimed for four sources, so at least one sits above 11.
+- **THE DESK COMES BACK FROM A RE-ENUMERATION UNDER A DIFFERENT USB PRODUCT ID, because the id
+  encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
+  0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path
+  changes with it, so **NO LONG-LIVED READER MAY CACHE ITS `RodeInterface`** - resolve it again on
+  every reopen, as `_announce_loop` and `recorder.Watcher` both do. Caching it is what made the
+  announcer go silent for good after a USB setting was changed in the app itself: the read failed,
+  the reopen was tried on the old path for ever, and to a screen-reader user that is
+  indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
+  "Control announcer reconnected", because silence is the one thing that cannot be interpreted.
+- **THE DEVICE MODEL IS RESOLVED FROM THAT SAME PRODUCT ID, SO IT IS ONLY RIGHT IN MODE 0.**
+  `devices.DEVICES` knows `0x0037` (Pro II) and `0x0050` (Duo) and nothing else, so any desk in a
+  non-zero `outputMultiMode` falls through to `DEFAULT`. That is harmless on a Pro II, which IS the
+  default, and wrong on a Duo in Expanded, which would be given a Pro II's matrix and channel
+  layout. The MI_09 product string cannot fix it - it reads `HID Interface` - so the answer is
+  either the dump's own `systemName` or a per-desk table of every mode's id.
+- **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode` PLUS A PHYSICAL REPLUG.** Measured on a
+  Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened. Expanded alone with the output mode
+  Off yields ONE endpoint, `System (RØDECaster)`. Post-fader multitrack AND Expanded (value 5)
+  yields ten capture endpoints, `Fader1` to `Fader9` plus `System`, matching the desk's 20-channel
+  multitrack stream as ten stereo pairs. That is a per-fader recording input for any app that can
+  pick a microphone, with no ASIO and no DAW.
+  **THE DRIVER ONLY LATCHES ON A USB ARRIVAL EVENT, AND TAKES ABOUT 60 SECONDS.** A mode change
+  re-enumerates the desk, the driver loses it and does NOT re-attach; only unplugging and replugging
+  the cable brings it back. So a check run straight after a mode write reads a stale nothing.
+- **NEVER MATCH A VIRTUAL ENDPOINT AGAINST THE DRIVER'S INF NAMES.** The INF string table declares
+  `RØDECaster Combo1 In`, `SmartPads In`, `Headset In` and the rest, and NONE of them appear. The
+  service names endpoints from the attached desk at runtime, which is how `Fader1` to `Fader9` arise.
+  The four playback devices it can name are `system output`, `game`, `music`, `virtual a` and
+  `virtual b`, each also carrying a capitalised display form.
+- **ONLY ONE OF THE FIVE PLAYBACK ENDPOINTS APPEARS, AND WHAT GATES THE OTHER FOUR IS UNKNOWN.** With
+  Expanded on, the desk's USB 1 input presents 10 channels, five stereo pairs, so the hardware side
+  is ready and the gap is in RODE's service. Neither the registry nor ProgramData holds any config
+  for them, and the desk publishes no property for it: of everything a Pro II carries, only
+  `outputMultiMode` and `appOutputDevice` touch this at all.
+- **A WINDOWS ENDPOINT RENAME DOES NOT SURVIVE TOGGLING EXPANDED, AND THE OLD NAME LINGERS DEAD.**
+  Re-enumeration creates a fresh instance with a numeric prefix, `Speakers (2- RODECaster Pro II
+  Main Multitrack)`, while the previous one stays listed and silent. So anything that stores a
+  playback device BY NAME rots, looking correct in its own settings while producing nothing. The
+  original name does come back cleanly once the desk returns to Standard.
 - **NO CHANNEL CAN BE RENAMED ON THE DESK.** Of the 14 string properties a Pro II publishes, not one
   names a channel: pads have `padName`, shows have `showName`, a channel has `inputColour` and no
   name. So Game, Music, A and B are fixed firmware labels. Renaming happens in Windows, on the audio
@@ -589,10 +629,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE VIRTUAL DEVICES DRIVER IS SIGNED "FREEDMAN ELECTRONICS PTY LTD", NOT "RODE".** Freedman is
   RODE's parent company, so a publisher check looking for the string "RODE" REJECTS THE GENUINE
   INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026.
+- **MATCH THE DRIVER BY UpgradeCode, NEVER BY NAME: EVERY NAME IT CARRIES SPELLS RØDE WITH A SLASHED
+  O.** Its MSI ProductName is `RØDECaster Virtual Device Driver` and its Manufacturer is
+  `RØDE Microphones` (U+00D8), and Windows copies both verbatim into the uninstall registry. A
+  detector matching the literal "RODECaster" or "RODE" therefore reports "not installed" on a machine
+  that has it, which is the same failure as the Freedman publisher check above and fails silently.
 - **DETECT THE DRIVER WITH TWO CHECKS, NOT ONE, OR THE MESSAGE IS CONFIDENTLY WRONG.** The installed
-  MSI answers "is it present" (UpgradeCode `{36C667D1-F3A6-4A7B-9A3B-1A6A5C1A5707}`, product name
-  "RODECaster Virtual Device Driver", manufacturer "RODE Microphones"; the UpgradeCode survives
-  version bumps, the ProductCode does not). The audio endpoints answer "is it ACTIVE". Present with
+  MSI answers "is it present" (UpgradeCode `{36C667D1-F3A6-4A7B-9A3B-1A6A5C1A5707}`; the UpgradeCode
+  survives version bumps, the ProductCode does not - 1.0.5 is
+  `{0612AAD0-4DE5-4C02-A531-FE61F95ACDC8}`). The audio endpoints answer "is it ACTIVE". Present with
   no endpoints means Bypassed or awaiting a reboot, and telling that user to install it is worse
   than saying nothing. Source: `https://update.rode.com/virtual_dev_driver/RODECasterDriver_WIN.zip`,
   a 1.1 MB zip holding one MSI, version 1.0.5 as of 29th September 2026. The URL carries no version,

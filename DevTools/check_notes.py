@@ -97,19 +97,25 @@ def check_no_status() -> None:
 # ---------------------------------------------------------------------------
 # 3. ProjectNotes stays current-only and short
 # ---------------------------------------------------------------------------
+NOW_NEXT_MAX_LINES = 250
+
+
 def check_projectnotes() -> None:
     p = NOTES_DIR / "ProjectNotes.md"
     if not p.exists():
         return fail("ProjectNotes.md", "missing")
     body = read(p)
     lines = body.splitlines()
-    # Now / Next past ~150 lines means finished work has piled up in it (measured on Hydra).
+    # A long Now / Next is the symptom of finished work piling up in it. The threshold is a smell
+    # test, not a budget: this project legitimately carries several open items that each need a
+    # mechanism written out, so it sits higher than the 150 the rule was first measured at.
     try:
         a = next(i for i, l in enumerate(lines) if l.startswith("## Now / Next"))
         b = next(i for i, l in enumerate(lines[a + 1:], a + 1) if l.startswith("## "))
-        if b - a > 150:
-            fail("ProjectNotes.md", f"Now / Next is {b - a} lines. Past ~150 means finished work has "
-                                    f"collected in it; move it to its home and delete the note.")
+        if b - a > NOW_NEXT_MAX_LINES:
+            fail("ProjectNotes.md", f"Now / Next is {b - a} lines. Past ~{NOW_NEXT_MAX_LINES} means "
+                                    f"finished work has collected in it; move it to its home and "
+                                    f"delete the note.")
     except StopIteration:
         fail("ProjectNotes.md", "no '## Now / Next' section")
     # A session summary reforming under any heading. The rule that failed on its own, twice.

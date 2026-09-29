@@ -92,6 +92,21 @@ Vendor ID: 0x19F7 (RODE).
 
 Product IDs:  Pro II = 0x0037,  Duo = 0x0050.
 
+THE PRODUCT ID ENCODES THE USB AUDIO CONFIGURATION, SO IT IS NOT A DESK
+IDENTIFIER. Writing outputMultiMode re-enumerates the unit, and it returns under a
+different PID carrying the same serial. Measured on a Pro II, fw 1.7.6:
+
+  outputMultiMode   0 -> 0x0037    (standard, no multitrack)
+                    2 -> 0x0092    (standard, post-fader multitrack)
+                    3 -> 0x0078    (expanded input, no multitrack)
+                    5 -> 0x0094    (expanded input, post-fader multitrack)
+
+Two consequences for host software. Identify the MODEL by the dump's own
+systemName rather than by PID, or a desk in any non-default mode is unrecognised.
+And never cache an enumerated HID path across such a write: the old path stops
+opening, for ever, while the unit is present and perfectly healthy. Both the path
+and the PID must be resolved again on every reopen.
+
 A DESK BEING FLASHED RE-ENUMERATES AS PID 0x0030 AND IS NOT GONE. During a
 firmware update the unit drops its normal identity and comes back under the same
 vendor ID as PID 0x0030: a composite device exposing a mass-storage interface and
