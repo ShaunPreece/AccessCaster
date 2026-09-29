@@ -181,6 +181,22 @@ def parse_binding(mods, key: str):
 
 
 
+# COMMANDS THAT MUST RUN ON THE PUMP THREAD, because they need the foreground right that the
+# keypress itself grants.
+#
+# WINDOWS GIVES A PROCESS THE RIGHT TO SET THE FOREGROUND WHEN A HOTKEY IT REGISTERED IS PRESSED,
+# and that right is transient. Handing the work to a freshly spawned thread spends it: by the time
+# that thread calls SetForegroundWindow the moment has passed, Windows refuses, and the window is
+# then only raisable by forcing it - which puts it in front WITHOUT a real activation. Measured:
+# the window became the foreground window and held it, GetGUIThreadInfo agreed the keyboard focus
+# was ours, and NVDA went on reading the app the user came from, because no activation event was
+# ever raised. Alt-Tabbing to the same window announced it perfectly.
+#
+# So the raise runs INLINE, in the WM_HOTKEY handler, where the right still exists. Everything
+# else keeps its own thread: a device write takes seconds and would block the next press.
+_FOREGROUND_COMMANDS = ("app.window",)
+
+
 class HotkeyManager:
     """Owns the pump thread, the user's shortcuts and the registration state.
 
@@ -508,7 +524,9 @@ class HotkeyManager:
             self._status = status
 
     def _fire(self, shortcut_id: str) -> None:
-        """Run a shortcut OFF the pump thread, so a device write cannot delay the next press."""
+        """Run a shortcut OFF the pump thread, so a device write cannot delay the next press.
+
+        Except the ones that need the foreground right - see _FOREGROUND_COMMANDS."""
         row = self.get(shortcut_id)
         if row is None:
             return
@@ -516,6 +534,9 @@ class HotkeyManager:
             if shortcut_id in self._busy:
                 return                        # still working on the last press; ignore this one
             self._busy.add(shortcut_id)
+        if row.get("command") in _FOREGROUND_COMMANDS:
+            self._run(row)                    # inline: the right does not survive a thread hop
+            return
         threading.Thread(target=self._run, args=(row,), daemon=True).start()
 
     def _run(self, row: dict) -> None:

@@ -2091,6 +2091,26 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Global keyboard shortcuts
 
+- **THE WINDOW SHORTCUT MUST RUN ON THE PUMP THREAD, AND THAT IS THE WHOLE FIX. DO NOT ADD A
+  WORKAROUND TO THE RAISE.** Windows grants a process the right to set the foreground while it is
+  handling a hotkey it registered with `RegisterHotKey`, and that right is transient. `_fire`
+  dispatches every shortcut to a freshly spawned thread so a slow device write cannot delay the
+  next press, and that thread hop SPENDS THE RIGHT: by the time it calls `SetForegroundWindow`
+  Windows refuses. `hotkeys._FOREGROUND_COMMANDS` is the exception list that runs such a command
+  inline instead; `app.window` is on it.
+  **A FORCED RAISE IS NOT AN ACTIVATION, AND EVERY MEASUREMENT SAYS IT WORKED.** With the right
+  spent, the only way up is to force it - a minimize/restore flip, a synthetic Alt tap,
+  `AttachThreadInput`. All of them put the window in front and move the keyboard focus, so
+  `GetForegroundWindow` returns it, `GetGUIThreadInfo` agrees the focus window is it, and it holds
+  for seconds. **And a screen reader goes on reading the app you came from**, because Windows never
+  raised a normal activation. Alt-Tabbing to the same window by hand announced it perfectly, which
+  is what proves the window, the browser and the screen reader are all innocent.
+  So the test for this is never "is it the foreground" - that passes while broken. It is whether a
+  screen reader follows, or failing that whether a plain permitted `SetForegroundWindow` was enough.
+  **Do not answer a refusal by forcing it, and do not answer the silence by speaking**: bringing a
+  window forward is a Windows action, the screen reader announces it, and the app's own announcer
+  is for the DESK.
+
 - **A FRESH INSTALL GETS SIXTEEN SHORTCUTS, NOT FIVE.** `_hotkey_defaults` is the five app ones plus
   the whole of `_pad_hotkey_scheme` (what is playing, bank up and down, one per pad slot). The pad
   half is a separate function only because `action_add_pad_shortcuts` can lay it onto a list that

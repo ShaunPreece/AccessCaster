@@ -8617,6 +8617,12 @@ async function init() {
   bindPageBoundary();
   initThemeToggle();
   window.addEventListener("hashchange", () => render(currentRoute()));
+  // RAISING THE WINDOW IS NOT ARRIVING IN IT. The global shortcut brings this window to the front,
+  // and focus then sits on the document with nothing to announce, so a screen-reader user hears
+  // silence until they press Tab and land somewhere by accident. Landing on the section heading is
+  // what the app already does when it opens (see render's focusTo), so coming back does the same.
+  //
+
   // AWAITED, unlike every other startup load: the version is part of the heading focus lands on.
   // See loadVersionBeforeRender for the timeout that stops a dead server costing us the focus too.
   await loadVersionBeforeRender();

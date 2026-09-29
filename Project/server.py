@@ -9661,8 +9661,19 @@ def _hk_seconds_phrase(seconds: float) -> str:
 def _hk_window() -> str:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
+    # SILENT ON SUCCESS, and that is right ONLY because the page speaks for itself: it moves focus
+    # to the current section's heading when the window is raised, so a screen reader announces
+    # where you have landed. Speaking here as well would talk over that in a second voice.
+    # SILENT ON SUCCESS. Bringing a window to the front is a WINDOWS action, and Windows tells the
+    # screen reader about it - so an announcement from here would be this app speaking over the
+    # screen reader doing its own job, in a second voice, about something it has already said. The
+    # app's own announcer is for the DESK. What this needs instead is a real activation, which is
+    # `_focus_app_window`'s problem and is documented there.
     if _focus_app_window():
-        return ""                    # the window is in front of you; saying so is noise
+        return ""
+    # A REFUSED RAISE MUST SAY SO. Before this it fell through to open_ui and said "Opening
+    # AccessCaster" whether or not a window already existed, which is fine, but a raise that
+    # failed with the window still sitting there behind everything said nothing at all.
     open_ui(f"http://localhost:{HTTP_PORT}/")
     return "Opening AccessCaster."
 
@@ -10597,6 +10608,10 @@ def _focus_app_window() -> bool:
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.SetForegroundWindow.restype = wintypes.BOOL
     user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    # Declared like the rest: an undeclared restype is a C int, which TRUNCATES a 64-bit HWND and
+    # would make the success check below compare two different halves of the same window.
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
 
     found = []
 
@@ -10618,17 +10633,65 @@ def _focus_app_window() -> bool:
     if not found:
         return False
     hwnd = found[0]
-    SW_RESTORE, SW_MINIMIZE = 9, 6
+    SW_RESTORE = 9
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
-    # SetForegroundWindow can be refused when the caller is not itself the foreground process; if
-    # so, a quick minimize/restore flip is not subject to that lock and reliably raises the window.
-    if not user32.SetForegroundWindow(hwnd):
-        user32.ShowWindow(hwnd, SW_MINIMIZE)
-        user32.ShowWindow(hwnd, SW_RESTORE)
-        user32.SetForegroundWindow(hwnd)
-    user32.BringWindowToTop(hwnd)
-    return True
+
+    # A PLAIN SetForegroundWindow, AND NOTHING ELSE. Windows grants this process the right to set
+    # the foreground while the hotkey it registered is being handled, so the call is allowed and
+    # produces a NORMAL activation - which is the whole point, because a normal activation is what
+    # tells a screen reader the window came forward.
+    #
+    # DO NOT ADD A WORKAROUND HERE IF IT FAILS. Every one of them - a minimize/restore flip, an
+    # Alt tap, AttachThreadInput - puts the window in front WITHOUT a real activation: measured,
+    # the window became foreground and held it, GetGUIThreadInfo agreed the keyboard focus was
+    # ours, and NVDA went on reading the app the user came from. Alt-Tabbing to the same window
+    # announced it perfectly, which is what proved the window and the screen reader were both
+    # fine. A refusal here means the CALLER has lost the foreground right, and the fix is at that
+    # end - see hotkeys._FOREGROUND_COMMANDS, where dispatching to a worker thread was spending it.
+    user32.SetForegroundWindow(hwnd)
+    # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED. This returned True unconditionally,
+    # so a refused raise and a successful one were indistinguishable - and the caller stays silent
+    # on a success, which makes a refusal silent too. It also made the fault impossible to
+    # diagnose: a note recorded "the raise is refused" when the raise was in fact working and the
+    # real fault was focus landing nowhere announceable.
+    got = user32.GetForegroundWindow()
+    ok = bool(got) and got == hwnd
+    # LOG THE FOCUS WINDOW, NOT JUST THE FOREGROUND ONE. They are different things and only the
+    # second is what a screen reader follows, so "the window came up but my screen reader still
+    # says I am in the other app" has two possible causes that look identical from outside: a
+    # window that is merely in front without holding focus, or a screen reader reporting a stale
+    # object because nothing generated a focus event. This one line separates them, and the
+    # question has come round three times without it. GetGUIThreadInfo(0) reports the foreground
+    # thread's own focus window.
+    try:
+        class _GTI(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                        ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                        ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                        ("rcCaret", wintypes.RECT)]
+        gti = _GTI()
+        gti.cbSize = ctypes.sizeof(_GTI)
+        user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(_GTI)]
+        user32.GetGUIThreadInfo(0, ctypes.byref(gti))
+
+        def _title(h):
+            if not h:
+                return "none"
+            n = user32.GetWindowTextLengthW(h)
+            b = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(h, b, n + 1)
+            return (b.value or "")[:40]
+
+        diagnostics.event("window.raise", "app window", activated=ok,
+                          wanted=f"{hwnd}", foreground=f"{got}",
+                          fg_title=_title(got),
+                          active=f"{gti.hwndActive}", active_title=_title(gti.hwndActive),
+                          focus=f"{gti.hwndFocus}", focus_title=_title(gti.hwndFocus))
+    except Exception as exc:
+        diagnostics.event("window.raise", "app window", activated=ok, error=f"{exc}")
+    return ok
 
 
 def _app_already_serving(port: int) -> bool:
