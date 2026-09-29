@@ -130,12 +130,17 @@ def cell(o, s):
 
 
 parts = []
-for i in range(devices.PRO2.matrix.cell_count):   # 516, the count the guard checks against
+for i in range(devices.PRO2.matrix.cell_count):   # the count the guard checks against
     s, o = divmod(i, devices.PRO2.matrix.row_stride)
     excluded, lvl = cell(o, s) if s in PRO2_SOURCES and o < 11 else (False, "0|0")
     parts.append(prop_bool("mixDisabled", excluded))
     parts.append(prop_str("mixLevelWithAnchor", lvl))
-blob = b"".join(mixminus_section(m) for m in MODES) + b"".join(parts)
+# THE GRID MUST SIT INSIDE A NAMED BLOCK, because the matrix read is block-scoped: RCSYNCMIX
+# carries the same six cross-point names, so an unscoped read returns two grids concatenated. An
+# ALL-CAPS name followed by the property marker is how the walker recognises a section, and
+# without one every cross-point below is attributed to no block and the read finds nothing.
+blob = (b"".join(mixminus_section(m) for m in MODES)
+        + devices.PRO2.matrix.block.encode() + b"\x00\x01" + b"".join(parts))
 
 
 # --- capture --------------------------------------------------------------------------------------

@@ -215,7 +215,11 @@ try:
 finally:
     devices.force_device(_prev)
 check("Duo pads are 6 per bank", devices.DUO.pad.pads_per_bank, 6)
-check("Duo matrix guard", (devices.DUO.matrix.cell_count, devices.DUO.matrix.row_stride), (516, 13))
+# 390 is the MIX BLOCK, which is the grid, and it is the same on both desks and both firmwares. The
+# old 516 counted MIX plus RCSYNCMIX, which reuses all six cross-point names and follows it in the
+# stream, so an unscoped read returned the two concatenated - and 1.7.6 changed that total again.
+check("Duo matrix guard counts the MIX block alone",
+      (devices.DUO.matrix.cell_count, devices.DUO.matrix.row_stride), (390, 13))
 check("processing/effects bases shared with the Pro II",
       (devices.DUO.proc_sel_base, devices.DUO.fx_sel_base),
       (devices.PRO2.proc_sel_base, devices.PRO2.fx_sel_base))

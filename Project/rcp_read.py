@@ -401,7 +401,17 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     diagnostics.event("model.read", bounded_by="length" if need is not None else "silence",
                       bytes=len(buf), frames=frames, pushes_skipped=pushes,
                       took=f"{time.time() - started:.2f}s")
-    return bytes(buf)
+    blob = bytes(buf)
+    # LEARN WHICH DESK THIS IS, from the desk's own word for it. Only when the product id names no
+    # desk, which happens whenever `outputMultiMode` is not the default: the id encodes the audio
+    # configuration, so it cannot be tabulated, while the serial it comes back under does not
+    # change. One dict lookup per dump, and the string read at most once per desk per session.
+    if devices.unidentified(iface):
+        try:
+            devices.note_system_name(iface, first(blob, "systemName", "str"))
+        except Exception:
+            pass                    # naming the desk is never worth failing a dump for
+    return blob
 
 
 def _val_after(blob: bytes, i: int):

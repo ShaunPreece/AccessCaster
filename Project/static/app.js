@@ -1143,6 +1143,14 @@ function buildInputLevel(d) {
     input.min = String(lvl.min_db);
     input.max = String(lvl.max_db);
     input.value = lvl.db.toFixed(1);
+    // A FIXED-LEVEL ENDPOINT HAS NO CONTROL TO OFFER, so the spin button and its button are
+    // disabled rather than left to fail. Every one of RODE's virtual devices is like this - all
+    // nine Fader inputs and System - and there the level lives on the desk's own fader. A live
+    // control that silently does nothing is the worst of the three states to land a screen reader
+    // on; disabled is announced, and the note below says where the volume actually is.
+    input.disabled = !!lvl.fixed;
+    const unity = document.getElementById("meter-input-unity");
+    if (unity) unity.disabled = !!lvl.fixed;
   }
   const mutedBox = document.getElementById("meter-input-muted");
   if (mutedBox) mutedBox.checked = !!lvl.muted;

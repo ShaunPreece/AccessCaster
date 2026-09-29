@@ -620,6 +620,13 @@ def level_note(volume_db: float) -> str:
 OFFERED_LEVEL_MIN_DB = -30.0
 OFFERED_LEVEL_MAX_DB = 30.0
 
+# What to say about an endpoint Windows cannot level at all. Worth its own sentence rather than a
+# disabled control, because the person needs to know WHERE the volume went, not just that it is
+# not here: on RODE's Virtual Devices output the level lives on the desk's fader, so the keyboard
+# volume key does nothing and there is no software route back.
+FIXED_LEVEL_NOTE = ("Windows cannot change this device's level. Use the channel's fader on the "
+                    "unit, or this app's own level control.")
+
 
 def _default_endpoint_name(flow: int) -> str:
     """Windows' default endpoint for one data flow, by friendly name, or "" if it cannot be read.
@@ -667,21 +674,30 @@ def _volume_interface(endpoint_id: str):
 
 
 def _offered_range(vol) -> tuple:
-    """(min dB, max dB, step) this control will offer for an endpoint: what the driver reports,
-    narrowed to the sane band above. One helper, so the reader and the writer cannot disagree about
-    what is allowed - which would show up as a control that accepts a value and then reports a
-    different one."""
+    """(min dB, max dB, step, fixed) this control will offer: what the driver reports, narrowed to
+    the sane band above. One helper, so the reader and the writer cannot disagree about what is
+    allowed - which would show up as a control that accepts a value and then reports a different one.
+
+    **`fixed` IS A DEGENERATE RANGE, NOT A MISSING ONE, AND THE TWO MUST NOT BE CONFLATED.** RODE's
+    Virtual Devices endpoint `System (RØDECaster)` answers GetVolumeRange with min 0, max 0: it has
+    no level control at all, the keyboard volume key does nothing to it, and SetMasterVolumeLevel
+    refuses with "the parameter is incorrect". Falling back to the sane band there offers a slider
+    that cannot move, which on a device whose ONLY volume control is a physical fader is worse than
+    offering none. A driver that reports no range at all is the different case: nothing is known,
+    so the band is still the honest answer.
+    """
     lo, hi, step = OFFERED_LEVEL_MIN_DB, OFFERED_LEVEL_MAX_DB, 0.5
     try:
         r_lo, r_hi, r_step = vol.GetVolumeRange()
-        if float(r_hi) > float(r_lo):
-            lo = max(OFFERED_LEVEL_MIN_DB, float(r_lo))
-            hi = min(OFFERED_LEVEL_MAX_DB, float(r_hi))
-            if float(r_step) > 0:
-                step = float(r_step)
+        if float(r_hi) <= float(r_lo):
+            return float(r_lo), float(r_lo), 0.5, True
+        lo = max(OFFERED_LEVEL_MIN_DB, float(r_lo))
+        hi = min(OFFERED_LEVEL_MAX_DB, float(r_hi))
+        if float(r_step) > 0:
+            step = float(r_step)
     except Exception:
         pass                     # no range reported: the sane band is the answer
-    return lo, hi, step
+    return lo, hi, step, False
 
 
 def endpoint_volume(endpoint_id: str) -> dict:
@@ -694,7 +710,7 @@ def endpoint_volume(endpoint_id: str) -> dict:
     try:
         dev, vol = _volume_interface(endpoint_id)
         db = float(vol.GetMasterVolumeLevel())
-        lo, hi, step = _offered_range(vol)
+        lo, hi, step, fixed = _offered_range(vol)
         muted = False
         try:
             muted = bool(vol.GetMute())
@@ -702,7 +718,10 @@ def endpoint_volume(endpoint_id: str) -> dict:
             pass
         return {"ok": True, "id": endpoint_id, "name": _friendly_name(dev), "db": db,
                 "min_db": lo, "max_db": hi, "step_db": step, "muted": muted,
-                "note": level_note(db)}
+                # SAY SO rather than leaving a dead slider. The caller needs to tell "this level is
+                # at 0 dB" from "this device has no level", and only the second is worth a sentence.
+                "fixed": fixed,
+                "note": (FIXED_LEVEL_NOTE if fixed else level_note(db))}
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the Windows level for that stream: {exc}"}
     finally:
@@ -743,7 +762,11 @@ def set_endpoint_volume_db(endpoint_id: str, db: float) -> dict:
     comtypes.CoInitialize()
     try:
         _dev, vol = _volume_interface(endpoint_id)
-        lo, hi, _step = _offered_range(vol)
+        lo, hi, _step, fixed = _offered_range(vol)
+        if fixed:
+            # REFUSE IN OUR OWN WORDS. Letting it through returns the driver's "the parameter is
+            # incorrect", which names nothing the person can act on and reads like a fault here.
+            return {"ok": False, "fixed": True, "message": FIXED_LEVEL_NOTE}
         want = max(lo, min(hi, float(db)))
         vol.SetMasterVolumeLevel(c_float(want), None)
         got = float(vol.GetMasterVolumeLevel())

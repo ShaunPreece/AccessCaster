@@ -609,12 +609,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
   and B inputs come off their faders and every RODECaster device on the computer is renamed.
-- **THE DEVICE MODEL IS RESOLVED FROM THAT SAME PRODUCT ID, SO IT IS ONLY RIGHT IN MODE 0.**
-  `devices.DEVICES` knows `0x0037` (Pro II) and `0x0050` (Duo) and nothing else, so any desk in a
-  non-zero `outputMultiMode` falls through to `DEFAULT`. That is harmless on a Pro II, which IS the
-  default, and wrong on a Duo in Expanded, which would be given a Pro II's matrix and channel
-  layout. The MI_09 product string cannot fix it - it reads `HID Interface` - so the answer is
-  either the dump's own `systemName` or a per-desk table of every mode's id.
+- **A DESK IS IDENTIFIED BY ITS SERIAL, AND A PRODUCT ID IS ONLY TRUSTED WHEN THE TABLE HOLDS IT.**
+  `devices.DEVICES` knows `0x0037` (Pro II) and `0x0050` (Duo), which are the DEFAULT-mode ids, so
+  any desk in a non-zero `outputMultiMode` presents an id no table can hold. Resolving on the id
+  alone then falls through to `DEFAULT`, which IS a Pro II - invisible on a Pro II and wrong on a
+  Duo in Expanded, which would be handed a Pro II's matrix shape and channel layout.
+  So `get_active_device` tries the id, then a map learned from the desk's own `systemName` and
+  keyed by SERIAL, which survives every re-enumeration. `rcp_read.read_model_raw` fills that map,
+  but only when `devices.unidentified` says the id names nothing: one dict lookup per dump, and the
+  string read once per desk per session. **Do not tabulate the other ids instead**: that is six
+  entries per desk, unmeasured for the Duo, and wrong again the day RODE add a mode. The MI_09
+  product string is no help either - it reads `HID Interface` on both desks.
 - **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode` PLUS A PHYSICAL REPLUG.** Measured on a
   Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened. Expanded alone with the output mode
   Off yields ONE endpoint, `System (RØDECaster)`. Post-fader multitrack AND Expanded (value 5)

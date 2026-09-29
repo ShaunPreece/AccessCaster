@@ -249,5 +249,50 @@ for _id in ("fader-levels-status", "reset-outputs-status", "stereo-status"):
     check(f"{_id} is written only through setStatus", f'setText("{_id}"' not in _js,
           "a bare setText here goes silent when the same message repeats")
 
+
+# --- A DESK IS IDENTIFIED BY ITS SERIAL, NOT BY AN ID THAT MOVES -----------------------------
+# The product id encodes the USB audio configuration, so a desk in any non-default `outputMultiMode`
+# presents an id no table holds (a Pro II reads 0x0037, 0x0078, 0x0092 or 0x0094 by mode). Resolving
+# on the id alone then falls through to DEFAULT, which IS a Pro II - so the fault is invisible on a
+# Pro II and hands a DUO the wrong matrix shape and channel layout. Checked here rather than on
+# hardware because only the Duo half is wrong and no Duo is attached.
+import devices                                                          # noqa: E402
+
+print("\nIDENTIFYING A DESK WHOSE PRODUCT ID IS NOT IN THE TABLE")
+
+
+class _Iface:
+    def __init__(self, product_id, serial):
+        self.product_id, self.serial_number = product_id, serial
+        self.interface_number = 9
+
+
+_MODE5 = _Iface(0x0094, "TEST-DUO-1")        # an Expanded desk: a real measured id, absent from DEVICES
+_saved_learned = dict(devices._LEARNED)
+devices._LEARNED.clear()
+try:
+    check("a mode-5 product id is genuinely unknown, or this test proves nothing",
+          0x0094 not in devices.DEVICES)
+    check("and such an interface is flagged for identifying", devices.unidentified(_MODE5))
+    check("a DUO says so in its own dump, whatever id it arrived under",
+          devices.note_system_name(_MODE5, "RODECaster Duo") is devices.DUO)
+    check("which is remembered against the SERIAL, the one thing that does not change",
+          devices._LEARNED.get("TEST-DUO-1") is devices.DUO)
+    check("so it is not asked again", not devices.unidentified(_MODE5))
+    check("a name matching neither desk teaches nothing, rather than teaching a guess",
+          devices.note_system_name(_Iface(0x0094, "TEST-OTHER"), "Some Other Box") is None
+          and "TEST-OTHER" not in devices._LEARNED)
+    check("a known id still wins without any dump at all",
+          devices.resolve_device(devices.PID_DUO) is devices.DUO
+          and devices.resolve_device(devices.PID_PRO2) is devices.PRO2)
+    # The consequence, stated as the thing that actually breaks: a Duo given a Pro II's spec has
+    # the wrong number of faders and the wrong matrix, and every read and write follows that.
+    check("the two desks really do differ, so misidentifying one matters",
+          devices.DUO.fader.count != devices.PRO2.fader.count
+          or devices.DUO.matrix.output_count != devices.PRO2.matrix.output_count)
+finally:
+    devices._LEARNED.clear()
+    devices._LEARNED.update(_saved_learned)
+
 print(f"\n{'ALL SPEC CHECKS PASSED' if not FAILED else str(len(FAILED)) + ' CHECK(S) FAILED'}")
 raise SystemExit(1 if FAILED else 0)

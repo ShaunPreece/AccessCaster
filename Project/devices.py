@@ -1079,6 +1079,44 @@ def device_from_system_name(system_name) -> Optional[DeviceModel]:
     return None
 
 
+# What a dump told us this desk is, keyed by its USB SERIAL.
+#
+# THE SERIAL IS THE ONLY STABLE IDENTIFIER THIS DESK HAS. The product id encodes the audio
+# configuration and changes under `outputMultiMode`, the path changes with it, and the MI_09
+# product string is the useless "HID Interface" on both desks. The serial survives every one of
+# those, so a desk seen once in any mode is known in all of them.
+#
+# LEARNED RATHER THAN TABULATED, because a table of every mode's id per desk is six entries each,
+# unmeasured for the Duo, and would be wrong again the day RODE add a mode. The desk states its own
+# model in every dump; this just remembers it.
+_LEARNED: dict = {}
+
+
+def unidentified(iface) -> bool:
+    """Whether this interface's product id names no desk and nothing has been learned for it.
+
+    The caller's cue to pay for reading `systemName` out of a dump it already has. Cheap enough to
+    ask on every dump, which is the point: the expensive half runs once per desk per session."""
+    if iface is None or _FORCED_DEVICE is not None:
+        return False
+    return (iface.product_id not in DEVICES
+            and bool(iface.serial_number)
+            and iface.serial_number not in _LEARNED)
+
+
+def note_system_name(iface, system_name) -> Optional[DeviceModel]:
+    """Record what a dump says this desk is, against its serial. Returns the model, or None.
+
+    Silently does nothing for a name that matches neither desk, so an unreadable dump cannot teach
+    us something false and have it believed for the rest of the session."""
+    if iface is None or not iface.serial_number:
+        return None
+    model = device_from_system_name(system_name)
+    if model is not None:
+        _LEARNED[iface.serial_number] = model
+    return model
+
+
 _FORCED_DEVICE: Optional[DeviceModel] = None
 
 
@@ -1103,16 +1141,28 @@ def force_device(dev: Optional[DeviceModel]) -> Optional[DeviceModel]:
 def get_active_device() -> DeviceModel:
     """The DeviceModel for the currently connected RODECaster control interface.
 
-    Resolves from the vendor control interface's product id. Falls back to DEFAULT
-    (Pro II) if nothing is connected or enumeration fails, so callers never crash
-    and Pro II-era behaviour is preserved when offline.
+    Resolves from the vendor control interface's product id, then from what a dump has told us
+    about this SERIAL. Falls back to DEFAULT (Pro II) if nothing is connected or enumeration
+    fails, so callers never crash and Pro II-era behaviour is preserved when offline.
+
+    **THE PRODUCT ID ALONE IS ONLY RIGHT IN THE DEFAULT AUDIO MODE.** It encodes the USB audio
+    configuration, so a desk in any other `outputMultiMode` presents an id no table can hold, and
+    would silently resolve to DEFAULT - which is a Pro II, so a Duo in Expanded would be handed a
+    Pro II's matrix shape and channel layout. The learned map fixes that: it is keyed by serial,
+    which does not change, and is filled in from the desk's own `systemName` the first time a dump
+    is read. A known id still wins, because it is definitive and needs no dump.
     """
     if _FORCED_DEVICE is not None:
         return _FORCED_DEVICE
     try:
         iface = rcp_hid.find_control_interface()
         if iface is not None:
-            return resolve_device(iface.product_id)
+            known = DEVICES.get(iface.product_id)
+            if known is not None:
+                return known
+            learned = _LEARNED.get(iface.serial_number)
+            if learned is not None:
+                return learned
     except Exception:
         pass
     return DEFAULT
