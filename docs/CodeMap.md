@@ -22,12 +22,12 @@ after a session that moved code.
 
 | file | lines | what it owns |
 |---|---|---|
-| `server.py` | 10896 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
+| `server.py` | 10912 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
 | `soundpad.py` | 3081 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. Pad records are found by windowing the dump on `padName`: `_pad_windows` is the ONE anchor pass and `_pad_field` reads one field inside a window (pass `default=_ABSENT` to tell a missing field from an undecodable one). `_sanitise_stack` is the ONE effect-stack cleaner, with `validate_fx_stack` (must not be empty) and `_sanitise_stack_loose` (may be) over it. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. |
 | `rcp_transfer.py` | 1467 | Record BUILDERS and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. Also the pad-volume mount gate: `find_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats) and `quiet_drive_errors` (kills Windows' modal drive box). |
 | `app_settings.py` | 217 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
-| `channels.py` | 1182 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
-| `devices.py` | 1168 | Device models and caps: `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec` (**its `block` names the dump section the grid lives in and its `cell_count` counts THAT block only** - 390, the MIX section; see the routing-matrix entry in `PROJECT_GUIDE.md` part 2), `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
+| `channels.py` | 1202 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
+| `devices.py` | 1226 | Device models and caps: `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec` (**its `block` names the dump section the grid lives in and its `cell_count` counts THAT block only** - 390, the MIX section; see the routing-matrix entry in `PROJECT_GUIDE.md` part 2), `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
 | `autostart.py` | 169 | "Start when you sign in": the HKCU Run value, SHARED WITH `installer.iss` (same key, name and command - `test_autostart.py` asserts it). `state()`, `set_enabled()`, `started_at_login()` (the `--startup` flag `tray.main` reads to come up with no page). Refuses from a source run. **`LEGACY_VALUE_NAME` is the pre-rename value "Access Caster"**: `read_value` falls back to it so a machine that has not been upgraded still reads as ON, and `set_enabled` deletes it whichever way it is called, because two entries naming the same exe start the app twice at sign-in. `installer.iss` deletes it too, ungated by the task. |
 | `profiles.py` | 889 | Save, restore, `device_snapshot`, `UNIT_KEY`, `_apply_v2`. The routing matrix is captured as a MIX SCHEME (`routing.mix_scheme`, via `routing_schemes.capture`); the three older matrix keys are written for old builds only. |
 | `tones.py` | 139 | The announcer's non-speech cues: two-note WAVs (falling = muted, rising = unmuted) generated into the user data dir. `tone_path(name)` makes one on demand and replaces any earlier shape, which is what `TONE_VERSION` in the file name is for. Played by the speech worker through SAPI, so they inherit the announcer's output device. |
@@ -54,7 +54,7 @@ after a session that moved code.
 ### server.py landmarks
 
 - Specs that drive read + write + UI + profile from one place: `PROCESSING_CONTROLS` (173),
-  `UNIT_SETTINGS` (840), `_PRESET_PROPS` (4463).
+  `UNIT_SETTINGS` (840), `_PRESET_PROPS` (4467).
 - Global shortcuts. The KEYS are `hotkeys.py`, the CATALOGUE is `commands.py`, and the two meet only
   in `hotkey_manager()`. Here: the actions the catalogue calls into (`_hk_announcer`, `_hk_record`,
   `_hk_mics` with `_hk_muted_mics` above it, `_hk_state`, `_hk_window`),
@@ -78,7 +78,7 @@ after a session that moved code.
   (`_hk_note_pad_progress` / `_hk_note_pad_active` / `_hk_play_snapshot` / `_hk_playing_from_model`,
   fed from `_ann_handle_report` and never spoken).
 - Device state and overview: `read_device_state` (330), `device_overview` (1155),
-  `_overview_routing` (1063), `_wireless_mics` (303), `read_device_status` (1270).
+  `_overview_routing` (1063), `_wireless_mics` (303), `read_device_status` (1271).
 - Recording: `read_recorder` (571), `action_record` (665), `action_drop_marker` (740),
   `_recorder_watcher` (469), `_recorder_sentence` (611), `action_delete_recording` (782, gated on
   `recorder.DELETE_PROVEN`), `_recorder_payload` (518, the ONE builder
@@ -95,18 +95,18 @@ after a session that moved code.
   `_token_offered` / `_authorised` / `_refuse`. **Local requests bypass it; `/api/access` and
   `/api/access/new` are in `LOCAL_ONLY_ROUTES` so the key never leaves this machine.** The page load
   is the only place the cookie is set.
-- Network: `read_network_status` (1362), `action_join_wifi` (1635), `action_set_bt_visible` (1708),
-  `_network_write_gate` (1836).
-- Announcer: `_announce_loop` (3233), `_ann_handle_report` (2515), `_ann_seed_layout` (2742),
-  `_ann_publish_level` (3157), `_ann_publish_mute` (3186), `_ann_publish_solo` (3933),
-  `_ann_mark_self_write` (3116), `_ann_is_self_echo` (3125), `_suspend_announcer_for_record` (3354).
-- Auto gain: `_autogain_run` (4024), `_ChatIsolation` (4140), `_autogain_restore_processing` (4235).
-- Per-channel level check: `action_channel_level_check` (5927), `_chan_check_stop` (5864),
-  `_level_check_summary` (5791).
-- Meters and the Windows level: `read_meters` (5524), `action_set_input_level` (5627),
-  `action_meter_watch` (5757).
-- Faders and chains: `action_set_fader` (5251), `action_reset_faders` (6079),
-  `_follow_chains` (4779), `_read_fader_vector` (4971), `_tidy_fader_target` (5206).
+- Network: `read_network_status` (1363), `action_join_wifi` (1636), `action_set_bt_visible` (1709),
+  `_network_write_gate` (1837).
+- Announcer: `_announce_loop` (3237), `_ann_handle_report` (2518), `_ann_seed_layout` (2745),
+  `_ann_publish_level` (3161), `_ann_publish_mute` (3190), `_ann_publish_solo` (3937),
+  `_ann_mark_self_write` (3120), `_ann_is_self_echo` (3129), `_suspend_announcer_for_record` (3358).
+- Auto gain: `_autogain_run` (4028), `_ChatIsolation` (4144), `_autogain_restore_processing` (4239).
+- Per-channel level check: `action_channel_level_check` (5939), `_chan_check_stop` (5876),
+  `_level_check_summary` (5803).
+- Meters and the Windows level: `read_meters` (5536), `action_set_input_level` (5639),
+  `action_meter_watch` (5769).
+- Faders and chains: `action_set_fader` (5259), `action_reset_faders` (6091),
+  `_follow_chains` (4783), `_read_fader_vector` (4975), `_tidy_fader_target` (5214).
 - Per-fader mute and solo (the Levels tab's rows): `action_set_fader_mute`, `action_set_fader_solo`,
   read from `fader_levels_live`; browser half is `onFaderMute` / `onFaderSolo` / `onClearFaderSolos`.
   By FADER rather than by channel name, so an empty strip and a linked pair both work.
@@ -114,13 +114,13 @@ after a session that moved code.
   `_carry_mute` (which puts back the mute the desk clears when it rearranges a layout). The pair
   table is `devices.FaderSpec.stereo_pairs` and `rcp_transfer.STEREO_LINK_PAIRS`; the browser half is
   `buildStereoLinks` / `onStereoLink` / `applyStereoValues` in `app.js`.
-- Routing: `routing_model` (6341), `action_set_cross_point` (6807), `action_reset_all_outputs`
-  (5072, now a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6270, which
+- Routing: `routing_model` (6353), `action_set_cross_point` (6823), `action_reset_all_outputs`
+  (5072, now a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6282, which
   since 29th August 2026 applies a profile's `routing.mix_scheme` through `routing_schemes.apply`
   and keeps the old index-keyed branch only for profiles saved before that).
-- Mix schemes: `_apply_scheme` (6857, the ONE apply path: gate, lock, write, wording),
-  `read_routing_schemes` (6890), `action_apply_routing_scheme` (6923),
-  `action_save_routing_scheme` (6937), `action_delete_routing_scheme` (6965). The format and the
+- Mix schemes: `_apply_scheme` (6873, the ONE apply path: gate, lock, write, wording),
+  `read_routing_schemes` (6906), `action_apply_routing_scheme` (6939),
+  `action_save_routing_scheme` (6953), `action_delete_routing_scheme` (6981). The format and the
   writes are in `routing_schemes.py`.
 - **Background jobs, all four on ONE class: `_BackgroundJob` (`start` / `status` / `busy` /
   `step` / `tick`).** The instances are `_profile_job`, `_restore_job`, `_show_job` and
@@ -134,9 +134,9 @@ after a session that moved code.
   mic preamp and leaves the channel ~55 dB down while the model reads perfect. Nothing can detect
   it by reading; see `PROJECT_GUIDE.md` part 2 before touching this.
 - ONE backup, both mechanisms underneath: `action_backup_now`, `action_restore_backup` (**always the profile since 21st September 2026**: the show import crashes the desk about 1 in 6, see its docstring), `backup_restore_plan` (what the confirmation dialog says, including `warnings` - what the backup will leave you unable to hear, via `_restore_silence_warnings`), `_removable_volume_ready`, `_backup_wording`.
-- Profiles and the as-found baseline: `snapshot_profile` (7279), `restore_profile` (7428, and it
-  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7350),
-  `action_baseline_save` (7382).
+- Profiles and the as-found baseline: `snapshot_profile` (7295), `restore_profile` (7444, and it
+  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7366),
+  `action_baseline_save` (7398).
 - The desk's own Shows (all after `restore_profile`): `read_show_state` (the page payload, and the
   ONE place the two option labels are built), `show_job_status`, `_run_show_job` (one job state for
   all four, since they are mutually exclusive), `_shows_write_gate`, `_export_and_wait`,
@@ -156,20 +156,20 @@ after a session that moved code.
   above `_network_write_gate`.
 - Capability gates, one per risky write family, and all but one now a one-liner over **`_cap_gate`**
   (which holds the shared reasoning: a selector proven on a Pro II is NOT proven on a Duo, and a
-  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4890),
-  `_matrix_write_gate` (6742), `_output_write_gate` (6750), `_network_write_gate`,
-  `_shows_write_gate`. **`_level_write_gate` (5335) keeps its own body** because it has a SECOND
+  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4894),
+  `_matrix_write_gate` (6758), `_output_write_gate` (6766), `_network_write_gate`,
+  `_shows_write_gate`. **`_level_write_gate` (5347) keeps its own body** because it has a SECOND
   condition beyond the cap: the device must also carry confirmed faderLevel selectors. Each keeps
   its own refusal sentence, because what the user can and cannot do differs per family.
-  `_chain_follow_on` (4769) is not a gate of this kind.
+  `_chain_follow_on` (4773) is not a gate of this kind.
 - **`_pad_write` is the shape of every live pad edit**: range-check the grid, take the HID lock,
   run the call, turn a crash into a sentence. Seventeen `action_set_pad_*` / `action_clear_pad` /
   `action_assign_fx` functions had these eight lines written out verbatim. `invalid=` is a refusal
   for a value it cannot check itself (checked AFTER the range and BEFORE the lock);
   `plain_value_error=True` surfaces a ValueError's own text, which soundpad writes as a finished
   user-facing sentence.
-- Lifecycle: `_bring_up_server` (10743), `_close_previous_instances` (10707), `_client_watchdog` (134),
-  `Handler` (10243).
+- Lifecycle: `_bring_up_server` (10759), `_close_previous_instances` (10723), `_client_watchdog` (134),
+  `Handler` (10259).
 
 --------------------------------------------------------------------------------
 ## Project/static (the web UI)
@@ -246,7 +246,7 @@ Alt+4 Recording, Alt+5 Profiles, Alt+6 Device, Alt+7 Help &amp; About (renamed f
 30th; the route key is still `about` and the section is still `sec-about`).
 
 --------------------------------------------------------------------------------
-## DevTools/ (120 files; the ones worth knowing)
+## DevTools/ (121 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
@@ -464,6 +464,9 @@ proved the flat walk was fitting around a structure it could not see.** Then the
 `selector_predict.py` (the model, 15 of 15 anchors),
 `selector_map.py` (header to selector, everything derivable), `selector_from_push.py` (a pushed
 record names its own selector),
+`input_sources.py` (the 30-entry INPUTSOURCE table with the reserved slots marked, `--save` /
+`--diff` two dumps: what a mode switch adds is how Expanded's four source codes were found, and
+it is how to confirm them on a Duo),
 `probe_derived_write.py`, `cap_probe.py` (drive one control with USBPcap running),
 `model_diff.py` (block-aware snapshot / diff of all 6436 property occurrences, `snap` / `diff` /
 `watch`; the tool for "the desk just did something, what changed?"), `transfer_volumes.py` (what

@@ -233,6 +233,26 @@ _strip_vec = {"vec": None, "at": 0.0}
 _strip_vec_last = {"vec": None}
 
 
+# WHETHER THE DESK IS IN EXPANDED, no expiry, same contract as _strip_vec_last: it decides a NAME
+# and which sources may be offered, never an address. Held here rather than read on demand because
+# the callers that need it - the announcer's read loop, the fader label helper - must not trigger a
+# model dump, and because Expanded changes only by a write that takes the desk off the USB bus, so
+# a cached answer cannot go quietly stale the way a fader layout can.
+_usb_expanded = {"on": None}
+
+
+def publish_usb_expanded(on) -> None:
+    """Cache the Expanded flag from a read that has just decoded `outputMultiMode`."""
+    if on is not None:
+        _usb_expanded["on"] = bool(on)
+
+
+def usb_expanded() -> bool:
+    """Whether the desk is in Expanded, as last seen. False until something has read it, which is
+    the safe default: it offers FEWER sources and the plainer name."""
+    return bool(_usb_expanded["on"])
+
+
 def publish_strip_vector(vec) -> None:
     """Cache a channelInputSource vector we have just read as part of some other read."""
     if vec:

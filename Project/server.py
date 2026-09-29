@@ -1201,8 +1201,9 @@ def device_overview() -> dict:
 
     def label(i):
         code = vec[i] if i < len(vec) else None
-        # all_labels: a fader holding a linked pair must be named, not fall through to "Fader N".
-        return spec.all_labels.get(code) or f"Fader {i + 1}"
+        # labels_for: a fader holding a linked pair must be named, not fall through to "Fader N",
+        # and USB 1 is named after what the computer actually sends in the mode the desk is in.
+        return spec.labels_for(channels.usb_expanded()).get(code) or f"Fader {i + 1}"
 
     faders, muted, soloed = [], [], []
     for i in range(spec.count):
@@ -2407,7 +2408,7 @@ def _ann_source_label(source_code: int) -> str:
     a pair is never something you assign, and code_label covers only the assignable set. With the
     narrow one, a linked Mic 1 + 2 is announced as "Source 4" out loud."""
     try:
-        lbl = devices.get_active_device().fader.all_labels.get(source_code)
+        lbl = devices.get_active_device().fader.labels_for(channels.usb_expanded()).get(source_code)
         if lbl:
             return lbl
         for s in devices.get_active_device().matrix.sources:
@@ -2503,8 +2504,10 @@ def _ann_channel_label(strip_idx: int) -> str:
     try:
         vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
         if vec and 0 <= strip_idx < len(vec):
-            # all_labels, so a stereo-linked pair is named rather than spoken as a bare code.
-            label = devices.get_active_device().fader.all_labels.get(vec[strip_idx])
+            # labels_for, so a linked pair is named rather than spoken as a bare code, and the
+            # Expanded four are named rather than announced as "Source 12".
+            label = devices.get_active_device().fader.labels_for(
+                channels.usb_expanded()).get(vec[strip_idx])
             if label:
                 return label
     except Exception:
@@ -2803,6 +2806,7 @@ def _ann_seed_layout(st: dict) -> None:
         # rearranged itself. The push cannot carry this: the desk leaves the bus as it changes, so
         # any push is sent into the gap. Comparing across the reconnect is the only way to see it.
         st["usb_mode"] = rcp_read.first(blob, "outputMultiMode", "int")
+        channels.publish_usb_expanded(recorder.split_usb_multitrack(st["usb_mode"])[1])
     except Exception:
         pass
     st["known"] = known
@@ -4913,7 +4917,7 @@ def _channel_name(code, spec=None) -> str:
     spec = spec or _active_faders()
     if _is_empty_fader(code):
         return "empty (no channel)"
-    return spec.all_labels.get(code, f"channel code {code}")
+    return spec.labels_for(channels.usb_expanded()).get(code, f"channel code {code}")
 
 
 def _follow_levels(old_vec, new_vec, levels_before, spec) -> str:
@@ -5001,7 +5005,11 @@ def fader_model() -> dict:
     return {
         "faders": [{"index": i, "label": _fader_label(i, spec), "physical": i < spec.physical}
                    for i in range(spec.count)],
-        "channels": [[code, label] for code, label in spec.assignable],
+        # THE DROPDOWN AND THE WRITE GATE MUST OFFER THE SAME SET, or Expanded's four inputs are
+        # either refused after being chosen or missing from the list that can choose them. Both
+        # come off `code_..._for`, so there is one answer to "what may go on a fader".
+        "channels": [[code, spec.labels_for(channels.usb_expanded()).get(code, str(code))]
+                     for code in spec.code_order_for(channels.usb_expanded())],
         "read_only": _fader_write_gate() is not None,
         # The PAIRS are static (which links exist, and what to call them); whether each is currently
         # linked is live state and arrives with the layout read, not from here.
@@ -5260,7 +5268,10 @@ def action_set_fader(fader_index: int, code: int) -> dict:
     spec = _active_faders()
     if not 0 <= fader_index < spec.count:
         return {"ok": False, "message": f"Fader {fader_index + 1} is not valid."}
-    if code not in spec.code_set:
+    # THE OFFERED SET WIDENS IN EXPANDED, where Game, Music, A and B become real inputs. In
+    # Standard they are nameable but not assignable: putting one on a fader there gives somebody a
+    # channel that can never carry audio.
+    if code not in spec.code_set_for(channels.usb_expanded()):
         return {"ok": False, "message": f"Channel code {code} is not assignable."}
     chain_note = ""
     try:
@@ -5273,7 +5284,8 @@ def action_set_fader(fader_index: int, code: int) -> dict:
                         "labels": [_channel_name(c, spec) for c in vec],
                         "message": f"{_fader_label(fader_index, spec)} already carries "
                                    f"{_channel_name(code, spec)}."}
-            target = _tidy_fader_target(vec, fader_index, code, spec.code_order)
+            target = _tidy_fader_target(vec, fader_index, code,
+                                        spec.code_order_for(channels.usb_expanded()))
             # THE CHAIN FOLLOWS THE CHANNEL. Processing and effects are per fader STRIP, so moving a
             # channel without moving its chain leaves it being processed by whatever voicing sits on
             # the strip it lands on. The RODE app does exactly this on its own
@@ -6398,6 +6410,10 @@ def read_routing_live() -> dict:
                        if v is not None and v != ""]
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))
+    # Publish it exactly as the strip vector above is published: this is the routing read every
+    # page view makes, so the announcer and the fader labels get the mode for free rather than
+    # dumping the model from a thread that must not.
+    channels.publish_usb_expanded(usb_expanded)
     return {
         "ok": True,
         "input_sources": input_sources,

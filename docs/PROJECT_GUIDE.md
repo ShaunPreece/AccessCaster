@@ -580,9 +580,29 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   because on a desk in Expanded that drops it back to Standard and the desk unassigns every
   extended input the user had put on a fader. The desk's own app warns before doing either.
 - **EXPANDED ADDS NO BLOCKS TO THE MODEL.** Byte length is 156825 in both states on a Pro II, so
-  Game, Music, A and B are existing slots in the ten-wide strip space rather than new inputs. Their
-  `channelInputSource` codes are NOT yet read; the known codes are 0-3, 7, 8, 9, 10 and 11, leaving
-  4, 5 and 6 unclaimed for four sources, so at least one sits above 11.
+  Game, Music, A and B are existing slots in the ten-wide strip space rather than new inputs.
+- **GAME, MUSIC, A AND B ARE SOURCE CODES 12, 13, 14 AND 15**, measured on a Pro II, fw 1.7.6:
+  each was written to a fader and read back, and all four were accepted. **4, 5 and 6 are NOT
+  spare and never were** - they are the stereo-link pair codes.
+  **READ THE `INPUTSOURCE` TABLE RATHER THAN GUESSING FROM GAPS.** Every desk publishes 30 nodes
+  whatever it has plugged in, so presence proves nothing, but two fields separate real from
+  reserved: `inputColour` `ff000000` is a placeholder slot, and `inputDigitalGain` `-12` marks the
+  family that arrives over USB (7, 8, 9, 10 carry it and no microphone does). Four consecutive
+  coloured entries at -12 is the signature that found these. `DevTools/input_sources.py` prints
+  the table and diffs two dumps.
+  **THE ORDER IS RODE'S, NOT MEASURED.** Their guide and their driver's INF both list Game, Music,
+  A, B, and they say the four are functionally identical. Naming them in any other order costs a
+  label, never a wrong address.
+  **NAMED ALWAYS, ASSIGNABLE ONLY IN EXPANDED**, and both halves are load-bearing. A fader keeps
+  whatever code it was given, so a desk that leaves Expanded can still hold one and the announcer
+  would otherwise say "0 percent, Source 12" out loud; and offering them in Standard puts an input
+  on a fader that can never carry audio. `FaderSpec.labels_for` / `code_set_for` are the pair, fed
+  by `channels.usb_expanded()`. **The dropdown and the write gate must come from the same call**,
+  or a source is offered and then refused.
+- **USB 1 IS NOT "MAIN STEREO" IN EXPANDED.** The channel carries the `System (RØDECaster)` virtual
+  device there, with the other four alongside it, so `FaderSpec.expanded_relabel` renames it to
+  "USB 1 (System)". A label naming a Windows device the person no longer has is worse than a plain
+  one, and this is read aloud on every encoder turn.
 - **THE DESK COMES BACK FROM A RE-ENUMERATION UNDER A DIFFERENT USB PRODUCT ID, because the id
   encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
   0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path

@@ -141,6 +141,13 @@ class FaderSpec:
     # (pair code, lower mic code, upper mic code, label) per LEGAL stereo link. Empty on a device
     # whose pair codes are not proven, which makes the whole feature refuse there. See pair_map.
     stereo_pairs: tuple = ()
+    # (code, label) sources that EXIST ONLY IN EXPANDED, RODE's Virtual Devices. Nameable always,
+    # assignable only when the desk says it is in Expanded - offering them in Standard would put a
+    # permanently silent input on somebody's fader. See expanded_labels / code_set_for.
+    expanded_sources: tuple = ()
+    # {code: label} to use INSTEAD of the assignable one while the desk is in Expanded, for a
+    # channel whose meaning changes with the mode.
+    expanded_relabel: tuple = ()
     default_vector: Optional[tuple] = None
     vector_len: Optional[int] = None
     capture_len: Optional[int] = None
@@ -213,11 +220,44 @@ class FaderSpec:
 
     @property
     def all_labels(self) -> dict:
-        """{code: label} for naming ANYTHING the vector can hold - the assignable channels plus the
-        linked pairs. Naming is the wide set; `code_set` (what may be WRITTEN) stays narrow."""
+        """{code: label} for naming ANYTHING the vector can hold - the assignable channels, the
+        linked pairs, and the Expanded-only sources. Naming is the wide set; `code_set` (what may
+        be WRITTEN) stays narrow.
+
+        THE EXPANDED FOUR ARE IN HERE EVEN IN STANDARD, deliberately. A fader keeps whatever code
+        it was given, so a desk that leaves Expanded can still be holding one, and the alternative
+        to naming it is the announcer saying "0 percent, Source 12" out loud - which is exactly
+        what a linked pair used to do before `code_label` was removed for the same reason."""
         out = dict(self.assignable)
+        out.update(self.expanded_sources)
         out.update(self.pair_label)
         return out
+
+    def labels_for(self, expanded: bool) -> dict:
+        """`all_labels`, with any channel whose MEANING changes in Expanded renamed.
+
+        On a Pro II that is USB 1: in Standard the computer sends it one stereo mix and Windows
+        calls the endpoint Main Stereo, and in Expanded the same channel carries the System virtual
+        device with Game, Music, A and B alongside it. Announcing "USB 1 (Main Stereo)" there names
+        a Windows device the person no longer has."""
+        out = self.all_labels
+        if expanded:
+            out.update(self.expanded_relabel)
+        return out
+
+    def code_set_for(self, expanded: bool) -> frozenset:
+        """What may be WRITTEN to a fader right now. The Expanded four join only when the desk is
+        in Expanded, because a source that exists in neither the mixer nor Windows is not a channel
+        anyone should be able to put on a fader."""
+        if not expanded:
+            return self.code_set
+        return self.code_set | frozenset(code for code, _label in self.expanded_sources)
+
+    def code_order_for(self, expanded: bool) -> tuple:
+        """`code_order` plus the Expanded four, in display order, for the same reason."""
+        if not expanded:
+            return self.code_order
+        return self.code_order + tuple(code for code, _label in self.expanded_sources)
 
     def pair_swallowing(self, code: int, vec) -> Optional[int]:
         """The pair code in `vec` that currently contains mic `code`, or None. Used so the tidy
@@ -353,6 +393,18 @@ PRO2_FADERS = FaderSpec(
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
     # All three codes captured from the RODE app on hardware.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4")),
+    # RODE's Virtual Devices, measured on hardware 29th September 2026: each of 12 to 15 was
+    # written to a fader and read back, and all four were accepted. They were found by their
+    # INPUTSOURCE entries rather than guessed - every usable input carries a non-black
+    # `inputColour`, and `inputDigitalGain` -12 marks the family that arrives over USB, which is
+    # what separates these four from the reserved slots either side. `DevTools/input_sources.py`
+    # prints that table. The ORDER is RODE's own, from their user guide and their driver's INF,
+    # and is not independently measured; it costs a label if wrong, never a wrong address, and
+    # RODE say the four are functionally identical anyway.
+    expanded_sources=((12, "Game"), (13, "Music"), (14, "Virtual A"), (15, "Virtual B")),
+    # In Expanded the computer no longer sends one stereo mix, so naming USB 1 after a Windows
+    # device that has gone is worse than not naming it at all.
+    expanded_relabel=((7, "USB 1 (System)"),),
     default_vector=(0, 1, 2, 3, 10, 11, 7, 8, 9),   # confirmed clean default
 )
 
@@ -419,6 +471,12 @@ DUO_FADERS = FaderSpec(
     # accept it proves nothing: the engine takes source 3 on a Duo, hardware that does not exist
     # (see PROJECT_GUIDE part 2). And nobody has a 3.5mm headset to hear the result with.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"),),
+    # The same four, on the same argument that settles the pair codes above: a source code is a
+    # position in the firmware's InputSourceType enum and both desks run the SAME binary. A Duo has
+    # Expanded and it is where the mode was found. NOT measured on a Duo, and the way to measure it
+    # is `DevTools/input_sources.py` with one attached - four codes carrying a colour and a digital
+    # gain of -12 is the signature.
+    expanded_sources=((12, "Game"), (13, "Music"), (14, "Virtual A"), (15, "Virtual B")),
     default_vector=(0, 1, 10, 11, 2, 7, 8, 9, -1, 9),
 )
 

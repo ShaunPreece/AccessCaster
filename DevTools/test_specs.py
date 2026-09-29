@@ -294,5 +294,30 @@ finally:
     devices._LEARNED.clear()
     devices._LEARNED.update(_saved_learned)
 
+
+# --- EXPANDED'S FOUR SOURCES: NAMED ALWAYS, ASSIGNABLE ONLY IN EXPANDED ----------------------
+# Codes 12-15 are RODE's Virtual Devices, measured on hardware. The split matters both ways:
+# offering them in Standard puts a permanently silent input on a fader, and refusing to NAME them
+# there leaves the announcer saying "0 percent, Source 12" about a fader that still holds one.
+print("\nTHE EXPANDED-ONLY SOURCES")
+for _dev in (devices.PRO2, devices.DUO):
+    _f = _dev.fader
+    _codes = [c for c, _l in _f.expanded_sources]
+    check(f"{_dev.name}: it has the four", _codes == [12, 13, 14, 15], _codes)
+    check(f"{_dev.name}: named even in Standard, or the announcer says a bare number",
+          all(_f.labels_for(False).get(c) for c in _codes))
+    check(f"{_dev.name}: not assignable in Standard",
+          not any(c in _f.code_set_for(False) for c in _codes))
+    check(f"{_dev.name}: assignable in Expanded",
+          all(c in _f.code_set_for(True) for c in _codes))
+    check(f"{_dev.name}: the dropdown order and the write gate agree",
+          set(_f.code_order_for(True)) == set(_f.code_set_for(True)))
+    check(f"{_dev.name}: a stereo PAIR code is still never assignable",
+          not any(c in _f.code_set_for(True) for c, _lo, _up, _l in _f.stereo_pairs))
+check("USB 1 is renamed in Expanded, since Main Stereo is not what the computer sends there",
+      devices.PRO2.fader.labels_for(True)[7] != devices.PRO2.fader.labels_for(False)[7])
+check("and a relabel never changes what may be written",
+      devices.PRO2.fader.code_set_for(True) >= devices.PRO2.fader.code_set_for(False))
+
 print(f"\n{'ALL SPEC CHECKS PASSED' if not FAILED else str(len(FAILED)) + ' CHECK(S) FAILED'}")
 raise SystemExit(1 if FAILED else 0)
