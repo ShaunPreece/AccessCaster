@@ -700,6 +700,20 @@ byte-for-byte on both units (the Duo writes are byte-identical to the Pro II).
 
 GLOBAL OUTPUT block, selector 0x0D:
   - recordingMultitrackMode  int: 0 = Off, 1 = Pre-Fader, 2 = Post-Fader.
+  - outputMultiMode          int: TWO SETTINGS IN ONE VALUE, and the app shows them
+                             as two. Low part is the USB 1 multitrack OUTPUT mode
+                             (0 = Off, 1 = Pre-Fader, 2 = Post-Fader); adding 3 sets
+                             the USB 1 INPUT to Expanded, RODE's "Virtual Devices".
+                               0 Off/Standard        3 Off/Expanded
+                               1 Pre-Fader/Standard  4 Pre-Fader/Expanded
+                               2 Post-Fader/Standard 5 Post-Fader/Expanded
+                             All six measured on a Pro II, fw 1.7.6. Compose and
+                             decompose; writing a bare 0-2 silently leaves Expanded,
+                             which unassigns whatever the user had on those faders.
+                             Expanded adds four assignable inputs (Game, Music, A, B)
+                             that need RODE's Virtual Devices driver on the host to
+                             carry any audio. The model does not grow: byte length is
+                             identical in both states, so the four are existing slots.
   - outputMonAutoMute        bool: mute Monitor output when headphones present.
   - outputBTAutoMute         bool: mute Bluetooth output on the same condition.
 

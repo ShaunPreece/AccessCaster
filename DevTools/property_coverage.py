@@ -399,8 +399,6 @@ RULES: list[tuple[str, str, str, str]] = [
      "SOLO/Listen mode: False = After-fader Listen (solo plays the channel at its fader level), "
      "True = Pre-fader Listen (at unity). Confirmed by driving the app's Output > Listen screen. "
      "Selector not captured, so it is read-only for us."),
-    (r"^(outputMultiBypass|outputMultiMode)$", "candidate feature", "med",
-     "Multitrack/pre-fader output behaviour next to the multitrack mode we already write."),
     (r"^disableAll", "candidate feature", "med",
      "Lockouts: all headphone outputs, all line outs, all physical buttons. Useful for a locked-down "
      "venue setup."),

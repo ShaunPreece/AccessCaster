@@ -573,6 +573,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
   stayed busy (active 0.61) and mode 2's went silent (0.06). Needs a person - the mic faders are
   physical.
+- **`outputMultiMode` CARRIES TWO SETTINGS, AND TREATING IT AS ONE SILENTLY DESTROYS A FADER
+  LAYOUT.** The low part is the USB 1 multitrack output mode (0 Off, 1 Pre-Fader, 2 Post-Fader) and
+  adding 3 puts the USB 1 INPUT into Expanded, which is RODE's Virtual Devices. All six values
+  measured on a Pro II, fw 1.7.6. Compose on write and decompose on read; never write a bare 0-2,
+  because on a desk in Expanded that drops it back to Standard and the desk unassigns every
+  extended input the user had put on a fader. The desk's own app warns before doing either.
+- **EXPANDED ADDS NO BLOCKS TO THE MODEL.** Byte length is 156825 in both states on a Pro II, so
+  Game, Music, A and B are existing slots in the ten-wide strip space rather than new inputs. Their
+  `channelInputSource` codes are NOT yet read.
 - **THREE properties re-enumerate the desk's whole USB audio function: `outputMultiMode`,
   `engineMode` and `systemMainMode`.** All four endpoints drop for a second or two, Windows falls
   back to the laptop sound card, and the default device moves. **This takes Shaun's screen reader
