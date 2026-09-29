@@ -582,6 +582,22 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **EXPANDED ADDS NO BLOCKS TO THE MODEL.** Byte length is 156825 in both states on a Pro II, so
   Game, Music, A and B are existing slots in the ten-wide strip space rather than new inputs. Their
   `channelInputSource` codes are NOT yet read.
+- **NO CHANNEL CAN BE RENAMED ON THE DESK.** Of the 14 string properties a Pro II publishes, not one
+  names a channel: pads have `padName`, shows have `showName`, a channel has `inputColour` and no
+  name. So Game, Music, A and B are fixed firmware labels. Renaming happens in Windows, on the audio
+  endpoint, and that is also what the volume mixer shows when a program is assigned to one.
+- **THE VIRTUAL DEVICES DRIVER IS SIGNED "FREEDMAN ELECTRONICS PTY LTD", NOT "RODE".** Freedman is
+  RODE's parent company, so a publisher check looking for the string "RODE" REJECTS THE GENUINE
+  INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026.
+- **DETECT THE DRIVER WITH TWO CHECKS, NOT ONE, OR THE MESSAGE IS CONFIDENTLY WRONG.** The installed
+  MSI answers "is it present" (UpgradeCode `{36C667D1-F3A6-4A7B-9A3B-1A6A5C1A5707}`, product name
+  "RODECaster Virtual Device Driver", manufacturer "RODE Microphones"; the UpgradeCode survives
+  version bumps, the ProductCode does not). The audio endpoints answer "is it ACTIVE". Present with
+  no endpoints means Bypassed or awaiting a reboot, and telling that user to install it is worse
+  than saying nothing. Source: `https://update.rode.com/virtual_dev_driver/RODECasterDriver_WIN.zip`,
+  a 1.1 MB zip holding one MSI, version 1.0.5 as of 29th September 2026. The URL carries no version,
+  so RODE replace the file in place and a pinned hash would fail on their every release; check the
+  signature instead.
 - **THREE properties re-enumerate the desk's whole USB audio function: `outputMultiMode`,
   `engineMode` and `systemMainMode`.** All four endpoints drop for a second or two, Windows falls
   back to the laptop sound card, and the default device moves. **This takes Shaun's screen reader

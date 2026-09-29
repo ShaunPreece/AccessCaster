@@ -79,5 +79,9 @@ DevTools/_probe_stub_*.json
 # Scratch space for webcam grabs and throwaway diffs. Never committed.
 .tmpwork/
 
+# Third-party installers fetched for a local test. RODE's driver is theirs to distribute, and the
+# URL in PROJECT_GUIDE is how to get it again.
+_driver/
+
 # Generated at build time from Project/version.py HISTORY
 /Project/ReleaseNotes.html
