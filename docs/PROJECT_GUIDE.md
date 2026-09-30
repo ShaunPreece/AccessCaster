@@ -725,6 +725,19 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   earns its own flag because the first run alone looked like a cure: the rate had been two binds
   in nine arrivals an hour earlier. **A GOOD SPELL WILL VALIDATE ANY CHANGE YOU MAKE DURING ONE.**
   Nothing about this bind may be claimed from a run without a control beside it.
+- **THE BIND IS NOT A PER-ARRIVAL COIN TOSS, SO THERE IS A FACTOR NOBODY HAS NAMED.** Measured in
+  one afternoon: 1 bind in 8 arrivals, then 18 in 18 across three runs of identical flips. No
+  fixed probability produces both, so the failures cluster on something that persists between
+  arrivals rather than being drawn fresh each time. The service process is the obvious place for
+  that state to live, and it is never restarted; a service restart FOLLOWED by an arrival is the
+  one recovery ever seen for a run of failures, which fits. **Do not write "it binds about half
+  the time" as though it were a property of an arrival.**
+- **THE DIAGNOSTIC TOOLS ARE NOT THE CAUSE, and it was worth asking.** Every failure of that
+  afternoon fell inside a window where `bind_timeline.py` or `vad_trace.py` was running, which
+  reads as an observer effect: the first enumerates five device-interface classes eight times a
+  second, and the second throttles `audiodg` by making it wait on a Python reader for 330 debug
+  lines a second. The test is to run the flips WITH the observer on purpose, and that gives 6
+  binds out of 6. The correlation was with the time of day, not the instrument.
 - **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
   switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
   re-reads only on an audio device arrival; after a mode change that write can land after the
