@@ -716,6 +716,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Nothing the first cycle did recovered it; the next follow-up, started by the announcer's own
   reconnect, did. So the failure is reported while the app is still capable of fixing it itself,
   which is the other reason that sentence must not ask the operator to do anything.
+- **WINDOWS' DEFAULT OUTPUT SITTING ON THE DRIVER'S OWN ENDPOINT DOES NOT AFFECT THE BIND.** It is
+  a good hypothesis, because `System (RØDECaster)` as the default means the audio engine holds a
+  render stream on the endpoint the service is rebuilding. Measured against its own matched
+  control on the same afternoon, six mode flips each way: six binds out of six with the default
+  moved to the Realtek speakers, and six out of six with it left on the driver, every one within
+  1.0 to 1.2 seconds. `DevTools/probe_bind_default_output.py --control` is the control, and it
+  earns its own flag because the first run alone looked like a cure: the rate had been two binds
+  in nine arrivals an hour earlier. **A GOOD SPELL WILL VALIDATE ANY CHANGE YOU MAKE DURING ONE.**
+  Nothing about this bind may be claimed from a run without a control beside it.
 - **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
   switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
   re-reads only on an audio device arrival; after a mode change that write can land after the

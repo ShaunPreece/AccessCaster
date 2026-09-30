@@ -252,7 +252,7 @@ Alt+4 Recording, Alt+5 Profiles, Alt+6 Device, Alt+7 Help &amp; About (renamed f
 30th; the route key is still `about` and the section is still `sec-about`).
 
 --------------------------------------------------------------------------------
-## DevTools/ (123 files; the ones worth knowing)
+## DevTools/ (124 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
@@ -523,6 +523,12 @@ exits. Read-only, no elevation, and it makes no arrival itself: use the app's US
 the cable. The second holds the global `DBWIN` debug channel, which needs ELEVATION and needs
 DebugView closed, and exists to record a negative: the service carries a full trace string table
 and emits none of it. See `PROJECT_GUIDE.md` part 2 under Expanded for what both measured.
+
+**`probe_bind_default_output.py`** measures the service's bind RATE: it drives the USB output mode
+off and back through the app's API and counts binds per ARRIVAL, not per flip, because the app's own
+follow-up makes extra arrivals whenever it misses and each is another trial. `--control` runs the
+same cycles changing nothing, and **any run without it is worthless**, because the rate swings on
+its own between spells. Needs the server running; restores the default output it found.
 
 **`check_exclusive_bind.py`** settles the two TCP facts the single-instance lock rests on, on port
 8791 so it never disturbs a running app: that `allow_reuse_address = 1` really does let two servers
