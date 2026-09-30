@@ -681,6 +681,39 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   firmware), which is the detector, and `reconcile` makes Windows agree with it. The follow-up
   runs after every USB mode write, on every announcer reconnect (the desk re-enumerates for its
   own reasons too) and at startup, and speaks the outcome.
+- **RODE'S OWN APP DOES NOTHING TO MAKE THE BIND HAPPEN, SO THERE IS NOTHING TO CAPTURE FROM IT.**
+  Its import table carries only read-only device APIs: `CM_Get_Parent`, `CM_Get_Child`,
+  `CM_Get_Sibling`, `CM_Locate_DevNodeA`, `CM_Get_Device_ID_List`, `SetupDiEnumDeviceInterfaces`.
+  There is no `CM_Reenumerate_DevNode`, no `SetupDiCallClassInstaller`, no `StartService` or
+  `ControlService`, and `ShellExecuteW` opens their web pages. It writes `outputMultiMode` over
+  HID exactly as we do and leaves the rest to the service, so driving it under USB capture to
+  learn about the bind would show only the record we already send.
+- **THE SERVICE HAS NO DEVICE-NOTIFICATION IMPORT AT ALL: IT POLLS.** No
+  `RegisterDeviceNotification`, no `CM_Register_Notification`; what it has is `HID.DLL`
+  (`HidD_GetHidGuid`, `HidD_GetSerialNumberString`, which is where the desk string in the status
+  block comes from) plus `Sleep`, `timeGetTime` and `WaitForMultipleObjects`. It matches the desk
+  by a device-interface path holding `usb#vid_19f7&pid_0078`, `0079`, `0094` or `0095`, then
+  instantiates the KS filters named `usb1main` and `usb1chat`. Its failure strings are
+  "DeviceInterfaceAlias disabled.", "No devices found" and the KS pin set
+  (`Failed to instantiate Capture Pin`).
+- **THE BIND IS NOT A RACE BETWEEN THE HID INTERFACE AND THE AUDIO INTERFACES.** That is the
+  obvious reading of "DeviceInterfaceAlias disabled" and it is wrong here: sampled at 120 ms
+  across four arrivals (`DevTools/bind_timeline.py`), the desk's KSCATEGORY_AUDIO, CAPTURE, RENDER
+  and TOPOLOGY interfaces and its HID interface go ACTIVE within 0.15 s of each other, and the
+  audio ones sometimes go first. There is no window in which HID is up and audio is not.
+- **THE SERVICE'S OWN TRACE IS COMPILED OUT, SO DEBUGVIEW WILL NEVER SHOW A BIND.** The binary
+  carries the whole trace string table (`%s Enter`, `%s Leave, returning %#08x`, `Found Device:
+  %s`) and imports `OutputDebugStringW`, which reads as a way in. It emits nothing: a global
+  DBWIN listener held across four arrivals caught 49,507 lines from `audiodg` and 114 from
+  `svchost`, both session 0, and zero from the service. Its registry key holds only `Version`,
+  `Path`, `Enable` and `Latency`, so there is no flag to switch tracing on either.
+  `DevTools/vad_trace.py` is the listener, kept because it proves the negative in one run.
+- **A BAD SPELL OUTLASTS THE FOLLOW-UP'S THREE RETRIES, AND THE ANNOUNCER'S RECONNECT IS WHAT
+  STARTS THE CYCLE THAT WINS.** Measured through one: nine arrivals at product id 0x0094 produced
+  two binds, and each came after a cycle had already spoken "still has not connected after three
+  tries". Nothing the first cycle did recovered it; the next follow-up, started by the announcer's
+  own reconnect, did. So the replug advice is spoken while the app is still capable of fixing it
+  itself.
 - **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
   switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
   re-reads only on an audio device arrival; after a mode change that write can land after the

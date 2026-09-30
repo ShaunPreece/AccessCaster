@@ -252,7 +252,7 @@ Alt+4 Recording, Alt+5 Profiles, Alt+6 Device, Alt+7 Help &amp; About (renamed f
 30th; the route key is still `about` and the section is still `sec-about`).
 
 --------------------------------------------------------------------------------
-## DevTools/ (121 files; the ones worth knowing)
+## DevTools/ (123 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
@@ -514,6 +514,15 @@ SWALLOWED / STORED / SIDE EFFECT / STRAY, and restores it. **It skips `toneGener
 `emergencyMuteActive` unless `--include-audible`**, because their proof needs a listener, and it
 never writes a `pair` property, because guessing an operand layout is how a stray gets appended.
 This is what found `btDoScan` alive.
+
+**`bind_timeline.py` and `vad_trace.py`** are the pair for RODE's virtual-device service, which
+binds to the desk on some arrivals and not others. The first samples, several times a second, which
+of the desk's device interfaces exist and which are ACTIVE, alongside the service's own connected
+flag, and prints every change with a millisecond offset; `--snapshot` reads the current state and
+exits. Read-only, no elevation, and it makes no arrival itself: use the app's USB mode control or
+the cable. The second holds the global `DBWIN` debug channel, which needs ELEVATION and needs
+DebugView closed, and exists to record a negative: the service carries a full trace string table
+and emits none of it. See `PROJECT_GUIDE.md` part 2 under Expanded for what both measured.
 
 **`check_exclusive_bind.py`** settles the two TCP facts the single-instance lock rests on, on port
 8791 so it never disturbs a running app: that `allow_reuse_address = 1` really does let two servers
