@@ -101,6 +101,13 @@ different PID carrying the same serial. Measured on a Pro II, fw 1.7.6:
                     3 -> 0x0078    (expanded input, no multitrack)
                     5 -> 0x0094    (expanded input, post-fader multitrack)
 
+RODE's Virtual Device Driver service binds to the desk by these PIDs: its string
+table names 0x0078, 0x0079, 0x0094 and 0x0095. It creates its nine Fader
+endpoints only under a multitrack PID (0x0094 measured); under 0x0078 it exposes
+System alone. 0x0079 and 0x0095 are unmeasured (see POSSIBLE_LEADS). The bind
+itself happens on some arrivals of the desk and not others, and never later, so a
+host that needs it must be ready to re-enumerate the desk again.
+
 Two consequences for host software. Identify the MODEL by the dump's own
 systemName rather than by PID, or a desk in any non-default mode is unrecognised.
 And never cache an enumerated HID path across such a write: the old path stops

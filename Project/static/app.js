@@ -4891,6 +4891,17 @@ async function loadRouting() {
     exp.row.appendChild(expHint);
     routingCtl.usbExpanded = exp.sel;
     usbBox.appendChild(exp.row);
+    // THE DRIVER'S SIDE OF EXPANDED, read from Windows rather than the unit: installed, running,
+    // connected, and how many of its virtual devices are switched on. Without it a desk in
+    // Expanded with no driver looks identical to one that is working, and the four inputs are
+    // silent for a reason nothing on the page names. Live text, so a mode change updates it.
+    const drv = document.createElement("p");
+    drv.className = "hint";
+    drv.id = "routing-usb-driver";
+    drv.setAttribute("aria-live", "polite");
+    drv.textContent = (data.usb_driver && data.usb_driver.text) || "";
+    routingCtl.usbDriver = drv;
+    usbBox.appendChild(drv);
 
     const ub = makeSwitchRow("routing-usb-bypass", "Send the separate tracks raw", (input) => {
       sendBypass("/api/routing/usb-bypass", input, (msg) => announce(msg, false));
@@ -6033,6 +6044,9 @@ function applyRoutingValues(v) {
   // String, because the option values came from JSON booleans and a select's value always is one.
   if (routingCtl.usbExpanded && v.usb_expanded !== null && v.usb_expanded !== undefined)
     setStagedValue(routingCtl.usbExpanded, String(!!v.usb_expanded), null);
+  if (routingCtl.usbDriver && v.usb_driver && typeof v.usb_driver.text === "string"
+      && routingCtl.usbDriver.textContent !== v.usb_driver.text)
+    routingCtl.usbDriver.textContent = v.usb_driver.text;
   applyBypass(routingCtl.usbBypass, routingCtl.usbBypassHint, v,
               v.usb_processing_bypass, v.usb_multitrack);
   // v.multitrack is still sent by /api/routing and is deliberately not applied here any more:

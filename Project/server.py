@@ -59,6 +59,7 @@ import app_settings            # THIS APP's own settings (shortcuts, announcemen
 import profiles                 # settings backup/restore (save+restore live here, not in server)
 import routing_schemes          # saved output-mix schemes (the matrix under a name) + the built-ins
 import meters                   # level metering, read from Windows' audio endpoints (not over USB)
+import virtual_devices          # RODE's Virtual Device Driver: its state, and switching its endpoints on
 import autogain                # sets a mic's gain by measuring it
 import recorder                 # the transport: start/pause/stop, storage volumes, recordings
 import shows                    # the DESK'S own backup: export/import/factory reset (not profiles)
@@ -3294,8 +3295,15 @@ def _announce_loop() -> None:
                 # have moved while we were deaf, and Expanded mode reassigns sources as it goes.
                 was_usb = st.get("usb_mode")
                 _ann_seed_layout(st)
-                _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
-                         or "Control announcer reconnected.")
+                if _virtual_devices_retrying.is_set():
+                    pass        # our own flip of the mode, already announced once as a retry
+                else:
+                    _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
+                             or "Control announcer reconnected.")
+                    # The desk re-enumerated, whoever caused it: the touchscreen, a profile, or
+                    # the desk leaving Expanded on its own. RODE's virtual devices need the same
+                    # follow-up either way, and this is the one place that sees every case.
+                    _virtual_devices_follow(st.get("usb_mode"))
         try:
             rep = dev.read(256, timeout_ms=200)
         except Exception as exc:
@@ -6443,6 +6451,9 @@ def read_routing_live() -> dict:
         "usb_expanded": usb_expanded,
         "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
         "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
+        # The driver's side of Expanded, in words, so the page can say whether the four inputs
+        # will actually carry anything. Read from Windows, not the desk.
+        "usb_driver": virtual_devices.describe(),
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
         "usb_processing_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
         "bypass_hint": recorder.BYPASS_HINT,
@@ -6541,11 +6552,13 @@ def action_set_usb_multitrack(mode: int) -> dict:
         # writing the mode alone would take a desk out of Expanded without being asked to.
         _, expanded = recorder.split_usb_multitrack(
             rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
-        rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(mode, expanded))
+        value = recorder.join_usb_multitrack(mode, expanded)
+        rcp_transfer.set_usb_multitrack_mode(value)
     return {"ok": True,
             "message": (f"This computer will now receive "
                         f"{recorder.USB_MULTITRACK_LABEL[mode].lower()}. The unit's audio devices "
-                        f"drop out for a couple of seconds while it changes over.")}
+                        f"drop out for a couple of seconds while it changes over."
+                        + _virtual_devices_follow(value))}
 
 
 def action_set_usb_expanded(on: bool) -> dict:
@@ -6564,14 +6577,94 @@ def action_set_usb_expanded(on: bool) -> dict:
     with _hid_lock:
         mode, _ = recorder.split_usb_multitrack(
             rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
-        rcp_transfer.set_usb_multitrack_mode(
-            recorder.join_usb_multitrack(mode or 0, bool(on)))
+        value = recorder.join_usb_multitrack(mode or 0, bool(on))
+        rcp_transfer.set_usb_multitrack_mode(value)
     tail = ("" if on else
             " Anything you had assigned to Game, Music, A or B has been taken off its fader.")
     return {"ok": True,
             "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
                         f"The unit's audio devices drop out for a couple of seconds while it "
-                        f"changes over.{tail}")}
+                        f"changes over.{tail}" + _virtual_devices_follow(value))}
+
+
+_virtual_devices_busy = threading.Lock()
+# Set while the follow-up is re-enumerating the desk on purpose, so the announcer's reconnect
+# does not narrate each flip of the mode as news.
+_virtual_devices_retrying = threading.Event()
+
+# RODE'S SERVICE BINDS ON ABOUT HALF OF THE DESK'S ARRIVALS, and never later. Measured: twelve
+# arrivals, six bound, in every mode and with nothing of ours open; a quiet desk stayed unbound
+# for five minutes; nothing writable from user mode (Enable, its command block) re-runs the
+# bind. What does is another arrival, so the follow-up makes one itself by flipping the output
+# mode away and back. Three attempts at even odds reach about nine in ten; a replug is only ever
+# one more attempt, which is why it is the last resort and not the first.
+_VIRTUAL_DEVICES_RETRIES = 3
+_VIRTUAL_DEVICES_RETRY_HOLD_S = 3.0     # at the other mode: long enough for the service to let go
+
+
+def _virtual_devices_follow(raw_mode) -> str:
+    """Bring RODE's virtual devices into line with the USB mode the desk now holds, and say so.
+
+    The work runs on a thread and its outcome is SPOKEN, because the service takes seconds to
+    bind after the desk re-enumerates, longer with retries, and a reply held that long reads as
+    a hang. The string returned is the reply's tail: what the user should know now, which is
+    only the case where nothing is coming (no driver, or a mode it will not be waited for in)."""
+    mode, expanded = recorder.split_usb_multitrack(raw_mode)
+    expect = bool(expanded) and bool(mode)
+
+    def rearrive():
+        """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept."""
+        with _hid_lock:
+            rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(0, True))
+            time.sleep(_VIRTUAL_DEVICES_RETRY_HOLD_S)
+            rcp_transfer.set_usb_multitrack_mode(int(raw_mode))
+
+    def run():
+        # ONE FOLLOW-UP PER RE-ENUMERATION. A mode write and the announcer's reconnect both see
+        # the same event a second apart, and two threads waiting on the same bind would announce
+        # the same inputs twice. The one already running covers it, retries included.
+        if not _virtual_devices_busy.acquire(blocking=False):
+            return
+        try:
+            out = virtual_devices.reconcile(expect_connected=expect)
+            attempts = 0
+            while (expect and out.status.running and out.status.enabled
+                   and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
+                attempts += 1
+                if attempts == 1:
+                    _ann_say("RODE's driver missed the unit. Reconnecting it; the audio drops "
+                             "again for a moment.")
+                _virtual_devices_retrying.set()
+                try:
+                    rearrive()
+                except Exception as exc:
+                    diagnostics.event("virtual_devices.retry_failed", f"{exc}")
+                    break
+                finally:
+                    _virtual_devices_retrying.clear()
+                diagnostics.event("virtual_devices.retry", "re-enumerated the desk", attempt=attempts)
+                out = virtual_devices.reconcile(expect_connected=True)
+            if out.sentence():
+                _ann_say(out.sentence())
+            elif expect and out.status.running and not out.status.connected:
+                _ann_say("RODE's driver still has not connected to the unit after three tries. "
+                         "Unplug and reconnect the unit's USB cable, which gives it another.")
+        finally:
+            _virtual_devices_busy.release()
+
+    threading.Thread(target=run, daemon=True, name="virtual-devices").start()
+    if not expanded:
+        return ""
+    st = virtual_devices.read_status()
+    if not (st.installed and st.running and st.enabled):
+        return f" {st.phrase()} Game, Music, A and B will be silent."
+    if not mode:
+        # The service can bind here too, but the mix alone carries no fader inputs to expose,
+        # so nothing is waited for and the user is told what the four need.
+        return (" Game, Music, A and B only reach their own inputs while this computer receives "
+                "every channel, so pick pre-fader or post-fader for that.")
+    return (" RODE's driver connects in a few seconds, and the virtual devices are announced "
+            "when they are ready.")
 
 
 def _bypass_sentence(where: str, on: bool) -> str:
@@ -10893,6 +10986,11 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # The Device page can still turn it off.
         action_set_announce(True)
+    # RODE's virtual devices may have been left switched off in Windows by a mode change made
+    # while this app was not running; apply the driver's current state now. Delayed so the
+    # announcer's greeting comes first, and silent unless something actually changed.
+    threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None)),
+                     daemon=True, name="virtual-devices-start").start()
     if shortcuts:
         # Global shortcuts, started whatever the announcer is doing (one of them turns it on).
         # Failures are reported and never fatal: no shortcut is worth refusing to start the app.

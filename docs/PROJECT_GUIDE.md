@@ -653,15 +653,53 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   string read once per desk per session. **Do not tabulate the other ids instead**: that is six
   entries per desk, unmeasured for the Duo, and wrong again the day RODE add a mode. The MI_09
   product string is no help either - it reads `HID Interface` on both desks.
-- **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode` PLUS A PHYSICAL REPLUG.** Measured on a
-  Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened. Expanded alone with the output mode
-  Off yields ONE endpoint, `System (RØDECaster)`. Post-fader multitrack AND Expanded (value 5)
-  yields ten capture endpoints, `Fader1` to `Fader9` plus `System`, matching the desk's 20-channel
-  multitrack stream as ten stereo pairs. That is a per-fader recording input for any app that can
-  pick a microphone, with no ASIO and no DAW.
-  **THE DRIVER ONLY LATCHES ON A USB ARRIVAL EVENT, AND TAKES ABOUT 60 SECONDS.** A mode change
-  re-enumerates the desk, the driver loses it and does NOT re-attach; only unplugging and replugging
-  the cable brings it back. So a check run straight after a mode write reads a stale nothing.
+- **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode`, AND A BIND THAT RODE'S SERVICE ONLY
+  SOMETIMES MAKES.** Measured on a Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened.
+  Post-fader multitrack AND Expanded (value 5, product id 0x0094) yields ten capture endpoints,
+  `Fader1` to `Fader9` plus `System`, matching the desk's 20-channel multitrack stream as ten
+  stereo pairs, and one playback endpoint, `System`. That is a per-fader recording input for any
+  app that can pick a microphone, with no ASIO and no DAW. Expanded with the mix alone (value 3,
+  0x0078) binds too but exposes only `System`: there is no per-fader stream to expose.
+  RODE's driver is a kernel virtual audio device (enumerator ROOT, device name `RØDECaster`) plus
+  a user-mode service, `RODECasterVADService`. **The service binds on SOME arrivals of the desk and
+  never later**: twelve arrivals in one afternoon, six bound (five of the first six, one of the
+  last six), in every mode, with our announcer running and with nothing of ours open, and a desk
+  left unbound stays so (five quiet minutes, measured). When it binds it does so within three
+  seconds, twelve on one occasion, and creates its endpoints within three more. **Nothing writable
+  from user mode re-runs the bind**: not its Enable switch (re-creates `System` only), not its
+  command block, not a service restart, not stopping our HID handle; a PnP restart of the desk is
+  vetoed by `usbaudio2` while Windows has streams open, which is the normal state of a default
+  sound device. What does re-run it is another arrival, so `server._virtual_devices_follow` makes
+  one itself, flipping the output mode off and back up to three times before advising a replug,
+  which is only ever one more arrival. The "only a replug brings it back" rule this replaced was
+  a description of the same coin toss.
+  `virtual_devices.py` reads the service's own status block (shared memory
+  `Global\RODECaster_VAD{...}`, readable by anyone: connected flag, Enable, heartbeat, desk,
+  firmware), which is the detector, and `reconcile` makes Windows agree with it. The follow-up
+  runs after every USB mode write, on every announcer reconnect (the desk re-enumerates for its
+  own reasons too) and at startup, and speaks the outcome.
+- **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
+  switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
+  re-reads only on an audio device arrival; after a mode change that write can land after the
+  pass, and the eleven endpoints then sit in Windows' "disabled" state until the next arrival,
+  which is what RODE's reboot instruction supplies. `reconcile` switches them on at once through
+  `IPolicyConfig`, the interface the Sound control panel uses, with no elevation; proven by ear,
+  a voice on Fader2 and the screen reader on System.
+- **A PROGRAM RECORDING FROM THE DESK'S MAIN MULTITRACK INPUT STOPS THE SERVICE CREATING ITS FADER
+  ENDPOINTS, AND THE SERVICE STILL SAYS CONNECTED.** It opens that capture pin directly, and a pin
+  the audio engine already has open cannot be opened again. The Sound control panel's Recording tab
+  meters every input, so it counts; measured three times with the panel open (connected, nine
+  Faders "not present") and once with it closed (nine Faders active three seconds after connect).
+  `reconcile` reports it as `faders_missing` with the remedy in words, and the remedy is a fresh
+  arrival, not "apply again": the desk ignores a write of the value it holds. This app's own meter
+  cannot cause it: a WASAPI stream dies with its device and `meters.Watcher` never reopens on its
+  own, while the Sound panel re-subscribes the moment the device returns.
+- **WINDOWS' DEFAULT OUTPUT IS MOVED ONLY WHEN IT WAS ON THE DESK OR IS DEAD.** Turning Expanded on
+  renames the desk's Main output, so the endpoint Windows was using stays listed and silent and
+  Windows falls back to whatever it can find, the laptop speakers included. `_restore_default`
+  prefers `System (RØDECaster)` while the driver is connected, then the desk's Main output, and
+  moves the console and multimedia roles together, leaving communications alone. A default that is
+  alive and elsewhere was chosen by the user and stays.
 - **NEVER MATCH A VIRTUAL ENDPOINT AGAINST THE DRIVER'S INF NAMES.** The INF string table declares
   `RØDECaster Combo1 In`, `SmartPads In`, `Headset In` and the rest, and NONE of them appear. The
   service names endpoints from the attached desk at runtime, which is how `Fader1` to `Fader9` arise.
@@ -674,10 +712,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   playback device is working, not short of four, and there is nothing to diagnose. The four are
   interchangeable labels rather than different kinds of input, and the desk's USB 1 input carries
   them as five stereo pairs on one 10-channel stream.
-  **RODE DOCUMENT A REBOOT AFTER INSTALLING THE DRIVER, NOT A REPLUG.** A replug is what was
-  measured here and it does work; the reboot is what a user should be told, because it is their
-  instruction. Their driver also has a tray icon carrying a Latency setting, Ultra-low by default
-  and droppable to Low if the computer cannot keep up.
+  **RODE DOCUMENT A REBOOT AFTER INSTALLING THE DRIVER.** A reboot is one more USB arrival, which
+  is all the enable-landed-late case above needs; `reconcile` does the same without one. Their
+  driver also has a tray icon carrying Enable and a Latency setting, Ultra-low by default and
+  droppable to Low if the computer cannot keep up; both are written into a second shared block
+  (`...{127DD4F7...}`, writable by ordinary users) which the service mirrors into its admin-only
+  registry key within a second. The app reads the status block and never writes the other:
+  bouncing Enable re-creates only `System`, never the Faders.
 - **NEVER SEND `VER` OR THE `U` PING: IN EXPANDED, EACH ONE DROPS THE VIRTUAL PLAYBACK ENDPOINT
   ABOUT 17 SECONDS LATER.** Windows surprise-removes `System (RODECaster)` and re-adds it a second
   or two on, and a screen reader on that output loses its speech for a few seconds each time.

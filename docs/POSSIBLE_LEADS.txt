@@ -204,6 +204,32 @@ Two things we could not settle, both needing something we do not have:
     is whether icecastConnect is accepted and what icecastState says afterwards.
 
 
+LEAD 10: which USB product ids are 0x0079 and 0x0095, and does pre-fader Expanded get Faders?
+--------------------------------------------------------------------------------------------
+
+RODE's Virtual Device Driver service names four product ids in its string table:
+0x0078, 0x0079, 0x0094 and 0x0095. We measured 0x0078 (Expanded, mix only: System alone)
+and 0x0094 (Expanded, post-fader multitrack: nine Fader endpoints plus System). Pre-fader
+multitrack with Expanded (outputMultiMode 4) was never enumerated, and the Duo was never
+put into Expanded at all, so 0x0079 and 0x0095 are either the pre-fader pair or the Duo's
+pair, and nothing here says which.
+
+**What to run.** Write outputMultiMode 4 on a Pro 2, or 3 and 5 on a Duo, read the new
+product id off the bus, and see whether the service's tray icon reports connected and
+which endpoints appear in Windows' recording devices. Two minutes with either desk. The
+service binds on only some arrivals (PROJECT_GUIDE part 2 under Expanded), so an
+unbound result needs a second arrival before it counts.
+
+**Why it matters.** If the Duo's ids differ, `virtual_devices.py` needs nothing (it reads
+the service, not the id) but the protocol spec's table does.
+
+**A second, bigger question in the same place: what makes the service bind, and does
+RODE's own app do better?** Twelve arrivals, six bound, is a race we could not see into.
+RODE's app switching the mode itself, watched with a USB capture and Process Monitor,
+would show whether it sends the desk anything extra or talks to the service. If it binds
+every time, the app has a trick worth copying.
+
+
 WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT
 -------------------------------------------------
 

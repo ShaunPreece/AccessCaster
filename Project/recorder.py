@@ -229,13 +229,14 @@ USB_EXPANDED_LABEL = {
 USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more inputs, Game, Music, "
                      "A and B, each assignable to its own fader, so one program can be faded "
                      "without the rest. The four names are interchangeable labels, not different "
-                     "kinds of input. It needs RODE's Virtual Devices driver installed here or the "
-                     "four arrive silent, it stops the RODECaster ASIO driver working, and turning "
-                     "it back off unassigns whatever you put on those faders. "
-                     # THE TWO WINDOWS STEPS, because the feature does nothing without them and
-                     # neither is discoverable from this app or from the desk. RODE's own guide is
-                     # the source for both.
-                     "In Windows, set your sound output to System (RODECaster) rather than Main, "
+                     "kinds of input. It needs RODE's Virtual Devices driver installed here, and "
+                     "this computer receiving every channel, or the four arrive silent; it stops "
+                     "the RODECaster ASIO driver working, and turning it back off unassigns "
+                     "whatever you put on those faders. "
+                     # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
+                     # choice this app knows nothing about. The other one, pointing Windows' sound
+                     # output at System (RODECaster), the app does itself (virtual_devices.py).
+                     "This app switches Windows' sound output to System (RODECaster) for you; "
                      "then send a program to one of the four in Settings, System, Sound, App "
                      "volume and device preferences, with that program running.")
 

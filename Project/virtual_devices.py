@@ -1,0 +1,430 @@
+"""RODE's Virtual Device Driver on this computer: is it here, is it bound to the desk, and are its
+endpoints switched on in Windows.
+
+The driver is two parts. A kernel virtual audio device (enumerator ROOT, device name "RØDECaster")
+owns the eleven endpoints, Fader1 to Fader9 and System as recording devices and System as the
+playback device. A user-mode service, RODECasterVADService, bridges them to the desk's USB 1
+multitrack stream and publishes its state in a shared-memory block any process may read. It binds
+only to the desk's Expanded product ids, and it creates the Fader endpoints only when the desk is
+sending every channel.
+
+WHY THIS MODULE EXISTS. Three things go wrong between the service and Windows, and none of them
+is visible from the desk:
+
+  - The service binds on only SOME of the desk's arrivals (measured: twelve arrivals, six bound,
+    in every mode and with nothing of ours open), and never later. What re-runs the bind is
+    another arrival, nothing else, so `server._virtual_devices_follow` re-enumerates the desk
+    itself when the bind is missed. This module reports; the server retries.
+  - When it does bind, its endpoints can come back DISABLED: it switches them on by writing
+    Windows' audio endpoint registry, which Windows re-reads only on an audio device arrival, and
+    after a mode change that write can land after the pass. `reconcile` applies the service's own
+    intent at once through the policy interface the Sound control panel uses, no elevation.
+  - A program recording from the desk's Main Multitrack input (the Sound control panel's Recording
+    tab does) holds the pin the service opens directly, so it reports connected and creates no
+    Faders. `reconcile` says so in words.
+
+It also puts Windows' default output back on the desk when a mode change has destroyed the
+endpoint it was on.
+"""
+from __future__ import annotations
+
+import ctypes
+import re
+import time
+import winreg
+from ctypes import wintypes
+from dataclasses import dataclass, field
+from typing import Optional
+
+import comtypes
+import comtypes.client
+from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
+
+import diagnostics
+import meters
+
+# Names the service creates. The status block is what its tray icon reads (readable by everyone);
+# the command block is what the tray writes (Enable, Latency), which the service mirrors into its
+# admin-only registry key within a second. The app reads the first and never writes the second.
+STATUS_MAPPING = r"Global\RODECaster_VAD{080F3A93-AC02-48d4-B1A3-0DF9178CC49A}"
+
+# Registry key the MSI writes; present means installed, whatever the service is doing.
+_DRIVER_KEY = r"SOFTWARE\RØDE Microphones\RØDECaster Virtual Device Driver"
+
+FILE_MAP_READ = 0x0004
+_BLOCK_BYTES = 512                  # the block is a page; everything it says is in the first part
+
+_k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_k32.OpenFileMappingW.restype = wintypes.HANDLE
+_k32.OpenFileMappingW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+_k32.MapViewOfFile.restype = wintypes.LPVOID
+_k32.MapViewOfFile.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_size_t)
+_k32.UnmapViewOfFile.argtypes = (wintypes.LPCVOID,)
+_k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+
+@dataclass
+class DriverStatus:
+    installed: bool = False         # the MSI's registry key exists
+    running: bool = False           # the service's status block exists
+    connected: bool = False         # the service has bound to a desk
+    enabled: bool = True            # the tray's Enable switch
+    desk: str = ""                  # "RØDECaster Pro II (GV0064612)" while connected
+    firmware: str = ""
+    driver_version: str = ""
+
+    def phrase(self) -> str:
+        """One sentence for a person, in the order the checks fail."""
+        if not self.installed:
+            return "RODE's Virtual Devices driver is not installed on this computer."
+        if not self.running:
+            return "RODE's Virtual Devices driver is installed but its service is not running."
+        if not self.enabled:
+            return "RODE's Virtual Devices driver is switched off in its tray icon."
+        if not self.connected:
+            return "RODE's Virtual Devices driver is running but not connected to the unit."
+        return f"RODE's Virtual Devices driver is connected to the {self.desk}."
+
+
+def _installed() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _DRIVER_KEY):
+            return True
+    except OSError:
+        return False
+
+
+def _read_block() -> Optional[bytes]:
+    h = _k32.OpenFileMappingW(FILE_MAP_READ, False, STATUS_MAPPING)
+    if not h:
+        return None
+    try:
+        view = _k32.MapViewOfFile(h, FILE_MAP_READ, 0, 0, 0)
+        if not view:
+            return None
+        try:
+            return ctypes.string_at(view, _BLOCK_BYTES)
+        finally:
+            _k32.UnmapViewOfFile(view)
+    finally:
+        _k32.CloseHandle(h)
+
+
+def read_status() -> DriverStatus:
+    """What the driver says about itself right now. Cheap: a registry probe and one page of
+    shared memory, no COM.
+
+    Block layout, measured against the service's own tray icon: three little-endian dwords,
+    connected / enabled / a once-a-second heartbeat, then ANSI strings. The desk string starts
+    at byte 12 and is overwritten in place, so a shorter string leaves the tail of a longer one
+    behind it; the version strings are found by their labels for the same reason."""
+    st = DriverStatus(installed=_installed())
+    block = _read_block()
+    if block is None:
+        return st
+    st.running = True
+    st.connected = int.from_bytes(block[0:4], "little") == 1
+    st.enabled = int.from_bytes(block[4:8], "little") == 1
+    text = block[12:].decode("cp1252", "replace")
+    st.desk = text.split("\0", 1)[0].strip() if st.connected else ""
+    m = re.search(r"irmware Version: ([\d.]+)", text)
+    st.firmware = m.group(1) if m else ""
+    m = re.search(r"App Version: ([\d.]+)", text)
+    st.driver_version = m.group(1) if m else ""
+    return st
+
+
+# The service binds about three seconds after the desk arrives, twelve on a bad day, or not at
+# all: it never binds late, so waiting longer only delays the retry (`server._virtual_devices_follow`).
+CONNECT_WAIT_S = 15.0
+
+
+def wait_connected(timeout_s: float = CONNECT_WAIT_S) -> DriverStatus:
+    """Poll the status block until the service reports connected, or give up. Returns at once
+    when the driver is absent, stopped or switched off: none of those change by waiting."""
+    at = time.monotonic()
+    while True:
+        st = read_status()
+        if st.connected or not (st.installed and st.running and st.enabled):
+            return st
+        if time.monotonic() - at >= timeout_s:
+            return st
+        time.sleep(0.5)
+
+
+# ---------------------------------------------------------------------------------------------
+# Windows' side: the endpoints, their enabled state, and the default output.
+
+# PKEY_Device_EnumeratorName: "ROOT" for the driver's endpoints, "USB" for the desk's own.
+PKEY_Device_EnumeratorName = (GUID("{a45c254e-df1c-4efd-8020-67d146a850e0}"), 24)
+# PKEY_DeviceInterface_FriendlyName: the owning device's name, "RØDECaster" for the driver.
+PKEY_DeviceInterface_FriendlyName = (GUID("{026e516e-b814-414b-83cd-856d6fef4822}"), 2)
+
+E_CONSOLE, E_MULTIMEDIA, E_COMMUNICATIONS = 0, 1, 2
+
+
+class IPolicyConfig(IUnknown):
+    """The interface the Sound control panel uses to enable an endpoint and to set the default
+    device. Undocumented but stable since Vista, and it needs no elevation. EVERY METHOD IS
+    DECLARED, IN ORDER, for the reason `meters.IAudioEndpointVolume` gives: a COM vtable is
+    positional, and only the last two are called."""
+    _iid_ = GUID("{f8679f50-850a-41cf-9c72-430f290290c8}")
+    _methods_ = (
+        COMMETHOD([], HRESULT, "GetMixFormat", (["in"], wintypes.LPCWSTR), (["out"], ctypes.POINTER(ctypes.c_void_p))),
+        COMMETHOD([], HRESULT, "GetDeviceFormat", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_int), (["out"], ctypes.POINTER(ctypes.c_void_p))),
+        COMMETHOD([], HRESULT, "ResetDeviceFormat", (["in"], wintypes.LPCWSTR)),
+        COMMETHOD([], HRESULT, "SetDeviceFormat", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_void_p), (["in"], ctypes.c_void_p)),
+        COMMETHOD([], HRESULT, "GetProcessingPeriod", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_int), (["out"], ctypes.POINTER(ctypes.c_longlong)), (["out"], ctypes.POINTER(ctypes.c_longlong))),
+        COMMETHOD([], HRESULT, "SetProcessingPeriod", (["in"], wintypes.LPCWSTR), (["in"], ctypes.POINTER(ctypes.c_longlong))),
+        COMMETHOD([], HRESULT, "GetShareMode", (["in"], wintypes.LPCWSTR), (["out"], ctypes.POINTER(ctypes.c_void_p))),
+        COMMETHOD([], HRESULT, "SetShareMode", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_void_p)),
+        COMMETHOD([], HRESULT, "GetPropertyValue", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_void_p), (["out"], ctypes.POINTER(ctypes.c_void_p))),
+        COMMETHOD([], HRESULT, "SetPropertyValue", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_void_p), (["in"], ctypes.c_void_p)),
+        COMMETHOD([], HRESULT, "SetDefaultEndpoint", (["in"], wintypes.LPCWSTR), (["in"], ctypes.c_int)),
+        COMMETHOD([], HRESULT, "SetEndpointVisibility", (["in"], wintypes.LPCWSTR), (["in"], wintypes.BOOL)),
+    )
+
+
+CLSID_PolicyConfigClient = GUID("{870af99c-171d-4f9e-af0d-e63df40c2bc9}")
+
+
+def _prop(store, key) -> str:
+    k = meters.PROPERTYKEY()
+    k.fmtid, k.pid = key
+    try:
+        pv = store.GetValue(ctypes.byref(k))
+        return pv.pwszVal or "" if pv.vt == 31 else ""
+    except Exception:
+        return ""
+
+
+@dataclass
+class Endpoint:
+    id: str
+    name: str
+    flow: str                       # "playback" or "recording"
+    state: str                      # meters.STATE_NAMES
+    virtual: bool                   # one of the driver's, as opposed to the desk's own USB audio
+    desk: bool                      # the desk's own USB audio (Main, Chat, Secondary)
+
+
+def _endpoints(enum) -> list:
+    """Every endpoint Windows knows about, tagged by owner. Caller holds the COM apartment."""
+    out = []
+    for flow in (meters.RENDER, meters.CAPTURE):
+        try:
+            coll = enum.EnumAudioEndpoints(flow, meters.STATE_ALL)
+            count = coll.GetCount()
+        except Exception:
+            continue
+        for i in range(count):
+            try:
+                dev = coll.Item(i)
+                store = dev.OpenPropertyStore(meters.STGM_READ)
+                owner = _prop(store, PKEY_DeviceInterface_FriendlyName)
+                enumerator = _prop(store, PKEY_Device_EnumeratorName)
+                name = meters._friendly_name(dev)
+                out.append(Endpoint(
+                    id=dev.GetId(), name=name, flow=meters.FLOW_NAMES[flow],
+                    state=meters.STATE_NAMES.get(dev.GetState(), "unknown"),
+                    virtual=(enumerator.upper() == "ROOT" and meters.is_desk_endpoint(owner)),
+                    desk=(enumerator.upper() == "USB" and meters.is_desk_endpoint(owner)),
+                ))
+            except Exception:
+                continue
+    return out
+
+
+def _default_id(enum, role: int) -> str:
+    try:
+        return enum.GetDefaultAudioEndpoint(meters.RENDER, role).GetId()
+    except Exception:
+        return ""
+
+
+@dataclass
+class Outcome:
+    status: DriverStatus
+    enabled: list = field(default_factory=list)      # names switched on
+    disabled: list = field(default_factory=list)     # names switched off
+    faders_ready: int = 0                            # Fader endpoints active once this is done
+    system_ready: bool = False                       # the System playback endpoint is active
+    say_ready: bool = False                          # a bind was awaited, so say what arrived
+    faders_missing: bool = False                     # connected, yet the service made no Faders
+    default_moved_to: str = ""                       # new default playback name, if it moved
+    error: str = ""
+
+    def sentence(self) -> str:
+        """What happened, for the reply and the announcer. Empty when nothing did.
+
+        The ready line is said whether the endpoints were switched on here or created by the
+        service itself: after a mode change the operator is waiting to hear that the inputs
+        exist, and which of the two got them there is not their concern."""
+        parts = []
+        if (self.enabled or self.say_ready) and (self.faders_ready or self.system_ready):
+            what = []
+            if self.faders_ready:
+                what.append(f"{self.faders_ready} fader input{'s' if self.faders_ready != 1 else ''}")
+            if self.system_ready:
+                what.append("System")
+            parts.append("Virtual devices ready: " + " and ".join(what) + ".")
+        if self.disabled:
+            parts.append("The virtual devices are off.")
+        if self.faders_missing:
+            parts.append(FADERS_MISSING)
+        if self.default_moved_to:
+            parts.append(f"Windows sound output is now {self.default_moved_to}.")
+        if self.error:
+            parts.append(self.error)
+        return " ".join(parts)
+
+
+# THE ONE FAILURE THE SERVICE REPORTS AS SUCCESS. It opens the desk's Main Multitrack capture pin
+# directly, and a pin the audio engine already has open cannot be opened again, so while any
+# program is recording from that input (the Sound control panel's Recording tab meters every
+# input, which counts) the service says connected and creates no Fader endpoints at all.
+FADERS_MISSING = ("RODE's driver is connected but has not created its fader inputs. Close anything "
+                  "recording from the unit's Main Multitrack input, the Sound control panel "
+                  "included, then set what this computer receives to just the mix and back "
+                  "again.")     # the desk ignores a write of the value it holds, so "apply
+                                # again" would re-enumerate nothing
+
+# The service creates its endpoints within about three seconds of reporting connected, one at a
+# time over roughly a second, so the set is read once it has stopped growing rather than at the
+# first arrival, or the announcement counts one fader of nine.
+FADERS_APPEAR_S = 10.0
+FADERS_SETTLE_S = 1.5
+
+
+def _is_fader(e: "Endpoint") -> bool:
+    return e.virtual and e.name.startswith("Fader") and e.state in ("active", "disabled")
+
+
+def _wait_for_faders(enum, timeout_s: float) -> list:
+    """Re-list endpoints until the Fader set has held still for FADERS_SETTLE_S, or the time is
+    up with none. Returns the list."""
+    at = time.monotonic()
+    eps, seen, held_since = _endpoints(enum), -1, at
+    while time.monotonic() - at < timeout_s:
+        n = sum(1 for e in eps if _is_fader(e))
+        if n != seen:
+            seen, held_since = n, time.monotonic()
+        elif n and time.monotonic() - held_since >= FADERS_SETTLE_S:
+            break
+        time.sleep(0.5)
+        eps = _endpoints(enum)
+    return eps
+
+
+def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True) -> Outcome:
+    """Make Windows agree with the driver: its endpoints enabled while the service is connected
+    and disabled while it is not, and the default playback device on the desk when a mode change
+    has taken away the one it was on.
+
+    `expect_connected` True waits for the service to bind first (a mode write has just landed and
+    it takes about twelve seconds); False or None does not wait. Safe to call at any time and from
+    any thread; it opens its own COM apartment. Never raises: the desk's controls must not fail
+    because Windows' audio service is having a moment.
+    """
+    status = wait_connected() if expect_connected else read_status()
+    out = Outcome(status=status)
+    comtypes.CoInitialize()
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        eps = (_wait_for_faders(enum, FADERS_APPEAR_S) if expect_connected and status.connected
+               else _endpoints(enum))
+        if status.running:
+            # The service has already written what it wants into the registry; this applies it
+            # now instead of at the next USB arrival. Only "disabled" and "active" are ours to
+            # flip: "not present" and "unplugged" belong to the device.
+            for e in eps:
+                if not e.virtual:
+                    continue
+                if status.connected and e.state == "disabled":
+                    policy.SetEndpointVisibility(e.id, True)
+                    out.enabled.append(e.name)
+                elif not status.connected and e.state == "active":
+                    policy.SetEndpointVisibility(e.id, False)
+                    out.disabled.append(e.name)
+            # Counted AFTER the flips above, as what the operator now has, and "disabled" no
+            # longer occurs here because it was just switched on.
+            faders = [e for e in eps if _is_fader(e)]
+            out.faders_ready = len(faders)
+            out.system_ready = any(e.virtual and e.flow == "playback" and e.name.startswith("System")
+                                   and e.state in ("active", "disabled") for e in eps)
+            out.say_ready = bool(expect_connected and status.connected)
+            out.faders_missing = bool(expect_connected and status.connected and not faders)
+        if move_default:
+            out.default_moved_to = _restore_default(enum, policy, eps, status.connected)
+    except Exception as exc:
+        out.error = f"Could not update Windows' audio devices: {exc}"
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+    if out.enabled or out.disabled or out.faders_missing or out.default_moved_to or out.error:
+        diagnostics.event("virtual_devices.reconcile", status.phrase(),
+                          enabled=len(out.enabled), disabled=len(out.disabled),
+                          faders=out.faders_ready, missing=out.faders_missing,
+                          default=out.default_moved_to or "-", error=out.error or "-")
+    return out
+
+
+def _restore_default(enum, policy, eps: list, connected: bool) -> str:
+    """Put the default playback device back on the desk if a mode change took it away.
+
+    ONLY WHEN IT WAS ON THE DESK OR IS DEAD. A default that is alive and somewhere else was
+    chosen by the user and stays. Once Expanded is on, the desk's Main output is renamed and its
+    old endpoint stays listed and dead, so Windows falls back to whatever it can find, which on a
+    laptop is the built-in speakers; RODE's own instruction is to select `System (RØDECaster)`
+    then, and that is the preference here, with the desk's Main output as the fallback when the
+    driver's endpoint is not there. Console and multimedia roles move together; communications
+    is left alone, because a call app's output is a choice this app knows nothing about."""
+    by_id = {e.id: e for e in eps}
+    current = by_id.get(_default_id(enum, E_CONSOLE))
+    if current is not None and current.state == "active" and not (current.desk or current.virtual):
+        return ""
+    live_playback = [e for e in eps if e.flow == "playback" and e.state == "active"]
+    target = None
+    if connected:
+        target = next((e for e in live_playback if e.virtual and e.name.startswith("System")), None)
+    if target is None:
+        target = next((e for e in live_playback if e.desk and "Main" in e.name), None)
+    if target is None or (current is not None and current.id == target.id):
+        return ""
+    policy.SetDefaultEndpoint(target.id, E_CONSOLE)
+    policy.SetDefaultEndpoint(target.id, E_MULTIMEDIA)
+    return target.name
+
+
+def describe() -> dict:
+    """For the page: the driver's state and what its endpoints are doing, as words."""
+    st = read_status()
+    virtual = []
+    comtypes.CoInitialize()
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        # Only what the driver exposes now. Windows keeps an entry for every endpoint it has
+        # ever seen (a "Game" playback device from an earlier driver state lingers as not
+        # present), and counting those would report "11 of 12" on a working install.
+        virtual = [e for e in _endpoints(enum) if e.virtual and e.state in ("active", "disabled")]
+    except Exception:
+        pass
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+    active = sum(1 for e in virtual if e.state == "active")
+    text = st.phrase()
+    if st.connected:
+        text += (f" {active} of {len(virtual)} virtual devices are on." if virtual
+                 else " No virtual devices are listed in Windows.")
+    return {"installed": st.installed, "running": st.running, "connected": st.connected,
+            "enabled": st.enabled, "driver_version": st.driver_version,
+            "virtual_active": active, "virtual_total": len(virtual), "text": text}
