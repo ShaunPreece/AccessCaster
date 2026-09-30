@@ -672,7 +672,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   sound device. What does re-run it is another arrival, so `server._virtual_devices_follow` makes
   one itself, flipping the output mode off and back up to three times before advising a replug,
   which is only ever one more arrival. The "only a replug brings it back" rule this replaced was
-  a description of the same coin toss.
+  a description of the same coin toss: in a bad spell a replug does not bind either (measured at
+  post-fader and at mix only). The one recovery seen for a bad spell is a service restart FOLLOWED
+  by an arrival, which bound one second after the desk returned; the restart alone, with the desk
+  present, did not. One sample, and it needs elevation, so it is not built.
   `virtual_devices.py` reads the service's own status block (shared memory
   `Global\RODECaster_VAD{...}`, readable by anyone: connected flag, Enable, heartbeat, desk,
   firmware), which is the detector, and `reconcile` makes Windows agree with it. The follow-up
