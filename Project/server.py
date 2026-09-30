@@ -6592,12 +6592,15 @@ _virtual_devices_busy = threading.Lock()
 # does not narrate each flip of the mode as news.
 _virtual_devices_retrying = threading.Event()
 
-# RODE'S SERVICE BINDS ON ABOUT HALF OF THE DESK'S ARRIVALS, and never later. Measured: twelve
+# RODE'S SERVICE BINDS ON SOME OF THE DESK'S ARRIVALS, and never later. Measured: twelve
 # arrivals, six bound, in every mode and with nothing of ours open; a quiet desk stayed unbound
 # for five minutes; nothing writable from user mode (Enable, its command block) re-runs the
 # bind. What does is another arrival, so the follow-up makes one itself by flipping the output
-# mode away and back. Three attempts at even odds reach about nine in ten; a replug is only ever
-# one more attempt, which is why it is the last resort and not the first.
+# mode away and back.
+#
+# THE ODDS ARE NOT EVEN, so three attempts are not the nine in ten they look like: a bad spell
+# runs, and one measured nine arrivals for two binds. A replug is one more arrival at whatever
+# the current odds are, which is why nothing here asks for one.
 _VIRTUAL_DEVICES_RETRIES = 3
 _VIRTUAL_DEVICES_RETRY_HOLD_S = 3.0     # at the other mode: long enough for the service to let go
 
@@ -6647,8 +6650,11 @@ def _virtual_devices_follow(raw_mode) -> str:
             if out.sentence():
                 _ann_say(out.sentence())
             elif expect and out.status.running and not out.status.connected:
-                _ann_say("RODE's driver still has not connected to the unit after three tries. "
-                         "Unplug and reconnect the unit's USB cable, which gives it another.")
+                # STATE, NEVER AN INSTRUCTION. A replug is one more arrival at the same odds, and
+                # in a bad spell it binds no better than the retries just did, so asking for one
+                # reads as "this will fix it" when it mostly will not.
+                _ann_say("RODE's driver has not connected to the unit, so the extra inputs are "
+                         "not there.")
         finally:
             _virtual_devices_busy.release()
 

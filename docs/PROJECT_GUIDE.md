@@ -670,10 +670,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   command block, not a service restart, not stopping our HID handle; a PnP restart of the desk is
   vetoed by `usbaudio2` while Windows has streams open, which is the normal state of a default
   sound device. What does re-run it is another arrival, so `server._virtual_devices_follow` makes
-  one itself, flipping the output mode off and back up to three times before advising a replug,
-  which is only ever one more arrival. The "only a replug brings it back" rule this replaced was
-  a description of the same coin toss: in a bad spell a replug does not bind either (measured at
-  post-fader and at mix only). The one recovery seen for a bad spell is a service restart FOLLOWED
+  one itself, flipping the output mode off and back up to three times, and then reports the state
+  and asks for NOTHING. **Never put a replug back in that sentence**: it is one more arrival at
+  whatever the odds currently are, in a bad spell it binds no better than the retries just did
+  (measured at post-fader and at mix only), and phrasing it as the remedy tells the operator to go
+  and pull a cable that mostly will not help. The "only a replug brings it back" rule this
+  replaced was a description of the same coin toss. The one recovery seen for a bad spell is a service restart FOLLOWED
   by an arrival, which bound one second after the desk returned; the restart alone, with the desk
   present, did not. One sample, and it needs elevation, so it is not built.
   `virtual_devices.py` reads the service's own status block (shared memory
@@ -710,10 +712,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `DevTools/vad_trace.py` is the listener, kept because it proves the negative in one run.
 - **A BAD SPELL OUTLASTS THE FOLLOW-UP'S THREE RETRIES, AND THE ANNOUNCER'S RECONNECT IS WHAT
   STARTS THE CYCLE THAT WINS.** Measured through one: nine arrivals at product id 0x0094 produced
-  two binds, and each came after a cycle had already spoken "still has not connected after three
-  tries". Nothing the first cycle did recovered it; the next follow-up, started by the announcer's
-  own reconnect, did. So the replug advice is spoken while the app is still capable of fixing it
-  itself.
+  two binds, and each came after a cycle had already run out of retries and reported failure.
+  Nothing the first cycle did recovered it; the next follow-up, started by the announcer's own
+  reconnect, did. So the failure is reported while the app is still capable of fixing it itself,
+  which is the other reason that sentence must not ask the operator to do anything.
 - **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
   switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
   re-reads only on an audio device arrival; after a mode change that write can land after the
