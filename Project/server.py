@@ -1272,9 +1272,9 @@ def _note_device_id(device_name, serial) -> None:
 
 
 def read_device_status() -> dict:
-    """Open the control interface, run the safe read commands, return a status dict.
+    """Open the control interface, run the one safe status command, return a status dict.
 
-    Read-only. Never changes device state.
+    Read-only. Never changes device state. See the comment at the command for why it is only `I`.
     """
     with _hid_lock:
         interfaces = [i.describe() for i in rcp_hid.enumerate_interfaces()]
@@ -1285,8 +1285,8 @@ def read_device_status() -> dict:
         #
         # The desk has TWO USB ports and this protocol works over exactly one interface, MI_09, which
         # is on USB 1, the port nearest the power inlet. USB 2 presents its own device (PID 0x0026,
-        # MI_03) that carries the audio and answers no read: `get_version` comes back empty and
-        # `ping` False. So a cable in USB 2 alone looks like a connected unit to anyone watching the
+        # MI_03) that carries the audio and answers no read: every report-1 command comes back
+        # empty. So a cable in USB 2 alone looks like a connected unit to anyone watching the
         # lights while the app can do nothing with it, and that state invites a whole causal theory
         # about the protocol when the real answer is which cable is plugged in.
         if iface is None:
@@ -1324,26 +1324,25 @@ def read_device_status() -> dict:
         # status line and the UI chrome (title/brand/About, updated in app.js) reflect reality.
         device_name = devices.resolve_device(iface.product_id).name
         try:
+            # ONE COMMAND, `I`, AND NEVER `VER` OR THE `U` PING. With the desk in Expanded, either
+            # of those two makes it drop RODE's virtual `System (RODECaster)` playback endpoint
+            # about 17 seconds later; Windows surprise-removes and re-adds it, and a screen reader
+            # on that output loses its speech for a few seconds. Measured one command at a time:
+            # `I` and a model dump are clean. `I` answering is proof enough that the desk is
+            # responding, and the identity below comes from the USB serial, so nothing is lost.
             with rcp_hid.RodeCaster.open_path(iface, "device status") as dev:
-                version_id = dev.get_version()
                 info = dev.get_info()
-                online = dev.ping()
-            # THE UNIT'S IDENTITY IS ITS USB SERIAL, NOT WHAT `VER` RETURNS. The serial survives
-            # factory resets and power cycles unchanged, and comes free with the enumeration without
-            # opening anything. `VER` is stable within a session but NOT across a reboot or a reset,
-            # so anything filed under it is silently orphaned. It is kept as `version_id` because it
-            # is genuinely diagnostic: it MOVING is the signal that the desk rebooted or was reset.
-            #
-            # Falls back to `VER` only when a desk reports no serial at all, which no desk here
-            # does; better a tag that can drift than no per-device tagging on some future unit.
-            _note_device_id(device_name, iface.serial_number or version_id)
+            online = bool(info)
+            # THE UNIT'S IDENTITY IS ITS USB SERIAL. It survives factory resets and power cycles
+            # unchanged, and comes free with the enumeration without opening anything. `VER` was
+            # never a substitute: it changes across a reboot, so anything filed under it is orphaned.
+            _note_device_id(device_name, iface.serial_number)
             return {
                 "connected": True,
                 "app_version": APP_VERSION,
                 "device_name": device_name,
                 "online": online,
-                "hardware_id": iface.serial_number or version_id,
-                "version_id": version_id,
+                "hardware_id": iface.serial_number or "",
                 "info_hex": info[:16].hex(),
                 "control_interface": iface.describe(),
                 "interfaces": interfaces,

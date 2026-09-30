@@ -678,6 +678,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   measured here and it does work; the reboot is what a user should be told, because it is their
   instruction. Their driver also has a tray icon carrying a Latency setting, Ultra-low by default
   and droppable to Low if the computer cannot keep up.
+- **NEVER SEND `VER` OR THE `U` PING: IN EXPANDED, EACH ONE DROPS THE VIRTUAL PLAYBACK ENDPOINT
+  ABOUT 17 SECONDS LATER.** Windows surprise-removes `System (RODECaster)` and re-adds it a second
+  or two on, and a screen reader on that output loses its speech for a few seconds each time.
+  Measured on 30th September 2026 one action at a time with the server stopped: `VER` alone 16.9 s,
+  `U` alone 17.3 s, deterministic; a model dump, the `I` command, a bare HID open and close, SAPI
+  speech, SAPI enumeration, a Chromium app window and every `meters.py` call all clean. It looked
+  like an Alt-Tab fault because the page's status read sent both on every load and reload.
+  `read_device_status` now sends `I` only, whose answer is the liveness proof, and identity is the
+  USB serial. `rcp_hid.quick_probe` and the DevTools probes still send both; they are tools, not
+  app paths, and cost a few seconds of speech when run.
 - **A WINDOWS ENDPOINT RENAME DOES NOT SURVIVE TOGGLING EXPANDED, AND THE OLD NAME LINGERS DEAD.**
   Re-enumeration creates a fresh instance with a numeric prefix, `Speakers (2- RODECaster Pro II
   Main Multitrack)`, while the previous one stays listed and silent. So anything that stores a
@@ -957,9 +967,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the Pro II here) survived eight factory resets and a power cycle on 16th September 2026 and comes
   free with the enumeration, without opening anything. `VER` read `FBB9-CBE2` that afternoon and
   `0576-FC06` by the evening, so everything filed under it - applied mic presets, the baseline
-  offer, parked chains - was being silently orphaned. It is kept as `version_id` because it MOVING
-  is a useful signal that the desk rebooted or was reset. Profiles were never affected: they gate on
-  `product_id`, which is the model, not the unit.
+  offer, parked chains - was being silently orphaned. The app no longer sends `VER` at all (see the
+  Expanded entry below). Profiles were never affected: they gate on `product_id`, which is the
+  model, not the unit.
 - **`inputColour` is a STRING** (AARRGGBB hex), not an int. There is no string channel-property
   writer at all, so it is SAVE ONLY in a profile: read and backed up, never restored.
 - **`inputType` is DERIVED from the mic type** (0 mic, 1 instrument, 2 line, -1 no physical input).

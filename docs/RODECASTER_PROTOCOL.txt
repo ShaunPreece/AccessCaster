@@ -164,6 +164,15 @@ report id):
   - 0x55 ('U')
       Response: 0x02 0x41 0x00 ...  A bare ACK. This is a ping.
 
+  WARNING, EXPANDED MODE (outputMultiMode 3-5, RODE's Virtual Devices): "VER" and 0x55
+  each make the desk drop the host's virtual "System (RODECaster)" playback endpoint
+  about 17 seconds later. Windows logs a Kernel-PnP surprise removal of the endpoint
+  and re-adds it a second or two on; anything playing through it, a screen reader
+  included, falls back to another output and returns. Measured on a Pro II at 1.7.6,
+  one command at a time: 0x49 and the model dump (section 2) are clean. So a
+  controller should never send "VER" or 0x55 as a liveness check; 0x49 answering is
+  the same proof at no cost.
+
 Stable identity comes from the model dump (section 2/3), not the command path:
   systemSerialNumber, systemName ("RODECaster Pro II" or "RODECaster Duo"),
   systemFirmwareVersion. (These are readable; their VALUES are not reproduced here.)

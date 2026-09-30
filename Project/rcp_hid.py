@@ -410,11 +410,13 @@ class RodeCaster:
     # ----- known read-only commands ---------------------------------------
 
     def get_version(self) -> str:
-        """Hardware/version id, e.g. '97B7-DECE'. Read-only.
+        """Per-session version token, e.g. '97B7-DECE'. Read-only, and NOT sent by the app.
 
-        Confirmed on Steven's unit: the command is the ASCII string 'VER'.
-        (The reference doc also lists single byte 0x57 'W', but that returns
-        nothing on this firmware; 'VER' is the one that works.)
+        The token changes across a reboot, so it identifies nothing; the USB serial does. Worse,
+        with the desk in Expanded this command makes it drop the virtual `System (RODECaster)`
+        playback endpoint about 17 seconds later, which costs a screen-reader user their speech
+        for a few seconds. Kept for the command-line probe only. (The single byte 0x57 'W' from
+        older references returns nothing on firmware 1.7.x.)
         """
         ok, data = self.parse_response(self.command(b"VER"))
         return self.to_ascii(data) if ok else ""
@@ -425,7 +427,9 @@ class RodeCaster:
         return data if ok else b""
 
     def ping(self) -> bool:
-        """True if the device answers with an ACK. Read-only."""
+        """True if the device answers with an ACK. Read-only, and NOT sent by the app: like `VER`,
+        in Expanded it drops the virtual playback endpoint about 17 seconds later. `get_info`
+        answering proves the desk is responding without that cost."""
         resp = self.command(b"\x55")
         return len(resp) >= 2 and resp[0] == REPORT_RESP and resp[1] == ACK
 
@@ -433,7 +437,9 @@ class RodeCaster:
 def quick_probe(verbose: bool = True) -> dict:
     """Run the three documented read-only commands and return a result dict.
 
-    Safe to run any time; it changes nothing on the device.
+    Changes nothing on the device, but it is a COMMAND-LINE TOOL, not an app path: `VER` and the
+    ping each make a desk in Expanded drop its virtual playback endpoint about 17 seconds later,
+    so running this costs a screen reader on that output a few seconds of speech.
     """
     result: dict = {"interfaces": [], "control": None, "version": None,
                     "info_hex": None, "ping": None, "error": None}
