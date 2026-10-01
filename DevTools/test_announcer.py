@@ -106,6 +106,41 @@ check("still names the channel", said, ["Mic 3 muted"])
 said, _ = run([state_packet("channelOutputMute", 4, True)], cold_cache=False)
 check("stereo source too", said, ["Bluetooth muted"])
 
+print("\nA MIXER PAD OWNS THE MUTE AND CUE LINES WHILE IT ACTS")
+channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+# `padActive` is addressed at the pad's STREAM POSITION, one level, same shape as a state push.
+def pad_active(position: int, on: bool) -> bytes:
+    return (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01" + bytes([position])
+            + b"padActive" + b"\x00\x01\x01" + bytes([0x02 if on else 0x03]))
+
+MIXER_POS, SOUND_POS = 5, 6
+server._hk_mixer_pos = frozenset({MIXER_POS})
+# One Back Channel press: the pad, then the four state pushes it moves. Nothing is worth saying.
+said, _ = run([pad_active(MIXER_POS, True),
+               state_packet("channelOutputMute", 0, True), state_packet("channelCueEnable", 0, True),
+               state_packet("channelOutputMute", 8, True), state_packet("channelCueEnable", 8, True)],
+              cold_cache=False)
+check("a mixer pad's whole burst is silent", said, [])
+# The release burst too, and a repeat press only pushes the deadline further out.
+said, _ = run([pad_active(MIXER_POS, False),
+               state_packet("channelOutputMute", 0, False),
+               state_packet("channelCueEnable", 0, False)], cold_cache=False)
+check("and so is the burst it restores", said, [])
+# The cache still has to be true: the encoder ring quotes it whether or not anything was spoken.
+_, st_q = run([pad_active(MIXER_POS, True), state_packet("channelOutputMute", 1, True)],
+              cold_cache=False)
+check("the mute cache is updated even when silent", st_q["muted"][1], True)
+# A SOUND pad moves nothing, so it must not buy silence.
+server._ann_mixer_quiet_until = 0.0
+said, _ = run([pad_active(SOUND_POS, True), state_packet("channelOutputMute", 1, True)],
+              cold_cache=False)
+check("a non-mixer pad suppresses nothing", said, ["USB 1 (Main Stereo) muted"])
+# And the window is short: a mute after it has passed speaks as usual.
+server._ann_mixer_quiet_until = 0.0
+said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
+check("a real mute once the window passes", said, ["USB 1 (Main Stereo) unmuted"])
+server._hk_mixer_pos = frozenset()
+
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # channelInputSource is pushed with the same 0x1C+strip selector; value = the new source code.

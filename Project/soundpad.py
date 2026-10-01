@@ -1021,7 +1021,9 @@ BACK_CHANNEL_SOURCES = (
 )
 
 # padMixerTriggerMode, shared by every mixer action (Censor/Trash Talk/Fade/Back Channel/Ducking).
-MIXER_TRIGGER_LABEL = {0: "Latching (press on, press again off)", 1: "Momentary (only while held)"}
+# 1 latches and 0 is momentary, ear-proven on a Back Channel pad. That is the SAME way round as
+# padTriggerMode on a MIDI pad, so the two share one convention: do not invert this pair.
+MIXER_TRIGGER_LABEL = {0: "Momentary (only while held)", 1: "Latching (press on, press again off)"}
 
 # padPlayMode on SOUND pads. EAR-PROVEN on hardware, one value at a time on a real sound pad and
 # restored to baseline after: 0 press to play / press to stop / press to play
@@ -1101,8 +1103,8 @@ PAD_PROP = {
     },
     "padMixerTriggerMode": {
         "kind": "int", "label": "Trigger mode", "applies_to": (3,), "min": 0, "max": 1,
-        "help": "Mixer pads: 0 Latching (press on, press again off), 1 Momentary (only while held). "
-                "Confirmed from the factory pads (Censor = Latching, Ducking = Momentary).",
+        "help": "Mixer pads: 0 Momentary (only while held), 1 Latching (press on, press again off). "
+                "Confirmed from the factory pads (Censor = Momentary, Ducking = Latching).",
     },
 }
 
@@ -1116,8 +1118,7 @@ PAD_PROP = {
 #     presses twelve seconds apart gave Note On then Note Off. LATCHING.
 #   mode 0: one press held for two seconds gave Note On at 18:35:50.833 and Note Off at
 #     18:35:53.138, i.e. on at press and off at release, one message each. MOMENTARY.
-# NOTE THE TRAP: this is the OPPOSITE way round from a mixer pad's padMixerTriggerMode, where 0 is
-# Latching and 1 is Momentary. Same two words, inverted values, so never share a value between them.
+# A mixer pad's padMixerTriggerMode agrees with this: 0 Momentary, 1 Latching.
 # `send` is still read and backed up but NOT offered as a control: the template stamps it 2 and
 # nothing has shown what it does, so a label would be a guess dressed as knowledge.
 TRIGGER_MODE_LABEL = {0: "Momentary", 1: "Latching"}
@@ -1428,7 +1429,7 @@ def set_play_mode(grid: int, mode: int) -> dict:
 
 
 def set_mixer_trigger(grid: int, mode: int) -> dict:
-    """Mixer pads: Latching (0) or Momentary (1)."""
+    """Mixer pads: Momentary (0) or Latching (1). See MIXER_TRIGGER_LABEL."""
     return set_pad_property(grid, "padMixerTriggerMode", mode)
 
 
@@ -1866,8 +1867,8 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
 
 MIXER_MODE = pr.MIXER_MODE
 MIXER_MODE_LABEL = pr.MIXER_MODE_LABEL
-# Per-mode defaults. colour is cosmetic (the pad LED); trigger_mode is BEHAVIOURAL (Latching vs
-# Momentary) and matches the factory grid where known (Censor latches=0, Ducking momentary=1).
+# Per-mode defaults. colour is cosmetic (the pad LED); trigger_mode is BEHAVIOURAL and matches the
+# factory grid where known: Censor is momentary (0, hold to bleep) and Ducking latches (1).
 _MIXER_DEFAULTS = {
     0: {"colour": 11, "trigger_mode": 0},   # Censor
     1: {"colour": 9,  "trigger_mode": 0},   # Trash Talk

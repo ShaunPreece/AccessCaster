@@ -350,7 +350,7 @@ def build_mixer_create(target_idx: int, name: str, colour: int, mode: int,
     cannot orphan. No file means no FAT mount needed either (HID-only, silent).
 
     `mode` = padMixerMode: 0 Censor, 1 Trash Talk, 2 Fade In/Out, 3 Back Channel, 4 Ducking.
-    `trigger_mode` = padMixerTriggerMode (Latching vs Momentary; factory Censor=0, Ducking=1).
+    `trigger_mode` = padMixerTriggerMode (0 Momentary, 1 Latching; factory Censor=0, Ducking=1).
     The app's captured Censor left padMixerMode/TriggerMode at the phase-1 default (0); we set
     both explicitly in the commit so every mode uses one code path (writing 0 is a no-op for
     Censor, so the read-back still matches the factory pad). Mode-specific extras (censor custom

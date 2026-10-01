@@ -2305,6 +2305,15 @@ def _ann_decode_int(data: bytes, after: int):
 # selector (0x1C..0x25), so their name is stable and the byte before it really is the selector.
 _ANN_STATE_SEL_BASE = channels.SEL_CHANNEL_PROC      # 0x1C + strip index
 _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
+# HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
+# these at once (both members' mute and cue), and each edge of a momentary pad brings its own burst,
+# so speaking them turns a two-second talkback push into eight announcements describing a state the
+# operator just asked for. A DEADLINE, not a switch: every mixer `padActive` pushes it further out,
+# so repeated presses cannot leave it stuck on, and a missed window costs only today's behaviour.
+# Generous against the burst (the pushes arrive together, within tens of ms) and short enough that a
+# real mute a moment later still speaks.
+_ANN_MIXER_QUIET_S = 0.75
+_ann_mixer_quiet_until = 0.0
 # PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Hardware-measured: a short press runs
 # 475 ms down-to-up and mutes nothing; a hold
 # pushes `channelOutputMute = True` 765 ms after the press edge, WHILE STILL HELD, and mutes the
@@ -2522,6 +2531,7 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
     """Decode one report-04 control event and speak it, updating the announcer state dict `st`
     ({"bank", "pending", "at"}). Scans the whole packet for a known property name, not just the
     first token, so a bank change is still caught if another name precedes it."""
+    global _ann_mixer_quiet_until
     if not b or b[0] != 0x04:
         return
     for m in _ANN_NAME.finditer(b):
@@ -2553,6 +2563,10 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
             path = _ann_addr_path(b, m, "padActive")
             if on is not None and path:
                 _hk_note_pad_active(path[-1], on)
+                # BOTH EDGES. A momentary pad restores every channel it moved when it is released,
+                # and that burst says no more than the one on the way in.
+                if path[-1] in _hk_mixer_pos:
+                    _ann_mixer_quiet_until = time.time() + _ANN_MIXER_QUIET_S
             return
         if _ann_is(name, "mixLevelWithAnchor") and _ann_levels_on:
             # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
@@ -2682,6 +2696,10 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
                 # (_ann_publish_solo), though this desk pushes nothing back for a software solo, so
                 # that branch is insurance rather than an observed fix.
                 if _ann_is_self_echo((kind, idx)):
+                    return
+                # A mixer pad is mid-action, so this mute or cue is the pad doing its job. After the
+                # cache above, which must stay true whether or not anything is said.
+                if time.time() < _ann_mixer_quiet_until:
                     return
                 if kind == "mute":
                     if st.get("enc_down_at"):
@@ -8704,11 +8722,11 @@ def action_set_play_mode(grid: int, mode: int) -> dict:
 
 
 def action_set_mixer_trigger(grid: int, mode: int) -> dict:
-    """Mixer pads: Latching (0, press on / press again off) or Momentary (1, only while held)."""
+    """Mixer pads: Momentary (0, only while held) or Latching (1, press on / press again off)."""
     return _pad_write(grid, "Could not change the pad's trigger mode",
                       lambda: soundpad.set_mixer_trigger(grid, mode),
                       invalid=None if mode in (0, 1) else
-                      "Trigger mode must be 0 (Latching) or 1 (Momentary).")
+                      "Trigger mode must be 0 (Momentary) or 1 (Latching).")
 
 
 def action_set_pad_trigger(grid: int, field: str, value: int) -> dict:
@@ -9264,6 +9282,12 @@ def _hk_current_bank():
 # its own, and a press cannot pay 1.5 s to find out whether it is allowed.
 _hk_fx_missing = frozenset()
 
+# STREAM POSITIONS OF THE MIXER PADS (padType 3), read off the same refresh dump. A mixer pad's whole
+# job is to move channel state - Back Channel mutes and cues its members, Censor mutes the mics - so
+# its `padActive` is the announcer's signal that the mute and cue pushes about to arrive are the
+# pad doing what it was pressed to do, not a change worth speaking. See _ANN_MIXER_QUIET_S.
+_hk_mixer_pos = frozenset()
+
 
 def _hk_refresh_pads() -> dict:
     """Re-read the pad pool and replace the cache. Returns the new map.
@@ -9271,12 +9295,13 @@ def _hk_refresh_pads() -> dict:
     One dump answers four questions - where each pad sits, what its play mode is, which bank the
     desk is on, and which voice-FX pads have lost their effect object - so the press that follows
     needs no read of its own."""
-    global _hk_pad_map, _hk_pads_at, _hk_fx_missing
+    global _hk_pad_map, _hk_pads_at, _hk_fx_missing, _hk_mixer_pos
     with _hid_lock:
         blob = rcp_read.read_model_stable()
     modes = soundpad.pad_play_modes(blob)
-    fresh = {pi: (pos, nm, pt, modes.get(pi))
-             for pos, pi, pt, nm in soundpad.pad_positions(blob)}
+    placed = list(soundpad.pad_positions(blob))
+    fresh = {pi: (pos, nm, pt, modes.get(pi)) for pos, pi, pt, nm in placed}
+    _hk_mixer_pos = frozenset(pos for pos, _pi, pt, _nm in placed if pt == 3)
     try:
         _hk_fx_missing = frozenset(soundpad.pool_health(blob).get("missing") or ())
     except Exception:

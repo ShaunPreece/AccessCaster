@@ -1133,8 +1133,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 - **`padTriggerCustom = False` is a DISCARD, not a park.** Writing that flag makes the DESK reset
   control, channel, on and off to defaults, and setting the flag back does NOT return them.
-- **A MIXER pad's `padMixerTriggerMode` is the OPPOSITE way round to `padTriggerMode`:** 0 Latching /
-  1 Momentary versus 1 latching / 0 momentary. Same two words, inverted values.
+- **`padMixerTriggerMode` and `padTriggerMode` agree: 0 Momentary, 1 Latching.** Ear-proven on a
+  Back Channel pad holding 1 that latches, and corroborated by the factory grid, where Censor is 0
+  (hold to bleep) and Ducking is 1. Do not invert either one to match the other.
 - **Write play mode BEFORE loop.** Selecting One Shot clears `padLoop`.
 - **Envelope fade points are absolute POSITIONS (0.0 to 1.0), not lengths.** A fade point outside the
   played part is accepted by the desk and does nothing whatsoever, with nothing on screen or in the

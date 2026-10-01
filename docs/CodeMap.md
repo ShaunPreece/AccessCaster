@@ -22,7 +22,7 @@ after a session that moved code.
 
 | file | lines | what it owns |
 |---|---|---|
-| `server.py` | 10984 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
+| `server.py` | 11112 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
 | `soundpad.py` | 3081 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. Pad records are found by windowing the dump on `padName`: `_pad_windows` is the ONE anchor pass and `_pad_field` reads one field inside a window (pass `default=_ABSENT` to tell a missing field from an undecodable one). `_sanitise_stack` is the ONE effect-stack cleaner, with `validate_fx_stack` (must not be empty) and `_sanitise_stack_loose` (may be) over it. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. |
 | `rcp_transfer.py` | 1467 | Record BUILDERS and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. Also the pad-volume mount gate: `find_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats) and `quiet_drive_errors` (kills Windows' modal drive box). |
 | `app_settings.py` | 217 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
@@ -103,9 +103,11 @@ after a session that moved code.
   is the only place the cookie is set.
 - Network: `read_network_status` (1366), `action_join_wifi` (1639), `action_set_bt_visible` (1712),
   `_network_write_gate` (1840).
-- Announcer: `_announce_loop` (3244), `_ann_handle_report` (2521), `_ann_seed_layout` (2748),
-  `_ann_publish_level` (3168), `_ann_publish_mute` (3197), `_ann_publish_solo` (3944),
-  `_ann_mark_self_write` (3127), `_ann_is_self_echo` (3136), `_suspend_announcer_for_record` (3365).
+- Announcer: `_announce_loop` (3262), `_ann_handle_report` (2530), `_ann_seed_layout` (2766),
+  `_ann_publish_level` (3186), `_ann_publish_mute` (3215), `_ann_publish_solo` (3969),
+  `_ann_mark_self_write` (3145), `_ann_is_self_echo` (3154), `_suspend_announcer_for_record` (3390).
+  A mixer pad's `padActive` silences the mute and cue lines for `_ANN_MIXER_QUIET_S` (2308), using
+  the positions `_hk_refresh_pads` caches in `_hk_mixer_pos`.
 - Auto gain: `_autogain_run` (4035), `_ChatIsolation` (4151), `_autogain_restore_processing` (4246).
 - Per-channel level check: `action_channel_level_check` (5946), `_chan_check_stop` (5883),
   `_level_check_summary` (5810).
@@ -571,7 +573,9 @@ puts it back, `MidiOut().play_pad(n)` fires one. CC number is the FUNCTION, MIDI
 pad. Run it directly to list ports or fire a pad), `state_observatory.py`
 (`listen` takes no `--raw`), `gui_drive.py` +
 `ui_map.json` (drive the RODE app), `duo_probe.py` (read-only bring-up probe for any new desk),
-`announcer_echo_check.py`, `audit_code.py`.
+`announcer_echo_check.py`, `audit_code.py`, `watch_backchannel.py` (samples Mic 1 and USB 2's mute
+and cue flags through the running service while a Back Channel pad is held, which is the only way
+to tell a pad that did nothing from one that did its job and tidied up).
 
 **Two cap-opening probes, and both are worth reading before writing another one.**
 `duo_stereo_probe.py` asks whether a stereo PAIR CODE is live on a Duo, and `--control CODE` is the

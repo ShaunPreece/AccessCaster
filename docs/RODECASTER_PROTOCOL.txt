@@ -1100,15 +1100,15 @@ and the select-begin as   04 01 01 02 9a 02 00.
 All built with build_blank(with_effects=False): NO region-B object, NO file, plus
 a commit that sets the final padType.
   Mixer (padType 3): padMixerMode int 0 Censor / 1 Trash Talk / 2 Fade In-Out /
-    3 Back Channel / 4 Ducking; padMixerTriggerMode int 0 Latching / 1 Momentary.
+    3 Back Channel / 4 Ducking; padMixerTriggerMode int 0 Momentary / 1 Latching.
   MIDI Trigger (padType 4): default CC padTriggerControl = padIdx, padTriggerChannel
     = 1, padTriggerOn = 127, padTriggerOff = 0; custom via padTriggerCustom = True +
     padTriggerType (0 CC / 1 Note) + control / channel / on / off.
     MIDI OUTPUT PROVEN 2026-08-27 by listening to the desk's own MIDI input port while
     the pad was pressed (DevTools/midi_monitor.py). Three findings:
       (a) padTriggerMode = 1 LATCHING (press on, next press off), 0 MOMENTARY (on at
-          press, off at release). This is the OPPOSITE polarity to a mixer pad's
-          padMixerTriggerMode (0 Latching, 1 Momentary) - same words, inverted values.
+          press, off at release). A mixer pad's padMixerTriggerMode has the SAME
+          polarity (0 Momentary, 1 Latching).
       (b) writing padTriggerCustom = False makes the DEVICE reset control/channel/on/off
           to the defaults, and they do NOT come back when the flag is set again. It is a
           discard, not a park. padTriggerType is NOT reset by it.

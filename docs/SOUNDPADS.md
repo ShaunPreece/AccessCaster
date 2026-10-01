@@ -113,7 +113,7 @@ build_blank reproduces each capture's phase-1 BYTE-FOR-BYTE (verified for all th
 MIXER (padType 3)  [BUILT + ear-proven: Censor, Ducking]  captures/sp_mixer.pcap
   commit = remount + padType=3 + padMixerMode + padMixerTriggerMode + padName + padColourIndex.
   padMixerMode: 0 Censor, 1 Trash Talk, 2 Fade In/Out, 3 Back Channel, 4 Ducking (0/4 confirmed
-  from factory pads, 1-3 from the manual order). padMixerTriggerMode = Latching(0)/Momentary(1).
+  from factory pads, 1-3 from the manual order). padMixerTriggerMode = Momentary(0)/Latching(1).
   Censor + Ducking created from our code, read-back matched the factory pads on EVERY behaviour
   field, and BOTH fired correctly by ear (Shaun). pad_records.build_mixer_create / soundpad.create_mixer
   (+ CLI `soundpad.py mixer <grid> <mode>`). create_mixer accepts all 5 modes today; Fade/BackChannel
@@ -165,9 +165,10 @@ MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 202
           sends the OFF value. Measured: Note On at 18:30:57, Note Off at 18:31:09, two presses.
         mode 0 = MOMENTARY: ON at press, OFF at release. Measured: On at 18:35:50.833, Off at
           18:35:53.138, one press held about two seconds.
-      NOTE THE TRAP: a MIXER pad's padMixerTriggerMode is the OPPOSITE way round (0 Latching,
-      1 Momentary). Same two words, inverted values. soundpad.TRIGGER_MODE_LABEL vs
-      MIXER_TRIGGER_LABEL; never share a value between them.
+      A MIXER pad's padMixerTriggerMode is the SAME way round (0 Momentary, 1 Latching), ear-proven
+      on a Back Channel pad holding 1 that latches. The two labels are kept as separate tables
+      (soundpad.TRIGGER_MODE_LABEL and MIXER_TRIGGER_LABEL) because they address different
+      properties, not because their values differ.
     - **padTriggerCustom = False IS DESTRUCTIVE.** Writing that one flag made the DESK reset
       padTriggerControl/Channel/On/Off to its defaults (60 -> 16, ch 2 -> 1, on 100 -> 127), and
       writing the flag back to True did NOT return the custom values. So "off" discards a mapping
