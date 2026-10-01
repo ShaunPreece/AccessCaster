@@ -22,7 +22,7 @@ after a session that moved code.
 
 | file | lines | what it owns |
 |---|---|---|
-| `server.py` | 11208 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
+| `server.py` | 11275 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
 | `soundpad.py` | 3081 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. Pad records are found by windowing the dump on `padName`: `_pad_windows` is the ONE anchor pass and `_pad_field` reads one field inside a window (pass `default=_ABSENT` to tell a missing field from an undecodable one). `_sanitise_stack` is the ONE effect-stack cleaner, with `validate_fx_stack` (must not be empty) and `_sanitise_stack_loose` (may be) over it. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. |
 | `rcp_transfer.py` | 1467 | Record BUILDERS and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. Also the pad-volume mount gate: `find_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats) and `quiet_drive_errors` (kills Windows' modal drive box). |
 | `app_settings.py` | 217 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
@@ -31,6 +31,7 @@ after a session that moved code.
 | `autostart.py` | 169 | "Start when you sign in": the HKCU Run value, SHARED WITH `installer.iss` (same key, name and command - `test_autostart.py` asserts it). `state()`, `set_enabled()`, `started_at_login()` (the `--startup` flag `tray.main` reads to come up with no page). Refuses from a source run. **`LEGACY_VALUE_NAME` is the pre-rename value "Access Caster"**: `read_value` falls back to it so a machine that has not been upgraded still reads as ON, and `set_enabled` deletes it whichever way it is called, because two entries naming the same exe start the app twice at sign-in. `installer.iss` deletes it too, ungated by the task. |
 | `profiles.py` | 889 | Save, restore, `device_snapshot`, `UNIT_KEY`, `_apply_v2`. The routing matrix is captured as a MIX SCHEME (`routing.mix_scheme`, via `routing_schemes.capture`); the three older matrix keys are written for old builds only. |
 | `tones.py` | 139 | The announcer's non-speech cues: two-note WAVs (falling = muted, rising = unmuted) generated into the user data dir. `tone_path(name)` makes one on demand and replaces any earlier shape, which is what `TONE_VERSION` in the file name is for. Played by the speech worker through SAPI, so they inherit the announcer's output device. |
+| `driver_install.py` | 189 | Fetching RODE's Virtual Devices driver: `ZIP_URL`, `PAGE_URL`, `install` (download, extract, `verify_signature`, hand the MSI to Windows). **THE APP'S ONLY OUTBOUND INTERNET CALL, and only from a button press.** The signature is the check and not a hash, because the URL carries no version and RODE replace the file in place; the signer insisted on is `Freedman Electronics`, their legal entity. Every failure raises `DriverInstallError` carrying a sentence that names the manual route. |
 | `routing_schemes.py` | 441 | Mix schemes: `capture` (`only=<output key>` makes a ONE-OUTPUT preset), `apply`, `describe` (its `expanded` flag changes the spoken source COUNT and nothing else), `scope_text` (the "(every output)" / "(Chat only)" suffix the dropdown reads, derived per desk), `builtins` (normal / chat-mic-only / chat-normal), the flat JSON store. Keyed by output and source KEY, and walking `MatrixSpec.all_sources`, so a scheme's shape does not depend on the desk's USB mode. |
 | `meters.py` | 1084 | WASAPI metering, `Watcher`, `_EngineWaker`, `trusted_ceiling`, `level_note`, endpoint volume, `_default_endpoint_name` (both `default_playback_name` and `default_recording_name`). Also the shared MMDevice COM declarations, including `IMMNotificationClient` (Windows' endpoint-change callback, implemented in `virtual_devices`). |
 | `virtual_devices.py` | 520 | **RODE's Virtual Device Driver, from this side.** `read_status` / `wait_connected` parse the service's shared status block (`STATUS_MAPPING`; `DriverStatus.phrase` is the sentence for a person), `IPolicyConfig` is the Sound-panel interface (enable an endpoint, set the default device, no elevation), `_endpoints` tags every endpoint `virtual` (the driver's, enumerator ROOT) or `desk` (the unit's own USB audio), **`reconcile` makes Windows agree with the service** (endpoints on while connected, off while not, `faders_missing` when a held pin stopped the service creating them, `_restore_default` for the output), `describe` is the page's driver line, and **`watch_endpoints` (+ `_EndpointNotifier`) reconciles on every endpoint change Windows reports** rather than on one sample. See PROJECT_GUIDE part 2 under Expanded before touching any of it. |
@@ -54,8 +55,8 @@ after a session that moved code.
 
 ### server.py landmarks
 
-- Specs that drive read + write + UI + profile from one place: `PROCESSING_CONTROLS` (173),
-  `UNIT_SETTINGS` (840), `_PRESET_PROPS` (4474).
+- Specs that drive read + write + UI + profile from one place: `PROCESSING_CONTROLS` (178),
+  `UNIT_SETTINGS` (845), `_PRESET_PROPS` (4529).
 - USB mode and RODE's virtual devices: `action_set_usb_multitrack` / `action_set_usb_expanded`,
   then `_virtual_devices_follow` directly under them (the thread that runs
   `virtual_devices.reconcile` and speaks the outcome; also called from the announcer's reconnect
@@ -85,10 +86,10 @@ after a session that moved code.
   (`_hk_pads_held`, `_hk_release_held_pads`, `_hk_release_held`); and the silent play tracking
   (`_hk_note_pad_progress` / `_hk_note_pad_active` / `_hk_play_snapshot` / `_hk_playing_from_model`,
   fed from `_ann_handle_report` and never spoken).
-- Device state and overview: `read_device_state` (330), `device_overview` (1158),
-  `_overview_routing` (1063), `_wireless_mics` (303), `read_device_status` (1274).
-- Recording: `read_recorder` (571), `action_record` (665), `action_drop_marker` (740),
-  `_recorder_watcher` (469), `_recorder_sentence` (611), `action_delete_recording` (782, gated on
+- Device state and overview: `read_device_state` (335), `device_overview` (1163),
+  `_overview_routing` (1068), `_wireless_mics` (308), `read_device_status` (1279).
+- Recording: `read_recorder` (576), `action_record` (670), `action_drop_marker` (745),
+  `_recorder_watcher` (474), `_recorder_sentence` (616), `action_delete_recording` (782, gated on
   `recorder.DELETE_PROVEN`), `_recorder_payload` (518, the ONE builder
   for the page and for every transport reply), `_recorder_state_changed` (420, the Watcher's
   callback: it words the change via `recorder.spoken_change` and owns the announcer suspend/restore
@@ -103,20 +104,20 @@ after a session that moved code.
   `_token_offered` / `_authorised` / `_refuse`. **Local requests bypass it; `/api/access` and
   `/api/access/new` are in `LOCAL_ONLY_ROUTES` so the key never leaves this machine.** The page load
   is the only place the cookie is set.
-- Network: `read_network_status` (1366), `action_join_wifi` (1639), `action_set_bt_visible` (1712),
-  `_network_write_gate` (1840).
-- Announcer: `_announce_loop` (3262), `_ann_handle_report` (2530), `_ann_seed_layout` (2766),
-  `_ann_publish_level` (3186), `_ann_publish_mute` (3215), `_ann_publish_solo` (3969),
-  `_ann_mark_self_write` (3145), `_ann_is_self_echo` (3154), `_suspend_announcer_for_record` (3390).
-  A mixer pad's `padActive` silences the mute and cue lines for `_ANN_MIXER_QUIET_S` (2308), using
+- Network: `read_network_status` (1370), `action_join_wifi` (1643), `action_set_bt_visible` (1716),
+  `_network_write_gate` (1844).
+- Announcer: `_announce_loop` (3290), `_ann_handle_report` (2553), `_ann_seed_layout` (2794),
+  `_ann_publish_level` (3214), `_ann_publish_mute` (3243), `_ann_publish_solo` (3997),
+  `_ann_mark_self_write` (3173), `_ann_is_self_echo` (3182), `_suspend_announcer_for_record` (3418).
+  A mixer pad's `padActive` silences the mute and cue lines for `_ANN_MIXER_QUIET_S` (2336), using
   the positions `_hk_refresh_pads` caches in `_hk_mixer_pos`.
-- Auto gain: `_autogain_run` (4035), `_ChatIsolation` (4151), `_autogain_restore_processing` (4246).
-- Per-channel level check: `action_channel_level_check` (5946), `_chan_check_stop` (5883),
-  `_level_check_summary` (5810).
-- Meters and the Windows level: `read_meters` (5543), `action_set_input_level` (5646),
-  `action_meter_watch` (5776).
-- Faders and chains: `action_set_fader` (5266), `action_reset_faders` (6098),
-  `_follow_chains` (4790), `_read_fader_vector` (4982), `_tidy_fader_target` (5221).
+- Auto gain: `_autogain_run` (4088), `_ChatIsolation` (4204), `_autogain_restore_processing` (4301).
+- Per-channel level check: `action_channel_level_check` (6001), `_chan_check_stop` (5938),
+  `_level_check_summary` (5865).
+- Meters and the Windows level: `read_meters` (5598), `action_set_input_level` (5701),
+  `action_meter_watch` (5831).
+- Faders and chains: `action_set_fader` (5321), `action_reset_faders` (6153),
+  `_follow_chains` (4845), `_read_fader_vector` (5037), `_tidy_fader_target` (5276).
 - Per-fader mute and solo (the Levels tab's rows): `action_set_fader_mute`, `action_set_fader_solo`,
   read from `fader_levels_live`; browser half is `onFaderMute` / `onFaderSolo` / `onClearFaderSolos`.
   By FADER rather than by channel name, so an empty strip and a linked pair both work.
@@ -124,13 +125,13 @@ after a session that moved code.
   `_carry_mute` (which puts back the mute the desk clears when it rearranges a layout). The pair
   table is `devices.FaderSpec.stereo_pairs` and `rcp_transfer.STEREO_LINK_PAIRS`; the browser half is
   `buildStereoLinks` / `onStereoLink` / `applyStereoValues` in `app.js`.
-- Routing: `routing_model` (6407), `action_set_cross_point` (7003), `action_reset_all_outputs`
+- Routing: `routing_model` (6416), `action_set_cross_point` (7028), `action_reset_all_outputs`
   (6314, a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6336, which
   applies a profile's `routing.mix_scheme` through `routing_schemes.apply` and keeps the old
   index-keyed branch only for profiles saved before 29th August 2026).
 - Mix schemes: `_apply_scheme` (7053, the ONE apply path: gate, lock, write, wording),
-  `read_routing_schemes` (7086), `action_apply_routing_scheme` (7122),
-  `action_save_routing_scheme` (7136), `action_delete_routing_scheme` (7165). The format and the
+  `read_routing_schemes` (7111), `action_apply_routing_scheme` (7147),
+  `action_save_routing_scheme` (7161), `action_delete_routing_scheme` (7190). The format and the
   writes are in `routing_schemes.py`.
 - **Background jobs, all four on ONE class: `_BackgroundJob` (`start` / `status` / `busy` /
   `step` / `tick`).** The instances are `_profile_job`, `_restore_job`, `_show_job` and
@@ -144,9 +145,9 @@ after a session that moved code.
   mic preamp and leaves the channel ~55 dB down while the model reads perfect. Nothing can detect
   it by reading; see `PROJECT_GUIDE.md` part 2 before touching this.
 - ONE backup, both mechanisms underneath: `action_backup_now`, `action_restore_backup` (**always the profile since 21st September 2026**: the show import crashes the desk about 1 in 6, see its docstring), `backup_restore_plan` (what the confirmation dialog says, including `warnings` - what the backup will leave you unable to hear, via `_restore_silence_warnings`), `_removable_volume_ready`, `_backup_wording`.
-- Profiles and the as-found baseline: `snapshot_profile` (7304), `restore_profile` (7453, and it
-  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7375),
-  `action_baseline_save` (7407).
+- Profiles and the as-found baseline: `snapshot_profile` (7567), `restore_profile` (7453, and it
+  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7638),
+  `action_baseline_save` (7670).
 - The desk's own Shows (all after `restore_profile`): `read_show_state` (the page payload, and the
   ONE place the two option labels are built), `show_job_status`, `_run_show_job` (one job state for
   all four, since they are mutually exclusive), `_shows_write_gate`, `_export_and_wait`,
@@ -166,25 +167,25 @@ after a session that moved code.
   above `_network_write_gate`.
 - Capability gates, one per risky write family, and all but one now a one-liner over **`_cap_gate`**
   (which holds the shared reasoning: a selector proven on a Pro II is NOT proven on a Duo, and a
-  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4901),
-  `_matrix_write_gate` (6766), `_output_write_gate` (6774), `_network_write_gate`,
-  `_shows_write_gate`. **`_level_write_gate` (5354) keeps its own body** because it has a SECOND
+  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4956),
+  `_matrix_write_gate` (6962), `_output_write_gate` (6970), `_network_write_gate`,
+  `_shows_write_gate`. **`_level_write_gate` (5409) keeps its own body** because it has a SECOND
   condition beyond the cap: the device must also carry confirmed faderLevel selectors. Each keeps
   its own refusal sentence, because what the user can and cannot do differs per family.
-  `_chain_follow_on` (4780) is not a gate of this kind.
+  `_chain_follow_on` (4835) is not a gate of this kind.
 - **`_pad_write` is the shape of every live pad edit**: range-check the grid, take the HID lock,
   run the call, turn a crash into a sentence. Seventeen `action_set_pad_*` / `action_clear_pad` /
   `action_assign_fx` functions had these eight lines written out verbatim. `invalid=` is a refusal
   for a value it cannot check itself (checked AFTER the range and BEFORE the lock);
   `plain_value_error=True` surfaces a ValueError's own text, which soundpad writes as a finished
   user-facing sentence.
-- Lifecycle: `_bring_up_server` (10831), `_close_previous_instances` (10795), `_client_watchdog` (134),
-  `Handler` (10279).
+- Lifecycle: `_bring_up_server` (11104), `_close_previous_instances` (11068), `_client_watchdog` (139),
+  `Handler` (10552).
 
 --------------------------------------------------------------------------------
 ## Project/static (the web UI)
 
-`app.js` 8456 lines, `index.html` 2852, `style.css` 313.
+`app.js` 8748 lines, `index.html` 1966, `style.css` 319.
 
 **`help.html` is the Help & About page (Alt+7), spliced into `index.html` by `Project/page.py` where
 the `<!-- INCLUDE help.html -->` marker sits.** A fragment, not a page. It is the only part of the UI
@@ -205,8 +206,8 @@ inline, because what the browser receives is unchanged.
   `sel.stagedApply`), `blockStaged`.** Used by fader assignment, the output mix mode, headphone
   type, USB multitrack, what to record, and mic type. `makeSelectRow` is the unstaged one, for
   dropdowns that only change what you are looking at.
-- Rebuild guards: `fillOptions` (3005), `rebuildIfChanged` (3033), `setLevelValue` (5265),
-  `markLevelsUnread` (5243), `applyUnitSettingValues` (1361).
+- Rebuild guards: `fillOptions` (3005), `rebuildIfChanged` (3033), `setLevelValue` (5316),
+  `markLevelsUnread` (5294), `applyUnitSettingValues` (1361).
 - Live region: `announce` (18). It REPLACES, it does not queue.
 - Confirm modal: **`confirmAction`** (was `confirmPad` until 30th August 2026; generic,
   used by pads, mix schemes, deleting a recording and the access link). DOM ids are still
@@ -218,23 +219,23 @@ inline, because what the browser receives is unchanged.
   and `loadVersionBeforeRender`, which the first render awaits so the app heading carries the version
   before focus lands on it. Pinned by `DevTools/ui_checks_shell.js`.
 - Keyboard: `bindPageBoundary` (8334, the end-of-page hard stop).
-- Router: `render` (8087). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
+- Router: `render` (8203). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
   so an opening window starts on the current page's nav link, and a route change takes the default
   and focuses the section's h1.
 - Page loaders: `loadVersion` (468, `/api/version`, called from init so the Help & About version is
   there without visiting Device), `loadStatus` (495), `loadOverview` (805), `loadChannels` (2086),
-  `renderChannelPanel` (2201), `loadPads` (3103), `loadMonmixOutput` (5020),
-  `loadFaderLevels` (5067), `buildMatrix` (5388), `onMatrixOutputChange` (5548, which also words each
+  `renderChannelPanel` (2201), `loadPads` (3103), `loadMonmixOutput` (5071),
+  `loadFaderLevels` (5118), `buildMatrix` (5439), `onMatrixOutputChange` (5548, which also words each
   source switch, including the source that matches the output).
-- Mix schemes: `wireSchemes` (5673), `loadSchemes` (5689, fills the dropdown; option values are
-  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (5774).
-- Recording: `fillRecordingList` (7511), `fillRecordingDeleteChoices` (7537),
-  `onDeleteRecording` (7557). Everything on that page speaks through `setRecState`, the page's
+- Mix schemes: `wireSchemes` (5724), `loadSchemes` (5689, fills the dropdown; option values are
+  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (5825).
+- Recording: `fillRecordingList` (7627), `fillRecordingDeleteChoices` (7653),
+  `onDeleteRecording` (7673). Everything on that page speaks through `setRecState`, the page's
   ONE live region.
-- Builders: `buildLevelSlider` (5279), `buildScaleFields` (3589), `buildTriggerFields` (3754),
+- Builders: `buildLevelSlider` (5330), `buildScaleFields` (3589), `buildTriggerFields` (3754),
   `buildBackChannelList` (3554), `renderCustomFxList` (4313), `fillSpeechChoices` (1642).
-- Specs: `REC_TRANSPORT` (7214). Never delete a `label:` key from one.
-- Progress dialogs: `pollProfileJob` (6340).
+- Specs: `REC_TRANSPORT` (7330). Never delete a `label:` key from one.
+- Progress dialogs: `pollProfileJob` (6395).
 - The desk's own Shows (after `doRestore`): `loadShows`, `selectedShow` (returns the SENTENCE form
   of the name, not the option text), `openShowConfirm` (one dialog, three actions), `doShowConfirmed`,
   `onShowExport`, `runShowJob`. Option values are snapshot indexes; `data-short-label` carries the
@@ -248,7 +249,7 @@ inline, because what the browser receives is unchanged.
   `showHotkey` deliberately cannot), `onHotkeysEnabledToggle`, and the dialogs:
   `onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm` / `onHotkeyDeleteOpen` /
   `onHotkeyDeleteConfirm` / `closeHotkeyDialog`. The editor's controls are STATIC in index.html.
-- `dropRetiredGroupState` (8453) drops the whole retired `accesscaster.groups` key.
+- `dropRetiredGroupState` (8569) drops the whole retired `accesscaster.groups` key.
 
 Page shortcuts (this line was STALE and is corrected 30th August 2026; the menu was reordered on the
 29th, `bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,

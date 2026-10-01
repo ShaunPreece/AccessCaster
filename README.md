@@ -40,6 +40,11 @@ accessible page where you can:
   RODE's Virtual Devices driver installed; the app switches Windows' sound output over for you.
   **One of the four appears in Windows only while that channel is on a fader**, which is the unit's
   own rule and the usual answer to "the driver is installed, so where are my devices".
+- **Getting that driver**, if it is missing: a button on the Routing page downloads RODE's own file,
+  verifies it is signed by RODE and runs their installer, with the normal Windows permission prompt.
+  **This is the only thing AccessCaster does that reaches the internet**, and it happens only when
+  you press that button: never at startup, never on a timer, never to check for a newer version.
+  A second button simply opens RODE's software page if you would rather do it yourself.
 - **SMART pads**: create, clear and reassign sound pads, voice-FX pads, mixer pads and MIDI
   pads, with dynamic banks, and play any pad from the keyboard.
 - **Recording**: start, pause and stop the recorder, choose multitrack or mixed, and see what

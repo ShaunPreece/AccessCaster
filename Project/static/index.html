@@ -908,15 +908,11 @@
         <div class="cat-tab" data-tab-key="master" data-tab-title="Master Mix" hidden>
           <h2 id="rt-h-master">Master Mix</h2>
 
-          <h3 id="rt-h-masterproc">Master output processing</h3>
-          <p id="routing-master-note" class="hint">
-            The Master Compellor is an output compressor that evens out and glues your whole
-            mix; it applies to the Main Mix outputs only. Output delay holds all Main Mix
-            outputs back by up to 2000 milliseconds to line audio up with video. These change
-            your main output for everyone, so adjust with care.
-          </p>
-          <div id="routing-master" aria-describedby="routing-master-note"></div>
-
+          <!-- USB AUDIO FIRST, AND THE COMPELLOR SECOND. Both belong to the main mix on its way
+               out, so either order reads sensibly; this one is by how often it is wanted. USB
+               audio is what Expanded, multitrack recording and every program on this computer go
+               through, and it is where the driver buttons live; the Compellor and the delay are
+               set once and left. First on the tab is one fewer heading to pass. -->
           <h3 id="rt-h-usb">USB audio</h3>
           <p class="hint" id="rt-usb-hint">
             What the unit sends this computer over its main USB connection, and what it accepts
@@ -925,6 +921,15 @@
             what the unit writes to its own card or drive: that is on the Recording page, Alt plus 4.
           </p>
           <div id="routing-usb" aria-describedby="rt-usb-hint"></div>
+
+          <h3 id="rt-h-masterproc">Master output processing</h3>
+          <p id="routing-master-note" class="hint">
+            The Master Compellor is an output compressor that evens out and glues your whole
+            mix; it applies to the Main Mix outputs only. Output delay holds all Main Mix
+            outputs back by up to 2000 milliseconds to line audio up with video. These change
+            your main output for everyone, so adjust with care.
+          </p>
+          <div id="routing-master" aria-describedby="routing-master-note"></div>
         </div>
 
       </div>

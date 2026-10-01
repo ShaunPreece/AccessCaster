@@ -4906,6 +4906,43 @@ async function loadRouting() {
     routingCtl.usbDriver = drv;
     usbBox.appendChild(drv);
 
+    // GETTING THE DRIVER, offered only while it is MISSING. Expanded needs it and the line above
+    // has just said so, which is the whole argument for the buttons being here rather than in the
+    // installer: this is where the shortfall is named. Two routes, and the manual one is a button
+    // in its own right rather than something that only appears after a failure - nobody should
+    // have to make something go wrong to find the way round it.
+    // GETTING THE DRIVER. BUILT HERE, LABELLED FROM THE LIVE READ, because `usb_driver` is not in
+    // the structure payload at all - it is read from Windows, not from the desk, and arrives with
+    // the values. Deciding here whether to create these made them never appear.
+    const getBox = document.createElement("div");
+    getBox.className = "row";
+    const get = document.createElement("button");
+    get.type = "button";
+    get.id = "routing-driver-install";
+    get.textContent = "Download and install RODE's Virtual Devices driver";
+    get.setAttribute("aria-describedby", "routing-driver-hint");
+    get.addEventListener("click", installDriver);
+    get.hidden = true;                  // shown only when the driver is missing; see applyDriverButtons
+    const page = document.createElement("button");
+    page.type = "button";
+    page.id = "routing-driver-page";
+    page.textContent = "Open RODE's software page";
+    page.setAttribute("aria-describedby", "routing-driver-hint");
+    page.addEventListener("click", async () => {
+      const res = await postJSON("/api/driver/page", {});
+      announce(res.message || "", !res.ok);
+    });
+    const dhint = document.createElement("span");
+    dhint.className = "hint";
+    dhint.id = "routing-driver-hint";
+    getBox.appendChild(get);
+    getBox.appendChild(page);
+    getBox.appendChild(dhint);
+    routingCtl.driverInstall = get;
+    routingCtl.driverPage = page;
+    routingCtl.driverHint = dhint;
+    usbBox.appendChild(getBox);
+
     const ub = makeSwitchRow("routing-usb-bypass", "Send the separate tracks raw", (input) => {
       sendBypass("/api/routing/usb-bypass", input, (msg) => announce(msg, false));
     });
@@ -6050,6 +6087,7 @@ function applyRoutingValues(v) {
   if (routingCtl.usbDriver && v.usb_driver && typeof v.usb_driver.text === "string"
       && routingCtl.usbDriver.textContent !== v.usb_driver.text)
     routingCtl.usbDriver.textContent = v.usb_driver.text;
+  applyDriverButtons(v.usb_driver);
   applyBypass(routingCtl.usbBypass, routingCtl.usbBypassHint, v,
               v.usb_processing_bypass, v.usb_multitrack);
   // v.multitrack is still sent by /api/routing and is deliberately not applied here any more:
@@ -6857,6 +6895,67 @@ async function refreshAfterAppSettingsImport() {
 /* Every show command follows the same shape: start it, follow the one job status, refresh the list.
    The list refresh is NOT optional - an export renumbers every uid on the unit, so a page holding
    the old list is holding stale positions. */
+/* Which driver buttons make sense right now, from the LIVE read.
+
+   THE DOWNLOAD BUTTON GOES WHEN THE DRIVER IS IN, because installing the same version again tells
+   the user nothing and costs them a UAC prompt. The PAGE button stays either way: repairing or
+   reinstalling is exactly what somebody with a half-working driver needs, and the server's refusal
+   message names that button, so a state where it is missing would point at something that is not
+   there. Hidden rather than removed, so the row never changes length under a screen reader
+   mid-read. */
+function applyDriverButtons(drv) {
+  if (!routingCtl.driverInstall) return;
+  const known = drv && typeof drv.installed === "boolean";
+  const missing = known && drv.installed === false;
+  routingCtl.driverInstall.hidden = !missing;
+  routingCtl.driverPage.textContent = missing
+    ? "Open RODE's software page instead"
+    : "Open RODE's software page, to reinstall or repair the driver";
+  // SAID BEFORE THE PRESS, not buried in Help: this is the one thing in the app that reaches the
+  // internet, and somebody who chose it partly for what it does not do should hear that here.
+  routingCtl.driverHint.textContent = !known
+    ? "Whether RODE's driver is installed could not be read."
+    : (missing
+        ? "Expanded needs this driver. Downloading it is the only time AccessCaster connects to "
+          + "the internet, and it only ever happens when you press that button. The file comes "
+          + "from RODE, is checked to be signed by them, and their own installer then runs and "
+          + "asks Windows for permission in the usual way."
+        : "The driver is installed. If it is not working, RODE's own installer can repair it.");
+}
+
+/* Fetch RODE's driver and hand it over, behind a confirmation and then the progress dialog.
+   CONFIRMED FIRST because this is the app's only outbound connection and the one place it installs
+   anything; the dialog says so in as many words, so agreeing to it is a decision rather than a
+   side effect of pressing a button labelled "download". */
+async function installDriver() {
+  const ok = await confirmAction(
+    "Download RODE's driver?",
+    "AccessCaster will connect to RODE's website, download their Virtual Devices driver, check it "
+      + "is signed by RODE, and then run their installer. Windows will ask your permission, and the "
+      + "installer may want to restart the computer. This is the only time this app uses the "
+      + "internet.",
+    "Download and install");
+  if (!ok) return;
+  _profileJobRunning = true;
+  openProgressDialog(null, "Installing RODE's driver", "Starting.");
+  try {
+    const start = await postJSON("/api/driver/install", {});
+    if (!start.ok) {
+      finishProgressDialog("Driver not installed", start.message || "Could not start.");
+      return;
+    }
+    const s = await pollProfileJob("/api/driver/status", "progress-dialog-step");
+    finishProgressDialog(s.ok ? "RODE's installer is running" : "Driver not installed",
+                         s.message || "Done.");
+  } catch (e) {
+    finishProgressDialog("Driver not installed", "Could not reach the device service.");
+  }
+  // The driver's own line, and the buttons, come off the next read of this page rather than being
+  // guessed at here: the install is RODE's from the moment it is handed over, and it may need a
+  // restart before Windows reports it at all.
+  await loadRouting();
+}
+
 async function runShowJob(closeDialogId, spec) {
   _profileJobRunning = true;
   openProgressDialog(closeDialogId, spec.title, spec.first);

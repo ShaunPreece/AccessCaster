@@ -407,8 +407,8 @@
         <dd>
           This page is a tab strip of four: Output mixes (which also holds mix presets and Reset all
           output mixes), Faders, Levels (the fader and monitor levels, the output mutes, auto-mute,
-          the monitor mix levels and the headphone types), and Master Mix (the Compellor, the output
-          delay, and the USB audio going each way between the unit and this computer).
+          the monitor mix levels and the headphone types), and Master Mix (the USB audio going each
+          way between the unit and this computer, then the Compellor and the output delay).
           Arrow left and right along the strip, Home and End for the ends, and only the tab you are
           on is on the page. Opening a tab reads that tab's settings from the unit, so the values
           are always current, and the tab you leave off on is remembered.
@@ -523,15 +523,16 @@
         </dd>
         <dt>Master Mix</dt>
         <dd>
-          Two things, both about the whole mix on its way out. Master output processing affects
-          everyone, so adjust with care: the Master Compellor is an output compressor that evens out
-          and glues the mix together, and output delay holds the main outputs back by up to two
-          seconds to line audio up with video. USB audio is the two directions of the cable to this
-          computer. "What this computer receives" is what any program here hears from the desk,
-          whether it is recording, streaming or in a call: either the mixed pair, or every channel
-          separately so a program can record them apart. "What this computer sends" is the other
-          way round, and is where Expanded lives, below. Neither changes what the unit writes to its
-          own card or drive, which is on the Recording page.
+          Two things, both about the whole mix on its way out. USB audio comes first, because it is
+          the one you come back to: it is the two directions of the cable to this computer. "What
+          this computer receives" is what any program here hears from the desk, whether it is
+          recording, streaming or in a call: either the mixed pair, or every channel separately so
+          a program can record them apart. "What this computer sends" is the other way round, and
+          is where Expanded lives, below. Then master output processing, which affects everyone, so
+          adjust with care: the Master Compellor is an output compressor that evens out and glues
+          the mix together, and output delay holds the main outputs back by up to two seconds to
+          line audio up with video. Neither half changes what the unit writes to its own card or
+          drive, which is on the Recording page.
         </dd>
         <dt>Expanded: four more inputs from this computer</dt>
         <dd>
@@ -554,9 +555,23 @@
         <dd>
           RODE's Virtual Devices driver, installed on this computer. Without it the four inputs
           exist on the unit but nothing here can send sound to them, and the page says which of
-          those two you are looking at. The driver is a normal Windows installer from RODE's own
-          site. One side effect worth knowing about: while it is installed the RODECaster ASIO
-          driver stops working, which matters only if you use a program that asks for ASIO.
+          those two you are looking at. One side effect worth knowing about: while it is installed
+          the RODECaster ASIO driver stops working, which matters only if you use a program that
+          asks for ASIO.
+        </dd>
+        <dt>Getting the driver, and the one time this app uses the internet</dt>
+        <dd>
+          If the driver is missing, a button appears beside that line to fetch it. It downloads
+          RODE's own file, checks it really is signed by RODE, and then runs RODE's installer, which
+          asks Windows for permission in the usual way and may want to restart the computer. It
+          never installs anything behind your back.
+          <strong>This is the only thing in AccessCaster that connects to the internet</strong>,
+          and it only happens when you press that button: never when the app starts, never on a
+          timer, and never to check whether a newer version exists. Everything else the app does
+          stays between this computer and the USB cable.
+          There is a second button beside it that just opens RODE's software page in your browser,
+          so you can always do it by hand instead. That one stays on the page even once the driver
+          is in, because it is also how you repair or reinstall it.
         </dd>
         <dt>Sending a program to one of the four</dt>
         <dd>

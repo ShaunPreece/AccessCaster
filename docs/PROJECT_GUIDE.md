@@ -856,7 +856,26 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   endpoint, and that is also what the volume mixer shows when a program is assigned to one.
 - **THE VIRTUAL DEVICES DRIVER IS SIGNED "FREEDMAN ELECTRONICS PTY LTD", NOT "RODE".** Freedman is
   RODE's parent company, so a publisher check looking for the string "RODE" REJECTS THE GENUINE
-  INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026.
+  INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026. `driver_install.SIGNER` is
+  that string, and it is the whole of what makes the download safe to run.
+- **THE DRIVER DOWNLOAD IS THE APP'S ONLY OUTBOUND INTERNET CALL, AND KEEPING IT SO IS A FEATURE.**
+  Everything else talks to localhost and the USB cable. It runs only from the button press: never
+  at startup, never on a timer, never a version check. `test_driver_install.py` asserts the claim
+  rather than trusting it, by scanning `Project/*.py` for a non-localhost `urlopen`; `server.py`'s
+  ping of its own `/api/announce` is the one hit it is right to ignore. Said plainly in the README,
+  in Help and on the control itself, because somebody who chose this app partly for what it does
+  not do deserves to be told where the exception is.
+- **CHECK THE SIGNATURE, NEVER A HASH.** The URL carries no version and RODE replace the file in
+  place, so a pinned hash refuses every release they ship, which trains people to skip the check.
+- **PASS A PATH TO POWERSHELL BY ENVIRONMENT VARIABLE, NOT AS AN ARGUMENT.**
+  `powershell -Command "... $args[0] ..." -args <path>` does NOT populate `$args`: the signature
+  check ran against an empty path, reported its status as "-args", and refused RODE's genuine MSI.
+  An env var cannot be mis-parsed and cannot be injected into either.
+- **THE DRIVER'S STATE IS IN THE LIVE PAYLOAD, NOT THE STRUCTURE ONE, because it is read from
+  Windows rather than from the desk.** So a control whose EXISTENCE is decided from `usb_driver` in
+  `loadRouting`'s structure pass is never created at all. Build such controls with the rest and let
+  the live pass label and show them, which is what every other control on the page does. The same
+  goes for anything else Windows-side.
 - **MATCH THE DRIVER BY UpgradeCode, NEVER BY NAME: EVERY NAME IT CARRIES SPELLS RØDE WITH A SLASHED
   O.** Its MSI ProductName is `RØDECaster Virtual Device Driver` and its Manufacturer is
   `RØDE Microphones` (U+00D8), and Windows copies both verbatim into the uninstall registry. A

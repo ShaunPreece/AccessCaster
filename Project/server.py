@@ -60,6 +60,7 @@ import profiles                 # settings backup/restore (save+restore live her
 import routing_schemes          # saved output-mix schemes (the matrix under a name) + the built-ins
 import meters                   # level metering, read from Windows' audio endpoints (not over USB)
 import virtual_devices          # RODE's Virtual Device Driver: its state, and switching its endpoints on
+import driver_install           # fetching that driver from RODE: the app's ONLY outbound call
 import autogain                # sets a mic's gain by measuring it
 import recorder                 # the transport: start/pause/stop, storage volumes, recordings
 import shows                    # the DESK'S own backup: export/import/factory reset (not profiles)
@@ -7381,6 +7382,69 @@ class _BackgroundJob:
 _profile_job = _BackgroundJob("A profile save is already running.", "Could not save the profile")
 
 
+# RODE'S DRIVER, FETCHED ON REQUEST. Its own job state rather than a shared one: it is the only
+# job in the app that touches the network instead of the desk, so it can run while a desk job is
+# going and must not be refused by one.
+_driver_job = _BackgroundJob("The driver install is already running.",
+                             "The driver could not be installed")
+
+
+def driver_install_status() -> dict:
+    return _driver_job.status()
+
+
+def action_install_driver() -> dict:
+    """Fetch RODE's Virtual Devices driver, check its signature and hand it to Windows.
+
+    **THE APP'S ONLY OUTBOUND INTERNET CALL, and only ever from this press.** Never at startup,
+    never on a timer, never a check for a newer version. See driver_install.py for why that is kept
+    deliberate, and for why the signature rather than a hash is what gets checked.
+
+    REFUSED WHEN IT IS ALREADY INSTALLED, because the honest answer there is not "installing" but
+    "you already have it": a second install of the same version tells the user nothing and costs
+    them a UAC prompt and a reboot prompt. Repairing a broken install is RODE's installer's job,
+    reachable through the page button beside this one.
+    """
+    if virtual_devices.read_status().installed:
+        return {"ok": False,
+                "message": ("RODE's Virtual Devices driver is already installed on this computer. "
+                            "If it is not working, use \"Open RODE's software page\" to reinstall "
+                            "or repair it.")}
+
+    def _work(job):
+        try:
+            got = driver_install.install(on_step=job.step)
+        except driver_install.DriverInstallError as exc:
+            diagnostics.event("driver.install_failed", f"{exc}")
+            return {"ok": False, "message": str(exc)}
+        diagnostics.event("driver.handed_over", got["signer"])
+        return {"ok": True,
+                "message": ("RODE's installer is now running. Follow its prompts, allow the "
+                            "Windows permission request, and restart the computer if it asks. "
+                            "This page will show the driver once it is in.")}
+
+    return _driver_job.start(_work,
+                             message="Downloading RODE's driver, please wait.",
+                             started="Install RODE's driver",
+                             failed="The driver install failed")
+
+
+def action_open_driver_page() -> dict:
+    """Open RODE's own software page in the browser: the manual route, offered as its own button
+    rather than only after a failure, so nobody has to make something go wrong to find it."""
+    try:
+        open_ui(driver_install.PAGE_URL)
+    except Exception as exc:
+        return {"ok": False,
+                "message": (f"The page could not be opened ({exc}). Go to {driver_install.PAGE_URL} "
+                            f"in your browser and look for the RODECaster Virtual Device Driver.")}
+    return {"ok": True,
+            "message": ("RODE's software page is opening in your browser. Look for the RODECaster "
+                        "Virtual Device Driver, download it and run the installer inside.")}
+
+
+
+
 def profile_save_status() -> dict:
     return _profile_job.status()
 
@@ -10293,6 +10357,7 @@ GET_ROUTES = {
     "/api/channels": action_get_channels,
     "/api/routing": routing_model,
     "/api/routing/live": read_routing_live,
+    "/api/driver/status": driver_install_status,
     "/api/faders/live": read_faders_live,
     "/api/routing/matrix/live": read_matrix_live,
     "/api/routing/schemes": read_routing_schemes,
@@ -10415,6 +10480,8 @@ POST_ROUTES = {
     # touches the drive, the transport or the recordings list. Same OUTPUT selector either way.
     "/api/routing/usb-multitrack": (action_set_usb_multitrack, [(int, "mode", -1)]),
     "/api/routing/usb-expanded": (action_set_usb_expanded, [(bool, "on", None)]),
+    "/api/driver/install": (action_install_driver, []),
+    "/api/driver/page": (action_open_driver_page, []),
     "/api/routing/usb-bypass": (action_set_usb_bypass, [(bool, "on", None)]),
     "/api/recorder/processing-bypass": (action_set_processing_bypass, [(bool, "on", None)]),
     "/api/routing/automute": (action_set_auto_mute, [(str, "which", ""), (bool, "on", None)]),
