@@ -658,8 +658,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Post-fader multitrack AND Expanded (value 5, product id 0x0094) yields ten capture endpoints,
   `Fader1` to `Fader9` plus `System`, matching the desk's 20-channel multitrack stream as ten
   stereo pairs, and one playback endpoint, `System`. That is a per-fader recording input for any
-  app that can pick a microphone, with no ASIO and no DAW. Expanded with the mix alone (value 3,
-  0x0078) binds too but exposes only `System`: there is no per-fader stream to expose.
+  app that can pick a microphone, with no ASIO and no DAW. **Expanded with the mix alone (value 3,
+  0x0078) IS NOT A SUPPORTED CONFIGURATION**: RODE's troubleshooting requires Expanded USB 1 Input
+  AND a pre or post fader USB 1 Output together. It was once recorded here as binding but exposing
+  only `System`; on 1st October 2026 it did not bind at all in thirty seconds, and setting post-fader
+  bound it in two. Treat any bind statistic gathered at value 3 as measuring an unsupported mode.
   RODE's driver is a kernel virtual audio device (enumerator ROOT, device name `RØDECaster`) plus
   a user-mode service, `RODECasterVADService`. **The service binds on SOME arrivals of the desk and
   never later**: twelve arrivals in one afternoon, six bound (five of the first six, one of the
@@ -765,13 +768,38 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   service names endpoints from the attached desk at runtime, which is how `Fader1` to `Fader9` arise.
   The four playback devices it can name are `system output`, `game`, `music`, `virtual a` and
   `virtual b`, each also carrying a capitalised display form.
-- **ONE PLAYBACK ENDPOINT IS THE DESIGN, AND THE OTHER FOUR ARE CHOSEN PER APPLICATION.** RODE's own
-  guide says it: with Expanded on, `System (RØDECaster)` REPLACES `RODECaster Pro II Main` as the
-  computer's output device, and Game, Music, A and B are picked in Windows' Settings > System >
-  Sound > App Volume Device Preferences, one per running program. So a desk showing a single
-  playback device is working, not short of four, and there is nothing to diagnose. The four are
-  interchangeable labels rather than different kinds of input, and the desk's USB 1 input carries
-  them as five stereo pairs on one 10-channel stream.
+- **A VIRTUAL DEVICE'S WINDOWS ENDPOINT EXISTS ONLY WHILE THAT CHANNEL IS ON A FADER.** Measured on a
+  Pro II, driver 1.0.5, 1st October 2026: with none of codes 12-15 on a fader the driver publishes
+  one playback endpoint, `System`; assigning Game produced `Game` six seconds later, and all four
+  assigned produced all four. RODE's troubleshooting article says the same. So a desk showing a
+  single playback device is a desk with no virtual channel on a fader, which is what every earlier
+  measurement here was. With Expanded on, `System (RØDECaster)` replaces `RODECaster Pro II Main` as
+  the computer's output, and a program is pointed at one of the four in Windows' Settings > System >
+  Sound > App volume and device preferences. The four are interchangeable labels rather than
+  different kinds of input, and the desk's USB 1 input carries them as five stereo pairs on ONE
+  10-channel playback endpoint (`RODECaster Pro II Main Multitrack`, 10 ch / 48 kHz / 32-bit in
+  Expanded, the same endpoint at 2 ch in Standard). The driver's `System` and the four are two-channel
+  windows onto pairs of that one stream, not separate hardware.
+- **THE DRIVER NAMES THE ENDPOINT, SO IT NAMES THE CODE.** Assigning 12, 13, 14, 15 one at a time
+  produced `Game`, `Music`, `Virtual A`, `Virtual B`, which settles the four without listening to
+  anything. RODE's help centre calls the last two "Chat A" and "Chat B" and their user guide calls
+  them "A" and "B"; the driver's own names are what Windows shows and what the app matches.
+- **WINDOWS PROMOTES THE NEWEST ENDPOINT TO DEFAULT, so assigning the four moves the default output
+  to whichever appeared last.** The per-app records under
+  `HKCU\...\LowRegistry\Audio\PolicyConfig\PropertyStore` are a trace of the endpoint each program
+  LAST PLAYED ON, not a choice somebody made: they are written automatically, they name programs
+  whose output is set elsewhere (NVDA picks its device inside NVDA), and they do not survive the
+  default moving. Do not read one as a user preference.
+- **NO CHANNEL ON THIS DESK HAS A NAME PROPERTY.** `CHANNEL` carries ten instances and no string at
+  all, and `INPUTSOURCE` has `inputColour` but no label; the only per-instance strings anywhere are
+  pad names, storage volume names, `sipUnitName`, `systemName` and StreamerX preset names. So "Game"
+  cannot be renamed on the desk, by us or by RODE's app, and a rename in Windows reaches neither the
+  desk nor this app's labels, which come from the table in `devices.py`.
+- **ASIO AND EXPANDED ARE MUTUALLY EXCLUSIVE** (RODE): the RODECaster ASIO driver is unavailable
+  while Expanded is on, and reaching it needs the Virtual Devices driver set to Bypass AND USB 1
+  Input back to Standard. That tray Bypass is also what hands back the conventional single
+  16-channel multitrack device for a DAW, keeping fader assignments; with the driver active,
+  multitrack instead arrives as one device per channel.
   **RODE DOCUMENT A REBOOT AFTER INSTALLING THE DRIVER.** A reboot is one more USB arrival, which
   is all the enable-landed-late case above needs; `reconcile` does the same without one. Their
   driver also has a tray icon carrying Enable and a Latency setting, Ultra-low by default and
@@ -918,6 +946,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   does, and it only ever RE-mutes. Muting something the user has open is the same surprise in
   reverse, which is why `profiles.UNIT_NEVER_RESTORE` refuses mutes outright; restoring what our own
   write disturbed is a different thing, but only in that one direction.
+- **A CROSS-POINT SELECTOR LEAVES BYTE RANGE AT SOURCE 14.** It is
+  `CROSS_POINT_BASE + 13*source + output`, so Game (12) is 232 and Music (13) is 245 but Virtual A
+  (14) is 258 and Virtual B (15) is 271, and the desk addresses those two with a TWO-byte index.
+  Read as one byte both come back as 1, below the base, so the push is silently discarded and the
+  fader moves with no level and no name - while mute and listen, addressed by strip index, still
+  speak, which is the signature that tells the two apart. `_ann_sel` is the one-byte read; take the
+  address from `_ann_addr_path`, as `faderLevel` and `potLevel` already do. Only codes 14 and 15
+  reach that far, and only in Expanded, which is why this was invisible until a virtual channel was
+  first put on a fader. **The WRITE side is still one byte**:
+  `rcp_transfer.cross_point_selector` refuses anything over 255, so no cross-point can be written
+  for Virtual A or Virtual B.
 - **A mix scheme writes the output MODE FIRST, then its cross-points.** Leaving Custom mode discards
   that output's cross-point set on the desk, so the other order throws away what it just wrote.
 - **EXCLUDING a cross-point also UNLINKS it, and an unlink FREEZES the level at the fader's current

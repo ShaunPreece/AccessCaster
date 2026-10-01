@@ -205,10 +205,15 @@ import rcp_transfer
 
 def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
     """A pushed fader position: mixLevelWithAnchor on the cross-point selector for (source, output),
-    value the ASCII string 'level|anchor'. The desk sends one per cross-point, 13 per source."""
+    value the ASCII string 'level|anchor'. The desk sends one per cross-point, 13 per source.
+
+    THE SELECTOR IS NOT ALWAYS ONE BYTE. CROSS_POINT_BASE + 13*source + output passes 255 at
+    source 14, so Virtual A and Virtual B arrive with a two-byte index and the width byte says so."""
     sel = rcp_transfer.CROSS_POINT_BASE + 13 * source_code + output
+    width = 1 if sel <= 0xFF else 2
     val = f"{level:g}|{level:g}".encode()
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x01, sel])
+    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, width])
+            + sel.to_bytes(width, "little")
             + b"mixLevelWithAnchor" + bytes([0x00, 0x01, len(val) + 1, 0x05]) + val + bytes(1))
 
 
@@ -1051,6 +1056,20 @@ check("a level push for a linked pair says the pair, not 'Source 4'", said,
 check("and the strip it sits on is named the same way", server._ann_channel_label(0), "Mic 1 + 2")
 check("the vacated fader beside it is not claimed by anything",
       server._ann_channel_label(1), "Channel 2")
+
+print("\nA CROSS-POINT SELECTOR PAST 255 IS STILL DECODED")
+# The selector is CROSS_POINT_BASE + 13*source + output, which leaves byte range at source 14, so
+# Virtual A and Virtual B are addressed with two bytes. Their low bytes alone are 2 and 15, both
+# below the cross-point base, so reading one byte discards the push and the fader moves in silence -
+# no level, no name. Only codes 14 and 15 reach that far, and only in Expanded.
+channels.publish_usb_expanded(True)
+channels.publish_strip_vector([0, 12, 13, 14, 15, 11, 7, 8, 9])
+check("a one-byte selector is unaffected",
+      run([xpoint_packet(12, 0, 0.25)], cold_cache=False)[0], ["25 percent, Game"])
+check("a two-byte selector is spoken, not dropped",
+      run([xpoint_packet(14, 0, 0.5)], cold_cache=False)[0], ["50 percent, Virtual A"])
+check("and so is the one past it",
+      run([xpoint_packet(15, 0, 1.0)], cold_cache=False)[0], ["100 percent, Virtual B"])
 
 print()
 if FAILED:

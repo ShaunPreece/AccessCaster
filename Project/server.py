@@ -2582,8 +2582,13 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
         if _ann_is(name, "mixLevelWithAnchor") and _ann_levels_on:
             # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
             # _ann_flush_pending speak it once the pushes stop.
+            # READ THE WHOLE ADDRESS, NOT THE SELECTOR BYTE. A cross-point selector is
+            # CROSS_POINT_BASE + 13*source + output, which passes 255 at source 14, so Virtual A and
+            # Virtual B are addressed with two bytes. Their low byte alone is 2 and 15, which fail
+            # the base test below, and the fader then moves in total silence - level and name both.
+            path = _ann_addr_path(b, m, "mixLevelWithAnchor")
             val = _ann_decode_str(b, m.end() + 1)
-            sel = _ann_sel(b, m, "mixLevelWithAnchor")
+            sel = path[0] if path and len(path) == 1 else _ann_sel(b, m, "mixLevelWithAnchor")
             if val and "|" in val and sel >= _ANN_XPOINT_BASE:
                 try:
                     lvl = float(val.split("|", 1)[0])

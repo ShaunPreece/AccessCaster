@@ -409,9 +409,10 @@ def describe() -> dict:
     try:
         enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                             interface=meters.IMMDeviceEnumerator)
-        # Only what the driver exposes now. Windows keeps an entry for every endpoint it has
-        # ever seen (a "Game" playback device from an earlier driver state lingers as not
-        # present), and counting those would report "11 of 12" on a working install.
+        # Only what the driver exposes now. Windows keeps an entry for every endpoint it has ever
+        # seen, and a virtual device's endpoint lives only while its channel is on a fader, so every
+        # one ever assigned lingers as not-present. Counting those reports "11 of 12" on a working
+        # install. Filter by STATE, never by name: those names come back when the channel does.
         virtual = [e for e in _endpoints(enum) if e.virtual and e.state in ("active", "disabled")]
     except Exception:
         pass
