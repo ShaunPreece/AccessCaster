@@ -401,6 +401,19 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `storageVolumeTransfer` (mounts nothing at any transferModeType 0-8),
   `staticIpSet` (a flag with no operands; the address fields are read-only reports),
   `systemDateTimezone` (applied by the touchscreen, not the engine).
+- **THE SIX "UNCLAIMED" READABLE PROPERTIES ARE PLAIN STORAGE, AND THE QUESTION IS CLOSED**
+  (`DevTools/probe_unclaimed_props.py`, 1st October 2026). `eqParamModeHigh` / `Mid` / `Low` are in
+  the GUI block beside `debugMode` and `metering`; `appOutputDevice`, `appMonitorMix` and
+  `appRecording` are in an APP block nothing else addresses. All six took a write at their TREE
+  address, read back exactly, restored, and left the node, property and name counts untouched. The
+  telling part is what did NOT happen: **not one of them pushed anything at all.** A live write has
+  a consequence on the push stream even when the property itself is not echoed - muting a channel
+  pushes `mixMute` on each of that source's thirteen cross-points and never `channelOutputMute` -
+  and these six produced no frame of any kind. Consistent with their names: they hold the RODE
+  app's own preferences on the desk's behalf, so there is nothing for us in them.
+  **Not filed as PROVED INACTIVE**, because that phrase is for a property whose JOB we know and
+  which fails to do it; nobody has watched the touchscreen while an `eqParamMode` changed, and
+  that is the only thing left they could plausibly move.
 - **`btDoScan` WAS ON THAT LIST AND IS NOT DEAD: IT SCANS.** Written True on a Duo it filled
   `btScan1` with `'<MAC> - <device name>'` for a real device in range, so Bluetooth discovery is
   reachable from software. The old entry read "no results on either block, phone in pairing mode",
@@ -2300,6 +2313,22 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   for the marker. **If another property ever looks inert, check its payload shape before its logic**;
   this hid for as long as the feature existed because the test built the packet in the shape the
   decoder assumed rather than the shape the desk sends.
+
+- **THOSE FOUR BYTES ARE THE COMPOSITE HEADER, SO THE SHAPE IS PREDICTABLE AND THE LIST IS CLOSED.**
+  `encoderSignal` is a COMPOSITE (value type 0x08), and a composite wraps its members, so the
+  member's own `01 05 01` marker sits one header in: `00` is the name's terminator and `01 0b 08`
+  is the outer header, which is why a decoder that skips the terminator is exactly 3 bytes short.
+  Measured on both halves (`DevTools/probe_push_decoders.py`, 1st October 2026): every pushed bool
+  and float has a gap of 0 and decodes identically to `model_tree.parse_record`, while
+  `mixLinkRequest` and `mixUnlinkRequest` have a gap of 3 and are composites.
+  **The desk publishes EIGHT composites in all** - `encoderSignal`, `mixLinkRequest`,
+  `mixUnlinkRequest`, `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`,
+  `playerJumpToSample`, `sipSlotCallDisconnect` - and the announcer handles only the first, whose
+  decoder already scans. So `_ann_decode_bool` and `_ann_decode_float` reading at a fixed offset is
+  correct TODAY and the question is settled, not open. **What would break it** is making the
+  announcer handle any of the other seven: a composite bool or float would decode as None, which is
+  a feature that does nothing rather than one that is wrong. Scan a window there too if that day
+  comes.
 
 - **THE CHANNEL BUTTON TOGGLES, AND THE ENCODER PRESS DOES NOT RELEASE IT.** Measured with
   `DevTools/encoder_press_probe.py`, 4th September 2026: `systemChannelSelected` went to 0 on the

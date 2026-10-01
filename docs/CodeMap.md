@@ -22,11 +22,11 @@ after a session that moved code.
 
 | file | lines | what it owns |
 |---|---|---|
-| `server.py` | 11177 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
+| `server.py` | 11208 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
 | `soundpad.py` | 3081 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. Pad records are found by windowing the dump on `padName`: `_pad_windows` is the ONE anchor pass and `_pad_field` reads one field inside a window (pass `default=_ABSENT` to tell a missing field from an undecodable one). `_sanitise_stack` is the ONE effect-stack cleaner, with `validate_fx_stack` (must not be empty) and `_sanitise_stack_loose` (may be) over it. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. |
 | `rcp_transfer.py` | 1467 | Record BUILDERS and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. Also the pad-volume mount gate: `find_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats) and `quiet_drive_errors` (kills Windows' modal drive box). |
 | `app_settings.py` | 217 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
-| `channels.py` | 1210 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
+| `channels.py` | 1220 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
 | `devices.py` | 1413 | Device models and caps: **`CHANNELS_PRO2` / `CHANNELS_DUO` are THE channel table, and every channel list is a view over one of them** (`_ui_channel_view`, `_matrix_source_view`, `_assignable_view` and their `_expanded_*` twins): adding an input is one `Channel` entry, and the fader dropdown, the Channels page and the matrix rows cannot disagree. `Channel.key` is STORED USER DATA - rename the label, never the key. `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec` (**its `block` names the dump section the grid lives in and its `cell_count` counts THAT block only** - 390, the MIX section; see the routing-matrix entry in `PROJECT_GUIDE.md` part 2. **`all_sources` / `all_source_indices` is what a READER or a WRITER walks and `sources_for(expanded)` is only what the page OFFERS** - the desk publishes every row in both modes), `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
 | `autostart.py` | 169 | "Start when you sign in": the HKCU Run value, SHARED WITH `installer.iss` (same key, name and command - `test_autostart.py` asserts it). `state()`, `set_enabled()`, `started_at_login()` (the `--startup` flag `tray.main` reads to come up with no page). Refuses from a source run. **`LEGACY_VALUE_NAME` is the pre-rename value "Access Caster"**: `read_value` falls back to it so a machine that has not been upgraded still reads as ON, and `set_enabled` deletes it whichever way it is called, because two entries naming the same exe start the app twice at sign-in. `installer.iss` deletes it too, ungated by the task. |
 | `profiles.py` | 889 | Save, restore, `device_snapshot`, `UNIT_KEY`, `_apply_v2`. The routing matrix is captured as a MIX SCHEME (`routing.mix_scheme`, via `routing_schemes.capture`); the three older matrix keys are written for old builds only. |
@@ -523,6 +523,36 @@ SWALLOWED / STORED / SIDE EFFECT / STRAY, and restores it. **It skips `toneGener
 `emergencyMuteActive` unless `--include-audible`**, because their proof needs a listener, and it
 never writes a `pair` property, because guessing an operand layout is how a stray gets appended.
 This is what found `btDoScan` alive.
+
+**`probe_push_decoders.py`** runs the announcer's `_ann_decode_bool` / `_ann_decode_float` /
+`_ann_decode_int` over every push the desk sends and compares each with `model_tree.parse_record`,
+the grammar's own answer. The two are different code paths over the same bytes (the announcer
+scans a raw packet for a name, because a press arrives with no promise about where in the report it
+sits), so a disagreement is a decoder blind spot. It also prints the GAP between a name and its
+value marker, which is what showed the `encoderSignal` prefix to be the COMPOSITE header rather
+than anything property-specific. **Two traps it carries in its docstring, for any future push
+probe:** a model dump arrives on report 04 as well and must be filtered with `_push_record_len`,
+and the desk does not echo a write as the property you wrote.
+
+**`probe_unclaimed_props.py`** writes, reads back and restores the six readable properties nothing
+in the app uses, addressing each at its TREE path rather than a guessed selector, and watches the
+push stream for any reaction. Counts the model's nodes, properties and names either side.
+
+**`probe_delete_backup_live.py`** drives `action_delete_backup` down both its branches against a
+real desk: a `show:<snapshot>` with no profile beside it, and a named backup whose two halves must
+both go. Checks the drive's free space rises by the show's 22 MB, which is the only direct evidence
+the file left, and that the as-found baseline is still refused without `force` afterwards.
+**It is a `probe_` and must stay one.** `_bootstrap` gives anything named `test_*.py` a throwaway
+data dir, which is right for a test and wrong here: the both-halves branch pairs a REAL profile
+with a REAL show, and under the sandbox it saw an empty profile store and reported that the backup
+it had been asked to delete did not exist. The show half passed regardless, because a show lives on
+the desk rather than in that folder, which is what made the failure look selective rather than
+environmental.
+
+**A BACKGROUND JOB'S STATUS KEY IS `running`, NOT `busy`** (`server.show_job_status`). Polling a key
+the status does not carry reads as None, so a wait returns at once and the read-back happens while
+the job is still going: that is what made `action_delete_backup` look as though it left the
+computer's copy behind when it had simply not finished.
 
 **`bind_timeline.py` and `vad_trace.py`** are the pair for RODE's virtual-device service, which
 binds to the desk on some arrivals and not others. The first samples, several times a second, which

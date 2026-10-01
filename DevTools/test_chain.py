@@ -12,6 +12,14 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import channels as c
+import devices
+
+# PIN THE DESK AND ITS FADER LAYOUT. `proc_selector` resolves a channel to the strip it is sitting
+# on RIGHT NOW, so without this the order checks below read the attached desk's live layout and
+# fail on any desk that has Mic 2 off its fader - which says nothing about the write order this
+# file exists to pin. Offline tests must not depend on what happens to be plugged in.
+devices.force_device(devices.PRO2)
+c.publish_strip_vector(list(devices.PRO2.fader.default_vector))
 
 FAILED = 0
 
