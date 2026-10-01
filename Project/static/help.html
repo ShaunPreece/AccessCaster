@@ -143,6 +143,7 @@
         <li>The virtual fader levels and the monitor speaker level, which have no physical fader to grab.</li>
         <li>A one-press reset of every output mix back to its normal state.</li>
         <li>What the unit sends this computer over USB (one mixed pair or every channel separately), monitor and Bluetooth auto-mute, and headphone type.</li>
+        <li>What this computer sends the unit: either as one stereo input, or split into four separate ones (Game, Music, A and B), each on its own fader, so music, a call, a game and your screen reader arrive as four channels instead of one and can be faded apart. Set it up with RODE's Virtual Devices driver installed and the app points Windows' sound output at the unit for you.</li>
         <li>Muting a whole output: the monitor speakers, or the Bluetooth send, plus the level a paired phone hears from the desk. None of these touch your mixes, your recording or your streams, only what somebody hears.</li>
         <li>The unit's own recorder: start, pause, resume and stop, drop a marker while you record, hear what it is doing and how long it has been going, read the list of what is already on the card or drive, and delete a recording you no longer want. What it records, a single mixed track or every channel on its own, is set here too, as is whether it saves a full-quality WAV or a smaller MP3.</li>
         <li>How the unit's clock is shown: 24-hour or 12-hour, daylight saving, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
@@ -407,7 +408,7 @@
           This page is a tab strip of four: Output mixes (which also holds mix presets and Reset all
           output mixes), Faders, Levels (the fader and monitor levels, the output mutes, auto-mute,
           the monitor mix levels and the headphone types), and Master Mix (the Compellor, the output
-          delay and what the unit sends this computer over USB).
+          delay, and the USB audio going each way between the unit and this computer).
           Arrow left and right along the strip, Home and End for the ends, and only the tab you are
           on is on the page. Opening a tab reads that tab's settings from the unit, so the values
           are always current, and the tab you leave off on is remembered.
@@ -525,11 +526,72 @@
           Two things, both about the whole mix on its way out. Master output processing affects
           everyone, so adjust with care: the Master Compellor is an output compressor that evens out
           and glues the mix together, and output delay holds the main outputs back by up to two
-          seconds to line audio up with video. USB output is what the unit sends this computer,
-          which is what any program here hears from the desk, whether it is recording, streaming or
-          in a call: either the mixed pair, or every channel separately so a program on this
-          computer can record them apart. It does not change what the unit writes to its own card or
-          drive, which is on the Recording page.
+          seconds to line audio up with video. USB audio is the two directions of the cable to this
+          computer. "What this computer receives" is what any program here hears from the desk,
+          whether it is recording, streaming or in a call: either the mixed pair, or every channel
+          separately so a program can record them apart. "What this computer sends" is the other
+          way round, and is where Expanded lives, below. Neither changes what the unit writes to its
+          own card or drive, which is on the Recording page.
+        </dd>
+        <dt>Expanded: four more inputs from this computer</dt>
+        <dd>
+          Normally this computer looks to the unit like one stereo input, so everything Windows
+          plays arrives on a single channel already mixed together. Expanded splits it into four
+          separate inputs instead, named Game, Music, A and B, each of which can sit on its own
+          fader. Music, a call, a game and your screen reader then arrive as four channels rather
+          than one, and you can fade or mute any of them without touching the rest.
+        </dd>
+        <dt>What you would use it for</dt>
+        <dd>
+          Three everyday ones. Play music in one program and have a guest on a call in another, and
+          you can duck the music under their voice with a fader instead of going hunting for a
+          volume slider. Put your screen reader on an input of its own, so you can leave it out of
+          what a caller hears, or out of the recording, while still hearing it yourself. Or record a
+          show with the music, the call and your microphone as separate tracks, so the balance is
+          something you can fix afterwards rather than something you have to get right on the night.
+        </dd>
+        <dt>What it needs</dt>
+        <dd>
+          RODE's Virtual Devices driver, installed on this computer. Without it the four inputs
+          exist on the unit but nothing here can send sound to them, and the page says which of
+          those two you are looking at. The driver is a normal Windows installer from RODE's own
+          site. One side effect worth knowing about: while it is installed the RODECaster ASIO
+          driver stops working, which matters only if you use a program that asks for ASIO.
+        </dd>
+        <dt>Sending a program to one of the four</dt>
+        <dd>
+          The app points Windows' sound output at "System (RODECaster)" for you, and that is what
+          carries your screen reader and anything you have not sent somewhere else. To put one
+          particular program on one of the four, open Settings, System, Sound, then "App volume and
+          device preferences" with that program running, and choose Game, Music, A or B as its
+          output. Each one you use turns up on the unit as its own channel. If the one you want is
+          not in that list, it is almost certainly not on a fader yet: see below.
+        </dd>
+        <dt>An input only exists in Windows while it is on a fader</dt>
+        <dd>
+          <strong>This is the one to remember.</strong> Game, Music, A and B appear in Windows' list
+          of sound devices only while that channel is sitting on a fader, so turning Expanded on is
+          half the job: until you assign them on the Faders tab, Windows has nothing to send sound
+          to and the four look as though they have not arrived. Assign one and it turns up in
+          Windows within a second or two; take it off its fader and it disappears again, along with
+          whatever you had pointed at it. It is the unit's own rule rather than this app's, and it
+          is the usual answer to "the driver is installed, so where are my devices".
+        </dd>
+        <dt>Turning Expanded off again</dt>
+        <dd>
+          Going back to Standard unassigns whatever you had put on Game, Music, A and B, and turning
+          Expanded on again does not bring that layout back, so arrange your faders again
+          afterwards. Either change also disconnects and reconnects the unit's audio devices for a
+          couple of seconds, so anything playing through the unit, your screen reader included, goes
+          quiet while it happens.
+        </dd>
+        <dt>Nine separate inputs at once</dt>
+        <dd>
+          Expanded and "Every channel, post-fader" together give this computer nine separate inputs
+          to record or stream from: your microphones, the pads, the call channels and the four from
+          this computer, each its own device in Windows and pickable in anything that lets you
+          choose a microphone. That is the arrangement to ask for when you want everything recorded
+          apart and mixed later.
         </dd>
         <dt>Monitor mix levels</dt>
         <dd>

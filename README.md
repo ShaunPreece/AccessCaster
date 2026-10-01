@@ -31,6 +31,15 @@ accessible page where you can:
 - **Effects**: echo and reverb per channel.
 - **Levels and routing**: non-mic channel levels, the output routing matrix (Monitor Mix and
   per-output source levels), and the fader layout (which channel sits on each fader).
+- **USB audio, both directions**: what the unit sends this computer (one mixed pair, or every
+  channel separately), and what this computer sends the unit. The second of those is RODE's
+  Expanded mode: instead of one stereo input carrying everything Windows plays, you get four
+  separate ones (Game, Music, A and B), each assignable to its own fader. Music, a call, a game and
+  your screen reader then arrive as four channels rather than one, so you can fade or mute any of
+  them on its own, keep one out of what a caller hears, or record them as separate tracks. Needs
+  RODE's Virtual Devices driver installed; the app switches Windows' sound output over for you.
+  **One of the four appears in Windows only while that channel is on a fader**, which is the unit's
+  own rule and the usual answer to "the driver is installed, so where are my devices".
 - **SMART pads**: create, clear and reassign sound pads, voice-FX pads, mixer pads and MIDI
   pads, with dynamic banks, and play any pad from the keyboard.
 - **Recording**: start, pause and stop the recorder, choose multitrack or mixed, and see what
