@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ctypes
 import re
+import threading
 import time
 import winreg
 from ctypes import wintypes
@@ -429,3 +430,93 @@ def describe() -> dict:
     return {"installed": st.installed, "running": st.running, "connected": st.connected,
             "enabled": st.enabled, "driver_version": st.driver_version,
             "virtual_active": active, "virtual_total": len(virtual), "text": text}
+
+
+# --- Watching Windows, rather than sampling it once ------------------------------------------
+# RECONCILE ACTS ON ONE SAMPLE, AND THE DRIVER MOVES UNDER IT. A mode write is followed by one
+# reconcile; if the service is still unbound at that instant, reconcile correctly switches the
+# virtual endpoints OFF, and when the service binds a few seconds later nothing switches them back
+# on. Measured 1st October 2026: three playback endpoints left disabled with the desk holding all
+# four channels on faders and the service reporting connected.
+#
+# So the repair cannot be a second sample at a guessed delay. Windows already says when an endpoint
+# moves, through IMMNotificationClient, and that is the signal to reconcile on - whenever it
+# happens, mode write or not.
+_WATCH_SETTLE_S = 1.5            # endpoint changes arrive in bursts; reconcile once the burst ends
+_WATCH_HEARTBEAT_S = 60.0        # a backstop, in case a change ever arrives without a callback
+
+
+class _EndpointNotifier(comtypes.COMObject):
+    """Sets an event when Windows reports any endpoint change. Does NO work of its own.
+
+    The callbacks arrive on one of Windows' own audio threads, which must not be held: reconciling
+    here would block the audio service while it talks to us about the devices we are changing.
+    Every method takes `*args` because comtypes hands the raw `this` pointer to some builds and not
+    others, and none of the arguments matter - the answer to all five is the same, go and look."""
+    _com_interfaces_ = [meters.IMMNotificationClient]
+
+    def __init__(self, wake: threading.Event):
+        super().__init__()
+        self._wake = wake
+
+    def OnDeviceStateChanged(self, *args):
+        self._wake.set()
+        return 0
+
+    def OnDeviceAdded(self, *args):
+        self._wake.set()
+        return 0
+
+    def OnDeviceRemoved(self, *args):
+        self._wake.set()
+        return 0
+
+    def OnDefaultDeviceChanged(self, *args):
+        self._wake.set()
+        return 0
+
+    def OnPropertyValueChanged(self, *args):
+        return 0
+
+
+def watch_endpoints(on_change, stop: threading.Event) -> None:
+    """Call `on_change` whenever Windows' audio endpoints move, until `stop` is set.
+
+    Runs on its own thread with its own COM apartment. Bursts are coalesced: a change starts a
+    quiet timer and `on_change` runs once the changes stop, so a mode switch that re-creates eleven
+    endpoints costs one reconcile rather than eleven. Never raises - a repair path that can take the
+    app down with it is worse than no repair path."""
+    wake = threading.Event()
+    comtypes.CoInitialize()
+    enum = client = None
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        client = _EndpointNotifier(wake)
+        enum.RegisterEndpointNotificationCallback(client)
+        diagnostics.event("virtual_devices.watch", "listening for endpoint changes")
+        while not stop.is_set():
+            if not wake.wait(_WATCH_HEARTBEAT_S):
+                continue
+            # Let the burst finish: each re-arm pushes the settle point out again.
+            while wake.is_set() and not stop.is_set():
+                wake.clear()
+                stop.wait(_WATCH_SETTLE_S)
+            if stop.is_set():
+                break
+            try:
+                on_change()
+            except Exception as exc:
+                diagnostics.event("virtual_devices.watch_failed", f"{exc}")
+    except Exception as exc:
+        diagnostics.event("virtual_devices.watch_failed", f"could not listen: {exc}")
+    finally:
+        try:
+            if enum is not None and client is not None:
+                enum.UnregisterEndpointNotificationCallback(client)
+        except Exception:
+            pass
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass

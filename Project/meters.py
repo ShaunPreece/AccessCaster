@@ -199,6 +199,25 @@ class IMMDeviceCollection(IUnknown):
     )
 
 
+class IMMNotificationClient(IUnknown):
+    """Windows' audio-endpoint change callback. Declared here with the rest of the MMDevice
+    plumbing; `virtual_devices` implements it to hear when an endpoint is switched off.
+
+    THE METHOD ORDER IS THE VTABLE, so it must stay exactly as mmdeviceapi.h declares it even
+    though only the first three are of any interest here."""
+    _iid_ = GUID("{7991EEC9-7E89-4D85-8390-6C703CEC60C0}")
+    _methods_ = (
+        COMMETHOD([], HRESULT, "OnDeviceStateChanged",
+                  (["in"], c_wchar_p, "pwstrDeviceId"), (["in"], c_uint32, "dwNewState")),
+        COMMETHOD([], HRESULT, "OnDeviceAdded", (["in"], c_wchar_p, "pwstrDeviceId")),
+        COMMETHOD([], HRESULT, "OnDeviceRemoved", (["in"], c_wchar_p, "pwstrDeviceId")),
+        COMMETHOD([], HRESULT, "OnDefaultDeviceChanged", (["in"], c_uint32, "flow"),
+                  (["in"], c_uint32, "role"), (["in"], c_wchar_p, "pwstrDefaultDeviceId")),
+        COMMETHOD([], HRESULT, "OnPropertyValueChanged", (["in"], c_wchar_p, "pwstrDeviceId"),
+                  (["in"], PROPERTYKEY, "key")),
+    )
+
+
 class IMMDeviceEnumerator(IUnknown):
     _iid_ = GUID("{A95664D2-9614-4F35-A746-DE8DB63617E6}")
     _methods_ = (
@@ -209,6 +228,10 @@ class IMMDeviceEnumerator(IUnknown):
                   (["in"], c_uint32, "role"), (["out"], POINTER(POINTER(IMMDevice)), "ppEndpoint")),
         COMMETHOD([], HRESULT, "GetDevice", (["in"], c_wchar_p, "pwstrId"),
                   (["out"], POINTER(POINTER(IMMDevice)), "ppDevice")),
+        COMMETHOD([], HRESULT, "RegisterEndpointNotificationCallback",
+                  (["in"], POINTER(IMMNotificationClient), "pClient")),
+        COMMETHOD([], HRESULT, "UnregisterEndpointNotificationCallback",
+                  (["in"], POINTER(IMMNotificationClient), "pClient")),
     )
 
 

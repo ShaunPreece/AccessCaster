@@ -101,6 +101,9 @@ _QUIT_GRACE = 5.0                  # after a quit beacon, wait this long so a RE
 def _request_shutdown():
     """Stop the HTTP server from a worker/watchdog thread (shutdown() blocks the calling
     thread until serve_forever returns, so it must not run on a request thread)."""
+    # Let the endpoint watcher unregister its callback rather than leaving Windows' audio service
+    # holding a pointer into a process that is going away.
+    _virtual_devices_watch_stop.set()
     if _httpd is not None:
         threading.Thread(target=_httpd.shutdown, daemon=True).start()
 
@@ -6628,6 +6631,34 @@ def action_set_usb_expanded(on: bool) -> dict:
 
 
 _virtual_devices_busy = threading.Lock()
+_virtual_devices_watch_stop = threading.Event()
+
+
+def _virtual_devices_repair() -> None:
+    """Windows' endpoints moved: make them agree with the driver again. Silent, and never speaks.
+
+    THE LOCK IS WHY THIS IS SAFE DURING A MODE CHANGE. `_virtual_devices_follow` holds it for the
+    whole of its wait and its retries, and those retries re-enumerate the desk on purpose, so every
+    endpoint change they cause is skipped here rather than fought over. What reaches this is a
+    change with no follow-up behind it, which is exactly the case that used to go unrepaired.
+
+    `move_default` stays off: a disable is not a reason to take the output device away from
+    wherever the user has put it, and the mode-change path already moves it when it has to.
+
+    A repair is itself an endpoint change, so it wakes the watcher again. That settles rather than
+    runs away because `reconcile` is idempotent: the second pass finds Windows already agreeing and
+    changes nothing, so nothing wakes a third."""
+    if not _virtual_devices_busy.acquire(blocking=False):
+        return
+    try:
+        out = virtual_devices.reconcile(move_default=False)
+        if out.enabled or out.disabled:
+            diagnostics.event("virtual_devices.repaired", out.status.phrase(),
+                              enabled=len(out.enabled), disabled=len(out.disabled))
+    except Exception as exc:
+        diagnostics.event("virtual_devices.repair_failed", f"{exc}")
+    finally:
+        _virtual_devices_busy.release()
 # Set while the follow-up is re-enumerating the desk on purpose, so the announcer's reconnect
 # does not narrate each flip of the mode as news.
 _virtual_devices_retrying = threading.Event()
@@ -11044,6 +11075,12 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
     # announcer's greeting comes first, and silent unless something actually changed.
     threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None)),
                      daemon=True, name="virtual-devices-start").start()
+    # And keep agreeing with it. The pass above, and the one after every mode write, each act on a
+    # single sample, so a bind that lands a moment later leaves Windows holding endpoints this app
+    # switched off itself. Windows announces every endpoint change; this listens and repairs.
+    threading.Thread(target=virtual_devices.watch_endpoints,
+                     args=(_virtual_devices_repair, _virtual_devices_watch_stop),
+                     daemon=True, name="virtual-devices-watch").start()
     if shortcuts:
         # Global shortcuts, started whatever the announcer is doing (one of them turns it on).
         # Failures are reported and never fatal: no shortcut is worth refusing to start the app.

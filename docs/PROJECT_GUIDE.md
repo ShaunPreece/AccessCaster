@@ -659,10 +659,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `Fader1` to `Fader9` plus `System`, matching the desk's 20-channel multitrack stream as ten
   stereo pairs, and one playback endpoint, `System`. That is a per-fader recording input for any
   app that can pick a microphone, with no ASIO and no DAW. **Expanded with the mix alone (value 3,
-  0x0078) IS NOT A SUPPORTED CONFIGURATION**: RODE's troubleshooting requires Expanded USB 1 Input
-  AND a pre or post fader USB 1 Output together. It was once recorded here as binding but exposing
-  only `System`; on 1st October 2026 it did not bind at all in thirty seconds, and setting post-fader
-  bound it in two. Treat any bind statistic gathered at value 3 as measuring an unsupported mode.
+  0x0078) BINDS: it is not the explanation for a missed bind.** RODE's troubleshooting asks for
+  Expanded USB 1 Input and a pre or post fader USB 1 Output together, and one mix-only arrival on
+  1st October 2026 failed to bind where post-fader bound in two seconds, which looked like a cause.
+  Six alternating flips the same afternoon settled it: three mix-only arrivals and three post-fader
+  ones, all six bound in about 4.5 seconds. The mode is not the factor. It exposes only `System`
+  either way, because the mix alone carries no per-fader stream.
   RODE's driver is a kernel virtual audio device (enumerator ROOT, device name `RØDECaster`) plus
   a user-mode service, `RODECasterVADService`. **The service binds on SOME arrivals of the desk and
   never later**: twelve arrivals in one afternoon, six bound (five of the first six, one of the
@@ -748,6 +750,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   which is what RODE's reboot instruction supplies. `reconcile` switches them on at once through
   `IPolicyConfig`, the interface the Sound control panel uses, with no elevation; proven by ear,
   a voice on Fader2 and the screen reader on System.
+- **`reconcile` ACTS ON ONE SAMPLE, AND IT CAN BE THE ONE THAT DISABLES THE ENDPOINTS.** It switches
+  the virtual endpoints OFF while the service reads as not connected, which is right at the instant
+  it looks and wrong a moment later if the bind then lands: nothing re-samples, and Windows is left
+  holding endpoints this app switched off. Measured 1st October 2026 - three playback endpoints
+  disabled with the desk holding all four channels on faders and the service reporting connected,
+  and the log line `reconcile ... not connected ... enabled=0 disabled=3` naming the act. **The
+  repair is an event, not a second guess at a delay**: `virtual_devices.watch_endpoints` registers
+  an `IMMNotificationClient` and `server._virtual_devices_repair` reconciles whenever Windows
+  reports an endpoint moving. It runs under `_virtual_devices_busy`, so the deliberate
+  re-enumerations of a retry are skipped rather than fought, and it terminates because reconcile is
+  idempotent: its own repair wakes it once more and changes nothing.
 - **A PROGRAM RECORDING FROM THE DESK'S MAIN MULTITRACK INPUT STOPS THE SERVICE CREATING ITS FADER
   ENDPOINTS, AND THE SERVICE STILL SAYS CONNECTED.** It opens that capture pin directly, and a pin
   the audio engine already has open cannot be opened again. The Sound control panel's Recording tab
