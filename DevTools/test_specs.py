@@ -366,13 +366,23 @@ for _dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, device
           _virtual <= {c["source_code"] for c in _dev.ui_channels_for(True)})
     check(f"{_n}: ...and the routing matrix",
           _virtual <= {s["index"] for s in _dev.matrix.sources_for(True)})
-    # THE ROWS THE GRID READS AND THE ROWS THE PAGE OFFERS. MatrixSpec has always required these
-    # to match and nothing checked it, which is how the four came to be offered as rows with no
-    # state behind them for half an hour.
+    # THE ROWS THE GRID READS AND THE ROWS THE PAGE OFFERS. The read must never be the narrower of
+    # the two, which is how the four came to be offered as rows with no state behind them.
     for _exp in (False, True):
-        check(f"{_n}: the grid read walks exactly the rows offered (expanded={_exp})",
+        check(f"{_n}: the grid read covers every row offered (expanded={_exp})",
+              set(s["index"] for s in _dev.matrix.sources_for(_exp))
+              <= set(_dev.matrix.all_source_indices))
+        check(f"{_n}: the display list and its index view agree (expanded={_exp})",
               tuple(_dev.matrix.source_indices_for(_exp))
               == tuple(s["index"] for s in _dev.matrix.sources_for(_exp)))
+    # A SCHEME'S SHAPE MUST NOT DEPEND ON THE MODE, so what is read and stored is the wide set in
+    # both: a scheme saved in Standard carrying no Virtual A cell left one behind when applied in
+    # Expanded, and "Everything normal" could not reset it.
+    check(f"{_n}: the read set is mode-independent and covers Expanded's four",
+          _virtual <= set(_dev.matrix.all_source_indices))
+    check(f"{_n}: a scheme covers every row the grid reads",
+          tuple(s["index"] for s in _dev.matrix.all_sources)
+          == tuple(_dev.matrix.all_source_indices))
 
 print(f"\n{'ALL SPEC CHECKS PASSED' if not FAILED else str(len(FAILED)) + ' CHECK(S) FAILED'}")
 raise SystemExit(1 if FAILED else 0)

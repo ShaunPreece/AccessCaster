@@ -117,7 +117,11 @@ CHAT_OUT, HP1_OUT, MIC1_SRC, USB1_SRC = 8, 0, 0, 7
 MODES = [0] * 11
 MODES[CHAT_OUT] = 2
 MODES[HP1_OUT] = 2
-PRO2_SOURCES = (0, 1, 2, 3, 7, 8, 9, 10, 11)
+# EVERY row a scheme covers, off the device model rather than written out: that is the wide,
+# mode-independent set (the nine plus RODE's four Expanded rows), and a fixture narrower than the
+# reader walks fabricates "included" for the rows it leaves out.
+PRO2_SOURCES = devices.PRO2.matrix.all_source_indices
+VIRTUAL_A_SRC = 14
 
 
 def cell(o, s):
@@ -166,6 +170,13 @@ check("a linked cross-point records no level of its own",
 check("an UNLINKED one records its manual level",
       scheme["outputs"]["Headphone1"]["sources"]["USB1"], {"excluded": False, "linked": False,
                                                            "level": 0.4})
+# RODE'S EXPANDED ROWS ARE IN THE SCHEME WHATEVER MODE THE DESK IS IN. The desk publishes their
+# cross-points either way, and a scheme whose shape followed the mode left a Virtual A cell behind
+# when one saved in Standard was applied in Expanded.
+check("a Virtual A cross-point is recorded like any other",
+      scheme["outputs"]["Chat"]["sources"]["VirtualA"], {"excluded": True})
+check("and the wide set is what got captured, not the display set",
+      len(scheme["outputs"]["Chat"]["sources"]), len(PRO2_SOURCES))
 check("the desk it was taken from is stamped on it", scheme["device_name"], devices.PRO2.name)
 
 print("\nCAPTURE: one output only, which is what makes a preset safe to fire mid-show")
@@ -306,6 +317,12 @@ with as_device(devices.PRO2):
     text = routing_schemes.describe(b["chat-mic-only"]["scheme"])
 check_true("names the output and the mode", "Sets Chat to a custom mix" in text)
 check_true("and says how many sources survive", "carrying 1 of 9 sources" in text)
+# THE COUNT FOLLOWS THE MODE while the stored scheme does not: the page shows 13 rows in Expanded
+# and 9 in Standard, so a fixed denominator would name rows the user cannot see.
+with as_device(devices.PRO2):
+    wide = routing_schemes.describe(b["chat-mic-only"]["scheme"], expanded=True)
+check_true("and counts Expanded's four when the desk is in Expanded",
+           "carrying 1 of 13 sources" in wide)
 with as_device(devices.PRO2):
     full = routing_schemes.describe(b["normal"]["scheme"])
 check("a whole-desk scheme is summarised, not listed output by output (it is read aloud)",

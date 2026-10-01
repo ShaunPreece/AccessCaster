@@ -20,7 +20,6 @@ import model_tree            # THE parser: the dump is a tree, and this reads it
 import diagnostics           # the app's own account of what it read and how long it took
 import rcp_hid   # write-generation counter, so a write invalidates the cached dump below
 from rcp_hid import find_control_interface
-import channels  # the live Expanded flag, for which matrix rows to walk
 import devices   # device model table (matrix shape, channel order) keyed by product id
 
 # The output-mode array: each output is a `MIXMINUSES` section holding an outputMixMinus
@@ -937,9 +936,11 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
         return dict(empty, reason=("The matrix changed shape (a phone caller may be connected), "
                                    f"so the live {cannot} cannot be read reliably right now."))
     out = {}
-    # THE ROWS THE PAGE OFFERS AND THE ROWS READ HERE MUST BE THE SAME SET, or Expanded's four
-    # appear on the grid with no state behind them. Both come off the device's channel table.
-    rows = m.source_indices_for(channels.usb_expanded())
+    # EVERY ROW THE GRID CARRIES, whatever mode the desk is in, so the read can never be narrower
+    # than what the page offers (Expanded's four once appeared on the grid with no state behind
+    # them) and a mix scheme captured in Standard still records the Expanded cross-points. The
+    # cells all exist on the wire; which of them to DISPLAY is `sources_for`'s question.
+    rows = m.all_source_indices
     for o in range(m.output_count):
         out[o] = {}
         for s in rows:

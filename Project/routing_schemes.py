@@ -19,6 +19,12 @@ by its matrix index. Two reasons, and both have bitten this project before:
   - the matrix row IS the source code, so a key is stable across a fader
     reorder. Nothing about a scheme changes when you move a channel to another fader.
 
+AND THE SAME SHAPE IN EITHER USB MODE. Capture and apply walk `MatrixSpec.all_sources`, which
+includes RODE's four Expanded rows whether the desk is in Expanded or not, because the desk
+publishes their cross-points either way. Walking the narrower DISPLAY list instead made a saved
+scheme depend on the mode the desk happened to be in: captured in Standard it held no Virtual A
+cell, so applying it in Expanded left one behind, and "Everything normal" could not reset it.
+
 LOCK BOUNDARY: the same rule as profiles.py, and for the same reason (no circular import). This
 module never imports the server. `capture` is pure (it reads an already-read model blob), and
 `apply` performs the device WRITES but ASSUMES THE CALLER HOLDS THE HID LOCK.
@@ -135,7 +141,7 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
     for out in wanted:
         oi = out["index"]
         srcs = {}
-        for src in m.sources:
+        for src in m.all_sources:
             si = src["index"]
             excluded = bool(st["excluded"].get(oi, {}).get(si))
             if excluded:
@@ -191,7 +197,7 @@ _CHAT_KEEP_SOURCE_KEY = "Mic1"
 
 def _all_included(m, output) -> dict:
     """Every source of this desk included in `output` and following its fader."""
-    return {s["key"]: {"excluded": False, "linked": True} for s in m.sources}
+    return {s["key"]: {"excluded": False, "linked": True} for s in m.all_sources}
 
 
 def builtins(device=None) -> list:
@@ -224,7 +230,7 @@ def builtins(device=None) -> list:
     })
 
     chat = next((o for o in m.outputs if o["key"] == "Chat"), None)
-    if chat is not None and any(s["key"] == _CHAT_KEEP_SOURCE_KEY for s in m.sources):
+    if chat is not None and any(s["key"] == _CHAT_KEEP_SOURCE_KEY for s in m.all_sources):
         # 2. Chat = my mic only. The accessibility preset: a co-host on the Chat output hears you
         #    and nothing else, so your screen reader (which reaches the desk through USB 1 or the
         #    SMART pads) does not go down the line.
@@ -234,11 +240,14 @@ def builtins(device=None) -> list:
             "description": ("Only Mic 1 goes to the Chat output, so a co-host does not hear your "
                             "screen reader. No other output is touched."),
             "destructive": False,
+            # `all_sources`, so the Expanded four are excluded too. The whole point of this preset
+            # is that a screen reader does not go down the line, and in Expanded the screen reader
+            # arrives on one of those four rather than on USB 1.
             "scheme": {"outputs": {"Chat": {
                 "mode": 2,
                 "sources": {s["key"]: {"excluded": s["key"] != _CHAT_KEEP_SOURCE_KEY,
                                        "linked": True}
-                            for s in m.sources},
+                            for s in m.all_sources},
             }}},
         })
         # 3. Chat back to normal. THIS REPLACES THE OLD "Chat = full mix" BUTTON, and fixes what
@@ -285,7 +294,7 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
     dev = device or devices.get_active_device()
     m = dev.matrix
     out_by_key = {o["key"]: o for o in m.outputs}
-    src_by_key = {s["key"]: s for s in m.sources}
+    src_by_key = {s["key"]: s for s in m.all_sources}
     applied = failed = 0
     touched, skipped = [], []
 
@@ -379,10 +388,16 @@ def scope_text(scheme: dict, device=None) -> str:
     return f"{len(named)} outputs only"
 
 
-def describe(scheme: dict, device=None) -> str:
+def describe(scheme: dict, device=None, expanded: bool = False) -> str:
     """A sentence saying what applying this scheme would do, for the page to read out BEFORE the
-    user commits to it. Built from the scheme, not stored with it, so it is never out of date."""
+    user commits to it. Built from the scheme, not stored with it, so it is never out of date.
+
+    `expanded` is the desk's USB mode, and it changes nothing but the SOURCE COUNT. A scheme stores
+    every row the grid carries, while the page shows RODE's Expanded four only in Expanded, so
+    "1 of 13" in Standard would quote a denominator nobody can see. The same filter drops a row
+    belonging to another desk, which `apply` would skip anyway."""
     dev = device or devices.get_active_device()
+    shown = {s["key"] for s in dev.matrix.sources_for(expanded)}
     out_by_key = {o["key"]: o for o in dev.matrix.outputs}
     found, missing = [], []
     for okey, ospec in (scheme.get("outputs") or {}).items():
@@ -395,7 +410,7 @@ def describe(scheme: dict, device=None) -> str:
     def one(out, ospec) -> str:
         mode = ospec.get("mode")
         if mode == 2:
-            srcs = ospec.get("sources") or {}
+            srcs = {k: c for k, c in (ospec.get("sources") or {}).items() if k in shown}
             kept = [k for k, c in srcs.items() if not c.get("excluded")]
             what = f"a custom mix carrying {len(kept)} of {len(srcs)} sources"
         elif mode == 1:

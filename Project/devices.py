@@ -69,11 +69,11 @@ class MatrixSpec:
     # (index == matrix column; mixminus = whether the output offers a Mix-Minus mode). Order is
     # the reading order for the UI. {s["index"] for s in sources} must equal set(source_indices).
     sources: tuple = ()
-    # Rows that exist only in Expanded. KEPT OUT OF `sources` on purpose: a mix scheme and a
-    # profile both record the matrix BY KEY off `sources`, so widening it would change the shape
-    # of saved user data according to which mode the desk happened to be in when it was saved.
-    # The page asks `sources_for` instead. The grid itself is unaffected either way - it carries
-    # 30 source rows on the wire in both modes, which is why these are addressable at all.
+    # Rows that exist only in Expanded. KEPT OUT OF `sources` on purpose, because `sources` is the
+    # DISPLAY list and offering four permanently silent rows across every output is a lot of grid
+    # for a screen reader to walk past for nothing. The page asks `sources_for`; anything that
+    # READS or WRITES the grid asks `all_sources`, because the grid carries all 30 source rows on
+    # the wire in both modes.
     expanded_sources: tuple = ()
     # {code: label} for a row whose MEANING changes in Expanded, off the same channel table that
     # feeds FaderSpec.expanded_relabel. Carried here too so the matrix cannot drift from the
@@ -81,9 +81,30 @@ class MatrixSpec:
     expanded_relabel: tuple = ()
     outputs: tuple = ()
 
+    @property
+    def all_sources(self) -> tuple:
+        """EVERY row the grid carries, mode-independent, and the one list anything that READS or
+        WRITES a cross-point should walk.
+
+        The desk publishes all 30 source rows whichever mode it is in, so the Expanded four are
+        ordinary MIX nodes with real state at all times. Reading or storing a NARROWER set than
+        that is what made a mix scheme mode-dependent: saved in Standard it carried no Virtual A
+        cell, and applied in Expanded it left one behind. A scheme and a profile are keyed off
+        this, so the saved shape is the same whatever mode the desk was in.
+
+        No relabelling: a scheme is keyed, so the Expanded names would be decoration here, and in
+        Standard they would be wrong."""
+        return tuple(self.sources) + tuple(self.expanded_sources)
+
+    @property
+    def all_source_indices(self) -> tuple:
+        """The codes of `all_sources`, for the grid read."""
+        return tuple(s["index"] for s in self.all_sources) if self.sources \
+            else tuple(self.source_indices)
+
     def source_indices_for(self, expanded: bool) -> tuple:
-        """The codes the GRID READ should walk. Must stay in step with `sources_for`, which is
-        why both come off the same table."""
+        """The codes behind `sources_for`. The DISPLAY set, so it is a subset of
+        `all_source_indices`; a reader wants that one."""
         return tuple(self.source_indices) + (
             tuple(s["index"] for s in self.expanded_sources) if expanded else ())
 

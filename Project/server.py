@@ -4217,7 +4217,9 @@ class _ChatIsolation:
     def __init__(self, keep_source: int):
         self.keep = keep_source
         self.chat = rcp_transfer.CROSS_POINT_OUTPUT_INDEX["Chat"]
-        self.sources = [x["index"] for x in _active_matrix().sources]
+        # `all_sources`: isolating one channel means every OTHER row out, and in Expanded four of
+        # them carry the computer's own audio. Leaving those in measures the screen reader.
+        self.sources = [x["index"] for x in _active_matrix().all_sources]
         self.level = 1.0
         self.mode_before = None
         self.excluded_before = {}
@@ -7089,6 +7091,9 @@ def read_routing_schemes() -> dict:
     (routing_schemes.describe) rather than stored in it, so it can never describe a desk it no
     longer matches."""
     read_only = _matrix_write_gate() is not None
+    # Read once for the whole list: the source count in every description is against the rows the
+    # grid is showing right now, and the mode cannot change mid-loop in any way that matters.
+    expanded = channels.usb_expanded()
     saved = []
     for name in routing_schemes.list_names():
         loaded = routing_schemes.load(name)
@@ -7096,7 +7101,7 @@ def read_routing_schemes() -> dict:
             continue
         s = loaded["scheme"]
         saved.append({"name": name,
-                      "description": routing_schemes.describe(s),
+                      "description": routing_schemes.describe(s, expanded=expanded),
                       "scope": routing_schemes.scope_text(s),
                       "device_name": s.get("device_name"),
                       "saved_at": s.get("saved_at")})
@@ -7153,7 +7158,8 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
     if not res.get("ok"):
         return res
     return {"ok": True, "name": safe,
-            "message": f"Saved the mix scheme '{safe}'. {routing_schemes.describe(cap['scheme'])}"}
+            "message": (f"Saved the mix scheme '{safe}'. "
+                        f"{routing_schemes.describe(cap['scheme'], expanded=channels.usb_expanded())}")}
 
 
 def action_delete_routing_scheme(name: str) -> dict:

@@ -507,7 +507,7 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
     dev = devices.get_active_device()
     m = dev.matrix
     valid_outputs = {o["index"] for o in m.outputs} if m.outputs else CONFIRMED_OUTPUT_INDICES
-    valid_sources = (set(m.source_indices_for(True)) if m.source_indices
+    valid_sources = (set(m.all_source_indices) if m.source_indices
                      else CONFIRMED_SOURCE_INDICES)
     if output_index not in valid_outputs:
         if not (allow_inferred and output_index in (11, 12)):

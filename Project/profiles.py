@@ -287,17 +287,23 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     output_modes = None
     matrix_excluded = []
     monitor_unlinked = []
+    # THE LEGACY KEYS KEEP THE NARROW SOURCE SET, which `mix_scheme` deliberately does not. The
+    # grid read covers RODE's four Expanded rows now, but v2.00 masks a cross-point selector to one
+    # byte and cannot address source 14 or 15 at all, so handing it those rows would be a restore
+    # that reports failures for cells it was never able to write.
+    legacy_sources = {s["index"] for s in devices.get_active_device().matrix.sources}
     if ms.get("ok"):
         modes = ms["modes"]
         output_modes = [int(modes[o]) for o in sorted(modes)]
         for o, srcs in ms["excluded"].items():
             for s, ex in srcs.items():
-                if ex:
+                if ex and s in legacy_sources:
                     matrix_excluded.append([int(o), int(s)])
     if ml.get("ok"):
         for o in monitor_output_indices:   # the monitor outputs THIS device exposes (device-aware, GAP-4)
             for s, cell in ml["levels"].get(o, {}).items():
-                if cell.get("linked") is False and cell.get("level") is not None:
+                if (s in legacy_sources and cell.get("linked") is False
+                        and cell.get("level") is not None):
                     monitor_unlinked.append({"o": int(o), "s": int(s), "level": float(cell["level"])})
 
     profile = {

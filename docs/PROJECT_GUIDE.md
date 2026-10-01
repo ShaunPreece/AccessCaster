@@ -980,13 +980,25 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (`DevTools/test_cross_point_wide_live.py`, 1st October 2026). The pad builders keep their mask
   because a pad index cannot reach 256, and `SEL_SHOWCONTROL` / `SEL_RECORDINGS` are unaffected:
   they split the index by hand through `build_channel_prop_*` and always did.
-- **THE CROSS-POINT GUARD TAKES THE EXPANDED FOUR AS EXPOSED IN BOTH MODES.** The grid carries all
-  30 source rows on the wire whichever mode the desk is in, so rows 12 to 15 are ordinary MIX nodes
-  that the read path already walks: `_check_cross_point` validates against
-  `MatrixSpec.source_indices_for(True)` and asks about existence, not about the mode. Whether to
-  OFFER a row is `sources_for`'s question, and `source_indices` stays narrow because a profile and
-  a mix scheme are keyed off it. Validating against the narrow set refused all FOUR Expanded rows,
-  not just the two that overflowed, so Game and Music looked writable and were not.
+- **READING OR WRITING THE GRID USES `MatrixSpec.all_sources`; ONLY THE DISPLAY LIST FOLLOWS THE
+  MODE.** The desk publishes all 30 source rows whichever mode it is in, so rows 12 to 15 are
+  ordinary MIX nodes with real state at all times. `all_sources` / `all_source_indices` is that
+  wide, mode-independent set, and `_read_matrix`, `routing_schemes.capture`, `routing_schemes.apply`
+  and `_check_cross_point` all take it; `sources_for(expanded)` is the narrower list the page
+  OFFERS, because four permanently silent rows across every output is a lot of grid to walk past
+  for nothing. Three faults came from walking the display list instead, and they are different
+  faults with one cause:
+  - the write guard refused all FOUR Expanded rows, not just the two that overflowed a byte, so
+    Game and Music looked writable and were not;
+  - a mix scheme's SHAPE followed the mode. Captured in Standard it held no Virtual A cell, so
+    applying it in Expanded left one behind and "Everything normal" could not reset it. A scheme
+    is saved user data, so its shape must not depend on which mode the desk happened to be in.
+  - the Chat preset and the auto-gain isolation both mean "every other source out", and in
+    Expanded the computer's own audio arrives on those four. So "Chat = my mic only" left a screen
+    reader going down the line, and a level check measured it.
+  **The source COUNT in a scheme's spoken description is the one place the mode belongs**
+  (`describe(scheme, expanded=...)`): the stored scheme always holds 13 rows, and saying "1 of 13"
+  to somebody looking at 9 would name rows they cannot see.
 - **A mix scheme writes the output MODE FIRST, then its cross-points.** Leaving Custom mode discards
   that output's cross-point set on the desk, so the other order throws away what it just wrote.
 - **EXCLUDING a cross-point also UNLINKS it, and an unlink FREEZES the level at the fader's current
@@ -1008,7 +1020,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   straight back. Do not grow a second copy in `profiles.py`: the one that used to be there covered
   the monitor outputs only and recorded levels for excluded cells. `output_modes`,
   `matrix_excluded` and `monitor_unlinked` are WRITE-FOR-OLD-BUILDS + read-for-old-profiles only;
-  nothing new should be added to them.
+  nothing new should be added to them. **They also keep the NARROW source set while `mix_scheme`
+  does not**, because v2.00 masks a cross-point selector to one byte and cannot address source 14
+  or 15 at all: handing it those rows would be a restore reporting failures for cells it could
+  never write.
 
 ## Channel properties
 
