@@ -2269,7 +2269,13 @@ def _ann_decode_bool(data: bytes, after: int):
 
     Mirrors rcp_read._val_after rather than counting bytes at the call site: the two hand-written
     offsets in the old code disagreed (name+3 vs name+4), and the name+4 one meant the encoder press
-    was decoded as "not pressed" every single time."""
+    was decoded as "not pressed" every single time.
+
+    THE FIXED OFFSET IS SAFE HERE AND NOT BY LUCK: the only values that sit one header further in
+    are COMPOSITES, and no composite the desk publishes carries a bool or a float this announcer
+    reads (see the encoder section of PROJECT_GUIDE part 2 for the eight and the measurement).
+    Handle a composite here one day and it will decode as None, which is a feature that does
+    nothing rather than one that is wrong - scan a window, as _ann_decode_int does."""
     v = data[after:]
     if v[:1] == b"\x00":
         v = v[1:]
@@ -2456,7 +2462,9 @@ def _ann_decode_str(data: bytes, after: int):
 
 
 def _ann_decode_float(data: bytes, after: int):
-    """Decode a float64 value block (01 09 04 <8 bytes>) after a property name."""
+    """Decode a float64 value block (01 09 04 <8 bytes>) after a property name.
+
+    Fixed offset, safe for the same reason as _ann_decode_bool above."""
     v = data[after:]
     if v[:1] == b"\x00":
         v = v[1:]
@@ -6630,6 +6638,22 @@ def action_set_usb_expanded(on: bool) -> dict:
             "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
                         f"The unit's audio devices drop out for a couple of seconds while it "
                         f"changes over.{tail}" + _virtual_devices_follow(value))}
+
+
+def _seed_usb_expanded() -> None:
+    """Publish the desk's USB mode once at startup, so no page has to be opened first.
+
+    Takes the HID lock like any other read and never raises: a desk that is not there yet simply
+    leaves the flag unpublished, and the next routing read or announcer seed fills it in."""
+    try:
+        if channels.usb_expanded_known():
+            return
+        with _hid_lock:
+            raw = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+        if raw is not None:
+            channels.publish_usb_expanded(recorder.split_usb_multitrack(raw)[1])
+    except Exception as exc:
+        diagnostics.event("usb_mode.seed_failed", f"{exc}")
 
 
 _virtual_devices_busy = threading.Lock()
@@ -11076,6 +11100,13 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # The Device page can still turn it off.
         action_set_announce(True)
+    # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
+    # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
+    # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something
+    # reads the Routing page. The announcer seeds it too, which is why this was invisible - but
+    # the announcer only runs while announcements are ON, and they are a user setting.
+    # Skipped when something has already published, so this costs one dump at most.
+    threading.Thread(target=_seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
     # RODE's virtual devices may have been left switched off in Windows by a mode change made
     # while this app was not running; apply the driver's current state now. Delayed so the
     # announcer's greeting comes first, and silent unless something actually changed.

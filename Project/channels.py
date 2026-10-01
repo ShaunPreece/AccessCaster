@@ -248,9 +248,19 @@ def publish_usb_expanded(on) -> None:
 
 
 def usb_expanded() -> bool:
-    """Whether the desk is in Expanded, as last seen. False until something has read it, which is
-    the safe default: it offers FEWER sources and the plainer name."""
+    """Whether the desk is in Expanded, as last seen.
+
+    False until something has published, which is a safe default only in the sense that it offers
+    FEWER sources and the plainer name. It is NOT a harmless one: unpublished, the fader dropdown
+    omits Game, Music, A and B AND the write gate refuses them, so on a desk that is in Expanded
+    the four cannot be assigned at all. Seed it at startup (`server._bring_up_server`) rather than
+    leaving the first publisher to whichever page the user happens to open."""
     return bool(_usb_expanded["on"])
+
+
+def usb_expanded_known() -> bool:
+    """Has anything published the mode yet? Lets the startup seed skip a dump it does not need."""
+    return _usb_expanded["on"] is not None
 
 
 def publish_strip_vector(vec) -> None:

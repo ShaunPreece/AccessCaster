@@ -1071,6 +1071,44 @@ check("a two-byte selector is spoken, not dropped",
 check("and so is the one past it",
       run([xpoint_packet(15, 0, 1.0)], cold_cache=False)[0], ["100 percent, Virtual B"])
 
+# --- THE EXPANDED FLAG MUST BE SEEDED AT STARTUP, not left to whichever page is opened first ------
+# `usb_expanded()` is a published cache and answers False while unpublished. That is not a harmless
+# default: unpublished, the fader dropdown omits Game, Music, A and B and the write gate refuses
+# them, so on a desk that IS in Expanded the four cannot be assigned at all. The announcer seeds it,
+# which is why this went unnoticed - but announcements are a user setting, so with them off nothing
+# published until the Routing page was opened.
+print()
+print("The Expanded flag is seeded at startup")
+_saved = channels._usb_expanded["on"]
+try:
+    channels._usb_expanded["on"] = None
+    check_true("unpublished is distinguishable from False", not channels.usb_expanded_known())
+    check("and an unpublished flag hides Expanded's four from the fader write gate",
+          sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}),
+          [])
+    server.rcp_read = type("R", (), {
+        "first": staticmethod(lambda *a, **k: 5),          # post-fader + Expanded
+        "read_model_stable": staticmethod(lambda **k: b""),
+    })()
+    server._seed_usb_expanded()
+    check_true("the startup seed publishes it", channels.usb_expanded_known())
+    check("and the desk's real mode is what it publishes", channels.usb_expanded(), True)
+    check("so the four are assignable again",
+          sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}),
+          [12, 13, 14, 15])
+    # Idempotent: a second call must not pay for another dump.
+    server.rcp_read = type("R", (), {
+        "first": staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-read"))),
+        "read_model_stable": staticmethod(lambda **k: b""),
+    })()
+    server._seed_usb_expanded()
+    check_true("a second seed reads nothing, because something has already published", True)
+finally:
+    channels._usb_expanded["on"] = _saved
+    import rcp_read as _rr
+    server.rcp_read = _rr
+
+
 print()
 if FAILED:
     print(f"{FAILED} CHECK(S) FAILED")
