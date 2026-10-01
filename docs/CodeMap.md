@@ -435,6 +435,11 @@ without them),
 re-enter, md5 it back off the desk),
 `test_schemes_live` (captures the mixes, drives Chat, puts them back, proves the matrix and the
 property counts are unchanged; needs the server stopped),
+`test_cross_point_wide_live` (a cross-point above source 13, where the selector needs TWO address
+bytes: the tree must put the MIX instance at the selector `cross_point_selector` builds, the write
+must read back, and the node/property/MIX counts must be unchanged. `--source` / `--output`, and it
+exits 2 rather than discard a hand-set level on an unlinked cell. Touches no output mode, so
+nothing about it is audible),
 `test_monitor_output_live` (EAR TEST on the rear line outs, `--block on|off`; one block per run and
 it counts down first, and its docstring carries why both of those are non-negotiable),
 `test_mic_type_gain_live` (steps a mic through every voicing and records the gain each one applies:

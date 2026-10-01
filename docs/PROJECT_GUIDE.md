@@ -513,9 +513,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   value on an arbitrary selector; on 29th August 2026 that turned a haptics write into selector 2,
   value 15. Use `rcp_transfer.set_unit_setting(prop, value)`, which looks the selector up by name and
   refuses anything not in `UNIT_SETTING_SEL`.
-- **A selector past 0xFF needs the two-byte builders**, `build_channel_prop_int/bool(prop, value,
-  lo, hi)`. The single-byte global builders raise rather than mask now, but the failure arrives
-  AFTER any earlier record in the same script has already landed.
+- **A selector past 0xFF needs NO special builder.** Every global builder passes it to
+  `build_address` whole and `encode_path` widens the index, so `build_global_prop_bool(prop, on,
+  258)` addresses root child 258. `build_channel_prop_int/bool(prop, value, lo, hi)` splits it by
+  hand instead, which is why `SEL_SHOWCONTROL` and `SEL_RECORDINGS` go through those; either shape
+  reaches the same node.
 - **"The RODE app has no control for it" means there is no CAPTURE ROUTE. It has never once meant
   unwritable.** That inference has been wrong six times.
 - **A value reading back is NOT evidence the value is valid.** `recordingCompressionQuality` stores
@@ -967,9 +969,24 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   speak, which is the signature that tells the two apart. `_ann_sel` is the one-byte read; take the
   address from `_ann_addr_path`, as `faderLevel` and `potLevel` already do. Only codes 14 and 15
   reach that far, and only in Expanded, which is why this was invisible until a virtual channel was
-  first put on a fader. **The WRITE side is still one byte**:
-  `rcp_transfer.cross_point_selector` refuses anything over 255, so no cross-point can be written
-  for Virtual A or Virtual B.
+  first put on a fader.
+- **THE WRITE SIDE WIDENS THE SAME WAY, AND A GLOBAL SELECTOR IS AN INDEX RATHER THAN A BYTE.**
+  `build_global_prop_int` / `_bool` / `_string` / `_float`, `build_mix_link_request` and
+  `build_cross_point_level` hand the selector to `build_address` whole, so `encode_path` emits
+  `01 0f` for 15 and `02 02 01` for 258 - the same two-byte form the desk pushes. Masking to 0xFF
+  truncated SILENTLY, which is worse than raising: 258 became 2, a valid node 256 cross-points
+  away. Proven on the Pro II for both Virtual A (258) and Virtual B (271): `mixDisabled` written,
+  read back, restored, and the model's node, property and MIX counts unchanged, so no stray
+  (`DevTools/test_cross_point_wide_live.py`, 1st October 2026). The pad builders keep their mask
+  because a pad index cannot reach 256, and `SEL_SHOWCONTROL` / `SEL_RECORDINGS` are unaffected:
+  they split the index by hand through `build_channel_prop_*` and always did.
+- **THE CROSS-POINT GUARD TAKES THE EXPANDED FOUR AS EXPOSED IN BOTH MODES.** The grid carries all
+  30 source rows on the wire whichever mode the desk is in, so rows 12 to 15 are ordinary MIX nodes
+  that the read path already walks: `_check_cross_point` validates against
+  `MatrixSpec.source_indices_for(True)` and asks about existence, not about the mode. Whether to
+  OFFER a row is `sources_for`'s question, and `source_indices` stays narrow because a profile and
+  a mix scheme are keyed off it. Validating against the narrow set refused all FOUR Expanded rows,
+  not just the two that overflowed, so Game and Music looked writable and were not.
 - **A mix scheme writes the output MODE FIRST, then its cross-points.** Leaving Custom mode discards
   that output's cross-point set on the desk, so the other order throws away what it just wrote.
 - **EXCLUDING a cross-point also UNLINKS it, and an unlink FREEZES the level at the fader's current

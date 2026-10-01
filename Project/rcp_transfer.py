@@ -124,6 +124,14 @@ def build_address(path) -> bytes:
     return model_tree.encode_path(path)
 
 
+# A GLOBAL SELECTOR IS A CHILD INDEX, NOT A BYTE, so the builders below pass it to
+# `build_address` whole. `encode_path` emits an index in the fewest bytes that hold it, so 0x0F
+# stays `01 0f` and 258 becomes `02 02 01` - which is how the desk itself addresses a cross-point
+# above source 13. Masking to 0xFF truncates silently rather than raising, and a truncated
+# selector is a write to a DIFFERENT, valid node. The pad builders keep their mask because a pad
+# index cannot reach 256.
+
+
 def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
     """Build a 256-byte report-id-3 record setting a global integer property."""
     name_b = name.encode("ascii")
@@ -256,7 +264,7 @@ def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
     value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated
     vlen = 1 + len(value_b)                     # the vtype byte plus the value and its null
     value_block = bytes([0x01, vlen, 0x05]) + value_b
-    payload = build_address([selector & 0xFF]) + name_b + b"\x00" + value_block
+    payload = build_address([selector]) + name_b + b"\x00" + value_block
     return _frame(payload)
 
 
@@ -273,7 +281,7 @@ def build_global_prop_bool(name: str, on: bool, selector: int = SEL_SYSTEM) -> b
     """
     name_b = name.encode("ascii")
     value_block = bytes([0x01, 0x01, 0x02 if on else 0x03])
-    payload = build_address([selector & 0xFF]) + name_b + b"\x00" + value_block
+    payload = build_address([selector]) + name_b + b"\x00" + value_block
     return _frame(payload)
 
 
@@ -468,12 +476,17 @@ CONFIRMED_OUTPUT_INDICES = set(range(0, 11))
 
 
 def cross_point_selector(output_index: int, source_index: int) -> int:
-    """Selector byte for the (output, source) matrix cross-point."""
+    """Selector for the (output, source) matrix cross-point.
+
+    IT IS AN INDEX, NOT A BYTE: Virtual A (source 14) lands at 258 and Virtual B at 271, and
+    `build_address` encodes those as a two-byte index exactly as the desk does on the push side.
+    The ceiling here is the address format's own (an index wider than two bytes is not a MIX node,
+    it is a bad sum); WHICH indices the connected desk exposes is `_check_cross_point`'s job."""
     sel = (CROSS_POINT_BASE
            + CROSS_POINT_SOURCE_STRIDE * source_index
            + CROSS_POINT_OUTPUT_STRIDE * output_index)
-    if not 0 <= sel <= 0xFF:
-        raise ValueError(f"cross-point selector {sel} out of byte range")
+    if not 0 <= sel <= 0xFFFF:
+        raise ValueError(f"cross-point selector {sel} is not a possible node index")
     return sel
 
 
@@ -485,11 +498,17 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
     constants, so a Pro II-only cross-point (Mic 4 = source 3, Headphone 3/4 = outputs 2/3) is
     refused on a Duo instead of silently writing to a phantom slot. Falls back to the Pro II
     confirmed sets for a device whose matrix carries no label/source list. This stops a stray
-    index from silently writing to an unintended (possibly live-call) slot."""
+    index from silently writing to an unintended (possibly live-call) slot.
+
+    THE EXPANDED FOUR COUNT AS EXPOSED IN BOTH MODES, because the grid carries all 30 source rows
+    on the wire whichever mode the desk is in: rows 12 to 15 are ordinary MIX nodes that the read
+    path already walks and gets values from. Whether to OFFER them is a UI question, answered by
+    `MatrixSpec.sources_for`; this guard is about whether the node exists."""
     dev = devices.get_active_device()
     m = dev.matrix
     valid_outputs = {o["index"] for o in m.outputs} if m.outputs else CONFIRMED_OUTPUT_INDICES
-    valid_sources = set(m.source_indices) if m.source_indices else CONFIRMED_SOURCE_INDICES
+    valid_sources = (set(m.source_indices_for(True)) if m.source_indices
+                     else CONFIRMED_SOURCE_INDICES)
     if output_index not in valid_outputs:
         if not (allow_inferred and output_index in (11, 12)):
             raise ValueError(
@@ -513,7 +532,7 @@ def build_mix_link_request(selector: int, link: bool) -> bytes:
     """
     name_b = (b"mixLinkRequest" if link else b"mixUnlinkRequest")
     value_block = bytes([0x01, 0x07, 0x08, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02])
-    payload = build_address([selector & 0xFF]) + name_b + b"\x00" + value_block
+    payload = build_address([selector]) + name_b + b"\x00" + value_block
     return _frame(payload)
 
 
@@ -551,7 +570,7 @@ def build_cross_point_level(selector: int, level: float, anchor: int = 0) -> byt
     """
     s = f"{_level_str(level)}|{int(anchor)}".encode("ascii")
     value_block = bytes([0x01, len(s) + 2, 0x05]) + s + b"\x00"
-    payload = build_address([selector & 0xFF]) + b"mixLevelWithAnchor" + b"\x00" + value_block
+    payload = build_address([selector]) + b"mixLevelWithAnchor" + b"\x00" + value_block
     return _frame(payload)
 
 
@@ -890,7 +909,7 @@ def build_global_prop_float(name: str, selector: int, value: float) -> bytes:
     """
     name_b = name.encode("ascii")
     value_block = bytes([0x01, 0x09, 0x04]) + struct.pack("<d", float(value))
-    payload = build_address([selector & 0xFF]) + name_b + b"\x00" + value_block
+    payload = build_address([selector]) + name_b + b"\x00" + value_block
     return _frame(payload)
 
 
@@ -1424,11 +1443,35 @@ def _selftest() -> None:
     assert build_global_prop_int("headphoneType", 0x0A, 1) == exp_duo_hp2, \
         "duo headphoneType 0x0A (Headphone 2) mismatch"
 
+    # CROSS-POINT ADDRESS WIDTH. A selector is a child index, so one over 255 must widen the
+    # address rather than wrap: Music (source 13, output 0) is 245 and stays `01 f5`, Virtual A
+    # (14) is 258 and becomes `02 02 01`, Virtual B (15) is 271 and becomes `02 0f 01`. Both
+    # halves are asserted because a mask would pass the first and silently redirect the second
+    # to a node 256 lower - a valid write to the wrong cross-point.
+    exp_xp_music = bytes.fromhex(
+        "0314000000" + "01010101" + "f5" + "6d697844697361626c6564" + "00" + "010102"
+    ).ljust(BULK_LEN, b"\x00")
+    assert build_global_prop_bool(
+        "mixDisabled", True, cross_point_selector(0, 13)) == exp_xp_music, \
+        "cross-point source 13 should still address in ONE byte"
+    exp_xp_va = bytes.fromhex(
+        "0315000000" + "01010102" + "0201" + "6d697844697361626c6564" + "00" + "010102"
+    ).ljust(BULK_LEN, b"\x00")
+    assert build_global_prop_bool(
+        "mixDisabled", True, cross_point_selector(0, 14)) == exp_xp_va, \
+        "cross-point source 14 (Virtual A) should address in TWO bytes"
+    exp_xp_vb = bytes.fromhex(
+        "0322000000" + "01010102" + "0f01" + "6d69784c6576656c57697468416e63686f72" + "00"
+        + "010705" + "302e357c30" + "00"
+    ).ljust(BULK_LEN, b"\x00")
+    assert build_cross_point_level(cross_point_selector(0, 15), 0.5) == exp_xp_vb, \
+        "cross-point source 15 (Virtual B) level should address in TWO bytes"
+
     print("selftest OK: builders match captured app bytes "
           "(frames 9, 167, padIdx, midi, gain, p48; "
           "Duo p48/gain/digital/phaseflip/mic-type/bypass/preset; "
           "Duo processing strip-selectors 0x1C-0x24; Duo fx strip-selector 0x27; "
-          "Duo output-write 0x0D/0x0E/0x09/0x0A)")
+          "Duo output-write 0x0D/0x0E/0x09/0x0A; cross-point address width 1 and 2 bytes)")
 
 
 if __name__ == "__main__":
