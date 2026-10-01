@@ -1358,6 +1358,23 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Web UI and screen reader
 
+- **A STAGED SELECT'S OPTION LIST MUST SHIP IN THE STRUCTURE PAYLOAD, NOT THE LIVE ONE.** The
+  controls are built once from `/api/routing`; the live read only sets values. Put the list only in
+  the live payload and the control is built EMPTY, and nothing says so: `setStagedValue` falls back
+  to inventing one option labelled `Value <device value>`, so it renders and reads as a real
+  control that can never be changed away from, with its Apply permanently unavailable. `"What this
+  computer sends"` shipped like that and Expanded could not be turned off from the page.
+  `ui_checks_staged.js` now FAILS a staged select with one option rather than skipping it; the skip
+  was reported as a pass, which is how the dead control stayed green.
+
+- **`_ann_say` IS WHERE THE ANNOUNCER SWITCH IS ENFORCED, because it is the only place every phrase
+  passes through.** `_announce_on` gates the read loop, and roughly half this app's speech comes
+  from elsewhere: the virtual-devices follow-up after a USB mode change, the recorder watcher. Gate
+  it anywhere else and "announcements off" leaves all of that talking. The phrases announcing speech
+  is BACK are safe because each sets the flag before it speaks, so no force path is needed. A
+  suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
+  different faults.
+
 - **THE PAGE IS CALLED "Backups" AND ITS ROUTE KEY IS `profiles`, DELIBERATELY.** The key, the
   section id `sec-profiles` and `/api/profiles` all keep the old word so a remembered tab position
   and the API path do not break. So `profiles` in code is right and "Profiles page" in USER-FACING
