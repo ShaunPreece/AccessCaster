@@ -29,10 +29,67 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.53"
+__version__ = "2.60"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.60", [
+        ("Four more inputs from this computer, each on its own fader",
+         "Normally your computer looks to the unit like one stereo input, so everything Windows "
+         "plays arrives on a single channel already mixed together. RODE's Expanded mode splits it "
+         "into four separate inputs instead, named Game, Music, A and B, and AccessCaster can now "
+         "switch it on and put each of them on a fader. Music, a call, a game and your screen "
+         "reader then arrive as four channels rather than one, so you can fade or mute any of them "
+         "on its own, keep one out of what a caller hears, or record them apart. It is on the "
+         "Routing page under Master Mix, as \"What this computer sends\". One thing to know, and "
+         "it is the unit's own rule rather than ours: each of the four appears in Windows only "
+         "while that channel is sitting on a fader, so turning Expanded on is half the job."),
+
+        ("Nine separate inputs for recording and streaming",
+         "Expanded together with \"Every channel, post-fader\" gives this computer nine separate "
+         "inputs: your microphones, the pads, the call channels and the four from this computer, "
+         "each its own device in Windows and pickable in anything that lets you choose a "
+         "microphone. That is the setup for recording everything apart and fixing the balance "
+         "afterwards, rather than having to get it right on the night."),
+
+        ("AccessCaster can fetch RODE's driver for you",
+         "Expanded needs RODE's Virtual Devices driver on this computer. If it is missing, a button "
+         "now appears on the Routing page that downloads RODE's own file, checks it really is "
+         "signed by RODE, and runs their installer, which asks Windows for permission in the usual "
+         "way. There is a second button beside it that just opens RODE's software page if you would "
+         "rather do it by hand, and that one stays once the driver is in, because it is also how "
+         "you repair or reinstall it. This download is the only thing AccessCaster does that "
+         "connects to the internet, and it only ever happens when you press that button: never when "
+         "the app starts, never on a timer, and never to check for a newer version."),
+
+        ("The output mixes cover the new inputs, and so do your mix presets",
+         "Game, Music, A and B are sources in the routing matrix and the monitor mix like any "
+         "other, so you can include or exclude them per output and set how loud each one is in your "
+         "own headphones. Mix presets save and restore them too, whichever mode the unit happened "
+         "to be in when you saved. \"Chat = my mic only\" now leaves them out as well, which "
+         "matters more than it sounds: in Expanded your screen reader arrives on one of those four, "
+         "so without this it would have gone down the line to a caller."),
+
+        ("Turning announcements off now silences all of them",
+         "About half the app's speech did not come from the announcer's own reading of the unit, so "
+         "switching announcements off left those still talking: a USB mode change would speak to "
+         "you with announcements turned off. The switch is now enforced in the one place every "
+         "spoken phrase passes through, so off means off."),
+
+        ("A Back Channel pad no longer narrates what you just asked for",
+         "One press of a mixer pad moves four channel states at once, both members' mute and their "
+         "listen, and a momentary pad brings a second burst when you let go. The announcer spoke "
+         "all eight, so a two second talkback push became eight announcements describing the state "
+         "you had just chosen. A mixer pad now quietens the mute and listen lines for a moment "
+         "around its own press. Censor and Ducking pads get it too."),
+
+        ("The pad editor had Momentary and Latching the wrong way round",
+         "Choosing Latching for a mixer pad set it to Momentary and the other way about, so a pad "
+         "you set up in the app behaved as the opposite when you pressed it. If you have a mixer "
+         "pad that never felt right, set its trigger mode again."),
+
+    ]),
+
     ("2.53", [
         ("The routing screen works again after the unit's 1.7.6 update",
          "RODE's firmware 1.7.6 broke the Routing page. It stopped showing your mix and said the "
