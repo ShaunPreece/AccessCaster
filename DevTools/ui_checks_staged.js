@@ -35,8 +35,17 @@ function stagedRows() {
 
 async function checkOne(row, writePath) {
   const { sel, btn, hint } = row;
+  // A STAGED SELECT WITH ONE OPTION IS ALWAYS A BUG, never a skip. It exists to change something,
+  // so a single option is a control that cannot be changed away from - and the way it happens is
+  // silent: `setStagedValue` invents a "Value true" option for a device value whose label list
+  // never arrived, which renders and reads as a real control. Skipping it here reported that as a
+  // pass and hid a routing control nobody could use.
   const other = [...sel.options].find((o) => o.value !== sel.value);
-  if (!other) { check("SKIP " + sel.id + ": only one option", true); return; }
+  if (!other) {
+    check(sel.id + ": offers more than one option", false,
+          [...sel.options].map((o) => o.textContent).join(" | ") || "no options at all");
+    return;
+  }
 
   check(sel.id + ": Apply is unavailable with nothing staged",
     btn.getAttribute("aria-disabled") === "true", btn.getAttribute("aria-disabled"));

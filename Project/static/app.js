@@ -4851,7 +4851,10 @@ async function loadRouting() {
     // STAGED behind Apply: this one does more than change the audio, it tears the USB audio
     // function down and rebuilds it, so an accidental arrow press silences a screen reader routed
     // through the unit. See the hint below, which says the same thing before you press.
-    const um = makeStagedSelect("routing-usb-mode", "What this computer receives", modes, {
+    // RODE's own word is in the label because their guides, videos and menus all say "Multitrack";
+    // a label that only describes leaves somebody following those instructions nothing to match.
+    const um = makeStagedSelect("routing-usb-mode", "What this computer receives (Multitrack)",
+      modes, {
       applyText: "Apply what this computer receives",
       onApply: async (sel, btn) => {
         const res = await routingPost("/api/routing/usb-multitrack",
@@ -4874,7 +4877,7 @@ async function loadRouting() {
     // above and one more: turning it OFF makes the unit unassign every extended input from its
     // fader, and that layout does not come back by turning it on again. A select rather than a
     // switch because the two states need naming - "off" does not say what you lose.
-    const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends",
+    const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends (USB 1 Input)",
       data.usb_expanded_labels || [], {
         applyText: "Apply what this computer sends",
         onApply: async (sel, btn) => {

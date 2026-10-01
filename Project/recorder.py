@@ -221,17 +221,20 @@ def join_usb_multitrack(mode, expanded) -> int:
 
 
 # Named for what ARRIVES, like every other label here, because "Expanded" alone says nothing about
-# what you get and the state it names is invisible without the driver.
+# what you get and the state it names is invisible without the driver. RODE'S OWN WORD LEADS,
+# though, because every guide, video and forum answer says "set USB 1 Input to Expanded": a label
+# that only describes leaves somebody following those instructions with nothing to match.
 USB_EXPANDED_LABEL = {
-    False: "Main and Chat only",
-    True: "Main, Chat and four separate app inputs",
+    False: "Standard: main and chat only",
+    True: "Expanded: main, chat and four separate app inputs",
 }
 USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more inputs, Game, Music, "
                      "A and B, each assignable to its own fader, so one program can be faded "
-                     "without the rest. The four names are interchangeable labels, not different "
-                     "kinds of input. It needs RODE's Virtual Devices driver installed here, and "
-                     "this computer receiving every channel, or the four arrive silent; it stops "
-                     "the RODECaster ASIO driver working, and turning it back off unassigns "
+                     # NOT "the four behave identically": four inputs behaving like four inputs is
+                     # what a reader already assumes, and saying it out loud reads as a hint that
+                     # they might be one device under four names.
+                     "without the rest. It needs RODE's Virtual Devices driver installed here; it "
+                     "stops the RODECaster ASIO driver working, and turning it back off unassigns "
                      "whatever you put on those faders. "
                      # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
                      # choice this app knows nothing about. The other one, pointing Windows' sound

@@ -2228,10 +2228,21 @@ def _ann_say(text: str) -> None:
     whose whole purpose is telling a blind operator what the desk just did: a burst of repeating
     cues then arrives with the log silent either side, and nothing says what fired them or how many
     there were. A cue is logged by NAME rather than as a file path, so a run of them reads as a run
-    of them.
+    of them. A SUPPRESSED phrase is logged too, marked: "it said nothing" and "it was never asked
+    to" are different faults and the log has to tell them apart.
+
+    THE ANNOUNCER SWITCH IS ENFORCED HERE, because it is the only place every phrase passes
+    through. Roughly half the speech in this app comes from outside the announcer's read loop - the
+    virtual-devices follow-up after a USB mode change, the recorder watcher - so a switch that only
+    stopped the loop left all of that talking to somebody who had asked for silence. The phrases
+    announcing that speech is BACK are safe: each one sets the flag before it speaks.
     """
-    diagnostics.event("say", ("cue " + os.path.basename(text[len(_ANN_WAV_PREFIX):]).split("-")[0]
-                              if text.startswith(_ANN_WAV_PREFIX) else text[:90]))
+    what = ("cue " + os.path.basename(text[len(_ANN_WAV_PREFIX):]).split("-")[0]
+            if text.startswith(_ANN_WAV_PREFIX) else text[:90])
+    if not _announce_on.is_set():
+        diagnostics.event("say", what + "  [suppressed: announcements off]")
+        return
+    diagnostics.event("say", what)
     if _ANN_SILENT:
         return                  # a test run: recorded above, never played. See _ANN_SILENT.
     global _ann_speak_thread
@@ -6399,6 +6410,12 @@ def routing_model() -> dict:
         # USB audio's option list. The STRUCTURE endpoint carries it because loadRouting builds the
         # controls once from this payload; the VALUES arrive with /api/routing/live.
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
+        # EXPANDED'S OPTIONS BELONG HERE TOO, for the same reason and with the same consequence if
+        # they are missing: `setStagedValue` invents a "Value true" option for a device value it has
+        # no label for, so the control renders with ONE option it cannot be changed away from. The
+        # live payload sends these as well, which is what hid it.
+        "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
+        "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
         "input_strips": [{"key": k, "label": lab}
                          for k, _idx, lab in _active_input_strips().strips],
         "input_sources": _active_input_strips().source_palette,
