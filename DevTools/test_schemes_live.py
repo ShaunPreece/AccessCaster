@@ -53,6 +53,20 @@ def read_matrix():
     return cap, blob
 
 
+def on_faders(blob) -> set:
+    """The source codes sitting on a fader right now.
+
+    A CROSS-POINT CANNOT BE OBSERVED AS LINKED UNLESS ITS CHANNEL IS ON A FADER, and that is the
+    desk rather than a fault here. `linked` is inferred from level == anchor, and the level is
+    republished by the FADER; relink a cross-point whose channel is off-fader and the two stay
+    apart for good, because nothing moves to republish it. Measured directly on the Pro II: unlink
+    Mic 3's Headphone 1 cell at 0.5, send mixLinkRequest, and it still reads '0.5|0'. So the
+    link assertions below ask only about sources the desk can actually answer for.
+    """
+    dev = devices.get_active_device()
+    return set(rcp_read.values(blob, "channelInputSource")[:dev.fader.count])
+
+
 def counts(blob):
     """Every property NAME the model reports and how many times it occurs.
 
@@ -79,6 +93,8 @@ def main() -> int:
         return 1
     baseline = before["scheme"]
     n0 = counts(blob0)
+    faders = on_faders(blob0)
+    src_code = {s["key"]: s["index"] for s in devices.get_active_device().matrix.all_sources}
     chat0 = baseline["outputs"].get("Chat")
     if chat0 is None:
         print("  This desk has no Chat output; nothing to drive safely. Stopping.")
@@ -111,8 +127,10 @@ def main() -> int:
     after, _b = read_matrix()
     chat = after["scheme"]["outputs"]["Chat"]
     check("the desk reads back MIX MINUS, not Main Mix", chat["mode"], 1)
-    check("with every source back in and following the faders",
-          all(not c["excluded"] and c["linked"] for c in chat["sources"].values()), True)
+    check("with every source back in", all(not c["excluded"] for c in chat["sources"].values()),
+          True)
+    check("and every one on a fader following it",
+          all(c["linked"] for k, c in chat["sources"].items() if src_code.get(k) in faders), True)
 
     print("\n4. A MANUAL LEVEL round-trips (the half a flags-only scheme loses)")
     level_scheme = {"outputs": {"Chat": {"mode": 2, "sources": dict(
@@ -127,7 +145,7 @@ def main() -> int:
     check("at the level the scheme asked for", round(cell.get("level", -1), 2), 0.42)
     check("and its neighbours are still linked",
           all(c["linked"] for k, c in after["scheme"]["outputs"]["Chat"]["sources"].items()
-              if k != "Mic1"), True)
+              if k != "Mic1" and src_code.get(k) in faders), True)
 
     print("\n5. AND THE SAVED SCHEME PUTS IT ALL BACK")
     res = routing_schemes.apply(baseline)

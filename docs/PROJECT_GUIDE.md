@@ -1007,6 +1007,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   such a cell; recording the level made a clean restore fail its own read-back.
 - **`linked` is inferred from level == anchor**, so it is unreliable for the moment right after an
   unlink (the unlink makes them equal). Fine on a settled desk, wrong as a post-write read-back.
+- **A CROSS-POINT WHOSE CHANNEL IS OFF-FADER CANNOT BE SEEN TO RELINK, AND THAT IS PERMANENT.** The
+  level is republished by the FADER, so with no fader carrying that channel the level and the
+  anchor stay wherever they were parted and the inference reads unlinked for good. Measured on the
+  Pro II: unlink Mic 3's Headphone 1 cell at 0.5, send `mixLinkRequest`, and it still reads
+  `'0.5|0'`. The link itself is fine - it is the only OBSERVABLE of it that is missing. So any
+  "everything is following its faders" assertion has to ask about on-fader sources only, which is
+  what `DevTools/test_schemes_live.py` does; Mic 2, Mic 3, Mic 4 and Bluetooth are routinely
+  off-fader on a desk in Expanded.
 - **A SOURCE CAN BE A CROSS-POINT OF ITS OWN OUTPUT, AND THE ROUTING PAGE MUST OFFER IT.** USB 1,
   USB 2, Chat and Bluetooth are on both lists, and the cell at `13*source + output` for a matching
   pair is an ordinary one: proven 16th September 2026 by excluding USB 2 from the USB 2 output
@@ -1162,8 +1170,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   pairing the desk's own UI cannot make.
 - **`inputInstrumentGain` IS a stored setting**, though: selecting Instrument sets it to 20 and
   switching away does not clear it.
-- **`mixLink` is NOT per-cross-point link state.** It reads True on 383 of the MIX block's 390 cells
-  while the proven level-vs-anchor inference says 114. Keep the inference.
+- **`mixLink` IS NOT PER-CROSS-POINT LINK STATE, and the direct test is the proof rather than the
+  counts.** Unlink an INCLUDED cross-point at a manual level and `mixLink` stays True (measured on
+  the Pro II: Headphone 1 x Mic 3 unlinked at 0.5, `mixLink` True throughout). What it actually
+  tracks is EXCLUSION: measured across all 390 cells it was False on exactly the 16 excluded ones
+  and True on every other, with no cell False and included. Keep the level-vs-anchor inference; it
+  is the only thing that reports a manual unlink.
+  **The counts argument that used to stand here was not evidence** - "True on 383 of 390 while the
+  inference says 114" looks damning until you look at the 221 the two disagree about, and every one
+  of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
+  source rows wide and a desk uses 13 of them.
 
 - **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
   (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names
