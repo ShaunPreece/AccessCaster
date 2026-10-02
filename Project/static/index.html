@@ -37,16 +37,17 @@
     <nav aria-label="Main">
       <ul class="navlist" role="list">
         <!-- ORDER: the pages used DURING a session come first, and the three you visit
-             deliberately - Profiles, Device, About - sit at the end in that order, with Recording
-             at 4 ahead of Profiles. The Alt+digit shortcuts follow the list positions, so
-             bindShortcuts must match this order exactly. -->
+             deliberately - Backups, Device, Help & About - sit at the end in that order. The
+             Alt+digit shortcuts follow the list positions, so bindShortcuts must match this order
+             exactly. -->
         <li><a class="navlink" href="#/channels"   data-route="channels"   aria-keyshortcuts="Alt+1">Channels and Processing</a></li>
         <li><a class="navlink" href="#/routing"    data-route="routing"    aria-keyshortcuts="Alt+2">Routing</a></li>
         <li><a class="navlink" href="#/pads"       data-route="pads"       aria-keyshortcuts="Alt+3">SMART pads</a></li>
         <li><a class="navlink" href="#/recording"  data-route="recording"  aria-keyshortcuts="Alt+4">Recording</a></li>
-        <li><a class="navlink" href="#/profiles"   data-route="profiles"   aria-keyshortcuts="Alt+5">Backups</a></li>
-        <li><a class="navlink" href="#/status"     data-route="status"     aria-keyshortcuts="Alt+6">Device</a></li>
-        <li><a class="navlink" href="#/about"      data-route="about"      aria-keyshortcuts="Alt+7">Help &amp; About</a></li>
+        <li><a class="navlink" href="#/callme"     data-route="callme"     aria-keyshortcuts="Alt+5">CallMe</a></li>
+        <li><a class="navlink" href="#/profiles"   data-route="profiles"   aria-keyshortcuts="Alt+6">Backups</a></li>
+        <li><a class="navlink" href="#/status"     data-route="status"     aria-keyshortcuts="Alt+7">Device</a></li>
+        <li><a class="navlink" href="#/about"      data-route="about"      aria-keyshortcuts="Alt+8">Help &amp; About</a></li>
       </ul>
     </nav>
 
@@ -1655,7 +1656,92 @@
       </div>
     </section>
 
-    <!-- HELP & ABOUT (Alt+7) IS IN static/help.html AND IS SPLICED IN HERE by page.render_index.
+    <section class="app-section" id="sec-callme" hidden>
+      <h1 id="h-callme" tabindex="-1">CallMe</h1>
+      <p class="note" role="note">
+        Take calls from remote guests over the unit's own internet connection. Calls are announced
+        wherever you are, and the answer and decline keyboard shortcuts work from any application.
+      </p>
+      <!-- THE PAGE'S ONE LIVE REGION. It speaks what a button here did. A call ringing or ending is
+           spoken by the announcer instead, so it is said only once; while announcements are off,
+           this line says it, because a ringing call must reach somebody either way. -->
+      <p id="callme-state" role="status" aria-live="polite" aria-atomic="true">Reading the unit...</p>
+      <p id="callme-fader-note" class="note" role="note" hidden></p>
+
+      <!-- FIRST, because it is the one thing on this page with a deadline: an unanswered call
+           stops ringing after two minutes. TWO BUTTONS, and the second one's label follows the
+           state (Decline while ringing, Hang up otherwise), the same pattern as the Recording
+           page's transport. Both stay in the tab order when they cannot act and say why when
+           pressed. -->
+      <h2 id="callme-h-call">Call</h2>
+      <div>
+        <p id="callme-now">Reading the unit...</p>
+        <p>
+          <button type="button" id="callme-answer">Answer</button>
+          <button type="button" class="secondary" id="callme-end">Hang up</button>
+        </p>
+        <!-- The technical side of a connected call, after the buttons so it is there to find and
+             never in the way. Empty and hidden with no call up. -->
+        <ul id="callme-details" aria-label="Call details" hidden></ul>
+      </div>
+
+      <h2 id="callme-h-dial">Call a RODECaster</h2>
+      <!-- A FORM, so Enter in the code box places the call the way it would anywhere else. -->
+      <form id="callme-dial-form" novalidate>
+        <div class="field">
+          <label for="callme-dial-code">Their CallMe code</label>
+          <input type="text" id="callme-dial-code" autocomplete="off" spellcheck="false"
+                 aria-describedby="callme-dial-hint">
+        </div>
+        <p class="hint" id="callme-dial-hint">
+          The code on their unit's CallMe screen. A guest link they have sent you works too.
+        </p>
+        <p>
+          <button type="submit" id="callme-dial">Call</button>
+        </p>
+      </form>
+
+      <h2 id="callme-h-hosting">Letting guests call in</h2>
+      <div>
+        <p class="field">
+          <label class="switch">
+            <input type="checkbox" id="callme-hosting" aria-describedby="callme-hosting-hint">
+            <span>Accept incoming calls</span>
+          </label>
+        </p>
+        <p class="hint" id="callme-hosting-hint">
+          Each time this is switched back on the unit gets a new code, and a guest link you have
+          already shared stops working.
+        </p>
+        <div class="field">
+          <label for="callme-code">Your CallMe code</label>
+          <input type="text" id="callme-code" readonly aria-describedby="callme-code-hint">
+        </div>
+        <p class="hint" id="callme-code-hint">
+          Someone with a RODECaster calls you by entering this code.
+        </p>
+        <div class="field">
+          <label for="callme-link">Guest link</label>
+          <input type="text" id="callme-link" readonly aria-describedby="callme-link-hint">
+        </div>
+        <p class="hint" id="callme-link-hint">
+          Anyone else opens this link in a web browser, types their name and allows the
+          microphone. Nothing needs installing.
+        </p>
+        <p>
+          <button type="button" class="secondary" id="callme-copy">Copy the guest link</button>
+        </p>
+      </div>
+
+      <h2 id="callme-h-plan">Your plan</h2>
+      <div>
+        <ul id="callme-plan" aria-labelledby="callme-h-plan">
+          <li>Reading the unit...</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- HELP & ABOUT (Alt+8) IS IN static/help.html AND IS SPLICED IN HERE by page.render_index.
          Server-side rather than fetched by the browser on purpose: this page's h1 is the route's
          focus target and buildStaticTabs reads its panes at startup, so a fetch would race both.
          What the browser receives is identical to having the section written out below. -->

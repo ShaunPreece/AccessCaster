@@ -901,7 +901,7 @@ async function loadOverview() {
    page answers "tell me everything", and its fader levels alone are nine clauses; this answers "is
    anything up?", which is the only question worth asking before you have started work. So the
    reference facts - every fader position, the monitor level, the pad bank - are left out here and
-   stay one Alt+6 away.
+   stay one Alt+7 away.
    Silent when the desk is not connected: the header's own live region has already said so, and
    saying it twice in two wordings is worse than saying it once. */
 function summariseOverview(d) {
@@ -8167,6 +8167,198 @@ function wireAutoGain() {
 /* Sections are permanent DOM; routing flips the `hidden` attribute and moves
    focus to the visible section's H1. A section's onShow runs EVERY time it is
    entered (see render), so what you read is the unit's state right now. */
+/* ---- CallMe ----------------------------------------------------------------
+   Entering the page reads the unit once and leaves a cheap poll running; the poll costs no device
+   read, because the server's CallMe listener hears every change as the unit pushes it. Every
+   sentence on the page comes from the server.
+
+   ONLY THE TEXT IS REDRAWN, never the controls, so a poll landing mid-keystroke cannot move focus.
+   The poll redraws only when the server's `version` moves, which during a call is once a second
+   (the call quality), so nothing here is a live region except the status line. */
+const CALLME_POLL_MS = 1000;
+let callmePoll = null;
+let callmeSeen = { version: null, incoming: null };
+
+async function loadCallme() {
+  setText("callme-state", "Reading the unit...");
+  let d;
+  try {
+    d = await (await fetch("/api/callme")).json();
+  } catch (e) {
+    setStatus("callme-state", "Could not reach the AccessCaster service.");
+    return;
+  }
+  if (!d.ok) {
+    setStatus("callme-state", d.message || "Could not read CallMe.");
+    return;
+  }
+  callmeSeen = { version: null, incoming: d.incoming ? d.incoming.id : null };
+  applyCallme(d);
+  setStatus("callme-state", d.status || "");
+  startCallmePoll();
+}
+
+function applyCallme(d) {
+  callmeSeen.version = d.version === undefined ? null : d.version;
+  const ringing = !!d.incoming;
+  const up = (d.slots || []).some((s) => s.state === "Active" || s.state === "Connecting");
+  setText("callme-now", d.now || "");
+  setAvailable(document.getElementById("callme-answer"), ringing, "No call is ringing.");
+  // THE LABEL IS THE BUTTON'S ONLY NAME, so it is set every time and never left empty.
+  const end = document.getElementById("callme-end");
+  if (end) {
+    end.textContent = d.end_label || "Hang up";
+    setAvailable(end, ringing || up, "There is no call to end.");
+  }
+  const details = (d.details || []).map((x) => x.label + ": " + x.value + ".");
+  fillCallmeList("callme-details", details);
+  const box = document.getElementById("callme-details");
+  if (box) box.hidden = details.length === 0;
+
+  const host = document.getElementById("callme-hosting");
+  if (host && document.activeElement !== host) host.checked = !!d.hosting;
+  setAvailable(host, !d.hosting_locked, "Hosting cannot be changed while a call is up.");
+  const code = document.getElementById("callme-code");
+  if (code) code.value = d.code || "";
+  const link = document.getElementById("callme-link");
+  if (link) link.value = d.link || "";
+  setAvailable(document.getElementById("callme-copy"), !!d.link,
+               "There is no guest link while hosting is off.");
+
+  fillCallmeList("callme-plan", (d.plan || []).map((p) => p.label + ": " + p.value + "."));
+  const note = document.getElementById("callme-fader-note");
+  if (note) {
+    note.textContent = d.fader_note || "";
+    note.hidden = !d.fader_note;
+  }
+}
+
+/* Redraw a list's items only when one has changed, so a reader part way down it is not pulled
+   back to the start by an identical rebuild once a second. */
+function fillCallmeList(id, texts) {
+  const list = document.getElementById(id);
+  if (!list) return;
+  const now = Array.from(list.children).map((li) => li.textContent);
+  if (now.join("\n") === texts.join("\n")) return;
+  list.replaceChildren(...texts.map((t) => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    return li;
+  }));
+}
+
+function startCallmePoll() {
+  stopCallmePoll();
+  callmePoll = window.setInterval(pollCallme, CALLME_POLL_MS);
+}
+
+function stopCallmePoll() {
+  if (callmePoll !== null) {
+    window.clearInterval(callmePoll);
+    callmePoll = null;
+  }
+}
+
+async function pollCallme() {
+  let d;
+  try {
+    d = await (await fetch("/api/callme/live")).json();
+  } catch (e) {
+    return;                       // a dropped poll is not worth saying anything about
+  }
+  if (!d.ok || d.version === callmeSeen.version) return;
+  const ringing = d.incoming ? d.incoming.id : null;
+  // A new call, said here only when the announcer is not saying it.
+  if (ringing !== null && ringing !== callmeSeen.incoming && !d.announcing) {
+    setStatus("callme-state", d.incoming.name + " is calling.");
+  }
+  callmeSeen.incoming = ringing;
+  applyCallme(d);
+}
+
+async function onCallmeRespond(btn, path, body) {
+  if (isBusy(btn)) return;
+  const why = unavailableReason(btn);
+  if (why !== null) {
+    setStatus("callme-state", why);
+    return;
+  }
+  setBusy(btn, true);
+  setStatus("callme-state", "Please wait.");
+  let res;
+  try {
+    res = await postJSON(path, body || {});
+  } catch (e) {
+    res = { ok: false, message: "Could not reach the AccessCaster service." };
+  }
+  setBusy(btn, false);
+  setStatus("callme-state", res.message || "Done.");
+  // Busy cleared the button's unavailable mark too, so redraw whatever the version says.
+  callmeSeen.version = null;
+  pollCallme();
+}
+
+async function onCallmeHosting(input) {
+  const why = unavailableReason(input);
+  if (why !== null) {
+    input.checked = !input.checked;
+    setStatus("callme-state", why);
+    return;
+  }
+  const wanted = input.checked;
+  setStatus("callme-state", wanted ? "Switching hosting on, please wait."
+                                   : "Switching hosting off, please wait.");
+  let res;
+  try {
+    res = await postJSON("/api/callme/hosting", { on: wanted });
+  } catch (e) {
+    res = { ok: false, message: "Could not reach the AccessCaster service." };
+  }
+  if (res.slots) applyCallme(res);
+  else input.checked = !wanted;
+  setStatus("callme-state", res.message || "Done.");
+}
+
+function wireCallme() {
+  const answer = document.getElementById("callme-answer");
+  const end = document.getElementById("callme-end");
+  const host = document.getElementById("callme-hosting");
+  const copy = document.getElementById("callme-copy");
+  if (answer) answer.addEventListener("click", () => onCallmeRespond(answer, "/api/callme/answer"));
+  // Decline or hang up, decided by the server at the moment of the press rather than by the
+  // label, so a call that started ringing a moment ago is declined, not the guest you are with.
+  if (end) end.addEventListener("click", () => onCallmeRespond(end, "/api/callme/end"));
+  const dialForm = document.getElementById("callme-dial-form");
+  if (dialForm) {
+    dialForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const code = (document.getElementById("callme-dial-code") || {}).value || "";
+      onCallmeRespond(document.getElementById("callme-dial"), "/api/callme/dial", { code: code });
+    });
+  }
+  if (host) host.addEventListener("change", () => onCallmeHosting(host));
+  if (copy) {
+    copy.addEventListener("click", async () => {
+      const why = unavailableReason(copy);
+      if (why !== null) {
+        setStatus("callme-state", why);
+        return;
+      }
+      const box = document.getElementById("callme-link");
+      // SELECTED EITHER WAY: the clipboard can be refused over plain HTTP, and then Control C on
+      // the selected text is the route.
+      box.focus();
+      box.select();
+      try {
+        await navigator.clipboard.writeText(box.value);
+        setStatus("callme-state", "The guest link is on the clipboard.");
+      } catch (err) {
+        setStatus("callme-state", "The link is selected. Press Control C to copy it.");
+      }
+    });
+  }
+}
+
 const ROUTES = {
   // The Device page reads PER TAB (see readDevice): each tab's read is a device dump, and taking all
   // five of them on entry would slow the page the app opens on for things nobody is looking at.
@@ -8183,6 +8375,9 @@ const ROUTES = {
   // poll running for the state alone; leaving it stops the poll. See loadRecording.
   recording:  { title: "Recording",          section: "sec-recording",
                 onShow: () => loadRecording() },
+  // Read once on entry, then the free poll while the page is open. See loadCallme.
+  callme:     { title: "CallMe",             section: "sec-callme",
+                onShow: () => loadCallme() },
   about:      { title: "Help & About",       section: "sec-about" },
 };
 // CHANNELS, NOT DEVICE. Opening on Device to get its entry read to speak the desk's state makes
@@ -8210,6 +8405,7 @@ function render(route, focusTo = "heading") {
   // The recording-state poll belongs to its page. It costs no device read, but a timer that
   // outlives the page it updates is how a stale value gets announced from somewhere else.
   if (activeSection !== "sec-recording") stopRecordingPoll();
+  if (activeSection !== "sec-callme") stopCallmePoll();
   new Set(Object.values(ROUTES).map((r) => r.section)).forEach((id) => {
     const sec = document.getElementById(id);
     if (sec) sec.hidden = (id !== activeSection);
@@ -8278,12 +8474,12 @@ function isTextEntry(t) {
 /* Alt+digit jumps to a nav destination. Matches e.code (physical key) so it
    survives Mac Option remapping, and ignores presses inside text fields only. */
 function bindShortcuts() {
-  // Must match the aria-keyshortcuts in index.html, and the nav order. The ordering is by how often
-  // a page is worked in: Recording is 4, ahead of Profiles, and the three pages you visit
-  // deliberately (Profiles, Device, About) are the last three. The numbers follow the list.
+  // Must match the aria-keyshortcuts in index.html, and the nav order. The pages worked in during a
+  // session come first, and the three you visit deliberately (Backups, Device, Help & About) are
+  // the last three. The numbers follow the list.
   const map = {
-    Digit1: "channels", Digit2: "routing", Digit3: "pads",
-    Digit4: "recording", Digit5: "profiles", Digit6: "status", Digit7: "about",
+    Digit1: "channels", Digit2: "routing", Digit3: "pads", Digit4: "recording",
+    Digit5: "callme", Digit6: "profiles", Digit7: "status", Digit8: "about",
   };
   document.addEventListener("keydown", (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -8592,6 +8788,7 @@ async function init() {
   document.getElementById("announce-devices-refresh")
           .addEventListener("click", onAnnounceDevicesRefresh);
   wireAccess();         // the remote-access link on Device > Hardware
+  wireCallme();         // the CallMe page's buttons, hosting switch and copy
   wireHotkeys();        // the shortcut chooser, its editor, and the Add / Delete dialogs
   document.getElementById("dev-state-btn").addEventListener("click", loadDeviceState);
   // Network: the three writable controls (see the netPost block).

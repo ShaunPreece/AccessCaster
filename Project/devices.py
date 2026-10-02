@@ -1051,10 +1051,12 @@ PRO2 = DeviceModel(
     # all ten showControl* properties, so a two-byte selector cannot land a factory reset on an
     # unknown block. What a Duo here has no route to is the EXPORT TARGET, its storage volumes
     # reading empty with nothing inserted.
+    # "callme": hosting and answering a CallMe call, on the SIPCALLING node found by walking the
+    # tree. Heard both ways on a Pro II with a browser guest; never tried on a Duo.
     caps=frozenset({"input_mic_write", "matrix_read", "matrix_write", "processing",
                     "channel_read", "output_write", "pad_write", "fader_write", "chain_follow",
                     "level_write", "unit_settings", "recorder", "network_write", "shows",
-                    "stereo_link"}),
+                    "stereo_link", "callme"}),
     proc_sel_base=0x1C,
     fx_sel_base=0x26,
     ui_channels=PRO2_UI_CHANNELS,

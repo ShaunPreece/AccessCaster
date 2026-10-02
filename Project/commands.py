@@ -39,7 +39,8 @@ LEVEL_STEP = 5
 
 # The order categories appear in. The add dialog offers a category first, because the catalogue runs
 # to well over a hundred entries on a full desk and one flat list of that is unusable by ear.
-CATEGORIES = ["App", "Channels", "Levels", "Recording", "Pads", "Outputs", "Mixes", "Unit"]
+CATEGORIES = ["App", "Channels", "Levels", "Recording", "CallMe", "Pads", "Outputs", "Mixes",
+              "Unit"]
 
 
 def _cmd(cid, category, label):
@@ -72,6 +73,7 @@ def catalogue(include_device: bool = True) -> list:
     out += _channel_commands()
     out += _level_commands()
     out += _recording_commands()
+    out += _callme_commands()
     out += _output_commands()
     out += _unit_commands()
     out += _scheme_commands()
@@ -295,6 +297,39 @@ def _run_rec(arg: str) -> str:
 
 
 # ---------------------------------------------------------------------------------------------
+# CALLME: a call has to be answerable from whatever application has focus.
+# ---------------------------------------------------------------------------------------------
+
+def _callme_commands() -> list:
+    return [
+        _cmd("callme.answer", "CallMe", "Answer the CallMe call"),
+        _cmd("callme.decline", "CallMe", "Decline the CallMe call"),
+        _cmd("callme.hangup", "CallMe", "Hang up the CallMe call"),
+        _cmd("callme.end", "CallMe", "Decline the ringing CallMe call, or else hang up"),
+        _cmd("callme.status", "CallMe", "Say who is calling and who is connected"),
+        _cmd("callme.hosting", "CallMe", "CallMe hosting on or off"),
+    ]
+
+
+def _run_callme(arg: str) -> str:
+    import server
+    if arg == "answer":
+        return server.action_callme_answer().get("message", "")
+    if arg == "decline":
+        return server.action_callme_decline().get("message", "")
+    if arg == "hangup":
+        return server.action_callme_hangup().get("message", "")
+    if arg == "end":
+        return server.action_callme_end().get("message", "")
+    if arg == "status":
+        return server.callme_status_sentence()
+    if arg == "hosting":
+        now, _path = server._callme_state_now()
+        return server.action_callme_hosting(not now.get("hosting")).get("message", "")
+    return f"Unknown CallMe command {arg}."
+
+
+# ---------------------------------------------------------------------------------------------
 # OUTPUTS
 # ---------------------------------------------------------------------------------------------
 
@@ -481,6 +516,7 @@ _DISPATCH = {
     "chan": _run_chan,
     "level": _run_level,
     "rec": _run_rec,
+    "callme": _run_callme,
     "out": _run_out,
     "unit": _run_unit,
     "scheme": _run_scheme,

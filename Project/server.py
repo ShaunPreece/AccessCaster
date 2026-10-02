@@ -63,6 +63,7 @@ import virtual_devices          # RODE's Virtual Device Driver: its state, and s
 import driver_install           # fetching that driver from RODE: the app's ONLY outbound call
 import autogain                # sets a mic's gain by measuring it
 import recorder                 # the transport: start/pause/stop, storage volumes, recordings
+import callme                   # RODE's remote guests: hosting, answering, call state
 import shows                    # the DESK'S own backup: export/import/factory reset (not profiles)
 import tones                    # the announcer's non-speech cues (the mute tones), generated WAVs
 import hotkeys                  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
@@ -826,6 +827,336 @@ def action_delete_recording(uid: int) -> dict:
     return {"ok": True, "recorder": info,
             "message": (f"Deleted {target['name']}, {target['duration']}. "
                         f"{len(info.get('recordings') or [])} recordings left on the unit.")}
+
+
+# ----------------------------------------------------------------------------
+# CALLME - RODE's remote guests: hosting, answering and call state.
+#
+# The protocol and the wording are callme.py; this is the app side. Like the recorder, the state
+# comes from a PUSH heard by its own Watcher, so `/api/callme/live` costs no device read and the
+# page can poll it, while `/api/callme` does a dump and re-seeds the Watcher.
+
+_callme_watch = None
+# How long an answer is given to reach Active before the reply goes out without it. Measured at
+# about 1.3 s from the write.
+_CALLME_ANSWER_WAIT_S = 4.0
+
+
+def _callme_watcher():
+    """The running Watcher, started on first use, or None if it could not be started."""
+    global _callme_watch
+    if _callme_watch is None:
+        try:
+            w = callme.Watcher(on_say=_ann_say, read_model=_callme_dump)
+            w.start()
+            _callme_watch = w
+        except Exception:
+            return None
+    return _callme_watch
+
+
+def _callme_gate():
+    return _cap_gate("callme", lambda name:
+                     f"AccessCaster can show CallMe on the {name} but not answer calls or change "
+                     f"hosting: that has only been confirmed on a RODECaster Pro 2.")
+
+
+def _callme_dump() -> bytes:
+    with _hid_lock:
+        return rcp_read.read_model()
+
+
+def _callme_note_dump(blob: bytes) -> None:
+    """Re-seed the Watcher from a dump this app has just taken."""
+    w = _callme_watcher()
+    if w is not None:
+        w.seed(blob)
+
+
+def _callme_payload(d: dict) -> dict:
+    """The page's reply: the state, plus the sentences the page shows, all worded here."""
+    d = dict(d)
+    d["announcing"] = _announce_on.is_set()
+    d["plan"] = [{"label": k, "value": v} for k, v in callme.plan_lines(d)]
+    d["now"] = callme.call_now(d)
+    d["details"] = [{"label": k, "value": v} for k, v in callme.call_details(d)]
+    d["end_label"] = callme.end_label(d)
+    d["status"] = callme.status_sentence(d)
+    d["fader_note"] = ("No fader carries CallMe 1, so a call can be answered but you will not hear "
+                       "the guest. Put CallMe 1 on a fader on Routing, Alt plus 2, under Faders."
+                       if d.get("on_fader") is False else "")
+    return d
+
+
+def read_callme() -> dict:
+    """The whole CallMe page from one dump, which also re-seeds the Watcher."""
+    try:
+        blob = _callme_dump()
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+    d = callme.read(blob)
+    if not d.get("ok"):
+        return d
+    _callme_note_dump(blob)
+    return _callme_payload(d)
+
+
+def read_callme_live() -> dict:
+    """The cheap one, from the Watcher alone: no device read. `version` changes whenever anything
+    the page shows has changed, so the page redraws only then."""
+    w = _callme_watcher()
+    snap = w.snapshot() if w is not None else None
+    if snap is None:
+        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+    return _callme_payload(snap)
+
+
+def _callme_state_now():
+    """(state, control path) from the Watcher once it is seeded, else from a fresh dump. A hotkey
+    answer should not wait a second and a half for a dump the Watcher makes unnecessary."""
+    w = _callme_watcher()
+    snap = w.snapshot() if w is not None else None
+    if snap is not None and w.control_path() is not None:
+        return snap, w.control_path()
+    blob = _callme_dump()
+    _callme_note_dump(blob)
+    return callme.read(blob), callme.paths(blob)[0]
+
+
+def action_callme_hosting(on: bool) -> dict:
+    """Switch call hosting, then wait for RODE's service to issue the code before saying so."""
+    gate = _callme_gate()
+    if gate is not None:
+        return gate
+    on = bool(on)
+    try:
+        d, path = _callme_state_now()
+        if path is None:
+            return {"ok": False, "message": "This unit does not publish CallMe."}
+        if d.get("hosting_locked"):
+            return {"ok": False, "message": "Hosting cannot be changed while a call is up."}
+        with _hid_lock:
+            rcp_transfer.send_record(callme.build_hosting(on, path))
+            # The code comes from RODE's service over the network, about a second after the switch.
+            deadline = time.time() + (6.0 if on else 2.0)
+            while True:
+                time.sleep(1.0)
+                blob = rcp_read.read_model_stable(fresh=True)
+                d = callme.read(blob)
+                settled = d.get("hosting") == on and (not on or d.get("code"))
+                if settled or time.time() > deadline:
+                    break
+        _callme_note_dump(blob)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not change hosting: {exc}"}
+    out = _callme_payload(d)
+    if d.get("hosting") != on:
+        out.update(ok=False, message="The unit did not take that: hosting is still "
+                                     + ("on." if d.get("hosting") else "off."))
+    elif not on:
+        out.update(ok=True, message="Hosting is off. Nobody can call in.")
+    elif d.get("code"):
+        out.update(ok=True, message=(f"Hosting is on. Your CallMe code is "
+                                     f"{callme.spell(d['code'])}."))
+    else:
+        out.update(ok=True, message="Hosting is on, but RODE's service has not sent a code yet. "
+                                    "Check the unit is online.")
+    return out
+
+
+def _callme_respond(answer: bool) -> dict:
+    """Answer the ringing call into the first free slot, or decline it."""
+    gate = _callme_gate()
+    if gate is not None:
+        return gate
+    try:
+        d, path = _callme_state_now()
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+    call = d.get("incoming")
+    if not call:
+        return {"ok": False, "message": "No CallMe call is ringing."}
+    if path is None:
+        return {"ok": False, "message": "This unit does not publish CallMe."}
+    slot = -1
+    if answer:
+        free = [s["slot"] - 1 for s in d.get("slots", []) if s.get("state") == "Idle"]
+        if not free:
+            return {"ok": False, "message": callme.sentence(
+                f"{call['name']} is calling, but every call this plan allows is already in use.")}
+        slot = free[0]
+    w = _callme_watcher()
+    if w is not None:
+        w.note_handled(call["id"])
+        if answer:
+            w.quiet_connect(slot, True)
+    try:
+        with _hid_lock:
+            rcp_transfer.send_record(callme.build_answer(call["id"], slot, path))
+    except Exception as exc:
+        if w is not None and answer:
+            w.quiet_connect(slot, False)
+        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+    if not answer:
+        return {"ok": True, "message": f"Declined the call from {call['name']}."}
+    # WAIT FOR THE CALL TO GO ACTIVE, which is the only honest confirmation: a write the unit
+    # stores and ignores looks exactly like one that worked, and so does a call whose audio never
+    # opens until it fails a minute later.
+    deadline = time.time() + _CALLME_ANSWER_WAIT_S
+    state = None
+    while time.time() < deadline and w is not None:
+        time.sleep(0.25)
+        snap = w.snapshot() or {}
+        state = next((s.get("state") for s in snap.get("slots", [])
+                      if s.get("slot") == slot + 1), None)
+        if state == "Active":
+            msg = f"Connected to {call['name']}."
+            if snap.get("on_fader") is False:
+                msg += " No fader carries CallMe 1, so you will not hear them until one does."
+            return {"ok": True, "message": msg}
+    if w is not None:
+        w.quiet_connect(slot, False)
+    if state == "Connecting":
+        return {"ok": True, "message": f"Answered {call['name']}. Still connecting."}
+    return {"ok": False, "message": (f"Sent the answer for {call['name']}'s call, but the unit has "
+                                     f"not started it.")}
+
+
+def action_callme_hangup(slot: int = 0) -> dict:
+    """End a call. `slot` is the call's number, 1 to 3, or 0 for "the one call that is up"."""
+    gate = _callme_gate()
+    if gate is not None:
+        return gate
+    w = _callme_watcher()
+    snap = w.snapshot() if w is not None else None
+    if snap is None:
+        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+    up = [s for s in snap.get("slots", []) if s.get("state") in ("Active", "Connecting")]
+    if slot:
+        up = [s for s in up if s.get("slot") == int(slot)]
+    if not up:
+        return {"ok": False, "message": "No CallMe call is up."}
+    if len(up) > 1:
+        return {"ok": False, "message": "More than one call is up, so say which one to end."}
+    target = up[0]
+    i = target["slot"] - 1
+    path = w.slot_path(i)
+    if path is None:
+        return {"ok": False, "message": "This unit does not publish that call."}
+    who = target.get("peer") or "the guest"
+    w.quiet_end(i, True)
+    try:
+        with _hid_lock:
+            for rec in callme.build_hangup(path):
+                rcp_transfer.send_record(rec)
+                time.sleep(0.15)
+    except Exception as exc:
+        w.quiet_end(i, False)
+        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+    deadline = time.time() + _CALLME_ANSWER_WAIT_S
+    while time.time() < deadline:
+        time.sleep(0.25)
+        snap = w.snapshot() or {}
+        state = next((s.get("state") for s in snap.get("slots", [])
+                      if s.get("slot") == target["slot"]), None)
+        if state == "Idle":
+            return {"ok": True, "message": f"Hung up on {who}."}
+    w.quiet_end(i, False)
+    return {"ok": False, "message": f"Sent the hang-up, but the call with {who} is still up."}
+
+
+# How long a dial is given to show it is ringing or has failed. A wrong code fails in 0.4 s.
+_CALLME_DIAL_WAIT_S = 3.0
+
+
+def action_callme_dial(code: str) -> dict:
+    """Call another RODECaster by its code. Replies once the call is RINGING, or with why it is
+    not; whether it connects comes later, from the Watcher, because the other end may take up to
+    two minutes to answer."""
+    gate = _callme_gate()
+    if gate is not None:
+        return gate
+    code = callme.normalise_code(code)
+    if not code:
+        return {"ok": False, "message": "Type the other unit's CallMe code, letters and numbers "
+                                        "only."}
+    try:
+        d, path = _callme_state_now()
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+    if path is None:
+        return {"ok": False, "message": "This unit does not publish CallMe."}
+    if code == (d.get("code") or ""):
+        return {"ok": False, "message": "That is this unit's own code."}
+    if d.get("incoming"):
+        return {"ok": False, "message": callme.sentence(
+            f"{d['incoming']['name']} is calling you. Answer or decline that first.")}
+    free = [s for s in d.get("slots", []) if s.get("state") == "Idle"]
+    if not free:
+        return {"ok": False, "message": "Every call this plan allows is already in use. Hang up "
+                                        "first."}
+    slot = free[0]
+    i = slot["slot"] - 1
+    who = callme.peer_name(callme.RODE_PREFIX + code)
+    w = _callme_watcher()
+    # A failure inside the wait is said by this reply, so the Watcher is kept from saying it too.
+    w.quiet_end(i, True)
+    try:
+        with _hid_lock:
+            for rec in callme.build_dial(code, i, path):
+                rcp_transfer.send_record(rec)
+                time.sleep(0.15)
+    except Exception as exc:
+        w.quiet_end(i, False)
+        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+    ended_before = slot.get("ended", 0)
+    started = time.time()
+    while time.time() - started < _CALLME_DIAL_WAIT_S:
+        time.sleep(0.1)
+        s = next((x for x in (w.snapshot() or {}).get("slots", [])
+                  if x.get("slot") == slot["slot"]), {})
+        if s.get("ended", 0) > ended_before:
+            return {"ok": False, "message": (f"Could not call {who}: "
+                                             f"{callme.end_reason(s.get('reason'))}.")}
+        # An unknown code goes through Connecting before it fails, so Connecting only counts as
+        # ringing once it has lasted a second.
+        if s.get("state") in ("Connecting", "Active") and time.time() - started >= 1.0:
+            w.quiet_end(i, False)
+            return {"ok": True, "message": f"Calling {who}."}
+    w.quiet_end(i, False)
+    return {"ok": False, "message": f"Sent the call to {who}, but the unit has not started it."}
+
+
+def action_callme_end() -> dict:
+    """Decline the call that is ringing, or else hang up the one that is up. A ringing call comes
+    first, so a second call arriving mid-conversation is turned away rather than the guest you are
+    talking to being cut off."""
+    w = _callme_watcher()
+    snap = (w.snapshot() if w is not None else None) or {}
+    if snap.get("incoming"):
+        return action_callme_decline()
+    if any(s.get("state") in ("Active", "Connecting") for s in snap.get("slots", [])):
+        return action_callme_hangup()
+    return {"ok": False, "message": "No CallMe call to end."}
+
+
+def action_callme_answer() -> dict:
+    return _callme_respond(True)
+
+
+def action_callme_decline() -> dict:
+    return _callme_respond(False)
+
+
+def callme_status_sentence() -> str:
+    """For the status shortcut: from the Watcher, falling back to a dump."""
+    try:
+        d, _path = _callme_state_now()
+    except Exception as exc:
+        return f"Could not read CallMe: {exc}"
+    if not d.get("ok", True):
+        return d.get("message") or "CallMe could not be read."
+    return callme.status_sentence(d)
 
 
 # ----------------------------------------------------------------------------
@@ -9981,6 +10312,8 @@ def _hotkey_defaults() -> list:
         ("rec.toggle", hotkeys.DEFAULT_MODS, "R", True),
         ("app.state", hotkeys.DEFAULT_MODS, "S", True),
         ("app.window", hotkeys.DEFAULT_MODS, "O", True),
+        ("callme.answer", hotkeys.DEFAULT_MODS, "C", True),
+        ("callme.end", hotkeys.DEFAULT_MODS, "D", True),
     ] + _pad_hotkey_scheme()
 
 # THE FIRST FORMAT, kept only to carry an existing settings file across. Version one bound a fixed
@@ -10374,6 +10707,8 @@ GET_ROUTES = {
     # from the push listener with no device read at all, so a page can poll THAT.
     "/api/recorder": read_recorder,
     "/api/recorder/live": read_recorder_live,
+    "/api/callme": read_callme,
+    "/api/callme/live": read_callme_live,
     "/api/channels/autogain/status": autogain_status,
     "/api/channels/level-check/status": channel_level_check_status,
     "/api/hotkeys": hotkey_state,
@@ -10423,6 +10758,12 @@ POST_ROUTES = {
     "/api/meters/input-mute": (action_set_input_mute, [(bool, "on", None)]),
     "/api/recorder/format": (action_set_recording_format, [(int, "value", -1)]),
     "/api/recorder/command": (action_record, [(str, "command", "")]),
+    "/api/callme/hosting": (action_callme_hosting, [(bool, "on", None)]),
+    "/api/callme/answer": (action_callme_answer, []),
+    "/api/callme/decline": (action_callme_decline, []),
+    "/api/callme/hangup": (action_callme_hangup, [(int, "slot", 0)]),
+    "/api/callme/end": (action_callme_end, []),
+    "/api/callme/dial": (action_callme_dial, [(str, "code", "")]),
     "/api/recorder/marker": (action_drop_marker, []),
     "/api/recorder/delete": (action_delete_recording, [(int, "uid", -1)]),
     "/api/channels/autogain": (action_autogain_start,
@@ -11200,6 +11541,9 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
     # Recording page free to poll, and it is how a press of the unit's own REC button is noticed.
     # Read-only, its own handle, and idle unless the recorder changes state.
     _recorder_watcher()
+    # The CallMe listener, for the same reasons: a call rings whatever page is open, and it has to
+    # be heard whether or not anyone is announcing. It seeds itself from a dump once it opens.
+    _callme_watcher()
     # Best-effort live read at startup so the first page load shows real state.
     try:
         seed = read_live_settings()

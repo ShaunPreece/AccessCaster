@@ -1290,6 +1290,41 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
   Thread-scoped on purpose: never swap it for process-wide `SetErrorMode`.
 
+## CallMe
+
+- **AN ANSWER IS A COMPOSITE WITH A FALSE BOOL, AND THE BOOL DECIDES WHETHER THE AUDIO OPENS.**
+  `sipIncomingCallAccept` takes `{"id":<id>,"sip_slot":<slot>}` plus a bool, the shape the
+  touchscreen writes. The string alone is stored and ignored; with a TRUE bool the slot goes
+  Connecting and fails 60 s later as "rtp stream error", which looks exactly like a network fault.
+  Slot -1 declines. Byte form in section 8.2 of the protocol spec.
+- **A HANG-UP IS AN EDGE, NOT A VALUE.** `sipSlotCallDisconnect` ends the call when its first
+  bool rises from False to True, so `callme.build_hangup` sends (False, False) then (True, False).
+  Sending only the second does nothing whenever the slot already holds it, which is its resting
+  value, so a one-write version passes the first test and fails every call after.
+- **CallMe has its own Watcher on its own handle, not a branch of the announcer**, because the
+  announcer thread stops when announcements are off and a call still has to be tracked and
+  answerable. Its speech goes through `_ann_say`, which is where the switch is enforced.
+- **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
+  `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
+  then times out with no clue why. `callme.build_dial` writes the factory empty string first.
+  Answering never meets this because every call has a new id.
+- **A dial reports ringing only after a second of Connecting.** An unknown code passes through
+  Connecting before it fails 0.4 s later, so the first Connecting push is not proof the call is
+  ringing. Each slot's `ended` count, bumped by the Watcher, is how the reply tells a NEW failure
+  from the reason the previous call left behind.
+- **Refuse a dial to this unit's own code**: it rings this desk, and on Lite the one slot is already
+  busy dialling, so it can never be answered.
+- **The call id comes from the `sipIncomingCallDetails` push, never from a counter.** It rises by one
+  per call today, but nothing promises that.
+- **Both calls that went Active had CallMe 1 (source code 16) on a fader**, so whether a call
+  connects with no CallMe fader is unmeasured. The TRUE-bool failure happened either way, so the
+  fader is not what decided that.
+- **Every off/on of `sipCallHostingEnabled` reissues `sipRodeCode`**, so a guest link shared before
+  it stops working. Do not toggle hosting as a way of refreshing state.
+- **`sipSlotCallState` is a bare "Idle" until a slot has carried a call, JSON after.** Parse both.
+- **Strings in `sipIncomingCallDetails` are UTF-8 and the model decoder reads latin-1**, so a default
+  guest name arrives as mojibake unless re-decoded.
+
 ## The desk pushes, and does not echo
 
 - **The desk pushes changes made ON the desk and does NOT echo our own writes.** Two consequences,
@@ -2397,8 +2432,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   RDP window closed there is no input desktop, so `keybd_event` injects nothing: registration still
   reports success, a posted WM_HOTKEY still dispatches, and only REAL presses do nothing. That cost
   an hour on 30th August 2026 and nearly caused a working rework to be rewritten. `query session`
-  first (the current session's line starts with ">"; "Disc" is the tell), and
-  `DevTools/test_hotkeys.py` now checks it and SKIPS the press-based checks rather than failing them.
+  first (the current session's line starts with ">"; "Disc" is the tell).
 - **`problem == ""` IS NOT PROOF A SHORTCUT IS REGISTERED.** It is also what an empty status dict
   says before `_apply_now` has ever run. When a press does nothing, do not read an empty problem as
   "registration is fine".
@@ -2557,27 +2591,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   stale map silently fires a stranger's voice effect onto a live mic.
 - **`hotkey_manager()` is LAZY.** Importing `server` must never register a system-wide hotkey: every
   DevTools script imports it. Only `_bring_up_server` asks, and never in headless mode.
-- **THE `test_hotkeys` PRESS FLAKE WAS `InstaAccess.exe`, SHAUN'S OWN WEBCAM CONTROLLER. SETTLED 2nd
-  SEPTEMBER 2026; DO NOT RE-DIAGNOSE IT.** For weeks the same checks failed intermittently - always
-  the ones that PRESS a key, never registration, which is the signature of a low-level keyboard hook
-  swallowing injected input. Closing that program gave three clean runs out of three against four
-  and three failures with it running. It is the same program that held Ctrl+Alt+Windows and the
-  digits. Ruled out along the way and not worth re-checking: a repo change (the same checks failed
-  on stashed code), a disconnected session, an unreachable input desktop, a stuck modifier.
-- **NOTHING THIS SUITE PRESSES MAY CARRY ALT OR THE WINDOWS KEY, and it must own the foreground
-  window before it presses at all.** `keybd_event` injects system-wide, so the keys reach whatever
-  is focused: a bare Alt release opens that application's MENU BAR and a bare Windows release opens
-  the Start menu. A sweep on 2nd September 2026 did exactly that, repeatedly, to the window Shaun
-  was reading. `parse_binding` only requires Ctrl, Alt OR Windows, so **Ctrl+Shift satisfies the
-  rule and opens nothing** - that is what everything pressed is on now. On top of that,
-  `own_the_keyboard()` puts up a visible window and CONFIRMS the foreground window belongs to this
-  process; when it cannot (Windows refuses SetForegroundWindow to a process the user has not
-  interacted with, and refuses silently) the press checks SKIP. **So a run launched from tooling
-  reports SKIP for them, and that is correct, not a regression** - run it with the desktop free to
-  exercise registration.
-- **SendInput injects NOTHING from an RDP session on this machine** (measured 30th August 2026: a
-  correctly formed 32-byte INPUT returns 0 with GetLastError 87). `DevTools/press_keys.py` uses
-  `keybd_event`, which fires the same hotkey every time. Do not "modernise" it.
+- **`test_hotkeys.py` PRESSES NO KEYS, AND MUST NOT AGAIN.** It fires shortcuts by posting
+  WM_HOTKEY to the pump. Injected presses proved only that Windows delivers a registered key, which
+  any real press shows, and a run killed between a press and its release left Ctrl and Shift held
+  down system-wide on the machine in use. `DevTools/press_keys.py` uses `keybd_event`, not
+  SendInput, which injects nothing from an RDP session here.
 - **Adding a Device tab breaks `ui_checks_device.js` in three places**, none of them obvious: the
   tab/title lists, the fixed string of pane headings, and the arrow-key debounce check, which counts
   presses to land on Unit settings (nine rights over seven tabs, not eight over six).

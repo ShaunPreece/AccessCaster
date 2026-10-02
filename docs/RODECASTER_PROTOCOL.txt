@@ -1328,6 +1328,69 @@ software replaces the operational controls directly, not by puppeteering the kno
   like an ignored second press. If you are timing pad presses, capture a
   timestamped stream and read it afterwards; do not measure in windows.
 
+8.2 CALLME: HOSTING, ANSWERING AND CALL STATE (Pro II, fw 1.7.6, 2nd October 2026)
+--------------------------------------------------------------------------------
+  Everything below was driven and heard on a Pro II on the free CallMe Lite tier,
+  with a phone browser as the guest. Addresses come off the live tree: the
+  SIPCALLING node is a root child (index 664 on this desk and firmware) and the
+  three call slots are the root children just before it (659 to 661 here), each
+  carrying its own sipSlot* set. Derive both from the dump; do not hardcode them.
+
+  HOSTING. sipCallHostingEnabled (bool, SIPCALLING) switches it. On, RODE's
+  service issues a six-character sipRodeCode within about a second and
+  sipRegistrationIsRegistered goes True. Off, the code empties; each off/on
+  issues a NEW code, so a shared link dies. The guest link is the touchscreen's
+  own template:  https://callme.rode.com/s?c=<sipRodeCode>
+  sipCallHostingToggleEnabled goes False while a call is up (the toggle locks).
+
+  AN INCOMING CALL is pushed as sipIncomingCallDetails, a COMPOSITE of a JSON
+  string and a bool:
+      {"id":5,"calltype":"rode","peeruri":"rode:<token>","peername":"Shaun"}, True
+  peername is UTF-8 ("RØDE-CallMe" when the guest typed no name). It clears to
+  ("", False) when the call is answered, declined, or after 120 s unanswered.
+
+  ANSWERING is one write to sipIncomingCallAccept, a COMPOSITE of a JSON string
+  and a FALSE bool, exactly as the touchscreen writes it:
+      01 1d 08  01 17 05 {"id":5,"sip_slot":0} 00  01 01 03
+  sip_slot is the call slot, 0 to 2; -1 DECLINES. Both halves matter:
+    - the string alone (type 05) is stored and never acted on;
+    - with a TRUE bool the call is set up (slot goes Connecting) but its audio
+      never opens, and 60 s later the slot reads Idle, "rtp stream error".
+  A correct answer goes Connecting -> Active in about 1.3 s. A CallMe channel on a
+  fader is NOT what decides this: the TRUE-bool failure happened with and without
+  CallMe 1 (source code 16) on a fader.
+
+  DIALLING another RODECaster is one write to sipOutgoingCallDetails (SIPCALLING),
+  the touchscreen's template as a COMPOSITE with a FALSE bool, like an answer:
+      {"dest":"rode:<code>","sip_slot":0}, False
+  THE DESK ACTS ONLY ON A CHANGE: a dial identical to the value already held is
+  stored and ignored, so a redial of the same code first writes the factory value,
+  a plain empty string (01 02 05 00), which starts nothing.
+  The slot goes Connecting at once with sipSlotCallAddress "rode:<code>". An unknown
+  code ends 0.4 s later as "404 Not Found"; a declined call as "486 Rejected".
+  Dialling your OWN code rings your own desk as an incoming call. Whether an
+  outgoing call reaches Active has not been seen yet: it needs a second desk.
+
+  HANGING UP is sipSlotCallDisconnect on the call's SLOT node, a COMPOSITE of two
+  bools. The desk ends the call when the FIRST bool RISES from False to True;
+  writing the value it already holds does nothing. So it is two writes:
+      01 07 08  01 01 03  01 01 03     (False, False): the call carries on
+      01 07 08  01 01 02  01 01 03     (True, False):  ended, reason "Local drop"
+  Measured on a live call: (True, True) over (True, True) and (False, True) over
+  (True, True) do nothing; (True, False) over (True, False) does nothing. A slot that
+  has never carried a call reads (True, False). The second bool's meaning is unknown.
+
+  CALL STATE, per slot: sipSlotCallState is "Idle" before any call, then JSON
+  {"state":"Connecting"|"Active"|"Idle","reason":"..."}. Reasons seen:
+  "Remote drop" (the guest hung up), "Local drop" (hung up here), "rtp stream
+  error" (above). Our own decline (sip_slot -1) clears the ringing call at once. Alongside it:
+  sipSlotCallAddress (the peer name), sipSlotCallUUID, sipSlotCallMode,
+  sipSlotCallIsHost. While Active, sipSlotCallBitrate, sipSlotCallPacketLoss,
+  sipSlotCallJitter (floats) and sipSlotCallQuality (int) are pushed EVERY SECOND.
+  sipRemainingCalltime / sipRemainingWebCalltime (minutes, Lite: 600 / 300 a
+  month) are pushed as each minute of a call completes; a browser call takes one
+  from BOTH counters.
+
 ================================================================================
 9. WHAT IS NOT ON THE USB BUS (limits to be aware of)
 --------------------------------------------------------------------------------

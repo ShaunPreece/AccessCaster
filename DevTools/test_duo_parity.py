@@ -227,15 +227,17 @@ for cap in ("input_mic_write", "processing", "channel_read", "matrix_read", "mat
             "output_write", "pad_write", "fader_write", "unit_settings", "level_write",
             "chain_follow", "stereo_link", "network_write", "recorder", "shows"):
     check(f"Duo cap {cap}", cap in devices.DUO.caps, True)
-# THE DUO CLAIMS EVERY CAP THE PRO II DOES, so there is deliberately no "stays OFF" list here.
+# THE DUO CLAIMS EVERY CAP THE PRO II DOES BUT ONE, and that one is listed here by name so a new
+# Pro II cap still cannot silently skip the Duo.
 # `recorder` and `shows` are on by the TREE-then-ENGINE route with the hardware missing: the
 # recorder CONSUMES a record request (255 -> 3) and SHOWCONTROL answers an impossible export with
 # error 8 in one second. Read the comments on both caps in devices.py before treating either as
 # witnessed - an engine answering proves an ADDRESS is live, never that a FEATURE works, and nobody
-# has made a recording or a show on a Duo. If a cap is ever turned back off, assert it here rather
-# than deleting the check.
-check("the Duo claims every cap the Pro II does",
-      sorted(devices.PRO2.caps - devices.DUO.caps), [])
+# has made a recording or a show on a Duo.
+# `callme` is OFF: no call has ever been hosted or answered on a Duo.
+DUO_CAPS_OFF = ["callme"]
+check("the Duo claims every cap the Pro II does, bar the ones named off",
+      sorted(devices.PRO2.caps - devices.DUO.caps), DUO_CAPS_OFF)
 # The Duo has ONE legal pair where the Pro II has three, and that is a property of the INPUTS, not
 # of how much has been proven: the Duo's third input is a HEADSET jack, so "2 + 3" and "3 + 4" are
 # not pairs anyone would want. A device claiming the cap with an EMPTY table still refuses

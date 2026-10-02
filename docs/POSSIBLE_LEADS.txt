@@ -189,19 +189,28 @@ The settings UI is a TOUCHSCREEN page, titled "CallMe Icecast" in rc_gui_juce, a
 desktop app does not offer it. Touch is not on the USB bus, so there is nothing to
 capture and no way to drive it from a host.
 
-Two things we could not settle, both needing something we do not have:
+ADDRESSING IT NEEDS NO SELECTOR. SIPADVANCED resolves as a root child of the live model
+tree, carrying icecastAddress, icecastConnect and icecastState on that one node, so a
+write is addressed by walking the tree for the property rather than by guessing a block
+selector. Derive the path from the dump in front of you; a child index read off someone
+else's firmware is not an address.
 
-  * SIPADVANCED has no confirmed write selector, and nothing may guess one (a wrong
-    selector appends a stray, which reads back like a real property, does nothing, and
-    clears only on a factory reset). The firmware's own name table puts SIPADVANCED
-    second from last, immediately before OAUTH, which is a route to deriving it - but
-    selectors count block INSTANCES, not block types, so table position alone is not
-    the answer.
-  * Whether Icecast needs a paid tier at all. The firmware carries three: "RODE CallMe
-    Lite" (the basic service, active on an unlicensed desk), "RODE CallMe", and "RODE
-    CallMe Pro", sold through account.rode.com. We found no gate on the Icecast page
-    specifically, and we have no licence to test with. If you hold one, the cheap test
-    is whether icecastConnect is accepted and what icecastState says afterwards.
+What is NOT settled is whether Icecast needs a paid tier. The firmware carries three:
+"RODE CallMe Lite" (free), "RODE CallMe" and "RODE CallMe Pro", sold through RODE's
+account portal. No gate was found on the Icecast page specifically. RODE's only public
+word on the feature is one line in the 1.7.4 release notes ("Added CALLME ICECAST
+functionality for sending audio to an ICECAST compatible media server"); their help
+centre and user guide do not mention it and their tier table lists it under no tier.
+The likeliest home is CallMe Pro, the tier with the integrated IP audio codec that
+began as Vortex's CallMe-RC, whose own announcement promised Shoutcast / Icecast to
+"your upgraded RODECaster" (checked 2nd October 2026). That is an inference, not
+RODE's statement. An
+unlicensed Pro 2 on 1.7.6 reads sipLicenceMode 0, sipLicenceCheck False and an empty
+sipLicenceRenewal, with the whole Icecast set at defaults and icecastState empty
+(measured 2nd October 2026), so those three are what a licence is expected to move.
+The cheap test, and it does NOT need a licence: set icecastAddress to any destination,
+trigger icecastConnect, and read icecastState. A refusal naming the licence settles it
+one way; a connection or lookup failure settles it the other.
 
 
 LEAD 10: which USB product ids are 0x0079 and 0x0095, and does pre-fader Expanded get Faders?

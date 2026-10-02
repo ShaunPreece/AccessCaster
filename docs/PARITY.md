@@ -158,8 +158,19 @@ it and must be checked against the app before it is believed.
 - A fader source changed on the desk
 - Anything latched I cannot see (pads, emergency mute, what the encoder did)
 
+## Remote guests (CallMe)
+
+- Call hosting on / off
+- The desk's CallMe code and guest link
+- An incoming call: who is calling
+- Answer / decline, into a chosen call slot
+- Call state per slot: connecting, active, ended and why
+- Live call quality: bitrate, packet loss, jitter
+- Remaining CallMe minutes, licence tier and renewal date
+- Call another RODECaster by its code
+- End a call
+
 ## Out of scope (Shaun's call)
 
-- Callers / SIP dialler / Quick Dial pads. The mix-minus a call needs is reachable through the
-  routing matrix instead, so the dialler itself is not a target.
+- SIP dialling (CallMe Pro only) and Quick Dial pads.
 - Desktop-app-only export and distribution presets.

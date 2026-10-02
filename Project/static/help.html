@@ -1,4 +1,4 @@
-﻿<!-- AccessCaster - the Help & About page (Alt+7).
+﻿<!-- AccessCaster - the Help & About page (Alt+8).
 
      A FRAGMENT, NOT A PAGE: no <html>, <head> or <body>. It is spliced into index.html where the
      INCLUDE marker sits, by page.render_index, which both server.py and DevTools/ui_probe.py serve
@@ -146,6 +146,7 @@
         <li>What this computer sends the unit: either as one stereo input, or split into four separate ones (Game, Music, A and B), each on its own fader, so music, a call, a game and your screen reader arrive as four channels instead of one and can be faded apart. Set it up with RODE's Virtual Devices driver installed and the app points Windows' sound output at the unit for you.</li>
         <li>Muting a whole output: the monitor speakers, or the Bluetooth send, plus the level a paired phone hears from the desk. None of these touch your mixes, your recording or your streams, only what somebody hears.</li>
         <li>The unit's own recorder: start, pause, resume and stop, drop a marker while you record, hear what it is doing and how long it has been going, read the list of what is already on the card or drive, and delete a recording you no longer want. What it records, a single mixed track or every channel on its own, is set here too, as is whether it saves a full-quality WAV or a smaller MP3.</li>
+        <li>CallMe guests: switch on hosting, read out the unit's code and copy the link a guest opens in their browser, hear who is calling, answer or decline from the page or from a keyboard shortcut in any program, call another RODECaster by its code, hang up, and hear when a call connects and ends. Call quality and the minutes left on your plan are on the page too. On a RODECaster Pro 2; the touchscreen is otherwise the only way to take a call.</li>
         <li>How the unit's clock is shown: 24-hour or 12-hour, daylight saving, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
         <li>Level meters in words: a background watch that stays quiet until it has news, telling you when a stream clips or goes silent, and an optional level spoken on a timer while you set gains. Read from the unit's USB audio streams through Windows rather than from the unit's own meters.</li>
         <li>SMART pads: put sounds, voice effects, mixer actions or MIDI triggers on any pad; rename, and set volume, colour, loop and restart behaviour; trim a sound and fade it in and out; clear one pad or all of them; and build your own custom voice effect with a live preview. Mixer pads add latching or momentary triggering, and Back Channel pads let you pick who is in the off-air room. You can also copy a pad's sound back to this computer, and tidy up sound files no pad plays any more.</li>
@@ -156,7 +157,7 @@
         <li>Wireless connections in one place: turning the unit's wifi on, scanning for networks and joining one, making the unit discoverable so a phone can pair with it, and what wireless mics the unit can see.</li>
         <li>The settings the unit otherwise offers only on its touchscreen: screen brightness and whether it sets itself, how long before the screen dims, how brightly the buttons are lit, the meter style, haptic feedback, whether the record button pauses or stops, the listen mode, and the monitor output's fixed level. A backup holds them.</li>
         <li>Spoken announcements of what the unit is doing: every physical button press, the banks, the encoder, and fader and level moves read out as you make them, in a voice, at a volume and through an audio output of your choosing.</li>
-        <li>Keyboard shortcuts that work anywhere in Windows, whatever program you are in, built from a catalogue of over 100 things the app can do. You start with five of your own plus the SMART pad keys, and add or remove whichever you want.</li>
+        <li>Keyboard shortcuts that work anywhere in Windows, whatever program you are in, built from a catalogue of over 100 things the app can do. You start with seven of your own plus the SMART pad keys, and add or remove whichever you want.</li>
         <li>Playing SMART pads from the keyboard: the number row plays the pads of the bank the unit is on, two more keys step through the banks, and one more says what is playing and how long is left. Sound pads, voice effects and mixer pads alike, with no need to reach the unit.</li>
         <li>Control from a phone or another computer on the same network, over an access link that keeps everyone else on that network out. The computer the unit is plugged into never needs the link, and you can make a new one at any time to lock out a device you have shared it with.</li>
         <li>Device info: connection, firmware and network status, and the MIDI control unlock that lets an external MIDI app or controller drive the desk.</li>
@@ -824,7 +825,51 @@
           cannot be undone. To copy a recording off, take the card or drive to a computer.</dd>
       </dl>
 
-      <h3>Backups (Alt+5)</h3>
+      <h3>CallMe (Alt+5)</h3>
+      <p>
+        Remote guests, over the unit's own wifi or network cable rather than this computer. A guest
+        either has a RODECaster of their own and dials your code, or opens your guest link in a web
+        browser. Calls are announced wherever you are, so the page is for setting up and checking
+        rather than somewhere you have to be when the phone rings.
+      </p>
+      <dl class="help-list">
+        <dt>Call</dt>
+        <dd>One line says what is happening: nothing, who is calling, who you are calling, or who
+          you are talking to, and after a call, why it ended. Below it are two buttons. Answer takes
+          a ringing call. The second is named for what it will do: Decline while a call is ringing,
+          Hang up otherwise, and it always turns a ringing call away first, so a second caller
+          arriving mid-conversation is declined rather than the guest you are with being cut off.
+          The keyboard shortcuts do the same from any program: Ctrl, Alt and Shift with C answers,
+          and with D declines or hangs up. A call nobody answers stops ringing after two minutes
+          and is announced as missed. Answer says when the call has connected, which is the only
+          real proof: the unit can accept a call whose sound then never starts, and that is
+          reported rather than called a success. While a call is connected, its technical details
+          follow the buttons, one to a line: the bitrate, how much audio is being lost, and the
+          jitter.</dd>
+        <dt>You need CallMe on a fader to hear a guest</dt>
+        <dd>A call can be answered with CallMe on no fader, but then the guest is heard nowhere. The
+          page warns you when that is the case; put CallMe 1 on a fader on Routing, under Faders.</dd>
+        <dt>Letting guests call in</dt>
+        <dd>The Accept incoming calls switch is the unit's own call hosting. Switched on, the unit
+          is given a code by RODE's service, which another RODECaster dials, and a guest link built
+          from it, which anyone else opens in a browser. Copy the guest link puts it on the
+          clipboard to send. Switching hosting off and on again gets a NEW code, so a link you have
+          already shared stops working; leave it on if you have sent one out. It cannot be changed
+          during a call.</dd>
+        <dt>Your plan</dt>
+        <dd>Which CallMe plan the unit is on, how many minutes are left, and when they reset, one
+          to a line. The free
+          plan, CallMe Lite, takes one guest at a time with ten hours a month of calls between
+          RODECasters and five of browser calls; a browser call counts against both. RODE's paid
+          plans, bought from your RODE account, add guests and remove the limits.</dd>
+        <dt>Call a RODECaster</dt>
+        <dd>Type the code shown on the other unit's CallMe screen and press Call, or Enter. A guest
+          link they have sent you works too. The page says straight away whether the call is
+          ringing, or why not: no RODECaster has that code, or they declined. When they answer, the
+          announcer says you are connected. Hang up ends it while it is still ringing, too.</dd>
+      </dl>
+
+      <h3>Backups (Alt+6)</h3>
       <p>
         One list of everything you can put the unit back from, and one button that makes another.
       </p>
@@ -939,7 +984,7 @@
         </dd>
       </dl>
 
-      <h3>Device (Alt+6)</h3>
+      <h3>Device (Alt+7)</h3>
       <p>The unit's current state, its hardware status, its own settings, and the global switches.</p>
       <dl class="help-list">
         <dt>Tabs</dt>
@@ -1035,12 +1080,14 @@
         <dd>Shortcuts that work anywhere in Windows, whatever program you are in, and even with this
           window closed, for as long as AccessCaster is running. The list is yours to build: Add
           offers a catalogue of over 100 commands, sorted into kinds (channels, levels, recording,
-          pads, outputs, mixes, the unit and the app itself), so anything you can do on a page you
+          CallMe, pads, outputs, mixes, the unit and the app itself), so anything you can do on a page you
           can put on a key. Delete removes one. Every shortcut the app ships is on the same three
           keys, Ctrl, Alt and Shift held together, so there is only ever one thing to hold and the
-          key you press decides what happens. A new install starts with five of its own: turn
+          key you press decides what happens. A new install starts with seven of its own: turn
           announcements off and on, mute every mic and open them again (the cough key), start or
-          stop a recording, hear what the unit is doing, and bring this window to the front. The
+          stop a recording, hear what the unit is doing, bring this window to the front, answer a
+          CallMe call (C), and decline one or hang up (D). A list you already had does not gain those two on
+          its own: add them from the CallMe kind. The
           SMART pad keys are there from the start too, described below. "Add the SMART pad
           shortcuts" is for anyone who has cleared them, or who had a list from before they
           shipped: your own choices are never overwritten, so a set you have changed has to be
@@ -1117,7 +1164,7 @@
           Bluetooth output on the Routing page.</dd>
       </dl>
 
-      <h3>Help &amp; About (Alt+7)</h3>
+      <h3>Help &amp; About (Alt+8)</h3>
       <p>
         This page. Above the tabs is what the app is and who wrote it, with a short list of what it
         still cannot do. Then four tabs: What it can control, Help, which is this guide, Known

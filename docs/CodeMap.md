@@ -36,6 +36,7 @@ after a session that moved code.
 | `meters.py` | 1084 | WASAPI metering, `Watcher`, `_EngineWaker`, `trusted_ceiling`, `level_note`, endpoint volume, `_default_endpoint_name` (both `default_playback_name` and `default_recording_name`). Also the shared MMDevice COM declarations, including `IMMNotificationClient` (Windows' endpoint-change callback, implemented in `virtual_devices`). |
 | `virtual_devices.py` | 520 | **RODE's Virtual Device Driver, from this side.** `read_status` / `wait_connected` parse the service's shared status block (`STATUS_MAPPING`; `DriverStatus.phrase` is the sentence for a person), `IPolicyConfig` is the Sound-panel interface (enable an endpoint, set the default device, no elevation), `_endpoints` tags every endpoint `virtual` (the driver's, enumerator ROOT) or `desk` (the unit's own USB audio), **`reconcile` makes Windows agree with the service** (endpoints on while connected, off while not, `faders_missing` when a held pin stopped the service creating them, `_restore_default` for the output), `describe` is the page's driver line, and **`watch_endpoints` (+ `_EndpointNotifier`) reconciles on every endpoint change Windows reports** rather than on one sample. See PROJECT_GUIDE part 2 under Expanded before touching any of it. |
 | `pad_records.py` | 581 | Pad record encode/decode. |
+| `callme.py` | 520 | **CallMe, RODE's remote guests.** `read(blob)` is the whole page from one dump (passwords never included; `slots` trimmed to what the tier allows via `TIER_SLOTS`; `on_fader` says whether CallMe 1, source `CALLME1_SOURCE` 16, is on a fader). `build_answer(call_id, slot, path)` is THE answer and decline write, a composite with a FALSE bool, `build_hangup(path)` is TWO records because a hang-up is an edge, and `build_dial(code, slot, path)` places an outgoing call (all three in PROJECT_GUIDE part 2 under CallMe). `build_hosting`. `normalise_code` takes a typed code, `rode:<code>` or a whole guest link; `peer_name` speaks a dialled desk as its spelt-out code; `sentence` capitalises a line that may open with "a guest". `paths(blob)` finds the control node and the three slot nodes by the property they carry. The wording: `status_sentence`, `call_now` (the one line on the page saying what is happening), `call_details` (bitrate, audio lost and jitter as label and value pairs), `end_label` (Decline or Hang up), `plan_lines` (label and value pairs, one fact to a line on the page), `end_reason`, `spell` (a code one character at a time), `renewal_date`, `utf8` (the desk sends UTF-8, the decoder reads latin-1). **`Watcher` is its own read-only HID handle**, like the recorder's, so calls are tracked with announcements off; it re-seeds from a dump every time the handle opens, speaks through `on_say`, and `note_handled` / `quiet_connect` / `quiet_end` stop a call this app answered or hung up being announced twice. |
 | `recorder.py` | 680 | Recorder state, storage volumes, marker drop, elapsed time, the recordings list (`read_recordings` / `parse_recording`), the gated delete (`SEL_RECORDINGS`, `DELETE_PROVEN`, `build_delete_request`), **the spoken wording in TWO forms that must not be confused - `STATE_LABEL` / `STATE_SPOKEN` for what the desk IS doing, and `spoken_change(was, now, medium)` for what just HAPPENED** (a drive going in or out is only tellable from the transition; see PROJECT_GUIDE part 2), and the labels for BOTH multitrack destinations (`MULTITRACK_LABEL` = the unit's, `USB_MULTITRACK_LABEL` = this computer's) and **ALL THREE of the Recording page's hints** (`MULTITRACK_HINT`, `RECORDING_FORMAT_HINT`, `BYPASS_HINT` / `BYPASS_NEEDS_MULTITRACK`) plus `RECORDING_FORMAT_LABEL` (WAV vs MP3 - TWO members only; see PROJECT_GUIDE before adding a third). The browser holds none of this wording. |
 | `shows.py` | 388 | The DESK'S own backup (not profiles): `SEL_SHOWCONTROL` 0x28E, `read_shows` (newest first, sorted on `showSnapshotIndex`), `find_by_snapshot`, `read_current`, `send_export` / `send_import` / `send_new_from_default` / `send_delete`, `wait_for`, `error_message`, `restore_fingerprint`. **The handle is the snapshot index, never the uid (positional) and never the uuid (names the show, so backups collide).** **`restore_fingerprint` is how an import proves it ACTED**: the uuid already equals the target in the ordinary case and the command field self-clears to its idle value, so only the desk state can answer. |
 | `model_tree.py` | 266 | **THE PARSER, and it OWNS THAT MODULE NAME.** The dump is a self-describing tree; this reads it and every byte is accounted for. `Node` (with `path()` and `address()`), `parse`, `walk`, plus `instances` / `find_property` which only `DevTools/probe_path_write.py` and `tree_tool.py` call - they are the tool-facing half and are NOT dead. **`parse_record` decodes ONE addressed record** (the shape of both our writes and the desk's pushes) and RAISES on anything malformed, deliberately, because `rcp_read._push_record_len` uses it as a test rather than a decoder. Moved out of DevTools 29th August 2026 because it is the app's reader, not a probing tool. The command line over it is `DevTools/tree_tool.py`, named differently ON PURPOSE: while both were called model_tree.py, `import model_tree` picked whichever came first on sys.path and the tool imported itself. |
@@ -99,6 +100,15 @@ after a session that moved code.
   `usb` tab and valued by `applyRoutingValues`). Writers in `rcp_transfer`:
   `set_recording_processing_bypass`, `set_usb_multitrack_mode`, `set_usb_multitrack_bypass`, all on
   `SEL_OUTPUT_GLOBAL` 0x0D beside `set_multitrack_mode`.
+- CallMe (straight after the recorder): `_callme_watcher` (started in `_bring_up_server`, seeded
+  by `_callme_dump`), `_callme_gate` (cap `callme`, Pro II only), `read_callme` / `read_callme_live`
+  over the ONE builder `_callme_payload`, `_callme_state_now` (the Watcher's state when seeded, so a
+  hotkey answer needs no dump), `action_callme_hosting`, `_callme_respond` behind
+  `action_callme_answer` / `action_callme_decline` (waits for the slot to go Active before it says
+  connected), `action_callme_dial` (replies once the call is ringing or has failed),
+  `action_callme_hangup` (by slot, or the one call that is up), `action_callme_end`
+  (decline if ringing, else hang up: the default D key), `callme_status_sentence`. Shortcuts in
+  `commands._callme_commands`.
 - Remote access (the token gate): `access_token` / `new_access_token` (settings.json,
   `remote_token`), `_lan_address`, `read_access`, `action_new_access_token`, and in the handler
   `_token_offered` / `_authorised` / `_refuse`. **Local requests bypass it; `/api/access` and
@@ -187,7 +197,7 @@ after a session that moved code.
 
 `app.js` 8748 lines, `index.html` 1966, `style.css` 319.
 
-**`help.html` is the Help & About page (Alt+7), spliced into `index.html` by `Project/page.py` where
+**`help.html` is the Help & About page (Alt+8), spliced into `index.html` by `Project/page.py` where
 the `<!-- INCLUDE help.html -->` marker sits.** A fragment, not a page. It is the only part of the UI
 that is prose rather than markup, and the app's ONLY statement of what it cannot do (the Limitations
 tab was retired into its intro). `buildStaticTabs` builds its tab strip exactly as when it was
@@ -251,19 +261,22 @@ inline, because what the browser receives is unchanged.
   `onHotkeyDeleteConfirm` / `closeHotkeyDialog`. The editor's controls are STATIC in index.html.
 - `dropRetiredGroupState` (8569) drops the whole retired `accesscaster.groups` key.
 
-Page shortcuts (this line was STALE and is corrected 30th August 2026; the menu was reordered on the
-29th, `bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,
-Alt+4 Recording, Alt+5 Profiles, Alt+6 Device, Alt+7 Help &amp; About (renamed from "About" on the
-30th; the route key is still `about` and the section is still `sec-about`).
+Page shortcuts (`bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,
+Alt+4 Recording, Alt+5 CallMe, Alt+6 Backups (route `profiles`, section `sec-profiles`), Alt+7
+Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-about`).
+
+- CallMe page: `loadCallme` (one dump on entry), `pollCallme` (the free `/api/callme/live` poll,
+  redrawing only when the server's `version` moves), `applyCallme` (text only, never the
+  controls), `fillCallmeList`, `onCallmeRespond` (answer, decline and hang up), `onCallmeHosting`, `wireCallme`. One live region, `callme-state`.
 
 --------------------------------------------------------------------------------
 ## DevTools/ (124 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
-else) plus `ui_checks_<page>.js`: about, baseline, boundary, chantabs, device, levelcheck, network,
-appsettings, boundary, chantabs, device, levelcheck, network,
-pads, padsbus, readonly, recording, routing, solo, **staged**, wireless, backups.
+else) plus `ui_checks_<page>.js`: about, appsettings, backups, baseline, boundary, callme,
+chantabs, device, levelcheck, network, pads, padsbus, readonly, recording, routing, shell, solo,
+**staged**, wireless.
 **`probeLog()` CARRIES THE POST BODY, not just the path** (2nd September 2026), so a check can ask
 WHAT the page tried to write rather than only that it tried: "the wireless mute posts to its own
 endpoint" passes just as happily when the page sends the wrong channel name. `ui_checks_pads.js` is the fullest
@@ -310,12 +323,13 @@ indistinguishable from outside.
 calling it broken.** Both of the "pre-existing failures" chased on 29th August 2026 were one set of
 arguments swept across every suite.
 
-**Global keyboard shortcuts.** `test_hotkeys.py` (offline, no desk: the validation rules, real
-registration with Windows, dispatch by posting WM_HOTKEY at the pump, our own clash detection,
-re-binding, the master switch, and what gets persisted). `test_hotkey_actions_live.py` (the ACTIONS
+**Global keyboard shortcuts.** `test_hotkeys.py` (offline, no desk, NO KEY PRESSES: the
+validation rules, real registration with Windows, dispatch by posting WM_HOTKEY at the pump, our own
+clash detection, re-binding, the master switch, and what gets persisted). `test_hotkey_actions_live.py` (the ACTIONS
 against the desk; stop the service first, and `--record` to include the recording pair).
-`press_keys.py` presses REAL keys, which is the only way to prove registration rather than dispatch
-- and it uses `keybd_event`, because SendInput injects nothing from an RDP session here.
+`press_keys.py` presses REAL keys system-wide, for `gui_drive.py`, and uses `keybd_event` because
+SendInput injects nothing from an RDP session here. A run killed mid-press leaves the modifier held
+in every application, so nothing that runs in a sweep may call it.
 `probe_free_chords.py` asks Windows which modifier chords will actually give up a key, by
 registering and immediately unregistering. **It is the only authority on that**: `RegisterHotKey`
 refuses without saying who holds the key, and the obvious guess is often wrong (Ctrl+Alt+Win+digit
@@ -538,6 +552,10 @@ and the desk does not echo a write as the property you wrote.
 **`probe_unclaimed_props.py`** writes, reads back and restores the six readable properties nothing
 in the app uses, addressing each at its TREE path rather than a guessed selector, and watches the
 push stream for any reaction. Counts the model's nodes, properties and names either side.
+
+**`probe_callme_live.py`** drives CallMe on a live desk: `state` reads every `sip*` property,
+`host on|off` switches hosting and prints the guest link, `watch` / `speak` log (and speak) every
+call push, and `answer [slot]` answers the next incoming call with the touchscreen's composite.
 
 **`probe_delete_backup_live.py`** drives `action_delete_backup` down both its branches against a
 real desk: a `show:<snapshot>` with no profile beside it, and a named backup whose two halves must

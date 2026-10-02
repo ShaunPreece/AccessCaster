@@ -39,12 +39,18 @@ def press(names, gap: float = 0.03) -> None:
         if key not in VK:
             raise SystemExit(f"unknown key: {n}")
         vks.append(VK[key])
-    for vk in vks:
-        _user32.keybd_event(vk, 0, 0, 0)
-        time.sleep(gap)
-    for vk in reversed(vks):
-        _user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-        time.sleep(gap)
+    # RELEASED IN A finally, AND EVERY KEY, not only those already pressed: a key left down by an
+    # interrupted run stays logically held system-wide, and to the user Ctrl or Shift simply stops
+    # behaving in every application. A hard kill between the two halves still leaves them down,
+    # which is why no test suite calls this.
+    try:
+        for vk in vks:
+            _user32.keybd_event(vk, 0, 0, 0)
+            time.sleep(gap)
+    finally:
+        for vk in reversed(vks):
+            _user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(gap)
 
 
 if __name__ == "__main__":
