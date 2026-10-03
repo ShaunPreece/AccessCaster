@@ -643,6 +643,7 @@ def _recorder_payload(blob: bytes) -> dict:
                            f"AccessCaster can read the recorder on the {dev.name} but not drive "
                            f"it, so it cannot delete a recording."))
 
+    out["storage_writable"] = "storage_write" in dev.caps
     out["announcer"] = _announcer_into_desk()
     return out
 
@@ -900,6 +901,122 @@ def action_delete_recording(uid: int) -> dict:
     return {"ok": True, "recorder": info,
             "message": (f"Deleted {target['name']}, {target['duration']}. "
                         f"{len(info.get('recordings') or [])} recordings left on the unit.")}
+
+
+# ----------------------------------------------------------------------------
+# EJECTING AND ERASING THE CARD OR DRIVE. Per-volume switches on the STORAGEVOLUME nodes, found
+# by walking the tree; section 7.2a of the protocol spec. The third volume is the unit's INTERNAL
+# storage, which holds the pad sounds, so only a volume the desk marks as a recording destination
+# may be touched, and the guard is checked against the live dump on every call.
+_ERASE_WAIT_S = 90.0        # a 117 GB drive took about 20 s
+
+
+def _storage_gate():
+    return _cap_gate("storage_write", lambda name:
+                     f"AccessCaster can show the {name}'s storage but not eject or erase it: that "
+                     f"has only been confirmed on a RODECaster Pro 2.")
+
+
+def _storage_target(index: int):
+    """(volume, node path, blob) for a card or drive this may act on, or (None, refusal, None)."""
+    blob = rcp_read.read_model_stable(fresh=True)
+    vols = recorder.read_volumes(blob)
+    vol = next((v for v in vols if v["index"] == int(index)), None)
+    if vol is None or not vol.get("can_record"):
+        return None, "That is not a card slot or drive this can change.", None
+    nodes = [n for n in model_tree.walk(model_tree.parse(blob)[0]) if n.name == "STORAGEVOLUME"]
+    if int(index) >= len(nodes):
+        return None, "The unit does not publish that slot.", None
+    return vol, nodes[int(index)].path(), blob
+
+
+def _storage_reply(blob: bytes, ok: bool, message: str) -> dict:
+    return {"ok": ok, "recorder": _recorder_payload(blob), "message": message}
+
+
+def action_storage_eject(index: int, on: bool = True) -> dict:
+    """Eject the card or drive (`on`), or reconnect one ejected from here (`on=False`).
+
+    An ejected volume reads as empty, so it can be pulled out safely, and clearing the flag mounts
+    it again with no replug. Refused while recording: the take is on that volume."""
+    gate = _storage_gate()
+    if gate is not None:
+        return gate
+    on = bool(on)
+    try:
+        with _hid_lock:
+            vol, path, blob = _storage_target(index)
+            if vol is None:
+                return {"ok": False, "message": path}
+            if on and recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
+                return {"ok": False, "message": f"The {vol['spoken']} is being recorded to. Stop "
+                                                f"the recording first."}
+            if on and not vol["inserted"]:
+                return {"ok": False, "message": f"Nothing is in the {vol['spoken']}."}
+            rcp_transfer.send_record(
+                rcp_transfer.build_path_prop_bool("storageVolumeEject", on, path))
+            time.sleep(1.5 if on else 3.0)
+            blob = rcp_read.read_model_stable(fresh=True)
+        now = next(v for v in recorder.read_volumes(blob) if v["index"] == vol["index"])
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not change the {recorder.volume_spoken(index)}: "
+                                        f"{exc}"}
+    if on:
+        if now["mounted"]:
+            return _storage_reply(blob, False, f"The {vol['spoken']} is still in use: the unit "
+                                               f"did not eject it.")
+        return _storage_reply(blob, True, f"The {vol['spoken']} is ejected. You can unplug it "
+                                          f"now, or reconnect it here to use it again.")
+    if not now["mounted"]:
+        return _storage_reply(blob, False, f"The {vol['spoken']} did not come back. If it has "
+                                           f"been unplugged, plug it in again.")
+    return _storage_reply(blob, True, f"The {vol['spoken']} is back, with {now['free_mb']} MB "
+                                      f"free.")
+
+
+def action_storage_erase(index: int) -> dict:
+    """Erase (format) the card or drive. Everything on it is deleted; the page asks first.
+
+    The desk clears `storageVolumeErase` itself when the format is done, which is the
+    confirmation; the free space then reads the whole capacity."""
+    gate = _storage_gate()
+    if gate is not None:
+        return gate
+    listener = rcp_read.PushListener()
+    listening = False
+    try:
+        with _hid_lock:
+            vol, path, blob = _storage_target(index)
+            if vol is None:
+                return {"ok": False, "message": path}
+            if recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
+                return {"ok": False, "message": "A recording is running. Stop it before erasing."}
+            if not (vol["inserted"] and vol["mounted"]):
+                return {"ok": False, "message": f"Nothing usable is in the {vol['spoken']}."}
+            try:
+                listener.start()
+                listening = True
+            except Exception:
+                pass
+            rcp_transfer.send_record(
+                rcp_transfer.build_path_prop_bool("storageVolumeErase", True, path))
+        if listening:
+            listener.wait_for("storageVolumeErase", _ERASE_WAIT_S, match=lambda v: v is False)
+        else:
+            time.sleep(25.0)
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not erase the {recorder.volume_spoken(index)}: "
+                                        f"{exc}"}
+    finally:
+        if listening:
+            listener.stop()
+    now = next((v for v in recorder.read_volumes(blob) if v["index"] == vol["index"]), None)
+    if not now or now["free_mb"] < now["capacity_mb"] - 64:
+        return _storage_reply(blob, False, f"The erase was sent, but the {vol['spoken']} does not "
+                                           f"read as empty yet.")
+    return _storage_reply(blob, True, f"Erased the {vol['spoken']}. {now['free_mb']} MB free.")
 
 
 # ----------------------------------------------------------------------------
@@ -10907,6 +11024,8 @@ POST_ROUTES = {
     "/api/callme/dial": (action_callme_dial, [(str, "code", "")]),
     "/api/recorder/marker": (action_drop_marker, []),
     "/api/recorder/delete": (action_delete_recording, [(int, "uid", -1)]),
+    "/api/storage/eject": (action_storage_eject, [(int, "index", -1), (bool, "on", True)]),
+    "/api/storage/erase": (action_storage_erase, [(int, "index", -1)]),
     "/api/channels/autogain": (action_autogain_start,
                                [(str, "name", ""), (float, "seconds", 0.0)]),
     "/api/channels/autogain/stop": (action_autogain_stop, []),

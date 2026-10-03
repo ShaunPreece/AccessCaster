@@ -7335,6 +7335,14 @@ async function loadRecording() {
     setRecState(d.message || "Could not read the recorder.");
     return;
   }
+  loadRecordingFrom(d);
+  setRecState(d.message || "");
+  startRecordingPoll();
+}
+
+/* Draw the whole page from one payload: the page read's, or a command's reply, which carries the
+   same shape (server._recorder_payload). Speaks nothing; the caller words the outcome. */
+function loadRecordingFrom(d) {
   recordingModel = d;
   recordingSeenState = d.state;
   fillRecordingDest(d);
@@ -7343,8 +7351,6 @@ async function loadRecording() {
   applyRecordingWritable(d);
   applyRecordingUsable(d);
   applyAnnouncerWarning(d);
-  setRecState(d.message || "");
-  startRecordingPoll();
 }
 
 /* The record button's label follows the state, the way a transport control normally does:
@@ -7674,6 +7680,109 @@ function fillRecordingList(d) {
     });
   });
   fillRecordingDeleteChoices(d);
+  fillStorageChoices(d);
+}
+
+/* The card slot and the USB drive, never the internal pad storage (`can_record` is false for it).
+   The option text carries the state, so the choice can be made from the dropdown alone. */
+function storageVolumes(d) {
+  return ((d && d.volumes) || []).filter((v) => v.can_record && !v.live_view);
+}
+
+function storageOptionText(v) {
+  if (v.ejected) return v.label + ": ejected";
+  if (!v.inserted) return v.label + ": empty";
+  return v.label + ": " + v.free_mb + " MB free of " + v.capacity_mb + " MB";
+}
+
+function fillStorageChoices(d) {
+  const sel = document.getElementById("rec-vol-select");
+  if (!sel) return;
+  const vols = storageVolumes(d);
+  const keep = sel.value;
+  fillOptions("rec-vol-select", vols.map((v) => ({ value: v.index, label: storageOptionText(v) })));
+  // Default to the one with something in it, which is nearly always the one wanted.
+  const inUse = vols.find((v) => v.inserted || v.ejected);
+  if (keep !== "" && vols.some((v) => String(v.index) === keep)) sel.value = keep;
+  else if (inUse) sel.value = String(inUse.index);
+  applyStorageButtons(d);
+  // Nothing in either slot and nothing ejected: one line instead of a dropdown of "empty" and two
+  // buttons that can do nothing. Focus that was in the block goes to the section's heading.
+  const box = document.getElementById("rec-vol-box");
+  const none = document.getElementById("rec-vol-none");
+  if (box && none) {
+    const hadFocus = box.contains(document.activeElement);
+    box.hidden = !inUse;
+    none.hidden = !!inUse;
+    if (!inUse && hadFocus) {
+      const h = document.getElementById("rec-h-storage");
+      if (h) h.focus();
+    }
+  }
+}
+
+function selectedStorage(d) {
+  const sel = document.getElementById("rec-vol-select");
+  return storageVolumes(d).find((v) => sel && String(v.index) === sel.value) || null;
+}
+
+function applyStorageButtons(d) {
+  const v = selectedStorage(d);
+  const eject = document.getElementById("rec-vol-eject");
+  const erase = document.getElementById("rec-vol-erase");
+  const cannot = d && d.storage_writable === false
+    ? "AccessCaster cannot eject or erase storage on this unit." : null;
+  const running = d && (d.state === 1 || d.state === 2);
+  if (eject) {
+    // THE LABEL IS THE BUTTON'S ONLY NAME, so it is always set.
+    eject.textContent = v && v.ejected ? "Reconnect" : "Eject";
+    eject.dataset.on = v && v.ejected ? "0" : "1";
+    setAvailable(eject, !cannot && !!v && (v.ejected || (v.inserted && !running)),
+      cannot || (!v ? "Choose a card or drive first." : running ? "Stop the recording first."
+        : "Nothing is in it."));
+  }
+  if (erase) {
+    setAvailable(erase, !cannot && !!v && v.inserted && v.mounted && !running,
+      cannot || (!v ? "Choose a card or drive first." : running ? "Stop the recording first."
+        : v.ejected ? "Reconnect it before erasing." : "Nothing is in it."));
+  }
+}
+
+async function onStorageEject(btn) {
+  const why = unavailableReason(btn);
+  if (why !== null) { setRecState(why); return; }
+  const v = selectedStorage(recordingModel);
+  if (!v) return;
+  const on = btn.dataset.on !== "0";
+  setBusy(btn, true);
+  setRecState(on ? "Ejecting, please wait." : "Reconnecting, please wait.");
+  try {
+    const res = await postJSON("/api/storage/eject", { index: v.index, on: on });
+    setRecState(res.message || "Done.");
+    if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
+  } catch (e) {
+    setRecState("Could not reach the AccessCaster service.");
+  } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
+}
+
+async function onStorageErase(btn) {
+  const why = unavailableReason(btn);
+  if (why !== null) { setRecState(why); return; }
+  const v = selectedStorage(recordingModel);
+  if (!v) return;
+  const ok = await confirmAction("Erase the " + v.spoken + "?",
+    "Everything on it is deleted, recordings and any other files. It cannot be undone, and "
+    + "AccessCaster has no copy.", "Erase");
+  if (!ok) { setRecState("Cancelled. Nothing was erased."); return; }
+  setBusy(btn, true);
+  setRecState("Erasing the " + v.spoken + ". This takes up to a minute.");
+  try {
+    const res = await postJSON("/api/storage/erase", { index: v.index });
+    setRecState(res.message || "Done.");
+    if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
+  } catch (e) {
+    setRecState("Could not reach the AccessCaster service.");
+  } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
 }
 
 /* The delete dropdown. Same list, but a CONTROL: a list item is not one and must not become one.
@@ -7693,8 +7802,18 @@ function fillRecordingDeleteChoices(d) {
   // while "this device cannot" or "not proven yet" is a standing one the server explains.
   setAvailable(btn, !none && d.can_delete !== false,
     none ? "There are no recordings on the unit." : (d.delete_note || "Deleting is not available."));
-  // The dropdown itself is never disabled: a natively disabled select leaves the tab order, so it
-  // would vanish and reappear as recordings come and go. An empty one simply has no options.
+  // NOTHING TO DELETE HIDES THE WHOLE BLOCK; the list above already says why. If focus was in it
+  // (the last recording has just gone), it moves to the list's heading rather than being dropped
+  // to the top of the document.
+  const box = document.getElementById("rec-delete-box");
+  if (box) {
+    const hadFocus = box.contains(document.activeElement);
+    box.hidden = none;
+    if (none && hadFocus) {
+      const h = document.getElementById("rec-h-list");
+      if (h) h.focus();
+    }
+  }
 }
 
 /* Everything here reports through setRecState, the page's ONE live region. No second region and no
@@ -7860,6 +7979,12 @@ function wireRecording() {
   if (check) check.addEventListener("click", () => onRecordCheck(check));
   const del = document.getElementById("rec-delete-btn");
   if (del) del.addEventListener("click", onDeleteRecording);
+  const volSel = document.getElementById("rec-vol-select");
+  if (volSel) volSel.addEventListener("change", () => applyStorageButtons(recordingModel));
+  const volEject = document.getElementById("rec-vol-eject");
+  if (volEject) volEject.addEventListener("click", () => onStorageEject(volEject));
+  const volErase = document.getElementById("rec-vol-erase");
+  if (volErase) volErase.addEventListener("click", () => onStorageErase(volErase));
 }
 
 /* ---- Help & About page -----------------------------------------------

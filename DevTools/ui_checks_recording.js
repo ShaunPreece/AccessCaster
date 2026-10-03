@@ -120,12 +120,12 @@ async function run() {
   check("it has one h1, focusable so the router can land on it",
     h1 && h1.getAttribute("tabindex") === "-1", h1 && h1.textContent);
   const headings = Array.from(sec().querySelectorAll("h2")).map((h) => h.textContent.trim());
-  // THREE headings, and the USB multitrack pair is NOT a fourth: it lives on Routing > USB audio,
-  // because it is an OUTPUT and never touches the drive, the transport or the recordings list. A
-  // control under "Recording" that has nothing to do with recording is the exact confusion that
-  // renaming Routing's own "Recording" tab removes.
-  check("three headings, in the order you need them",
-    headings.length === 3, headings.join(" | "));
+  // FOUR headings, the card and drive last, and the USB multitrack pair is NOT among them: it lives
+  // on Routing > USB audio, because it is an OUTPUT and never touches the drive, the transport or
+  // the recordings list. A control under "Recording" that has nothing to do with recording is the
+  // exact confusion that renaming Routing's own "Recording" tab removes.
+  check("four headings, in the order you need them, the card and drive last",
+    headings.length === 4 && /card and drive/i.test(headings[3] || ""), headings.join(" | "));
   // WHAT TO RECORD comes before the transport: it is the decision you cannot fix afterwards.
   check("what to record comes first, ahead of the transport",
     /what to record/i.test(headings[0] || ""), headings[0]);
@@ -442,6 +442,12 @@ async function run() {
   check("deleting did not bring a second live region with it", !el("rec-delete-status"));
   check("nothing in the list itself became clickable",
     list.querySelectorAll("button, a, input, select").length === 0);
+  // With nothing to delete, the dropdown and button are hidden rather than left as two stops that
+  // can do nothing; the list already says there are no recordings.
+  const noneOnUnit = delSel.options.length === 0;
+  check("the delete controls are shown exactly when there is something to delete",
+    el("rec-delete-box").hidden === noneOnUnit,
+    `${delSel.options.length} recordings, hidden=${el("rec-delete-box").hidden}`);
   if (list.querySelectorAll("li").length && !/No recordings|Nothing to list/i.test(flatText(list))) {
     check("every recording on the unit is offered in the dropdown",
       delSel.options.length === list.querySelectorAll("li").length,

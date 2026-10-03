@@ -317,6 +317,7 @@ def read_volumes(blob: bytes, include_extra: bool = False) -> list:
     move. `include_extra=True` returns them for anything that wants the live figure."""
     states = rcp_read.values(blob, "storageVolumeState", "str")
     dests = [bool(v) for v in rcp_read.values(blob, "storageVolumeRecDestination", "bool")]
+    ejects = [bool(v) for v in rcp_read.values(blob, "storageVolumeEject", "bool")]
     out = []
     for i, s in enumerate(states):
         if i >= len(VOLUME_NAMES) and not include_extra:
@@ -347,6 +348,9 @@ def read_volumes(blob: bytes, include_extra: bool = False) -> list:
             # pad upload starts being a real risk.
             "low": bool(inserted and pct is not None and pct < 20),
             "can_record": bool(dests[i]) if i < len(dests) else False,
+            # Ejected from this side: the slot reads empty, and clearing the flag mounts it again
+            # with no replug. Stays True until cleared, even with the drive pulled out.
+            "ejected": bool(ejects[i]) if i < len(ejects) else False,
         })
     return out
 

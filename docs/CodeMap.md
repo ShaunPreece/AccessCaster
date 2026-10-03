@@ -88,6 +88,7 @@ after a session that moved code.
   (`_hk_note_pad_progress` / `_hk_note_pad_active` / `_hk_play_snapshot` / `_hk_playing_from_model`,
   fed from `_ann_handle_report` and never spoken).
 - Expanded tidy-up, before `action_set_usb_expanded`: `_clear_extended_faders` (empties every fader carrying Game, Music, A or B, parking their chains) and `_tidy_after_standard` (the same, worded and spoken, for a desk found in Standard at start-up via `_seed_usb_expanded`, or after it leaves Expanded on its own, from the announcer's reconnect).
+- Card and drive, after `action_delete_recording`: `_storage_gate` (cap `storage_write`, Pro II only), `_storage_target` (refuses any volume that is not a recording destination, so never the internal pad storage), `action_storage_eject` (`on=False` reconnects), `action_storage_erase` (listens for the desk to clear its flag). Browser half: `fillStorageChoices`, `applyStorageButtons`, `onStorageEject`, `onStorageErase`, and `loadRecordingFrom`, which draws the Recording page from any reply that carries its payload.
 - Firmware updates, after `read_device_state`: `_firmware_update` (the SYSTEM node's update fields), `_firmware_update_sentence`, `action_check_firmware` (writes `updateCheckRequested` and listens for `updateChecking` to clear; never installs). Shown by `firmwareLine` / `onFirmwareCheck` in app.js and spoken by `summariseOverview`.
 - Device state and overview: `read_device_state` (335), `device_overview` (1163),
   `_overview_routing` (1068), `_wireless_mics` (308), `read_device_status` (1279).
@@ -558,6 +559,8 @@ push stream for any reaction. Counts the model's nodes, properties and names eit
 **`probe_callme_live.py`** drives CallMe on a live desk: `state` reads every `sip*` property,
 `host on|off` switches hosting and prints the guest link, `watch` / `speak` log (and speak) every
 call push, and `answer [slot]` answers the next incoming call with the touchscreen's composite.
+
+**`ui_checks_storage.js`** pins the Recording page's card and drive section: the internal pad storage never offered, Eject named for what it will do, erase asking first.
 
 **`probe_update_check.py`** asks the desk to check for a firmware update and logs every update push; it never installs. **`probe_storage_live.py`** ejects or erases the card or drive and logs the desk's answer, refusing the internal pad storage (anything `recorder.read_volumes` does not mark `can_record`).
 

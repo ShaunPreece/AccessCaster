@@ -1053,10 +1053,12 @@ PRO2 = DeviceModel(
     # reading empty with nothing inserted.
     # "callme": hosting and answering a CallMe call, on the SIPCALLING node found by walking the
     # tree. Heard both ways on a Pro II with a browser guest; never tried on a Duo.
+    # "storage_write": ejecting and erasing the card or drive, on the STORAGEVOLUME nodes. Both
+    # proven on a Pro II's USB drive; a Duo here has never had storage in it.
     caps=frozenset({"input_mic_write", "matrix_read", "matrix_write", "processing",
                     "channel_read", "output_write", "pad_write", "fader_write", "chain_follow",
                     "level_write", "unit_settings", "recorder", "network_write", "shows",
-                    "stereo_link", "callme"}),
+                    "stereo_link", "callme", "storage_write"}),
     proc_sel_base=0x1C,
     fx_sel_base=0x26,
     ui_channels=PRO2_UI_CHANNELS,

@@ -1633,7 +1633,7 @@
         </p>
       </div>
 
-      <h2 id="rec-h-list">Recordings on the unit</h2>
+      <h2 id="rec-h-list" tabindex="-1">Recordings on the unit</h2>
       <div>
         <p class="hint" id="rec-list-hint">
           Newest first. To copy them off, take the card or drive to a computer.
@@ -1644,21 +1644,49 @@
         <!-- DELETE. The list above is for reading, this is for acting: a list item is not a control
              and must not become one, so the choice is made in a proper labelled dropdown. The
              server decides whether this can work at all (payload can_delete / delete_note) and the
-             reason is attached to the button, so a disabled control always says why. -->
-        <div class="field">
-          <label for="rec-delete-select">Recording to delete</label>
-          <select id="rec-delete-select" aria-describedby="rec-delete-hint"></select>
+             reason is attached to the button, so a disabled control always says why.
+             HIDDEN WITH NOTHING TO DELETE: the list above already says so, and an empty dropdown
+             beside an unavailable button is two stops that can do nothing. -->
+        <div id="rec-delete-box">
+          <div class="field">
+            <label for="rec-delete-select">Recording to delete</label>
+            <select id="rec-delete-select" aria-describedby="rec-delete-hint"></select>
+          </div>
+          <p class="hint" id="rec-delete-hint">
+            Deletes it from the card or drive. This cannot be undone; you are asked to confirm.
+          </p>
+          <p>
+            <button type="button" class="secondary" id="rec-delete-btn"
+                    aria-describedby="rec-delete-hint">Delete this recording</button>
+          </p>
         </div>
-        <p class="hint" id="rec-delete-hint">
-          Deletes it from the card or drive. This cannot be undone; you are asked to confirm.
-        </p>
-        <p>
-          <button type="button" class="secondary" id="rec-delete-btn"
-                  aria-describedby="rec-delete-hint">Delete this recording</button>
-        </p>
         <!-- NO LIVE REGION HERE. This page has exactly one (the state line at the top), because two
              regions talking over each other is the fault it was built to avoid. Every outcome,
              deleting included, is spoken there. -->
+      </div>
+
+      <!-- The card slot and the USB drive only: the unit's internal storage holds the pad sounds
+           and is never offered. Eject's label follows the chosen one, Eject or Reconnect, the same
+           pattern as the record button. -->
+      <h2 id="rec-h-storage" tabindex="-1">The card and drive</h2>
+      <div>
+        <p id="rec-vol-none" hidden>No card or drive is in the unit.</p>
+        <!-- Hidden while there is nothing to act on, like the delete controls above. An ejected
+             drive counts as something: Reconnect is the one control it needs. -->
+        <div id="rec-vol-box">
+        <div class="field">
+          <label for="rec-vol-select">Card or drive</label>
+          <select id="rec-vol-select" aria-describedby="rec-vol-hint"></select>
+        </div>
+        <p class="hint" id="rec-vol-hint">
+          Eject before you pull a card or drive out. An ejected one can be reconnected here without
+          unplugging it. Erasing deletes everything on it; you are asked to confirm.
+        </p>
+        <p>
+          <button type="button" class="secondary" id="rec-vol-eject">Eject</button>
+          <button type="button" class="secondary" id="rec-vol-erase">Erase</button>
+        </p>
+        </div>
       </div>
       </div>
     </section>

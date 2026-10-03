@@ -657,6 +657,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
   and B inputs go dead and every RODECaster device on the computer is renamed.
+- **THE THIRD STORAGEVOLUME IS THE INTERNAL PAD STORAGE, AND ERASE MUST NEVER REACH IT.** Eject and
+  erase are per-volume switches; `_storage_target` takes the volume from `recorder.read_volumes` on
+  the live dump and refuses anything not marked `can_record`, which the internal one never is. Do
+  not address the nodes by a fixed index instead.
 - **LEAVING EXPANDED OVER USB DOES NOT UNASSIGN THE FOUR; THE TOUCHSCREEN DOES IT ITSELF.** The
   unit's screen asks "All extended inputs will be unassigned" and empties those faders; writing
   Standard from here leaves them assigned to inputs nothing can feed (read 3rd October 2026: mode 0,
