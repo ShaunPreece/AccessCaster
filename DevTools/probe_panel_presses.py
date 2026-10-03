@@ -10,13 +10,12 @@ that.
    curiosity. The test was designed then and never run: hold the mute on, dump, and see whether the
    dump moved or only the push did.
 
-2. DO THE ANNOUNCER'S DECODERS READ A PRESS CORRECTLY? `probe_push_decoders.py` covers everything
-   reachable from software and says so; `mutePressed`, `soloPressed`, `encoderPressed`,
-   `encoderSignal` and `padProgress` arrive ONLY from a physical control, and `channelOutputMute` /
-   `channelCueEnable` are pushed only when the DESK changes them. Same measurement as that probe:
-   the announcer's decoder against `model_tree.parse_record`, plus the gap between the name and its
-   value marker. `encoderSignal` is the one composite the announcer handles, so a turn is the only
-   hardware check its window-scanning decoder has ever had.
+2. IS EVERY PUSH ONE WHOLE RECORD? The announcer acts only on a frame `rcp_read.parse_push` accepts,
+   which is exactly one record. `mutePressed`, `soloPressed`, `encoderPressed`, `encoderSignal` and
+   `padProgress` arrive ONLY from a physical control, and `channelOutputMute` / `channelCueEnable`
+   are pushed only when the DESK changes them, so only a person at the desk can show they all
+   qualify. A frame shaped like a push (a plausible declared length, zeros after it) that is NOT one
+   record is counted and dumped: any at all means the announcer is deaf to something.
 
 NOTHING IS WRITTEN TO THE DESK. This only listens and dumps.
 
@@ -33,15 +32,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 
-import model_tree
 import rcp_hid
 import rcp_read
-import server
 
-NAME = server._ANN_NAME
-DECODER = {"bool": server._ann_decode_bool,
-           "float": server._ann_decode_float,
-           "int": server._ann_decode_int}
 # What a press is expected to move, so the report can say which did and which did not arrive.
 WANTED = ["mutePressed", "soloPressed", "encoderPressed", "encoderSignal",
           "channelOutputMute", "channelCueEnable", "faderLevel", "potLevel",
@@ -51,8 +44,16 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--seconds", type=float, default=240.0, help="how long to listen")
 args = ap.parse_args()
 
-records = []          # (frame, path, name, value, kind, when)
+records = []          # (path, name, value, kind)
+odd = []              # frames shaped like a push that are not exactly one record
 stop = threading.Event()
+
+
+def push_shaped(frame: bytes) -> bool:
+    """A plausible declared length followed only by zeros: what a push looks like from outside. A
+    dump frame is 255 dense bytes and fails the zeros test."""
+    n = int.from_bytes(frame[1:5], "little")
+    return 6 <= n <= rcp_read.PUSH_MAX_RECORD and 5 + n <= len(frame) and not any(frame[5 + n:])
 
 
 def listen(dev):
@@ -66,14 +67,11 @@ def listen(dev):
             if not rep or rep[0] != 0x04:
                 continue
             frame = bytes(rep)
-            n = rcp_read._push_record_len(frame)     # drops model-dump slices
-            if n is None:
-                continue
-            try:
-                path, name, val, kind, _e = model_tree.parse_record(frame[5:5 + n])
-            except ValueError:
-                continue
-            records.append((frame, tuple(path), name, val, kind, time.time()))
+            rec = rcp_read.parse_push(frame)
+            if rec is not None:
+                records.append(rec)
+            elif push_shaped(frame):
+                odd.append(frame)
     finally:
         rcp_hid.close_handle(dev, "panel probe")
 
@@ -92,56 +90,24 @@ stop.set()
 time.sleep(0.6)
 
 print(f"\n{len(records)} push record(s)\n")
-rows = defaultdict(lambda: {"n": 0, "gaps": set(), "kinds": set(), "vals": [],
-                            "agree": 0, "disagree": 0, "unreachable": 0, "example": None})
-for frame, path, name, val, kind, _when in records:
+rows = defaultdict(lambda: {"n": 0, "kinds": set(), "vals": []})
+for path, name, val, kind in records:
     r = rows[name]
     r["n"] += 1
     r["kinds"].add(kind)
     if len(r["vals"]) < 6:
         r["vals"].append((path[-1] if path else None, val))
-    hit = next((m for m in NAME.finditer(frame) if server._ann_is(m.group().decode(), name)), None)
-    if hit is None:
-        r["unreachable"] += 1
-        continue
-    at = hit.end() + 1
-    v = frame[at:at + 24]
-    gap = next((i for i in range(len(v) - 2)
-                if v[i] == 0x01 and v[i + 2] in (0x01, 0x02, 0x03, 0x04, 0x05)), None)
-    r["gaps"].add(gap)
-    # A COMPOSITE IS NOT "no decoder": `encoderSignal` is a pair and the announcer reads it with
-    # _ann_decode_int, which is the whole reason that decoder scans a window instead of trusting a
-    # fixed offset. Compare against the composite's FIRST member, which is what it is reaching for.
-    if kind == "pair":
-        inner = val[0] if val else (None, None)
-        if inner[1] != "int":
-            continue
-        val, kind, decode = inner[0], "int", server._ann_decode_int
-    else:
-        decode = DECODER.get(kind)
-        if decode is None:
-            continue
-    got = decode(frame, at)
-    same = (got is not None and abs(got - val) < 1e-9) if kind == "float" else (got == val)
-    if same:
-        r["agree"] += 1
-    else:
-        r["disagree"] += 1
-        r["example"] = (val, got)
 
-print(f"  {'property':<26} {'kind':<6} {'n':>4}  {'gap':<5} verdict")
+print(f"  {'property':<26} {'kind':<6} {'n':>4}")
 for name in sorted(rows):
     r = rows[name]
-    gaps = ",".join("?" if g is None else str(g) for g in sorted(r["gaps"], key=str))
-    if r["unreachable"]:
-        verdict = f"NAME NOT FOUND by the announcer's scan in {r['unreachable']}"
-    elif r["disagree"]:
-        verdict = f"MISMATCH: grammar {r['example'][0]!r}, decoder {r['example'][1]!r}"
-    elif r["agree"]:
-        verdict = "decoder agrees with the grammar"
-    else:
-        verdict = "no announcer decoder for this kind"
-    print(f"  {name:<26} {'/'.join(sorted(r['kinds'])):<6} {r['n']:>4}  {gaps:<5} {verdict}")
+    print(f"  {name:<26} {'/'.join(sorted(r['kinds'])):<6} {r['n']:>4}")
+
+print(f"\n  push-shaped frames that are NOT one record: {len(odd)}"
+      + ("  <- the announcer cannot hear these" if odd else ""))
+for frame in odd[:5]:
+    n = int.from_bytes(frame[1:5], "little")
+    print(f"    {frame[:5 + n].hex(' ')}")
 
 print("\n  samples (address tail, value):")
 for name in sorted(rows):

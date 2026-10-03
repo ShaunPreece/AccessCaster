@@ -7,11 +7,14 @@ _ann_say stubbed, and asserts what would be SPOKEN.
 Run: python DevTools/test_announcer.py
 """
 from __future__ import annotations
+import struct
 import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import devices
+import model_tree
+import rcp_read
 import server
 import channels
 
@@ -40,25 +43,45 @@ def check_true(label, got):
     check(label, bool(got), True)
 
 
+def push(path, name: str, value_block: bytes) -> bytes:
+    """A whole report-04 frame as the desk pushes it: `04 <len32> <record> <zeros to 256>`, the
+    record being `<address> <name> 00 <value block>`. The announcer acts only on a frame that is
+    exactly this, so a builder that cuts a corner tests nothing."""
+    rec = model_tree.encode_path(path) + name.encode() + b"\x00" + value_block
+    frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
+    return frame + bytes(256 - len(frame))
+
+
+def v_bool(on: bool) -> bytes:
+    return bytes([0x01, 0x01, 0x02 if on else 0x03])
+
+
+def v_int(value: int) -> bytes:
+    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
+
+
+def v_float(value: float) -> bytes:
+    return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", value)
+
+
+def v_str(text: str) -> bytes:
+    body = b"\x05" + text.encode() + b"\x00"
+    return bytes([0x01, len(body)]) + body
+
+
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property: 01 01 01 01 <sel> <name> 00 01 01 <02 on | 03 off>.
-    sel = SEL_CHANNEL_PROC + strip index, exactly as observed on hardware (mute on channel 2 -> 0x1D)."""
-    sel = channels.SEL_CHANNEL_PROC + strip_idx
-    return (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01" + bytes([sel])
-            + prop.encode() + b"\x00\x01\x01" + bytes([0x02 if on else 0x03]))
+    """A pushed STATE property at SEL_CHANNEL_PROC + strip index, exactly as observed on hardware
+    (mute on channel 2 -> 0x1D)."""
+    return push([channels.SEL_CHANNEL_PROC + strip_idx], prop, v_bool(on))
 
 
-def press_packet(name: str, down: bool = True) -> bytes:
-    """A press EDGE. The selector byte before the name is PRINTABLE, so it is absorbed into the
-    name (buttons 1/2/3 read as cmutePressed / dmutePressed / emutePressed) - which is why the
-    decoder matches on the suffix."""
-    return (bytes([0x04]) + b"\x00\x00\x00\x01\x01\x02\x00" + name.encode()
-            + b"\x00\x01\x01" + bytes([0x02 if down else 0x03]))
+def press_packet(name: str, down: bool = True, button: int = 1) -> bytes:
+    """A press EDGE, addressed at the physical BUTTON (0x63 + button - 1), not at a strip."""
+    return push([0, 0x62 + button], name, v_bool(down))
 
 
 def bank_packet(bank0: int) -> bytes:
-    return (bytes([0x04]) + b"\x00\x00\x00\x01\x01\x01\x01\x0a" + b"selectedBank"
-            + b"\x00\x01\x05\x01" + bank0.to_bytes(4, "little"))
+    return push([0x0A], "selectedBank", v_int(bank0))
 
 
 def run(pkts, st=None, cold_cache=True):
@@ -110,8 +133,7 @@ print("\nA MIXER PAD OWNS THE MUTE AND CUE LINES WHILE IT ACTS")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # `padActive` is addressed at the pad's STREAM POSITION, one level, same shape as a state push.
 def pad_active(position: int, on: bool) -> bytes:
-    return (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01" + bytes([position])
-            + b"padActive" + b"\x00\x01\x01" + bytes([0x02 if on else 0x03]))
+    return push([position], "padActive", v_bool(on))
 
 MIXER_POS, SOUND_POS = 5, 6
 server._hk_mixer_pos = frozenset({MIXER_POS})
@@ -144,10 +166,8 @@ server._hk_mixer_pos = frozenset()
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # channelInputSource is pushed with the same 0x1C+strip selector; value = the new source code.
-push = (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01"
-        + bytes([channels.SEL_CHANNEL_PROC + 1]) + b"channelInputSource"
-        + b"\x00\x01\x05\x01" + (10).to_bytes(4, "little"))
-said, _ = run([push], cold_cache=False)
+said, _ = run([push([channels.SEL_CHANNEL_PROC + 1], "channelInputSource", v_int(10))],
+              cold_cache=False)
 check("the layout change itself is silent", said, [])
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
 check("TTL'd cache dropped, so writes re-read", channels.cached_strip_vector(), None)
@@ -157,18 +177,18 @@ check("mute on that strip names the NEW source", said, ["Bluetooth muted"])
 print("\nPRESS EDGES ARE HELD, THEN SUPERSEDED BY THE STATE")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # The real sequence: edge, then the state ~70 ms later. Only the state should be spoken.
-for button in ("cmutePressed", "dmutePressed", "emutePressed"):
-    said, st = run([press_packet(button), state_packet("channelOutputMute", 1, True)],
-                   cold_cache=False)
-    check(f"{button} + state", said, ["USB 1 (Main Stereo) muted"])
-    check(f"{button} pending cleared", st["pending"], None)
+for button in (1, 2, 3):
+    said, st = run([press_packet("mutePressed", button=button),
+                    state_packet("channelOutputMute", 1, True)], cold_cache=False)
+    check(f"mute button {button} + state", said, ["USB 1 (Main Stereo) muted"])
+    check(f"mute button {button} pending cleared", st["pending"], None)
 
-said, st = run([press_packet("csoloPressed"), state_packet("channelCueEnable", 0, True)],
+said, st = run([press_packet("soloPressed"), state_packet("channelCueEnable", 0, True)],
                cold_cache=False)
 check("solo edge + state", said, ["Mic 1 solo on"])
 
 print("\nFALLBACK WHEN NO STATE ARRIVES (device-agnostic safety net)")
-said, st = run([press_packet("dmutePressed")], cold_cache=False)
+said, st = run([press_packet("mutePressed", button=2)], cold_cache=False)
 check("edge alone says nothing yet", said, [])
 SPOKEN.clear()
 server._ann_flush_pending(st)
@@ -178,28 +198,31 @@ server._ann_flush_pending(st)
 check("flushed to the generic word after it", SPOKEN, ["Mute"])
 check("pending cleared after flush", st["pending"], None)
 
-said, st = run([press_packet("esoloPressed")], cold_cache=False)
+said, st = run([press_packet("soloPressed", button=3)], cold_cache=False)
 st["at"] = time.time() - (server._ANN_PENDING_S + 0.05)
 SPOKEN.clear()
 server._ann_flush_pending(st)
 check("solo fallback", SPOKEN, ["Solo"])
 
 print("\nRELEASE EDGES AND NOISE ARE IGNORED")
-said, _ = run([press_packet("dmutePressed", down=False)], cold_cache=False)
+said, _ = run([press_packet("mutePressed", down=False, button=2)], cold_cache=False)
 check("release edge", said, [])
-said, _ = run([b"\x04\x00\x00\x00mixMute\x00\x01\x01\x02"], cold_cache=False)
+said, _ = run([push([0x4C], "mixMute", v_bool(True))], cold_cache=False)
 check("per-cross-point mixMute ignored", said, [])
-said, _ = run([b"\x03\x00\x00\x00" + b"\x01\x01\x01\x01\x1d" + b"channelOutputMute"
-               + b"\x00\x01\x01\x02"], cold_cache=False)
+said, _ = run([b"\x03" + state_packet("channelOutputMute", 1, True)[1:]], cold_cache=False)
 check("non report-04 ignored", said, [])
 # A selector outside the strip range must not be announced as some phantom channel.
-bad = (bytes([0x04]) + b"\x00\x00\x00\x01\x01\x01\x01" + bytes([0x02])
-       + b"channelOutputMute" + b"\x00\x01\x01\x02")
-said, _ = run([bad], cold_cache=False)
+said, _ = run([push([0x02], "channelOutputMute", v_bool(True))], cold_cache=False)
 check("out-of-range selector ignored", said, [])
+# A SLICE OF A MODEL DUMP is not a push, even when a whole state record sits inside it: a page
+# reading the desk must never sound like the desk changing. Dump frames are 255 dense bytes.
+rec = state_packet("channelOutputMute", 1, True)
+dump_slice = (b"\x04" + b"\x30" * 40 + rec[5:5 + int.from_bytes(rec[1:5], "little")]).ljust(
+    256, b"\x31")
+said, _ = run([dump_slice], cold_cache=False)
+check("a model-dump slice is ignored", said, [])
 
 print("\nSPOKEN POSITIONS: IMMEDIATE, INTERRUPTING, NEVER STACKING")
-import struct
 import rcp_transfer
 
 
@@ -210,16 +233,11 @@ def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
     THE SELECTOR IS NOT ALWAYS ONE BYTE. CROSS_POINT_BASE + 13*source + output passes 255 at
     source 14, so Virtual A and Virtual B arrive with a two-byte index and the width byte says so."""
     sel = rcp_transfer.CROSS_POINT_BASE + 13 * source_code + output
-    width = 1 if sel <= 0xFF else 2
-    val = f"{level:g}|{level:g}".encode()
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, width])
-            + sel.to_bytes(width, "little")
-            + b"mixLevelWithAnchor" + bytes([0x00, 0x01, len(val) + 1, 0x05]) + val + bytes(1))
+    return push([sel], "mixLevelWithAnchor", v_str(f"{level:g}|{level:g}"))
 
 
 def monlevel_packet(level: float) -> bytes:
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x01, 0x0A])
-            + b"outputMonLevel" + bytes([0x00, 0x01, 0x09, 0x04]) + struct.pack("<d", level))
+    return push([0x0A], "outputMonLevel", v_float(level))
 
 
 def fresh_st():
@@ -292,17 +310,11 @@ check("a mute still gets through", SPOKEN, ["USB 1 (Main Stereo) muted"])
 print("\nAFTER AN ENCODER PRESS, ONE CLICK NAMES WHAT YOU ARE HOLDING")
 # The press is detected (it always was) but says nothing about WHICH channel it selected, so the
 # first movement must name it straight away - otherwise you nudge blind and wait for each settle.
-# EXACTLY as captured off the desk: 00 00 00 | 01 01 01 01 | 06 | name | 00 01 01 02.
-# The value type sits at name+3. An invented shape with an extra byte matches a hand-written name+4
-# offset in the code, and then both are wrong together: the encoder press announces nothing on real
-# hardware while this suite stays green. Build packets from captures, not from what the code happens
-# to expect.
-enc_press = (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01" + bytes([0x06])
-             + b"encoderPressed" + b"\x00\x01\x01\x02")
-# The RELEASE edge, which the desk does push (measured, contradicting the "edge only"
-# hardware-observed). Announcing now happens here rather than on the press, because a HOLD is
-# the desk's own mute gesture and must not advance our ring - see _ANN_ENC_HOLD_S.
-enc_release = enc_press[:-1] + b"\x03"
+# Addressed at 0x06, as captured off the desk.
+enc_press = push([0x06], "encoderPressed", v_bool(True))
+# The RELEASE edge, which the desk does push. Announcing happens here rather than on the press,
+# because a HOLD is the desk's own mute gesture and must not advance our ring - see _ANN_ENC_HOLD_S.
+enc_release = push([0x06], "encoderPressed", v_bool(False))
 
 
 def tap(st_, packets=()):
@@ -407,37 +419,23 @@ print("\nA TURN THAT MOVES NOTHING SAYS SO")
 def encsig_packet(delta: int = 1) -> bytes:
     """THE SHAPE THE DESK ACTUALLY SENDS, hexdumped from the wire:
 
-        ... encoderSignal | 00 01 0b 08 | 01 05 01 | <int32 LE> | 01
+        ... encoderSignal | 00 | 01 0b 08 | 01 05 01 <int32 LE> | 01 ...
 
-    THE FOUR BYTES BEFORE THE MARKER MATTER: keep them, or this stops testing anything. A builder
-    that emits `00 01 05 01 <int32>`, marker straight after the name, is the shape a decoder is
-    tempted to ASSUME rather than the shape the desk sends, so the suite proves the decoder against
-    its own assumption while the real delta is thrown away on every turn.
-    """
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x01, 0x06])
-            + b"encoderSignal" + bytes([0x00, 0x01, 0x0B, 0x08, 0x01, 0x05, 0x01])
-            + int(delta).to_bytes(4, "little", signed=True) + bytes([0x01]))
+    A COMPOSITE (type 0x08) whose first member is the step. Keep it a composite, or this stops
+    testing the one property whose value is not where every other property puts it."""
+    return push([0x06], "encoderSignal",
+                bytes([0x01, 0x0B, 0x08]) + v_int(delta) + v_bool(True))
 
 
 def enccolour_packet(value: int) -> bytes:
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x01, 0x07])
-            + b"encoderColour" + bytes([0x00, 0x01, 0x05, 0x01])
-            + int(value).to_bytes(4, "little", signed=True))
+    return push([0x07], "encoderColour", v_int(value))
 
 
-# THE DELTA HAS TO SURVIVE THE DECODER, and for as long as this feature existed it did not. Pin the
-# value itself, not just the behaviour built on it: a decoder that silently returns None turns every
-# turn into a delta of 0, which _ann_at_limit reads as "do not know" and lets through.
-check("a clockwise click decodes as +1",
-      server._ann_decode_int(encsig_packet(1), encsig_packet(1).find(b"encoderSignal")
-                             + len(b"encoderSignal") + 1), 1)
-check("and an anticlockwise click as -1",
-      server._ann_decode_int(encsig_packet(-1), encsig_packet(-1).find(b"encoderSignal")
-                             + len(b"encoderSignal") + 1), -1)
-
-# The at-limit checks further down are what this protects: they set enc_pos and the level cache by
-# hand and then send a turn, so they only ever proved anything if the DELTA in that turn survives.
-# Under the old builder they passed against a packet shape the desk does not send.
+# THE DELTA HAS TO SURVIVE THE DECODER. Pin the value itself, not just the behaviour built on it: a
+# decoder that loses it turns every turn into a delta of 0, which _ann_at_limit reads as "do not
+# know" and lets through, so the at-limit checks further down would pass while proving nothing.
+check("a clockwise click decodes as +1", rcp_read.parse_push(encsig_packet(1))[2][0][0], 1)
+check("and an anticlockwise click as -1", rcp_read.parse_push(encsig_packet(-1))[2][0][0], -1)
 
 st = fresh_st()
 SPOKEN.clear()
@@ -537,9 +535,7 @@ channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9
 
 
 def fader_level_packet(fader_idx: int, value127: int) -> bytes:
-    sel = devices.FADER_NODE_BASE + fader_idx
-    return (bytes([0x04]) + b"\x00\x00\x01\x01\x02\x00\x01" + bytes([sel]) + b"faderLevel"
-            + b"\x00\x01\x05\x01" + int(value127).to_bytes(4, "little"))
+    return push([0, devices.FADER_NODE_BASE + fader_idx], "faderLevel", v_int(value127))
 
 
 st = fresh_st()
@@ -637,16 +633,13 @@ print("\nTHE ENCODER ON A SELECTED CHANNEL: GAIN FOR MICS, LEVEL FOR LINE STRIPS
 
 
 def chan_gain_packet(prop: bytes, chan_sel: int, value: int, trailer: int = 0x02) -> bytes:
-    """A pushed CHANNEL-address property: 01 01 01 02 <chan_sel> <trailer> <name> 00 01 05 01 <int>."""
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x02, chan_sel, trailer])
-            + prop + bytes([0x00, 0x01, 0x05, 0x01])
-            + int(value).to_bytes(4, "little", signed=True))
+    """A pushed property at a channel's INPUTSOURCE node, whose index is two bytes: the low byte is
+    `chan_sel`, the high byte `trailer`."""
+    return push([chan_sel | trailer << 8], prop.decode(), v_int(value))
 
 
 def chansel_packet(value: int) -> bytes:
-    return (bytes([0x04]) + bytes(3) + bytes([0x01, 0x01, 0x01, 0x01, 0x0F])
-            + b"systemChannelSelected" + bytes([0x00, 0x01, 0x05, 0x01])
-            + int(value).to_bytes(4, "little", signed=True))
+    return push([0x0F], "systemChannelSelected", v_int(value))
 
 
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
@@ -781,8 +774,7 @@ check("same bank not repeated", SPOKEN, [])
 said, _ = run([enc_press, enc_release], cold_cache=False)
 check("encoder press", said, ["Select"])
 # And the invented shape must NOT be accepted, or the bug can come back unnoticed.
-fake_press = (bytes([0x04]) + b"\x00\x00\x00\x01\x01\x01\x01\x0a" + b"encoderPressed"
-              + b"\x00\x01\x01\x01\x02")
+fake_press = push([0x0A], "encoderPressed", bytes([0x01, 0x01, 0x01]))   # an int type byte
 said, _ = run([fake_press], cold_cache=False)
 check("a malformed press value is ignored", said, [])
 
@@ -792,7 +784,6 @@ print("\nOUR OWN LAYOUT WRITES REFRESH THE NAMING LAYOUT")
 # pushed stream the way a change made on the desk is. An encoder PRESS then announces the old
 # channel ("Mic 2") while a TURN announces the new one ("USB 1"): the turn reads the source code off
 # the cross-point selector, the press has to look the layout up.
-import rcp_read  # noqa: E402
 
 OLD_LAYOUT = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]      # before the reset: Mic 2 up on fader 7
 NEW_LAYOUT = [0, 1, 2, 3, 10, 11, 7, 8, 9, 9]      # after the reset: USB 1 on fader 7

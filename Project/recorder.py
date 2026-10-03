@@ -673,16 +673,12 @@ class Watcher(threading.Thread):
 def _state_from_push(report: bytes):
     """`recordState`'s value out of one report-04 packet, or None if that is not what this is.
 
-    The push carries the global address form `01 01 01 01 <selector>` followed by the name and an
-    int value block (`01 05 01` + 4 bytes LE), which is the same shape our own writes use. The
-    selector is checked as well as the name: `recordState` is single-instance today, but matching
-    the address too is what stops a same-named field in another block being read as the recorder."""
-    if not report or report[0] != 0x04:
+    The address is checked as well as the name: `recordState` is single-instance today, but matching
+    the path too is what stops a same-named field in another block being read as the recorder."""
+    rec = rcp_read.parse_push(report)
+    if rec is None:
         return None
-    i = report.find(b"recordState")
-    if i < 0 or report[i - 1:i] != bytes([SEL_RECORDER]):
+    path, name, value, kind = rec
+    if name != "recordState" or path != [SEL_RECORDER] or kind != "int":
         return None
-    j = i + len("recordState")
-    if report[j:j + 4] != b"\x00\x01\x05\x01":
-        return None
-    return int.from_bytes(report[j + 4:j + 8], "little", signed=True)
+    return value

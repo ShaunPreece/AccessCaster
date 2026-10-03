@@ -1217,8 +1217,8 @@ and the same events can be INJECTED on report 0x03 (OUT). This is the basis of a
 "announce what the user pressed" accessibility aid. Property names:
   - encoderSignal    (encoder turn; an injected turn PROVABLY moved Mic1 gain)
   - encoderPressed   (encoder push)
-  - soloPressed / csoloPressed
-  - mutePressed / cmutePressed
+  - soloPressed       (at [0, button], from 0x63; a name scan reads it as csoloPressed)
+  - mutePressed      (at [0, button], from 0x63; a name scan reads it as cmutePressed)
   - selectedBank     (soundpad bank selection)
   - padButtonPressed
   - recButtonPressed

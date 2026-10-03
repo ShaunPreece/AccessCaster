@@ -757,11 +757,10 @@ class Watcher(threading.Thread):
             if not rep or rep[0] != 0x04 or b"sip" not in bytes(rep):
                 continue
             try:
-                frame = bytes(rep)
-                n = rcp_read._push_record_len(frame)
-                if n is None:
+                rec = rcp_read.parse_push(bytes(rep))
+                if rec is None:
                     continue
-                path, name, value, _k, _e = model_tree.parse_record(frame[5:5 + n])
+                path, name, value, _k = rec
                 if name.startswith("sip") and name not in _SECRET_PROPS:
                     self.apply(path, name, value)
             except Exception:

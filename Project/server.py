@@ -35,7 +35,6 @@ import queue
 import secrets                    # remote-access token (see access_token)
 import shutil
 import socket                     # to report this machine's LAN address for the remote link
-import struct
 import subprocess
 import tempfile
 import threading
@@ -2568,11 +2567,8 @@ def action_set_midi(on: bool) -> dict:
 # THE HANDLE IS REOPENED ON A FRESHLY RESOLVED INTERFACE, never on a remembered one. The desk
 # re-enumerates on `outputMultiMode`, `engineMode` and `systemMainMode`, all of which the app itself
 # writes, and comes back under a different USB product id and path.
-import re as _re
-
 _announce_on = threading.Event()
 _announce_thread = None
-_ANN_NAME = _re.compile(rb"[A-Za-z][A-Za-z0-9_]{3,}")
 
 # Reconnect pacing. Quick at first, so a momentarily busy handle costs nothing audible and a
 # re-enumeration (about 2.5 s) is picked up as soon as the desk is back; slow after that, because
@@ -2909,65 +2905,13 @@ def _ann_say(text: str) -> None:
         pass
 
 
-def _ann_decode_bool(data: bytes, after: int):
-    """Decode a compact bool (01 <len> <02 true | 03 false>) after a property name. None if absent.
-
-    Mirrors model_tree._value rather than counting bytes at the call site: the two hand-written
-    offsets in the old code disagreed (name+3 vs name+4), and the name+4 one meant the encoder press
-    was decoded as "not pressed" every single time.
-
-    THE FIXED OFFSET IS SAFE HERE AND NOT BY LUCK: the only values that sit one header further in
-    are COMPOSITES, and no composite the desk publishes carries a bool or a float this announcer
-    reads (see the encoder section of PROJECT_GUIDE part 2 for the eight and the measurement).
-    Handle a composite here one day and it will decode as None, which is a feature that does
-    nothing rather than one that is wrong - scan a window, as _ann_decode_int does."""
-    v = data[after:]
-    if v[:1] == b"\x00":
-        v = v[1:]
-    if len(v) >= 3 and v[0] == 0x01 and v[2] in (0x02, 0x03):
-        return v[2] == 0x02
-    return None
-
-
-_ANN_INT_MARKER = b"\x01\x05\x01"     # ... then a little-endian signed int32
-_ANN_INT_SCAN = 6                     # how far past `after` the marker may legitimately sit
-
-
-def _ann_decode_int(data: bytes, after: int):
-    """The int value that follows a property name, or None.
-
-    THE MARKER IS SEARCHED FOR IN A SHORT WINDOW, NOT ASSUMED TO SIT AT OFFSET 0. Most properties
-    put `01 05 01 <int32 LE>` straight after the name; `encoderSignal` carries four bytes of its
-    own first, measured on the desk as:
-
-        00 01 0b 08 | 01 05 01 | <int32 LE> | 01      +1 clockwise, ff ff ff ff anticlockwise
-
-    A fixed-offset check therefore returns None for EVERY encoder turn, the caller's `or 0` makes
-    that a delta of zero, and `_ann_at_limit` - which gives up on a zero delta - never fires at all:
-    turning past 100% says "Encoder not linked to anything" despite the guard written to prevent it.
-    The failure is INERT rather than wrong, which is why it survives its own tests when they build
-    the packet in the shape the decoder expects. DevTools/test_announcer.py builds the real one, so
-    a fixed-offset decoder cannot come back unnoticed.
-
-    The window is deliberately tight so a scan can never reach the next property in the frame."""
-    b = data[after:after + _ANN_INT_SCAN + len(_ANN_INT_MARKER) + 4]
-    j = b.find(_ANN_INT_MARKER)
-    if j < 0 or j > _ANN_INT_SCAN or len(b) < j + 7:
-        return None
-    return int.from_bytes(b[j + 3:j + 7], "little", signed=True)
-
-
 # MUTE / SOLO STATE, hardware-observed.
 # Pressing mute or solo pushes, unasked and about 70 ms after the button edge, the STATE property
-# `channelOutputMute` / `channelCueEnable`, carrying `01 01 01 01 <selector>` immediately BEFORE the
-# name with selector = SEL_CHANNEL_PROC + strip index. So the announcer can say WHICH channel and
-# WHETHER it is now muted, instead of the bare word "Mute" - and it catches a mute from any source
-# (button, touchscreen, MIDI), not just a press edge. Still strictly read-only.
-#
-# WHY NOT THE PRESS EDGE: a printable selector byte gets absorbed into the name match, so buttons
-# 1/2/3 read as cmutePressed / dmutePressed / emutePressed and only one spelling can be listed,
-# which announces nothing for every other channel. The state properties carry a NON-printable
-# selector (0x1C..0x25), so their name is stable and the byte before it really is the selector.
+# `channelOutputMute` / `channelCueEnable`, addressed at SEL_CHANNEL_PROC + strip index. So the
+# announcer can say WHICH channel and WHETHER it is now muted, instead of the bare word "Mute" - and
+# it catches a mute from any source (button, touchscreen, MIDI), not just a press edge. Still
+# strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
+# BUTTON, which names no channel, so it is only the fallback when no state follows.
 _ANN_STATE_SEL_BASE = channels.SEL_CHANNEL_PROC      # 0x1C + strip index
 _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
 # HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
@@ -3096,80 +3040,6 @@ def _ann_source_label(source_code: int) -> str:
     return f"Source {source_code}"
 
 
-def _ann_decode_str(data: bytes, after: int):
-    """Decode a string value block (01 <len> 05 <bytes> 00) after a property name."""
-    v = data[after:]
-    if v[:1] == b"\x00":
-        v = v[1:]
-    if len(v) >= 3 and v[0] == 0x01 and v[2] == 0x05:
-        return v[3:3 + max(0, v[1] - 1)].split(b"\x00")[0].decode("latin-1", "ignore")
-    return None
-
-
-def _ann_decode_float(data: bytes, after: int):
-    """Decode a float64 value block (01 09 04 <8 bytes>) after a property name.
-
-    Fixed offset, safe for the same reason as _ann_decode_bool above."""
-    v = data[after:]
-    if v[:1] == b"\x00":
-        v = v[1:]
-    if len(v) >= 11 and v[0] == 0x01 and v[2] == 0x04:
-        try:
-            return struct.unpack("<d", v[3:11])[0]
-        except Exception:
-            return None
-    return None
-
-
-def _ann_is(token: str, prop: str) -> bool:
-    """Does a name matched in the stream refer to this property?
-
-    A SELECTOR byte sitting immediately before the property name is sometimes a printable letter, in
-    which case the regex swallows it and the name reads e.g. 'LmixLevelWithAnchor' (cross-point
-    selectors for source 0 are 0x4c-0x58, 'L' to 'X'). That is a parsing artefact, not a different
-    property, so match on the SUFFIX - exactly how the mute/solo press edges are matched (they read
-    cmutePressed / dmutePressed / emutePressed for buttons 1/2/3)."""
-    return token == prop or token.endswith(prop)
-
-
-def _ann_sel(b: bytes, m, prop: str) -> int:
-    """The selector byte carried immediately before a property NAME, whether or not the regex
-    swallowed it (see _ann_is)."""
-    i = m.end() - len(prop) - 1
-    return b[i] if 0 <= i < len(b) else -1
-
-
-def _ann_addr_path(b: bytes, m, prop: str):
-    """The full TREE PATH a pushed property was addressed at, or None if it does not parse.
-
-    The address is `01 01 <levels> [<len><index LE>] x levels` (model_tree.encode_path) and the app
-    only ever sees one-level pushes here. Reading the whole index matters: an INPUTSOURCE address
-    needs two bytes, so the low byte alone identifies nothing - 0x6F is Mic 2's input on both desks
-    and also a perfectly ordinary one-byte selector elsewhere."""
-    start = m.end() - len(prop)                     # first byte of the property name
-    for head in range(start - 4, max(-1, start - 12), -1):
-        if b[head] != 0x01 or b[head + 1] != 0x01:
-            continue
-        levels = b[head + 2]
-        if not 1 <= levels <= 3:
-            continue
-        i, path = head + 3, []
-        for _ in range(levels):
-            if i >= start:
-                break
-            width = b[i]
-            i += 1
-            if width > 4 or i + width > start:
-                break
-            path.append(int.from_bytes(b[i:i + width], "little"))   # width 0 means the index is 0
-            i += width
-        # It only parses if the address ends exactly where the name begins. That is what rules out a
-        # shorter reading of a longer address, which is the whole failure this function exists for.
-        if len(path) == levels and i == start:
-            return path
-    return None
-
-
 def _ann_channel_label(strip_idx: int) -> str:
     """A speakable name for a strip index, e.g. 'Mic 2', from the known fader layout.
 
@@ -3195,244 +3065,217 @@ def _ann_channel_label(strip_idx: int) -> str:
 
 
 def _ann_handle_report(b: bytes, st: dict) -> None:
-    """Decode one report-04 control event and speak it, updating the announcer state dict `st`
-    ({"bank", "pending", "at"}). Scans the whole packet for a known property name, not just the
-    first token, so a bank change is still caught if another name precedes it."""
+    """Decode one report-04 frame and speak it, updating the announcer state dict `st`
+    ({"bank", "pending", "at"}). Only a PUSH is acted on: a slice of a model dump decodes as None
+    and is ignored, so a page reading the desk never sounds like the desk changing."""
     global _ann_mixer_quiet_until
-    if not b or b[0] != 0x04:
+    rec = rcp_read.parse_push(b)
+    if rec is None:
         return
-    for m in _ANN_NAME.finditer(b):
-        name = m.group().decode()
-        if name == "selectedBank":
-            val = _ann_decode_int(b, m.end() + 1)
-            if val is None:
-                return
-            # Keep the shortcut layer's copy current whether or not this is a change: the bank
-            # decides which pad a number key fires, so a stale one plays a stranger's sound.
-            _hk_note_bank(val)
-            if val != st["bank"]:
-                st["bank"] = val
-                _ann_say(f"Bank {val + 1}")
+    path, name, val, kind = rec
+    # Typed views of the value, so a branch that wants an int never acts on a string or a bool.
+    ival = val if kind == "int" else None
+    bval = val if kind == "bool" else None
+    fval = val if kind == "float" else None
+    # The strip a one-level push at SEL_CHANNEL_PROC + strip is addressed at, else -1.
+    strip = path[0] - _ANN_STATE_SEL_BASE if len(path) == 1 else -1
+    if not 0 <= strip < 16:
+        strip = -1
+
+    if name == "selectedBank":
+        if ival is None:
             return
-        # PAD PLAYBACK, TRACKED AND NEVER SPOKEN. A playing pad pushes `padProgress` about twenty
-        # times a second, so this is the one branch where saying anything at all would be wrong: the
-        # "what is playing" shortcut reads the state out on demand instead, rather than talking over
-        # the pad the whole time it plays. Both are addressed at the pad's
-        # STREAM POSITION, so the whole path is read rather than the selector byte.
-        if _ann_is(name, "padProgress"):
-            val = _ann_decode_float(b, m.end() + 1)
-            path = _ann_addr_path(b, m, "padProgress")
-            if val is not None and path:
-                _hk_note_pad_progress(path[-1], val)
+        # Keep the shortcut layer's copy current whether or not this is a change: the bank decides
+        # which pad a number key fires, so a stale one plays a stranger's sound.
+        _hk_note_bank(ival)
+        if ival != st["bank"]:
+            st["bank"] = ival
+            _ann_say(f"Bank {ival + 1}")
+        return
+    # PAD PLAYBACK, TRACKED AND NEVER SPOKEN. A playing pad pushes `padProgress` about twenty times a
+    # second, so this is the one branch where saying anything at all would be wrong: the "what is
+    # playing" shortcut reads the state out on demand instead, rather than talking over the pad the
+    # whole time it plays. Both are addressed at the pad's STREAM POSITION, the last path element.
+    if name == "padProgress":
+        if fval is not None and path:
+            _hk_note_pad_progress(path[-1], fval)
+        return
+    if name == "padActive":
+        if bval is not None and path:
+            _hk_note_pad_active(path[-1], bval)
+            # BOTH EDGES. A momentary pad restores every channel it moved when it is released, and
+            # that burst says no more than the one on the way in.
+            if path[-1] in _hk_mixer_pos:
+                _ann_mixer_quiet_until = time.time() + _ANN_MIXER_QUIET_S
+        return
+    if name == "mixLevelWithAnchor":
+        # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
+        # _ann_flush_pending speak it once the pushes stop. A cross-point selector is
+        # CROSS_POINT_BASE + 13*source + output, which passes 255 at source 14, so Virtual A and
+        # Virtual B are addressed with a two-byte index: use the whole path element, never a byte.
+        if not _ann_levels_on or kind != "str" or "|" not in val or len(path) != 1:
             return
-        if _ann_is(name, "padActive"):
-            on = _ann_decode_bool(b, m.end() + 1)
-            path = _ann_addr_path(b, m, "padActive")
-            if on is not None and path:
-                _hk_note_pad_active(path[-1], on)
-                # BOTH EDGES. A momentary pad restores every channel it moved when it is released,
-                # and that burst says no more than the one on the way in.
-                if path[-1] in _hk_mixer_pos:
-                    _ann_mixer_quiet_until = time.time() + _ANN_MIXER_QUIET_S
+        if path[0] < _ANN_XPOINT_BASE:
             return
-        if _ann_is(name, "mixLevelWithAnchor") and _ann_levels_on:
-            # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
-            # _ann_flush_pending speak it once the pushes stop.
-            # READ THE WHOLE ADDRESS, NOT THE SELECTOR BYTE. A cross-point selector is
-            # CROSS_POINT_BASE + 13*source + output, which passes 255 at source 14, so Virtual A and
-            # Virtual B are addressed with two bytes. Their low byte alone is 2 and 15, which fail
-            # the base test below, and the fader then moves in total silence - level and name both.
-            path = _ann_addr_path(b, m, "mixLevelWithAnchor")
-            val = _ann_decode_str(b, m.end() + 1)
-            sel = path[0] if path and len(path) == 1 else _ann_sel(b, m, "mixLevelWithAnchor")
-            if val and "|" in val and sel >= _ANN_XPOINT_BASE:
-                try:
-                    lvl = float(val.split("|", 1)[0])
-                except ValueError:
-                    return
-                src = (sel - _ANN_XPOINT_BASE) // _ANN_XPOINT_STRIDE
-                _ann_note_level(st, "fader", src, lvl)
+        try:
+            lvl = float(val.split("|", 1)[0])
+        except ValueError:
             return
-        if _ann_is(name, "encoderSignal"):
-            # Raw rotation. We do not announce the turn itself - the level change that follows says
-            # everything - but if NOTHING follows, _ann_flush_pending speaks up (see _ANN_ENC_DEAD_S).
-            # EXCEPT at the ends of the range: turning down at 0, or up at maximum, legitimately
-            # changes nothing, and announcing "not linked" there was simply wrong.
-            if _ann_levels_on:
-                delta = _ann_decode_int(b, m.end() + 1) or 0
-                st["enc_turn_at"] = None if _ann_at_limit(st, delta) else time.time()
+        _ann_note_level(st, "fader", (path[0] - _ANN_XPOINT_BASE) // _ANN_XPOINT_STRIDE, lvl)
+        return
+    if name == "encoderSignal":
+        # Raw rotation, a COMPOSITE whose first member is the signed step (+1 clockwise, -1 anti).
+        # We do not announce the turn itself - the level change that follows says everything - but
+        # if NOTHING follows, _ann_flush_pending speaks up (see _ANN_ENC_DEAD_S). EXCEPT at the ends
+        # of the range: turning down at 0, or up at maximum, legitimately changes nothing.
+        if _ann_levels_on:
+            delta = val[0][0] if kind == "pair" and val and val[0][1] == "int" else 0
+            st["enc_turn_at"] = None if _ann_at_limit(st, delta) else time.time()
+        return
+    if name == "systemChannelSelected":
+        # -1 = nothing selected, and the encoder is back on the levels ring. Anything else is a STRIP
+        # INDEX: that channel is selected and the encoder now moves its gain. The channel buttons
+        # emit no press edge of their own - this state change IS the event.
+        if ival is None or ival == st.get("chan_sel"):
             return
-        if _ann_is(name, "systemChannelSelected"):
-            # -1 = nothing selected, and the encoder is back on the levels ring. Anything else is a
-            # STRIP INDEX: that channel is selected and the encoder now moves its gain. The channel
-            # buttons emit no press edge of their own - this state change IS the event, which is why
-            # an early capture that looked for a button press found nothing.
-            val = _ann_decode_int(b, m.end() + 1)
-            if val is None or val == st.get("chan_sel"):
-                return
-            st["chan_sel"] = val
-            _ann_say("Levels. Encoder sets fader and monitor levels" if val < 0
-                     else _ann_selected_phrase(val))
+        st["chan_sel"] = ival
+        _ann_say("Levels. Encoder sets fader and monitor levels" if ival < 0
+                 else _ann_selected_phrase(ival))
+        return
+    if name in ("inputMicrophoneGain", "inputDigitalGain"):
+        # The gain the encoder moves while a channel is selected. BOTH kinds matter: a MIC strip
+        # moves inputMicrophoneGain, a line strip (USB 1, Chat, USB 2, Bluetooth) moves
+        # inputDigitalGain. Miss the second and a working turn on USB 1 announces "not linked" while
+        # the system audio audibly changes. Pushed at the channel's INPUTSOURCE node, whose index is
+        # two bytes (0x26E + source_code).
+        if not _ann_levels_on or ival is None:
             return
-        if _ann_is(name, "inputMicrophoneGain") or _ann_is(name, "inputDigitalGain"):
-            # The gain the encoder moves while a channel is selected. BOTH kinds matter: a MIC strip
-            # moves inputMicrophoneGain, a line strip (USB 1, Chat, USB 2, Bluetooth) moves
-            # inputDigitalGain. Miss the second and a working turn on USB 1 announces "not linked"
-            # while the system audio audibly changes.
-            # Pushed at the channel's INPUTSOURCE node, so the address in front of the name is the
-            # two-byte index 0x26E + source_code and the whole of it has to be read (_ann_addr_path).
-            if not _ann_levels_on:
-                return
-            val = _ann_decode_int(b, m.end() + 1)
-            if val is None:
-                return
-            st["enc_turn_at"] = None              # the turn DID do something: it moved a gain
-            is_mic = _ann_is(name, "inputMicrophoneGain")
-            prop = "inputMicrophoneGain" if is_mic else "inputDigitalGain"
-            who = _ann_gain_label(_ann_addr_path(b, m, prop), is_mic)
-            if who and st.get("gain_said") != (who, val):
-                # Record it either way, so a suppressed echo is not spoken by a later duplicate push.
-                st["gain_said"] = (who, val)
-                if not _ann_is_self_echo(("gain", who)):
-                    _ann_say(f"{who} {val} d B")
+        st["enc_turn_at"] = None              # the turn DID do something: it moved a gain
+        who = _ann_gain_label(path, name == "inputMicrophoneGain")
+        if who and st.get("gain_said") != (who, ival):
+            # Record it either way, so a suppressed echo is not spoken by a later duplicate push.
+            st["gain_said"] = (who, ival)
+            if not _ann_is_self_echo(("gain", who)):
+                _ann_say(f"{who} {ival} d B")
+        return
+    if name == "encoderColour":
+        # -1 = the encoder is bound to nothing; anything else is the colour of what it drives.
+        if ival is not None:
+            st["enc_bound"] = (ival >= 0)
+        return
+    if name == "faderLevel":
+        # The VIRTUAL fader level, 0-127, hardware-observed. This is the encoder's own report of
+        # what it just moved, and its address names the FADER directly
+        # (PHYSICALINTERFACE.FADER[base + index]), so it is the cleanest signal for re-seating the
+        # ring - the cross-point pushes that follow say the same thing by source.
+        idx = (path[1] - devices.FADER_NODE_BASE) if len(path) == 2 and path[0] == 0 else -1
+        if ival is not None and 0 <= idx < 16:
+            _ann_ring_seat(st, "fader", idx, max(0.0, min(1.0, ival / _ANN_FADER_LEVEL_MAX)))
+        return
+    if name == "outputMonLevel":
+        if _ann_levels_on and fval is not None:
+            _ann_ring_seat(st, "monitor", 0, fval)
+            _ann_note_level(st, "monitor", 0, fval)
+        return
+    # THE HEADPHONE KNOBS. They are physical pots with NO TACTILE INDICATOR, so there is no way to
+    # know where one is set by touch, which is exactly the case software has to answer. The desk
+    # pushes `potLevel` per step as the knob turns: measured 199 pushes in 12 seconds, one per
+    # increment, with the pot identified by the path. They go through the ordinary level machinery,
+    # so a sweep settles into ONE closing phrase rather than a torrent, exactly as a fader does. NOT
+    # seated on the encoder ring: the ring cycles what the ENCODER selects, and a headphone knob is
+    # not on it.
+    if name == "potLevel":
+        idx = path[1] if len(path) == 2 and path[0] == 0 else -1
+        if _ann_levels_on and ival is not None and 0 <= idx < _ANN_POT_COUNT:
+            _ann_note_level(st, "headphone", idx, max(0.0, min(1.0, ival / _ANN_POT_LEVEL_MAX)))
+        return
+    if name == "channelInputSource":
+        # A fader source changed. Keep the naming layout current and drop the TTL'd cache, so a
+        # change made on the desk itself is picked up at once instead of after up to 15 s. We do NOT
+        # speak it: our own fader writes push this too, and the UI already reports those.
+        if ival is not None and strip >= 0:
+            channels.note_strip_source(strip, ival)
+        return
+    if name in _ANN_STATE_PROPS:
+        if bval is None or strip < 0:
             return
-        if _ann_is(name, "encoderColour"):
-            # -1 = the encoder is bound to nothing; anything else is the colour of what it drives.
-            val = _ann_decode_int(b, m.end() + 1)
-            if val is not None:
-                st["enc_bound"] = (val >= 0)
+        on, what = bval, _ANN_STATE_PROPS[name]
+        st["pending"] = None            # the state supersedes the press edge
+        who = _ann_channel_label(strip)
+        if what == "mute":
+            # Track it: the encoder ring quotes this instead of a level (a muted channel's level is
+            # not the useful fact), and a mute landing mid-press is what identifies the gesture as
+            # the desk's press-and-hold rather than a selection change.
+            st.setdefault("muted", {})[strip] = on
+        # Our own write, echoed back: the UI announced it already (see _ann_mark_self_write). After
+        # the cache, so the ring still quotes the truth, and before the press-and-hold inference,
+        # because a software mute is not a gesture on the desk. Solo is marked too
+        # (_ann_publish_solo), though this desk pushes nothing back for a software solo, so that
+        # branch is insurance rather than an observed fix.
+        if _ann_is_self_echo((what, strip)):
             return
-        if _ann_is(name, "faderLevel"):
-            # The VIRTUAL fader level, 0-127, hardware-observed. This is the encoder's own
-            # report of what it just moved, and its selector names the FADER directly, so it is the
-            # cleanest signal for re-seating the ring - the cross-point pushes that follow say the
-            # same thing by source.
-            # Addressed at PHYSICALINTERFACE.FADER[base + index], a TWO-level path, so read the whole
-            # address rather than the byte before the name. Both give the same answer here and only
-            # one of them says why - see _ann_addr_path, and the Duo gain bug that earned it.
-            val = _ann_decode_int(b, m.end() + 1)
-            path = _ann_addr_path(b, m, "faderLevel") or []
-            idx = (path[1] - devices.FADER_NODE_BASE) if len(path) == 2 and path[0] == 0 else -1
-            if val is not None and 0 <= idx < 16:
-                lvl = max(0.0, min(1.0, val / _ANN_FADER_LEVEL_MAX))
-                _ann_ring_seat(st, "fader", idx, lvl)
+        # A mixer pad is mid-action, so this mute or cue is the pad doing its job. After the cache
+        # above, which must stay true whether or not anything is said.
+        if time.time() < _ann_mixer_quiet_until:
             return
-        if _ann_is(name, "outputMonLevel") and _ann_levels_on:
-            val = _ann_decode_float(b, m.end() + 1)
-            if val is not None:
-                _ann_ring_seat(st, "monitor", 0, val)
-                _ann_note_level(st, "monitor", 0, val)
+        if what == "mute":
+            if st.get("enc_down_at"):
+                st["enc_hold"] = True
+            # A TONE IF THEY HAVE ASKED FOR ONE, and the sentence if the tone cannot be played. Mute
+            # is the announcement that arrives too late as words: you press it mid-sentence, and by
+            # the time "Mic 2 muted" has been said the moment has gone. The cue does not name the
+            # channel, which is the trade and is why this is an option rather than the default.
+            if not (_ann_mute_tones and _ann_tone("muted" if on else "unmuted")):
+                _ann_say(f"{who} {'muted' if on else 'unmuted'}")
+        else:
+            _ann_say(f"{who} solo {'on' if on else 'off'}")
+        return
+    # Press EDGES. Do not speak yet: hold the generic word for _ANN_PENDING_S in case the state
+    # property follows (it names the channel, which is strictly better).
+    if name == "mutePressed" and bval is True:
+        st["pending"], st["at"] = "Mute", time.time()
+        return
+    if name == "soloPressed" and bval is True:
+        st["pending"], st["at"] = "Solo", time.time()
+        return
+    if name == "encoderPressed" and bval is True:
+        # Say NOTHING yet. A short press advances the ring; a hold mutes instead and leaves the
+        # selection alone (see _ANN_ENC_HOLD_S), and at the press edge we cannot yet tell which this
+        # is. The cost is announcing on release, about 400 ms later on a measured press, which is
+        # far cheaper than naming the wrong channel and desyncing the ring.
+        st["enc_at"], st["enc_named"] = time.time(), False
+        st["enc_down_at"], st["enc_hold"] = time.time(), False
+        return
+    if name == "encoderPressed" and bval is False:
+        down_at = st.get("enc_down_at")
+        held = bool(st.get("enc_hold")) or (
+            down_at is not None and (time.time() - down_at) >= _ANN_ENC_HOLD_S)
+        st["enc_down_at"], st["enc_hold"] = None, False
+        if held:
+            return          # the desk muted; that announcement already named the channel
+        # A CHANNEL BUTTON HOLDS THE ENCODER, AND AN ENCODER PRESS DOES NOT TAKE IT BACK. Measured
+        # on the desk: with `systemChannelSelected` at 0, two encoder presses leave it at 0, and only
+        # the channel button pressed again returns it to -1. Advancing the ring here announces USB 1
+        # and then Chat while the desk has never left Mic 1 - and worse than the wrong words, it
+        # leaves `enc_pos` pointing at a ring entry the encoder is not on, which is the same value
+        # `_ann_at_limit` reads to decide whether a turn is against a stop. Say what the encoder is
+        # still on, and leave the ring position alone.
+        sel_now = st.get("chan_sel")
+        if sel_now is not None and sel_now >= 0:
+            _ann_say(_ann_selected_phrase(sel_now))
             return
-        # THE HEADPHONE KNOBS. They are physical pots with NO TACTILE INDICATOR, so there is no way
-        # to know where one is set by touch, which is exactly the case software has to answer.
-        # The desk pushes `potLevel` per step as the knob turns: measured 199 pushes in 12 seconds,
-        # one per increment, with the pot identified by the path. They go through the ordinary level
-        # machinery, so a sweep settles into ONE closing phrase rather than a torrent, exactly as a
-        # fader does. NOT seated on the encoder ring: the ring cycles what the ENCODER selects, and
-        # a headphone knob is not on it.
-        if _ann_is(name, "potLevel") and _ann_levels_on:
-            val = _ann_decode_int(b, m.end() + 1)
-            path = _ann_addr_path(b, m, "potLevel") or []
-            idx = path[1] if len(path) == 2 and path[0] == 0 else -1
-            if val is not None and 0 <= idx < _ANN_POT_COUNT:
-                _ann_note_level(st, "headphone", idx,
-                                max(0.0, min(1.0, val / _ANN_POT_LEVEL_MAX)))
-            return
-        if _ann_is(name, "channelInputSource"):
-            # A fader source changed. Keep the naming layout current and drop the TTL'd cache, so a
-            # change made on the desk itself is picked up at once instead of after up to 15 s. We do
-            # NOT speak it: our own fader writes push this too, and the UI already reports those.
-            val = _ann_decode_int(b, m.end() + 1)
-            idx = _ann_sel(b, m, "channelInputSource") - _ANN_STATE_SEL_BASE
-            if val is not None and 0 <= idx < 16:
-                channels.note_strip_source(idx, val)
-            return
-        for prop, kind in _ANN_STATE_PROPS.items():
-            if not _ann_is(name, prop):
-                continue
-            on = _ann_decode_bool(b, m.end() + 1)
-            if on is None:
-                continue
-            idx = _ann_sel(b, m, prop) - _ANN_STATE_SEL_BASE
-            if 0 <= idx < 16:
-                st["pending"] = None            # the state supersedes the press edge
-                who = _ann_channel_label(idx)
-                if kind == "mute":
-                    # Track it: the encoder ring quotes this instead of a level (a muted channel's
-                    # level is not the useful fact), and a mute landing mid-press is what identifies
-                    # the gesture as the desk's press-and-hold rather than a selection change.
-                    st.setdefault("muted", {})[idx] = on
-                # Our own write, echoed back: the UI announced it already (see _ann_mark_self_write).
-                # After the cache, so the ring still quotes the truth, and before the press-and-hold
-                # inference, because a software mute is not a gesture on the desk. Solo is marked too
-                # (_ann_publish_solo), though this desk pushes nothing back for a software solo, so
-                # that branch is insurance rather than an observed fix.
-                if _ann_is_self_echo((kind, idx)):
-                    return
-                # A mixer pad is mid-action, so this mute or cue is the pad doing its job. After the
-                # cache above, which must stay true whether or not anything is said.
-                if time.time() < _ann_mixer_quiet_until:
-                    return
-                if kind == "mute":
-                    if st.get("enc_down_at"):
-                        st["enc_hold"] = True
-                    # A TONE IF THEY HAVE ASKED FOR ONE, and the sentence if the tone cannot be
-                    # played. Mute is the announcement that arrives too late as words: you press it
-                    # mid-sentence, and by the time "Mic 2 muted" has been said the moment has gone.
-                    # The cue does not name the channel, which is the trade and is why this is an
-                    # option rather than the default.
-                    if not (_ann_mute_tones and _ann_tone("muted" if on else "unmuted")):
-                        _ann_say(f"{who} {'muted' if on else 'unmuted'}")
-                else:
-                    _ann_say(f"{who} solo {'on' if on else 'off'}")
-                return
-        # Press EDGES. Do not speak yet: hold the generic word for _ANN_PENDING_S in case the
-        # state property follows (it names the channel, which is strictly better).
-        if name.endswith("mutePressed") and _ann_decode_bool(b, m.end() + 1) is True:
-            st["pending"], st["at"] = "Mute", time.time(); return
-        if name.endswith("soloPressed") and _ann_decode_bool(b, m.end() + 1) is True:
-            st["pending"], st["at"] = "Solo", time.time(); return
-        if _ann_is(name, "encoderPressed"):
-            down = _ann_decode_bool(b, m.end() + 1)
-            if down is True:
-                # Say NOTHING yet. A short press advances the ring; a hold mutes instead and leaves
-                # the selection alone (see _ANN_ENC_HOLD_S), and at the press edge we cannot yet tell
-                # which this is. The cost is announcing on release, about 400 ms later on a measured
-                # press, which is far cheaper than naming the wrong channel and desyncing the ring.
-                st["enc_at"], st["enc_named"] = time.time(), False
-                st["enc_down_at"], st["enc_hold"] = time.time(), False
-                return
-            if down is False:
-                down_at = st.get("enc_down_at")
-                held = bool(st.get("enc_hold")) or (
-                    down_at is not None and (time.time() - down_at) >= _ANN_ENC_HOLD_S)
-                st["enc_down_at"], st["enc_hold"] = None, False
-                if held:
-                    return          # the desk muted; that announcement already named the channel
-                # A CHANNEL BUTTON HOLDS THE ENCODER, AND AN ENCODER PRESS DOES NOT TAKE IT BACK.
-                # Measured on the desk: with `systemChannelSelected` at 0, two encoder presses
-                # leave it at 0, and only the channel button pressed again
-                # returns it to -1. Advancing the ring here announces USB 1 and then Chat while the
-                # desk has never left Mic 1 - and worse than the wrong words, it
-                # leaves `enc_pos` pointing at a ring entry the encoder is not on, which is the same
-                # value `_ann_at_limit` reads to decide whether a turn is against a stop. Say what the
-                # encoder is still on, and leave the ring position alone.
-                sel_now = st.get("chan_sel")
-                if sel_now is not None and sel_now >= 0:
-                    _ann_say(_ann_selected_phrase(sel_now))
-                    return
-                # A short press advances the fixed ring (_ann_encoder_ring), so once we know where we
-                # are we can say WHAT was just selected and where it sits - before a click moves it.
-                # Until the first movement seats us, all we can honestly say is "Select". A release
-                # with no press behind it (the announcer started mid-press) counts as a short press:
-                # a possibly-wrong name self-corrects, silence just leaves you guessing.
-                pos = st.get("enc_pos")
-                if pos is None:
-                    _ann_say("Select")
-                else:
-                    st["enc_pos"] = (pos + 1) % len(_ann_encoder_ring())
-                    _ann_say(_ann_ring_phrase(st, st["enc_pos"]))
-            return
+        # A short press advances the fixed ring (_ann_encoder_ring), so once we know where we are we
+        # can say WHAT was just selected and where it sits - before a click moves it. Until the first
+        # movement seats us, all we can honestly say is "Select". A release with no press behind it
+        # (the announcer started mid-press) counts as a short press: a possibly-wrong name
+        # self-corrects, silence just leaves you guessing.
+        pos = st.get("enc_pos")
+        if pos is None:
+            _ann_say("Select")
+        else:
+            st["enc_pos"] = (pos + 1) % len(_ann_encoder_ring())
+            _ann_say(_ann_ring_phrase(st, st["enc_pos"]))
+        return
 
 
 def _ann_seed_layout(st: dict) -> None:

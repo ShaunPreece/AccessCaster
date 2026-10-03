@@ -1001,10 +1001,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (14) is 258 and Virtual B (15) is 271, and the desk addresses those two with a TWO-byte index.
   Read as one byte both come back as 1, below the base, so the push is silently discarded and the
   fader moves with no level and no name - while mute and listen, addressed by strip index, still
-  speak, which is the signature that tells the two apart. `_ann_sel` is the one-byte read; take the
-  address from `_ann_addr_path`, as `faderLevel` and `potLevel` already do. Only codes 14 and 15
-  reach that far, and only in Expanded, which is why this was invisible until a virtual channel was
-  first put on a fader.
+  speak, which is the signature that tells the two apart. Take the address as a whole path element
+  from `rcp_read.parse_push`, never as a byte. Only codes 14 and 15 reach that far, and only in
+  Expanded, which is why this was invisible until a virtual channel was first put on a fader.
 - **THE WRITE SIDE WIDENS THE SAME WAY, AND A GLOBAL SELECTOR IS AN INDEX RATHER THAN A BYTE.**
   `build_global_prop_int` / `_bool` / `_string` / `_float`, `build_mix_link_request` and
   `build_cross_point_level` hand the selector to `build_address` whole, so `encode_path` emits
@@ -1381,10 +1380,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   than trusting it, and `rcp_read._last_read["bounded_by"]` says which happened.
 - **A PUSH IS ONE WHOLE RECORD ALONE IN ITS FRAME: `04 <len32> <record> <zeros to 256>`.** Real ones
   are 20 to 30 bytes, so 220-odd bytes of padding, where a dump frame is 255 dense bytes with at
-  most a handful of trailing zeros. `rcp_read._push_record_len` decides it STRUCTURALLY, via
+  most a handful of trailing zeros. `rcp_read._push_record` decides it STRUCTURALLY, via
   `model_tree.parse_record`: the record must parse completely and account for exactly the declared
   length, and every byte after it must be zero. Do not reduce that to a size threshold - a false
   positive silently punches 255 bytes out of the middle of the model.
+- **EVERY LISTENER DECODES A PUSH WITH `rcp_read.parse_push`, NEVER BY SCANNING THE FRAME FOR A NAME.**
+  The announcer, the recorder and CallMe watchers and `PushListener` all receive the model dump's
+  frames too, because Windows gives every open handle every input report. A name scan finds
+  property names inside a dump slice and reads garbage either side of them; it also glues a
+  printable selector onto the name (`mutePressed` at [0, 0x63] reads as `cmutePressed`).
+  `parse_push` answers None for anything that is not exactly one record, so a page reading the desk
+  can never sound like the desk changing.
 - **THE DUMP BURST IS ATOMIC.** Measured with a pad playing throughout: pushes arrive BEFORE the
   first dump frame and AFTER the last, never between two of them, 536 uninterrupted dump frames every
   time. That is why dropping push frames cannot leave a hole. It is also why a HEALTHY read now skips
@@ -1468,8 +1474,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   wrong fader model. The same page is still the authority on the headset: one 3.5mm TRRS jack on the front,
   whose microphone is its own input channel and whose earpieces share the Headphone 1 mix and are
   turned up with the Headphone 1 encoder.
-- **THE ANNOUNCER MUST READ A PUSHED ADDRESS IN FULL, not just its low byte** (`_ann_addr_path`).
-  `0x026E` needs two bytes and `0x6E` alone is an ordinary one-byte selector elsewhere. Taking the
+- **THE ANNOUNCER MUST READ A PUSHED ADDRESS IN FULL, not just its low byte** (the path
+  `rcp_read.parse_push` returns). `0x026E` needs two bytes and `0x6E` alone is an ordinary one-byte selector elsewhere. Taking the
   low byte and looking it up in a per-device table is how a gain turned ON THE DESK went unspoken on
   a Duo: the table held the dead selectors, the lookup missed, and nothing was said at all.
 - **`rcp_read.read_settings` returns RAW STREAM-ORDER arrays and is a diagnostic, not a per-channel
@@ -2328,34 +2334,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **Re-confirmed for `encoderColour` on 4th September 2026**: seven presses around the ring moved it
   not once. The ring POSITION cannot be known until something moves.
 
-- **`encoderSignal` DOES NOT PUT ITS VALUE WHERE EVERY OTHER PROPERTY DOES.** Hexdumped off the wire
-  4th September 2026:
+- **`encoderSignal` IS A COMPOSITE (value type 0x08), so its step is the FIRST MEMBER, not the
+  value.** Hexdumped off the wire 4th September 2026:
 
-      encoderSignal | 00 01 0b 08 | 01 05 01 | <int32 LE> | 01     +1 clockwise, ff ff ff ff anti
+      encoderSignal | 00 | 01 0b 08 | 01 05 01 <int32 LE> | 01 ...    +1 clockwise, -1 anti
 
-  Four bytes of its own sit before the `01 05 01` int marker. `_ann_decode_int` required that marker
-  at a fixed offset, so it returned None for EVERY turn, the caller's `or 0` made the delta zero, and
-  `_ann_at_limit` - which gives up on a zero delta - had never once run on hardware. Turning past
-  100% therefore always said "Encoder not linked to anything". The decoder now SCANS a short window
-  for the marker. **If another property ever looks inert, check its payload shape before its logic**;
-  this hid for as long as the feature existed because the test built the packet in the shape the
-  decoder assumed rather than the shape the desk sends.
-
-- **THOSE FOUR BYTES ARE THE COMPOSITE HEADER, SO THE SHAPE IS PREDICTABLE AND THE LIST IS CLOSED.**
-  `encoderSignal` is a COMPOSITE (value type 0x08), and a composite wraps its members, so the
-  member's own `01 05 01` marker sits one header in: `00` is the name's terminator and `01 0b 08`
-  is the outer header, which is why a decoder that skips the terminator is exactly 3 bytes short.
-  Measured on both halves (`DevTools/probe_push_decoders.py`, 1st October 2026): every pushed bool
-  and float has a gap of 0 and decodes identically to `model_tree.parse_record`, while
-  `mixLinkRequest` and `mixUnlinkRequest` have a gap of 3 and are composites.
-  **The desk publishes EIGHT composites in all** - `encoderSignal`, `mixLinkRequest`,
-  `mixUnlinkRequest`, `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`,
-  `playerJumpToSample`, `sipSlotCallDisconnect` - and the announcer handles only the first, whose
-  decoder already scans. So `_ann_decode_bool` and `_ann_decode_float` reading at a fixed offset is
-  correct TODAY and the question is settled, not open. **What would break it** is making the
-  announcer handle any of the other seven: a composite bool or float would decode as None, which is
-  a feature that does nothing rather than one that is wrong. Scan a window there too if that day
-  comes.
+  `parse_push` returns it as a list of (value, kind) pairs. Read it as anything else and every turn
+  has a delta of 0, which `_ann_at_limit` treats as "do not know", so turning past 100% says
+  "Encoder not linked to anything". `test_announcer` builds the real composite and pins the delta.
+  The desk publishes eight composites: `encoderSignal`, `mixLinkRequest`, `mixUnlinkRequest`,
+  `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`, `playerJumpToSample`,
+  `sipSlotCallDisconnect`.
 
 - **THE CHANNEL BUTTON TOGGLES, AND THE ENCODER PRESS DOES NOT RELEASE IT.** Measured with
   `DevTools/encoder_press_probe.py`, 4th September 2026: `systemChannelSelected` went to 0 on the

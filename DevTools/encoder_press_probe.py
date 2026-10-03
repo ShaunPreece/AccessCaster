@@ -15,12 +15,12 @@ the server up (Windows gives each open handle its own input queue - server.py:51
 
 Usage: python encoder_press_probe.py [seconds]
 """
-import re
 import sys
 import time
 
 import hid
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import rcp_read
 import rcp_transfer as t
 
 # Watch the state properties too, not just the encoder. A HOLD is timeable (press True at 11.95 s,
@@ -31,27 +31,8 @@ import rcp_transfer as t
 WATCH = ("encoderPressed", "encoderSignal", "encoderColour", "screenTouched",
          "channelOutputMute", "channelCueEnable", "systemChannelSelected", "faderLevel",
          "outputMonLevel", "mutePressed", "soloPressed")
-NAME_RE = re.compile(rb"[A-Za-z][A-Za-z0-9_]{3,}")
 
 seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 45.0
-
-
-def decode_bool(data: bytes, after: int):
-    """01 <len> <02 true | 03 false> after the name. Mirrors server._ann_decode_bool."""
-    v = data[after:]
-    if v[:1] == b"\x00":
-        v = v[1:]
-    if len(v) >= 3 and v[0] == 0x01 and v[2] in (0x02, 0x03):
-        return v[2] == 0x02
-    return None
-
-
-def decode_int(data: bytes, after: int):
-    b = data[after:after + 7]
-    if b[:3] == b"\x01\x05\x01":
-        return int.from_bytes(b[3:7], "little", signed=True)
-    return None
-
 
 iface = t.find_control_interface()
 if iface is None:
@@ -69,21 +50,14 @@ events = []
 try:
     while time.time() - start < seconds:
         rep = dev.read(256, timeout_ms=200)
-        if not rep or rep[0] != 0x04:
+        rec = rcp_read.parse_push(bytes(rep)) if rep else None
+        if rec is None or rec[1] not in WATCH:
             continue
-        b = bytes(rep)
-        for m in NAME_RE.finditer(b):
-            name = m.group().decode("latin-1")
-            hit = next((w for w in WATCH if name.endswith(w)), None)
-            if not hit:
-                continue
-            val = decode_bool(b, m.end() + 1)
-            if val is None:
-                val = decode_int(b, m.end() + 1)
-            ts = time.time() - start
-            events.append((ts, hit, val))
-            print(f"[{ts:6.3f}s] {hit} = {val}")
-            sys.stdout.flush()
+        _path, hit, val, _kind = rec
+        ts = time.time() - start
+        events.append((ts, hit, val))
+        print(f"[{ts:6.3f}s] {hit} = {val}")
+        sys.stdout.flush()
 finally:
     dev.close()
 

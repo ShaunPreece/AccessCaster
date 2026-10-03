@@ -15,12 +15,13 @@ offline half of ProjectMemory/DUO_SUPPORT.md (part A1); the rest still needs a D
 Run: python DevTools/test_duo_parity.py
 """
 from __future__ import annotations
-import re as _re
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import channels
 import devices
+import model_tree
+import rcp_read
 import rcp_transfer
 import server
 
@@ -62,17 +63,22 @@ class as_device:
         return False
 
 
+def push(path, name: str, value_block: bytes) -> bytes:
+    """A whole report-04 push frame (see test_announcer.push)."""
+    rec = model_tree.encode_path(path) + name.encode() + b"\x00" + value_block
+    frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
+    return frame + bytes(256 - len(frame))
+
+
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property (see test_announcer.state_packet): sel = 0x1C + strip index."""
-    return (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01"
-            + bytes([channels.SEL_CHANNEL_PROC + strip_idx]) + prop.encode()
-            + b"\x00\x01\x01" + bytes([0x02 if on else 0x03]))
+    """A pushed STATE property: sel = 0x1C + strip index."""
+    return push([channels.SEL_CHANNEL_PROC + strip_idx], prop,
+                bytes([0x01, 0x01, 0x02 if on else 0x03]))
 
 
 def int_packet(prop: str, sel: int, value: int) -> bytes:
-    """A pushed global int property: 01 01 01 01 <sel> <name> 00 01 05 01 <int32 LE>."""
-    return (bytes([0x04]) + b"\x00\x00\x00" + b"\x01\x01\x01\x01" + bytes([sel])
-            + prop.encode() + b"\x00\x01\x05\x01" + value.to_bytes(4, "little", signed=True))
+    """A pushed global int property."""
+    return push([sel], prop, b"\x01\x05\x01" + value.to_bytes(4, "little", signed=True))
 
 
 def run(pkts):
@@ -165,10 +171,9 @@ print("\nTHE PUSHED ADDRESS IS READ IN FULL, NOT JUST ITS LOW BYTE")
 # 0x026E needs two bytes. Reading only the low one calls it selector 0x6E, which is an ordinary
 # one-byte selector elsewhere in the protocol, so the width has to come from the length byte.
 for want, addr in (([0x26E], b"\x01\x01\x01\x02\x6e\x02"), ([0x6E], b"\x01\x01\x01\x01\x6e")):
-    frame = addr + b"inputMicrophoneGain\x00"
-    m = _re.search(b"inputMicrophoneGain", frame)
-    check(f"address {addr.hex(' ')} decodes to {want}",
-          server._ann_addr_path(frame, m, "inputMicrophoneGain"), want)
+    rec = addr + b"inputMicrophoneGain\x00\x01\x05\x01" + bytes(4)
+    frame = (b"\x04" + len(rec).to_bytes(4, "little") + rec).ljust(256, b"\x00")
+    check(f"address {addr.hex(' ')} decodes to {want}", rcp_read.parse_push(frame)[0], want)
 
 print("\nFADER LEVEL ADDRESSES ARE DERIVED, AND THE PRO II'S THREE ARE UNCHANGED")
 # The retired Pro II table, asserted against the derivation that replaced it. These three values are

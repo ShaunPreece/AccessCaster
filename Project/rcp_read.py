@@ -146,8 +146,8 @@ def read_model(settle_ms: int = 1500, max_reads: int = 4000, fresh: bool = False
     return blob
 
 
-def _push_record_len(frame: bytes):
-    """The record length if this report-04 frame is one asynchronous push, else None.
+def _push_record(frame: bytes):
+    """(record length, parse_record's (path, name, value, kind, end)) for one push, else None.
 
     A push is `04 <len32> <record> <zero padding>`. The test is structural on purpose: the declared
     length must be followed by a record that parses COMPLETELY and accounts for exactly that many
@@ -163,10 +163,27 @@ def _push_record_len(frame: bytes):
     if any(frame[5 + n:]):
         return None
     try:
-        end = model_tree.parse_record(frame[5:5 + n])[4]
+        rec = model_tree.parse_record(frame[5:5 + n])
     except ValueError:
         return None
-    return n if end == n else None
+    return (n, rec) if rec[4] == n else None
+
+
+def _push_record_len(frame: bytes):
+    """The record length if this report-04 frame is one asynchronous push, else None."""
+    got = _push_record(frame)
+    return got[0] if got else None
+
+
+def parse_push(frame: bytes):
+    """(path, name, value, kind) if this report-04 frame is one asynchronous push, else None.
+
+    The one decoder for anything that listens to the desk: a slice of a model dump answers None, so a
+    listener never mistakes a name inside the tree for a change the desk just made."""
+    if not frame or frame[0] != 0x04:
+        return None
+    got = _push_record(frame)
+    return got[1][:4] if got else None
 
 
 class PushListener:
@@ -255,16 +272,12 @@ class PushListener:
                     return
                 if not rep or rep[0] != 0x04:
                     continue
-                frame = bytes(rep)
                 self.frames += 1
-                n = _push_record_len(frame)
-                if n is None:
+                rec = parse_push(bytes(rep))
+                if rec is None:
                     self.not_a_record += 1
                     continue
-                try:
-                    path, name, val, kind, _end = model_tree.parse_record(frame[5:5 + n])
-                except ValueError:
-                    continue                              # already improbable; never fatal
+                path, name, val, kind = rec
                 self.pushes += 1
                 self._q.put((tuple(path), name, val, kind))
         finally:
