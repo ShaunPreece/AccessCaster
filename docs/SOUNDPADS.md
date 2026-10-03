@@ -319,7 +319,9 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    RECORD always appends; only the EFFECTS block allocates a region-B object.)
 3. TWO KINDS OF ORPHAN, ONE REMOVAL EACH. An ATTACHED orphan stores effectsIdx LAST, like a live
    pad's object: bare bind + clear removes it, and a delete by tree path does NOT (three tries).
-   A DETACHED one stores effectsIdx FIRST (RODE's app left one after a pad was retyped): nothing
+   A DETACHED one stores effectsIdx FIRST (RODE's app left one after a pad was retyped on earlier
+   firmware; on 1.7.6, retyping an FX pad to Mixer in RODE's app, with or without an effect
+   switched on, collects the object cleanly, so no known action makes one now): nothing
    binds to it, so bare bind + clear never collects it, and the delete by tree path removes exactly
    that node. The delete is the pad clear's shape aimed at PADEFFECTS[n] in transfer mode:
    `01 01 02 02 9d 02 01 <n>` voiceDisguiseOn ON, OFF, then select-begin `04 01 01 02 9d 02 01 <n>`.
