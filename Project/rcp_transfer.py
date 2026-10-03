@@ -136,7 +136,7 @@ def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
     """Build a 256-byte report-id-3 record setting a global integer property."""
     name_b = name.encode("ascii")
     # SIGNED int32: the device stores an "empty fader" as channelInputSource -1 (0xFFFFFFFF) and
-    # our reader (rcp_read._val_after) decodes int values signed, so the write side must match.
+    # our reader (model_tree._value) decodes int values signed, so the write side must match.
     # All non-negative callers (selectors, modes, source codes 0..16) encode identically to the
     # old unsigned form, so this is byte-compatible and additionally lets us write -1 to vacate a
     # strip. Confirmed on the Duo (write -1 -> read back -1, byte-clean).
@@ -258,7 +258,7 @@ def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
       * the string value block `01 <vlen> 05 <value> 00`, identical to build_pad_prop_string, which is
         verified byte-for-byte against sound4.pcap frame 167 (padFilePath).
     It is still the FIRST time the two have been combined, so treat the first write on any property
-    as unproven until it is read back. rcp_read._val_after decodes exactly this shape.
+    as unproven until it is read back. model_tree._value decodes exactly this shape.
     """
     name_b = name.encode("ascii")
     value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated

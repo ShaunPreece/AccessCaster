@@ -1,8 +1,9 @@
 """Non-destructive dump of every voice-FX effect-object on the device.
 
-Reads the model, splits the EFFECTS_PARAMETERS markers into region A (channel-strip
-effects, one per input channel) and region B (the special + per-pad effect-objects),
-and prints each region-B object's full recipe: every on-flag + param value + effectsIdx.
+Reads the model tree: region A is the channel-strip EFFECTS_PARAMETERS nodes (root
+children, one per input channel), region B the children of PADEFFECTS (the special +
+per-pad effect-objects). Prints each region-B object's full recipe: every on-flag +
+param value + effectsIdx.
 Also lists the pad table so each FX pad can be mapped to its effect-object(s).
 
 This is the source-of-truth extractor for factory voice-FX recipes (SOUNDPADS "match
@@ -15,13 +16,15 @@ import pickle
 import sys
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import model_tree
 import rcp_read as rr
+import soundpad
 
 
 def _restrip(raw: bytes) -> bytes:
     """Some snapshots hold the raw frame stream WITH the 0x04 report-id at every 256-byte
     boundary. Drop byte 0 of each 256-byte frame to get the clean contiguous stream that
-    find_all/_val_after expect."""
+    the tree parser expects."""
     if len(raw) % 256 == 0 and raw[:1] == b"\x04":
         return b"".join(raw[i + 1:i + 256] for i in range(0, len(raw), 256))
     return raw
@@ -51,53 +54,26 @@ EFFECT_FIELDS = [
 ON_FLAGS = [n for n, k in EFFECT_FIELDS if n.endswith("On")]
 
 
-def _marker_offsets(m: bytes):
-    offs, s = [], 0
-    while True:
-        i = m.find(b"EFFECTS_PARAMETERS", s)
-        if i < 0:
-            break
-        offs.append(i)
-        s = i + 1
-    return offs
-
-
 def decode_objects(m: bytes):
-    offs = _marker_offsets(m)
-    if len(offs) < 2:
-        region_a = len(offs)
-    else:
-        gaps = [(offs[k + 1] - offs[k], k) for k in range(len(offs) - 1)]
-        region_a = max(gaps)[1] + 1
+    """(region-A count, [object dict]) with every EFFECTS_PARAMETERS node in dump order."""
+    root = rr.node_at(m, [])
+    nodes = [n for n in model_tree.walk(root) if n.name == "EFFECTS_PARAMETERS"]
+    region_a = sum(1 for n in nodes if n.parent is root)
     objs = []
-    for j, o in enumerate(offs):
-        nxt = offs[j + 1] if j + 1 < len(offs) else len(m)
-        rec = {"abs_index": j, "region": "A" if j < region_a else "B",
-               "regionB_index": (j - region_a) if j >= region_a else None}
-        for name, kind in EFFECT_FIELDS:
-            p = m.find(name.encode(), o, nxt)
-            if p < 0:
-                rec[name] = None
-            else:
-                val, _ = rr._val_after(m, p + len(name))
-                rec[name] = val
+    for j, n in enumerate(nodes):
+        in_b = n.parent is not root
+        rec = {"abs_index": j, "region": "B" if in_b else "A",
+               "regionB_index": n.index if in_b else None}
+        props = {p: v for p, v, _k in n.props}
+        for name, _kind in EFFECT_FIELDS:
+            rec[name] = props.get(name)
         objs.append(rec)
     return region_a, objs
 
 
 def pad_table(m: bytes):
-    names = [v for v, k in rr.find_all(m, "padName")]
-    types = [v for v, k in rr.find_all(m, "padType")]
-    idxs = [v for v, k in rr.find_all(m, "padIdx")]
-    pads = []
-    for i, nm in enumerate(names):
-        pads.append({
-            "pos": i,
-            "padName": nm,
-            "padType": types[i] if i < len(types) else None,
-            "padIdx": idxs[i] if i < len(idxs) else None,
-        })
-    return pads
+    return [{"pos": p.position, "padName": p.name, "padType": p.type, "padIdx": p.idx}
+            for p in soundpad.pad_nodes(m)]
 
 
 def main():

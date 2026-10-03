@@ -6,28 +6,17 @@ streaming its ENTIRE property model on report-0x04 IN (gain, P48, MIDI,
 polarity, EQ, FX, ...). This module replays that command from our own code and
 parses the returned stream, so we can read current settings with NO RODE app.
 
-The returned stream is a concatenated tree of sections and properties; each
-property is  <name> 00 <value-block>, value-block one of:
-  01 05 01 <4-byte LE int>      integer
-  01 01 <02|03>                 compact bool (02 = ON/true, 03 = OFF/false)
-  01 <vlen> 05 <bytes> 00       string
-We don't fully parse the tree; we locate property names and decode the value
-that follows, which is enough to read every setting we care about.
+The returned stream is a tree of nodes and properties, parsed by model_tree; every
+read here is served from that parse. A dump that will not parse raises
+ModelUnreadable rather than being guessed at.
 """
 from __future__ import annotations
-import queue, re, struct, time, threading
+import queue, time, threading
 import model_tree            # THE parser: the dump is a tree, and this reads it
 import diagnostics           # the app's own account of what it read and how long it took
 import rcp_hid   # write-generation counter, so a write invalidates the cached dump below
 from rcp_hid import find_control_interface
 import devices   # device model table (matrix shape, channel order) keyed by product id
-
-# The output-mode array: each output is a `MIXMINUSES` section holding an outputMixMinus
-# int (0=Main,1=MixMinus,2=Custom). We anchor on the MIXMINUSES section header and read the
-# int after it; the first 11 headers are outputs 0-10 in order (verified by writing each).
-# Anchoring on the SECTION rather than the property name also survives a mangled name, which is
-# what a framing fault does to outputMixMinus on HP1/USB1.
-_MIXMINUSES_HDR = re.compile(rb"MIXMINUSES\x00")
 
 BULK_LEN = 256
 # Verbatim trigger captured from the app (micmidi_reads.pcap frame 70043):
@@ -414,39 +403,13 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     return blob
 
 
-def _val_after(blob: bytes, i: int):
-    """Decode the value block right after a property name that ends at index i."""
-    v = blob[i:]
-    if v[:1] == b"\x00":
-        v = v[1:]
-    if len(v) >= 3 and v[0] == 0x01:
-        vlen, vtype = v[1], v[2]
-        if vtype == 0x01:  # int LE
-            return int.from_bytes(v[3:7], "little", signed=True), "int"
-        if vtype in (0x02, 0x03):  # compact bool
-            return (vtype == 0x02), "bool"
-        if vtype == 0x04 and len(v) >= 11:  # 64-bit float (channel processing, normalised 0..1)
-            return struct.unpack("<d", v[3:11])[0], "float"
-        if vtype == 0x05:  # string
-            s = v[3:3 + max(0, vlen - 1)].split(b"\x00")[0]
-            return s.decode("latin1"), "str"
-    return None, "?"
-
-
 # ---- ONE PARSE PER DUMP, and every read served from it ----------------------
 #
-# ONE READER, NOT THREE. A raw substring search, a flat block walk and a tree parser can all coexist
-# here, and the crude one ends up carrying most of the traffic because it looks fast.
-#
-# That speed argument is backwards. The cost is never the parsing METHOD, it is parsing PER
-# LOOKUP. Measured on a live 143 KB dump: 33 lookups cost 4 ms by substring search, but 1711 ms if
-# each one walked. Parse ONCE into an index and every read after it is a dict lookup - and the tree
-# parse is 9.6 ms, five times FASTER than the 84.5 ms flat walk it replaces.
+# ONE READER. The cost of reading is never the parsing METHOD, it is parsing PER LOOKUP: parse once
+# into an index and every read after it is a dict lookup. The tree parse of a 143 KB dump is 9.6 ms.
 #
 # So: `model_tree.parse` once per dump, cached, and find_all / iter_properties /
-# iter_block_properties / block_value all serve from that index. See model_tree.py for what the
-# tree fixes (a phantom `iPOT`, EFFECTS_PARAMETERS misfiled as PARAMETERS, and 12 properties the
-# flat reader returned as None).
+# iter_block_properties / block_value / node_at all serve from that index.
 #
 # Keyed by IDENTITY and holding a strong reference to the blob, deliberately: id() alone is unsafe
 # because a freed object's id can be reused, which would hand back another dump's index. Two entries
@@ -461,35 +424,49 @@ class _Index:
     __slots__ = ("root", "flat", "by_name", "by_path")
 
     def __init__(self, root):
-        self.root = root
+        self.root = root                  # None for an empty blob
         self.flat = []                    # [(block, name, value, kind)] in dump order
         self.by_name: dict = {}
         # ADDRESS -> node. The tree path IS the write address (see model_tree.encode_path), so this
         # is what lets a read be addressed exactly the way the matching write is. by_name throws the
         # address away, which is fine for "every occurrence" and wrong for "this channel's value".
         self.by_path: dict = {}
-        for node in model_tree.walk(root):
+        for node in (model_tree.walk(root) if root is not None else ()):
             self.by_path[tuple(node.path())] = node
             for pname, val, kind in node.props:
                 self.flat.append((node.name, pname, val, kind))
                 self.by_name.setdefault(pname, []).append((val, kind))
 
 
-def _index(blob: bytes):
-    """The parsed index for a dump, parsed once and remembered. None if it will not parse.
+class ModelUnreadable(ValueError):
+    """A non-empty dump that does not parse as a model tree (truncated, or not a dump at all)."""
 
-    A DUMP THAT WILL NOT PARSE MUST NOT TAKE THE APP DOWN. A read can race a write and come back
-    truncated, and the honest response to that is to fall back to the old flat walk for this one
-    blob, not to raise into a page handler. read_model_stable already guards the common case by
-    requiring two dumps to agree.
+
+def parses(blob) -> bool:
+    """True if `blob` is a model dump that parses. An empty blob does not count."""
+    try:
+        return bool(blob) and _index(blob).root is not None
+    except ModelUnreadable:
+        return False
+
+
+def _index(blob: bytes):
+    """The parsed index for a dump, parsed once and remembered.
+
+    AN EMPTY BLOB IS AN EMPTY MODEL: it is what a desk that has stopped answering returns, and
+    callers already test for that with is_model_dump. ANY OTHER BLOB THAT WILL NOT PARSE RAISES
+    ModelUnreadable. There is no fallback reader: a guessed answer from a truncated dump reads as a
+    real setting, and read_model_stable retries until it has a dump that parses.
     """
     for cached_blob, idx in _INDEX_CACHE:
         if cached_blob is blob:
             return idx
+    if not blob:
+        return _Index(None)
     try:
         root, _used, _tail = model_tree.parse(blob)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ModelUnreadable(f"the model dump does not parse ({len(blob)} bytes): {exc}") from exc
     idx = _Index(root)
     _INDEX_CACHE.append((blob, idx))
     del _INDEX_CACHE[:-_INDEX_CACHE_MAX]
@@ -499,19 +476,12 @@ def _index(blob: bytes):
 def find_all(blob: bytes, name: str):
     """All decoded values for a property name, in stream order: [(value, kind), ...].
 
-    EXACT NAME, never a prefix. The old substring search could not tell a name from the start of a
-    longer one: `padActive` matched inside `padActiveEdit` and put a junk entry at the FRONT of the
-    list, which `soundpad.latched_pads` compensated for with a hardcoded "+1" - a parser artefact
-    worked around inside the check that catches a voice-FX pad left engaged on a live mic.
-    `outputMonAutoMute` collided with `outputMonAutoMuteActive` the same way.
+    EXACT NAME, never a prefix: a substring search finds `padActive` inside `padActiveEdit`.
 
-    A property whose value cannot be decoded is still returned, as (None, "?"), because it IS an
+    A property whose value cannot be decoded is still returned, with its raw kind, because it IS an
     occurrence and dropping it would shift every positional read past it.
     """
-    idx = _index(blob)
-    if idx is None:
-        return _legacy_find_all(blob, name)
-    return list(idx.by_name.get(name, ()))
+    return list(_index(blob).by_name.get(name, ()))
 
 
 def values(blob: bytes, name: str, kind: str | None = None) -> list:
@@ -547,39 +517,6 @@ def first(blob: bytes, name: str, kind: str | None = None, default=None):
     return default
 
 
-def _legacy_find_all(blob: bytes, name: str):
-    """The old raw substring search. ONLY for a dump the tree parser cannot read; it is kept
-    because a truncated dump should degrade rather than raise, not because it is trustworthy."""
-    key = name.encode()
-    out, start = [], 0
-    while True:
-        i = blob.find(key, start)
-        if i < 0:
-            break
-        val, kind = _val_after(blob, i + len(key))
-        out.append((val, kind))
-        start = i + len(key)
-    return out
-
-
-_ALNUM = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-def _clean_prop_name(name: str) -> str:
-    """Strip a SELECTOR BYTE that has been absorbed into a property name.
-
-    Every property name in this schema starts with a lowercase letter, so a leading digit, or a
-    leading capital in front of a lowercase one, is the record's selector byte happening to be
-    printable - the same artefact that once made the announcer only ever report channel 1 (see
-    server._ann_is). Section headers are ALL CAPS and are left alone.
-    """
-    i = 0
-    while i < len(name) and name[i].isdigit():
-        i += 1
-    name = name[i:]
-    if len(name) > 1 and name[0].isupper() and name[1].islower() and not name.isupper():
-        name = name[1:]
-    return name
-
-
 def iter_properties(blob: bytes):
     """Every property occurrence in a model dump, in stream order: (name, value, kind).
 
@@ -588,11 +525,7 @@ def iter_properties(blob: bytes):
     profile be a complete RECORD of the desk rather than a record of the settings we happen to
     understand today.
     """
-    idx = _index(blob)
-    if idx is None:
-        yield from _legacy_iter_properties(blob)
-        return
-    for _block, name, val, kind in idx.flat:
+    for _block, name, val, kind in _index(blob).flat:
         yield name, val, kind
 
 
@@ -610,11 +543,7 @@ def iter_block_properties(blob: bytes):
     and does nothing; `btVisible` was duplicated into SYSTEM that way for a while and went with a
     factory reset. Either way, anything reading a duplicated name must say which block it means.
     """
-    idx = _index(blob)
-    if idx is None:
-        yield from _legacy_iter_block_properties(blob)
-        return
-    yield from idx.flat
+    yield from _index(blob).flat
 
 
 def block_value(blob: bytes, block: str, name: str, instance: int = 0):
@@ -661,11 +590,9 @@ def node_at(blob: bytes, path):
     """The tree node at an ADDRESS, or None if the dump has no node there.
 
     `path` is the child-index list that `model_tree.encode_path` turns into the write address, so
-    a caller reads exactly where it would write. Returns None (rather than falling back to the flat
-    walk) when the dump will not parse: there is no honest positional equivalent of an address.
+    a caller reads exactly where it would write. Raises ModelUnreadable if the dump does not parse.
     """
-    idx = _index(blob)
-    return None if idx is None else idx.by_path.get(tuple(path))
+    return _index(blob).by_path.get(tuple(path))
 
 
 def path_value(blob: bytes, path, name: str, default=None):
@@ -699,70 +626,6 @@ def snapshot_properties(blob: bytes) -> dict:
     for name, val, _kind in iter_properties(blob):
         out.setdefault(name, []).append(val)
     return out
-
-
-def _legacy_iter_properties(blob: bytes):
-    """The old flat walk. ONLY for a dump the tree parser cannot read - see _index.
-
-    Method: every value block starts \\x00\\x01, so we walk BACK from each one over the ASCII run
-    that precedes it to get the name (a backwards walk, not a forward regex, because a forward
-    scan cannot overlap and so truncates a name whose neighbour ended inside it).
-
-    TWO KNOWN FIRMWARE ARTEFACTS, neither of which we can tidy away honestly:
-      * a printable SELECTOR byte glued to the front of the name - handled by _clean_prop_name;
-      * the first character of a name occasionally OVERWRITTEN by a framing byte, which is why
-        rcp_read.read_output_modes anchors on the section header rather than on `outputMixMinus`.
-        Measured on a live Pro II dump: 4 names out of 511 arrive one character short. They are
-        recorded as they came, so the snapshot stays a faithful record of the stream.
-    ALL-CAPS section headers (MIXMINUSES, AUDIO, ...) are structure, not properties, and are skipped.
-    """
-    for _header, name, val, kind in _legacy_walk(blob):
-        if not name.isupper():              # ALL-CAPS entries are section headers, not properties
-            yield name, val, kind
-
-
-def _legacy_iter_block_properties(blob: bytes):
-    """The old flat walk WITH the section header. ONLY for a dump the tree cannot read.
-
-    Kept honest about what it gets wrong: it recovers a name by stepping back over alphanumerics,
-    so it invents a phantom `iPOT` and truncates EFFECTS_PARAMETERS to PARAMETERS.
-    """
-    for header, name, val, kind in _legacy_walk(blob):
-        if not name.isupper():
-            yield header, name, val, kind
-
-
-def _legacy_walk(blob: bytes):
-    """The single flat scan both legacy readers run on, yielding (header, name, value, kind) and
-    ALL-CAPS section headers as (header, HEADER, ...) so a caller can tell them apart.
-
-    It was written out twice, the two copies differing only in whether they tracked the header.
-    Both are dead weight in the normal case (the tree index serves every read) and only run for a
-    dump the parser cannot read at all, which is exactly when having two subtly different scans
-    would be hardest to reason about.
-    """
-    header = None
-    i = 0
-    while True:
-        i = blob.find(b"\x00\x01", i)
-        if i < 0:
-            return
-        j = i
-        while j > 0 and blob[j - 1] in _ALNUM:
-            j -= 1
-        raw = blob[j:i]
-        if len(raw) >= 3:
-            # Clean BEFORE the letter test: a name whose absorbed selector byte is a digit
-            # ("9systemMidiControl") starts with a digit until the selector is stripped.
-            name = _clean_prop_name(raw.decode("latin1"))
-            if len(name) >= 3 and name[0].isalpha():
-                if name.isupper():
-                    header = name
-                    yield header, name, None, "?"
-                else:
-                    val, kind = _val_after(blob, i)
-                    yield header, name, val, kind
-        i += 2
 
 
 # Channel order in the model stream (the unit's fixed input list).
@@ -829,13 +692,19 @@ def read_settings() -> dict:
 
 
 def _stable_key(b: bytes):
+    """What two dumps must share to count as agreeing. None for a dump that does not parse, which
+    therefore never agrees with anything."""
+    if not b:
+        return (0, (), ())
+    if not parses(b):
+        return None
     return (len(b),
             tuple(values(b, "mixDisabled")),
             tuple(values(b, "mixMute")))
 
 
 def read_model_stable(max_try: int = 6, fresh: bool = False) -> bytes:
-    """Read the model until two consecutive dumps agree (size + matrix state vectors),
+    """Read the model until two consecutive dumps agree (size + matrix state vectors) and parse,
     so a read that raced a write and came back truncated/partial is never returned.
 
     A cached dump counts as the FIRST of the two: if the cache already holds a fresh blob (no write
@@ -854,7 +723,7 @@ def read_model_stable(max_try: int = 6, fresh: bool = False) -> bytes:
     for n in range(1, max_try + 1):
         b = read_model(fresh=True)
         key = _stable_key(b)
-        if prev_key is not None and key == prev_key:
+        if key is not None and key == prev_key:
             _cache_put(b, stable=True)
             if n > 2:
                 diagnostics.event("model.stable", "settled after several reads", reads=n)
@@ -870,16 +739,10 @@ def read_model_stable(max_try: int = 6, fresh: bool = False) -> bytes:
 
 
 def read_output_modes(blob: bytes) -> list:
-    """The 11 output modes (0=Main Mix, 1=Mix Minus, 2=Custom), index = output index.
-    Anchors on the MIXMINUSES section header (intact even when the outputMixMinus name
-    is corrupted by a framing byte). Returns [] if the array is not found cleanly."""
-    out = []
-    for m in _MIXMINUSES_HDR.finditer(blob):
-        seg = blob[m.end():m.end() + 34]
-        vh = seg.find(b"\x01\x05\x01")           # int value header
-        if vh >= 0:
-            out.append(seg[vh + 3])              # low byte of the int = the mode
-    return out
+    """Every output's mode (0=Main Mix, 1=Mix Minus, 2=Custom), index = output index: the
+    `outputMixMinus` of each MIXMINUSES node, in dump order (the first 11 are outputs 0-10 on a Pro
+    II, verified by writing each)."""
+    return block_values(blob, "MIXMINUSES", "outputMixMinus", "int")
 
 
 def master_processing(blob: bytes) -> dict:

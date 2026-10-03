@@ -1,36 +1,7 @@
-"""THE MODEL IS A SELF-DESCRIBING TREE. This parses it properly, and the parse is its own proof.
-
-Decoded off a live dump, after `block_order.py` showed that skipping STORAGEVOLUME
-and WIFISCANRESULT in the flat walk is LOAD-BEARING (their instances sit between SYSTEM 0x0F and the
-proven NETWORK 0x10, so they really do take no slot) - which meant the flat walk was fitting around
-a structure it could not see.
-
-THE GRAMMAR, and every byte of the dump is accounted for by it:
-
-    node     := NAME "\\0" count(P) property x P  count(C) node x C
-    property := name "\\0" 0x01 <vlen> <payload, vlen bytes; payload[0] = type>
-    count(n) := <length byte L> <n, L bytes little-endian>      # L = 0 means the count is 0
-
-So the two bytes that look like "an array marker before a block name" are the PARENT's child COUNT,
-and the lone 0x00 between two adjacent POT blocks is the first POT's own child count of zero.
-Nothing is special-cased; SOUNDPADS is not a hole in the walk, it is an ordinary node with 0
-properties and 24 children.
-
-WHY THIS MATTERS MORE THAN TIDINESS. The write address is that tree path, not a flat number:
-
-    01 01 <levels> [ <len> <index, len bytes LE> ] x levels
-
-`levels` is the DEPTH. So a node that is a child of the root takes ONE index (which is why every
-selector we have ever confirmed equals its root-child position, `0x1C` = CHANNEL[0], `0x026E` =
-INPUTSOURCE[0] as a two-byte index), and a node one level deeper takes TWO - which is exactly the
-pad path `01 01 02 02 9a 02 01 <n>`: root child 0x029A = SOUNDPADS, then child n = PAD[n].
-
-That retires the "flat index past 0xFF" problem AND the unexplained "drift": PAD[0..23] were never
-root children, so counting them as such shifted everything after them. It also gives STORAGEVOLUME
-and WIFISCANRESULT real addresses for the first time - they are not slotless, they are one level
-down, under a parent the flat walk could not see.
-
-`address_of` returns the path for any node. NOTHING HERE WRITES TO THE DEVICE.
+"""Command line over the model tree parser (Project/model_tree.py, which documents the grammar and
+why the write address is the tree path). Prints the parse summary, finds blocks and properties
+with their write addresses, and scores the tree against every known selector. NOTHING HERE WRITES
+TO THE DEVICE.
 
 Usage:
     python DevTools/tree_tool.py                 # live dump: parse, verify, summarise
@@ -55,13 +26,25 @@ import rcp_read
 # name; the app's module owns it.
 from model_tree import Node, parse, walk, instances, find_property  # noqa: F401
 
-# The confirmed block selectors, copied from selector_predict.ANCHORS. Kept as a list of
-# (block, instance, selector) so the tree can be SCORED against ground truth rather than admired.
-try:
-    import selector_predict
-    ANCHORS = selector_predict.ANCHORS
-except Exception:                                        # pragma: no cover - tooling only
-    ANCHORS = []
+# Every block-level selector known from the wire or from hardware, as (block, instance, selector,
+# where it came from), so the tree can be SCORED against ground truth rather than admired.
+ANCHORS = [
+    ("RECBUTTON", 0, 0x02, "off the wire (recButtonPressed)"),
+    ("RECORDER", 0, 0x03, "off the wire (recordState)"),
+    ("ENCODER", 0, 0x06, "off the wire (encoderColour push)"),
+    ("GUI", 0, 0x07, "captured (screenBrightness)"),
+    ("HEADPHONE", 0, 0x09, "captured (headphoneType HP1)"),
+    ("HEADPHONE", 1, 0x0A, "confirmed on the Duo (headphoneType HP2)"),
+    ("OUTPUT", 0, 0x0D, "captured (outputMonLevel, outputPrefader)"),
+    ("MASTERCHANNEL", 0, 0x0E, "captured (masterCompellorOn)"),
+    ("SYSTEM", 0, 0x0F, "captured (transferModeType, systemMidiControl)"),
+    ("NETWORK", 0, 0x10, "PROVEN: btVisible written, read back, phone paired"),
+    ("STREAMERXMIXPRESET", 1, 0x13, "the btDoScan stray landed here"),
+    ("CHANNEL", 0, 0x1C, "captured (channelInputSource fader 1, channelOutputMute strip 0)"),
+    ("EFFECTS_PARAMETERS", 0, 0x26, "captured (fx selector base)"),
+    ("MIXMINUSES", 0, 0x31, "captured (outputMixMinus base)"),
+    ("MIX", 0, 0x4C, "captured (cross-point base 76, verified for all 99 cells)"),
+]
 
 
 def _fmt_addr(node: Node) -> str:
@@ -101,13 +84,9 @@ def main() -> int:
 
     if "--anchors" in argv:
         print("\nSCORING the tree against every CONFIRMED selector")
-        # selector_predict's flat walk reads a block name by stepping back over ALNUM bytes, which
-        # stops at an underscore, so EFFECTS_PARAMETERS reaches it as "PARAMETERS". The tree reads
-        # the real name. Aliased here rather than changing the proven flat walk.
-        alias = {"PARAMETERS": "EFFECTS_PARAMETERS"}
         right = wrong = 0
         for block, inst, want, why in ANCHORS:
-            got = instances(root, alias.get(block, block))
+            got = instances(root, block)
             path = got[inst].path() if inst < len(got) else None
             ok = path == [want]
             right += ok

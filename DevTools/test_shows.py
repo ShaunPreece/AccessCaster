@@ -5,6 +5,7 @@ Run: python DevTools/test_shows.py
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 
+import fake_model
 import server
 import shows
 
@@ -16,32 +17,8 @@ def check(label, got, want):
 
 
 def fake_blob(entries):
-    """A minimal model blob: (block header, property, value) in stream order.
-
-    Mirrors the real layout that rcp_read.iter_block_properties walks. A name is any alphanumeric
-    run immediately followed by `00 01`; an ALL-CAPS one is a section header, anything else is a
-    property whose value block follows as `<vlen> <vtype> <payload>` (rcp_read._val_after):
-    vtype 0x01 = int32 LE, 0x05 = string. Every record is separated by a 0x00 so the parser's
-    walk-back over alphanumerics cannot absorb a payload byte into the next name.
-
-    IT OPENS WITH THE ROOT NODE'S NAME, as every real dump does, because `rcp_read.is_model_dump`
-    uses that marker to tell a dump from the ZERO BYTES a desk that has stopped answering returns.
-    Without it a fake dump is indistinguishable from a dead desk, and `shows.wait_for` correctly
-    ignores it.
-    """
-    out = bytearray(b"Rodecaster\x00")
-    header = None
-    for block, name, value in entries:
-        if block != header:
-            out += b"\x00" + block.encode() + b"\x00\x01\x00\x00\x00"
-            header = block
-        out += b"\x00" + name.encode() + b"\x00\x01"
-        if isinstance(value, int):
-            out += b"\x05\x01" + value.to_bytes(4, "little", signed=True)
-        else:
-            raw = value.encode() + b"\x00"
-            out += bytes([len(raw), 0x05]) + raw
-    return bytes(out)
+    """A model dump from (block, property, value) triples in stream order (see fake_model)."""
+    return fake_model.encode(entries)
 
 
 print("wifi scan slot parsing")

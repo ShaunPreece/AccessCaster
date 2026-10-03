@@ -2003,12 +2003,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **It reads back BY BLOCK now and returns the state, and the browser switch follows the DESK, not
   the click.** It occurs once, in OUTPUT: this was never the `btVisible` duplicate trap, and the
   monitor and Bluetooth toggles are not crossed.
-- **THERE IS ONE READER: `model_tree.parse`, indexed once per dump by `rcp_read._index`.** Do not
-  add a second way to get a value out of a dump. `soundpad.py`'s raw windowing is the one survivor
-  and the reason for the `padType` trap. `find_all`
-  matches WHOLE names (a prefix match once put a junk entry in front of a 24-pad list and a
-  hardcoded "+1" was written to compensate, inside a safety check). The `_legacy_*` walkers exist
-  only so a dump that will not parse degrades instead of raising - never call them directly.
+- **THERE IS ONE READER: `model_tree.parse`, indexed once per dump by `rcp_read._index`, AND NO
+  FALLBACK.** Do not add a second way to get a value out of a dump, and do not bring back a byte
+  scan for when the parse fails: a truncated dump read that way returns plausible wrong settings. An
+  EMPTY blob reads as an empty model (a desk that stopped answering); any other unparseable blob
+  raises `ModelUnreadable`, and `read_model_stable` retries until a dump parses. `find_all` matches
+  WHOLE names (a prefix match puts `padActiveEdit` in front of the pad list). Test fixtures build
+  real trees with `DevTools/fake_model.py`.
 - **A PROPERTY'S TYPE IS PER OCCURRENCE, not per name.** `storageVolumeCapacity` is a 32-bit int on
   two volumes and 64-bit on the third. Anything assuming one type per name will read a stale zero.
 - **AUTO-MUTE SILENCES THE SCREEN READER, if the screen reader shares the monitor output.** Shaun,

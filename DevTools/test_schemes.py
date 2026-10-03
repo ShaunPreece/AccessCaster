@@ -10,12 +10,12 @@ Run: python DevTools/test_schemes.py
 """
 from __future__ import annotations
 import os
-import struct
 import sys
 import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import devices
+import fake_model
 import rcp_transfer
 import routing_schemes
 
@@ -91,25 +91,8 @@ class capture_writes:
 
 # --- a synthetic model blob carrying a full matrix ------------------------------------------------
 # 516 cross-points (the guard value both desks report) at read index 13*source + output, plus the
-# MIXMINUSES headers read_output_modes anchors on. mixLevelWithAnchor is the ASCII 'level|anchor'
+# MIXMINUSES nodes read_output_modes reads. mixLevelWithAnchor is the ASCII 'level|anchor'
 # string: equal halves = LINKED (follows the fader), different = a manual level.
-
-def prop_int(name, value):
-    return name.encode() + b"\x00\x01\x05\x01" + int(value).to_bytes(4, "little", signed=True)
-
-
-def prop_bool(name, value):
-    return name.encode() + b"\x00\x01\x01" + (b"\x02" if value else b"\x03")
-
-
-def prop_str(name, value):
-    v = value.encode() + b"\x00"
-    return name.encode() + b"\x00\x01" + bytes([len(v)]) + b"\x05" + v
-
-
-def mixminus_section(mode):
-    return b"MIXMINUSES\x00" + prop_int("outputMixMinus", mode)
-
 
 # The desk we pretend to read: Chat (output 8) on Custom carrying Mic 1 only, Headphone 1 (output 0)
 # on Custom with USB 1 (source 7) pulled down to 0.4 by hand, everything else normal.
@@ -133,18 +116,17 @@ def cell(o, s):
     return False, "0.75|0.75"          # linked: level == anchor
 
 
+MIX = devices.PRO2.matrix.block
 parts = []
 for i in range(devices.PRO2.matrix.cell_count):   # the count the guard checks against
     s, o = divmod(i, devices.PRO2.matrix.row_stride)
     excluded, lvl = cell(o, s) if s in PRO2_SOURCES and o < 11 else (False, "0|0")
-    parts.append(prop_bool("mixDisabled", excluded))
-    parts.append(prop_str("mixLevelWithAnchor", lvl))
-# THE GRID MUST SIT INSIDE A NAMED BLOCK, because the matrix read is block-scoped: RCSYNCMIX
-# carries the same six cross-point names, so an unscoped read returns two grids concatenated. An
-# ALL-CAPS name followed by the property marker is how the walker recognises a section, and
-# without one every cross-point below is attributed to no block and the read finds nothing.
-blob = (b"".join(mixminus_section(m) for m in MODES)
-        + devices.PRO2.matrix.block.encode() + b"\x00\x01" + b"".join(parts))
+    parts.append((MIX, "mixDisabled", excluded))
+    parts.append((MIX, "mixLevelWithAnchor", lvl))
+# THE GRID SITS INSIDE ITS NAMED BLOCK, because the matrix read is block-scoped: RCSYNCMIX carries
+# the same cross-point names, so an unscoped read returns two grids concatenated.
+MODE_ROWS = [("MIXMINUSES", "outputMixMinus", m) for m in MODES]
+blob = fake_model.encode(MODE_ROWS + parts)
 
 
 # --- capture --------------------------------------------------------------------------------------
@@ -199,7 +181,7 @@ with as_device(devices.DUO):
 
 print("\nCAPTURE: a matrix that changed shape is refused, not half-saved")
 with as_device(devices.PRO2):
-    short = routing_schemes.capture("show", b"".join(parts[:40]))
+    short = routing_schemes.capture("show", fake_model.encode(MODE_ROWS + parts[:40]))
 check("capture refuses when the cross-point count is wrong", short.get("ok"), False)
 check_true("and says why", "changed shape" in (short.get("message") or ""))
 

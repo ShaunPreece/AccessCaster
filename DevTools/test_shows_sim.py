@@ -20,6 +20,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import threading
 import time
 
+import fake_model
 import devices
 import rcp_read
 import server
@@ -49,48 +50,6 @@ def check_in(label, needle, haystack):
 
 # ---------------------------------------------------------------------------
 # The fake desk.
-
-def _count(n: int) -> bytes:
-    if n == 0:
-        return b"\x00"
-    ln = 1 if n <= 0xFF else 2
-    return bytes([ln]) + n.to_bytes(ln, "little")
-
-
-def _prop(name: str, value) -> bytes:
-    # BOOL IS TESTED BEFORE INT ON PURPOSE: bool subclasses int in Python, so the int branch would
-    # swallow True and emit it with the wrong KIND, and rcp_read.values filters on kind.
-    if isinstance(value, bool):
-        payload = bytes([0x02 if value else 0x03])
-    elif isinstance(value, int):
-        payload = b"\x01" + value.to_bytes(4, "little", signed=True)
-    else:
-        payload = b"\x05" + value.encode("latin1") + b"\x00"
-    return name.encode("latin1") + b"\x00" + _count(len(payload)) + payload
-
-
-def encode(entries):
-    """Render (block, property, value) triples as a model dump in the real tree grammar (see
-    model_tree): the root, then one child node per run of a block. A property name repeating inside
-    a run starts a new instance, so consecutive SHOW rows become one SHOW node per backup.
-
-    It opens with the root node's name, as every real dump does, because `rcp_read.is_model_dump`
-    uses that marker to tell a real dump from the ZERO BYTES a desk that has stopped answering
-    returns.
-    """
-    nodes = []                                   # [(block, {name: value})]
-    for block, name, value in entries:
-        if not nodes or nodes[-1][0] != block or name in nodes[-1][1]:
-            nodes.append((block, {}))
-        nodes[-1][1][name] = value
-    out = bytearray(b"Rodecaster\x00" + _count(0) + _count(len(nodes)))
-    for block, props in nodes:
-        out += block.encode() + b"\x00" + _count(len(props))
-        for name, value in props.items():
-            out += _prop(name, value)
-        out += _count(0)
-    return bytes(out)
-
 
 class FakeDesk:
     """Enough of a RODECaster to answer the show commands.
@@ -149,7 +108,7 @@ class FakeDesk:
         rows += [("SHOWCONTROL", "currentShowName", "Loaded"),
                  ("SHOWCONTROL", "currentShowUUID", self.current_uuid),
                  ("SHOWCONTROL", "showControlLastError", self.last_error)]
-        return encode(rows)
+        return fake_model.encode(rows)
 
     def uid_of(self, snapshot):
         for n, b in enumerate(self.backups):

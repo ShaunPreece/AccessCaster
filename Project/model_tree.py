@@ -1,38 +1,23 @@
 """THE MODEL IS A SELF-DESCRIBING TREE. This parses it properly, and the parse is its own proof.
 
-Decoded off a live dump, after `DevTools/block_order.py` showed that skipping
-STORAGEVOLUME and WIFISCANRESULT in the old flat walk is LOAD-BEARING (their instances sit between
-SYSTEM 0x0F and the proven NETWORK 0x10, so they really do take no slot) - which meant the flat walk
-was fitting around a structure it could not see.
-
 THE GRAMMAR, and every byte of the dump is accounted for by it:
 
     node     := NAME "\\0" count(P) property x P  count(C) node x C
     property := name "\\0" 0x01 <vlen> <payload, vlen bytes; payload[0] = type>
     count(n) := <length byte L> <n, L bytes little-endian>      # L = 0 means the count is 0
 
-So the two bytes the flat walk read as "an array marker before a block name" are the PARENT's child
-COUNT, and the lone 0x00 between two adjacent POT blocks is the first POT's own child count of zero.
-Nothing is special-cased; SOUNDPADS is not a hole in the walk, it is an ordinary node with 0
+A parent's child COUNT sits just before its first child's name, and a node with no children still
+carries a count of zero, so nothing is special-cased: SOUNDPADS is an ordinary node with 0
 properties and 24 children.
 
 WHY THIS LIVES IN Project/ AND NOT DevTools/: it is not a probing tool, it is THE reader. `rcp_read`
 builds its whole index from it, so every value the app shows comes through this parser, and
 `DevTools/tree_tool.py` is a command line over it.
 
-WHY IT REPLACED THE FLAT WALK, measured on a live 143 KB dump rather than argued:
-  * FIVE TIMES FASTER: 9.6 ms to parse the whole tree against 84.5 ms for the flat block walk. The
-    speed objection that kept the crude substring reader alive was backwards.
-  * IT DOES NOT INVENT PROPERTIES. The flat walk found a phantom `iPOT`, because it recovered a name
-    by stepping back over alphanumerics and swallowed the preceding byte.
-  * IT GETS BLOCK NAMES RIGHT. The same step-back stops at an underscore, so EFFECTS_PARAMETERS
-    reached callers as "PARAMETERS" - 24 occurrences misfiled.
-  * IT DECODES 12 PROPERTIES THE FLAT READER COULD NOT, all of which it returned as None: the
-    64-bit ints (`showLastModification`, `storageVolumeCapacity`/`Free`, `requestDropMarker`), the
-    composites (`padRecordStateRequest`, `mixLinkRequest`, `encoderSignal`, ...) and the long
-    strings (`fxPresetContents`, 316 bytes, invisible to a one-byte length reader).
-  * NO REGRESSIONS. Every one of the 471 shared property names agreed, occurrence for occurrence,
-    except those 12 - and in all 12 the flat reader had nothing.
+DO NOT REPLACE IT WITH A BYTE SCAN FOR NAMES. A scan that finds a name by stepping back from a value
+marker invents properties (a phantom `iPOT`), cuts EFFECTS_PARAMETERS at the underscore, and cannot
+decode the 64-bit ints, composites or long strings (`fxPresetContents`, 316 bytes). The tree parse
+of a 143 KB dump takes 9.6 ms, about a ninth of what such a scan took.
 
 THE WRITE ADDRESS IS THE TREE PATH, not a flat number:
 
@@ -43,9 +28,7 @@ confirmed equals its root-child position: 0x1C = CHANNEL[0], 0x026E = INPUTSOURC
 index), and a node one level deeper takes TWO - exactly the pad path `01 01 02 02 9a 02 01 <n>`:
 root child 0x029A = SOUNDPADS, then child n = PAD[n].
 
-That retires the "flat index past 0xFF" problem AND the unexplained "drift": PAD[0..23] were never
-root children, so counting them as such shifted everything after them. It also gives STORAGEVOLUME
-and WIFISCANRESULT real addresses for the first time.
+PAD[n] is not a root child, so counting nodes in dump order does not give an address past it.
 
 NOTHING HERE WRITES TO THE DEVICE.
 """

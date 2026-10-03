@@ -2912,7 +2912,7 @@ def _ann_say(text: str) -> None:
 def _ann_decode_bool(data: bytes, after: int):
     """Decode a compact bool (01 <len> <02 true | 03 false>) after a property name. None if absent.
 
-    Mirrors rcp_read._val_after rather than counting bytes at the call site: the two hand-written
+    Mirrors model_tree._value rather than counting bytes at the call site: the two hand-written
     offsets in the old code disagreed (name+3 vs name+4), and the name+4 one meant the encoder press
     was decoded as "not pressed" every single time.
 

@@ -37,36 +37,7 @@ def check(label, got, want):
         print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
-# --- A minimal encoder for the model grammar --------------------------------------------------
-# model_tree only parses, so the tests need the other direction. The grammar is small enough that
-# this is the whole of it (see model_tree's header):
-#     node := NAME \0 count(P) property x P  count(C) node x C
-def _count(n: int) -> bytes:
-    if n == 0:
-        return b"\x00"
-    ln = 1 if n <= 0xFF else 2 if n <= 0xFFFF else 4
-    return bytes([ln]) + n.to_bytes(ln, "little")
-
-
-def _prop(name: str, value) -> bytes:
-    if isinstance(value, bool):
-        payload = bytes([0x02 if value else 0x03])
-    elif isinstance(value, int):
-        payload = b"\x01" + value.to_bytes(4, "little", signed=True)
-    elif isinstance(value, str):
-        payload = b"\x05" + value.encode("latin1") + b"\x00"
-    else:
-        raise TypeError(f"no encoding for {value!r}")
-    return name.encode("latin1") + b"\x00" + _count(len(payload)) + payload
-
-
-def node(name: str, props: dict | None = None, kids: list | None = None) -> bytes:
-    props, kids = props or {}, kids or []
-    out = name.encode("latin1") + b"\x00" + _count(len(props))
-    for k, v in props.items():
-        out += _prop(k, v)
-    out += _count(len(kids))
-    return out + b"".join(kids)
+from fake_model import node   # the model grammar's encoder, shared by the offline suites
 
 
 def dump(children: dict, n_children: int) -> bytes:

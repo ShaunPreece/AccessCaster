@@ -355,18 +355,11 @@ class EffectObject(NamedTuple):
     detached: bool          # see effect_objects
 
 
-class PadTableUnreadable(ValueError):
-    """The dump did not parse, so no pad or effect object can be located."""
-
-
 def _top_node(blob: bytes, name: str):
-    """The root child called `name`, or None if the dump has none. Raises PadTableUnreadable when
-    the dump does not parse: a pad write aimed by a guessed position can delete the wrong pad, so
-    there is no fallback reader here."""
+    """The root child called `name`, or None if the dump has none (an empty dump has none).
+    rcp_read raises ModelUnreadable for a dump that does not parse."""
     root = rr.node_at(blob, [])
-    if root is None:
-        raise PadTableUnreadable("The desk's pad table did not read cleanly. Try again.")
-    return next((n for n in root.kids if n.name == name), None)
+    return next((n for n in root.kids if n.name == name), None) if root else None
 
 
 def pad_nodes(blob=None) -> list:

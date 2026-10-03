@@ -87,7 +87,7 @@ def read_appendix() -> list[tuple[str, str, int]]:
 # 2. Where our code touches each property
 # ---------------------------------------------------------------------------
 # A line that decodes a value out of a model dump.
-READ_CALL = re.compile(r"find_all|_val_after|\bvec\(|\bfirst\(|read_model")
+READ_CALL = re.compile(r"find_all|\bvalues\(|\bvec\(|\bfirst\(|read_model|path_value|block_value|props\.get")
 # A line that builds or sends a record to the device.
 WRITE_CALL = re.compile(r"build_\w+|send_record|send_records_paced")
 

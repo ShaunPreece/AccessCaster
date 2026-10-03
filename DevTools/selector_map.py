@@ -45,7 +45,8 @@ HEADER_SELECTOR = {
     "SYSTEM": 0x0F,         # systemMidiControl, transferModeType, systemHapticSetting
     # NETWORK IS 0x10, NOT 0x13: btVisible written on 0x10 reads back in the NETWORK block (not the
     # SYSTEM duplicate), leaves no stray, and a phone then pairs and plays audio through the desk.
-    # DevTools/selector_predict.py holds the rejected 0x13 model and the stray that disproves it.
+    # A rejected flat-count model predicted 0x13, which is STREAMERXMIXPRESET[1]; the btDoScan
+    # stray there labels what that selector really addresses.
     # TWO CAUTIONS specific to this block, neither of them about the address:
     #   * many of its fields are ACTIONS, not settings (btDoScan, btDoPair, btDoConnect, btDoUnPair,
     #     wifiScan). A read-back may show nothing changed even when the action ran, so judge those by
@@ -64,30 +65,13 @@ ANCHORS = {
     "systemMidiControl": 0x0F, "systemChannelSelected": 0x0F, "transferModeType": 0x0F,
     "systemHapticSetting": 0x0F, "systemRecButtonSetting": 0x0F,
 }
-_ALNUM = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-
-
 def sections(blob: bytes) -> tuple[dict, Counter]:
-    """{property: its section header} and how many times each property occurs."""
-    header, where, count = None, {}, Counter()
-    i = 0
-    while True:
-        i = blob.find(b"\x00\x01", i)
-        if i < 0:
-            return where, count
-        j = i
-        while j > 0 and blob[j - 1] in _ALNUM:
-            j -= 1
-        raw = blob[j:i].decode("latin1")
-        if len(raw) >= 3:
-            name = rcp_read._clean_prop_name(raw)
-            if len(name) >= 3 and name[0].isalpha():
-                if name.isupper():
-                    header = name
-                else:
-                    where.setdefault(name, header)
-                    count[name] += 1
-        i += 2
+    """{property: the block (node name) it first occurs in} and how many times each occurs."""
+    where, count = {}, Counter()
+    for block, name, _val, _kind in rcp_read.iter_block_properties(blob):
+        where.setdefault(name, block)
+        count[name] += 1
+    return where, count
 
 
 def main() -> None:

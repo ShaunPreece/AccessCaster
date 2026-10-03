@@ -17,7 +17,6 @@ Run: python DevTools/test_profiles.py
 from __future__ import annotations
 import os
 import shutil
-import struct
 import sys
 import tempfile
 from pathlib import Path
@@ -25,6 +24,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import channels
 import devices
+import fake_model
 import profiles
 import rcp_transfer
 
@@ -61,30 +61,29 @@ class as_device:
         return False
 
 
-# --- a synthetic model blob (the same wire encoding rcp_read._val_after decodes) -----------------
+# --- a synthetic model blob, every property on the root node (see fake_model) -------------------
 
 def prop_int(name, value):
-    return name.encode() + b"\x00\x01\x05\x01" + int(value).to_bytes(4, "little", signed=True)
+    return (None, name, int(value))
 
 
 def prop_float(name, value):
-    return name.encode() + b"\x00\x01\x09\x04" + struct.pack("<d", float(value))
+    return (None, name, float(value))
 
 
 def prop_bool(name, value):
-    return name.encode() + b"\x00\x01\x01" + (b"\x02" if value else b"\x03")
+    return (None, name, bool(value))
 
 
 def prop_str(name, value):
-    v = value.encode() + b"\x00"
-    return name.encode() + b"\x00\x01" + bytes([len(v)]) + b"\x05" + v
+    return (None, name, str(value))
 
 
 # Nine faders: the six physical pots read 0, the three virtual ones carry a level. Two headphone
 # outputs with DIFFERENT types, the second of them "Low sensitivity" (2) - the value that used to
 # be dropped. Monitor speaker at 3 percent, which is where Shaun's desk actually sits.
 FADER_LEVEL_VALUES = [0, 0, 0, 0, 0, 0, 100, 64, 127]
-blob = b"".join(
+blob = fake_model.encode(
     [prop_int("channelInputSource", c) for c in (0, 7, 2, 3, 10, 11, 1, 8, 9, 9)]
     + [prop_bool("systemMidiControl", True)]
     + [prop_int("faderLevel", v) for v in FADER_LEVEL_VALUES]

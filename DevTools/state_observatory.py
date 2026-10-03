@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 
 import hid
+import model_tree
 import rcp_read
 import rcp_hid
 
@@ -51,30 +52,20 @@ OUT_DIR = Path(__file__).resolve().parent / "captures" / "observatory"
 # Any property whose NAME matches this never has its value printed or saved.
 SECRET_NAME = re.compile(r"psk|password|paircode|rodecode|authusername|username|ssid|serial",
                          re.IGNORECASE)
-# A property name in the stream: an identifier followed by the name terminator.
-NAME_RE = re.compile(rb"[A-Za-z][A-Za-z0-9]{3,63}\x00")
-
-
-def split_selector(matched: str) -> tuple[str, int | None]:
-    """Peel a selector byte off the front of a regex-matched name.
-
-    NAME_RE cannot tell a name from a name with an address byte glued to its front, and the bytes
-    we most want are exactly the ones it eats: a matrix cross-point at 0x4c to 0x58 is ASCII 'L' to
-    'X', so `mixLevelWithAnchor` there arrives looking like `LmixLevelWithAnchor`. Measured on a
-    Duo: a fader move reported thirteen different "properties", one per
-    cross-point, and the real name appeared nowhere.
-
-    EVERY property this protocol publishes starts lowercase (all 462 the Duo reports, checked), so
-    an initial CAPITAL is never part of a name and is always the preceding byte. Returns the clean
-    name plus that byte, which is the address the caller wanted all along.
-
-    PARTIAL BY CONSTRUCTION: a selector in the lowercase range 0x61 to 0x7a is still invisible this
-    way. The complete fix is to parse records structurally via `model_tree` instead of scanning for
-    names; this buys the addresses back without that rework.
-    """
-    if matched[:1].isupper():
-        return matched[1:], ord(matched[0])
-    return matched, None
+def push_record(payload: bytes):
+    """(name, path, value, address hex) for a report-04 frame that is ONE pushed record, else None
+    (a slice of a model dump). `payload` is the frame without its report id: a 4-byte length, then
+    the addressed record, which model_tree.parse_record decodes structurally."""
+    n = int.from_bytes(payload[:4], "little")
+    if not 0 < n <= len(payload) - 4:
+        return None
+    rec = payload[4:4 + n]
+    try:
+        path, name, value, _kind, end = model_tree.parse_record(rec)
+    except ValueError:
+        return None
+    addr_end = rec.index(name.encode()) if name.encode() in rec else 0
+    return name, tuple(path), value, rec[:addr_end].hex()
 
 
 def redact(name: str, value):
@@ -85,21 +76,8 @@ def redact(name: str, value):
 # Generic parse: every property in a dump, not just the ones we already know
 # ---------------------------------------------------------------------------
 def parse_all(blob: bytes) -> dict[str, list]:
-    """{name: [value, ...]} in stream order, for EVERY decodable property in the dump.
-
-    rcp_read.find_all answers "what is the value of X" for a name we already know. Phase 1 needs
-    the opposite: everything that is in there, so a diff can surface a property no one has ever
-    looked at. Names inside string values can produce a phantom entry; harmless here because both
-    sides of a diff are parsed the same way.
-    """
-    out: dict[str, list] = {}
-    for m in NAME_RE.finditer(blob):
-        name = m.group()[:-1].decode("latin1")
-        value, kind = rcp_read._val_after(blob, m.end() - 1)
-        if kind == "?":
-            continue
-        out.setdefault(name, []).append(value)
-    return out
+    """{name: [value, ...]} in stream order, for EVERY property in the dump (rcp_read's tree)."""
+    return rcp_read.snapshot_properties(blob)
 
 
 def snapshot(fresh: bool = True) -> dict[str, list]:
@@ -177,13 +155,10 @@ def listen(seconds: float, label: str) -> None:
             packets += 1
             first_at = first_at or now
             last_at = now
-            payload = b[1:]
-            for m in NAME_RE.finditer(payload):
-                name, sel = split_selector(m.group()[:-1].decode("latin1"))
-                value, kind = rcp_read._val_after(payload, m.end() - 1)
-                if kind == "?":
-                    continue
-                key = f"{name} @0x{sel:02x}" if sel is not None else name
+            rec = push_record(b[1:])
+            if rec is not None:
+                name, path, value, _addr = rec
+                key = f"{name} @{list(path)}"
                 seen.setdefault(key, []).append((round(now - (first_at or now), 2),
                                                  redact(name, value)))
     finally:
@@ -255,15 +230,11 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
             if b[0] != 0x04:
                 continue
             packets += 1
-            payload = b[1:]
-            for m in NAME_RE.finditer(payload):
-                name, sel = split_selector(m.group()[:-1].decode("latin1"))
-                value, kind = rcp_read._val_after(payload, m.end() - 1)
-                if kind == "?":
-                    continue
-                pre = payload[max(0, m.start() - 8):m.start()].hex() if raw else ""
-                events.append((round(time.time() - t0, 2), name, sel,
-                               redact(name, value), pre))
+            rec = push_record(b[1:])
+            if rec is not None:
+                name, path, value, addr = rec
+                events.append((round(time.time() - t0, 2), name, path,
+                               redact(name, value), addr if raw else ""))
     finally:
         dev.close()
         STOP_FILE.unlink(missing_ok=True)
@@ -283,7 +254,7 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
         vals = [v for _t, v, _p in hits]
         span = hits[-1][0] - hits[0][0]
         rate = f"{len(hits) / span:.1f}/s" if span > 0.2 else "-"
-        addr = f"0x{sel:02x}" if sel is not None else "  -  "
+        addr = str(list(sel))
         print(f"  {addr}  {name:28} {len(hits):4} x {rate:>8}  "
               f"{len({repr(v) for v in vals})} distinct  first={vals[0]!r} last={vals[-1]!r}",
               flush=True)
@@ -359,15 +330,11 @@ def guided(steps=None, raw: bool = False) -> None:
                 if b[0] != 0x04:
                     continue
                 packets += 1
-                payload = b[1:]
-                for m in NAME_RE.finditer(payload):
-                    name = m.group()[:-1].decode("latin1")
-                    value, kind = rcp_read._val_after(payload, m.end() - 1)
-                    if kind == "?":
-                        continue
-                    pre = payload[max(0, m.start() - 8):m.start()].hex() if raw else ""
+                rec = push_record(b[1:])
+                if rec is not None:
+                    name, _path, value, addr = rec
                     events.append((round(time.time() - t0, 2), prompt, name,
-                                   redact(name, value), pre))
+                                   redact(name, value), addr if raw else ""))
     finally:
         dev.close()
 
