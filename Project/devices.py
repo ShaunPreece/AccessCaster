@@ -453,12 +453,16 @@ class Channel:
               solo only - see the SMART pads note below; a bus has no Level and no processing).
       expanded_only / expanded_label : Expanded is RODE's Virtual Devices mode, which adds four
               inputs and changes what USB 1 carries. See FaderSpec.expanded_sources.
+      stereo: a two-leg source. Its pan is channelPanL / channelPanR, one per leg; channelPan only
+              pans a mono source and does nothing here. Heard on USB 1 and CallMe 1; the other
+              computer and phone feeds are taken to be the same kind of input.
     """
 
     code: int
     key: str
     label: str
     kind: str
+    stereo: bool = False
     on_faders: bool = True
     on_channels_page: bool = True
     in_matrix: bool = True
@@ -469,12 +473,14 @@ class Channel:
 def _ui_channel_view(table) -> tuple:
     """The Channels page's list, IN TABLE ORDER. The order is what a screen reader walks, so it is
     the table's own order rather than anything derived."""
-    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code}
+    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code,
+                  "stereo": c.stereo}
                  for c in table if c.on_channels_page and not c.expanded_only)
 
 
 def _expanded_ui_channel_view(table) -> tuple:
-    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code}
+    return tuple({"name": c.key, "label": c.label, "kind": c.kind, "source_code": c.code,
+                  "stereo": c.stereo}
                  for c in table if c.on_channels_page and c.expanded_only)
 
 
@@ -528,10 +534,10 @@ def _relabel_view(table) -> tuple:
 # The four are functionally identical by RODE's own account, so the ORDER is theirs (guide and
 # driver INF) and costs a label if wrong, never an address.
 _VIRTUAL_DEVICES = (
-    Channel(12, "Game", "Game", "line", expanded_only=True),
-    Channel(13, "Music", "Music", "line", expanded_only=True),
-    Channel(14, "VirtualA", "Virtual A", "line", expanded_only=True),
-    Channel(15, "VirtualB", "Virtual B", "line", expanded_only=True),
+    Channel(12, "Game", "Game", "line", stereo=True, expanded_only=True),
+    Channel(13, "Music", "Music", "line", stereo=True, expanded_only=True),
+    Channel(14, "VirtualA", "Virtual A", "line", stereo=True, expanded_only=True),
+    Channel(15, "VirtualB", "Virtual B", "line", stereo=True, expanded_only=True),
 )
 
 CHANNELS_PRO2 = (
@@ -539,14 +545,15 @@ CHANNELS_PRO2 = (
     Channel(1, "Mic2", "Mic 2", "mic"),
     Channel(2, "Mic3", "Mic 3", "mic"),
     Channel(3, "Mic4", "Mic 4", "mic"),
-    Channel(10, "Bluetooth", "Bluetooth", "line"),
+    Channel(10, "Bluetooth", "Bluetooth", "line", stereo=True),
     # In Expanded the computer no longer sends one stereo mix down USB 1: the channel carries the
     # System virtual device, with Game, Music, A and B alongside it. Naming it after a Windows
     # device the person no longer has is worse than naming it plainly, and this is read aloud on
     # every encoder turn.
-    Channel(7, "USB1", "USB 1 (Main Stereo)", "line", expanded_label="USB 1 (System)"),
-    Channel(8, "Chat", "Chat", "line"),
-    Channel(9, "USB2", "USB 2 (Secondary)", "line"),
+    Channel(7, "USB1", "USB 1 (Main Stereo)", "line", stereo=True,
+            expanded_label="USB 1 (System)"),
+    Channel(8, "Chat", "Chat", "line", stereo=True),
+    Channel(9, "USB2", "USB 2 (Secondary)", "line", stereo=True),
     # THE SMART PADS BUS IS A CHANNEL, BUT NOT A PROCESSED ONE. It sits on a strip and that strip
     # PUBLISHES a full chain: it reads channelCurrentFxPreset -1 with channelBypassProcessing
     # False, and every parameter on it accepts a write, lands, reads back and restores byte-clean.
@@ -569,7 +576,7 @@ CHANNELS_PRO2 = (
     # A remote caller. Like every channel its chain is the one on whichever strip carries it, so it
     # has processing only while it is on a fader. NOT A MATRIX ROW: where its row sits in the
     # cross-point grid has not been measured, and a guessed row would route somebody else's audio.
-    Channel(16, "CallMe1", "CallMe 1", "line", in_matrix=False),
+    Channel(16, "CallMe1", "CallMe 1", "line", stereo=True, in_matrix=False),
 ) + _VIRTUAL_DEVICES
 
 CHANNELS_DUO = (
@@ -580,15 +587,15 @@ CHANNELS_DUO = (
     # like a MIC's, which is an open question - see PROJECT_GUIDE part 2. Nobody has had a headset
     # in that jack to settle it by ear.
     Channel(2, "Headset", "Headset", "line"),
-    Channel(7, "USB1", "USB 1", "line"),
-    Channel(8, "Chat", "Chat", "line"),
-    Channel(9, "USB2", "USB 2", "line"),
-    Channel(10, "Bluetooth", "Bluetooth", "line"),
+    Channel(7, "USB1", "USB 1", "line", stereo=True),
+    Channel(8, "Chat", "Chat", "line", stereo=True),
+    Channel(9, "USB2", "USB 2", "line", stereo=True),
+    Channel(10, "Bluetooth", "Bluetooth", "line", stereo=True),
     # Mute is EAR-PROVEN here and only the mute: the pads go silent and come back, and the desk
     # mutes all 13 of source 11's cross-points on its own. The processing chain does nothing on
     # this desk either - see CHANNELS_PRO2 above.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
-    Channel(16, "CallMe1", "CallMe 1", "line", in_matrix=False),
+    Channel(16, "CallMe1", "CallMe 1", "line", stereo=True, in_matrix=False),
 ) + _VIRTUAL_DEVICES
 
 PRO2_FADERS = FaderSpec(

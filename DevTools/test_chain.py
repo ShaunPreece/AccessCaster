@@ -101,7 +101,9 @@ check("advanced flag is in the chain", c.CHAIN_ADVANCED_PROP in c.CHAIN_BOOL_PRO
 check("bypass is in the chain", "channelBypassProcessing" in c.CHAIN_BOOL_PROPS, True)
 check("the FX block is in the chain",
       ("echoOn" in c.CHAIN_FX_BOOL_PROPS and "echoMix" in c.CHAIN_FX_FLOAT_PROPS), True)
-check("the 36 params are in the chain", len(c.CHAIN_FLOAT_PROPS), 36)
+check("the 38 params are in the chain", len(c.CHAIN_FLOAT_PROPS), 38)
+check("both stereo pan legs are in the chain",
+      {"channelPanL", "channelPanR"} <= set(c.CHAIN_FLOAT_PROPS), True)
 # Q IS AN INDEPENDENT, WRITABLE PARAMETER, so the chain has to carry it or moving a channel to
 # another fader quietly reshapes its EQ. The tempting inference the other way - the RODE app never
 # sends Q, yet Q moves in the model diffs, so the device must recompute it - is false. Measured on

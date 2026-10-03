@@ -395,7 +395,10 @@ PROCESSING_PROPS = frozenset({
     "deesserThreshold", "deesserRatio", "deesserAttack", "deesserRelease",
     "deesserGain", "deesserFrequency",
     "hpfFrequency", "hpfSlope",
-    "channelPan",
+    # channelPan pans a MONO source and does nothing on a stereo one. A stereo source pans with
+    # channelPanL / channelPanR, where each leg of the pair sits (defaults 0.0 and 1.0): RODE's app
+    # shows them as two knobs, and both legs at 0.0 is heard hard left.
+    "channelPan", "channelPanL", "channelPanR",
 })
 # Extra channel-processing parameters a PRESET writes: the Aphex aural-exciter / big-bottom and the
 # Depth/Sparkle/Punch (VoxLab) macros (all normalised 0..1 floats). aphexBBTune/aphexAETune are the two
@@ -771,7 +774,7 @@ PROCESSING_READ_PROPS = (
     "noiseGateRange", "noiseGateHysteresis",
     "deesserThreshold", "deesserRatio", "deesserAttack", "deesserRelease",
     "deesserGain", "deesserFrequency",
-    "channelPan",
+    "channelPan", "channelPanL", "channelPanR",
     "channelDepth", "channelSparkle", "channelPunch", "aphexBBDrive", "aphexAEMix",
     "aphexBBTune", "aphexAETune",
 )
@@ -879,13 +882,13 @@ def read_mixer() -> dict:
 # directly, because during a swap the vector is changing underneath us.
 #
 # WHAT IS IN THE CHAIN (settled by diffing the RODE app's own drag):
-# channelBypassProcessing + the 10 module bools + the 33 float params + the FX block (echoOn/reverbOn
+# channelBypassProcessing + the 10 module bools + the float params + the FX block (echoOn/reverbOn
 # and their params) + channelAdvancedProcessing + channelCurrentFxPreset. NOT the routing matrix
 # (source-keyed) and NOT the mic input properties (gain/type/P48/polarity belong to
 # the physical XLR, and the app leaves them alone). The three eq*Q values follow device-side.
 CHAIN_BOOL_PROPS = tuple(PROCESSING_MODULE_BOOLS) + ("channelBypassProcessing", CHAIN_ADVANCED_PROP)
 CHAIN_FX_BOOL_PROPS = ("echoOn", "reverbOn")
-# Floats: the 33 processing params plus the echo/reverb params, all normalised 0..1.
+# Floats: the processing params plus the echo/reverb params, all normalised 0..1.
 CHAIN_FLOAT_PROPS = tuple(PRESET_FLOAT_PROPS)
 CHAIN_FX_FLOAT_PROPS = tuple(_CHANNEL_FX_PARAM_SET)
 # A float difference smaller than this is the device's own float32 rounding, not a real change, so we
@@ -1165,6 +1168,7 @@ def read_channels(blob: bytes | None = None) -> list:
         chain = ch["kind"] != "bus"
         rec = {
             "name": ch["name"], "label": ch["label"], "kind": ch["kind"],
+            "stereo": ch.get("stereo", False),
             # WHETHER IT HAS A STRIP AT ALL, which is a DIFFERENT thing from the desk not
             # reporting its state and needs different words. Mute, solo and processing are all
             # per-STRIP, so a source on no fader has none of them - and "the unit did not report

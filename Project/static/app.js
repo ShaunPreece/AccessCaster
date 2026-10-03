@@ -2374,10 +2374,139 @@ function fillParamGroups(body, ch, groups, tabTitle) {
   const single = groups.length === 1 && groups[0].group === tabTitle;
   groups.forEach((group) => {
     const wrap = single ? body : tabSection(body, group.group);
-    (group.controls || []).forEach((ctrl) => {
+    // Pan controls come in a mono and a stereo kind; a channel gets only its own kind.
+    const controls = (group.controls || []).filter((c) => !c.pan || c.stereo === !!ch.stereo);
+    if (ch.stereo && controls.some((c) => c.pan)) {
+      controls.filter((c) => !c.pan).forEach((ctrl) => {
+        wrap.appendChild(buildParamSlider(ch, ctrl, ch.params ? ch.params[ctrl.prop] : null));
+      });
+      const host = document.createElement("div");
+      wrap.appendChild(host);
+      fillStereoPan(host, ch, controls.filter((c) => c.pan));
+      return;
+    }
+    controls.forEach((ctrl) => {
       wrap.appendChild(buildParamSlider(ch, ctrl, ch.params ? ch.params[ctrl.prop] : null));
     });
   });
+}
+
+/* A pan position (0-100, 50 centre) in words, since "30 percent" says nothing about direction. */
+function panWords(pct) {
+  if (pct === 50) return "centre";
+  if (pct <= 0) return "hard left";
+  if (pct >= 100) return "hard right";
+  return pct < 50 ? `${(50 - pct) * 2} percent left` : `${(pct - 50) * 2} percent right`;
+}
+
+/* An offset of -100..100 applied to both legs of a stereo pan, in words. */
+function panOffsetWords(off) {
+  if (off === 0) return "centre";
+  if (off <= -100) return "hard left";
+  if (off >= 100) return "hard right";
+  return off < 0 ? `${-off} percent left` : `${off} percent right`;
+}
+
+/* Which stereo channels have their two pan legs linked, per channel name. The desk has no such
+   setting, so it is remembered here. Each entry holds the leg positions at the moment of linking
+   (`base`) and the offset applied to them since, so returning the linked slider to centre restores
+   the original width exactly instead of leaving both legs squeezed against an end stop. */
+const STEREO_PAN_LINK_KEY = "accesscaster.stereoPanLink";
+
+function stereoPanLinks() {
+  try { return JSON.parse(window.localStorage.getItem(STEREO_PAN_LINK_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function saveStereoPanLinks(st) {
+  try { window.localStorage.setItem(STEREO_PAN_LINK_KEY, JSON.stringify(st)); }
+  catch (e) { /* storage blocked: the link lasts until the panel is rebuilt */ }
+}
+
+const clampPct = (v) => Math.max(0, Math.min(100, v));
+
+/* STEREO PAN: two legs, as RODE's app has them, plus a Link switch that turns them into one pan
+   control. Linked, the single slider shifts both legs from where they were when linked; unlinked,
+   each leg has its own slider. `host` is rebuilt whole when the switch changes. */
+function fillStereoPan(host, ch, legs) {
+  host.innerHTML = "";
+  const [lCtrl, rCtrl] = legs;
+  const leg = (prop) => (ch.params && ch.params[prop] !== null && ch.params[prop] !== undefined
+    ? ch.params[prop] : null);
+  const links = stereoPanLinks();
+  const switchId = "panlink-" + ch.name;
+  host.appendChild(buildSwitch(switchId, "Link both sides into one pan control", !!links[ch.name],
+    (on) => {
+      const st = stereoPanLinks();
+      if (on) st[ch.name] = { base: [leg(lCtrl.prop), leg(rCtrl.prop)], offset: 0 };
+      else delete st[ch.name];
+      saveStereoPanLinks(st);
+      fillStereoPan(host, ch, legs);
+      const again = document.getElementById(switchId);
+      if (again) again.focus();
+    }));
+
+  const entry = links[ch.name];
+  const l = leg(lCtrl.prop), r = leg(rCtrl.prop);
+  if (!entry || l === null || r === null) {
+    host.appendChild(buildParamSlider(ch, lCtrl, l));
+    host.appendChild(buildParamSlider(ch, rCtrl, r));
+    return;
+  }
+  // The legs moved since the link was made (the desk, another page, a preset): link afresh from
+  // where they are now rather than apply an old offset to an old width.
+  const shifted = (base, off) => [clampPct(base[0] + off), clampPct(base[1] + off)];
+  const expect = shifted(entry.base, entry.offset);
+  if (Math.abs(expect[0] - l) > 1 || Math.abs(expect[1] - r) > 1) {
+    entry.base = [l, r];
+    entry.offset = 0;
+    saveStereoPanLinks(links);
+  }
+
+  const row = document.createElement("div");
+  row.className = "field proc-field";
+  const id = "param-panlinked-" + ch.name;
+  const label = document.createElement("label");
+  label.setAttribute("for", id);
+  label.textContent = "Pan";
+  const input = document.createElement("input");
+  input.type = "range";
+  input.id = id;
+  input.min = "-100"; input.max = "100"; input.step = "1";
+  input.value = String(entry.offset);
+  const out = document.createElement("output");
+  out.setAttribute("for", id);
+  out.className = "proc-value";
+  const show = () => {
+    const words = panOffsetWords(parseInt(input.value, 10));
+    input.setAttribute("aria-valuetext", words);
+    out.textContent = words;
+  };
+  show();
+  input.addEventListener("input", show);
+  input.addEventListener("change", () => {
+    const off = parseInt(input.value, 10);
+    const [nl, nr] = shifted(entry.base, off);
+    const key = "param-panlinked-" + ch.name;
+    window.clearTimeout(channelDebounce[key]);
+    channelDebounce[key] = window.setTimeout(async () => {
+      try {
+        for (const [prop, pct] of [[lCtrl.prop, nl], [rCtrl.prop, nr]]) {
+          const res = await postJSON("/api/channels/param", { name: ch.name, prop, value: pct / 100 });
+          if (!res.ok) { announce(res.message || "Could not set the pan.", true); return; }
+          if (ch.params) ch.params[prop] = pct;
+        }
+        const st = stereoPanLinks();
+        if (st[ch.name]) { st[ch.name].offset = off; saveStereoPanLinks(st); }
+        entry.offset = off;
+        announce(`${ch.label} pan ${panOffsetWords(off)}.`);
+      } catch (err) { announce("Could not reach the device service.", true); }
+    }, WRITE_DEBOUNCE_MS);
+  });
+  row.appendChild(label);
+  row.appendChild(input);
+  row.appendChild(out);
+  host.appendChild(row);
 }
 
 function fillChannelEffects(body, ch) {
@@ -2702,16 +2831,19 @@ function buildParamSlider(ch, ctrl, percent) {
   input.min = "0"; input.max = "100"; input.step = "1";
   const known = percent !== null && percent !== undefined;
   input.value = known ? String(percent) : "50";
-  input.setAttribute("aria-valuetext", known ? percent + " percent" : "not read yet");
+  const spoken = (v) => (ctrl.pan ? panWords(v) : v + " percent");
+  const shown = (v) => (ctrl.pan ? panWords(v) : v + "%");
+  input.setAttribute("aria-valuetext", known ? spoken(percent) : "not read yet");
 
   const out = document.createElement("output");
   out.setAttribute("for", id);
   out.className = "proc-value";
-  out.textContent = known ? percent + "%" : "not read";
+  out.textContent = known ? shown(percent) : "not read";
 
   input.addEventListener("input", () => {
-    out.textContent = input.value + "%";
-    input.setAttribute("aria-valuetext", input.value + " percent");
+    const v = parseInt(input.value, 10);
+    out.textContent = shown(v);
+    input.setAttribute("aria-valuetext", spoken(v));
   });
   input.addEventListener("change", () => {
     const pct = parseInt(input.value, 10);

@@ -288,7 +288,7 @@ RULES: list[tuple[str, str, str, str]] = [
      "NEVER writes these - the device recomputes them from the EQ params, and they follow a channel "
      "across a fader move for the same reason. So they need no writer and no place in our chain set."),
     (r"^(channelPanL|channelPanR)$", "chain gap", "med",
-     "Per-strip. Probably internals behind the single Pan control; confirm derived, not independent."),
+     "Per-strip. The pan of a STEREO source (where each leg sits); channelPan only pans a mono one."),
     (r"^hpf(Higher|Lower)On$", "chain gap", "med",
      "Per-strip HPF variants with no app control found yet. Confirm before including in the chain set."),
     (r"^channelAdvancedProcessing$", "candidate feature", "med",

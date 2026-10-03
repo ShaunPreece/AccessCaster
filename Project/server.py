@@ -231,11 +231,21 @@ PROCESSING_CONTROLS = [
         {"prop": "aphexBBDrive", "label": "Big bottom (bass)"},
         {"prop": "aphexAEMix", "label": "Aural exciter (air)"},
     ]},
+    # A mono channel gets channelPan; a stereo one gets the two legs instead (see devices.Channel
+    # .stereo), so "stereo" says which kind of channel a control is for.
     {"group": "Pan", "controls": [
-        {"prop": "channelPan", "label": "Pan (left to right)"},
+        {"prop": "channelPan", "label": "Pan", "pan": True, "stereo": False},
+        {"prop": "channelPanL", "label": "Left side position", "pan": True, "stereo": True},
+        {"prop": "channelPanR", "label": "Right side position", "pan": True, "stereo": True},
     ]},
 ]
-_PROCESSING_PROP_SET = {c["prop"] for g in PROCESSING_CONTROLS for c in g["controls"]}
+_PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c in g["controls"]}
+# How a write is reported: "Threshold" alone could be the compressor's, the gate's or the de-esser's,
+# so the group goes in front wherever the label does not already name its module.
+_PROCESSING_SPOKEN = {c["prop"]: (c["label"] if g["group"] in ("Pan", "Tone shaping")
+                                  else f"{g['group']} {c['label'].lower()}")
+                      for g in PROCESSING_CONTROLS for c in g["controls"]}
+_PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
 
 # Current known state of the mixer. We CAN read these live from the device now
 # (rcp_read), and every value we set is sent to the device, so this dict holds
@@ -5138,8 +5148,15 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
         return {"ok": False, "message": "Value must be a number from 0 to 1."}
     with _hid_lock:
         channels.set_channel_processing(name, prop, v)
+    ctrl = _PROCESSING_CONTROL_BY_PROP[prop]
+    pct = round(v * 100)
+    if ctrl.get("pan"):
+        where = ("centre" if pct == 50 else "hard left" if pct == 0 else "hard right" if pct == 100
+                 else f"{(50 - pct) * 2} percent left" if pct < 50 else f"{(pct - 50) * 2} percent right")
+    else:
+        where = f"{pct} percent"
     return {"ok": True,
-            "message": f"{ch['label']} {prop} set to {round(v * 100)} percent."}
+            "message": f"{ch['label']} {_PROCESSING_SPOKEN[prop].lower()} set to {where}."}
 
 
 # --- Mic processing PRESETS (whole-chain, captured from the RODE app + user-saved) -----
