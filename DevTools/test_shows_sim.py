@@ -50,30 +50,45 @@ def check_in(label, needle, haystack):
 # ---------------------------------------------------------------------------
 # The fake desk.
 
-def encode(entries):
-    """Render (block, property, value) triples as a model stream rcp_read can parse.
+def _count(n: int) -> bytes:
+    if n == 0:
+        return b"\x00"
+    ln = 1 if n <= 0xFF else 2
+    return bytes([ln]) + n.to_bytes(ln, "little")
 
-    IT OPENS WITH THE ROOT NODE'S NAME, as every real dump does, because `rcp_read.is_model_dump`
+
+def _prop(name: str, value) -> bytes:
+    # BOOL IS TESTED BEFORE INT ON PURPOSE: bool subclasses int in Python, so the int branch would
+    # swallow True and emit it with the wrong KIND, and rcp_read.values filters on kind.
+    if isinstance(value, bool):
+        payload = bytes([0x02 if value else 0x03])
+    elif isinstance(value, int):
+        payload = b"\x01" + value.to_bytes(4, "little", signed=True)
+    else:
+        payload = b"\x05" + value.encode("latin1") + b"\x00"
+    return name.encode("latin1") + b"\x00" + _count(len(payload)) + payload
+
+
+def encode(entries):
+    """Render (block, property, value) triples as a model dump in the real tree grammar (see
+    model_tree): the root, then one child node per run of a block. A property name repeating inside
+    a run starts a new instance, so consecutive SHOW rows become one SHOW node per backup.
+
+    It opens with the root node's name, as every real dump does, because `rcp_read.is_model_dump`
     uses that marker to tell a real dump from the ZERO BYTES a desk that has stopped answering
-    returns. Without it this fake desk is indistinguishable from a dead one, and `shows.wait_for`
-    rightly ignores everything it says.
+    returns.
     """
-    out = bytearray(b"Rodecaster\x00")
-    header = None
+    nodes = []                                   # [(block, {name: value})]
     for block, name, value in entries:
-        if block != header:
-            out += b"\x00" + block.encode() + b"\x00\x01\x00\x00\x00"
-            header = block
-        out += b"\x00" + name.encode() + b"\x00\x01"
-        # BOOL IS TESTED BEFORE INT ON PURPOSE: bool subclasses int in Python, so the int branch
-        # would swallow True and emit it with the wrong KIND, and rcp_read.values filters on kind.
-        if isinstance(value, bool):
-            out += b"\x01\x02" if value else b"\x01\x03"
-        elif isinstance(value, int):
-            out += b"\x05\x01" + value.to_bytes(4, "little", signed=True)
-        else:
-            raw = value.encode() + b"\x00"
-            out += bytes([len(raw), 0x05]) + raw
+        if not nodes or nodes[-1][0] != block or name in nodes[-1][1]:
+            nodes.append((block, {}))
+        nodes[-1][1][name] = value
+    out = bytearray(b"Rodecaster\x00" + _count(0) + _count(len(nodes)))
+    for block, props in nodes:
+        out += block.encode() + b"\x00" + _count(len(props))
+        for name, value in props.items():
+            out += _prop(name, value)
+        out += _count(0)
     return bytes(out)
 
 

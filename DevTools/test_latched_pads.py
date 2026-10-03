@@ -22,7 +22,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 
-import rcp_read
 import server
 import soundpad
 
@@ -42,21 +41,17 @@ def with_pads(positions, active_flags):
     """Run the detectors against a synthetic pad table.
 
     `positions` is [(position, padIdx, padType, name)] as pad_positions returns it, and
-    `active_flags` is the padActive vector, ONE ENTRY PER PAD, aligned with `positions`.
-
-    NO LEADING NON-PAD ENTRY: `rcp_read.find_all` matches whole names, so nothing has to be
-    skipped. A reader that searches the dump for the name as raw text matches `padActive` inside
-    `padActiveEdit` and puts a junk value at the front, and a fixture that hardcodes that junk pins
-    the PARSER BUG rather than the desk. The alignment is worth pinning either way, because getting
-    it wrong by one blames the wrong pad, which is worse than not noticing at all."""
-    real_pos, real_find = soundpad.pad_positions, rcp_read.find_all
-    soundpad.pad_positions = lambda blob=None: positions
-    rcp_read.find_all = lambda blob, name: (
-        [(v, "bool") for v in active_flags] if name == "padActive" else real_find(blob, name))
+    `active_flags` is each pad's padActive, aligned with `positions`. A pad past the end of
+    `active_flags` carries no padActive at all."""
+    pads = [soundpad.Pad(pos, idx, typ, name,
+                         {"padActive": active_flags[i]} if i < len(active_flags) else {})
+            for i, (pos, idx, typ, name) in enumerate(positions)]
+    real_nodes = soundpad.pad_nodes
+    soundpad.pad_nodes = lambda blob=None: pads
     try:
         return soundpad.latched_pads(b""), server._pads_engaged(b"")
     finally:
-        soundpad.pad_positions, rcp_read.find_all = real_pos, real_find
+        soundpad.pad_nodes = real_nodes
 
 
 PADS = [(8, 0, 1, "Music_Bed"), (18, 8, 2, "Voice Disguise"), (23, 14, 2, "Small Robot")]

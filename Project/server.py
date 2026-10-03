@@ -10606,29 +10606,23 @@ def _hk_playing_now(_target: str = "") -> str:
 def _hk_playing_from_model() -> list:
     """What the DESK says is active, read fresh. The answer when the announcer is off.
 
-    `padActive` is one value per pad record in stream order, so the k-th value belongs to the k-th
-    pad - the same alignment `soundpad.latched_pads` relies on. Progress comes from the same dump,
-    which is why it is read here rather than asked for separately.
-
     Returns {stream position: sentence}, keyed the same way as the tracked state so the caller can
     merge the two rather than say the same pad twice."""
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
-        pos = soundpad.pad_positions(blob)
-        active = rcp_read.values(blob, "padActive")
-        progress = rcp_read.values(blob, "padProgress")
+        pads = soundpad.pad_nodes(blob)
     except Exception:
         return {-1: "I could not ask the desk what is playing."}
     out = {}
-    for i, (position, _pi, pad_type, name) in enumerate(pos):
-        if i >= len(active) or not active[i]:
+    for p in pads:
+        if p.props.get("padActive") is not True:
             continue
-        frac = progress[i] if i < len(progress) and isinstance(progress[i], float) else None
-        if pad_type == soundpad.PAD_TYPE_SOUND and frac is not None:
-            out[position] = f"{name}, {round(frac * 100)} percent through."
+        frac = p.props.get("padProgress")
+        if p.type == soundpad.PAD_TYPE_SOUND and isinstance(frac, float):
+            out[p.position] = f"{p.name}, {round(frac * 100)} percent through."
         else:
-            out[position] = f"{name} is switched on."
+            out[p.position] = f"{p.name} is switched on."
     return out
 
 

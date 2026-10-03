@@ -19,7 +19,8 @@ through repeated cycles - no orphan, no neighbour disturbance, no reboot (ear-pr
 
 THE POOL: one region-B object per FX pad. Our tools keep it that way automatically - the hardened
 create can never leave a duplicate, and clear/create self-heal any stray orphan. If the pool is ever
-polluted (e.g. a crash mid-write), clean_pool removes the orphans app-free, no factory reset (section 5).
+polluted (e.g. a crash mid-write), clean_pool removes the orphans app-free, no factory reset. The one
+exception is a DETACHED object in the middle of the list, which is reported, not removed (section 5).
 
 ================================================================================
 ## 1. FACTORY VOICE-FX RECIPES  [CONFIRMED - data in fx_recipes.json]
@@ -225,11 +226,12 @@ only ever been said out loud, never written here; that gap kept making us re-der
   clean factory table is 7 region-B objects (6 VFX + special) even with 8 sound pads - sound pads
   contribute zero. The same goes for any non-FX pad type (Mixer/MIDI/QuickDial): no region-B object.
 
-EFFECT-OBJECT writes (frame 0x9d): effect-objects live in two clusters separated by a ~100 KB
-byte-gap. REGION A = channel-strip effects (one per input channel, 11). REGION B = the special
-object (effectsIdx 65) + one definition per VFX pad. The 0x9d sub-handle is a REGION-B index.
-assign_create.free_effect_subhandle(padIdx) derives region-A from the gap, then REUSES the pad's
-existing object (effectsIdx==padIdx) for an edit, or APPENDS at the first free region-B slot.
+EFFECT-OBJECT writes (frame 0x9d): REGION A = the channel-strip EFFECTS_PARAMETERS nodes, which
+are root children (one per input channel, 11). REGION B = the children of the PADEFFECTS node
+(root child 0x29D on the Pro II): the special object (effectsIdx 65) + one definition per VFX pad.
+The 0x9d sub-handle is a child index under PADEFFECTS, read off the tree by
+soundpad.effect_objects. free_effect_subhandle(padIdx) REUSES the pad's existing object
+(effectsIdx==padIdx) for an edit, or APPENDS (the child count).
 A clean factory table has exactly ONE region-B object per VFX pad = 7 total (6 VFX + special).
 
 *** SOUND-create orphan bug - FIXED + EAR-PROVEN 2026-06-16 ***: the sound create used to emit a
@@ -306,14 +308,25 @@ DUPLICATE, a clear/create can collide with the stray object and silence another 
 rule is exactly one region-B object per FX pad, plus the special object at effectsIdx 65. Our tools
 hold that automatically and repair it if something external (a crash mid-write) breaks it.
 
-TWO DEVICE FACTS this rests on (measured by region-B count, app-free, no reset):
+DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.6):
 1. CLEAR GCs THE BOUND OBJECT. Clearing an FX pad makes the firmware garbage-collect that pad's
    region-B object - the clear sends only 0x9a pad frames (zero 0x9d), yet the object vanishes.
-   Measured: create FX pad -> region_b +1; clear it -> region_b -1. Persists a reboot.
+   Measured: create FX pad -> region_b +1; clear it -> region_b -1. Persists a reboot. A MIXER pad's
+   clear does NOT collect an object made with it, which is how an attached orphan arises.
 2. A BARE FX CREATE DOES NOT APPEND. build_blank(with_effects=False) sends no EFFECTS_PARAMETERS
    handoff and zero 0x9d writes, so no new object is allocated; the engine binds the pad to an EXISTING
    object by the effectsIdx==padIdx rule. So an orphan can be ADOPTED without appending. (The pad
    RECORD always appends; only the EFFECTS block allocates a region-B object.)
+3. TWO KINDS OF ORPHAN, ONE REMOVAL EACH. An ATTACHED orphan stores effectsIdx LAST, like a live
+   pad's object: bare bind + clear removes it, and a delete by tree path does NOT (three tries).
+   A DETACHED one stores effectsIdx FIRST (RODE's app left one after a pad was retyped): nothing
+   binds to it, so bare bind + clear never collects it, and the delete by tree path removes exactly
+   that node. The delete is the pad clear's shape aimed at PADEFFECTS[n] in transfer mode:
+   `01 01 02 02 9d 02 01 <n>` voiceDisguiseOn ON, OFF, then select-begin `04 01 01 02 9d 02 01 <n>`.
+4. A MIDDLE DELETE IS UNSAFE. Deleting a detached object that is not LAST removed it cleanly, but
+   the next FX pad's clear then left a 13-property partial node instead of collecting its object
+   (one trial). So only the last object is ever deleted by path; a middle one is reported and the
+   create refuses that padIdx. Whether the later pad still SOUNDS right was never tested.
 
 PRIMITIVES (soundpad.py section 7b), device-proven 2026-06-20, hardened create EAR-PROVEN end to end
 (safe_assign_fx_recipe on a slot first polluted with an orphan healed it AND created a Megaphone that
@@ -321,11 +334,16 @@ went live on creation, no reboot; survived a power cycle):
 - safe_assign_fx_recipe  HARDENED create: scrub the slot (clear any pad, GC any
     leftover orphan for that padIdx) then the normal append-create. The pad left behind is always made
     by the proven-live normal create, so it is live. assign_fx_to_grid (web) uses this and self-heals.
-- clean_pool()              recovery net: GC every stray orphan (safe, touches no live pad). Runs
-    automatically inside create/clear. Live-pad DUPLICATES are reported, not auto-rebuilt (see below).
-- remove_orphan_objects(idx)  GC the objects for one padIdx that have no live FX pad.
+    Refuses, before writing, a padIdx with a detached object in the middle of the list (fact 4).
+- clean_pool()              recovery net: removes every orphan and detached object it safely can
+    (touches no live pad). Runs automatically inside create/clear. Live-pad DUPLICATES and a middle
+    detached object are reported, not repaired.
+- remove_orphan_objects(idx)  the objects for one padIdx with no live FX pad, last first: attached by
+    bare bind + clear, detached by _delete_effect_object if last. Stops on a pass that removes nothing.
 - _bind_existing_fx(idx)    bare adopt (no append); TRANSIENT helper for orphan GC only - its own live
     binding is not reboot-proven, so such a pad is never left in place.
+- DevTools/test_orphan_cleanup_live.py  makes an attached orphan and checks clean_pool restores the
+    whole tree. The detached branch has no test: only RODE's app has made one.
 
 DUPLICATE on a LIVE pad (rare): clear the pad (GCs one copy, leaves the other as an orphan), then
 recreate it from its recipe with the normal live create. Not auto-run by clean_pool because rebuilding
@@ -363,8 +381,8 @@ definitions, which is what `soundpad.heal_fx_pool` repairs (PROJECT_GUIDE part 2
                         (assign_create.py, assign_create_fx.py, clear_pad.py, restore_fx.py,
                         pad_ops.py) were thin wrappers and are DELETED; nothing imports them.
                         Do NOT add pad logic anywhere else - a second copy is how we ran stale code.
-                        Record windowing lives in _pad_windows / _pad_field (ONE anchor pass on
-                        padName); stack cleaning in _sanitise_stack.
+                        Pads and effect objects are read off the tree (pad_nodes, effect_objects);
+                        stack cleaning in _sanitise_stack.
 - rcp_read.py / rcp_transfer.py / rcp_hid.py   core read / write / HID.
 - pad_records.py        low-level byte-builders (sound/fx/recipe) + byte-for-byte selftest. The
                         layer underneath soundpad.py; keep it.

@@ -1246,7 +1246,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`clear_pad` is HID-only ON PURPOSE** (no `remountPadStorage`, no file writes, hence no drive
   toast). It leaves the wav behind; the sweep or the manual button collects it.
 - **A voice-FX pad EDITED IN PLACE restores at the recipe's values, not the edited ones.**
-- **Keep the pool clean.** Orphaned region-B objects are factory-reset-only.
+- **Keep the pool clean, and remove each kind of orphan only its own way** (`SOUNDPADS.md`
+  section 5). An ATTACHED orphan (effectsIdx stored last) goes by bare bind + clear; a delete by
+  tree path does not touch it. A DETACHED one (effectsIdx stored first, left by RODE's app) goes only
+  by the path delete, and ONLY when it is the last object: a middle delete left the next FX pad's
+  clear collecting the wrong thing. `remove_orphan_objects` stops on a pass that removes nothing;
+  never turn that into a retry loop.
 - **`find_pad_volume` MUST READ BYTES before returning a root, not just stat it.** `isdir` and
   `disk_usage > 0` were each added after a failure of this class and the volume passed BOTH and then
   died on the first real read with EINVAL (29th August 2026, the as-found baseline, pad 1). The
@@ -2533,14 +2538,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   CONFIGURATION: nothing is written persistently, so the worst case is an unwanted pad trigger or a
   control moving, nowhere near the stray-property class. The app already exposes a MIDI switch on
   the Device settings tab, so the user's escape hatch needs no new UI.
-- **READ `padType` WITH `soundpad.pad_positions`, NEVER WITH THE WINDOWED READER.** `padType` is the
-  one pad field that can sit BEFORE `padName` (factory records put the name first, records written
-  by us or the RODE app put the type first), so anything reading "the type after the name" gets the
-  PREVIOUS pad's type. `pad_positions` pairs them BY INDEX across the whole dump and agrees with the
-  tree parser on all 22 pads. `soundpad._pad_field` carries a DO-NOT-READ-padType warning and
-  `DevTools/list_pads.py` had the bug anyway until 2nd September 2026, showing a Duo's "Cut" pad as
-  type None when it is type 6. The enumeration itself is in `SOUNDPADS.md`; note that **type 3 is
-  MIXER, not a voice effect**, which is why "Censor" and "Ducking" read as 3.
+- **READ PAD FIELDS OFF THE TREE (`soundpad.pad_nodes`), NEVER BY SEARCHING THE DUMP FOR A NAME.**
+  Field order inside a pad record varies (factory records put `padName` first, records written by
+  us or the RODE app put `padType` and `padColourIndex` before it), so a reader that windows the
+  dump on `padName` hands those fields to the neighbouring pad; measured 3rd October 2026, it
+  misread the colour of every pad and Rim_Shot's `padReplay`. Pairing a name's k-th occurrence with
+  the k-th pad is no better: a pad that lacks a field shifts every pad after it. The enumeration
+  itself is in `SOUNDPADS.md`; note that **type 3 is MIXER, not a voice effect**, which is why
+  "Censor" and "Ducking" read as 3.
 - **SELECTING THE PAD BANK IS AN ORDINARY HID WRITE: `selectedBank`, an int on the GUI block,
   selector 0x07** - the same mapped node as `metering`, which has been written and restored for
   months. Proven 2nd September 2026 with the ENGINE as the judge, not a read-back: with the bank at

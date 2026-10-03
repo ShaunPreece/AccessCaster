@@ -10,9 +10,11 @@ LAYERING: pad_records.py stays underneath as the low-level byte-builder (it has 
 selftest vs the captures). soundpad.py is the operations layer over it. Nothing else holds pad logic.
 
 THE ONE RULE (SOUNDPADS.md): keep the region-B effect-object pool clean (one object per FX pad).
-Every mutating op is gated on a clean pool and re-reports health, because an orphan can only be
-cleared by a touchscreen factory reset, so we must refuse to operate on a polluted pool, not risk
-silencing another pad's live effect.
+Every mutating op cleans the pool first (clean_pool) and re-reports health, because a stray object
+can collide with a create and silence another pad's live effect.
+
+THE READER: pads and effect objects are read off the parsed tree (pad_nodes, effect_objects),
+never by searching the dump for a property name; field order inside a pad record varies.
 
 All the choreography here was decoded + ear-proven exactly as documented in SOUNDPADS.md. The
 load-bearing facts are kept as comments at each function (handle = count+0, REUSE-not-append the
@@ -35,6 +37,7 @@ import re
 import sys
 import time
 from collections import Counter
+from typing import NamedTuple
 
 import diagnostics      # the app's own account: why a pad is being rebuilt, and why not
 import rcp_hid          # open_handle / write_report: every handle and every write is logged
@@ -330,95 +333,70 @@ SPECIAL_EFFECTS_IDX = 65
 # Clear addressing: selector = the pad's 0-based stream position + OFFSET. On a CLEAN table the
 # 0-based padName position equals the device selector (verified on clean bank-1). Keep 0.
 SELECTOR_OFFSET = 0
-PAD_PREFIX = bytes.fromhex("010102029a0201")   # pad-addressed record prefix; selector byte follows
 
 
 # ----------------------------------------------------------------------------------------------
 # SECTION 1 - READ / STREAM POSITIONS
 # ----------------------------------------------------------------------------------------------
 
-def _pad_windows(blob: bytes):
-    """[(anchor, end)] for every pad record in the dump, delimited by its padName.
-
-    THE ONE ANCHOR PASS. Both readers below need the same list of record windows and each built it
-    with its own copy of this loop. A record's window runs from its own padName to the NEXT one
-    (or the end of the blob for the last), which is what lets a field be attributed to the pad it
-    belongs to instead of to whichever pad happens to be nearest in the stream.
-    """
-    anchors, s = [], 0
-    while True:
-        i = blob.find(b"padName", s)
-        if i < 0:
-            break
-        anchors.append(i)
-        s = i + len(b"padName")
-    return [(a, anchors[k + 1] if k + 1 < len(anchors) else len(blob))
-            for k, a in enumerate(anchors)]
+class Pad(NamedTuple):
+    """One PAD node under SOUNDPADS, as the tree parser reads it."""
+    position: int           # child index under SOUNDPADS: the pad write selector
+    idx: int | None         # padIdx, the grid slot (0-based)
+    type: int | None        # padType, see PAD_TYPE_LABEL
+    name: str | None
+    props: dict             # every property on the node, by name
 
 
-_ABSENT = object()      # "this record does not carry that field", which is NOT the same as None
+class EffectObject(NamedTuple):
+    """One EFFECTS_PARAMETERS node under PADEFFECTS (region B)."""
+    index: int              # child index under PADEFFECTS: the 0x9d sub-handle
+    effects_idx: int | None
+    detached: bool          # see effect_objects
 
 
-def _pad_field(blob: bytes, key: bytes, start: int, end: int, default=None):
-    """One field's value inside a record window, or `default` if the record does not carry it.
-
-    Pass `default=_ABSENT` when you need to tell a MISSING field from one that is present but did
-    not decode: a present-but-undecodable field still belongs in the map, a missing one does not.
-    """
-    i = blob.find(key, start, end)
-    return rr._val_after(blob, i + len(key))[0] if i >= 0 else default
+class PadTableUnreadable(ValueError):
+    """The dump did not parse, so no pad or effect object can be located."""
 
 
-def pad_positions(blob=None):
-    """[(position, padIdx, padType, name)] for every pad record, in stream order.
+def _top_node(blob: bytes, name: str):
+    """The root child called `name`, or None if the dump has none. Raises PadTableUnreadable when
+    the dump does not parse: a pad write aimed by a guessed position can delete the wrong pad, so
+    there is no fallback reader here."""
+    root = rr.node_at(blob, [])
+    if root is None:
+        raise PadTableUnreadable("The desk's pad table did not read cleanly. Try again.")
+    return next((n for n in root.kids if n.name == name), None)
 
-    Pass `blob` (a prior rr.read_model()/read_model_stable() result) to reuse one dump instead
-    of reading the device again; defaults to a fresh read.
 
-    padName and padType occur exactly once per record, so we pair them BY INDEX (k-th padName
-    <-> k-th padType in byte order = same record). This is robust to intra-record field order:
-    factory records store padName before padType, but pads created by us / the RODE app store
-    padType just before padName, which an old "find padType AFTER padName" windowing mis-labelled.
-    padIdx is still found by windowing each record (it parses cleanly mid-record).
-    """
+def pad_nodes(blob=None) -> list:
+    """Every pad record as a Pad, in stream order. `blob` reuses a dump; default is a fresh read."""
     if blob is None:
         blob = rr.read_model(fresh=True)
-    windows = _pad_windows(blob)
-    types = rr.values(blob, "padType")
+    pads = _top_node(blob, "SOUNDPADS")
     out = []
-    for pos, (a, end) in enumerate(windows):
-        name = rr._val_after(blob, a + len(b"padName"))[0]
-        pidx = _pad_field(blob, b"padIdx", a, end)
-        ptype = types[pos] if pos < len(types) else None  # index-paired (robust)
-        out.append((pos, pidx, ptype, name))
+    for node in (pads.kids if pads else ()):
+        props = {p: v for p, v, _k in node.props}
+        out.append(Pad(node.index, props.get("padIdx"), props.get("padType"),
+                       props.get("padName"), props))
     return out
 
 
+def pad_positions(blob=None):
+    """[(position, padIdx, padType, name)] for every pad record, in stream order."""
+    return [(p.position, p.idx, p.type, p.name) for p in pad_nodes(blob)]
+
+
 def _fields_by_padidx(blob: bytes, fields) -> dict:
-    """{field: {padIdx: value}} for several fields in ONE pass over the record windows.
-
-    For fields that occur only on some pad types (e.g. padMixerMode on mixer pads only), so they
-    cannot be paired by stream position like padGain/padLoop. Records are delimited by padName
-    anchors, same windowing as pad_positions; a field absent from a record simply leaves that pad
-    out of that field's map. Multi-field because the Back Channel read wants ten of them at once
-    and one anchor pass beats ten full scans of the (large) model blob.
-
-    DO NOT read padType with this. A pad record runs padType, padName, padProgress, ... padReplay:
-    padType is the ONE field that sits BEFORE padName, so it falls in the PREVIOUS window and this
-    returns the NEXT pad's type (verified against pad_positions: padIdx 7 Rim_Shot, a
-    sound pad, reads back as 2). Every other field, padIdx and padMixerMode and the
-    padMixerBackChannel* flags included, follows padName and is attributed correctly. Use
-    pad_positions for the type."""
-    fkeys = [(f, f.encode()) for f in fields]
+    """{field: {padIdx: value}} for several fields. A pad that does not carry a field (padMixerMode
+    exists on mixer pads only) is left out of that field's map."""
     out = {f: {} for f in fields}
-    for a, end in _pad_windows(blob):
-        pidx = _pad_field(blob, b"padIdx", a, end)
-        if pidx is None:
+    for p in pad_nodes(blob):
+        if p.idx is None:
             continue
-        for f, fkey in fkeys:
-            val = _pad_field(blob, fkey, a, end, default=_ABSENT)
-            if val is not _ABSENT:
-                out[f][pidx] = val
+        for f in fields:
+            if f in p.props:
+                out[f][p.idx] = p.props[f]
     return out
 
 
@@ -431,63 +409,69 @@ def _field_by_padidx(blob: bytes, field: str) -> dict:
 # SECTION 2 - POOL HEALTH (the clean-pool gate)
 # ----------------------------------------------------------------------------------------------
 
-def _region_b_effects_idx(blob: bytes) -> list:
-    """effectsIdx of each region-B effect-object, using the SAME region-A/B split as
-    free_effect_subhandle (the largest inter-object byte-gap is the A/B boundary)."""
-    offs, s = [], 0
-    while True:
-        i = blob.find(b"EFFECTS_PARAMETERS", s)
-        if i < 0:
-            break
-        offs.append(i)
-        s = i + 1
-    if len(offs) < 2:
-        return []
-    gaps = [(offs[k + 1] - offs[k], k) for k in range(len(offs) - 1)]
-    region_a = max(gaps)[1] + 1
+def effect_objects(blob=None) -> list:
+    """Every region-B effect object (PADEFFECTS' children) as an EffectObject, in stream order.
+
+    DETACHED means the node stores `effectsIdx` FIRST. A live pad's object stores it last; the
+    special object 65 stores it first but belongs to no pad, so it is not counted as detached. RODE's
+    app leaves detached objects behind (seen after a pad was retyped). No pad binds to one, so a pad
+    clear never collects it, and the only removal is a delete by tree path (_delete_effect_object).
+    """
+    if blob is None:
+        blob = rr.read_model_stable(fresh=True)
+    fx = _top_node(blob, "PADEFFECTS")
     out = []
-    for j in range(region_a, len(offs)):
-        o = offs[j]
-        nxt = offs[j + 1] if j + 1 < len(offs) else len(blob)
-        ei = blob.find(b"effectsIdx", o, nxt)
-        out.append(rr._val_after(blob, ei + 10)[0] if ei >= 0 else None)
+    for node in (fx.kids if fx else ()):
+        props = {p: v for p, v, _k in node.props}
+        eidx = props.get("effectsIdx")
+        first = node.props[0][0] if node.props else None
+        out.append(EffectObject(node.index, eidx,
+                                first == "effectsIdx" and eidx != SPECIAL_EFFECTS_IDX))
     return out
 
 
 def pool_health(blob: bytes | None = None) -> dict:
     """Verdict on the region-B effect-object pool: clean iff there is exactly one object per
     voice-FX pad (effectsIdx == its padIdx) plus the single special object, with no duplicate
-    effectsIdx, no orphan (object with no matching FX pad) and no missing object."""
+    effectsIdx, no orphan (object with no matching FX pad), no missing object and no detached one.
+
+    Detached objects are listed on their own (`detached`, by effectsIdx) and kept out of the other
+    three counts: they bind nothing, so one sharing a live pad's padIdx is not a duplicate."""
     if blob is None:
         blob = rr.read_model_stable(fresh=True)
-    pads = pad_positions(blob)
-    fx_pad_idxs = sorted(p[1] for p in pads if p[2] == 2 and p[1] is not None)
-    region_b = _region_b_effects_idx(blob)
-    present = [e for e in region_b if e is not None]
-    counts = Counter(present)
+    fx_pad_idxs = sorted(p.idx for p in pad_nodes(blob) if p.type == 2 and p.idx is not None)
+    objects = effect_objects(blob)
+    attached = [o.effects_idx for o in objects if not o.detached and o.effects_idx is not None]
+    counts = Counter(attached)
     expected = set(fx_pad_idxs) | {SPECIAL_EFFECTS_IDX}
     duplicates = sorted(k for k, c in counts.items() if c > 1)
     orphans = sorted(k for k in counts if k not in expected)
     missing = sorted(i for i in fx_pad_idxs if i not in counts)
+    detached = [o.effects_idx for o in objects if o.detached]
     return {
-        "clean": not duplicates and not orphans and not missing,
-        "region_b_count": len(region_b),
+        "clean": not duplicates and not orphans and not missing and not detached,
+        "region_b_count": len(objects),
         "fx_pads": fx_pad_idxs,
-        "effects_idx": sorted(present),
+        "effects_idx": sorted(attached),
         "duplicates": duplicates,
         "orphans": orphans,
         "missing": missing,
+        "detached": detached,
     }
 
 
 def _health_message(health: dict) -> str:
-    # Silent in the normal (clean) case - users never see effect-object/orphan wording. Stray
-    # orphans are now AUTO-HEALED by clean_pool during create/clear, so the pool stays clean in
-    # normal use. The only residue that can survive is a live-pad DUPLICATE (rare, from a crash
-    # mid-write), which needs a manual clear+recreate of that pad, ear-checked because it rebuilds a
-    # live effect (SOUNDPADS 5b), not a restart.
+    # Silent in the normal (clean) case - users never see effect-object/orphan wording. Orphans and
+    # a detached object at the END of the list are removed by clean_pool during create/clear. What
+    # can survive: a detached object in the middle of the list (see remove_orphan_objects), and a
+    # live-pad DUPLICATE, which needs an ear-checked clear and recreate (SOUNDPADS 5b).
     if health["clean"]:
         return ""
+    if health.get("detached"):
+        pads = ", ".join(str(i + 1) for i in sorted(set(health["detached"])))
+        return (f"A leftover voice-effect definition for pad {pads} is stored on the desk and "
+                "cannot be removed safely from here. Avoid putting a voice effect on that pad; a "
+                "factory reset clears it.")
     if health["missing"]:
         # Named separately from a duplicate, which is a different fault with a different repair:
         # this is a state the desk reaches ON ITS OWN (see heal_fx_pool), not only after a crash
@@ -538,13 +522,8 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
     if max_banks is None:
         max_banks = spec.user_banks
     blob = rr.read_model_stable(fresh=True)
-    replays = rr.values(blob, "padReplay")
-    gains = rr.values(blob, "padGain")
-    loops = rr.values(blob, "padLoop")
-    colours = rr.values(blob, "padColourIndex")
-    # The mixer fields exist only on mixer pads, so they cannot be position-paired like padGain;
-    # read them per record, all in one anchor pass. bc_props is what THIS desk offers, so the
-    # per-pad "back_channel" map below always has exactly the keys the UI will render.
+    # bc_props is what THIS desk offers, so the per-pad "back_channel" map below always has exactly
+    # the keys the UI will render.
     bc_props = [s["prop"] for s in back_channel_sources()]
     mixer_fields = _fields_by_padidx(
         blob, ["padMixerMode", "padMixerTriggerMode", "padPlayMode", "padFilePath"]
@@ -559,13 +538,13 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
     # folder can pick the wrong one.
     file_paths = mixer_fields["padFilePath"]
     by_idx = {}
-    for pos, pidx, ptype, name in pad_positions(blob):
-        if pidx is not None:
-            by_idx[pidx] = {"position": pos, "type": ptype, "name": name,
-                            "replay": replays[pos] if pos < len(replays) else None,
-                            "gain": gains[pos] if pos < len(gains) else None,
-                            "loop": loops[pos] if pos < len(loops) else None,
-                            "colour": colours[pos] if pos < len(colours) else None}
+    for p in pad_nodes(blob):
+        if p.idx is not None:
+            by_idx[p.idx] = {"position": p.position, "type": p.type, "name": p.name,
+                             "replay": p.props.get("padReplay"),
+                             "gain": p.props.get("padGain"),
+                             "loop": p.props.get("padLoop"),
+                             "colour": p.props.get("padColourIndex")}
     # How many banks to show: highest USER bank that has real content, plus one spare. System
     # pads (padType 6, padIdx 56-63) and anything past the user range are ignored for this.
     max_user_pidx = max_banks * pads_per_bank
@@ -685,8 +664,7 @@ def current_pad_count() -> int:
     a stale/too-low handle makes the create overwrite an existing pad's stream position (this
     corrupted a system pad on a full table - see SOUNDPADS.md / pad_records.HANDLE).
     """
-    m = rr.read_model(fresh=True)
-    return len(rr.values(m, "padName"))
+    return len(pad_nodes())
 
 
 def wait_for_pad_present(target_idx: int, timeout: float = 6.0, poll: float = 0.3) -> bool:
@@ -704,12 +682,8 @@ def wait_for_pad_present(target_idx: int, timeout: float = 6.0, poll: float = 0.
 
 
 def free_effect_subhandle(target_idx: int) -> int:
-    """Effects sub-handle for a pad = REUSE the pad's FIRST existing effect-object's region-B
-    index; only APPEND (region-B count) if the pad has no effect-object yet.
-
-    The effect-objects live in two clusters (a large byte-gap separates them): REGION A = the
-    channel-strip effects (one per input channel), then REGION B = the special + the per-pad
-    effect-objects. The 0x9d sub-handle indexes REGION B only. region-A is DERIVED from the gap.
+    """Effects sub-handle for a pad = REUSE the pad's FIRST existing effect object's index under
+    PADEFFECTS; only APPEND (the object count) if the pad has no object yet.
 
     WHY REUSE, NOT APPEND (decoded + ear-proven): the LIVE FX engine binds a pad to the
     FIRST region-B effect-object whose effectsIdx == padIdx. Appending our effect at the end left
@@ -717,24 +691,8 @@ def free_effect_subhandle(target_idx: int) -> int:
     RODE app writes to the pad's FIRST matching object. So we reuse that index. (Dead ends: hard-
     coded 0x0B; sub=total count; sub=region-B append - all silenced this/other pad's FX.)
     """
-    m = rr.read_model_stable(fresh=True)   # stable: single reads can return partial data here
-    offs, s = [], 0
-    while True:
-        i = m.find(b"EFFECTS_PARAMETERS", s)
-        if i < 0:
-            break
-        offs.append(i); s = i + 1
-    if len(offs) < 2:
-        return len(offs)
-    gaps = [(offs[k + 1] - offs[k], k) for k in range(len(offs) - 1)]
-    region_a = max(gaps)[1] + 1            # objects before the largest inter-object gap
-    for j in range(region_a, len(offs)):   # scan region B for the pad's first object
-        o = offs[j]; nxt = offs[j + 1] if j + 1 < len(offs) else len(m)
-        ei = m.find(b"effectsIdx", o, nxt)
-        eiv = rr._val_after(m, ei + 10)[0] if ei >= 0 else None
-        if eiv == target_idx:
-            return j - region_a            # REUSE the pad's first effect-object (region-B index)
-    return len(offs) - region_a            # no existing object -> append at first free slot
+    objects = effect_objects()
+    return next((o.index for o in objects if o.effects_idx == target_idx), len(objects))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -746,15 +704,16 @@ def _pad256(payload: bytes) -> bytes:
     return rec + bytes(256 - len(rec))
 
 
-def build_pad_bool(name: str, on: bool, sel: int) -> bytes:
-    """Pad-addressed compact bool: 01 01 02 02 9a 02 01 <sel> <name> 00 01 01 <02=on/03=off>."""
-    return _pad256(PAD_PREFIX + bytes([sel & 0xFF]) + name.encode()
+def build_pad_bool(name: str, on: bool, sel: int, frame: int = pr.FRAME_PAD) -> bytes:
+    """Compact bool on child `sel` of the pad (0x9a) or effects (0x9d) node:
+    01 01 02 02 <frame> 02 01 <sel> <name> 00 01 01 <02=on/03=off>."""
+    return _pad256(bytes([0x01, 0x01, 0x02, 0x02, frame, 0x02, 0x01, sel & 0xFF]) + name.encode()
                    + bytes([0x00, 0x01, 0x01, 0x02 if on else 0x03]))
 
 
-def build_select_begin(sel: int) -> bytes:
-    """select-begin: 04 01 01 02 9a 02 01 <sel>."""
-    return _pad256(bytes([0x04, 0x01, 0x01, 0x02, 0x9a, 0x02, 0x01, sel & 0xFF]))
+def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
+    """select-begin on child `sel`: 04 01 01 02 <frame> 02 01 <sel>."""
+    return _pad256(bytes([0x04, 0x01, 0x01, 0x02, frame, 0x02, 0x01, sel & 0xFF]))
 
 
 # CURSOR-addressed variants (addressing mode 0x00 = the device's current model-edit cursor,
@@ -1738,24 +1697,44 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 7b - POOL SELF-HEAL + HARDENED CREATE (device-proven, NOT yet ear-proven)
+# SECTION 7b - POOL SELF-HEAL + HARDENED CREATE
 #
-# OVERTURNS the old "orphans are factory-reset-only" rule. Two device facts proven this session:
-#   1. Clearing an FX pad makes the FIRMWARE garbage-collect its bound region-B object (clear
-#      sends only 0x9a pad frames, zero 0x9d; the object still vanishes). Survives a power cycle.
-#   2. A BARE FX create (build_blank with_effects=False -> NO EFFECTS_PARAMETERS handoff, zero
-#      0x9d writes) appends NO region-B object; the engine binds the pad to an EXISTING object by
-#      the effectsIdx==padIdx rule. So we can adopt an orphan object WITHOUT appending a new one.
+# An orphan is an effect object with no live FX pad. There are two kinds, and each has exactly one
+# removal that works (device-proven on 1.7.6):
+#   * ATTACHED (effectsIdx stored last, like a live pad's object). Clearing an FX pad makes the
+#     firmware collect the object bound to it, and a BARE FX create (build_blank with_effects=False,
+#     zero 0x9d writes) binds a pad to an existing object without appending one. So: bare-bind a
+#     pad, clear it, and the object goes. A delete by tree path does NOT remove this kind.
+#   * DETACHED (effectsIdx stored first, see effect_objects). Nothing binds to it, so the bare-bind
+#     route never collects it. A delete by tree path removes exactly that node. Deleting one from
+#     the MIDDLE of the list removes it cleanly, but in the one trial the next FX pad's clear then
+#     collected the wrong thing, so only the LAST object is ever deleted this way.
 #
-# So an orphan (object with no live FX pad) is removable app-free: bind a bare pad to it, then
-# clear that pad -> GC. The old cleanup_orphans.py failed because it adopted with an APPENDING
-# create (net-zero cycle); the fix is the bare adopt. A pre-existing orphan is also why a normal
-# create could double up, so the hardened create scrubs the slot first.
-#
-# LIVENESS NOTE: the bare-bind pad alone is NOT confirmed live without a reboot, so it is used
-# ONLY transiently to GC orphans (the pad is cleared immediately). Every pad we LEAVE behind is
-# made by the normal append-create (assign_create_fx_recipe), which is the proven live path.
+# The bare-bind pad is used only transiently (cleared at once). Every pad we leave behind is made
+# by the normal create (assign_create_fx_recipe), which is the proven live path.
 # ----------------------------------------------------------------------------------------------
+
+def _delete_effect_object(index: int) -> None:
+    """Delete PADEFFECTS child `index` by tree path: the pad clear's shape (a bool ON, OFF, then
+    select-begin) aimed at the effects node, inside transfer mode. Only for a DETACHED object at
+    the END of the list; the caller checks both."""
+    _require_pad_write()
+    iface = t.find_control_interface()
+    if iface is None:
+        raise RuntimeError("no control interface (close the RODE app)")
+    t.set_transfer_mode(True); time.sleep(1.0)
+    dev = rcp_hid.open_handle(iface, "effect object delete")
+    try:
+        for r in (build_pad_bool("voiceDisguiseOn", True, index, pr.FRAME_FX),
+                  build_pad_bool("voiceDisguiseOn", False, index, pr.FRAME_FX),
+                  build_select_begin(index, pr.FRAME_FX)):
+            rcp_hid.write_report(dev, r)
+            time.sleep(0.08)
+        time.sleep(0.3)
+    finally:
+        rcp_hid.close_handle(dev, "effect object delete")
+    time.sleep(0.2)
+    t.set_transfer_mode(False)
 
 def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
     """Create an FX pad bound to an EXISTING region-B object, writing NO new object
@@ -1783,47 +1762,58 @@ def _fx_pad_idxs() -> set:
 
 
 def remove_orphan_objects(target_idx: int, max_iter: int = 8) -> int:
-    """GC every region-B object for `target_idx` that has NO live FX pad (an orphan), by
-    bare-binding a pad to it then clearing (the firmware GCs the bound object). Returns the
-    number removed. No-op if a live FX pad owns target_idx (then it is not an orphan)."""
+    """Remove every effect object for `target_idx` while no live FX pad owns it, last first: an
+    attached one by bare bind and clear, a detached one by path delete if it is the last object.
+    Returns the number removed. Stops, rather than retrying, on a detached object in the middle of
+    the list or on any pass that removes nothing; pool_health then reports what is left."""
     removed = 0
     for _ in range(max_iter):
         if target_idx in _fx_pad_idxs():
             break
-        if target_idx not in pool_health()["effects_idx"]:
+        objects = effect_objects()
+        mine = [o for o in objects if o.effects_idx == target_idx]
+        if not mine:
             break
-        _bind_existing_fx(target_idx)
+        last = mine[-1]
+        if last.detached:
+            if last.index != len(objects) - 1:
+                break
+            _delete_effect_object(last.index)
+        else:
+            _bind_existing_fx(target_idx)
+            time.sleep(0.6)
+            # Found by padIdx whatever its type: a bind that does not take can leave a blank
+            # (padType 0) record, and that must be cleared too.
+            pos = next((p for p, pi, _t, _n in pad_positions() if pi == target_idx), None)
+            if pos is not None:
+                clear_pad(pos)
         time.sleep(0.6)
-        pos = next((p for p, pi, _t, _n in pad_positions() if pi == target_idx), None)
-        if pos is None:
+        if sum(o.effects_idx == target_idx for o in effect_objects()) >= len(mine):
             break
-        clear_pad(pos)
-        time.sleep(0.6)
         removed += 1
     return removed
 
 
 def clean_pool() -> dict:
-    """Recovery net: GC every ORPHAN region-B object (an effectsIdx with an object but no live
-    FX pad). Fully safe - touches no live pad, leaves no pad behind. Live-pad DUPLICATES (a pad
-    plus an extra copy of its object) are NOT auto-repaired here because rebuilding a live pad's
-    effect must be ear-checked; those are reported in `unhealed` for a manual, ear-checked fix.
-    Returns the post-heal pool_health plus what it did."""
+    """Recovery net: remove every orphan and detached effect object that has no live FX pad
+    (remove_orphan_objects). Touches no live pad and leaves no pad behind. Live-pad DUPLICATES (a
+    pad plus an extra copy of its object) are NOT repaired here because rebuilding a live pad's
+    effect must be ear-checked; they are reported for a manual fix, as is a detached object that
+    is not last in the list. Returns the post-heal pool_health plus what it did."""
     h = pool_health()
-    orphan_idxs = sorted(set(h["orphans"]))
     removed = 0
-    for idx in orphan_idxs:
+    for idx in sorted(set(h["orphans"]) | set(h["detached"])):
         removed += remove_orphan_objects(idx)
     h2 = pool_health()
-    unhealed = sorted(set(h2["duplicates"]))   # remaining = live-pad duplicates
+    unhealed = sorted(set(h2["duplicates"]))
     return {
         "ok": h2["clean"],
         "removed_orphans": removed,
         "health": h2,
         "unhealed_live_duplicates": unhealed,
-        "message": (("Pool is clean." if h2["clean"]
-                     else f"Removed {removed} orphan object(s); "
-                          f"live-pad duplicate(s) remain for {unhealed} (need a manual rebuild).")),
+        "message": ("Pool is clean." if h2["clean"]
+                    else f"Removed {removed} orphan object(s); left: duplicates {unhealed}, "
+                         f"orphans {h2['orphans']}, detached {h2['detached']}."),
     }
 
 
@@ -1832,7 +1822,15 @@ def safe_assign_fx_recipe(target_idx: int, name: str, recipe: dict, colour: int 
     """HARDENED multi-effect (recipe) FX create. Scrubs the slot (clears any pad there and GCs its
     effect object) so a create never lands on top of a live one, then runs the
     normal recipe create (proven live). `active` True engages it live (live preview); False leaves
-    the pad at rest like the factory so it does not leave a mic processing."""
+    the pad at rest like the factory so it does not leave a mic processing.
+
+    REFUSES, before any write, a slot that has a detached effect object stuck in the middle of the
+    list: a new FX pad there may bind the leftover instead of its own effect, and nothing here can
+    remove it safely."""
+    objects = effect_objects()
+    if any(o.detached and o.effects_idx == target_idx and o.index != len(objects) - 1
+           for o in objects):
+        raise ValueError(_health_message({"clean": False, "detached": [target_idx]}))
     pos = next((p for p, pi, _t, _n in pad_positions() if pi == target_idx), None)
     if pos is not None:
         clear_pad(pos); time.sleep(0.8)
@@ -2179,12 +2177,12 @@ def heal_fx_pool(progress=None) -> dict:
         return {"ok": True, "healed": [], "unrecognised": [], "failed": [],
                 "health": health, "message": ""}
 
-    pos_of = {pi: (p, nm) for p, pi, pt, nm in pad_positions(blob) if pt == PAD_TYPE_VOICE_FX}
-    colours = rr.values(blob, "padColourIndex")
+    fx_pads = {p.idx: p for p in pad_nodes(blob) if p.type == PAD_TYPE_VOICE_FX}
     recipes = all_recipes()
     healed, unrecognised, failed = [], [], []
     for n, pidx in enumerate(sorted(missing), start=1):
-        stream_pos, name = pos_of.get(pidx, (None, ""))
+        pad = fx_pads.get(pidx)
+        name = pad.name if pad else ""
         key = _safe_match_recipe(name)
         if key is None:
             unrecognised.append({"grid": pidx + 1, "name": name})
@@ -2196,8 +2194,8 @@ def heal_fx_pool(progress=None) -> dict:
         # factory red because its effect needed rebuilding. The recipe colour is the fallback for a
         # pad whose colour we could not read.
         colour = spec.get("colour")
-        if stream_pos is not None and stream_pos < len(colours):
-            colour = colours[stream_pos]
+        if pad and isinstance(pad.props.get("padColourIndex"), int):
+            colour = pad.props["padColourIndex"]
         try:
             safe_assign_fx_recipe(pidx, name or key, spec["stack"],
                                   colour=int(colour), active=False)
@@ -2244,22 +2242,8 @@ def latched_pads(blob=None) -> list:
     reset: the FX rebuild finished by reporting it had switched off Input 1 and Scene A."""
     if blob is None:
         blob = rr.read_model_stable()
-    pos = pad_positions(blob)
-    active = rr.values(blob, "padActive")
-    # THE "+1" THAT USED TO BE HERE IS GONE, and it must not come back. It said "padActive carries a
-    # leading entry that is not a pad record", which was true of the OLD reader and not of the desk:
-    # the raw substring search matched `padActive` inside `padActiveEdit` (a GUI-block property that
-    # sorts first) and padded the list with a junk entry. rcp_read.find_all matches whole names now,
-    # so the list is exactly one entry per pad and the k-th pad is active[k]. Changed in the SAME
-    # edit as that reader; either alone leaves this off by one, which here means
-    # missing a latched pad - the fault that put a robot voice on a live mic.
-    out = []
-    for i, (p, pi, pt, nm) in enumerate(pos):
-        if pt == SYSTEM_PAD_TYPE:          # the desk's own bank-8 pads - see the docstring
-            continue
-        if i < len(active) and active[i]:
-            out.append((p, pi, nm))
-    return out
+    return [(p.position, p.idx, p.name) for p in pad_nodes(blob)
+            if p.type != SYSTEM_PAD_TYPE and p.props.get("padActive") is True]
 
 
 def pad_play_modes(blob=None) -> dict:
@@ -2267,16 +2251,11 @@ def pad_play_modes(blob=None) -> dict:
 
     WHY A SHORTCUT NEEDS THIS. A second press on a sound pad does whatever the PAD's own mode says -
     Toggle stops it, One Shot restarts it from the beginning, and there is no global stop - so a
-    shortcut that always says "playing" is wrong half the time. This is what lets it say which.
-
-    Aligned BY INDEX against `pad_positions`, exactly as `latched_pads` aligns `padActive`, and for
-    the same reason: `rr.values` matches whole names, so the k-th occurrence is the k-th pad record.
-    Do NOT window the dump for this - that is the reader with the padType attribution trap."""
+    shortcut that always says "playing" is wrong half the time. This is what lets it say which."""
     if blob is None:
         blob = rr.read_model_stable()
-    modes = rr.values(blob, "padPlayMode")
-    return {pi: modes[i] for i, (_p, pi, _pt, _nm) in enumerate(pad_positions(blob))
-            if i < len(modes) and isinstance(modes[i], int)}
+    return {p.idx: p.props["padPlayMode"] for p in pad_nodes(blob)
+            if isinstance(p.props.get("padPlayMode"), int)}
 
 
 def engage_pad(position: int) -> None:

@@ -1175,6 +1175,18 @@ GOTCHA (tooling): `python rcp_transfer.py` with NO argument defaults to arg "ent
 which ENTERS transfer mode + remounts pad storage - it is NOT the selftest. Use the
 explicit selftest subcommand; recover a stray enter by exiting transfer mode.
 
+7.13 DELETING A REGION-B EFFECT OBJECT BY PATH (Pro II, 1.7.6)
+--------------------------------------------------------------
+Region B is the children of PADEFFECTS (root child 0x29D on the Pro II). The pad
+clear's shape aimed at child n deletes that node, inside transfer mode:
+    01 01 02 02 9d 02 01 <n>  voiceDisguiseOn  ON, then OFF
+    04 01 01 02 9d 02 01 <n>  select-begin
+It removed a DETACHED object (one storing effectsIdx first) and nothing else in
+the tree. It does NOT remove an ATTACHED object (effectsIdx stored last), at the
+end or in the middle: three tries, no change, while a single write to the same
+node read back. Deleting a detached object from the MIDDLE left the next FX pad's
+clear writing a 13-property partial node instead of collecting its own object
+(one trial), so delete only the last object.
 
 --------------------------------------------------------------------------------
 8. ENCODER / BUTTON EVENTS
