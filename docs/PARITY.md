@@ -110,6 +110,10 @@ it and must be checked against the app before it is believed.
 - Bluetooth output level, and the BT / monitor MUTES
 - Listen mode (After-fader vs Pre-fader)
 - USB / multi output mode
+- What this computer sends: Standard (one stereo input) or Expanded (RODE's four virtual devices,
+  Game, Music, A and B, each assignable to a fader)
+- RODE's Virtual Devices driver: its Latency and Bypass settings (in the driver's own tray icon)
+- A RODE USB microphone on USB 2: its own processing controls, and its mute button
 
 ## Recording & export
 
@@ -121,6 +125,8 @@ it and must be checked against the app before it is believed.
 - Markers
 - Recordings list, and deleting one
 - Platform/custom export presets
+- Erasing (formatting) the card or drive, and ejecting it safely
+- Playing a recording back on the desk, and trimming or fading it there
 
 ## Device / system / network
 
@@ -138,6 +144,9 @@ it and must be checked against the app before it is believed.
 - Bluetooth pair/connect
 - Shows: New / Import / Export
 - Factory reset (full)
+- Firmware: whether an update is available, and installing it from the desk
+- Pairing and unpairing a RODE wireless transmitter, and its Gain Assist, Pad and on-board
+  recording
 - Network configuration
 - Profiles (our snapshot/restore)
 
@@ -169,6 +178,8 @@ it and must be checked against the app before it is believed.
 - Remaining CallMe minutes, licence tier and renewal date
 - Call another RODECaster by its code
 - End a call
+- Extend a call past the one-hour limit on the Lite and standard plans, and hear the warning
+- Processing on the CallMe channel
 
 ## Out of scope (Shaun's call)
 

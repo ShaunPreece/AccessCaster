@@ -190,6 +190,25 @@ check("the details, one to a line", callme.call_details(live),
       [("Bitrate", "23 kilobits a second"), ("Audio lost", "none"), ("Jitter", "1.3 milliseconds")])
 check("no details with no call", callme.call_details(idle), [])
 
+print("the one-hour limit")
+w, said = watcher()
+w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+said.clear()
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+check("five minutes' warning is spoken", said,
+      ["Call with Shaun ends in five minutes. Only the unit's screen can extend it."])
+check("an expiring call is still connected", w.snapshot()["slots"][0]["state"] in callme.CONNECTED,
+      True)
+check("and still up, so it can be hung up", callme.end_label({"incoming": None}), "Hang up")
+check("the call line says so",
+      callme.call_now({"incoming": None, "slots": [{"slot": 1, "state": "Expiring",
+                                                    "peer": "Shaun"}]}),
+      "Talking to Shaun, ending within five minutes.")
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Idle timeout"}')
+check("the end at the hour, in words", said[-1],
+      "Call with Shaun ended: it reached the plan's one-hour limit.")
+
 print("calls nobody took")
 w, said = watcher()
 w.apply(CTL, "sipIncomingCallDetails", DETAILS)

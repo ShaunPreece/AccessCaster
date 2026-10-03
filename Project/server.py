@@ -48,6 +48,7 @@ import time
 import diagnostics            # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import rcp_hid
 import rcp_read
+import model_tree
 import rcp_transfer
 import channels
 import devices                  # per-device model (matrix labels, caps) keyed by product id
@@ -402,9 +403,81 @@ def read_device_state() -> dict:
         # varies, so the value the startup read already captured is the reliable one.
         fw = next((v for v in val("systemFirmwareVersion") if v not in (None, "")), None)
     out["firmware"] = fw
+    out["firmware_update"] = _firmware_update(blob)
     wired = next((v for v in val("wiredConnected") if v is not None), None)
     out["wired_connected"] = bool(wired) if wired is not None else None
     return out
+
+
+# ----------------------------------------------------------------------------
+# FIRMWARE UPDATES: telling the user one exists. Installing is NOT offered: an update reboots the
+# desk, which is the unit the user's screen reader is probably speaking through, and the install
+# could not be tested until RODE ship something newer.
+#
+# All on the SYSTEM node. `updateCheckRequested` is the touchscreen's Check for Update: the desk
+# raises `updateChecking` and clears both within about a second. What an AVAILABLE update looks like
+# has not been seen yet; `appUpdateAvailable` / `osUpdateAvailable` and `updateVersion` are the
+# fields the desk publishes for it.
+_UPDATE_CHECK_WAIT_S = 20.0
+_UPDATE_HOW = ("Install it on the unit's screen under Settings, System, Information, or with "
+               "RODE's own app.")
+
+
+def _firmware_update(blob: bytes) -> dict:
+    def sys_val(name):
+        return rcp_read.block_value(blob, "SYSTEM", name)
+    available = bool(sys_val("appUpdateAvailable")) or bool(sys_val("osUpdateAvailable"))
+    version = sys_val("updateVersion") or ""
+    return {"available": available, "version": version if available else "",
+            "no_internet": bool(sys_val("updateNoInternet"))}
+
+
+def _firmware_update_sentence(upd: dict) -> str:
+    if upd.get("available"):
+        what = f"Firmware {upd['version']}" if upd.get("version") else "A firmware update"
+        return f"{what} is available. {_UPDATE_HOW}"
+    if upd.get("no_internet"):
+        return ("The unit could not reach RODE's update server. It needs wifi or a network cable "
+                "to check.")
+    return ""
+
+
+def action_check_firmware() -> dict:
+    """Ask the desk to check RODE's server for a firmware update, and say what it found."""
+    listener = rcp_read.PushListener()
+    listening = False
+    try:
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+            found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
+            if not found:
+                return {"ok": False, "message": "This unit does not offer a firmware check."}
+            path = found[0][0].path()
+            # Opened before the write: the desk answers within a second.
+            try:
+                listener.start()
+                listening = True
+            except Exception:
+                pass
+            rcp_transfer.send_record(
+                rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
+        if listening:
+            listener.wait_for("updateChecking", _UPDATE_CHECK_WAIT_S, match=lambda v: v is False)
+        else:
+            time.sleep(3.0)
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not check for a firmware update: {exc}"}
+    finally:
+        if listening:
+            listener.stop()
+    upd = _firmware_update(blob)
+    with _session_state_lock:
+        fw = _session_state.get("firmware")
+    fw = fw or rcp_read.block_value(blob, "SYSTEM", "systemFirmwareVersion") or "unknown"
+    msg = _firmware_update_sentence(upd) or f"Firmware {fw} is the latest."
+    return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
 
 
 # ----------------------------------------------------------------------------
@@ -1031,7 +1104,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
     snap = w.snapshot() if w is not None else None
     if snap is None:
         return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
-    up = [s for s in snap.get("slots", []) if s.get("state") in ("Active", "Connecting")]
+    up = [s for s in snap.get("slots", []) if s.get("state") in callme.UP]
     if slot:
         up = [s for s in up if s.get("slot") == int(slot)]
     if not up:
@@ -1120,7 +1193,7 @@ def action_callme_dial(code: str) -> dict:
                                              f"{callme.end_reason(s.get('reason'))}.")}
         # An unknown code goes through Connecting before it fails, so Connecting only counts as
         # ringing once it has lasted a second.
-        if s.get("state") in ("Connecting", "Active") and time.time() - started >= 1.0:
+        if s.get("state") in callme.UP and time.time() - started >= 1.0:
             w.quiet_end(i, False)
             return {"ok": True, "message": f"Calling {who}."}
     w.quiet_end(i, False)
@@ -1135,7 +1208,7 @@ def action_callme_end() -> dict:
     snap = (w.snapshot() if w is not None else None) or {}
     if snap.get("incoming"):
         return action_callme_decline()
-    if any(s.get("state") in ("Active", "Connecting") for s in snap.get("slots", [])):
+    if any(s.get("state") in callme.UP for s in snap.get("slots", [])):
         return action_callme_hangup()
     return {"ok": False, "message": "No CallMe call to end."}
 
@@ -1413,10 +1486,11 @@ def _overview_routing(blob: bytes) -> dict:
         return {"ok": False, "reason": state.get("reason") or "The routing could not be read.",
                 "notes": []}
     mode_names = {0: "Main Mix", 1: "Mix Minus", 2: "Custom"}
-    # Wide, and mode-aware for the label: a note about a cross-point must name it whatever
-    # mode we think the desk is in.
-    src_label = {s["index"]: s["label"]
-                 for s in (dev.matrix.sources_for(channels.usb_expanded()) or ())}
+    # NAMED FROM EVERY SOURCE, COUNTED FROM THE LIVE ONES. The desk keeps a cross-point for Game,
+    # Music, A and B in both modes, but in Standard nothing can feed them, so a note that counts them
+    # says "USB 2 carries only Game, Music, A and B" about an output that carries nothing at all.
+    src_label = {s["index"]: s["label"] for s in (dev.matrix.all_sources or ())}
+    live = {s["index"] for s in (dev.matrix.sources_for(channels.usb_expanded()) or ())}
     notes = []
     for out in (dev.matrix.outputs or ()):
         o = out["index"]
@@ -1427,7 +1501,8 @@ def _overview_routing(blob: bytes) -> dict:
         if default is not None and mode != default:
             notes.append(f"{out['label']} is set to {mode_names.get(mode, mode)}, "
                          f"usually {mode_names.get(default, default)}.")
-        cells = sorted((state["excluded"].get(o) or {}).items())
+        cells = sorted((s, off) for s, off in (state["excluded"].get(o) or {}).items()
+                       if s in live)
         excluded = [src_label.get(s, f"source {s}") for s, off in cells if off]
         included = [src_label.get(s, f"source {s}") for s, off in cells if not off]
         # Say whichever list is shorter. A typical Chat preset excludes eight of nine sources, and
@@ -1585,6 +1660,8 @@ def device_overview() -> dict:
             # why. Reported by exception like everything else here, so it costs nothing when the
             # desk is fine.
             "pads_engaged": _pads_engaged(blob),
+            # By exception, like the rest: empty unless the desk says an update is waiting.
+            "firmware_update": _firmware_update(blob),
             "faders": faders,
             "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,
             "bank": (bank[0] + 1) if bank else None,       # the desk numbers banks from 0
@@ -3182,8 +3259,8 @@ def _ann_seed_layout(st: dict) -> None:
         # not to keep a resting value quiet, but so a reconnect can tell that it MOVED. The desk
         # can drop out of Expanded on its own (measured: off the bus unprompted, back two seconds
         # later in Standard with the setting reset), and the change is invisible - the operator's
-        # extended inputs are simply gone off their faders and their computer's audio has
-        # rearranged itself. The push cannot carry this: the desk leaves the bus as it changes, so
+        # extended inputs stop carrying anything and their computer's audio has rearranged
+        # itself. The push cannot carry this: the desk leaves the bus as it changes, so
         # any push is sent into the gap. Comparing across the reconnect is the only way to see it.
         st["usb_mode"] = rcp_read.first(blob, "outputMultiMode", "int")
         channels.publish_usb_expanded(recorder.split_usb_multitrack(st["usb_mode"])[1])
@@ -3600,8 +3677,8 @@ def _ann_usb_mode_change(was, now) -> str:
 
     IT NAMES THE HALF THAT CHANGED, not both. A re-enumeration resets the whole property, but
     reciting two settings when one moved buries the one that matters, and Expanded going away is
-    the consequential half: the operator's Game, Music, A and B inputs come off their faders and
-    every RODECaster device on the computer is renamed under it. Spoken rather than shown because
+    the consequential half: the operator's Game, Music, A and B inputs go dead and every
+    RODECaster device on the computer is renamed under it. Spoken rather than shown because
     the desk does this unprompted, when nobody is looking at the app.
     """
     if was is None or now is None or was == now:
@@ -3609,8 +3686,9 @@ def _ann_usb_mode_change(was, now) -> str:
     was_mode, was_exp = recorder.split_usb_multitrack(was)
     now_mode, now_exp = recorder.split_usb_multitrack(now)
     if was_exp != now_exp:
-        return ("USB input is now Expanded." if now_exp else
-                "The unit has left Expanded USB input. Game, Music, A and B are off their faders.")
+        # Leaving it, the faders are tidied and spoken about separately (_tidy_after_standard),
+        # so this says only what is certain.
+        return "USB input is now Expanded." if now_exp else "The unit has left Expanded USB input."
     # A value outside the six measured ones is still worth SAYING, just not naming: going silent on
     # an unknown would hide exactly the case nobody has seen before.
     label = recorder.USB_MULTITRACK_LABEL.get(now_mode)
@@ -3677,6 +3755,14 @@ def _announce_loop() -> None:
                 else:
                     _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
                              or "Control announcer reconnected.")
+                    # Out of Expanded with nobody using the app's switch (the touchscreen tidies
+                    # its own faders; the desk dropping out on its own does not). On a thread: it
+                    # writes, and this loop must keep reading.
+                    if (was_usb is not None and st.get("usb_mode") is not None
+                            and recorder.split_usb_multitrack(was_usb)[1]
+                            and not recorder.split_usb_multitrack(st["usb_mode"])[1]):
+                        threading.Thread(target=_tidy_after_standard, args=(True,),
+                                         daemon=True, name="expanded-tidy").start()
                     # The desk re-enumerated, whoever caused it: the touchscreen, a profile, or
                     # the desk leaving Expanded on its own. RODE's virtual devices need the same
                     # follow-up either way, and this is the one place that sees every case.
@@ -6946,26 +7032,77 @@ def action_set_usb_multitrack(mode: int) -> dict:
                         + _virtual_devices_follow(value))}
 
 
+def _clear_extended_faders() -> list:
+    """Take Game, Music, A and B off every fader that carries one, and return their names.
+
+    THE TOUCHSCREEN DOES THIS AND THE DESK DOES NOT. Leaving Expanded on the unit's screen asks
+    "All extended inputs will be unassigned" and empties those faders; the same change written over
+    USB leaves them assigned to inputs nothing can feed, so the faders go dead. Each channel's
+    processing is parked by `_follow_chains`, exactly as when a channel is moved off a fader by
+    hand. Holds the HID lock. Writes nothing when no fader carries one of the four."""
+    spec = _active_faders()
+    extended = {code for code, _label in spec.expanded_sources}
+    if not extended or _fader_write_gate() is not None:
+        return []
+    with _hid_lock:
+        blob = rcp_read.read_model()
+        old = _read_fader_vector(blob, spec)
+        dead = [i for i, code in enumerate(old) if code in extended]
+        if not dead:
+            return []
+        chains_before = channels.read_chains(blob) if _chain_follow_on() else None
+        for i in dead:
+            rcp_transfer.set_fader_source(i, -1)
+        channels.invalidate_strip_vector()
+        new = _read_fader_vector(spec=spec)
+        if chains_before is not None:
+            _follow_chains(old, new, chains_before)
+    labels = spec.labels_for(True)
+    return [labels.get(old[i], f"source {old[i]}") for i in dead]
+
+
+def _tidy_after_standard(spoken: bool) -> str:
+    """Empty the faders the Expanded four left behind once the desk is in Standard, and word it.
+
+    For the cases the app did not cause: the desk dropping out of Expanded on its own, or being
+    found in Standard at start-up with the four still on faders. `spoken` sends the sentence to the
+    announcer as well as returning it."""
+    try:
+        cleared = _clear_extended_faders()
+    except Exception as exc:
+        diagnostics.event("usb_mode.tidy_failed", f"{exc}")
+        return ""
+    if not cleared:
+        return ""
+    msg = (f"USB input is Standard, so {_join_and(cleared)} cannot carry anything. Took them off "
+           f"their faders; their processing is kept.")
+    if spoken:
+        _ann_say(msg)
+    return msg
+
+
 def action_set_usb_expanded(on: bool) -> dict:
     """The USB 1 INPUT half of the same property: Standard, or Expanded with four more app inputs.
 
     THE REPLY CARRIES BOTH COSTS, because neither is visible from the app. Like the output mode
     above, the change re-advertises the desk's whole USB audio function and the audio devices
-    vanish for a second or two. Turning it OFF additionally makes the desk unassign every extended
-    input from its fader, which is a layout the operator built and cannot get back by turning it on
-    again, so that half says so plainly."""
+    vanish for a second or two. Turning it OFF also takes Game, Music, A and B off their faders,
+    as the unit's own screen does, and that is done FIRST, while the desk is still on the bus: the
+    mode change takes it off USB for a couple of seconds."""
     gate = _output_write_gate()
     if gate is not None:
         return gate
     if on is None:
         return {"ok": False, "message": "Expanded needs on or off."}
+    cleared = [] if on else _clear_extended_faders()
     with _hid_lock:
         mode, _ = recorder.split_usb_multitrack(
             rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
         rcp_transfer.set_usb_multitrack_mode(value)
-    tail = ("" if on else
-            " Anything you had assigned to Game, Music, A or B has been taken off its fader.")
+    tail = ("" if on or not cleared else
+            f" {_join_and(cleared)} came off their faders, as the unit's own screen does; their "
+            f"processing is kept.")
     return {"ok": True,
             "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
                         f"The unit's audio devices drop out for a couple of seconds while it "
@@ -6978,12 +7115,15 @@ def _seed_usb_expanded() -> None:
     Takes the HID lock like any other read and never raises: a desk that is not there yet simply
     leaves the flag unpublished, and the next routing read or announcer seed fills it in."""
     try:
-        if channels.usb_expanded_known():
-            return
-        with _hid_lock:
-            raw = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
-        if raw is not None:
-            channels.publish_usb_expanded(recorder.split_usb_multitrack(raw)[1])
+        if not channels.usb_expanded_known():
+            with _hid_lock:
+                raw = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode",
+                                     "int")
+            if raw is not None:
+                channels.publish_usb_expanded(recorder.split_usb_multitrack(raw)[1])
+        # A desk found in Standard with the Expanded four still on faders: tidy it now.
+        if channels.usb_expanded_known() and not channels.usb_expanded():
+            _tidy_after_standard(spoken=True)
     except Exception as exc:
         diagnostics.event("usb_mode.seed_failed", f"{exc}")
 
@@ -10758,6 +10898,7 @@ POST_ROUTES = {
     "/api/meters/input-mute": (action_set_input_mute, [(bool, "on", None)]),
     "/api/recorder/format": (action_set_recording_format, [(int, "value", -1)]),
     "/api/recorder/command": (action_record, [(str, "command", "")]),
+    "/api/device/firmware-check": (action_check_firmware, []),
     "/api/callme/hosting": (action_callme_hosting, [(bool, "on", None)]),
     "/api/callme/answer": (action_callme_answer, []),
     "/api/callme/decline": (action_callme_decline, []),

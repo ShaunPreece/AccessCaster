@@ -916,6 +916,11 @@ function summariseOverview(d) {
   (d.storage_low || []).forEach((v) => {
     alerts.push(`${v.label} is nearly full, ${v.free_pct} percent left`);
   });
+  const fwu = d.firmware_update || {};
+  if (fwu.available) {
+    alerts.push((fwu.version ? `firmware ${fwu.version}` : "a firmware update")
+      + " is available, on the Device page under Hardware");
+  }
   const muted = (d.muted || []).map((c) => c.label);
   const soloed = (d.soloed || []).map((c) => c.label);
   if (muted.length) alerts.push("muted: " + muted.join(", "));
@@ -970,6 +975,29 @@ async function speakStartupSummary() {
 /* Device page: read-only live state (card, recorder, firmware, wired network). Written as plain
    sentences in a polite live region rather than a table, so a screen reader reads it as a short
    report. Anything the unit cannot tell us honestly says so instead of showing a zero. */
+function firmwareLine(fw, upd) {
+  const u = upd || {};
+  if (!u.available) return fw || "Unknown";
+  return (fw || "Unknown") + ". " + (u.version ? `Version ${u.version}` : "An update")
+    + " is available.";
+}
+
+/* Ask the desk to check RODE's server. The reply is worded by the server; this only shows it. */
+async function onFirmwareCheck(btn) {
+  if (isBusy(btn)) return;
+  setBusy(btn, true);
+  setStatus("dev-fw-status", "Checking with RODE, please wait.");
+  let res;
+  try {
+    res = await postJSON("/api/device/firmware-check", {});
+  } catch (e) {
+    res = { ok: false, message: "Could not reach the AccessCaster service." };
+  }
+  setBusy(btn, false);
+  if (res.ok) setText("dev-firmware", firmwareLine(res.firmware, res.firmware_update));
+  setStatus("dev-fw-status", res.message || "Done.");
+}
+
 async function loadDeviceState() {
   const btn = document.getElementById("dev-state-btn");
   const out = document.getElementById("dev-state");
@@ -1014,7 +1042,7 @@ async function loadDeviceState() {
     //
     // Firmware and the wired network came the other way, from that tab, and are a dl rather than
     // lines in this live region: they are values you look up, not news.
-    setText("dev-firmware", d.firmware || "Unknown");
+    setText("dev-firmware", firmwareLine(d.firmware, d.firmware_update));
     setText("dev-wired",
       d.wired_connected === true ? "Connected"
       : d.wired_connected === false ? "Not connected" : "Unknown");
@@ -4874,8 +4902,9 @@ async function loadRouting() {
     usbBox.appendChild(um.row);
 
     // EXPANDED, the INPUT direction of the same setting. Staged for the same reason as the mode
-    // above and one more: turning it OFF makes the unit unassign every extended input from its
-    // fader, and that layout does not come back by turning it on again. A select rather than a
+    // above and one more: turning it OFF takes every extended input off its fader (the server
+    // does it, as the unit's own screen does), and that layout does not come back by turning it
+    // on again. A select rather than a
     // switch because the two states need naming - "off" does not say what you lose.
     const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends (USB 1 Input)",
       data.usb_expanded_labels || [], {
@@ -8201,7 +8230,7 @@ async function loadCallme() {
 function applyCallme(d) {
   callmeSeen.version = d.version === undefined ? null : d.version;
   const ringing = !!d.incoming;
-  const up = (d.slots || []).some((s) => s.state === "Active" || s.state === "Connecting");
+  const up = (d.slots || []).some((s) => ["Active", "Expiring", "Connecting"].includes(s.state));
   setText("callme-now", d.now || "");
   setAvailable(document.getElementById("callme-answer"), ringing, "No call is ringing.");
   // THE LABEL IS THE BUTTON'S ONLY NAME, so it is set every time and never left empty.
@@ -8791,6 +8820,8 @@ async function init() {
   wireCallme();         // the CallMe page's buttons, hosting switch and copy
   wireHotkeys();        // the shortcut chooser, its editor, and the Add / Delete dialogs
   document.getElementById("dev-state-btn").addEventListener("click", loadDeviceState);
+  const fwCheck = document.getElementById("dev-fw-check");
+  if (fwCheck) fwCheck.addEventListener("click", () => onFirmwareCheck(fwCheck));
   // Network: the three writable controls (see the netPost block).
   document.getElementById("net-wifi-toggle").addEventListener("change", onWifiToggle);
   document.getElementById("net-bt-toggle").addEventListener("change", onBtVisibleToggle);

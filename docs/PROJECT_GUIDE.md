@@ -656,7 +656,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   leaves the bus, so any push announcing it is sent into the gap. `_ann_seed_layout` therefore
   records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
-  and B inputs come off their faders and every RODECaster device on the computer is renamed.
+  and B inputs go dead and every RODECaster device on the computer is renamed.
+- **LEAVING EXPANDED OVER USB DOES NOT UNASSIGN THE FOUR; THE TOUCHSCREEN DOES IT ITSELF.** The
+  unit's screen asks "All extended inputs will be unassigned" and empties those faders; writing
+  Standard from here leaves them assigned to inputs nothing can feed (read 3rd October 2026: mode 0,
+  faders 2 to 5 still 12 to 15). So `_clear_extended_faders` empties them, BEFORE the mode write,
+  because the change takes the desk off the bus. `_tidy_after_standard` does the same when the desk
+  is found in Standard with them still assigned: at start-up, and after it leaves Expanded on its
+  own.
 - **A DESK IS IDENTIFIED BY ITS SERIAL, AND A PRODUCT ID IS ONLY TRUSTED WHEN THE TABLE HOLDS IT.**
   `devices.DEVICES` knows `0x0037` (Pro II) and `0x0050` (Duo), which are the DEFAULT-mode ids, so
   any desk in a non-zero `outputMultiMode` presents an id no table can hold. Resolving on the id
@@ -1314,6 +1321,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   from the reason the previous call left behind.
 - **Refuse a dial to this unit's own code**: it rings this desk, and on Lite the one slot is already
   busy dialling, so it can never be answered.
+- **"Expiring" is a connected state.** A call on the Lite or standard plan spends its last five
+  minutes in it, so everything that asks "is a call up" uses `callme.CONNECTED` / `callme.UP`,
+  never `== "Active"`: a bare comparison makes the Hang up button refuse a live call.
 - **The call id comes from the `sipIncomingCallDetails` push, never from a counter.** It rises by one
   per call today, but nothing promises that.
 - **Both calls that went Active had CallMe 1 (source code 16) on a fader**, so whether a call

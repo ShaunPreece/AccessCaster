@@ -117,6 +117,13 @@
             <dt>Wired network</dt>
             <dd id="dev-wired">Unknown</dd>
           </dl>
+          <!-- Checking only. Installing is left to the unit's screen or RODE's app: an update
+               restarts the unit, and this computer's audio, the screen reader included, may be
+               going through it. -->
+          <p>
+            <button type="button" class="secondary" id="dev-fw-check">Check for a firmware update</button>
+          </p>
+          <p id="dev-fw-status" role="status" aria-live="polite"></p>
 
           <!-- THE TECHNICAL FACTS BELONG HERE, not on a tab of their own: they are the same kind
                of thing this tab already holds, what the unit is rather than anything you can change,

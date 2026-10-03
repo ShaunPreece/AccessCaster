@@ -38,7 +38,12 @@ END_REASONS = {
     "rtp stream error": "the call's audio could not connect",
     "486 rejected": "they declined the call",
     "404 not found": "no RODECaster has that code",
+    "idle timeout": "it reached the plan's one-hour limit",
 }
+# A call is CONNECTED while Active, and still while Expiring: the state the Lite and standard plans
+# give it five minutes before their one-hour limit ends it. UP adds the ringing-out Connecting.
+CONNECTED = ("Active", "Expiring")
+UP = CONNECTED + ("Connecting",)
 # How a RODECaster is addressed when dialled, and how its peer address reads back.
 RODE_PREFIX = "rode:"
 
@@ -244,7 +249,7 @@ def build_hosting(on: bool, path) -> bytes:
 
 def _slot_view(n: int, props: dict) -> dict:
     state, reason = parse_slot_state(props.get("sipSlotCallState"))
-    active = state == "Active"
+    active = state in CONNECTED
     bitrate = props.get("sipSlotCallBitrate")
     jitter = props.get("sipSlotCallJitter")
     loss = props.get("sipSlotCallPacketLoss")
@@ -315,11 +320,13 @@ def describe_minutes(m: int) -> str:
 
 
 def _live(d: dict) -> list:
-    return [s for s in d.get("slots", []) if s.get("state") in ("Active", "Connecting")]
+    return [s for s in d.get("slots", []) if s.get("state") in UP]
 
 
 def _doing(s: dict) -> str:
     who = s.get("peer") or "a guest"
+    if s.get("state") == "Expiring":
+        return f"talking to {who}, ending within five minutes"
     if s.get("state") == "Active":
         return f"talking to {who}"
     return f"connecting to {who}" if s.get("incoming") else f"calling {who}"
@@ -347,7 +354,7 @@ def call_details(d: dict) -> list:
     """The technical side of each connected call, as (label, value) pairs. Empty with no call up.
     `sipSlotCallQuality` is left out: its scale is unknown, and 2 is the only value ever seen."""
     out = []
-    live = [s for s in _live(d) if s.get("state") == "Active"]
+    live = [s for s in _live(d) if s.get("state") in CONNECTED]
     for s in live:
         tag = f"Call {s['slot']} " if len(live) > 1 else ""
         if s.get("bitrate_kbps") is not None:
@@ -560,22 +567,27 @@ class Watcher(threading.Thread):
             was = s.get("state")
             s["state"], s["reason"] = state, reason
             who = s.get("peer") or "the guest"
-            if state == "Active" and was != "Active":
+            if state == "Expiring" and was != "Expiring":
+                # Extending is touchscreen-only until what its Extend writes is known: writing
+                # sipSlotCallExtend True is stored and ignored.
+                say.append(f"Call with {who} ends in five minutes. Only the unit's screen can "
+                           f"extend it.")
+            elif state == "Active" and was not in CONNECTED:
                 if i in self._quiet:
                     self._quiet.discard(i)
                 else:
                     say.append(f"Connected to {who}.")
-            elif state == "Idle" and was in ("Active", "Connecting"):
+            elif state == "Idle" and was in UP:
                 s["ended"] = s.get("ended", 0) + 1
                 if i in self._quiet_end:
                     self._quiet_end.discard(i)
                 else:
                     say.append(f"Call with {who} ended"
                                + (f": {end_reason(reason)}." if reason else "."))
-            if state != "Active":
+            if state not in CONNECTED:
                 s.update(quality=None, bitrate_kbps=None, jitter_ms=None, packet_loss=None)
             return True
-        if s.get("state") != "Active":
+        if s.get("state") not in CONNECTED:
             return False
         if name == "sipSlotCallQuality":
             s["quality"] = value

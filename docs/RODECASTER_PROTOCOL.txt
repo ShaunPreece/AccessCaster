@@ -999,6 +999,17 @@ padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-F
       driver; you do NOT implement SCSI, you mount the volume and copy files.
   (b) PAD CONFIG = report-3 property records on MI_09 (the property channel).
 
+7.2a EJECTING AND ERASING THE CARD OR DRIVE (Pro II, fw 1.7.6, 3rd October 2026)
+--------------------------------------------------------------------------------
+  Per-volume bools on the three STORAGEVOLUME nodes under SYSTEM ([15,0] card,
+  [15,1] USB drive, [15,2] INTERNAL pad storage). NEVER address [15,2]: it holds the
+  pad sounds.
+  storageVolumeEject = True dismounts the volume within 0.1 s (its state goes to
+  0|0|0|0|0, the recordings list empties, recordState goes to 3, no destination).
+  The flag STAYS True; writing it False remounts the volume at once, no replug.
+  storageVolumeErase = True formats it: about 20 s later the desk clears the flag
+  itself and the free space rises to the full capacity; it stays mounted.
+
 7.3 TRANSFER-MODE CONTROL (global ints / bools, selector 0x0f)
 --------------------------------------------------------------
   - transferModeType = 2 to enter, 0 to exit. (It is 2, NOT 1.)
@@ -1328,6 +1339,18 @@ software replaces the operational controls directly, not by puppeteering the kno
   like an ignored second press. If you are timing pad presses, capture a
   timestamped stream and read it afterwards; do not measure in windows.
 
+8.1a FIRMWARE UPDATE CHECK (Pro II, fw 1.7.6, 3rd October 2026)
+--------------------------------------------------------------------------------
+  All on the SYSTEM node: systemFirmwareVersion, appUpdateAvailable,
+  osUpdateAvailable, updateVersion, updateChecking, updateNoInternet,
+  updateDownloadProgress, updateInstalledProgress (10000 at rest), updateDownloaded,
+  updateComplete. updateCheckRequested = True is the touchscreen's Check for Update:
+  the desk pushes updateChecking True, then about 0.6 s later updateChecking False
+  and updateCheckRequested False. With nothing newer, nothing else moves. What an
+  available update looks like has not been seen. updateInitiateRequested would
+  install one and has never been written; it sits beside updateRebootRequested,
+  which is confirmed to reboot the desk.
+
 8.2 CALLME: HOSTING, ANSWERING AND CALL STATE (Pro II, fw 1.7.6, 2nd October 2026)
 --------------------------------------------------------------------------------
   Everything below was driven and heard on a Pro II on the free CallMe Lite tier,
@@ -1381,9 +1404,16 @@ software replaces the operational controls directly, not by puppeteering the kno
   has never carried a call reads (True, False). The second bool's meaning is unknown.
 
   CALL STATE, per slot: sipSlotCallState is "Idle" before any call, then JSON
-  {"state":"Connecting"|"Active"|"Idle","reason":"..."}. Reasons seen:
+  {"state":"Connecting"|"Active"|"Expiring"|"Idle","reason":"..."}. Reasons seen:
   "Remote drop" (the guest hung up), "Local drop" (hung up here), "rtp stream
-  error" (above). Our own decline (sip_slot -1) clears the ringing call at once. Alongside it:
+  error" (above), "Idle timeout" (the one-hour limit, below).
+
+  THE ONE-HOUR LIMIT (Lite and standard plans; measured on Lite, 3rd October 2026).
+  55 minutes into a call the slot goes "Expiring", with no other push; the
+  touchscreen then offers Extend. Unextended, it goes Idle, "Idle timeout", exactly
+  five minutes later. Writing sipSlotCallExtend True during Expiring, or False then
+  True, is STORED AND IGNORED: the call still ended at the hour. What the
+  touchscreen's Extend writes is not known yet. Our own decline (sip_slot -1) clears the ringing call at once. Alongside it:
   sipSlotCallAddress (the peer name), sipSlotCallUUID, sipSlotCallMode,
   sipSlotCallIsHost. While Active, sipSlotCallBitrate, sipSlotCallPacketLoss,
   sipSlotCallJitter (floats) and sipSlotCallQuality (int) are pushed EVERY SECOND.
