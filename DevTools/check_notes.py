@@ -171,6 +171,8 @@ def check_dead_links() -> None:
     scan = (sorted(MEM.glob("*.md")) + sorted(DOCS.glob("*.md"))
             + sorted((REPO / "Project").glob("*.py"))
             + sorted((REPO / "DevTools").glob("*.py"))
+            + sorted((REPO / "Project" / "static").glob("*.js"))
+            + sorted((REPO / "DevTools").glob("*.js"))
             + [NOTES_DIR / "ProjectNotes.md", REPO / "CLAUDE.md", REPO / "README.md"])
     dead: dict = {}
     for p in scan:
@@ -189,12 +191,45 @@ def check_dead_links() -> None:
                           f"{', '.join(sorted(set(where))[:5])}. State the fact inline and date it.")
 
 
+# ---------------------------------------------------------------------------
+# 6. No entry written twice
+# ---------------------------------------------------------------------------
+# The failure this catches: an invariant pasted into a second section, after which one copy is
+# corrected and the other is not, so the file states both sides of a settled question. An entry is a
+# top-level bullet; its KEY is the bold lead-in, or the first 80 characters when there is none.
+ENTRY = re.compile(r"^- (.+)$", re.M)
+BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+def check_duplicates() -> None:
+    targets = (sorted(DOCS.glob("*.md")) + sorted(DOCS.glob("*.txt")) + sorted(MEM.glob("*.md"))
+               + [NOTES_DIR / "ProjectNotes.md"])
+    for p in targets:
+        if not p.exists() or p.name == "Completed.md" or "GENERATED FILE" in read(p)[:400]:
+            continue
+        body = read(p)
+        # PROJECT_GUIDE's part 1 summarises its worst gotchas on purpose; only part 2 is the record.
+        body = body[body.find("# PART 2"):] if "# PART 2" in body else body
+        seen: dict = {}
+        for m in ENTRY.finditer(body):
+            first = m.group(1)
+            b = BOLD.match(first)
+            key = re.sub(r"\W+", " ", (b.group(1) if b else first[:80])).strip().lower()
+            if len(key) < 25:
+                continue
+            seen[key] = seen.get(key, 0) + 1
+        for key, n in seen.items():
+            if n > 1:
+                fail(p.name, f'entry written {n} times: "{key[:70]}". Keep one and delete the rest.')
+
+
 def main() -> int:
     check_completed()
     check_no_status()
     check_projectnotes()
     check_style()
     check_dead_links()
+    check_duplicates()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

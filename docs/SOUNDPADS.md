@@ -26,7 +26,7 @@ polluted (e.g. a crash mid-write), clean_pool removes the orphans app-free, no f
 
 Real MULTI-EFFECT recipes (the app's own FX editor can't reproduce them - its "Megaphone" is
 distortion only). Validated 2026-06-14 against a fresh factory show load (exact match).
-extract_recipes.py regenerates fx_recipes.json from any clean model snapshot.
+`DevTools/decode_effects.py` dumps every effect-object from a model snapshot.
 
   Pad            grid  colour  recipe
   Voice Disguise   9     8     voiceDisguise
@@ -67,7 +67,7 @@ we never orphan in the first place.
 MIC PROCESSING PRESETS (channel strip, not pads, captured same session): Neutral / Podcast Studio /
 Broadcast. channelCurrentFxPreset index = 0 / 1 / 2. Each writes (to channel selector 0x1c..0x1f =
 Mic1..4): eqLow/Mid/HighGain, aphexBBDrive, aphexAEMix, compressorThreshold+Gain, deesserThreshold,
-noiseGateThreshold+Range+Release, channelDepth/Sparkle/Punch. Values in cap_control/preset_values.json.
+noiseGateThreshold+Range+Release, channelDepth/Sparkle/Punch. Values in ProjectAssets/mic_presets.json.
 
 ================================================================================
 ## 1c. FILE FORMATS + ON-DEVICE FILENAMES  [CONFIRMED - ear-proven 2026-06-17]
@@ -95,10 +95,10 @@ ON-DEVICE FILENAME = the REAL name, matching the FACTORY (confirmed by clean-tab
   filename through create_sound(dest_filename=...) -> assign_create -> build_sound_create(filename=...);
   the low-level builder still DEFAULTS to "sound.wav" so the byte-for-byte selftest is unchanged.
 
-VOLUME SAFETY (2026-06-17): rcp_transfer.find_pad_volume now requires a GENUINELY mounted volume
-  (shutil.disk_usage(root).total > 0), not just isdir, matching write_pad_raw. This closes the EINVAL
-  size-0-phantom bug that truncated Music_Bed via the old overwrite path: a create now either gets a
-  real volume or aborts BEFORE sending any pad record. assign_create's file copy also retries on EINVAL.
+VOLUME SAFETY: rcp_transfer.find_pad_volume requires a volume that READS BYTES
+  (`pad_volume_readable`), not one that merely exists or reports a size: a half-mounted volume passes
+  both of those and then fails the first real read with EINVAL. A create either gets a readable
+  volume or aborts BEFORE sending any pad record. See PROJECT_GUIDE part 2 under `find_pad_volume`.
 
 ================================================================================
 ## 1d. CREATING THE OTHER PAD TYPES - Mixer, MIDI Trigger, Quick Dial  [decoded 2026-06-17]
@@ -196,10 +196,11 @@ MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 202
   grid 19, read-back padType=4 + control=18 (=padIdx) + ch1/on127/off0/CC, pool clean=7, cleared
   clean. The 2026-06-17 "REMAINING: press the pad with a MIDI monitor" item is now DONE (above).
 
-QUICK DIAL (padType 5)  [DECODED only - OUT OF SCOPE (SIP calling)]  captures/sp_quickdial.pcap
-  commit = remount + padType=5 + padName + padColourIndex; the SIP target rides padSIPCallSlot /
-  padSIPPhoneBookEntry (template defaults 0 = the captured pad). Same template/pattern as the others,
-  so it is trivially buildable if SIP/CallMe ever comes into scope; no tooling built (SIP is parked).
+QUICK DIAL (padType 5)  [DECODED only, not built]  captures/sp_quickdial.pcap
+  commit = remount + padType=5 + padName + padColourIndex; the CallMe target rides padSIPCallSlot /
+  padSIPPhoneBookEntry (template defaults 0 = the captured pad). Same template/pattern as the others.
+  CallMe itself is built (PROJECT_GUIDE part 2 under CallMe), so this is buildable; no pad tooling
+  exists for it yet.
 
 ================================================================================
 ## 2. ADDRESSING  [CONFIRMED]
@@ -251,9 +252,9 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
 ## 3. CONFIRMED METHODS  (all clean on a clean table; never disturb neighbours)
 
 3.1 READ  rcp_read.read_model() / read_model_stable() (strips the per-frame 0x04 report id, the old
-    framing bug that made counts drift). decode_effects.py dumps every effect-object; extract_recipes.py
-    pulls per-pad recipes.
-3.2 CREATE SOUND  assign_create.py <padIdx> <folder> <wav> [name] [colour]. handoff + phase1 + sync +
+    framing bug that made counts drift). DevTools/decode_effects.py dumps every effect-object.
+3.2 CREATE SOUND  soundpad.create_sound / assign_create (CLI `soundpad.py create <grid> <folder> <wav>
+    [name] [colour]`). handoff + phase1 + sync +
     commit(padType=1) + file write mid-sequence + remount + padFilePath. handle=free_handle(count). NO
     region-B/EFFECTS block (build_sound_create(with_effects=False), the 2026-06-16 fix - see section 2).
     Pool-safe: a sound create+clear keeps region-B unchanged (proven). saw_sync still True without the block.
@@ -263,12 +264,13 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     effect on-flag(s) on the fx sub-handle. THE RECIPE BUILDER IS THE ONLY PATH:
     assign_create_fx_recipe(idx,name,recipe) (pad_records.build_fx_create_recipe writes every
     on-flag + param). Appends exactly one effect-object - read-back proven clean over repeated cycles.
-3.4 CLEAR  clear_pad.py pos <0-based position>. = padActive ON/OFF + select-begin(position) + exit
+3.4 CLEAR  soundpad.clear_grid_pad(grid) (CLI `soundpad.py clear <grid>`), over clear_pad(position),
+    which takes a 0-based STREAM position. = padActive ON/OFF + select-begin(position) + exit
     transfer mode. Drops the pad record AND its effect-object cleanly (no orphan). No remount = no drive-F toast.
-3.5 REASSIGN = clear (3.4) then create (3.3); re-read positions between. restore_fx.py "<name>"|all
-    rebuilds factory FX from fx_recipes.json this way.
-3.6 IN-PLACE EFFECT EDIT - realtime  edit_effect_live.py <padIdx> <param> <value> [int|float|bool].
-    Change an EXISTING pad's effect with no clear/create/allocation: set_transfer_mode(True) ->
+3.5 REASSIGN = clear (3.4) then create (3.3); re-read positions between. soundpad.restore_factory_fx
+    (CLI `soundpad.py restore <name>|all`) rebuilds factory FX from fx_recipes.json this way.
+3.6 IN-PLACE EFFECT EDIT - realtime  soundpad.preview_update (the live-preview path, section 3b of
+    soundpad.py). Change an EXISTING pad's effect with no clear/create/allocation: set_transfer_mode(True) ->
     padActive=True on the pad (0x9a) -> param/on-flag on the pad's effect sub-handle (0x9d) ->
     set_transfer_mode(False). PROVEN realtime (changed Monster's pitch live while talking, no reboot,
     no neighbour disturbed). Best for editing existing pads + realtime preview. (Full-recipe-in-place
@@ -281,12 +283,10 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     "Advanced per-pad" UI renders, so the layout is decoupled from the code. Named wrappers:
     set_pad_gain / set_pad_name / set_pad_colour / set_pad_loop. CLI: `soundpad.py set <grid> <prop>
     <value>`. PROVEN by read-back on a throwaway pad (padName, padColourIndex, padGain -12->-20,
-    padLoop all wrote + read back, pool stayed 7). STILL TO CONFIRM before exposing (plumbing works,
-    enum/range not yet verified): padPlayMode (Toggle/OneShot/Hold), padEffectInput (which mic),
-    padEffectTriggerMode (FX latching), padEnv* (trim/fade), mixer sub-params (fade secs / back-channel
-    sources / censor custom). Record-to-pad + export are device recorder/file features, NOT config writes
-    (out of scope). Note: set_pad_property writes any property if given an explicit kind (escape hatch).
-3.8 IN-PLACE EFFECT EDIT - see 3.6 (edit_effect_live, FX effect PARAMS on the 0x9d sub-handle).
+    padLoop all wrote + read back, pool stayed 7). padPlayMode, padEnv* and the mixer sub-params are
+    settled since (section 1d, and the pad-firing entries in PROJECT_GUIDE part 2). Record-to-pad is
+    NOT a config write and is not to be probed: recording to a pad from the touchscreen reboots the
+    desk. Note: set_pad_property writes any property if given an explicit kind (escape hatch).
 
 ================================================================================
 ## 4. BUILDERS (pad_records.py)  [CONFIRMED - byte-for-byte selftests]
@@ -334,11 +334,11 @@ a live effect must be ear-checked.
 LIVENESS is only confirmable by ear (talk into mic + hold the VFX pad); the persistent model does not
 capture the live binding, so a "clean pool" read does not prove a pad sounds right.
 
-FACTORY RESET (reference): app gear Settings > Factory Reset -> "unplug all RODE devices" -> reconnect
--> firmware reflash. Wipes EVERYTHING to a bare empty state (no pads, no show, 109 KB settings model).
-It does NOT restore the factory show; that comes from the touchscreen first-boot SETUP WIZARD (language
-/ date / wifi / analytics / load-show), which is touchscreen-only and NOT USB-bypassable. So a full
-from-code reset-to-clean-device is not achievable. Clean snapshot: cap_control/clean_factory_2026-06-14.bin.
+FACTORY RESET (reference): the RODE app's Settings > Factory Reset reflashes the firmware and wipes
+EVERYTHING to a bare empty state (no pads, no show), leaving the touchscreen-only first-boot SETUP
+WIZARD. The software reset, `showControlNewFromDefault`, is the one to use: it restores the factory
+show, pad records and pad audio with no wizard. It does NOT bring back the voice-FX effect
+definitions, which is what `soundpad.heal_fx_pool` repairs (PROJECT_GUIDE part 2, Soundpads).
 
 ================================================================================
 ## 6. PRACTICAL RULES
@@ -349,9 +349,8 @@ from-code reset-to-clean-device is not achievable. Clean snapshot: cap_control/c
 
 ================================================================================
 ## 7. KNOWN DEVICE LIMITS (real, still true - not worth re-attempting)
-- Bluetooth / wifi / the first-boot setup wizard cannot be driven over USB: they are touchscreen-only
-  firmware actions. Writing the model property flips the stored value but the radio/engine ignores it
-  (no USB-reachable trigger).
+- The first-boot setup wizard and Bluetooth PAIRING cannot be driven over USB: touch is not on the
+  bus. (Wifi joining and Bluetooth discoverability ARE writable; see PROJECT_GUIDE.)
 - The device rejects shortcut pad writes: an overwrite-in-place file hack, a bare padType=0 "clear",
   and a bare padFilePath repoint are all ignored. Use the proven clear+create (section 3).
 
@@ -369,13 +368,6 @@ from-code reset-to-clean-device is not achievable. Clean snapshot: cap_control/c
 - rcp_read.py / rcp_transfer.py / rcp_hid.py   core read / write / HID.
 - pad_records.py        low-level byte-builders (sound/fx/recipe) + byte-for-byte selftest. The
                         layer underneath soundpad.py; keep it.
-- edit_effect_live.py   in-place realtime effect edit.
-- decode_effects.py / extract_recipes.py   decode effect-objects / pull recipes from a snapshot.
-- fx_recipes.json       the factory recipes (data).
-- captures/reference/   kept reference captures.
-- cap_control/clean_factory_2026-06-14.bin   the true clean-factory snapshot (7 region-B objects).
-
-PENDING VERIFICATION: a sound upload through the BROWSER end to end has not been ear-tested from the
-website. The CLI create path is fully ear-proven (8 WAV formats + MP3 + spaced filenames, section 1c)
-and the server path uses the same create_sound with dest_filename = the upload name, so this is a
-confirmation step, not new work.
+- DevTools/decode_effects.py   decode effect-objects from a snapshot.
+- ProjectAssets/fx_recipes.json   the factory recipes (data).
+- DevTools/captures/reference/   kept reference captures (local, gitignored).

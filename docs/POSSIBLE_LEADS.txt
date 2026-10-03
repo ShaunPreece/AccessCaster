@@ -149,13 +149,13 @@ model again will not help: an empty mic input reads identically to this.
 LEAD 7: properties nothing uses, and nobody knows what they do
 ---------------------------------------------------------------
 
-Readable, present in a factory dump, and unclaimed: `appOutputDevice` (string, empty),
-`appMonitorMix`, `appRecording`, and `eqParamModeHigh` / `Mid` / `Low`. The names suggest
-they hold RODE's own app's preferences on the desk's behalf, which would make them inert
-for anyone else. The three `eqParamMode` values sit beside `debugMode` and `metering`, so
-a touchscreen presentation setting is more likely than anything audible.
+Settled as plain storage (1st October 2026): `appOutputDevice`, `appMonitorMix`,
+`appRecording` and `eqParamModeHigh` / `Mid` / `Low` each took a write at their tree
+address, read back exactly, restored, and pushed nothing at all. They look like RODE's
+own app's preferences held on the desk's behalf. The one thing left open is whether an
+`eqParamMode` change shows on the touchscreen, which needs somebody watching it.
 
-Also unclaimed and more promising: `systemName`, `assignableMeterSource`, `presenterMode`
+Still unclaimed and more promising: `systemName`, `assignableMeterSource`, `presenterMode`
 / `presenterSoftware`, `shareAnom` / `shareResource`.
 
 One write and a read-back settles each. Mind the sweep warning at the top.
@@ -173,9 +173,13 @@ It is a `pair` property, meaning it carries two operands, and we have not worked
 layout. Do not guess one: a malformed write is how strays get made. Work it out from a
 capture of RODE's own software first.
 
+**Be ready for a reboot.** Recording to a pad from the desk's own touchscreen rebooted our
+Pro 2 three times out of three, with and without any host software attached. It recovered
+cleanly each time, but it is why we stopped probing this block.
 
-LEAD 9: Icecast streaming, if you hold a paid CallMe licence
-------------------------------------------------------------
+
+LEAD 9: Icecast streaming, and whether it needs a paid CallMe licence
+---------------------------------------------------------------------
 
 Firmware 1.7.4 added Icecast streaming, and 1.7.6 publishes the whole configuration as
 ordinary properties in the SIPADVANCED block: icecastAddress, icecastPort (8000),
@@ -232,11 +236,14 @@ unbound result needs a second arrival before it counts.
 **Why it matters.** If the Duo's ids differ, `virtual_devices.py` needs nothing (it reads
 the service, not the id) but the protocol spec's table does.
 
-**A second, bigger question in the same place: what makes the service bind, and does
-RODE's own app do better?** Twelve arrivals, six bound, is a race we could not see into.
-RODE's app switching the mode itself, watched with a USB capture and Process Monitor,
-would show whether it sends the desk anything extra or talks to the service. If it binds
-every time, the app has a trick worth copying.
+**A second, bigger question in the same place: what makes the service bind?** It binds on
+some arrivals of the desk and not others, and not as a fresh coin toss each time: one
+afternoon gave 1 bind in 8 arrivals, then 18 in 18. So the failures cluster on some state
+that persists between arrivals, most likely inside the service, which is never restarted.
+The only recovery seen in a bad spell was a service restart followed by a fresh arrival
+(one sample, and it needs elevation). RODE's own app is no help here: its import table
+holds only read-only device APIs, and it writes the same USB mode record we do. Whether
+it misses binds too during a bad spell has not been measured.
 
 
 WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT

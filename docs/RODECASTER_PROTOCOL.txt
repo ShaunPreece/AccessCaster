@@ -9,8 +9,8 @@ for the units).
 
 Purpose: to let anyone build their own controller (for example on Linux) without
 re-capturing or re-testing. Everything below was confirmed on real hardware (a
-RODECaster Pro II and a RODECaster Duo, both on firmware 1.7.3) UNLESS explicitly
-marked INFERRED / PREDICTED / PROVISIONAL.
+RODECaster Pro II, on 1.7.3 and later 1.7.6, and a RODECaster Duo on 1.7.3) UNLESS
+explicitly marked INFERRED / PREDICTED / PROVISIONAL.
 
 The two units speak the SAME HID property protocol and share almost the entire
 property schema. What differs is the device SHAPE (channel / output / pad counts)
@@ -54,21 +54,19 @@ special trigger record (payload ad10a7b0) makes the device stream its ENTIRE
 property model back, so you can read the unit's true current state. Soundpad audio
 is NOT sent over this protocol: entering "Transfer Mode" mounts the pad storage as
 an ordinary FAT removable drive and you copy WAV/MP3 files onto it. The
-touchscreen, first-boot setup wizard, Bluetooth pairing, and WiFi join are NOT on
-the USB bus and cannot be driven over it.
+touchscreen, the first-boot setup wizard and Bluetooth pairing are NOT on the USB
+bus and cannot be driven over it.
 
 DIFFERENCES AT A GLANCE (detail in the sections that follow):
 
   Aspect                     Pro II                    Duo
   -------------------------  ------------------------  ------------------------
   Product ID (PID)           0x0037                    0x0050
-  Channel selector base      0x6E                      0x48
-  Channel address trailer    0x02                      0x01
-  Mixer channels             9 (fixed order)           10 logical strips (7 real
-                                                       inputs)
-  Physical faders            9                         9
-  Processing strip index     PINNED per channel        DYNAMIC (resolved from
-                             (does not move)           channelInputSource)
+  Input values address       0x26E + source code       0x26E + source code
+                             (INPUTSOURCE, both desks; see 4.1)
+  Faders                     9 (6 physical)            9 (4 physical)
+  Processing strip index     per STRIP on both desks: resolved from the live
+                             channelInputSource vector, never pinned to a channel
   Routing matrix cells       390 in MIX                390 in MIX
   Matrix internal stride     13                        13
   Exposed outputs            11 (HP1-4, Monitor, REC,  9 (HP1-2, Monitor, REC,
@@ -238,12 +236,10 @@ Address forms (the bytes BEFORE the property name), each now readable as a path:
   - Global property:
         01 01 01 01 <selector>
 
-  - Channel-addressed (a mixer channel):
-        01 01 01 02 <chan_sel> <trailer>
-    PER-DEVICE:  trailer = 0x02 on the Pro II, 0x01 on the Duo.
-                 chan_sel base = 0x6E on the Pro II, 0x48 on the Duo (see 4.1).
-    (Code names these CHANNEL_ADDR_TRAILER_PRO2 = 0x02 / CHANNEL_ADDR_TRAILER_DUO
-     = 0x01.)
+  - Channel-addressed (a channel's input values):
+        01 01 01 02 <0x6E + source code> 02
+    That is one level with a two-byte index, 0x26E + code = INPUTSOURCE[code], on
+    BOTH desks. The Duo's old 0x48 / 0x01 form is a dead address (see 4.1).
 
   - Pad-addressed (legacy single-property form):
         01 01 02 02 9a 02 01 <selector>
@@ -286,7 +282,7 @@ After the address comes the ASCII property name, then a 0x00, then the value.
 -----------------------------------------------------------------------
 All examples are the full 256-byte record shown only up to the meaningful bytes
 (the rest is 0x00 padding). Spaces added for readability only. These are Pro II
-examples; the Duo equivalents differ only in the channel selector base + trailer.
+examples, and the Duo uses the same addresses.
 
   systemMidiControl ON (global, selector 0x0f):
     03 1a000000 0101010 10f
@@ -298,9 +294,6 @@ examples; the Duo equivalents differ only in the channel selector base + trailer
     03 21000000 010101026e02
     696e7075744d6963726f70686f6e654761696e 00 01 05 01 38000000
     (0x38 = 56)
-
-  Duo inputMicrophoneGain Mic 1 = 54 dB (chan_sel 0x48, trailer 0x01):
-    ... 010101 0248 01  696e7075744d6963726f70686f6e654761696e 00 01 05 01 36000000
 
   inputPower (48V phantom) Mic 1 ON (Pro II chan_sel 0x6e, trailer 0x02):
     03 18000000 010101026e02
@@ -377,7 +370,9 @@ before it was found. See "Reading the model dump" in PROJECT_GUIDE.md part 2.
 The dump is a concatenated tree of sections and properties. Each property is
 <name> 0x00 <value-block>, using the same typed value encodings as writes. A
 simple reader does not need to parse the tree: locate a name, decode the value
-that follows. Properties recur once per channel / output / pad. The full property
+that follows. Properties recur once per channel / output / pad, so a name search
+cannot tell WHICH occurrence it found: anything belonging to one channel, output or
+pad has to be read by its node, which needs the tree parse of 2.2. The full property
 + section-header list is the generated docs/PROPERTY_LIST_<DESK>.md (see section 12).
 
 IMPORTANT: many properties are READABLE but NOT WRITABLE over USB, so do not
@@ -419,14 +414,11 @@ Inputs: 19 input slots (inputId 0..18); only slots 0-6 are REAL.
       is NOT cleared when you leave Instrument, so it is a real stored setting.
     inputPower = [0 x7, -1 x12]
     inputId is a 0-based index, NOT a write selector.
-Strips / faders: 10 logical strips (physical/virtual fader split not confirmed).
+Strips / faders: 10 vector slots, 9 faders (4 physical, 5 virtual).
     channelInputSource (10 strips). The fw-1.7.3 baseline dump reads
     [0,1,10,11,2,7,8,9,-1,9] (Mic1,Mic2,BT,SMART,Headset,USB1,Chat,USB2,empty,USB2).
     NOTE: -1 = empty strip; this baseline has an empty strip AND a duplicated source
-    (USB2 twice), so it is NOT a trustworthy factory "reset" target - the Duo's clean
-    default fader vector is UNCONFIRMED. Code treats it as such (devices.DUO_FADERS
-    default_vector=None; the "fader_write" cap is OFF for the Duo so set/reset-faders
-    refuse rather than write a guessed layout - GAP-1).
+    (USB2 twice). That IS the shipped default: see section 6.
     faderLevel (9 faders); faderMin/Max 0/127;  potLevel (4 pots)
 Routing matrix: 390 cells in MIX, internal stride 13, 13 outputs; exposed
     sources 0,1,2,7,8,9,10,11. (The 247 cells seen earlier was the fw-1.6.8 dump;
@@ -450,9 +442,9 @@ no blind selector scans on a live unit.
 4. CHANNELS (preamp, level, processing, effects, FX preset)
 --------------------------------------------------------------------------------
 
-Property NAMES and value encodings are identical across both units. The per-device
-difference is the channel SELECTOR mapping (4.1) and whether the processing strip
-index is pinned (Pro II) or dynamic (Duo).
+Property NAMES, value encodings and addresses are identical across both units.
+Input values live at INPUTSOURCE[source code] (4.1); processing and effects are per
+fader STRIP, resolved from the live channelInputSource vector (4.4).
 
 4.1 CHANNEL SELECTOR MAP
 ------------------------
@@ -491,9 +483,9 @@ PRO II - channel-addressed form, trailer 0x02 (i.e. address high byte 0x02):
   effects, and channelInputSource fader writes; per-channel indices:
     Mic1 0x1c, Mic2 0x1d, Mic3 0x1e, Mic4 0x1f, Bluetooth 0x20,
     SMARTpads 0x21 (no channel processing), USB1 0x22, Chat 0x23, USB2 0x24,
-    CallMe1 0x25.
-  The processing index is PINNED per channel: it does NOT move when a channel is
-  reassigned to a different fader.
+    CallMe1 0x25 - in the DEFAULT layout. These are STRIP indices: processing
+  belongs to the fader strip, so a channel moved to another fader is processed at
+  its new strip. Resolve it as channelInputSource.index(source_code).
 
 DUO - THE SAME ADDRESSES AS THE PRO II. Input values live at INPUTSOURCE[code],
   i.e. path 0x26E + source_code, written as 01 01 01 02 <0x6E + code> 02:
@@ -521,14 +513,15 @@ DUO - THE SAME ADDRESSES AS THE PRO II. Input values live at INPUTSOURCE[code],
   6f 02, never at 0x48.
   Mic2's old 0x49 was never more than a code write plus a read-back, which is
   precisely the evidence that cannot tell a live address from a dead one.
-  The Duo PROCESSING/EFFECTS strip index is DYNAMIC: strip = channelInputSource.
-  index(source_code), i.e. the position of that source in the live fader vector.
-  This is why the read map and the processing-write map share one lookup. CONFIRMED
-  by capturing the write selector on six non-contiguous strips.
+  The PROCESSING/EFFECTS strip index is strip = channelInputSource.index(
+  source_code), the position of that source in the live fader vector, on both
+  desks. CONFIRMED on the Duo by capturing the write selector on six
+  non-contiguous strips.
 
-4.1a WHERE AN INPUT VALUE IS READ FROM (differs between the desks)
-------------------------------------------------------------------
-Two nodes can hold a channel's input values, and which one answers is per-desk.
+4.1a WHERE AN INPUT VALUE IS READ FROM, AND THE DUO'S LEFTOVER COPIES
+---------------------------------------------------------------------
+Read input values from INPUTSOURCE on both desks. A used Duo can also carry input
+properties on MIX nodes, written there by the dead 0x48 form; they are inert.
 
   INPUTSOURCE[source_code] at root child 0x26E + code, 30 entries, on BOTH desks.
     This is the value before any override. Read off a FACTORY Duo 31st Aug 2026:
@@ -541,7 +534,7 @@ Two nodes can hold a channel's input values, and which one answers is per-desk.
     PRO II  0x6E + code | 0x0200  =  0x26E + code  -> the SAME node as the table.
     DUO     0x48 + code | 0x0100  =  0x148 + code  -> a MIX node, a DIFFERENT node.
 
-So the Pro II has one place and the Duo has two, and on the Duo the MIX node wins.
+So the Pro II has one place and a used Duo can have two. Only INPUTSOURCE is live.
 
 CREATE-ON-FIRST-WRITE (Duo). On a factory Duo the MIX nodes carry only their six mix
 properties (mixLevelWithAnchor, mixLink, mixLinkRequest, mixUnlinkRequest, mixMute,
@@ -580,8 +573,7 @@ the properties they created, so a positional read is permanently wrong there.
 4.4 PROCESSING (global float64; selector = 0x1c + strip/channel index)
 ----------------------------------------------------------------------
 The NAME picks the parameter; all values normalised 0..1 (the device maps to real
-dB/Hz/ms). On the Pro II the index is the pinned channel index; on the Duo it is
-the dynamic strip index (4.1).
+dB/Hz/ms). The index is the fader strip the channel sits on, on both desks (4.1).
   - EQ:        eqLowGain, eqMidGain, eqHighGain, eqLowShelf, eqMidBell,
                eqHighBell, eqLowQ, eqMidQ, eqHighQ
   - Compressor: compressorThreshold, compressorRatio, compressorAttack,
@@ -591,7 +583,10 @@ the dynamic strip index (4.1).
   - De-esser:  deesserThreshold, deesserRatio, deesserAttack, deesserRelease,
                deesserGain, deesserFrequency
   - High-pass: hpfFrequency, hpfSlope
-  - Pan:       channelPan
+  - Pan:       channelPan (a MONO source), or channelPanL + channelPanR (a
+               STEREO source: where the left and right legs sit, default 0.0
+               and 1.0). channelPan does nothing on a stereo source; both
+               legs at 0.0 put USB 1 hard left (heard 3rd October 2026).
   - VoxLab:    channelDepth, channelSparkle, channelPunch
   - Aphex:     aphexBBDrive, aphexAEMix, aphexBBTune, aphexAETune
 
@@ -645,7 +640,9 @@ OUTPUT INDICES:
 
 SOURCE INDICES (channelInputSource source codes, NOT fader display order):
   Pro II: Mic1..Mic4 = 0..3, USB1 = 7, Chat = 8, USB2 = 9, Bluetooth = 10,
-    SMARTpads = 11. Indices 4/5/6 INFERRED to be the 3 SIP callers.
+    SMARTpads = 11, CallMe 1 = 16 (MEASURED: muting it moved nodes 284 to 296,
+    0x4C + 13*16 + 0..12). 4/5/6 are the stereo-linked pairs (6.5) and 12-15 the
+    Expanded inputs Game, Music, A and B.
   Duo: exposed sources 0,1,2,7,8,9,10,11 (Mic1, Mic2, Headset, USB1, Chat, USB2,
     Bluetooth, SMARTpads); sources 3-6 and 12+ are placeholders.
 
@@ -745,8 +742,10 @@ GLOBAL OUTPUT block, selector 0x0D:
                              that need RODE's Virtual Devices driver on the host to
                              carry any audio. The model does not grow: byte length is
                              identical in both states, so the four are existing slots.
-  - outputMonAutoMute        bool: mute Monitor output when headphones present.
-  - outputBTAutoMute         bool: mute Bluetooth output on the same condition.
+  - outputMonAutoMute        bool: mute the Monitor output while any mic channel is
+                             BOTH unmuted and faded up (RODE's guide mentions only
+                             the fader).
+  - outputBTAutoMute         bool: the same for the Bluetooth output.
 
 MASTER-PROCESSING block, selector 0x0E (master Compellor + output delay):
   - masterCompellorOn        bool.
@@ -886,9 +885,9 @@ everything returned to baseline; no stray appended, and the desk was byte-identi
   * Section 2.6 used to say this property was unwritable. See the note there for why
     that conclusion was wrong: the scan behind it used the mic-preamp channel-address
     format, not this one.
-STILL UNWRITTEN: channelCueEnable (solo). Same block and the same shape, so it is a
-strong candidate for the same treatment, but it has NOT been tested and a solo left on
-is more disruptive than a mute left on. Test it the same way before exposing it.
+SOLO: channelCueEnable is the same block and the same shape, and it is written the
+same way. A solo replaces the headphone feed, so anything that sets one must offer the
+way to clear it.
 
 6.4 THE UNIT'S OWN SETTINGS (display, haptics, REC button, listen) - 2026-08-26
 --------------------------------------------------------------------------------
@@ -900,8 +899,8 @@ live Pro II on 2026-08-26 (over our own HTTP service),
 with the occurrence-count stray check clean and 0 properties left changed.
   outputMonFixed is the ONE not written in that run: it changes what the monitor
   OUTPUT sends, so it was read and reported but deliberately not toggled unasked.
-Pro II only, behind the "unit_settings" cap: none of these selectors has ever been
-seen on a Duo, so a Duo reads them and refuses to write (capture wider than write).
+Behind the "unit_settings" cap, which is ON for both desks: the Duo was confirmed by
+the tree rather than a capture (11.1).
 
 6.5 STEREO LINKING TWO MIC INPUTS (2026-08-31)
 --------------------------------------------------------------------------------
@@ -1016,9 +1015,9 @@ padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-F
   - remountPadStorage: replay verbatim. Non-standard bool value block:
         03 1a000000 010101010f 72656d6f756e7450616453746f72616765 00 01 01 02 00
     Makes the FAT volume appear / reappear.
-  - Wait for a GENUINELY mounted volume: check the drive's total size > 0, not
-    merely that the path exists. A size-0 "phantom" mount passes an isdir check but
-    fails every write with EINVAL.
+  - Wait for a GENUINELY mounted volume: READ BYTES from it. A half-mounted volume
+    passes an isdir check AND reports a size, then fails the first real read with
+    EINVAL.
 
 7.4 FILE FORMAT RULES (ear-confirmed)
 -------------------------------------
@@ -1126,10 +1125,10 @@ a commit that sets the final padType.
       (c) padTriggerSend (template value 2) remains unexplained; read, never written.
     All eight are readable per pad (soundpad.TRIGGER_FIELD) and the five mapping fields
     plus the mode and the custom flag are writable in place (soundpad.set_trigger_mapping).
-  Quick Dial (padType 5): padSIPCallSlot / padSIPPhoneBookEntry (decoded, not built;
-    SIP out of scope).
+  Quick Dial (padType 5): padSIPCallSlot / padSIPPhoneBookEntry (decoded, not built).
 
 7.11 PAD PROPERTY RANGES / SEMANTICS
+-------------------------------------
 
   padEnvStart / padEnvFadeIn / padEnvFadeOut / padEnvStop (float, sound pads):
     FOUR POSITIONS ALONG THE SOUND, 0.0 to 1.0. Play from Start to Stop, fading up
@@ -1145,7 +1144,6 @@ a commit that sets the final padType.
   padMixerCensorCustom (bool, mode 0) + padMixerCensorFilePath (str): use your own
     sound instead of the beep. Writing the flag is proven; the path is read only
     (putting the audio on the unit is a file upload, not a property write).
-------------------------------------
   - padColourIndex     int 0..11.
   - padGain            float64 in dB (factory sound pad = -12.0).
   - padReplay          bool. True = re-press RESTARTS from start (factory sound
@@ -1197,9 +1195,9 @@ adjusts, which is why the encoder appears to "stop working":
                             change any property. encoderColour reads -1 here and 7
                             when the encoder has something bound.
     nothing selected(-1) -> the levels ring: virtual faders (see 6.1) + monitor.
-systemChannelSelected is WRITABLE on the same selector (verified both ways), so a
-host can deselect and hand the encoder back to the levels ring - the only route
-back before we found this was a power cycle.
+The channel button TOGGLES: a second press of the same button returns
+systemChannelSelected to -1; an encoder press does not. Nothing needs writing to
+hand the encoder back.
 
 
 The encoder / mute / solo / bank buttons EMIT named properties on report 0x04 (IN)
@@ -1213,22 +1211,12 @@ and the same events can be INJECTED on report 0x03 (OUT). This is the basis of a
   - padButtonPressed
   - recButtonPressed
 
-CHANNEL-SELECT buttons are the EXCEPTION (Pro II, tested; Duo assumed same). The
-coloured channel buttons in the row above each fader jump to that channel's set-up
-screen on the touchscreen, but they emit ZERO HID events - exactly like a
-touchscreen tap - so a channel-select press CANNOT be captured or announced. The
-model does expose the current selection as two writable ints, systemChannelSelected
-and systemMixSelected, BUT:
-  - writing systemChannelSelected (proven 1->2) does NOT reliably drive the screen
-    (nav effect unconfirmed on hardware), and
-  - it does NOT redirect processing/effects writes. Processing is addressed per
-    channel by selector 0x1c + (channel-1) (section 4.4), independent of whatever
-    systemChannelSelected currently holds. An early approach that tried to "select
-    the channel, then write on a shared 0x1c" silently wrote everything to Mic1 -
-    do not use systemChannelSelected as a write target.
-So: read systemChannelSelected/systemMixSelected if you want to MIRROR the device's
-current on-screen selection, but there is no way to know a channel button was
-pressed, and no reliable way to move the on-screen selection from USB.
+CHANNEL-SELECT buttons emit no PRESS record (unlike mute and solo); the state
+change pushed as systemChannelSelected IS the event, as above. Do not use
+systemChannelSelected as a WRITE target: it does not reliably drive the screen, and
+it does not redirect processing writes, which are addressed by strip (4.4). An early
+approach that tried to "select the channel, then write on a shared 0x1c" silently
+wrote everything to Mic1.
 
 ENCODER KNOB - injectable but NO accessibility use (Pro II, closed-loop tested via
 webcam). An injected encoderSignal turn DOES change a value (it provably moved Mic1
@@ -1296,7 +1284,7 @@ software replaces the operational controls directly, not by puppeteering the kno
   (6 pads per bank). Restored to 0 clean. So MIDI reaches ANY pad on the desk,
   given one HID write first.
 
-  Source: "RODECaster Pro II MIDI spec.md" in the Access Deck project.
+  Source: RODE's published MIDI specification for the RODECaster Pro II.
 
   WHY NOT HID, and do not spend an evening re-testing either route:
     - padActive written over HID engages voice-FX and mixer pads, but a SOUND pad
@@ -1436,35 +1424,22 @@ software replaces the operational controls directly, not by puppeteering the kno
     cannot be captured or injected. Language / date / WiFi-join / analytics /
     load-show in the wizard are touchscreen-only firmware actions.
 
-  - BLUETOOTH pairing/connect and WiFi JOIN are touchscreen-only firmware actions.
-    The WiFi credentials and the btDo* action properties (btVisible / btDoScan /
-    btDoPair / btDoConnect) are readable and even writable in the model (they ride
-    the global-int/bool selector 0x0f, same as the transfer-mode ints), BUT writing
-    the property only flips the STORED value while the radio / engine ignores it.
-    All three USB approaches were tried and FAILED: (1) event-channel injection on
-    the report-04 *Pressed path (works for mute, ZERO effect for btVisible/btDoScan);
-    (2) a config write that set btVisible/btDoScan True (radio stayed non-discoverable,
-    scan found nothing, btDoScan never consumed); (3) a persist-then-power-cycle
-    "trick" (setting survived but the firmware still did not act). There is no
-    USB-reachable trigger that makes the device act on it. Reading SSID / PSK / IP /
-    connected-status works (useful for a read-only WiFi status display); the connect
-    step is the gap.
+  - BLUETOOTH PAIRING is touchscreen-only. What IS reachable, on the NETWORK block
+    (root child 0x10) rather than SYSTEM: btVisible makes the desk discoverable, and
+    btDoScan fills btScan1..10 on a Duo (not on the one Pro II tested). Wifi
+    scanning and joining work too (wifiScan, then the SSID and PSK properties).
+    Earlier negatives here were taken while stray copies of btVisible and btDoScan
+    sat in SYSTEM, so writes landed on the strays and did nothing.
 
-  - MUTE / LISTEN (solo) / physical FADER moves are live physical or MIDI controls,
-    not settable config properties. Use MIDI for those (after enabling
-    systemMidiControl).
+  - The PHYSICAL faders are analog pots and cannot be driven. Mute
+    (channelOutputMute) and solo (channelCueEnable) ARE writable (6.3).
 
-  - A full FACTORY-RESET-to-clean from code is not achievable: the reset itself is
-    app-triggerable, but the post-reset setup wizard that restores the factory show
-    is touchscreen-only.
+  - A software factory reset IS available: showControlNewFromDefault restores the
+    factory show without the setup wizard. Only the RODE app's reflashing reset
+    leads to the touchscreen-only wizard.
 
-  - On-device waveform trim / fade and the recordings list are device / microSD
-    features, not config writes. recordState / requestRecordState /
-    requestDropMarker / recButtonPressed exist in the model but their write format
-    and effect are undecoded; retest with an SD card before relying on them.
-
-  - UNDECODED on BOTH desks (future captures, not device-specific gaps):
-    outputMonFixed (Monitor Fixed Output Level) and Listen mode.
+  - The recorder is driven by requestRecordState / requestDropMarker and read from
+    recordState (push-only; it reads 0 in the dump) and the RECORDINGS block.
 
 
 --------------------------------------------------------------------------------
@@ -1490,9 +1465,8 @@ software replaces the operational controls directly, not by puppeteering the kno
     strip the per-frame 0x04 byte, and locate the property name (section 12 lists
     them all for the Duo).
 
-  - PORTING between the two units: keep the property NAMES and value encodings; swap
-    the channel selector base (0x6E vs 0x48) + trailer (0x02 vs 0x01); resolve the
-    processing/effects strip index dynamically on the Duo (pinned on the Pro II);
+  - PORTING between the two units: property NAMES, value encodings and addresses are
+    shared; resolve the processing/effects strip from the live fader vector on both,
     and use the per-device output/source/pad counts from section 3.
 
 
@@ -1506,8 +1480,8 @@ Global bool/int/float       01 01 01 01 <s>         per-property             bot
   systemMidiControl                                 0x0F                     unlock for MIDI
 Transfer mode / remount     01 01 01 01 0F          transferModeType=2/0     both
 Fader input source          01 01 01 01 <s>         0x1C + fader_index       both
-Channel proc/effects        01 01 01 01 <s>         proc 0x1C+idx / fx 0x26  Pro II idx pinned;
-                                                    +idx                     Duo idx dynamic
+Channel proc/effects        01 01 01 01 <s>         proc 0x1C+strip /        strip from the
+                                                    fx 0x26+strip            live fader vector
   channelCurrentFxPreset                            0x1C + idx (int)         floats first, marker last
 Input mic gain/P48/pol/type 01 01 01 02 <s> 02      0x6E + source_code       BOTH desks; the
   and line inputDigitalGain                         = INPUTSOURCE[code]      Duo's old 0x48
@@ -1581,8 +1555,10 @@ entries in the desk comparison, and it is usage rather than a device difference.
 connected desk by `DevTools/property_list.py`. Names and types only, never values, so the wifi PSK
 and the SIP password appear as names and nothing more.
 
-Both desks publish the same property NAMES. The per-device differences are counts, and
-they follow the physical shape already modelled in `Project/devices.py`.
+Two desks on the same firmware publish the same property NAMES. The per-device
+differences are counts, and they follow the physical shape already modelled in
+`Project/devices.py`. Compare only desks on matching firmware: 1.7.6 adds 27 names
+to 1.7.3 and removes none.
 
 ================================================================================
 End of reference.

@@ -206,10 +206,9 @@ Say these plainly, because each one cost real hardware time to settle:
   own media player screen cannot be reached. This is a hardware fact, not a gap in our work.
 - **Setting the clock.** There is no set-time, read-time, epoch or RTC command anywhere in the
   protocol, proven three independent ways. The desk syncs from `pool.ntp.org` itself.
-- ~~**Playing a sound pad.**~~ **NO LONGER TRUE, and it was only ever true of the HID bus.** A sound
-  pad plays when the request goes to the desk's own USB MIDI port instead (`DevTools/midi_out.py`,
-  2nd September 2026). Over HID you can still only set the flag and hear nothing. Selecting the BANK
-  is an ordinary HID write, so the two transports work together: see the pad-firing entries in part 2.
+- **Playing a sound pad over HID.** The flag sets and nothing plays. A sound pad plays when the
+  request goes to the desk's own USB MIDI port instead, and selecting the BANK is an ordinary HID
+  write, so the two transports work together: see the pad-firing entries in part 2.
 - **Level meters.** The desk describes its front-panel meters in the model but does not publish
   their values there; they hold unpopulated defaults. The official app shows moving meters, so the
   data goes somewhere else and finding it is a capture job. We read the desk's USB audio streams
@@ -254,9 +253,9 @@ the shortcut thread all want it.
 The layers, bottom up:
 
 - `rcp_hid.py` opens the interface and owns the transport.
-- `model_tree.py` parses a dump into a tree. **There is exactly one parser and one index per dump.**
-  We previously had three ways to read a value, none retired, and two real bugs came from the crudest
-  of them. Do not add a fourth.
+- `model_tree.py` parses a dump into a tree. **There is one parser and one index per dump**, and
+  two real bugs came from the cruder readers it replaced. Do not add another. The one exception left
+  is `soundpad.py`, which still windows the raw dump with `blob.find` (see the `padType` entry).
 - `rcp_transfer.py` builds every write record, and owns Transfer Mode.
 - `rcp_read.py` serves every lookup from the cached parse.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
@@ -351,14 +350,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 --------------------------------------------------------------------------------
 ## Writing to the device
 
-- **THE DESK CLOCK IS UNSOLVED, AND THE NTP ROUTE IS PARKED AS IMPRACTICAL** (Shaun's ruling, 30th
-  August 2026). There is no clock property to write: the engine shells out to `ntpdate pool.ntp.org`
-  then `hwclock -w`, and the touchscreen sets it locally with `settimeofday`, which is why nothing
-  is exposed. The only way in is DNS - controlling what `pool.ntp.org` resolves to - which means the
-  user reconfiguring their router or running a permanent fake NTP service. Neither is something a
-  blind user can be asked to do and neither could ship. **Do not propose this test again.**
 - **DO NOT SHORTEN THE PAD-CREATE SLEEPS OR THE 60 ms HID PACING.** Two of four proposed speedups
-  were built and measured 29th August 2026 (16.29 s per pad down to about 4 s). The other two were
+  were built and measured 29th August 2026 (16.29 s per pad down to 13.79 s). The other two were
   exactly these, and they must stay undone: the fixed sleeps and the pacing are WHAT MAKES A CREATE
   COMMIT. The remaining overhead is them, so the only thing left to win is the thing that makes it
   work.
@@ -383,21 +376,23 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **CONSUMED MEANS IT ACTED; STUCK MEANS IT DID NOT.** The firmware CLEARS a request field it has
   carried out (`requestRecordState`, `requestDropMarker`, `showControlExport` back to False,
   `showControlImport` back to -1). A field that reads back exactly as written was merely STORED.
-  Measured 29th August 2026 on `padRecordStateRequest`, `storageVolumeTransfer`, `btDoScan` and
-  `toneGeneration`, all of which stick and all of which do nothing. Use it before concluding a
+  `padRecordStateRequest`, `storageVolumeTransfer` and `toneGeneration` all stick and do nothing.
+  `btDoScan` also sticks, yet scans on a Duo, so a flag that never self-clears is not proof of a
+  dead one: test for the result too (see the `btDoScan` entry). Use it before concluding a
   feature works: a clean read-back is NOT evidence of an effect.
 - **PROVED INACTIVE: written, read back, and they do nothing. Do not re-test any of these.**
-  Shaun's term, and the phrase to use HERE for anything settled this way, so a reader can tell
-  "tested and dead" from "not built yet" at a glance. (It used to be a status code in PARITY.md
-  too; that file lost its status column on 30th August 2026 and is a target list now.) Each below
-  was proven on hardware, and each has a promising name, which is the whole trap.
+  The phrase to use for anything settled this way, so a reader can tell "tested and dead" from "not
+  built yet" at a glance. Each below was proven on hardware, and each has a promising name, which
+  is the whole trap.
   `toneGeneration` (no sound at 1, 2, 3, 440, 1000 or 255, re-proved 22nd September 2026 on a clean
   tree with the listening path proved first - a pad playing loudly through HP1 - because the
   original reading was taken while a stray existed),
   `broadcastMeters` (no dump values, no pushes),
   `emergencyMuteActive` (a pad kept playing, and audibly: re-checked 22nd September 2026 with
   `padActive` confirming a pad was genuinely playing at the moment the flag was set),
-  `padRecordStateRequest` and `padRecordIdx` (PADRECORDER stores and never acts),
+  `padRecordStateRequest` and `padRecordIdx` (PADRECORDER stores and never acts; measured while a
+  stray existed and not re-proved, because PADRECORDER is not to be probed again: see "Recording to
+  a pad from the touchscreen reboots the desk"),
   `storageVolumeTransfer` (mounts nothing at any transferModeType 0-8),
   `staticIpSet` (a flag with no operands; the address fields are read-only reports),
   `systemDateTimezone` (applied by the touchscreen, not the engine).
@@ -448,7 +443,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   which is what a working re-scan looks like when the room has not changed, so it is not evidence
   either way about whether each trigger re-scans. The
   rest of the family - `btDoPair`, `btPairCode`, `btDoConnect`, `btDoDisconnect`, `btDoUnPair`,
-  `btPairedNumber1` to `5` - has never been tested and must not be assumed dead by association.
+  `btPairedNumber1` to `5` - has never been tested and must not be assumed dead by association. The
+  pair and connect triggers take an address whose format has never been seen; pairing FROM the
+  phone while the desk is discoverable needs no address at all.
   This matters more than one wrong entry: pairing is touchscreen-only, so a blind owner cannot do
   it at all today.
 - **THE FACTORY PAD AUDIO LIVES ON THE DESK, and a software factory reset restores it.** The eight
@@ -540,15 +537,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A negative result is only as good as the address AND the format it was tested with.**
 - **No blind selector scans on hardware.** An early one appended two persistent stray global props
   that shifted two read arrays by +1 and survived power-cycles.
-- **Read a property BY BLOCK and instance, never "first occurrence in the stream".** `btVisible`
-  has a SYSTEM duplicate, so the Network page once reported "not discoverable" while the radio was.
-  Use `rcp_read.block_value()` / `iter_block_properties()`.
+- **Read a property BY BLOCK and instance, never "first occurrence in the stream".** A stray copy of
+  `btVisible` in SYSTEM once made the Network page report "not discoverable" while the radio was, and
+  `MIX` / `RCSYNCMIX` share six names legitimately. Use `rcp_read.block_value()` /
+  `iter_block_properties()`.
 - **`requestRecordState`, `requestDropMarker` and `requestDeleteUID` are self-clearing REQUESTS.**
   Never read one for status; read the thing it acts on (`recordState`, or the recordings list).
 - **RECORDINGS = 0x28F, PROVEN 29th August 2026** by deleting a real recording (list 20 -> 19,
   `recordingUID` and `recordingContent` each down one, nothing else moved). Written in the TWO-BYTE
-  address form; the global builders mask the selector to one byte, so `0x28F` sent through one of
-  those becomes `0x8F` - a live mix cross-point.
+  address form. Anything that masks a selector to one byte turns `0x28F` into `0x8F`, a live mix
+  cross-point; the global builders no longer mask (see "The write side widens the same way").
 - **Deleting a recording does NOT renumber the others.** Uids 1-19 stayed put when 20 went, so a UID
   is a stable handle and a page's list does not shift under it.
 - **A RECORDING'S TIMESTAMP IS AN ORDINARY UTC EPOCH, shown in the COMPUTER'S LOCAL time.** The
@@ -580,8 +578,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`wifiPSK` is READABLE off the desk.** Keep it out of the API, the browser, profiles and log
   lines. `wifi_join.py` takes it on stdin, never argv, and its read-back reports only "a password is
   stored".
-- **Never write Mic 1** unless Shaun says so explicitly for a specific test. He runs it bypassed on
-  purpose while recording.
 - **`rcp_transfer.py` with NO argument defaults to `enter`** (enters transfer mode and remounts pad
   storage), not the selftest. Use `rcp_transfer.py selftest`; clean up with `exit`.
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
@@ -621,8 +617,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   nothing comparing them. Adding the Virtual Devices updated two of the four, which left the
   routing matrix naming USB 1 after a Windows device that no longer existed and offering no rows
   for the four at all. **Adding an input is now one `Channel` entry**; which surfaces it appears on
-  is stated per entry, because membership genuinely differs (CallMe 1 takes a fader and has neither
-  a channel strip nor a matrix row). `test_specs.py` asserts the surfaces agree and that the grid
+  is stated per entry, because membership genuinely differs (CallMe 1 takes a fader and has a
+  channel strip, but no matrix row yet). `test_specs.py` asserts the surfaces agree and that the grid
   reads exactly the rows the page offers.
   **`Channel.key` IS STORED USER DATA** - profiles, mix schemes and the applied-preset record all
   save it - so renaming a key orphans somebody's saved settings. Rename the `label`, which is the
@@ -861,10 +857,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Main Multitrack)`, while the previous one stays listed and silent. So anything that stores a
   playback device BY NAME rots, looking correct in its own settings while producing nothing. The
   original name does come back cleanly once the desk returns to Standard.
-- **NO CHANNEL CAN BE RENAMED ON THE DESK.** Of the 14 string properties a Pro II publishes, not one
-  names a channel: pads have `padName`, shows have `showName`, a channel has `inputColour` and no
-  name. So Game, Music, A and B are fixed firmware labels. Renaming happens in Windows, on the audio
-  endpoint, and that is also what the volume mixer shows when a program is assigned to one.
 - **THE VIRTUAL DEVICES DRIVER IS SIGNED "FREEDMAN ELECTRONICS PTY LTD", NOT "RODE".** Freedman is
   RODE's parent company, so a publisher check looking for the string "RODE" REJECTS THE GENUINE
   INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026. `driver_install.SIGNER` is
@@ -1099,19 +1091,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   write that moved the matrix would mean the channel mute had been reached by another name. It is
   NOT in the chain set and must not join it: a mute is live state, so a fader move carrying it would
   silence a mic nobody muted. NEVER ear-proven, and it cannot be here - nobody owns a wireless mic.
-- **THE SMART PADS BUS IS A PROCESSED CHANNEL, ON BOTH DESKS** (source 11, kind `"bus"`), and
-  the old "SMARTpads has no channel processing" refusal was an untested claim, disproved 29th August
-  2026: its strip runs a full chain, Shaun's is custom (marker -1) with processing on, and a write
-  to selector 0x21 lands, reads back and restores byte-clean. It has NO level - that is its fader,
-  and `inputDigitalGain` slot 11 is a flat 0 - so a bus gets mute, solo and the chain only.
-  **The DUO got the entry on 2nd September 2026 and needs it MORE**: there the pads are on a PHYSICAL
-  fader (vector index 3, the fourth of four counted by hand), where on a Pro II the fader is virtual.
-  Nothing device-specific was needed - `kind == "bus"` already means "chain and mute/solo, no input
-  level" everywhere that reads it. The desk confirmed the strip resolution by answering a mute with
-  all thirteen of source 11's `mixMute` cross-points, which a dead address could not have faked.
-  **CallMe 1 (source 16) is on the Channels page** like any line input: its chain is the one on
+- **CallMe 1 (source 16) is on the Channels page** like any line input: its chain is the one on
   the strip it is on (`channelInputSource.index(16)`), so it has processing only while on a fader.
-  It has no matrix row: its row in the cross-point grid is unmeasured.
+  Heard on a phone call, 3rd October 2026: mute, Level and the high-pass all reach the caller's
+  audio, and `channelPan` hard left and hard right does nothing. Its cross-point row is source 16
+  (a mute moves nodes 284 to 296), but the Routing page has no row for it yet.
 - **A STEREO PAIR JOINS TWO ADJACENT INPUTS, NOT TWO FADERS, AND REASSIGNING FADERS CANNOT CHANGE
   WHICH PAIRS EXIST.** The pair codes are fixed positions in the firmware's input enum: 4 = inputs
   1+2, 5 = inputs 2+3, 6 = inputs 3+4. A fader is a slot you put a source on; the PAIR is formed at
@@ -1138,44 +1122,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **PAN IS NOT A FAIR TEST OF A STEREO SOURCE ON ITS OWN**, which was the innocent explanation while
   this was still open: a mic is mono and pans, the pads bus is stereo. It was ruled out by testing
   non-pan parameters (HPF, EQ, gate, make-up gain) and by the Pro II hearing the same nothing.
-- **`channelWirelessMute` IS IN THE CHANNEL BLOCK, PER STRIP, NOT IN THE INPUT TABLE.** It sits on
-  exactly the nodes `channelOutputMute` and `channelCueEnable` sit on (`proc_sel_base + strip`, ten
-  of them, read off a live tree 2nd September 2026), so it is written with
-  `channels.set_channel_wireless_mute` like any other toggle there. `CHANNEL_PROP` listed it among
-  the properties addressed at the INPUT selector until then, which is a different block indexed by
-  SOURCE CODE; nothing could reach it, so no wrong write ever shipped, but the note was wrong for as
-  long as it existed. It moves ONE property and drags nothing, unlike the channel mute below, and a
-  write that moved the matrix would mean the channel mute had been reached by another name. It is
-  NOT in the chain set and must not join it: a mute is live state, so a fader move carrying it would
-  silence a mic nobody muted. NEVER ear-proven, and it cannot be here - nobody owns a wireless mic.
-- **THE SMART PADS BUS IS A PROCESSED CHANNEL, ON BOTH DESKS** (source 11, kind `"bus"`), and
-  the old "SMARTpads has no channel processing" refusal was an untested claim, disproved 29th August
-  2026: its strip runs a full chain, Shaun's is custom (marker -1) with processing on, and a write
-  to selector 0x21 lands, reads back and restores byte-clean. It has NO level - that is its fader,
-  and `inputDigitalGain` slot 11 is a flat 0 - so a bus gets mute, solo and the chain only.
-  **The DUO got the entry on 2nd September 2026 and needs it MORE**: there the pads are on a PHYSICAL
-  fader (vector index 3, the fourth of four counted by hand), where on a Pro II the fader is virtual.
-  Nothing device-specific was needed - `kind == "bus"` already means "chain and mute/solo, no input
-  level" everywhere that reads it. The desk confirmed the strip resolution by answering a mute with
-  all thirteen of source 11's `mixMute` cross-points, which a dead address could not have faked.
-  **CallMe 1 (source 16) is on the Channels page** like any line input: its chain is the one on
-  the strip it is on (`channelInputSource.index(16)`), so it has processing only while on a fader.
-  It has no matrix row: its row in the cross-point grid is unmeasured.
-- **WHETHER THE PADS BUS TAKES PROCESSING AT ALL IS OPEN, ON BOTH DESKS.** The MUTE is settled: heard
-  on a Duo 2nd September 2026, and the desk mutes all 13 cross-points of source 11 itself. The CHAIN
-  is not. `channelPan` hard over on the bus did nothing, and the control is what makes that worth
-  believing - the same listener on the same headphones heard pan on Mic 2 move his voice to one ear
-  minutes earlier. Maximum HPF, full EQ cuts, a slammed noise gate and zero make-up gain were all
-  judged inaudible, though those were press-and-listen and one processing-bypass A/B may in fact have
-  been heard (a five-second lead-in meant it landed while the listener was still being briefed).
-  **The Pro II claim that started all this rests on a write that landed and read back**, which is the
-  evidence class that just failed by ear. RODE's own guide says "You can add processing to any audio
-  channel except the SMART pads"; that sentence was overridden on read-back evidence and may be
-  right. **Settle it on a Pro II by ear** - no phone relay, no lead-in - before building on the chain,
-  and if it is inert the bus keeps its mute and loses its chain in the UI.
-- **PAN MAY SIMPLY BE MEANINGLESS ON A STEREO SOURCE**, which is the innocent explanation for the
-  above and would leave EQ and dynamics working. A mic is mono and pans; the pads bus is stereo.
-  Do not read "pan does nothing" as "the chain is dead" without testing a non-pan parameter.
+- **A STEREO SOURCE PANS WITH `channelPanL` AND `channelPanR`, NOT `channelPan`.** Heard 3rd
+  October 2026: `channelPan` hard over did nothing on USB 1 or CallMe 1, and both legs at 0.0 put
+  USB 1 hard left. Every strip carries all three; default legs are 0.0 and 1.0. A pan control on a
+  stereo channel that writes `channelPan` is dead. RODE's app shows a stereo channel two knobs,
+  LEFT and RIGHT, one per leg, not one balance control.
+- **WRITING A VOXLAB MACRO (`channelDepth` / `Sparkle` / `Punch`) RECOMPUTES EQ AND DYNAMICS.**
+  The desk rewrites the EQ gains, compressor, gate and de-esser thresholds from the macros, so a
+  restore writes the macros FIRST and the derived values after. Turning Advanced off in RODE's app
+  resets the whole chain to new values (it warns), so it is not a way back to a baseline.
 - **MUTING A CHANNEL ALSO MUTES ITS WHOLE MATRIX ROW.** Writing `channelOutputMute` on a strip sets
   `mixMute` on all 13 cross-points for that source as well, and clearing it clears all 13. Measured
   on a Duo 31st August 2026 (14 properties moved from one write, and restored). The 13 are exactly
@@ -1446,10 +1401,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   through the tree index. Three comments still warned that `screenBrightness` would match inside
   `hwScreenBrightness` and were steering people away from the right tool; corrected 30th August
   2026. **If you find another, fix it rather than believing it.**
-- **A NAME CAN OCCUR IN MORE THAN ONE BLOCK, and that is still real.** `btVisible` is in both
-  SYSTEM and NETWORK and only the NETWORK copy drives the radio. Use `block_value` for those and
-  say which block you mean. This is the reason `outputMonAutoMute` and `outputBTAutoMute` are read
-  by block in `routing_model` - NOT prefix matching, which is what the comment there used to claim.
+- **A NAME CAN OCCUR IN MORE THAN ONE BLOCK, and that is still real.** `MIX` and `RCSYNCMIX` share
+  six names, and a stray adds a copy wherever it lands (`btVisible` had one in SYSTEM until a factory
+  reset, and only the NETWORK copy drives the radio). Use `block_value` and say which block you mean;
+  `outputMonAutoMute` and `outputBTAutoMute` are read by block in `routing_model` for this reason.
 - **A positional read must pass `kind=None`** so it gets EVERY occurrence including the
   undecodable `(None, "?")` ones. Dropping those shifts every index past them.
 - **EVERY INPUT VALUE, ON EVERY DESK, LIVES AT `INPUTSOURCE[source_code]` = path `0x26E + code`.**
@@ -1489,8 +1444,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `rc_audio_mixer` is the engine, `rc_gui_juce` the touchscreen. Its string table gives up the
   `InputSourceType` label list ("Input 1", "Input 2", "Headset", ... "1 + 2", "2 + 3", "3 + 4") and
   class names like `InputAssignSourcePage::LinkButton`, which is how the stereo-pair codes were shown
-  to be firmware-wide rather than per-desk. RODE's, so it stays OUTSIDE the repo;
-  `DevTools/firmware_dig.py` expects it at `C:\Users\shaun\rode-firmware`.
+  to be firmware-wide rather than per-desk. Embedded Linux (Amlogic); the touchscreen is JUCE, with
+  a 4787-entry UI string table. RODE's, so it stays OUTSIDE the repo; `DevTools/firmware_dig.py`
+  expects it at `C:\Users\shaun\rode-firmware`. **Look here before calling anything blocked.**
 - **THE DUO MIX NODES CARRYING AN INPUT PROPERTY ARE OUR OWN LITTER, and only a factory reset removes
   them.** Of 390 MIX nodes on a used Duo, 387 carry exactly six properties; the exceptions are the
   three this app wrote to. That count is the cheapest way to spot a write landing where it does not
@@ -1601,10 +1557,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **DO NOT MARK CAPABILITY-GATED SHORTCUTS AS UNAVAILABLE IN THE CATALOGUE** (Shaun's ruling, 2nd
   September 2026, rejecting exactly that proposal). The shortcut catalogue IS filtered by what a desk
   HAS - Channels drops from 32 entries on a Pro II to 27 on a Duo - but NOT by what it can DO, so a
-  Duo offers the three Recording shortcuts it cannot yet carry out. Pressing one explains itself
-  clearly, so it is not silent, only late. Shaun's reasoning: the gate is TEMPORARY, the recorder is
-  work we intend to finish, and building UI around a gap with a known expiry date is work that has to
-  be rolled back later. Do not re-propose it.
+  desk lacking a capability still lists its shortcuts. Pressing one explains itself clearly, so it
+  is not silent, only late. The reasoning: a capability gate is TEMPORARY, and building UI around a
+  gap with a known expiry date is work that has to be rolled back later. Do not re-propose it.
 - **A DROPDOWN THAT CHANGES THE DESK'S AUDIO MUST STAGE, AND WAIT FOR AN APPLY.** Shaun's rule, 30th
   August 2026: "where a dropdown changes something that affects audio is where an apply button is
   needed. The pads selector dropdown shows you the info on the pad so instant is fine." A CLOSED
@@ -1931,16 +1886,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   30th August 2026). The only route in is DNS - the desk believes whatever answers as
   `pool.ntp.org` - and every way of controlling that answer means the USER reconfiguring their
   router, or running a permanent fake NTP service on a hotspot the desk is joined to. That is not
-  something a blind user can be asked to do, and it could never ship as a feature, so the test in
-  It is NOT owed work. **Do not propose it
-  again.** The desk's clock is correct in practice anyway; this only ever mattered for a desk with
-  no internet.
-- **THE FIRMWARE IS READABLE AND IT OUTRANKS EVERY OTHER SOURCE.** A dump shows what the desk
-  PUBLISHES, the RODE app shows what the app KNOWS, the firmware shows what the desk DOES. RODE
-  publish the image; ours is 1.7.3, md5-verified against theirs, kept OUTSIDE the repo at
-  `C:\Users\shaun\rode-firmware`, dug with `DevTools/firmware_dig.py`. Embedded Linux (Amlogic),
-  engine `rc_audio_mixer`, touchscreen `rc_gui_juce` (JUCE, with a 4787-entry UI string table).
-  **Look here before calling anything blocked.**
+  something a blind user can be asked to do, and it could never ship as a feature, so it is NOT
+  owed work. **Do not propose it again.** The desk's clock is correct in practice anyway; this only
+  ever mattered for a desk with no internet.
 - **A STATIC IP CANNOT BE SET, AND IT IS NOT A GAP IN OUR WORK.** Spiked on hardware 30th August
   2026 with the ethernet plugged in. `staticIpSet` accepts True and reads back True, but
   **`ipAddress` will not take a value at all**: 192.168.7.231 was written and the property still read
@@ -2051,7 +1999,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the click.** It occurs once, in OUTPUT: this was never the `btVisible` duplicate trap, and the
   monitor and Bluetooth toggles are not crossed.
 - **THERE IS ONE READER: `model_tree.parse`, indexed once per dump by `rcp_read._index`.** Do not
-  add a second way to get a value out of a dump; that is how three of them accumulated. `find_all`
+  add a second way to get a value out of a dump. `soundpad.py`'s raw windowing is the one survivor
+  and the reason for the `padType` trap. `find_all`
   matches WHOLE names (a prefix match once put a junk entry in front of a 24-pad list and a
   hardcoded "+1" was written to compensate, inside a safety check). The `_legacy_*` walkers exist
   only so a dump that will not parse degrades instead of raising - never call them directly.
@@ -2071,15 +2020,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   The reset put every checked value back to the known factory dump exactly, and the import restored
   the desk with **ZERO real differences** against a pre-reset model dump (104 raw differences, all of
   them self-clearing `mixLink`/`mixUnlinkRequest` flags, shows-list metadata or free disk space).
-  **The import is therefore the trusted undo**: it is what put the desk right after the clean restore
-  left it wrong. Reach for it before a profile restore when the desk must come back exactly.
-- **A SHOW IMPORT IS ONLY LEGAL ONCE THE LOADED SHOW DIFFERS.** Every backup taken before a reset
-  carries the loaded show's uuid and the desk refuses it. The reset is what mints a new uuid and
-  makes the older backups importable, which is why these two can never be tested separately.
-- **`recordingCompressionQuality` PICKS THE FORMAT: 0 = WAV, 1/2/3 = MP3.** Proven 29th August 2026
-  with four identical takes. It is ALSO an unclamped raw store (99, -1 and 255 stick) and
-  `recordBytesPerSecond` never moves for it - so this is the counter-example to "stores anything,
-  therefore does nothing". Storing anything is not the same as ignoring it; the FILES decided it.
+  It is the most exact undo there is, but NOT the default one: an import takes the desk off the bus
+  about one time in six (see "A show import can take the desk off the bus"), so the app restores
+  from a profile and imports only a backup it holds no profile for.
 - **A RECORDING'S FORMAT IS READABLE WITHOUT THE DRIVE.** `recordingContent` is a pipe-joined string
   whose field 2 is the FILE PATH, so its extension names the format. Field 0 is the name, field 4 the
   duration in seconds.
@@ -2100,7 +2043,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
     * **RODE's own copy**, which says the desk records "MP3 or WAV". Two options.
   2 and 3 are simply OUT OF RANGE. The property is an unclamped raw store (99, -1 and 255 stick
   too), so the desk keeps whatever you send and the recorder takes any non-zero as MP3. Do not read
-  a value sticking as evidence it means anything. The question "what separates 1, 2 and 3" is CLOSED.
+  a value sticking as evidence it means anything, nor as evidence it means nothing:
+  `recordBytesPerSecond` never moves for it, and the FILES still showed it picks the format. The question "what separates 1, 2 and 3" is CLOSED.
   **Beware the JUCE red herring:** both binaries carry a `64 kbps ... 500 kbps` list next to WAV
   chunk ids (TCOD, ISBJ, INAM). That is JUCE's own audio-format boilerplate, not this desk's menu.
 - **THE FORMAT APPLIES TO THE STEREO MIX ONLY. SEPARATE TRACKS ARE ALWAYS 24-BIT WAV.** Proven by a
@@ -2120,11 +2064,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   tool's ANCHORS table", and ANCHORS holds properties whose selector was CAPTURED. 55 of the 137 it
   listed on 29th August 2026 were already wired in the app, `outputMonMute` among them, which has
   shipped since the 28th. Cross-reference against `Project/` before picking anything off it.
-- **TURN THE ASSISTANT'S AUDIO CUES OFF BEFORE ANY AUDIO MEASUREMENT** (Shaun, 30th August 2026).
-  Windows' default playback here is `Speakers (RODECaster Pro II Main Stereo)`, so everything the PC
-  plays goes into the desk and back out on the capture endpoint - Claudio's thinking cue included,
-  which sounds continuously. A "silence baseline" that is really the heartbeat is a witness
-  measuring the wrong thing, the `say_worker` trap again. Silence the cues, or point playback
+- **SILENCE THE PC BEFORE ANY AUDIO MEASUREMENT.** When Windows' default playback is the desk,
+  everything the PC plays goes into the desk and back out on the capture endpoint, so a "silence
+  baseline" can be a system sound or a notification cue. Silence the PC, or point playback
   elsewhere, rather than reasoning around the noise afterwards.
 - **THE 22 `METER` NODES DESCRIBE THE FRONT PANEL; THEY DO NOT CARRY VALUES.** `PHYSICALINTERFACE`
   (path [0]) is a description of the hardware surface - POT x4, FADER x9, METER x22, PADBUTTON x64,
@@ -2161,10 +2103,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   process do not invalidate the SCRIPT's cache, so a read after a write returns the OLD value until
   the TTL expires. On 29th August 2026 that produced a confident "the monitor level writes are
   landing nowhere" when every one of them had landed.
-- **AN EAR TEST MUST NOT START IN THE SAME MESSAGE THAT EXPLAINS IT, and must run ONE block per
-  invocation.** Shaun's screen reader was still reading "listen for this" while the sweep was
-  already half done, and a two-block run left him with no way to tell which block he was in ("how do
-  I know which is block 1 and 2?"). Describe it, WAIT for the go-ahead, then run one block.
 - **NO WRITE MAY REPORT SUCCESS FROM THE WRITE RETURNING.** This is the whole app's rule and
   auto-mute was the one place still breaking it. If a property is readable, read it back and say
   what the desk holds; if it self-clears (the record commands, the show commands, the marker), say
@@ -2203,7 +2141,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE REMOVAL TAKES THE FILE-STOR GADGET VOLUME WITH IT**, which is the mass-storage gadget the
   USB dropout section below names as its one untested candidate. Not sufficient on its own: it is
   mounted on a healthy desk too.
-- **IT IS INTERMITTENT, ONE IN THREE INSTRUMENTED IMPORTS**, all with real work to do. An import is
+- **IT IS INTERMITTENT: 5 FAILURES IN 31 IMPORTS, against 0 in 9 profile restores.** An import is
   a SAFE trial - reversible, one replug per drop - so this can be run until it is caught.
 - **THE OPEN INVESTIGATION IS TRACKED PRIVATELY**, with the timeline and the dead
   theories. Read the dead ones before theorising: both were measurement artefacts of watching the
@@ -2230,15 +2168,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   untouched: it stayed connected through the import, and reconnected afterwards with no pairing
   code. An empty pairing table in the show file would have wiped it. **This was the headline
   argument for keeping shows over profiles**, so it is a decision, not a detail.
-- **`btPairedNumber` PUBLISHES 0 OCCURRENCES on firmware 1.7.3.** It is in RODE's own name table,
-  which is why it looks available, but this desk does not publish it - so there is no readable
-  paired-devices list and any test of pairing has to be BEHAVIOURAL.
+- **THERE IS NO READABLE PAIRED-DEVICES LIST.** The bare `btPairedNumber` in RODE's name table is
+  not published, and `btPairedNumber1` to `5` stay EMPTY with a phone paired, so any test of
+  pairing has to be BEHAVIOURAL.
 - **`btConnectedAddress` IS CONNECTION, NOT PAIRING.** It empties the moment a phone disconnects
   and says nothing about what the desk still remembers. Do not read one for the other.
-- **`btDoPair` / `btDoUnPair` / `btDoConnect` / `btDoDisconnect` are still untried**, and the note
-  that blocked them ("nothing is paired here to test against") no longer holds. They take an
-  address whose format we have never seen; making the desk discoverable and pairing FROM the phone
-  remains the route that works and needs no address at all.
 
 ## Zero bytes is not an answer
 
@@ -2366,7 +2300,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   off the bus, so `powerOffRequest` is unreachable, and there is no power-ON property because a
   powered-off desk has no USB either. Only a replug, or switched mains power.
 - **STILL OPEN: what makes the desk leave the bus during app activity - but there is now a
-  REPEATABLE TRIGGER.** A SHOW IMPORT does it, about one time in three, reproduced and instrumented
+  REPEATABLE TRIGGER.** A SHOW IMPORT does it, about one time in six, reproduced and instrumented
   21st September 2026 with the event-log fingerprint (see "A show import can take the desk off the
   bus" above). An import reads the show off the removable drive and
   the removal takes the File-Stor Gadget volume with it, which is the mass-storage lead this entry
@@ -2700,8 +2634,8 @@ shared one; a new copy is how they drifted apart the first time.
   `docs/PROPERTY_LIST_<DESK>.md`, plus the private per-desk coverage reports, where
   `<DESK>` is `devices.DeviceModel.slug` (`PRO2` / `DUO`). They shared ONE device-agnostic path until
   31st August 2026, so regenerating on the Duo silently rewrote the Pro II reference with Duo data,
-  and **`property_list.py --check` could not catch it because it compares NAMES only, and the two
-  desks publish identical names** (463 each, measured). It printed "unchanged" while the file had
+  and **`property_list.py --check` could not catch it because it compares NAMES only, and two
+  desks on the same firmware publish identical names** (463 each, measured on 1.7.3). It printed "unchanged" while the file had
   swapped desks. Anything that needs only the NAME universe can stay device-agnostic and should
   (`test_specs.py`, `check_notes.py` both glob); anything reading the occurrence COUNTS must be
   device-scoped, because counts differ per desk AND move with ordinary use.
@@ -2779,6 +2713,5 @@ shared one; a new copy is how they drifted apart the first time.
   returns 0 until the probe sets DPI awareness. `PrintWindow(h, dc, 2)` captures the app's own pixels
   underneath any overlay, which is how it was diagnosed.
 - **`SetCursorPos` is a NO-OP over RDP.** Use SendInput absolute-move.
-- **Do sessions SYNCHRONOUSLY.** Long background agents mid-chat desynced us.
 - **`.bin` model dumps and `duo_matrix_*.json` are gitignored** because they carry plaintext wifi and
   SIP state. Never commit one.
