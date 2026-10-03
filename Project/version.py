@@ -33,6 +33,47 @@ __version__ = "2.61"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.62", [
+        ("Extend a call without the touchscreen",
+         "A call on RODE's free and standard plans ends after an hour unless it is extended. In its "
+         "last five minutes, Extend the call on the CallMe page gives it another hour, and so does "
+         "the answer shortcut, Control, Alt and Shift with C, when nothing is ringing. Switch on "
+         "Extend calls automatically and AccessCaster does it for you at the five-minute warning."),
+
+        ("CallMe contacts",
+         "Give a CallMe code a name and it becomes a contact, with its own Call, Edit and Delete "
+         "buttons. Each contact can have its own keyboard shortcut, and a call to a contact is "
+         "spoken by name. If a contact's code has changed, which happens when they switch incoming "
+         "calls off and on, the app says so. Contacts are saved with the app's own settings, so "
+         "they travel with a settings export."),
+
+        ("More about the call you are on",
+         "The call details now include how long the call has been connected, and a call nobody "
+         "picks up is announced as nobody answering rather than as a timeout."),
+
+        ("The CallMe channel on the Channels page",
+         "CallMe 1 now has its own Level, mute and processing on the Channels page, like any other "
+         "input, while it is on a fader."),
+
+        ("Pan on stereo channels",
+         "Pan on a stereo channel, such as USB, Chat, Bluetooth or CallMe, did nothing, because the "
+         "unit pans those differently. A stereo channel now has two sliders, one for where each "
+         "side sits, and a switch that links them into a single Pan control. A mic keeps its one "
+         "Pan slider, which now says left or right as you move it."),
+
+        ("The page notices when the app restarts",
+         "If AccessCaster stops while its window is open, the window now tells you, and says when "
+         "it is back. After an update the window reloads itself, so you are never left using the "
+         "old page with the new app."),
+
+        ("The firmware check says when you are up to date",
+         "Checking for new firmware on the Device page now tells you plainly when the unit already "
+         "has the latest, rather than only naming the latest version."),
+
+        ("Daylight saving is off the Device page",
+         "The unit stores the setting but only its own touchscreen ever applies it, so the switch "
+         "here did nothing. It still comes back with a backup."),
+    ]),
     ("2.61", [
         ("CallMe: take guests' calls without the touchscreen",
          "RODE's CallMe lets a guest join your show from another RODECaster or from a web browser, "
