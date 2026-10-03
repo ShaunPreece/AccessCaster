@@ -476,7 +476,8 @@ def action_check_firmware() -> dict:
     with _session_state_lock:
         fw = _session_state.get("firmware")
     fw = fw or rcp_read.block_value(blob, "SYSTEM", "systemFirmwareVersion") or "unknown"
-    msg = _firmware_update_sentence(upd) or f"Firmware {fw} is the latest."
+    msg = (_firmware_update_sentence(upd)
+           or f"Your unit is up to date. Firmware {fw} is the latest.")
     return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
 
 
