@@ -1255,8 +1255,14 @@ DUO = DeviceModel(
     # to enable ahead of the hardware: shows.ERROR_NO_STORAGE now words code 8 properly instead of
     # "cannot explain". WHAT IS STILL UNWITNESSED is a Duo actually WRITING and RELOADING a show,
     # which needs a card or drive in that desk. All four commands are proven on a Pro II.
+    #
+    # "callme" is ON AHEAD OF A WITNESSED CALL, for the first desk-to-desk test. Every CallMe write
+    # finds its node by the property it carries on the live tree, never by a selector, so a Duo
+    # cannot be handed a Pro II address; both desks run the same firmware program. Answering,
+    # declining, hanging up and dialling are proven on a Pro II only.
+    # "storage_write" stays OFF: no Duo here has had a card or drive in it.
                     "level_write", "chain_follow", "unit_settings", "stereo_link",
-                    "network_write", "recorder", "shows"}),
+                    "network_write", "recorder", "shows", "callme"}),
     proc_sel_base=0x1C,
     fx_sel_base=0x26,
     ui_channels=DUO_UI_CHANNELS,

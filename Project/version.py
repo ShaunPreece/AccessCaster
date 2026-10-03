@@ -29,10 +29,61 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.60"
+__version__ = "2.61"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.61", [
+        ("CallMe: take guests' calls without the touchscreen",
+         "RODE's CallMe lets a guest join your show from another RODECaster or from a web browser, "
+         "over the unit's own internet connection, and until now every part of it was on the "
+         "touchscreen. It has its own page now, CallMe, on Alt plus 5. Switch on Accept incoming "
+         "calls and the page gives you the unit's code, which another RODECaster dials, and a guest "
+         "link with a copy button, which anyone else opens in a browser. When someone calls, you "
+         "hear who it is wherever you are, and Answer takes the call. The second button is Decline "
+         "while a call is ringing and Hang up once you are talking, and the details of a connected "
+         "call, how fast the sound is arriving and how much is lost, are listed below them. You can "
+         "also call another RODECaster by typing its code. The page shows your plan and the "
+         "minutes left."),
+
+        ("Two new keyboard shortcuts for calls",
+         "Control, Alt and Shift with C answers a call, and with D declines a ringing call or hangs "
+         "up the one you are on, from any program. A new install has them already. If you have set "
+         "up your own shortcuts, add them on the Device page under Keyboard shortcuts, from the "
+         "CallMe kind."),
+
+        ("You are told before a call reaches the plan's hour",
+         "On RODE's free and standard plans a call ends after an hour unless it is extended. "
+         "AccessCaster now tells you five minutes before. Extending still has to be done on the "
+         "unit's screen."),
+
+        ("The page shortcuts moved up by one",
+         "CallMe took Alt plus 5, so Backups is now Alt plus 6, Device Alt plus 7, and Help and "
+         "About Alt plus 8."),
+
+        ("Leaving Expanded no longer leaves four dead faders",
+         "Switching what this computer sends back to Standard used to leave Game, Music, A and B "
+         "on their faders, where nothing could feed them. They now come off, as the unit's own "
+         "screen does it, with their processing kept for when you switch back. A unit already in "
+         "that state is tidied when AccessCaster starts, and it tells you so. The summary spoken at "
+         "start-up also names those four properly instead of calling them by number."),
+
+        ("Eject and erase the card or drive",
+         "The Recording page has a new section, The card and drive. Eject one before you pull it "
+         "out, and reconnect it from the same button without unplugging it. Erase deletes "
+         "everything on it, after asking you first. The unit's own storage, where your pad sounds "
+         "live, is never offered."),
+
+        ("Find out when there is new firmware",
+         "The Device page, under Hardware, can ask RODE whether there is newer firmware for your "
+         "unit, and the summary at start-up says so when there is. Installing it is still done on "
+         "the unit's screen or with RODE's app, because an update restarts the unit and your "
+         "computer's sound may be going through it."),
+
+        ("Less to tab past on the Recording page",
+         "With no recordings on the unit, the delete controls are hidden, and with no card or drive "
+         "in, the card and drive section is a single line."),
+    ]),
     ("2.60", [
         ("Four more inputs from this computer, each on its own fader",
          "Normally your computer looks to the unit like one stereo input, so everything Windows "

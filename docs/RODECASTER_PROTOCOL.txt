@@ -1354,7 +1354,9 @@ software replaces the operational controls directly, not by puppeteering the kno
 8.2 CALLME: HOSTING, ANSWERING AND CALL STATE (Pro II, fw 1.7.6, 2nd October 2026)
 --------------------------------------------------------------------------------
   Everything below was driven and heard on a Pro II on the free CallMe Lite tier,
-  with a phone browser as the guest. Addresses come off the live tree: the
+  with a phone browser as the guest. A DUO (fw 1.7.3 dump) carries the same CallMe
+  nodes at the same paths with the same 26 properties; three that are composites on
+  a desk that has taken a call are still plain strings on one that never has. Addresses come off the live tree: the
   SIPCALLING node is a root child (index 664 on this desk and firmware) and the
   three call slots are the root children just before it (659 to 661 here), each
   carrying its own sipSlot* set. Derive both from the dump; do not hardcode them.

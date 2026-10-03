@@ -234,9 +234,8 @@ for cap in ("input_mic_write", "processing", "channel_read", "matrix_read", "mat
 # error 8 in one second. Read the comments on both caps in devices.py before treating either as
 # witnessed - an engine answering proves an ADDRESS is live, never that a FEATURE works, and nobody
 # has made a recording or a show on a Duo.
-# `callme` is OFF: no call has ever been hosted or answered on a Duo.
 # `storage_write` is OFF: no Duo here has had a card or drive in it.
-DUO_CAPS_OFF = ["callme", "storage_write"]
+DUO_CAPS_OFF = ["storage_write"]
 check("the Duo claims every cap the Pro II does, bar the ones named off",
       sorted(devices.PRO2.caps - devices.DUO.caps), DUO_CAPS_OFF)
 # The Duo has ONE legal pair where the Pro II has three, and that is a property of the INPUTS, not
