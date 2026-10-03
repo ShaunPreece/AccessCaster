@@ -70,8 +70,11 @@ async function run() {
   const end = el("callme-end");
   check("Answer is a native button", answer && answer.tagName === "BUTTON");
   check("the second button is a native button", end && end.tagName === "BUTTON");
-  check("TWO buttons in the call area, no more",
-    sec().querySelector("#callme-h-call + div").querySelectorAll("button").length === 2);
+  check("THREE buttons in the call area: answer, end, extend",
+    sec().querySelector("#callme-h-call + div").querySelectorAll("button").length === 3);
+  const expiringNow = /ending within five minutes/.test(el("callme-now").textContent);
+  check("Extend is unavailable unless the call is about to end",
+    (el("callme-extend").getAttribute("aria-disabled") === "true") === !expiringNow);
   check("the second button is named for what it will do",
     end.textContent.trim() === (ringingNow ? "Decline" : "Hang up"), end.textContent);
   check("neither uses the disabled attribute, so neither leaves the tab order",
@@ -111,6 +114,46 @@ async function run() {
     check("and says why, in the page's own live region",
       /no call is ringing/i.test(el("callme-state").textContent), el("callme-state").textContent);
   }
+
+  // ---- contacts -------------------------------------------------------------
+  const list = el("callme-contacts");
+  check("the contacts list is named by its heading",
+    list && list.getAttribute("aria-labelledby") === "callme-h-contacts");
+  for (const id of ["callme-contact-name", "callme-contact-code"]) {
+    check(`${id} is a labelled text box`, el(id) && nameOf(el(id)).length > 0, nameOf(el(id)));
+  }
+  check("Add contact is the form's submit button",
+    el("callme-contact-save").type === "submit"
+      && el("callme-contact-save").form.id === "callme-contact-form");
+  renderCallmeContacts([{ name: "Probe Person", code: "ZZ9QQ9", spoken: "Z Z 9 Q Q 9" }]);
+  const row = list.querySelector("li");
+  check("a contact reads as its name and spelt code",
+    /^Probe Person, code Z Z 9 Q Q 9\./.test(row.textContent), row.textContent);
+  const names = Array.from(row.querySelectorAll("button")).map((b) => b.textContent.trim());
+  check("its three buttons carry its name",
+    names.join("|") === "Call Probe Person|Edit Probe Person|Delete Probe Person", names.join("|"));
+  el("callme-contact-edit-ZZ9QQ9").click();
+  await sleep(200);
+  check("Edit fills the form and focuses the name",
+    el("callme-contact-name").value === "Probe Person" && el("callme-contact-code").value === "ZZ9QQ9"
+      && document.activeElement === el("callme-contact-name"));
+  check("the save button says it is an edit",
+    /^Save changes to Probe Person$/.test(el("callme-contact-save").textContent.trim()),
+    el("callme-contact-save").textContent);
+  check("Cancel editing appears", !el("callme-contact-cancel").hidden);
+  el("callme-contact-cancel").click();
+  await sleep(200);
+  check("cancelling empties the form and goes back to the Edit button",
+    el("callme-contact-name").value === "" && el("callme-contact-cancel").hidden
+      && document.activeElement === el("callme-contact-edit-ZZ9QQ9"));
+  await probeClear();
+  el("callme-contact-call-ZZ9QQ9").click();
+  await sleep(700);
+  const dials = posts(await probeLog());
+  check("Call posts a dial with the contact's code",
+    dials.length === 1 && dials[0].path === "/api/callme/dial"
+      && JSON.stringify(dials[0].body || "").includes("ZZ9QQ9"), JSON.stringify(dials));
+  await sleep(1500);
 
   // ---- reads ----------------------------------------------------------------
   await probeClear();

@@ -37,7 +37,7 @@ WRITTEN_BY_THE_APP = {
     "hotkeys", "announcer_levels", "announcer_volume", "announcer_voice", "announcer_output",
     "record_mute_announcer", "meter_stream", "meter_warn_clip", "meter_warn_silence",
     "meter_silence_after", "meter_speak_every", "meter_clip_sound", "meter_clip_db",
-    "remote_token", "applied_presets", "baseline_asked",
+    "remote_token", "applied_presets", "baseline_asked", "callme_contacts", "callme_auto_extend",
 }
 
 # THE REAL STORED SHAPE, copied from a live settings.json rather than invented. An invented shape

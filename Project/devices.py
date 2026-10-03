@@ -438,7 +438,7 @@ HEADPHONE_TYPES = HeadphoneTypeSpec(
 # mistake anyone can be careful enough to avoid; the structure has to make it impossible.
 #
 # ADDING AN INPUT IS NOW ONE ENTRY. Which surfaces it appears on is stated per entry, because
-# membership genuinely differs - CallMe 1 can go on a fader but has no channel strip and no matrix
+# membership genuinely differs - CallMe 1 is on the faders and the Channels page but has no matrix
 # row - and a flag that says so is checkable where three separate omissions are not.
 @dataclass(frozen=True)
 class Channel:
@@ -566,11 +566,10 @@ CHANNELS_PRO2 = (
     # slot carries a value), so offering a Level slider would offer a control we have not shown to
     # do anything.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
-    # ASSIGNABLE TO A FADER AND NOWHERE ELSE, deliberately. Its source code is unconfirmed and the
-    # tenth strip currently resolves to source 9, which USB 2 already claims - so a strip lookup
-    # for it would silently land on USB 2's chain, and a matrix row would index the wrong grid
-    # line. Needs its own capture before it earns either.
-    Channel(16, "CallMe1", "CallMe 1", "line", on_channels_page=False, in_matrix=False),
+    # A remote caller. Like every channel its chain is the one on whichever strip carries it, so it
+    # has processing only while it is on a fader. NOT A MATRIX ROW: where its row sits in the
+    # cross-point grid has not been measured, and a guessed row would route somebody else's audio.
+    Channel(16, "CallMe1", "CallMe 1", "line", in_matrix=False),
 ) + _VIRTUAL_DEVICES
 
 CHANNELS_DUO = (
@@ -589,7 +588,7 @@ CHANNELS_DUO = (
     # mutes all 13 of source 11's cross-points on its own. The processing chain does nothing on
     # this desk either - see CHANNELS_PRO2 above.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
-    Channel(16, "CallMe1", "CallMe 1", "line", on_channels_page=False, in_matrix=False),
+    Channel(16, "CallMe1", "CallMe 1", "line", in_matrix=False),
 ) + _VIRTUAL_DEVICES
 
 PRO2_FADERS = FaderSpec(
@@ -1256,10 +1255,9 @@ DUO = DeviceModel(
     # "cannot explain". WHAT IS STILL UNWITNESSED is a Duo actually WRITING and RELOADING a show,
     # which needs a card or drive in that desk. All four commands are proven on a Pro II.
     #
-    # "callme" is ON AHEAD OF A WITNESSED CALL, for the first desk-to-desk test. Every CallMe write
-    # finds its node by the property it carries on the live tree, never by a selector, so a Duo
-    # cannot be handed a Pro II address; both desks run the same firmware program. Answering,
-    # declining, hanging up and dialling are proven on a Pro II only.
+    # "callme": every CallMe write finds its node by the property it carries on the live tree,
+    # never by a selector, so a Duo cannot be handed a Pro II address; both desks run the same
+    # firmware program. A Pro II to Duo call connects in both directions.
     # "storage_write" stays OFF: no Duo here has had a card or drive in it.
                     "level_write", "chain_follow", "unit_settings", "stereo_link",
                     "network_write", "recorder", "shows", "callme"}),

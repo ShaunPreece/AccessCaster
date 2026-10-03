@@ -846,9 +846,8 @@ UNIT_SETTING_SEL = {
     "outputBTMute": (SEL_OUTPUT_GLOBAL, "bool"),            # mute what a paired phone hears
     "outputBTLevel": (SEL_OUTPUT_GLOBAL, "float"),          # 0..1, the Bluetooth OUTPUT level
     # SYSTEM block (0x0F): HOW THE CLOCK IS SHOWN, not what time it is. The time itself is not
-    # writable from here at all - the unit sets its own over the network - so the only one of these
-    # that changes anything a recording carries is daylight saving, which the unit will NOT do for
-    # itself and which stamps every take an hour out until somebody changes it.
+    # writable from here at all - the unit sets its own over the network. Daylight saving and the
+    # timezone are stored and only applied by the touchscreen, so both are profile-only.
     "systemDateTime24h": (SEL_SYSTEM, "bool"),              # 24-hour clock vs 12-hour
     "systemDateTimeDaylightSavings": (SEL_SYSTEM, "bool"),
     "systemDateTimeOnHome": (SEL_SYSTEM, "bool"),           # show the clock on the home screen

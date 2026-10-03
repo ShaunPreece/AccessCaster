@@ -8364,6 +8364,11 @@ function applyCallme(d) {
     end.textContent = d.end_label || "Hang up";
     setAvailable(end, ringing || up, "There is no call to end.");
   }
+  const auto = document.getElementById("callme-auto-extend");
+  if (auto && document.activeElement !== auto) auto.checked = !!d.auto_extend;
+  setAvailable(document.getElementById("callme-extend"),
+               (d.slots || []).some((s) => s.state === "Expiring"),
+               "No call is about to end. Extend is offered five minutes before the hour runs out.");
   const details = (d.details || []).map((x) => x.label + ": " + x.value + ".");
   fillCallmeList("callme-details", details);
   const box = document.getElementById("callme-details");
@@ -8385,6 +8390,120 @@ function applyCallme(d) {
     note.textContent = d.fader_note || "";
     note.hidden = !d.fader_note;
   }
+  renderCallmeContacts(d.contacts);
+}
+
+/* THE CONTACTS LIST is rebuilt only when it has changed, because a rebuild destroys the button a
+   reader may be sitting on. Focus that was inside the list goes back to the button with the same
+   id, which survives a rebuild because ids are built from the code. */
+let callmeContactsSig = null;
+let callmeEditing = null;         // the code of the contact being edited, or null when adding
+
+function renderCallmeContacts(contacts) {
+  const list = document.getElementById("callme-contacts");
+  if (!list || !Array.isArray(contacts)) return;
+  const sig = JSON.stringify(contacts);
+  if (sig === callmeContactsSig) return;
+  callmeContactsSig = sig;
+  const active = document.activeElement;
+  const focusId = active && list.contains(active) ? active.id : null;
+  if (!contacts.length) {
+    const li = document.createElement("li");
+    li.textContent = "No contacts yet.";
+    list.replaceChildren(li);
+  } else {
+    list.replaceChildren(...contacts.map((c) => {
+      const li = document.createElement("li");
+      li.append(c.name + ", code " + c.spoken + ". ",
+                callmeContactButton("call", c, "Call " + c.name), " ",
+                callmeContactButton("edit", c, "Edit " + c.name), " ",
+                callmeContactButton("delete", c, "Delete " + c.name));
+      return li;
+    }));
+  }
+  const again = focusId && document.getElementById(focusId);
+  if (again) again.focus();
+}
+
+function callmeContactButton(act, contact, label) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.id = "callme-contact-" + act + "-" + contact.code;
+  if (act !== "call") b.className = "secondary";
+  b.dataset.act = act;
+  b.dataset.code = contact.code;
+  b.dataset.name = contact.name;
+  b.textContent = label;
+  return b;
+}
+
+function callmeContactFormReset() {
+  callmeEditing = null;
+  setText("callme-contact-save", "Add contact");
+  document.getElementById("callme-contact-cancel").hidden = true;
+  document.getElementById("callme-contact-name").value = "";
+  document.getElementById("callme-contact-code").value = "";
+}
+
+async function onCallmeContactList(e) {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const { act, code, name } = btn.dataset;
+  if (act === "call") {
+    onCallmeRespond(btn, "/api/callme/dial", { code: code });
+  } else if (act === "edit") {
+    callmeEditing = code;
+    document.getElementById("callme-contact-name").value = name;
+    document.getElementById("callme-contact-code").value = code;
+    setText("callme-contact-save", "Save changes to " + name);
+    document.getElementById("callme-contact-cancel").hidden = false;
+    document.getElementById("callme-contact-name").focus();
+  } else if (act === "delete") {
+    const ok = await confirmAction(
+      "Delete " + name + "?",
+      "This removes " + name + " from the contacts on this computer. A call that is up is not "
+      + "affected.",
+      "Delete");
+    if (!ok) return;
+    const res = await postCallmeContact("/api/callme/contact/delete", { code: code });
+    if (res.ok) {
+      if (callmeEditing === code) callmeContactFormReset();
+      document.getElementById("callme-h-contacts").focus();
+    }
+  }
+}
+
+async function onCallmeContactSave(e) {
+  e.preventDefault();
+  const btn = document.getElementById("callme-contact-save");
+  if (isBusy(btn)) return;
+  setBusy(btn, true);
+  const res = await postCallmeContact("/api/callme/contact/save", {
+    name: document.getElementById("callme-contact-name").value,
+    code: document.getElementById("callme-contact-code").value,
+    was: callmeEditing || "",
+  });
+  setBusy(btn, false);
+  if (!res.ok) return;
+  const wasEditing = callmeEditing;
+  callmeContactFormReset();
+  // An edit returns to the contact's own Edit button; an addition stays in the empty form, ready
+  // for the next one.
+  const back = wasEditing && document.getElementById("callme-contact-edit-"
+                                                      + (res.code || wasEditing));
+  (back || document.getElementById("callme-contact-name")).focus();
+}
+
+async function postCallmeContact(path, body) {
+  let res;
+  try {
+    res = await postJSON(path, body);
+  } catch (e) {
+    res = { ok: false, message: "Could not reach the AccessCaster service." };
+  }
+  setStatus("callme-state", res.message || "Done.");
+  if (res.ok) renderCallmeContacts(res.contacts);
+  return res;
 }
 
 /* Redraw a list's items only when one has changed, so a reader part way down it is not pulled
@@ -8482,6 +8601,23 @@ function wireCallme() {
   // Decline or hang up, decided by the server at the moment of the press rather than by the
   // label, so a call that started ringing a moment ago is declined, not the guest you are with.
   if (end) end.addEventListener("click", () => onCallmeRespond(end, "/api/callme/end"));
+  const extend = document.getElementById("callme-extend");
+  if (extend) {
+    extend.addEventListener("click", () => onCallmeRespond(extend, "/api/callme/extend"));
+  }
+  const auto = document.getElementById("callme-auto-extend");
+  if (auto) {
+    auto.addEventListener("change", async () => {
+      let res;
+      try {
+        res = await postJSON("/api/callme/auto-extend", { on: auto.checked });
+      } catch (e) {
+        res = { ok: false, message: "Could not reach the AccessCaster service." };
+      }
+      if (!res.ok) auto.checked = !auto.checked;
+      setStatus("callme-state", res.message || "Done.");
+    });
+  }
   const dialForm = document.getElementById("callme-dial-form");
   if (dialForm) {
     dialForm.addEventListener("submit", (e) => {
@@ -8491,6 +8627,20 @@ function wireCallme() {
     });
   }
   if (host) host.addEventListener("change", () => onCallmeHosting(host));
+  const contacts = document.getElementById("callme-contacts");
+  if (contacts) contacts.addEventListener("click", onCallmeContactList);
+  const contactForm = document.getElementById("callme-contact-form");
+  if (contactForm) contactForm.addEventListener("submit", onCallmeContactSave);
+  const cancel = document.getElementById("callme-contact-cancel");
+  if (cancel) {
+    cancel.addEventListener("click", () => {
+      const code = callmeEditing;
+      callmeContactFormReset();
+      setStatus("callme-state", "Editing cancelled.");
+      const back = code && document.getElementById("callme-contact-edit-" + code);
+      (back || document.getElementById("callme-contact-name")).focus();
+    });
+  }
   if (copy) {
     copy.addEventListener("click", async () => {
       const why = unavailableReason(copy);
@@ -8890,11 +9040,80 @@ function initSingleInstanceGuard() {
 
 /* ---- init ----------------------------------------------------------- */
 
+/* THE PAGE WATCHES THE SERVER IT WAS LOADED FROM, through the heartbeat below. Each reply names the
+   server's run and version. Without this, a window left open across an upgrade keeps running the
+   OLD page against the NEW server, so anything the new version added simply is not there.
+     - No answer to SERVER_LOST_AFTER pings in a row: a modal says so, once per outage.
+     - A different version answers: say so and reload, so the window runs the new page.
+     - The same version on a new run (a restart): say it is back, no reload. */
+const SERVER_LOST_AFTER = 3;          // missed pings in a row, so a blip is not an outage
+const serverWatch = { seen: null, misses: 0, lostShown: false, reloading: false, returnTo: null };
+
+function noteServer(reply) {
+  const w = serverWatch;
+  if (w.reloading) return;
+  if (reply === null) {
+    w.misses += 1;
+    if (w.misses >= SERVER_LOST_AFTER && !w.lostShown) openServerLost();
+    return;
+  }
+  const wasLost = w.misses >= SERVER_LOST_AFTER;
+  w.misses = 0;
+  if (!reply.instance) return;        // a refusal, or a server too old to say which it is
+  if (w.seen === null) {
+    w.seen = { instance: reply.instance, version: reply.version };
+    return;
+  }
+  if (reply.version !== w.seen.version) {
+    w.reloading = true;
+    closeServerLost();
+    announce("AccessCaster was updated to version " + reply.version + ". Reloading.", true);
+    window.setTimeout(() => window.location.reload(), 2500);
+    return;
+  }
+  if (reply.instance !== w.seen.instance) w.seen.instance = reply.instance;
+  if (wasLost) {
+    w.lostShown = false;
+    closeServerLost();
+    announce("AccessCaster is back.", true);
+  }
+}
+
+function openServerLost() {
+  const dlg = document.getElementById("server-lost-dialog");
+  if (!dlg || dlg.open) return;
+  serverWatch.lostShown = true;
+  serverWatch.returnTo = document.activeElement;
+  dlg.showModal();
+  document.getElementById("server-lost-ok").focus();
+}
+
+function closeServerLost() {
+  const dlg = document.getElementById("server-lost-dialog");
+  if (!dlg || !dlg.open) return;
+  dlg.close();
+  const back = serverWatch.returnTo;
+  if (back && back.isConnected && typeof back.focus === "function") back.focus();
+}
+
 function initAppLifecycle() {
   // The server lives only while a webpage is open. Heartbeat keeps it alive; closing the page
   // (sendBeacon on pagehide) tells it to stop. A reload also fires pagehide, but the reloaded
   // page's first ping cancels the pending shutdown server-side, so refreshing is safe.
-  const ping = () => { fetch("/api/ping", { method: "POST", keepalive: true }).catch(() => {}); };
+  const ping = async () => {
+    let reply = null;
+    try {
+      const resp = await fetch("/api/ping", { method: "POST", keepalive: true });
+      // ANY answer means the server is up, including a refusal: a remote page with a stale token
+      // is not looking at a stopped server.
+      try { reply = await resp.json(); } catch (e) { reply = {}; }
+    } catch (e) {
+      reply = null;
+    }
+    noteServer(reply);
+  };
+  const ok = document.getElementById("server-lost-ok");
+  if (ok) ok.addEventListener("click", closeServerLost);
   ping();
   setInterval(ping, 4000);
   // Browsers throttle (or fully freeze) timers in a hidden/backgrounded tab, so the 4s ping can

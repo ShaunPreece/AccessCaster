@@ -47,17 +47,24 @@ accessible page where you can:
   A second button simply opens RODE's software page if you would rather do it yourself.
 - **SMART pads**: create, clear and reassign sound pads, voice-FX pads, mixer pads and MIDI
   pads, with dynamic banks, and play any pad from the keyboard.
-- **Recording**: start, pause and stop the recorder, choose multitrack or mixed, and see what
-  storage is in the unit and how much room is left.
+- **Recording**: start, pause and stop the recorder, choose multitrack or mixed, see what
+  storage is in the unit and how much room is left, and eject or erase the card or drive.
+- **CallMe**: RODE's remote calls without the touchscreen. Switch hosting on and share the guest
+  link, hear who is calling and answer or decline from a keyboard shortcut in any program, call
+  another RODECaster by its code or from a contacts list, extend a call before the free plan's
+  one-hour limit (or have it extended for you), and set the caller's level and processing like
+  any other channel.
 - **Backups**: one button to back the unit up, and one list to restore it from. A copy of your
   settings and pads is kept on this computer and that is what a restore uses, because asking the
   unit to reload its own copy can lock it up. The unit's own copy is still made alongside, and is
   the fallback when this computer has none.
 - **Presets and mix presets**: mic-processing presets, and mix presets that save the output mixes
   under a name, either the whole desk or a single output.
+- **Firmware**: check whether RODE has a newer firmware for the unit, and hear the answer.
 - **Device settings**: the unit's own display, buttons and haptics, and how its clock is shown
-  (24-hour or 12-hour, daylight saving, whether the time appears on its screen). The time itself
-  is not settable from here: the unit sets its own over the network.
+  (24-hour or 12-hour, whether the time appears on its screen). The time itself is not settable
+  from here: the unit sets its own over the network, and only its touchscreen applies a timezone
+  or daylight saving change.
 - **Wireless**: wifi and Bluetooth, both readable and changeable, including joining a network and
   making the unit discoverable so a phone can pair with it.
 - **MIDI control mode**: the unlock used by Stream Deck and similar setups.

@@ -1109,8 +1109,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Nothing device-specific was needed - `kind == "bus"` already means "chain and mute/solo, no input
   level" everywhere that reads it. The desk confirmed the strip resolution by answering a mute with
   all thirteen of source 11's `mixMute` cross-points, which a dead address could not have faked.
-  **CallMe1 is still out** and must stay out until captured: the tenth strip resolves to source 9,
-  which USB 2 already claims, so a strip lookup for it would land on USB 2's chain.
+  **CallMe 1 (source 16) is on the Channels page** like any line input: its chain is the one on
+  the strip it is on (`channelInputSource.index(16)`), so it has processing only while on a fader.
+  It has no matrix row: its row in the cross-point grid is unmeasured.
 - **A STEREO PAIR JOINS TWO ADJACENT INPUTS, NOT TWO FADERS, AND REASSIGNING FADERS CANNOT CHANGE
   WHICH PAIRS EXIST.** The pair codes are fixed positions in the firmware's input enum: 4 = inputs
   1+2, 5 = inputs 2+3, 6 = inputs 3+4. A fader is a slot you put a source on; the PAIR is formed at
@@ -1157,8 +1158,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Nothing device-specific was needed - `kind == "bus"` already means "chain and mute/solo, no input
   level" everywhere that reads it. The desk confirmed the strip resolution by answering a mute with
   all thirteen of source 11's `mixMute` cross-points, which a dead address could not have faked.
-  **CallMe1 is still out** and must stay out until captured: the tenth strip resolves to source 9,
-  which USB 2 already claims, so a strip lookup for it would land on USB 2's chain.
+  **CallMe 1 (source 16) is on the Channels page** like any line input: its chain is the one on
+  the strip it is on (`channelInputSource.index(16)`), so it has processing only while on a fader.
+  It has no matrix row: its row in the cross-point grid is unmeasured.
 - **WHETHER THE PADS BUS TAKES PROCESSING AT ALL IS OPEN, ON BOTH DESKS.** The MUTE is settled: heard
   on a Duo 2nd September 2026, and the desk mutes all 13 cross-points of source 11 itself. The CHAIN
   is not. `channelPan` hard over on the bus did nothing, and the control is what makes that worth
@@ -1328,6 +1330,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **"Expiring" is a connected state.** A call on the Lite or standard plan spends its last five
   minutes in it, so everything that asks "is a call up" uses `callme.CONNECTED` / `callme.UP`,
   never `== "Active"`: a bare comparison makes the Hang up button refuse a live call.
+- **Extend is a PAIR, `sipSlotCallExtend` = (True, True) on the slot node** (`callme.build_extend`),
+  captured from the touchscreen. A single bool is stored and ignored. Auto-extend runs from the
+  Watcher's `on_expiring` hook, which is called under the Watcher's lock, so it only starts a
+  thread.
 - **The call id comes from the `sipIncomingCallDetails` push, never from a counter.** It rises by one
   per call today, but nothing promises that.
 - **Both calls that went Active had CallMe 1 (source code 16) on a fader**, so whether a call
@@ -1917,6 +1923,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   locally, so setting it never has to cross the wire. **The timezone is the same shape**: applying
   one is `ln -sf <zoneinfo> /etc/localtime`, written by the touchscreen app, which is why
   `systemDateTimezone` stores our writes and does nothing. Do not re-hunt for a property.
+  **`systemDateTimeDaylightSavings` is the same shape** (3rd October 2026, watched on a webcam): a
+  write reads back and the clock on the screen stays an hour out. Both are profile-only, off the
+  Device page. Seen working on the same camera: `systemDateTime24h`, `systemDateTimeOnHome`,
+  `screenBrightness`, `autoBrightness` and `activeButtonsBrightness`.
   **SETTING THE CLOCK IS UNSOLVED AND PARKED, and the NTP idea is THEORY ONLY** (Shaun's ruling,
   30th August 2026). The only route in is DNS - the desk believes whatever answers as
   `pool.ntp.org` - and every way of controlling that answer means the USER reconfiguring their
@@ -2259,6 +2269,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - It now refuses outright when the desk is not answering, rather than writing into the dark.
 
 ## The server's lifecycle, and why it cannot be reasoned about from outside
+
+- **AN OPEN PAGE OUTLIVES ITS SERVER, so the page watches it** (`noteServer` in app.js). A window
+  left open across an upgrade otherwise runs the OLD page against the NEW server, and anything the
+  new version added is missing with no error. The `/api/ping` reply carries `_INSTANCE_ID` and the
+  version; three missed pings open `server-lost-dialog`, and a different version reloads the page.
+  Any HTTP answer counts as alive (a remote page with a stale token is refused, not stopped). The
+  dialog's text never changes while open, because NVDA does not read changes inside an open
+  dialog: recovery closes it and speaks outside it. A page from before this existed cannot do any
+  of it, so the first upgrade past it still needs the old window closed by hand.
 
 - **THE TRAY BUILD HAS NO WATCHDOG.** `start_server_managed` passes `watchdog=False`, deliberately:
   the app lives in the tray until Quit, so closing the page must not stop it. Only

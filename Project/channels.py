@@ -191,7 +191,7 @@ PROC_CHANNEL_ORDER = ["Mic1", "Mic2", "Mic3", "Mic4", "Bluetooth", "SMARTpads",
 def _static_proc_index(channel) -> int:
     """Legacy FIXED-layout channel -> processing index (Pro II). `channel` is a 1-based index into
     PROC_CHANNEL_ORDER (1=Mic1 ... 5=Bluetooth ... 10=CallMe1) or a name in it.
-    Used for channels a device does not list in ui_channels (e.g. the Pro II CallMe1 return)."""
+    Used for channels a device does not list in ui_channels."""
     if isinstance(channel, str):
         if channel not in PROC_CHANNEL_ORDER:
             raise ValueError(f"unknown channel {channel!r}; known: {PROC_CHANNEL_ORDER}")
@@ -344,7 +344,7 @@ def _strip_index(entry) -> int:
 
 def _channel_strip(channel) -> int:
     """Resolve any channel identifier to its device strip index (device-aware). Falls back to the
-    legacy fixed mapping for channels a device does not list in ui_channels (e.g. Pro II CallMe1)."""
+    legacy fixed mapping for channels a device does not list in ui_channels."""
     dev = devices.get_active_device()
     entry = _ui_entry_for(dev, channel)
     if entry is not None:

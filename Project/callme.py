@@ -38,6 +38,7 @@ END_REASONS = {
     "rtp stream error": "the call's audio could not connect",
     "486 rejected": "they declined the call",
     "404 not found": "no RODECaster has that code",
+    "408 request timeout": "nobody answered",
     "idle timeout": "it reached the plan's one-hour limit",
 }
 # A call is CONNECTED while Active, and still while Expiring: the state the Lite and standard plans
@@ -126,11 +127,79 @@ def end_reason(reason: str) -> str:
 
 def peer_name(address) -> str:
     """Who a call is with, in words. A dialled RODECaster reads back as "rode:<code>", which is
-    spoken as the code one character at a time; a guest's own name is used as it is."""
+    the contact's name if the code is saved, else the code spoken one character at a time; a
+    guest's own name is used as it is."""
     text = utf8(address or "")
     if text.lower().startswith(RODE_PREFIX):
-        return "RODECaster " + spell(text[len(RODE_PREFIX):].upper())
+        code = text[len(RODE_PREFIX):].upper()
+        return contact_name(code) or "RODECaster " + spell(code)
     return text
+
+
+# ---------------------------------------------------------------------------------------------
+# CONTACTS: names for RODECaster codes, kept on this computer.
+# ---------------------------------------------------------------------------------------------
+# A code belongs to RODE's service, which issues a new one each time its owner switches hosting
+# off and on. So an entry can go stale and nothing on this side can learn the new code; only its
+# owner can say it. The server owns the stored list and hands it here with set_contacts.
+
+_contacts: dict = {}        # code -> name
+
+
+def clean_contacts(raw) -> list:
+    """Stored contacts as [{"name", "code"}], sorted by name, with anything malformed dropped."""
+    out, seen = [], set()
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict):
+            continue
+        name = " ".join(str(c.get("name") or "").split())
+        code = normalise_code(c.get("code"))
+        if name and code and code not in seen:
+            seen.add(code)
+            out.append({"name": name, "code": code})
+    return sorted(out, key=lambda c: c["name"].lower())
+
+
+def set_contacts(contacts) -> None:
+    global _contacts
+    _contacts = {c["code"]: c["name"] for c in clean_contacts(contacts)}
+
+
+def contact_name(code) -> str:
+    """The saved name for a code, or ""."""
+    return _contacts.get(normalise_code(code), "")
+
+
+def save_contact(contacts: list, name, code, was="") -> tuple:
+    """(new list, message) adding a contact, or replacing the one whose code is `was`.
+    The list is None when the entry is refused, and the message says why."""
+    name = " ".join(str(name or "").split())
+    code = normalise_code(code)
+    was = normalise_code(was)
+    if not name:
+        return None, "Type a name for the contact."
+    if not code:
+        return None, "Type their CallMe code, letters and numbers only."
+    others = [c for c in clean_contacts(contacts) if c["code"] != was]
+    for c in others:
+        if c["code"] == code:
+            return None, f"That code is already saved as {c['name']}."
+        if c["name"].lower() == name.lower():
+            return None, f"You already have a contact called {c['name']}."
+    new = clean_contacts(others + [{"name": name, "code": code}])
+    verb = "Updated" if was else "Saved"
+    return new, f"{verb} {name}, code {spell(code)}."
+
+
+def delete_contact(contacts: list, code) -> tuple:
+    """(new list, message) without the contact whose code is `code`. None if there is no such
+    contact."""
+    code = normalise_code(code)
+    cur = clean_contacts(contacts)
+    gone = next((c for c in cur if c["code"] == code), None)
+    if gone is None:
+        return None, "That contact is not saved."
+    return [c for c in cur if c["code"] != code], f"Deleted {gone['name']}."
 
 
 def normalise_code(text) -> str:
@@ -223,6 +292,20 @@ def build_hangup(path) -> list:
     return [rec(False), rec(True)]
 
 
+def build_extend(path) -> list:
+    """Extend the expiring call on the slot at `path`: two records, sent in order.
+
+    `sipSlotCallExtend` is a pair of bools, and the touchscreen's Extend leaves it at (True, True).
+    A single bool is stored and ignored. The pair is lowered first and then raised, the shape the
+    hang-up pair needs, because a write of the value already held may do nothing; whether Extend
+    strictly needs the lowering is unmeasured."""
+    def rec(on: bool) -> bytes:
+        flag = _block(b"\x02" if on else b"\x03")
+        return rcp_transfer._frame(rcp_transfer.build_address(list(path))
+                                   + b"sipSlotCallExtend\x00" + _block(b"\x08" + flag + flag))
+    return [rec(False), rec(True)]
+
+
 def build_dial(code: str, slot: int, path) -> list:
     """Call the RODECaster with `code` from `slot`: two records, sent in order.
 
@@ -255,6 +338,8 @@ def _slot_view(n: int, props: dict) -> dict:
     loss = props.get("sipSlotCallPacketLoss")
     return {"slot": n, "state": state, "reason": reason,
             "peer": peer_name(props.get("sipSlotCallAddress")) if state != "Idle" else "",
+            # Identifies one call across re-seeds, which is what keeps its length counting.
+            "uuid": props.get("sipSlotCallUUID") or "",
             # True for a call that came IN (this unit is hosting it), False for one placed here.
             "incoming": bool(props.get("sipSlotCallIsHost")),
             # Bumped by the Watcher each time a call on this slot ends, so a caller waiting on the
@@ -350,13 +435,25 @@ def call_now(d: dict) -> str:
     return " ".join(parts)
 
 
-def call_details(d: dict) -> list:
-    """The technical side of each connected call, as (label, value) pairs. Empty with no call up.
-    `sipSlotCallQuality` is left out: its scale is unknown, and 2 is the only value ever seen."""
+def describe_length(seconds: float, exact: bool = True) -> str:
+    """A call's length in whole minutes. Not exact when the app started mid-call, so "at least"."""
+    m = int(max(0, seconds) // 60)
+    text = "less than a minute" if m == 0 else describe_minutes(m)
+    return text if exact else f"at least {text}"
+
+
+def call_details(d: dict, now: float | None = None) -> list:
+    """Each connected call's length and technical side, as (label, value) pairs. Empty with no call
+    up. `sipSlotCallQuality` is left out: its scale is unknown, and 2 is the only value ever seen.
+    The desk publishes no start time, so the length is the Watcher's own count from Active."""
+    now = time.time() if now is None else now
     out = []
     live = [s for s in _live(d) if s.get("state") in CONNECTED]
     for s in live:
         tag = f"Call {s['slot']} " if len(live) > 1 else ""
+        if s.get("since"):
+            out.append((tag + "Call length",
+                        describe_length(now - s["since"], s.get("since_exact", True))))
         if s.get("bitrate_kbps") is not None:
             out.append((tag + "Bitrate", f"{s['bitrate_kbps']} kilobits a second"))
         out.append((tag + "Audio lost", _loss_words(s.get("packet_loss"))))
@@ -409,10 +506,13 @@ class Watcher(threading.Thread):
     back from a replug is re-read before its pushes are trusted, and every full page read re-seeds
     it too (`seed`). A push that arrives before any seed is dropped."""
 
-    def __init__(self, on_say=None, read_model=None):
+    def __init__(self, on_say=None, read_model=None, on_expiring=None):
         super().__init__(daemon=True, name="callme-watch")
         self._on_say = on_say
         self._read_model = read_model
+        # Called with the slot index when a call goes Expiring, under the Watcher's lock, so it
+        # must not block. True means it is extending the call and the warning goes unsaid.
+        self._on_expiring = on_expiring
         self._lock = threading.Lock()
         self._state = None              # the read() shape, kept current from pushes
         self._ctl = None
@@ -420,6 +520,7 @@ class Watcher(threading.Thread):
         self._handled = set()           # call ids answered or declined, whose clear is not news
         self._quiet = set()             # slot indices whose next "Connected" the reply speaks
         self._quiet_end = set()         # slot indices whose next "ended" the reply speaks
+        self._since = {}                # call uuid -> (connected at, exact): see since_for
         self.version = 0                # bumped on every change the page would show
         self.running = True
 
@@ -436,6 +537,10 @@ class Watcher(threading.Thread):
             self._state = d
             self._ctl = control_path(root)
             self._slots = slot_paths(root)
+            # A call already up when first seen started at some unknown earlier time.
+            for s in d.get("slots", []):
+                if s.get("state") in CONNECTED and s.get("uuid") and s["uuid"] not in self._since:
+                    self._since[s["uuid"]] = (time.time(), False)
             self.version += 1
 
     def quiet_connect(self, slot_index: int, on: bool) -> None:
@@ -453,7 +558,14 @@ class Watcher(threading.Thread):
                 return None
             d = json.loads(json.dumps(self._state))
             d["version"] = self.version
+            for s in d.get("slots", []):
+                s["since"], s["since_exact"] = self._since.get(s.get("uuid"), (None, None))
             return d
+
+    def since_for(self, uuid) -> tuple:
+        """(time the call connected, whether that is exact) for a call, or (None, None)."""
+        with self._lock:
+            return self._since.get(uuid, (None, None))
 
     def quiet_end(self, slot_index: int, on: bool) -> None:
         """The same as quiet_connect, for a call this app is hanging up."""
@@ -562,17 +674,26 @@ class Watcher(threading.Thread):
         if name == "sipSlotCallIsHost" and isinstance(value, bool):
             s["incoming"] = value
             return True
+        if name == "sipSlotCallUUID":
+            s["uuid"] = value if isinstance(value, str) else ""
+            return True
         if name == "sipSlotCallState":
             state, reason = parse_slot_state(value)
             was = s.get("state")
             s["state"], s["reason"] = state, reason
             who = s.get("peer") or "the guest"
             if state == "Expiring" and was != "Expiring":
-                # Extending is touchscreen-only until what its Extend writes is known: writing
-                # sipSlotCallExtend True is stored and ignored.
-                say.append(f"Call with {who} ends in five minutes. Only the unit's screen can "
-                           f"extend it.")
+                if not (self._on_expiring and self._on_expiring(i)):
+                    say.append(f"Call with {who} ends in five minutes unless you extend it.")
+            elif state == "Active" and was == "Expiring":
+                # Extended, here or on the unit's screen.
+                if i in self._quiet:
+                    self._quiet.discard(i)
+                else:
+                    say.append(f"Call with {who} extended.")
             elif state == "Active" and was not in CONNECTED:
+                if s.get("uuid"):
+                    self._since[s["uuid"]] = (time.time(), True)
                 if i in self._quiet:
                     self._quiet.discard(i)
                 else:

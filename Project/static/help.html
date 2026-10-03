@@ -87,8 +87,9 @@
         <li>Searching for Bluetooth devices or starting a pairing from this end. Making the unit
           discoverable, and pairing from your phone, does work. The radio simply ignores the request
           when it arrives over USB; this was tested three separate ways rather than assumed.</li>
-        <li>Setting the unit's date and time. It sets its own clock over the internet, and the only
-          way to change it by hand is the touchscreen.</li>
+        <li>Setting the unit's date and time, its time zone, or daylight saving. It sets its own
+          clock over the internet, and only the touchscreen applies a time zone or daylight saving
+          change: the unit stores one sent from here and leaves the clock where it was.</li>
         <li>Setting a fixed IP address. This is the unit's own limitation rather than mine, and it
           was tested on the desk rather than assumed: it reports the address, subnet and gateway it
           currently has, but gives no way to set them.</li>
@@ -146,8 +147,8 @@
         <li>What this computer sends the unit: either as one stereo input, or split into four separate ones (Game, Music, A and B), each on its own fader, so music, a call, a game and your screen reader arrive as four channels instead of one and can be faded apart. Set it up with RODE's Virtual Devices driver installed and the app points Windows' sound output at the unit for you.</li>
         <li>Muting a whole output: the monitor speakers, or the Bluetooth send, plus the level a paired phone hears from the desk. None of these touch your mixes, your recording or your streams, only what somebody hears.</li>
         <li>The unit's own recorder: start, pause, resume and stop, drop a marker while you record, hear what it is doing and how long it has been going, read the list of what is already on the card or drive, and delete a recording you no longer want. What it records, a single mixed track or every channel on its own, is set here too, as is whether it saves a full-quality WAV or a smaller MP3.</li>
-        <li>CallMe guests: switch on hosting, read out the unit's code and copy the link a guest opens in their browser, hear who is calling, answer or decline from the page or from a keyboard shortcut in any program, call another RODECaster by its code, hang up, and hear when a call connects and ends. Call quality and the minutes left on your plan are on the page too. On a RODECaster Pro 2; the touchscreen is otherwise the only way to take a call.</li>
-        <li>How the unit's clock is shown: 24-hour or 12-hour, daylight saving, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
+        <li>CallMe guests: switch on hosting, read out the unit's code and copy the link a guest opens in their browser, hear who is calling, answer or decline from the page or from a keyboard shortcut in any program, call another RODECaster by its code or from your contacts, hang up, and hear when a call connects and ends. Extend a call before the plan's one-hour limit, or have it extended for you. The call's length, its quality and the minutes left on your plan are on the page too, and the CallMe channel has its own level and processing on the Channels page. The touchscreen is otherwise the only way to take a call.</li>
+        <li>How the unit's clock is shown: 24-hour or 12-hour, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
         <li>Level meters in words: a background watch that stays quiet until it has news, telling you when a stream clips or goes silent, and an optional level spoken on a timer while you set gains. Read from the unit's USB audio streams through Windows rather than from the unit's own meters.</li>
         <li>SMART pads: put sounds, voice effects, mixer actions or MIDI triggers on any pad; rename, and set volume, colour, loop and restart behaviour; trim a sound and fade it in and out; clear one pad or all of them; and build your own custom voice effect with a live preview. Mixer pads add latching or momentary triggering, and Back Channel pads let you pick who is in the off-air room. You can also copy a pad's sound back to this computer, and tidy up sound files no pad plays any more.</li>
         <li>Backups: one list and one button. The unit keeps its own complete copy on its card or drive when there is one, this computer keeps the settings and pads either way, and a restore uses whichever is still there. Either written over what is on the desk, or with the unit reset to factory first so it matches the backup exactly.</li>
@@ -299,7 +300,7 @@
       <p>
         Pick one channel and set everything for it in one place. This covers every input
         channel your unit has: its microphones and its line channels (such as Bluetooth,
-        USB, Headset and Chat), plus the SMART pads mix, which has a mute and a solo here but no
+        USB, Headset, Chat and CallMe 1, the remote caller), plus the SMART pads mix, which has a mute and a solo here but no
         level and no processing: its level is its own fader, and the unit applies no processing to
         the pads. The list of channels matches the device you are connected to.
       </p>
@@ -840,17 +841,25 @@
       <dl class="help-list">
         <dt>Call</dt>
         <dd>One line says what is happening: nothing, who is calling, who you are calling, or who
-          you are talking to, and after a call, why it ended. Below it are two buttons. Answer takes
+          you are talking to, and after a call, why it ended. Below it are three buttons. Answer takes
           a ringing call. The second is named for what it will do: Decline while a call is ringing,
           Hang up otherwise, and it always turns a ringing call away first, so a second caller
           arriving mid-conversation is declined rather than the guest you are with being cut off.
+          The third, Extend the call, works in a call's last five minutes; see The one-hour limit.
           The keyboard shortcuts do the same from any program: Ctrl, Alt and Shift with C answers,
-          and with D declines or hangs up. A call nobody answers stops ringing after two minutes
+          or with nothing ringing extends a call that is about to end, and with D declines or
+          hangs up. A call nobody answers stops ringing after two minutes
           and is announced as missed. Answer says when the call has connected, which is the only
           real proof: the unit can accept a call whose sound then never starts, and that is
-          reported rather than called a success. While a call is connected, its technical details
-          follow the buttons, one to a line: the bitrate, how much audio is being lost, and the
+          reported rather than called a success. While a call is connected, its details follow the
+          buttons, one to a line: how long it has been going, the bitrate, how much audio is being
+          lost, and the
           jitter.</dd>
+        <dt>The one-hour limit</dt>
+        <dd>On RODE's free and standard plans a call ends after an hour unless it is extended. Five
+          minutes before, the announcer says so, and Extend the call, or the answer shortcut, gives
+          it another hour. Switch on Extend calls automatically and AccessCaster does it for you and
+          says so.</dd>
         <dt>You need CallMe on a fader to hear a guest</dt>
         <dd>A call can be answered with CallMe on no fader, but then the guest is heard nowhere. The
           page warns you when that is the case; put CallMe 1 on a fader on Routing, under Faders.</dd>
@@ -872,6 +881,13 @@
           link they have sent you works too. The page says straight away whether the call is
           ringing, or why not: no RODECaster has that code, or they declined. When they answer, the
           announcer says you are connected. Hang up ends it while it is still ringing, too.</dd>
+        <dt>Contacts</dt>
+        <dd>Save a name with a RODECaster's code and calls to that unit are announced and shown by
+          the name. Each contact has its own Call, Edit and Delete buttons, and each can go on a
+          keyboard shortcut as "Call" and the name. A unit's code changes whenever its owner
+          switches incoming calls off and on, so if a call to a contact says no RODECaster has that
+          code, ask them for the new one and edit the contact. Contacts are kept on this computer
+          and travel with "Save this app's settings to a file".</dd>
       </dl>
 
       <h3>Backups (Alt+6)</h3>
@@ -975,7 +991,7 @@
         <dt>This app's own settings</dt>
         <dd>
           Last on the page, and the one part of it that is about AccessCaster rather than the unit.
-          Your keyboard shortcuts, your announcement preferences and your level warnings belong to
+          Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong to
           the app, so no backup of the desk carries them and reinstalling would lose them: "Save this app's
           settings to a file" writes them all into one small file you can keep somewhere safe or
           copy to another computer, and "Restore these settings" reads one back, with your shortcuts
@@ -1037,12 +1053,11 @@
           fader is doing, which is what you want for checking a mic that is currently faded down;
           after-fader listen hears it as the fader has it set, so a fader all the way down means
           silence. Then the clock settings
-          (24-hour, daylight saving, and whether the time shows on the unit's screen), and three
+          (24-hour, and whether the time shows on the unit's screen), and three
           lockouts that can lock the unit's physical buttons or silence every headphone or line
-          output. The time itself and the timezone are not here: the unit sets its own clock over
-          the network, and the only manual way in is its touchscreen. Daylight saving is the one it
-          will not do for itself, so it needs changing twice a year, and until it is changed every
-          recording is stamped an hour out. They are read from the unit
+          output. The time itself, the timezone and daylight saving are not here: the unit sets its
+          own clock over the network, and it only applies a timezone or daylight saving change made
+          on its own touchscreen. They are read from the unit
           each time you open the tab, and a backup holds them and puts them back. They work on
           both units. Last on the tab is the MIDI switch:
           turning it on lets an external MIDI app or controller handle mute, faders, listen and
@@ -1095,7 +1110,7 @@
           key you press decides what happens. A new install starts with seven of its own: turn
           announcements off and on, mute every mic and open them again (the cough key), start or
           stop a recording, hear what the unit is doing, bring this window to the front, answer a
-          CallMe call (C), and decline one or hang up (D). A list you already had does not gain those two on
+          CallMe call or extend one about to end (C), and decline one or hang up (D). A list you already had does not gain those two on
           its own: add them from the CallMe kind. The
           SMART pad keys are there from the start too, described below. "Add the SMART pad
           shortcuts" is for anyone who has cleared them, or who had a list from before they
@@ -1195,9 +1210,16 @@
       </p>
       <p>
         Reach the icon with the Windows key and B, then arrow to AccessCaster and press the
-        applications key or Enter. Its menu holds three things: Open AccessCaster, which brings this
+        applications key or Enter. Its menu holds four things: Open AccessCaster, which brings this
         page back, Announcer, which switches spoken announcements off and on and is ticked while
-        they are on, and Quit, which stops the program properly, shortcut keys and all.
+        they are on, Diagnostic log, which opens the app's own record of what it sent to the unit,
+        and Quit, which stops the program properly, shortcut keys and all.
+      </p>
+      <p>
+        If the program stops while this window is open, because it was quit, updated or crashed,
+        the window tells you so in a dialog after about twelve seconds, since nothing on the page
+        can work without it. When the program comes back, the window says so; if it came back as
+        a newer version, the window reloads itself so you are using the new page.
       </p>
 
       <h3>If the unit stops responding</h3>

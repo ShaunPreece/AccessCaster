@@ -1513,7 +1513,8 @@
       </p>
 
       <p class="note" role="note">
-        Your keyboard shortcuts, announcement preferences and level warnings belong to AccessCaster
+        Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong
+        to AccessCaster
         rather than to the unit, so no profile carries them and reinstalling would lose them. Saving
         them here writes one small file you can copy to another computer or keep somewhere safe. It
         contains nothing about the desk and no remote-access token, so it is safe to email to
@@ -1704,20 +1705,31 @@
       <p id="callme-fader-note" class="note" role="note" hidden></p>
 
       <!-- FIRST, because it is the one thing on this page with a deadline: an unanswered call
-           stops ringing after two minutes. TWO BUTTONS, and the second one's label follows the
-           state (Decline while ringing, Hang up otherwise), the same pattern as the Recording
-           page's transport. Both stay in the tab order when they cannot act and say why when
-           pressed. -->
+           stops ringing after two minutes. The second button's label follows the state (Decline
+           while ringing, Hang up otherwise), the same pattern as the Recording page's transport.
+           Extend is live only in the call's last five minutes on a plan with an hour limit. All
+           three stay in the tab order when they cannot act and say why when pressed. -->
       <h2 id="callme-h-call">Call</h2>
       <div>
         <p id="callme-now">Reading the unit...</p>
         <p>
           <button type="button" id="callme-answer">Answer</button>
           <button type="button" class="secondary" id="callme-end">Hang up</button>
+          <button type="button" class="secondary" id="callme-extend">Extend the call</button>
         </p>
         <!-- The technical side of a connected call, after the buttons so it is there to find and
              never in the way. Empty and hidden with no call up. -->
         <ul id="callme-details" aria-label="Call details" hidden></ul>
+        <p class="field">
+          <label class="switch">
+            <input type="checkbox" id="callme-auto-extend" aria-describedby="callme-auto-extend-hint">
+            <span>Extend calls automatically</span>
+          </label>
+        </p>
+        <p class="hint" id="callme-auto-extend-hint">
+          On plans that end a call after an hour, extend it five minutes before the end, so a call
+          never cuts off. The answer shortcut also extends a call that is about to end.
+        </p>
       </div>
 
       <h2 id="callme-h-dial">Call a RODECaster</h2>
@@ -1735,6 +1747,36 @@
           <button type="submit" id="callme-dial">Call</button>
         </p>
       </form>
+
+      <!-- A contact names a code everywhere a call is spoken or shown. Each row's buttons carry
+           the contact's name, so a list of "Call" buttons is never ambiguous out of context. -->
+      <h2 id="callme-h-contacts" tabindex="-1">Contacts</h2>
+      <div>
+        <ul id="callme-contacts" aria-labelledby="callme-h-contacts">
+          <li>Reading the unit...</li>
+        </ul>
+        <form id="callme-contact-form" novalidate>
+          <div class="field">
+            <label for="callme-contact-name">Name</label>
+            <input type="text" id="callme-contact-name" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="callme-contact-code">CallMe code</label>
+            <input type="text" id="callme-contact-code" autocomplete="off" spellcheck="false"
+                   aria-describedby="callme-contact-hint">
+          </div>
+          <p class="hint" id="callme-contact-hint">
+            Their code, or a guest link they have sent you. A code changes whenever its owner
+            switches incoming calls off and on, so if a call to a contact fails, ask them for the
+            new one.
+          </p>
+          <p>
+            <button type="submit" id="callme-contact-save">Add contact</button>
+            <button type="button" class="secondary" id="callme-contact-cancel" hidden>Cancel
+              editing</button>
+          </p>
+        </form>
+      </div>
 
       <h2 id="callme-h-hosting">Letting guests call in</h2>
       <div>
@@ -2032,6 +2074,20 @@
     <div class="dialog-actions">
       <button type="button" id="delete-cancel-btn">Cancel</button>
       <button type="button" class="primary" id="delete-confirm-btn">Delete</button>
+    </div>
+  </dialog>
+
+  <!-- The server this page came from has stopped answering (app.js noteServer). Its text never
+       changes while open, because NVDA does not read content that changes inside an open dialog:
+       recovery closes it and speaks outside it. -->
+  <dialog id="server-lost-dialog" role="alertdialog"
+          aria-labelledby="server-lost-title" aria-describedby="server-lost-desc">
+    <h2 id="server-lost-title">AccessCaster has stopped</h2>
+    <p id="server-lost-desc">This window cannot reach the AccessCaster service, so nothing on it
+      will work. If AccessCaster is being updated or restarted, this window reloads or carries on
+      by itself when it is back. Otherwise, start AccessCaster again from the Start menu.</p>
+    <div class="dialog-actions">
+      <button type="button" id="server-lost-ok">OK</button>
     </div>
   </dialog>
 

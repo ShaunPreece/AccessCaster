@@ -197,7 +197,28 @@ w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 said.clear()
 w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 check("five minutes' warning is spoken", said,
-      ["Call with Shaun ends in five minutes. Only the unit's screen can extend it."])
+      ["Call with Shaun ends in five minutes unless you extend it."])
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+check("an extension on the unit is spoken", said[-1], "Call with Shaun extended.")
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+ext = []
+for r in callme.build_extend(SLOTS[0]):
+    n = int.from_bytes(r[1:5], "little")
+    path, name, value, _k, _e = model_tree.parse_record(r[5:5 + n])
+    ext.append((tuple(path), name, value))
+check("extend lowers the pair, then raises both, as the touchscreen leaves it",
+      [e[2] for e in ext],
+      [[(False, "bool"), (False, "bool")], [(True, "bool"), (True, "bool")]])
+check("both on the call's slot", {e[:2] for e in ext}, {(tuple(SLOTS[0]), "sipSlotCallExtend")})
+auto, auto_said = watcher()
+asked = []
+auto._on_expiring = lambda i: asked.append(i) or True
+auto.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
+auto.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+auto_said.clear()
+auto.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+check("auto-extend is asked with the slot", asked, [0])
+check("and the warning goes unsaid while it extends", auto_said, [])
 check("an expiring call is still connected", w.snapshot()["slots"][0]["state"] in callme.CONNECTED,
       True)
 check("and still up, so it can be hung up", callme.end_label({"incoming": None}), "Hang up")
@@ -242,6 +263,45 @@ check("a slot the plan does not have is ignored", w.version, v)
 unseeded_said = []
 callme.Watcher(on_say=unseeded_said.append).apply(CTL, "sipIncomingCallDetails", DETAILS)
 check("nothing is spoken before a seed", unseeded_said, [])
+
+print("\nCALL LENGTH")
+w, said = watcher()
+w.apply(SLOTS[0], "sipSlotCallUUID", "abc")
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+s0 = w.snapshot()["slots"][0]
+check("a call seen connecting is timed exactly", (s0["since"] is not None, s0["since_exact"]),
+      (True, True))
+check("its length leads the details",
+      callme.call_details(w.snapshot(), now=s0["since"] + 3900)[0], ("Call length", "1 hour 5 minutes"))
+check("under a minute", callme.describe_length(30), "less than a minute")
+check("a call already up when the app started says 'at least'",
+      callme.describe_length(600, exact=False), "at least 10 minutes")
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+check("an extension does not restart the count", w.snapshot()["slots"][0]["since"], s0["since"])
+
+print("\nCONTACTS")
+book, msg = callme.save_contact([], " Steven ", "https://callme.rode.com/s?c=xy34zw")
+check("a guest link is saved as its code", book, [{"name": "Steven", "code": "XY34ZW"}])
+check("saving says so, code spelt", msg, "Saved Steven, code X Y 3 4 Z W.")
+check("a duplicate code is refused", callme.save_contact(book, "Steve", "XY34ZW")[1],
+      "That code is already saved as Steven.")
+check("a duplicate name is refused", callme.save_contact(book, "steven", "ABC123")[1],
+      "You already have a contact called Steven.")
+check("a name is required", callme.save_contact(book, " ", "ABC123")[0], None)
+book2, _ = callme.save_contact(book, "Steven", "XYZ789", was="XY34ZW")
+check("an edit replaces the entry, not adds one", book2, [{"name": "Steven", "code": "XYZ789"}])
+check("a malformed stored entry is dropped",
+      callme.clean_contacts([{"name": "A", "code": "!!"}, "junk", {"name": "B", "code": "b1"}]),
+      [{"name": "B", "code": "B1"}])
+callme.set_contacts(book)
+check("a saved code is spoken by name", callme.peer_name("rode:xy34zw"), "Steven")
+check("an unsaved code is still spelt", callme.peer_name("rode:AB12CD"), "RODECaster A B 1 2 C D")
+check("deleting", callme.delete_contact(book, "XY34ZW"), ([], "Deleted Steven."))
+check("deleting what is not there", callme.delete_contact(book, "ZZZ"),
+      (None, "That contact is not saved."))
+callme.set_contacts([])
 
 print()
 if FAILS:

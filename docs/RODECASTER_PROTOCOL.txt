@@ -1392,9 +1392,11 @@ software replaces the operational controls directly, not by puppeteering the kno
   stored and ignored, so a redial of the same code first writes the factory value,
   a plain empty string (01 02 05 00), which starts nothing.
   The slot goes Connecting at once with sipSlotCallAddress "rode:<code>". An unknown
-  code ends 0.4 s later as "404 Not Found"; a declined call as "486 Rejected".
-  Dialling your OWN code rings your own desk as an incoming call. Whether an
-  outgoing call reaches Active has not been seen yet: it needs a second desk.
+  code ends 0.4 s later as "404 Not Found"; a declined call as "486 Rejected"; a
+  call nobody answers as "408 Request Timeout" (3rd October 2026).
+  Dialling your OWN code rings your own desk as an incoming call. Answered on the
+  other desk, the slot goes Active exactly as an incoming call does (Pro II to Duo,
+  3rd October 2026).
 
   HANGING UP is sipSlotCallDisconnect on the call's SLOT node, a COMPOSITE of two
   bools. The desk ends the call when the FIRST bool RISES from False to True;
@@ -1413,9 +1415,11 @@ software replaces the operational controls directly, not by puppeteering the kno
   THE ONE-HOUR LIMIT (Lite and standard plans; measured on Lite, 3rd October 2026).
   55 minutes into a call the slot goes "Expiring", with no other push; the
   touchscreen then offers Extend. Unextended, it goes Idle, "Idle timeout", exactly
-  five minutes later. Writing sipSlotCallExtend True during Expiring, or False then
-  True, is STORED AND IGNORED: the call still ended at the hour. What the
-  touchscreen's Extend writes is not known yet. Our own decline (sip_slot -1) clears the ringing call at once. Alongside it:
+  five minutes later. The touchscreen's Extend leaves sipSlotCallExtend (on the
+  call's slot node) at a PAIR of bools, (True, True), and the slot goes straight
+  back to Active (logged 3rd October 2026). Writing a single bool True, or False
+  then True, is STORED AND IGNORED. AccessCaster writes (False, False) then
+  (True, True), the shape the hang-up pair needs. Our own decline (sip_slot -1) clears the ringing call at once. Alongside it:
   sipSlotCallAddress (the peer name), sipSlotCallUUID, sipSlotCallMode,
   sipSlotCallIsHost. While Active, sipSlotCallBitrate, sipSlotCallPacketLoss,
   sipSlotCallJitter (floats) and sipSlotCallQuality (int) are pushed EVERY SECOND.

@@ -302,17 +302,32 @@ def _run_rec(arg: str) -> str:
 
 def _callme_commands() -> list:
     return [
-        _cmd("callme.answer", "CallMe", "Answer the CallMe call"),
+        _cmd("callme.answer", "CallMe", "Answer the CallMe call, or extend one about to end"),
         _cmd("callme.decline", "CallMe", "Decline the CallMe call"),
         _cmd("callme.hangup", "CallMe", "Hang up the CallMe call"),
         _cmd("callme.end", "CallMe", "Decline the ringing CallMe call, or else hang up"),
+        _cmd("callme.extend", "CallMe", "Extend the CallMe call before the hour runs out"),
         _cmd("callme.status", "CallMe", "Say who is calling and who is connected"),
         _cmd("callme.hosting", "CallMe", "CallMe hosting on or off"),
-    ]
+    ] + _callme_contact_commands()
+
+
+def _callme_contact_commands() -> list:
+    # BOUND BY NAME, NOT BY CODE: a code is what gets edited when its owner's changes, and the
+    # shortcut has to survive that edit.
+    import server
+    return [_cmd(f"callme.contact:{c['name']}", "CallMe", f"Call {c['name']}")
+            for c in server._callme_contacts()]
 
 
 def _run_callme(arg: str) -> str:
     import server
+    if arg.startswith("contact:"):
+        name = arg.partition(":")[2]
+        c = next((c for c in server._callme_contacts() if c["name"].lower() == name.lower()), None)
+        if c is None:
+            return f"There is no contact called {name} any more."
+        return server.action_callme_dial(c["code"]).get("message", "")
     if arg == "answer":
         return server.action_callme_answer().get("message", "")
     if arg == "decline":
@@ -321,6 +336,8 @@ def _run_callme(arg: str) -> str:
         return server.action_callme_hangup().get("message", "")
     if arg == "end":
         return server.action_callme_end().get("message", "")
+    if arg == "extend":
+        return server.action_callme_extend().get("message", "")
     if arg == "status":
         return server.callme_status_sentence()
     if arg == "hosting":

@@ -90,6 +90,9 @@ _hid_lock = threading.Lock()
 # (ACCESS_CASTER_NO_UI) so our background/tooling runs are not auto-killed.
 _httpd = None                      # set in main(); the running ThreadingHTTPServer
 _last_ping = time.time()           # updated by every /api/ping
+# Which run of the server this is. The ping reply carries it with the version, so an open page can
+# tell that the server it was loaded from has gone and a different one answers in its place.
+_INSTANCE_ID = secrets.token_hex(8)
 _preview_grid = None               # grid of the live-preview scratch pad, if one is engaged
 _client_seen = False               # True once any page has pinged at least once
 _quit_at = None                    # set by /api/quit; a deadline a ping can still cancel
@@ -1038,7 +1041,8 @@ def _callme_watcher():
     global _callme_watch
     if _callme_watch is None:
         try:
-            w = callme.Watcher(on_say=_ann_say, read_model=_callme_dump)
+            w = callme.Watcher(on_say=_ann_say, read_model=_callme_dump,
+                               on_expiring=_callme_on_expiring)
             w.start()
             _callme_watch = w
         except Exception:
@@ -1067,6 +1071,11 @@ def _callme_note_dump(blob: bytes) -> None:
 def _callme_payload(d: dict) -> dict:
     """The page's reply: the state, plus the sentences the page shows, all worded here."""
     d = dict(d)
+    w = _callme_watcher()
+    for s in d.get("slots", []):
+        # A page read straight off a dump has no length: the Watcher holds it, keyed by the call.
+        if "since" not in s and w is not None:
+            s["since"], s["since_exact"] = w.since_for(s.get("uuid"))
     d["announcing"] = _announce_on.is_set()
     d["plan"] = [{"label": k, "value": v} for k, v in callme.plan_lines(d)]
     d["now"] = callme.call_now(d)
@@ -1076,7 +1085,38 @@ def _callme_payload(d: dict) -> dict:
     d["fader_note"] = ("No fader carries CallMe 1, so a call can be answered but you will not hear "
                        "the guest. Put CallMe 1 on a fader on Routing, Alt plus 2, under Faders."
                        if d.get("on_fader") is False else "")
+    d["contacts"] = _callme_contact_rows(_callme_contacts())
+    d["auto_extend"] = bool(load_settings().get("callme_auto_extend"))
     return d
+
+
+def _callme_contacts() -> list:
+    return callme.clean_contacts(load_settings().get("callme_contacts"))
+
+
+def _callme_contact_rows(contacts: list) -> list:
+    return [dict(c, spoken=callme.spell(c["code"])) for c in contacts]
+
+
+def _callme_store_contacts(contacts: list, message: str) -> dict:
+    update_settings(callme_contacts=contacts)
+    callme.set_contacts(contacts)
+    return {"ok": True, "message": message, "contacts": _callme_contact_rows(contacts)}
+
+
+def action_callme_contact_save(name: str, code: str, was: str = "") -> dict:
+    """Add a contact, or replace the one saved under the code `was`."""
+    contacts, message = callme.save_contact(_callme_contacts(), name, code, was)
+    if contacts is None:
+        return {"ok": False, "message": message}
+    return dict(_callme_store_contacts(contacts, message), code=callme.normalise_code(code))
+
+
+def action_callme_contact_delete(code: str) -> dict:
+    contacts, message = callme.delete_contact(_callme_contacts(), code)
+    if contacts is None:
+        return {"ok": False, "message": message}
+    return _callme_store_contacts(contacts, message)
 
 
 def read_callme() -> dict:
@@ -1307,8 +1347,11 @@ def action_callme_dial(code: str) -> dict:
         s = next((x for x in (w.snapshot() or {}).get("slots", [])
                   if x.get("slot") == slot["slot"]), {})
         if s.get("ended", 0) > ended_before:
-            return {"ok": False, "message": (f"Could not call {who}: "
-                                             f"{callme.end_reason(s.get('reason'))}.")}
+            msg = f"Could not call {who}: {callme.end_reason(s.get('reason'))}."
+            if callme.contact_name(code) and s.get("reason", "").startswith("404"):
+                msg += (f" {who}'s code changes whenever they switch hosting off and on. Ask "
+                        f"them for the new one and edit the contact.")
+            return {"ok": False, "message": msg}
         # An unknown code goes through Connecting before it fails, so Connecting only counts as
         # ringing once it has lasted a second.
         if s.get("state") in callme.UP and time.time() - started >= 1.0:
@@ -1316,6 +1359,68 @@ def action_callme_dial(code: str) -> dict:
             return {"ok": True, "message": f"Calling {who}."}
     w.quiet_end(i, False)
     return {"ok": False, "message": f"Sent the call to {who}, but the unit has not started it."}
+
+
+def _callme_on_expiring(_slot_index: int) -> bool:
+    """The Watcher's hook when a call goes Expiring. Runs under the Watcher's lock, so the extend
+    itself goes to a thread."""
+    if not load_settings().get("callme_auto_extend"):
+        return False
+    threading.Thread(target=_callme_auto_extend, daemon=True, name="callme-auto-extend").start()
+    return True
+
+
+def _callme_auto_extend() -> None:
+    res = action_callme_extend(auto=True)
+    _ann_say(res.get("message") or "Could not extend the call.")
+
+
+def action_callme_auto_extend(on: bool) -> dict:
+    update_settings(callme_auto_extend=bool(on))
+    return {"ok": True, "auto_extend": bool(on),
+            "message": ("Calls will be extended automatically before the hour runs out." if on
+                        else "Calls will no longer be extended automatically.")}
+
+
+def action_callme_extend(auto: bool = False) -> dict:
+    """Extend the call that is about to reach the plan's one-hour limit."""
+    gate = _callme_gate()
+    if gate is not None:
+        return gate
+    w = _callme_watcher()
+    snap = w.snapshot() if w is not None else None
+    if snap is None:
+        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+    expiring = [s for s in snap.get("slots", []) if s.get("state") == "Expiring"]
+    if not expiring:
+        return {"ok": False, "message": "No call is about to end, so there is nothing to extend."}
+    target = expiring[0]
+    i = target["slot"] - 1
+    path = w.slot_path(i)
+    if path is None:
+        return {"ok": False, "message": "This unit does not publish that call."}
+    who = target.get("peer") or "the guest"
+    w.quiet_connect(i, True)
+    try:
+        with _hid_lock:
+            for rec in callme.build_extend(path):
+                rcp_transfer.send_record(rec)
+                time.sleep(0.15)
+    except Exception as exc:
+        w.quiet_connect(i, False)
+        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+    deadline = time.time() + _CALLME_ANSWER_WAIT_S
+    while time.time() < deadline:
+        time.sleep(0.25)
+        snap = w.snapshot() or {}
+        state = next((s.get("state") for s in snap.get("slots", [])
+                      if s.get("slot") == target["slot"]), None)
+        if state == "Active":
+            return {"ok": True, "message": (f"Extended the call with {who}"
+                                            + (" automatically." if auto else "."))}
+    w.quiet_connect(i, False)
+    return {"ok": False, "message": (f"Sent Extend, but the call with {who} is still about to "
+                                     f"end in five minutes.")}
 
 
 def action_callme_end() -> dict:
@@ -1332,6 +1437,13 @@ def action_callme_end() -> dict:
 
 
 def action_callme_answer() -> dict:
+    """Answer the ringing call; with nothing ringing, extend a call that is about to end. A ringing
+    call comes first, because its two minutes run out sooner than an expiring call's five."""
+    w = _callme_watcher()
+    snap = (w.snapshot() if w is not None else None) or {}
+    if not snap.get("incoming") and any(s.get("state") == "Expiring"
+                                        for s in snap.get("slots", [])):
+        return action_callme_extend()
     return _callme_respond(True)
 
 
@@ -1405,19 +1517,10 @@ UNIT_SETTINGS = [
      "detail": "How bright a button's light is when that button is inactive, from 0 to 255. Turn it "
                "right down to darken the unit without losing the lit buttons."},
     # ---- THE CLOCK (selectors derived and read-back proven). -------------------------------------
-    # Easily mistaken for touchscreen-only, because no screen in the RODE app carries it. It matters
-    # because every recording the unit makes is timestamped, so a desk on the wrong settings
-    # mislabels every file, and there is no other way in without sight.
-    # The TIMEZONE itself is deliberately NOT offered here: see the note in rcp_transfer's
-    # UNIT_SETTING_SEL. It writes fine, but the unit reports it as a bare list index with no names
-    # anywhere we can read, and a number a blind user cannot check against anything is not a
-    # control, it is a guess with a slider on it.
+    # The timezone and daylight saving are NOT offered: both store a write and leave the clock
+    # alone, because the touchscreen applies them. See UNIT_SETTINGS_NOT_ON_PAGE.
     {"prop": "systemDateTime24h", "label": "24-hour clock", "kind": "bool",
      "detail": "Show the unit's clock as 24-hour rather than 12-hour with am and pm."},
-    {"prop": "systemDateTimeDaylightSavings", "label": "Daylight saving time", "kind": "bool",
-     "detail": "Whether the unit adds an hour for daylight saving. It does not do this on its own, "
-               "so it needs changing twice a year, and until it is changed every recording the unit "
-               "timestamps is an hour out."},
     {"prop": "systemDateTimeOnHome", "label": "Show the clock on the unit's home screen",
      "kind": "bool",
      "detail": "Whether the time appears on the unit's own screen. Nothing you can hear; it is here "
@@ -1466,6 +1569,10 @@ UNIT_SETTINGS_NOT_ON_PAGE = {
                           "the unit's own Time Zone field would not open either. Writing it would "
                           "change nothing a user could see, so offering it would be a lie. Still "
                           "saved and restored by a profile, because it is real stored state.",
+    "systemDateTimeDaylightSavings": "NOT OFFERED, for the same reason as the timezone: a write is "
+                                     "stored and reads back, and the clock on the unit's screen "
+                                     "stays where it was (watched on camera). The touchscreen "
+                                     "applies it. Still saved and restored by a profile.",
 }
 
 
@@ -2551,6 +2658,7 @@ def _clamp_volume(value) -> int:
 _ann_volume = _clamp_volume(load_settings().get("announcer_volume", _ANN_VOLUME_DEFAULT))
 _ann_voice = str(load_settings().get("announcer_voice", "") or "")
 _ann_say_device = str(load_settings().get("announcer_output", "") or "")
+callme.set_contacts(load_settings().get("callme_contacts"))
 
 
 # WHAT SPEECH IS AVAILABLE. Both lists come from SAPI itself (the same engine the worker speaks
@@ -10779,6 +10887,8 @@ def action_import_app_settings(payload) -> dict:
     if not changes:
         return {"ok": False, "message": app_settings.describe_import(report)}
     update_settings(**changes)
+    if "callme_contacts" in changes:
+        callme.set_contacts(changes["callme_contacts"])
 
     notes = []
     if "hotkeys" in changes:
@@ -11022,7 +11132,12 @@ POST_ROUTES = {
     "/api/callme/decline": (action_callme_decline, []),
     "/api/callme/hangup": (action_callme_hangup, [(int, "slot", 0)]),
     "/api/callme/end": (action_callme_end, []),
+    "/api/callme/extend": (action_callme_extend, []),
+    "/api/callme/auto-extend": (action_callme_auto_extend, [(bool, "on", None)]),
     "/api/callme/dial": (action_callme_dial, [(str, "code", "")]),
+    "/api/callme/contact/save": (action_callme_contact_save,
+                                 [(str, "name", ""), (str, "code", ""), (str, "was", "")]),
+    "/api/callme/contact/delete": (action_callme_contact_delete, [(str, "code", "")]),
     "/api/recorder/marker": (action_drop_marker, []),
     "/api/recorder/delete": (action_delete_recording, [(int, "uid", -1)]),
     "/api/storage/eject": (action_storage_eject, [(int, "index", -1), (bool, "on", True)]),
@@ -11334,7 +11449,7 @@ class Handler(BaseHTTPRequestHandler):
                 _last_ping = time.time()
                 _client_seen = True
                 _quit_at = None
-                self._send_json({"ok": True})
+                self._send_json({"ok": True, "instance": _INSTANCE_ID, "version": APP_VERSION})
             elif self.path == "/api/quit":
                 # The webpage is closing (sendBeacon on pagehide). Schedule shutdown after a
                 # short grace; a reloaded page's ping arrives first and cancels it.

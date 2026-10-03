@@ -38,6 +38,8 @@ PORTABLE = (
     "meter_speak_every",
     "meter_clip_sound",
     "meter_clip_db",
+    "callme_contacts",
+    "callme_auto_extend",
 )
 
 # WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice, an audio output and a
@@ -83,9 +85,9 @@ def build_export(settings: dict) -> dict:
         "version": VERSION,
         "settings": values,
         # Named so a human reading the file can tell what it is and what it deliberately omits.
-        "note": ("AccessCaster's own settings: keyboard shortcuts, announcement preferences and "
-                 "level warnings. It does NOT contain any desk settings (those are profiles), and "
-                 "it deliberately contains no remote-access token."),
+        "note": ("AccessCaster's own settings: keyboard shortcuts, announcement preferences, "
+                 "level warnings and CallMe contacts. It does NOT contain any desk settings (those "
+                 "are profiles), and it deliberately contains no remote-access token."),
     }
 
 
@@ -118,7 +120,10 @@ def describe_export(payload: dict) -> str:
     shortcuts = count_shortcuts(got.get("hotkeys"))
     if shortcuts:
         bits.append(f"{shortcuts} keyboard shortcut{'s' if shortcuts != 1 else ''}")
-    others = len(got) - (1 if "hotkeys" in got else 0)
+    contacts = len(got.get("callme_contacts") or ())
+    if contacts:
+        bits.append(f"{contacts} CallMe contact{'s' if contacts != 1 else ''}")
+    others = len(got) - (1 if "hotkeys" in got else 0) - (1 if "callme_contacts" in got else 0)
     if others:
         bits.append(f"{others} other preference{'s' if others != 1 else ''}")
     return " and ".join(bits) if bits else f"{len(got)} settings"
