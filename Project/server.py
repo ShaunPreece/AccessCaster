@@ -7347,17 +7347,23 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                 value, fresh, pid = held, now != pid, now
                 return True
 
+            # A move that is not an arrival (pre-fader to post-fader in Expanded) gives the
+            # service nothing new to bind to, so the retries it was owed carry on rather than
+            # starting again, and the miss is not announced twice.
+            attempts = 0
             while True:
                 expect, arrival = _virtual_devices_expectation(value), fresh
-                out = virtual_devices.reconcile(expect_connected=expect)
+                # Waiting for a bind only makes sense after an arrival; otherwise read it as is.
+                out = virtual_devices.reconcile(
+                    expect_connected=expect if (arrival or not expect) else None)
                 left = moved()
                 # Recorded even when the mode has since moved: a wait that ran out before the
-                # person changed it is still a missed bind, and it is marked as cut short.
+                # desk left the bus is still a missed bind, and one it left during is cut short.
                 if expect and arrival and out.status.running:
-                    virtual_devices.record_bind(0, out.status.connected, cut_short=left)
+                    virtual_devices.record_bind(0, out.status.connected, cut_short=left and fresh)
                 if left:
+                    attempts = 0 if fresh else attempts
                     continue
-                attempts = 0
                 while (expect and out.status.running and out.status.enabled
                        and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
                     attempts += 1
@@ -7376,10 +7382,12 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                                       attempt=attempts)
                     out = virtual_devices.reconcile(expect_connected=True)
                     left = moved()
-                    virtual_devices.record_bind(attempts, out.status.connected, cut_short=left)
+                    virtual_devices.record_bind(attempts, out.status.connected,
+                                                cut_short=left and fresh)
                     if left:
                         break
                 if left:
+                    attempts = 0 if fresh else attempts
                     continue
                 break
             if out.sentence():
