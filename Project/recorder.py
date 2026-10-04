@@ -368,7 +368,12 @@ def destination(volumes: list):
 def parse_recording(uid, content: str) -> dict:
     """One entry of the recordings list, from its `recordingContent` string.
 
-        name | device uid | path | epoch-ms timestamp | seconds | six unmapped flags
+        1.7.3:  name | device uid | path | epoch-ms timestamp | seconds | unmapped flags
+        1.7.6:  name | device uid | path | (empty) | epoch-ms timestamp | seconds | unmapped flags
+
+    The firmware inserts fields after the path, so the timestamp is FOUND (the first field after
+    the path that is a millisecond epoch) and the duration is the field after it. A fixed index
+    reads the timestamp as the duration on the other firmware.
 
     THE TIMESTAMP IS A REAL EPOCH IN UTC, and it is shown in THIS COMPUTER'S LOCAL TIME.
 
@@ -386,18 +391,23 @@ def parse_recording(uid, content: str) -> dict:
     parts = str(content).split("|")
     if len(parts) < 5:
         return {"uid": uid, "name": str(content), "seconds": None, "when": "", "path": ""}
-    try:
-        seconds = round(float(parts[4]), 1)
-    except ValueError:
-        seconds = None
+    # A millisecond epoch has 13 digits until the year 2286; nothing else in the record is that long.
+    at = next((i for i in range(3, len(parts) - 1)
+               if parts[i].isdigit() and len(parts[i]) >= 12), None)
+    seconds = None
     when = ""
-    try:
-        # Local time on THIS computer (no tz argument = the system zone), so the time shown is the
-        # wall clock the person remembers making the recording at. See the docstring.
-        stamp = datetime.fromtimestamp(int(parts[3]) / 1000.0)
-        when = stamp.strftime("%d %B %Y at %H:%M")
-    except (ValueError, OSError, OverflowError):
-        pass
+    if at is not None:
+        try:
+            seconds = round(float(parts[at + 1]), 1)
+        except ValueError:
+            pass
+        try:
+            # Local time on THIS computer (no tz argument = the system zone), so the time shown is
+            # the wall clock the person remembers making the recording at. See the docstring.
+            stamp = datetime.fromtimestamp(int(parts[at]) / 1000.0)
+            when = stamp.strftime("%d %B %Y at %H:%M")
+        except (ValueError, OSError, OverflowError):
+            pass
     return {"uid": uid, "name": parts[0], "path": parts[2], "when": when, "seconds": seconds,
             "duration": describe_duration(seconds)}
 

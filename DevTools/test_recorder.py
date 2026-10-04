@@ -67,6 +67,14 @@ if utc_render != r["when"]:
 else:
     print("  note this machine is on UTC, so local and UTC read the same; the direction of the "
           "fix cannot be pinned here")
+# Firmware 1.7.6 inserts an empty field after the path, which shifts the timestamp and duration.
+CONTENT_176 = ("Recording 27|c9f82780f0fb47e694b408e95ed52616|"
+               "/Application/ssd-mount/RODECaster/27 - 4 Oct 2026/Stereo Mix.wav||"
+               "1791121655376|9.42433|0|0|1|0|0|1|1|0")
+r = recorder.parse_recording(27, CONTENT_176)
+check("1.7.6 seconds", r["seconds"], 9.4)
+check("1.7.6 timestamp", r["when"],
+      datetime.fromtimestamp(1791121655376 / 1000.0).strftime("%d %B %Y at %H:%M"))
 check("a malformed record does not raise",
       recorder.parse_recording(1, "nonsense")["seconds"], None)
 

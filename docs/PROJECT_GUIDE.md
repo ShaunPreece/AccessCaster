@@ -2037,8 +2037,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   about one time in six (see "A show import can take the desk off the bus"), so the app restores
   from a profile and imports only a backup it holds no profile for.
 - **A RECORDING'S FORMAT IS READABLE WITHOUT THE DRIVE.** `recordingContent` is a pipe-joined string
-  whose field 2 is the FILE PATH, so its extension names the format. Field 0 is the name, field 4 the
-  duration in seconds.
+  whose field 2 is the FILE PATH, so its extension names the format. Field 0 is the name. **The
+  timestamp and duration have no fixed index**: 1.7.3 has them at 3 and 4, 1.7.6 inserts an empty
+  field after the path and moves them to 4 and 5. `recorder.parse_recording` finds the epoch-ms
+  field and takes the duration from the one after it; a fixed index reads the timestamp as the length.
   **THE SEVEN TRAILING FIELDS CARRY NOTHING ABOUT FORMAT, SIZE OR BITRATE, and this was checked**
   (30th August 2026). Across takes 19-22, which are one WAV and three MP3s at qualities 1, 2 and 3,
   every one of them reads identically: `0|0|1|0|0|1|1`. So there is NO size anywhere in the model.
