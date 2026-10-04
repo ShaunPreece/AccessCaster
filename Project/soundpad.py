@@ -1728,7 +1728,7 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 #     pad, clear it, and the object goes. A delete by tree path does NOT remove this kind.
 #   * DETACHED (effectsIdx stored first, see effect_objects). Nothing binds to it, so the bare-bind
 #     route never collects it. A delete by tree path removes exactly that node. RODE's app leaves
-#     one when an FX pad is retyped to MIDI, though not every time.
+#     one when an FX pad made in RODE's app is retyped to MIDI.
 #   * PARTIAL (no effectsIdx, 13 properties). Once ANY object has left the middle of the list, by
 #     a clear, a retype in RODE's app or a path delete, the next FX pad's clear leaves this shell
 #     instead of collecting its object. The delete by tree path removes it too.
