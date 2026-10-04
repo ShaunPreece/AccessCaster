@@ -7348,18 +7348,18 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                 return True
 
             while True:
-                expect = _virtual_devices_expectation(value)
+                expect, arrival = _virtual_devices_expectation(value), fresh
                 out = virtual_devices.reconcile(expect_connected=expect)
-                if moved():
+                left = moved()
+                # Recorded even when the mode has since moved: a wait that ran out before the
+                # person changed it is still a missed bind, and it is marked as cut short.
+                if expect and arrival and out.status.running:
+                    virtual_devices.record_bind(0, out.status.connected, cut_short=left)
+                if left:
                     continue
-                if expect and fresh and out.status.running:
-                    virtual_devices.record_bind(0, out.status.connected)
-                attempts, left = 0, False
+                attempts = 0
                 while (expect and out.status.running and out.status.enabled
                        and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
-                    if moved():
-                        left = True
-                        break
                     attempts += 1
                     if attempts == 1:
                         _ann_say("RODE's driver missed the unit. Reconnecting it; the audio drops "
@@ -7375,8 +7375,11 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                     diagnostics.event("virtual_devices.retry", "re-enumerated the desk",
                                       attempt=attempts)
                     out = virtual_devices.reconcile(expect_connected=True)
-                    virtual_devices.record_bind(attempts, out.status.connected)
-                if left or moved():
+                    left = moved()
+                    virtual_devices.record_bind(attempts, out.status.connected, cut_short=left)
+                    if left:
+                        break
+                if left:
                     continue
                 break
             if out.sentence():

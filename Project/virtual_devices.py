@@ -227,10 +227,11 @@ def service_state() -> dict:
     return out
 
 
-def record_bind(attempt: int, connected: bool) -> None:
+def record_bind(attempt: int, connected: bool, cut_short: bool = False) -> None:
     """Append one bind attempt to the history. Attempt 0 is the arrival itself, 1 onwards the
-    follow-up's own re-enumerations. Never raises: a record that can break a bind is worse than
-    none."""
+    follow-up's own re-enumerations. `cut_short` marks a wait during which the mode was changed
+    again, so a miss there may be the desk leaving rather than the service failing. Never raises:
+    a record that can break a bind is worse than none."""
     try:
         folder = data_path("logs")
         os.makedirs(folder, exist_ok=True)
@@ -238,6 +239,8 @@ def record_bind(attempt: int, connected: bool) -> None:
         if os.path.exists(path) and os.path.getsize(path) > _BIND_HISTORY_MAX:
             os.replace(path, path + ".previous")
         line = {"time": round(time.time()), "attempt": attempt, "connected": connected}
+        if cut_short:
+            line["cut_short"] = True
         line.update(service_state())
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(line) + "\n")

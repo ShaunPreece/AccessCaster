@@ -76,11 +76,13 @@ def main() -> None:
               f"{'yes' if r.get('connected') else 'MISSED':6} {r.get('pid', '-'):>6} "
               f"{r.get('threads', '-'):>4} {r.get('handles', '-'):>7} "
               f"{r.get('private_kb', '-'):>8}  {changed}"
+              + ("   CUT SHORT" if r.get("cut_short") else "")
               + ("   SERVICE RESTARTED" if restarted else ""))
         previous = r
 
+    # A miss cut short by a mode change may be the desk leaving, not the service failing.
     bound = [r for r in rows if r.get("connected")]
-    missed = [r for r in rows if not r.get("connected")]
+    missed = [r for r in rows if not r.get("connected") and not r.get("cut_short")]
     print(f"\n{len(bound)} bound, {len(missed)} missed, across {len(rows)} attempts.")
     if not (bound and missed):
         print("Nothing to compare until there is at least one of each.")
