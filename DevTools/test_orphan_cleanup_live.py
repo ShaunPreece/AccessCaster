@@ -1,11 +1,13 @@
-"""Live test of the orphan cleanup: makes an ATTACHED orphan effect object and checks clean_pool
-removes it, leaving the whole tree as it started.
+"""Live test of the orphan cleanup, leaving the whole tree as it started after each part.
 
-The orphan is made the way one is made in use: a pad created WITH an effects block, typed as a
-mixer, then cleared. A mixer pad's clear does not collect the object, so it is left with no pad.
-Uses padIdx 16 (bank 3 pad 1), which must be empty. A DETACHED object cannot be made from here
-(only RODE's app has been seen to leave one), so that branch of remove_orphan_objects is not
-covered.
+ATTACHED: a pad created WITH an effects block, typed as a mixer, then cleared. A mixer pad's clear
+does not collect the object, so it is left with no pad; clean_pool must remove it.
+
+PARTIAL: two FX pads, then the first cleared, which removes an object from the middle of the list,
+then the second, whose clear leaves a partial object; clear_grid_pad must delete it.
+
+Uses padIdx 16 and 17 (bank 3 pads 1 and 2), which must be empty. A DETACHED object cannot be made
+from here (only RODE's app has been seen to leave one), so that branch is not covered.
 
     python DevTools/test_orphan_cleanup_live.py
 """
@@ -55,15 +57,25 @@ def make_orphan():
 
 
 def main() -> int:
-    if sp._position_of(SLOT)[0] is not None:
-        print(f"padIdx {SLOT} is not empty; refusing.")
-        return 2
+    for idx in (SLOT, SLOT + 1):
+        if sp._position_of(idx)[0] is not None:
+            print(f"padIdx {idx} is not empty; refusing.")
+            return 2
     before = tree_state()
     make_orphan()
     h = sp.pool_health()
     check("an attached orphan was made", (h["orphans"], h["detached"]), ([SLOT], []))
     res = sp.clean_pool()
     check("clean_pool removed it", res["removed_orphans"], 1)
+    check("the pool is clean", res["health"]["clean"], True)
+    check("the whole tree is as it started", tree_state() == before, True)
+
+    print("\nPARTIAL")
+    for idx in (SLOT, SLOT + 1):
+        sp.assign_fx_to_grid(idx + 1, "Megaphone")
+    sp.clear_grid_pad(SLOT + 1)
+    res = sp.clear_grid_pad(SLOT + 2)
+    check("no partial object is left", res["health"]["partial"], [])
     check("the pool is clean", res["health"]["clean"], True)
     check("the whole tree is as it started", tree_state() == before, True)
     print("\n" + ("ALL CHECKS PASSED" if not FAILED else f"{FAILED} FAILED"))

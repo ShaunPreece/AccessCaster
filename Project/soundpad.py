@@ -354,6 +354,13 @@ class EffectObject(NamedTuple):
     effects_idx: int | None
     detached: bool          # see effect_objects
 
+    @property
+    def partial(self) -> bool:
+        """A node with no effectsIdx: the 13-property shell (distortion, echo and reverb only) that
+        an FX pad's clear leaves instead of collecting its object, when an object earlier in the
+        list has been removed since. Binds nothing."""
+        return self.effects_idx is None
+
 
 def _top_node(blob: bytes, name: str):
     """The root child called `name`, or None if the dump has none (an empty dump has none).
@@ -429,20 +436,22 @@ def pool_health(blob: bytes | None = None) -> dict:
     effectsIdx, no orphan (object with no matching FX pad), no missing object and no detached one.
 
     Detached objects are listed on their own (`detached`, by effectsIdx) and kept out of the other
-    three counts: they bind nothing, so one sharing a live pad's padIdx is not a duplicate."""
+    three counts: they bind nothing, so one sharing a live pad's padIdx is not a duplicate. Partial
+    objects carry no effectsIdx, so they are listed by node index (`partial`)."""
     if blob is None:
         blob = rr.read_model_stable(fresh=True)
     fx_pad_idxs = sorted(p.idx for p in pad_nodes(blob) if p.type == 2 and p.idx is not None)
     objects = effect_objects(blob)
-    attached = [o.effects_idx for o in objects if not o.detached and o.effects_idx is not None]
+    attached = [o.effects_idx for o in objects if not o.detached and not o.partial]
     counts = Counter(attached)
     expected = set(fx_pad_idxs) | {SPECIAL_EFFECTS_IDX}
     duplicates = sorted(k for k, c in counts.items() if c > 1)
     orphans = sorted(k for k in counts if k not in expected)
     missing = sorted(i for i in fx_pad_idxs if i not in counts)
     detached = [o.effects_idx for o in objects if o.detached]
+    partial = [o.index for o in objects if o.partial]
     return {
-        "clean": not duplicates and not orphans and not missing and not detached,
+        "clean": not duplicates and not orphans and not missing and not detached and not partial,
         "region_b_count": len(objects),
         "fx_pads": fx_pad_idxs,
         "effects_idx": sorted(attached),
@@ -450,13 +459,14 @@ def pool_health(blob: bytes | None = None) -> dict:
         "orphans": orphans,
         "missing": missing,
         "detached": detached,
+        "partial": partial,
     }
 
 
 def _health_message(health: dict) -> str:
-    # Silent in the normal (clean) case - users never see effect-object/orphan wording. Orphans and
-    # a detached object at the END of the list are removed by clean_pool during create/clear. What
-    # can survive: a detached object in the middle of the list (see remove_orphan_objects), and a
+    # Silent in the normal (clean) case - users never see effect-object/orphan wording. Orphans, and
+    # a detached or partial object at the END of the list, are removed by clean_pool during
+    # create/clear. What can survive: a detached or partial object in the middle of the list, and a
     # live-pad DUPLICATE, which needs an ear-checked clear and recreate (SOUNDPADS 5b).
     if health["clean"]:
         return ""
@@ -465,6 +475,9 @@ def _health_message(health: dict) -> str:
         return (f"A leftover voice-effect definition for pad {pads} is stored on the desk and "
                 "cannot be removed safely from here. Avoid putting a voice effect on that pad; a "
                 "factory reset clears it.")
+    if health.get("partial"):
+        return ("An empty leftover voice-effect entry is stored on the desk. No pad uses it, and "
+                "it cannot be removed safely from here; a factory reset clears it.")
     if health["missing"]:
         # Named separately from a duplicate, which is a different fault with a different repair:
         # this is a state the desk reaches ON ITS OWN (see heal_fx_pool), not only after a crash
@@ -845,6 +858,17 @@ def clear_pad(position: int, debug: bool = False) -> str:
     return f"cleared position {position} via {how}; sent {n} bytes"
 
 
+def clear_slot(position: int, ptype) -> str:
+    """clear_pad for a pad being cleared IN USE, as opposed to inside the orphan cleanup. A voice-
+    effect pad's clear leaves a partial object at the end of the list whenever an earlier object
+    has been removed since, so that clear is followed by remove_partial_objects."""
+    out = clear_pad(position)
+    if ptype == 2:
+        time.sleep(0.6)
+        remove_partial_objects()
+    return out
+
+
 def clear_grid_pad(grid: int) -> dict:
     """Clear the pad at grid position `grid` (1-based), app-style. Reports pool health after.
 
@@ -857,7 +881,7 @@ def clear_grid_pad(grid: int) -> dict:
         return {"ok": True, "message": f"Pad {grid} is already empty.", "health": pool_health()}
     if ptype != 1:                                 # non-sound clear can touch region-B binding
         clean_pool()                               # silently GC stray orphans first (no-op if clean)
-    clear_pad(pos)
+    clear_slot(pos, ptype)
     health = pool_health()
     msg = f"Cleared pad {grid} ({PAD_TYPE_LABEL.get(ptype, 'pad')} '{name}'). " + _health_message(health)
     return {"ok": health["clean"], "message": msg, "health": health}
@@ -1646,7 +1670,7 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
     pos, ptype, oldname = _position_of(pidx)
     cleared = None
     if pos is not None:
-        clear_pad(pos)
+        clear_slot(pos, ptype)
         cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
         time.sleep(1.2)                            # let the record drop before the create reads count
     try:
@@ -1692,16 +1716,20 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 # ----------------------------------------------------------------------------------------------
 # SECTION 7b - POOL SELF-HEAL + HARDENED CREATE
 #
-# An orphan is an effect object with no live FX pad. There are two kinds, and each has exactly one
+# An orphan is an effect object with no live FX pad. There are three kinds, and each has exactly one
 # removal that works (device-proven on 1.7.6):
 #   * ATTACHED (effectsIdx stored last, like a live pad's object). Clearing an FX pad makes the
 #     firmware collect the object bound to it, and a BARE FX create (build_blank with_effects=False,
 #     zero 0x9d writes) binds a pad to an existing object without appending one. So: bare-bind a
 #     pad, clear it, and the object goes. A delete by tree path does NOT remove this kind.
 #   * DETACHED (effectsIdx stored first, see effect_objects). Nothing binds to it, so the bare-bind
-#     route never collects it. A delete by tree path removes exactly that node. Deleting one from
-#     the MIDDLE of the list removes it cleanly, but in the one trial the next FX pad's clear then
-#     collected the wrong thing, so only the LAST object is ever deleted this way.
+#     route never collects it. A delete by tree path removes exactly that node. RODE's app leaves
+#     one when an FX pad is retyped to MIDI, though not every time.
+#   * PARTIAL (no effectsIdx, 13 properties). Once ANY object has left the middle of the list, by
+#     a clear, a retype in RODE's app or a path delete, the next FX pad's clear leaves this shell
+#     instead of collecting its object. The delete by tree path removes it too.
+# Only the LAST object is ever deleted by path: what a delete from the middle does to the next
+# clear is the partial case above, and whether the pads after it still sound right is untested.
 #
 # The bare-bind pad is used only transiently (cleared at once). Every pad we leave behind is made
 # by the normal create (assign_create_fx_recipe), which is the proven live path.
@@ -1709,8 +1737,8 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 
 def _delete_effect_object(index: int) -> None:
     """Delete PADEFFECTS child `index` by tree path: the pad clear's shape (a bool ON, OFF, then
-    select-begin) aimed at the effects node, inside transfer mode. Only for a DETACHED object at
-    the END of the list; the caller checks both."""
+    select-begin) aimed at the effects node, inside transfer mode. Only for a DETACHED or PARTIAL
+    object at the END of the list; the caller checks both."""
     _require_pad_write()
     iface = t.find_control_interface()
     if iface is None:
@@ -1787,16 +1815,36 @@ def remove_orphan_objects(target_idx: int, max_iter: int = 8) -> int:
     return removed
 
 
+def remove_partial_objects(max_iter: int = 8) -> int:
+    """Delete partial objects (no effectsIdx) from the END of the list by tree path, one at a time.
+    Returns the number removed. A partial one in the middle is left for pool_health to report, for
+    the same reason a middle detached one is."""
+    removed = 0
+    for _ in range(max_iter):
+        objects = effect_objects()
+        if not objects or not objects[-1].partial:
+            break
+        _delete_effect_object(objects[-1].index)
+        time.sleep(0.6)
+        if len(effect_objects()) >= len(objects):
+            break
+        removed += 1
+    return removed
+
+
 def clean_pool() -> dict:
-    """Recovery net: remove every orphan and detached effect object that has no live FX pad
-    (remove_orphan_objects). Touches no live pad and leaves no pad behind. Live-pad DUPLICATES (a
-    pad plus an extra copy of its object) are NOT repaired here because rebuilding a live pad's
-    effect must be ear-checked; they are reported for a manual fix, as is a detached object that
-    is not last in the list. Returns the post-heal pool_health plus what it did."""
+    """Recovery net: remove every orphan, detached and partial effect object that has no live FX
+    pad (remove_orphan_objects, remove_partial_objects). Touches no live pad and leaves no pad
+    behind. Live-pad DUPLICATES (a pad plus an extra copy of its object) are NOT repaired here
+    because rebuilding a live pad's effect must be ear-checked; they are reported for a manual fix,
+    as is a detached or partial object that is not last in the list. Returns the post-heal
+    pool_health plus what it did."""
     h = pool_health()
     removed = 0
     for idx in sorted(set(h["orphans"]) | set(h["detached"])):
         removed += remove_orphan_objects(idx)
+    if h["partial"]:
+        removed += remove_partial_objects()
     h2 = pool_health()
     unhealed = sorted(set(h2["duplicates"]))
     return {
@@ -1806,7 +1854,8 @@ def clean_pool() -> dict:
         "unhealed_live_duplicates": unhealed,
         "message": ("Pool is clean." if h2["clean"]
                     else f"Removed {removed} orphan object(s); left: duplicates {unhealed}, "
-                         f"orphans {h2['orphans']}, detached {h2['detached']}."),
+                         f"orphans {h2['orphans']}, detached {h2['detached']}, "
+                         f"partial {h2['partial']}."),
     }
 
 
@@ -1824,9 +1873,9 @@ def safe_assign_fx_recipe(target_idx: int, name: str, recipe: dict, colour: int 
     if any(o.detached and o.effects_idx == target_idx and o.index != len(objects) - 1
            for o in objects):
         raise ValueError(_health_message({"clean": False, "detached": [target_idx]}))
-    pos = next((p for p, pi, _t, _n in pad_positions() if pi == target_idx), None)
+    pos, ptype, _name = _position_of(target_idx)
     if pos is not None:
-        clear_pad(pos); time.sleep(0.8)
+        clear_slot(pos, ptype); time.sleep(0.8)
     remove_orphan_objects(target_idx)
     assign_create_fx_recipe(target_idx, name, recipe, colour=colour, active=active)
     time.sleep(0.6)
@@ -1921,7 +1970,7 @@ def create_mixer(grid: int, mode, name=None, colour=None, trigger_mode=None, deb
     pos, ptype, oldname = _position_of(pidx)
     cleared = None
     if pos is not None:
-        clear_pad(pos)
+        clear_slot(pos, ptype)
         cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
         time.sleep(1.2)
     try:
@@ -1987,7 +2036,7 @@ def create_trigger(grid: int, name=None, colour=5, custom=False, trigger_type=0,
     pos, ptype, oldname = _position_of(pidx)
     cleared = None
     if pos is not None:
-        clear_pad(pos)
+        clear_slot(pos, ptype)
         cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
         time.sleep(1.2)
     try:
@@ -2032,7 +2081,7 @@ def restore_one(pad_name: str, live: bool):
         return
     if pos is not None:
         print("  clearing existing pad...")
-        print("   ", clear_pad(pos))
+        print("   ", clear_slot(pos, ptype))
         time.sleep(1.2)
     print("  creating factory recipe...")
     # active=False IS LOAD-BEARING: leaving it off puts a robot voice on a live mic.

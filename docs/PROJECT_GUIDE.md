@@ -1247,10 +1247,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A voice-FX pad EDITED IN PLACE restores at the recipe's values, not the edited ones.**
 - **Keep the pool clean, and remove each kind of orphan only its own way** (`SOUNDPADS.md`
   section 5). An ATTACHED orphan (effectsIdx stored last) goes by bare bind + clear; a delete by
-  tree path does not touch it. A DETACHED one (effectsIdx stored first, left by RODE's app) goes only
-  by the path delete, and ONLY when it is the last object: a middle delete left the next FX pad's
-  clear collecting the wrong thing. `remove_orphan_objects` stops on a pass that removes nothing;
-  never turn that into a retry loop.
+  tree path does not touch it. A DETACHED one (effectsIdx stored first, left by RODE's app) and a
+  PARTIAL one (no effectsIdx) go only by the path delete, and ONLY when last. Any removal from the
+  middle of the list makes the next FX clear leave a partial object, which is why every in-use clear
+  goes through `clear_slot` and never a bare `clear_pad`. `remove_orphan_objects` and
+  `remove_partial_objects` stop on a pass that removes nothing; never turn that into a retry loop.
 - **`find_pad_volume` MUST READ BYTES before returning a root, not just stat it.** `isdir` and
   `disk_usage > 0` were each added after a failure of this class and the volume passed BOTH and then
   died on the first real read with EINVAL (29th August 2026, the as-found baseline, pad 1). The

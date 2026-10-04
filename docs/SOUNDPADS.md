@@ -20,7 +20,8 @@ through repeated cycles - no orphan, no neighbour disturbance, no reboot (ear-pr
 THE POOL: one region-B object per FX pad. Our tools keep it that way automatically - the hardened
 create can never leave a duplicate, and clear/create self-heal any stray orphan. If the pool is ever
 polluted (e.g. a crash mid-write), clean_pool removes the orphans app-free, no factory reset. The one
-exception is a DETACHED object in the middle of the list, which is reported, not removed (section 5).
+exception is a DETACHED or PARTIAL object in the middle of the list, which is reported, not removed
+(section 5).
 
 ================================================================================
 ## 1. FACTORY VOICE-FX RECIPES  [CONFIRMED - data in fx_recipes.json]
@@ -317,18 +318,25 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    handoff and zero 0x9d writes, so no new object is allocated; the engine binds the pad to an EXISTING
    object by the effectsIdx==padIdx rule. So an orphan can be ADOPTED without appending. (The pad
    RECORD always appends; only the EFFECTS block allocates a region-B object.)
-3. TWO KINDS OF ORPHAN, ONE REMOVAL EACH. An ATTACHED orphan stores effectsIdx LAST, like a live
+3. THREE KINDS OF ORPHAN, ONE REMOVAL EACH. An ATTACHED orphan stores effectsIdx LAST, like a live
    pad's object: bare bind + clear removes it, and a delete by tree path does NOT (three tries).
-   A DETACHED one stores effectsIdx FIRST (RODE's app left one after a pad was retyped on earlier
-   firmware; on 1.7.6, retyping an FX pad to Mixer in RODE's app, with or without an effect
-   switched on, collects the object cleanly): nothing
-   binds to it, so bare bind + clear never collects it, and the delete by tree path removes exactly
-   that node. The delete is the pad clear's shape aimed at PADEFFECTS[n] in transfer mode:
-   `01 01 02 02 9d 02 01 <n>` voiceDisguiseOn ON, OFF, then select-begin `04 01 01 02 9d 02 01 <n>`.
-4. A MIDDLE DELETE IS UNSAFE. Deleting a detached object that is not LAST removed it cleanly, but
-   the next FX pad's clear then left a 13-property partial node instead of collecting its object
-   (one trial). So only the last object is ever deleted by path; a middle one is reported and the
-   create refuses that padIdx. Whether the later pad still SOUNDS right was never tested.
+   A DETACHED one stores effectsIdx FIRST. On 1.7.6, retyping an FX pad to MIDI in RODE's app left
+   one once (4th October 2026) and collected the object cleanly the next time; retyping to Mixer
+   collected it both times tried. Nothing binds to it, so bare bind + clear never collects it, and
+   the delete by tree path removes exactly that node. The delete is the pad clear's shape aimed at
+   PADEFFECTS[n] in transfer mode: `01 01 02 02 9d 02 01 <n>` voiceDisguiseOn ON, OFF, then
+   select-begin `04 01 01 02 9d 02 01 <n>`.
+   A PARTIAL one has no effectsIdx and only 13 properties (distortion, echo and reverb). See fact 4.
+   The same delete by tree path removes it, byte-clean against a whole-tree baseline (twice,
+   4th October 2026), even though the node carries no voiceDisguiseOn.
+4. A REMOVAL FROM THE MIDDLE BREAKS THE NEXT FX CLEAR. Once any object leaves the middle of the
+   list, the next FX pad's clear leaves a PARTIAL object instead of collecting its own. Seen three
+   ways: our path delete of a middle detached object, RODE's app retyping a middle FX pad to MIDI,
+   and our own clear of a middle FX pad (4th October 2026: make FX pads on 17 and 18, clear 17,
+   clear 18). So it is the firmware, not either app, and ordinary use makes it. `clear_slot`
+   deletes the partial object straight after every FX clear. Only the last object is ever deleted
+   by path; a middle one is reported and the create refuses that padIdx. Whether the later pads
+   still SOUND right after a middle removal was never tested.
 
 PRIMITIVES (soundpad.py section 7b), device-proven 2026-06-20, hardened create EAR-PROVEN end to end
 (safe_assign_fx_recipe on a slot first polluted with an orphan healed it AND created a Megaphone that
@@ -337,15 +345,18 @@ went live on creation, no reboot; survived a power cycle):
     leftover orphan for that padIdx) then the normal append-create. The pad left behind is always made
     by the proven-live normal create, so it is live. assign_fx_to_grid (web) uses this and self-heals.
     Refuses, before writing, a padIdx with a detached object in the middle of the list (fact 4).
-- clean_pool()              recovery net: removes every orphan and detached object it safely can
-    (touches no live pad). Runs automatically inside create/clear. Live-pad DUPLICATES and a middle
-    detached object are reported, not repaired.
+- clean_pool()              recovery net: removes every orphan, detached and partial object it safely
+    can (touches no live pad). Runs automatically inside create/clear. Live-pad DUPLICATES and a middle
+    detached or partial object are reported, not repaired.
+- clear_slot(pos, ptype)    clear_pad for a clear in use: after an FX clear it runs
+    remove_partial_objects, which deletes partial objects from the end of the list.
 - remove_orphan_objects(idx)  the objects for one padIdx with no live FX pad, last first: attached by
     bare bind + clear, detached by _delete_effect_object if last. Stops on a pass that removes nothing.
 - _bind_existing_fx(idx)    bare adopt (no append); TRANSIENT helper for orphan GC only - its own live
     binding is not reboot-proven, so such a pad is never left in place.
 - DevTools/test_orphan_cleanup_live.py  makes an attached orphan and checks clean_pool restores the
-    whole tree. The detached branch has no test: only RODE's app has made one.
+    whole tree, then makes a partial object (two FX pads, clear the first, clear the second) and
+    checks clear_grid_pad leaves none. The detached branch has no test: only RODE's app makes one.
 
 DUPLICATE on a LIVE pad (rare): clear the pad (GCs one copy, leaves the other as an orphan), then
 recreate it from its recipe with the normal live create. Not auto-run by clean_pool because rebuilding
