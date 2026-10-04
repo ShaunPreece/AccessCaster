@@ -7120,10 +7120,10 @@ def action_set_usb_multitrack(mode: int) -> dict:
     with _hid_lock:
         # READ FIRST so the input half is carried through. The desk holds both in one property, so
         # writing the mode alone would take a desk out of Expanded without being asked to.
-        _, expanded = recorder.split_usb_multitrack(
-            rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
+        old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+        _, expanded = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode, expanded)
-        arrived = _write_usb_mode(value)
+        arrived = _write_usb_mode_parked(value, old)
     return {"ok": True,
             "message": (f"This computer will now receive "
                         f"{recorder.USB_MULTITRACK_LABEL[mode].lower()}. The unit's audio devices "
@@ -7195,10 +7195,10 @@ def action_set_usb_expanded(on: bool) -> dict:
         return {"ok": False, "message": "Expanded needs on or off."}
     cleared = [] if on else _clear_extended_faders()
     with _hid_lock:
-        mode, _ = recorder.split_usb_multitrack(
-            rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
+        old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+        mode, _ = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
-        arrived = _write_usb_mode(value)
+        arrived = _write_usb_mode_parked(value, old)
     tail = ("" if on or not cleared else
             f" {_join_and(cleared)} came off their faders, as the unit's own screen does; their "
             f"processing is kept.")
@@ -7264,17 +7264,81 @@ def _virtual_devices_repair() -> None:
 # does not narrate each flip of the mode as news.
 _virtual_devices_retrying = threading.Event()
 
-# RODE'S SERVICE BINDS ON SOME OF THE DESK'S ARRIVALS, and never later. Measured: twelve
-# arrivals, six bound, in every mode and with nothing of ours open; a quiet desk stayed unbound
-# for five minutes; nothing writable from user mode (Enable, its command block) re-runs the
-# bind. What does is another arrival, so the follow-up makes one itself by flipping the output
-# mode away and back.
-#
-# THE ODDS ARE NOT EVEN, so three attempts are not the nine in ten they look like: failures come
-# in runs, and one measured nine arrivals for two binds. A replug is one more arrival at whatever
-# the current odds are, which is why nothing here asks for one.
+# RODE'S SERVICE LOSES THE DESK TO ANYTHING PLAYING TO THE DESK'S MAIN OUTPUT WHEN IT ARRIVES
+# (`virtual_devices.park_output` has the mechanism). Parking Windows' default elsewhere for the
+# arrival prevents it where there is somewhere to park; the retries are for where there is not, and
+# for a program set to the desk's Main output by name. A retry is a fresh arrival, so a fresh race.
 _VIRTUAL_DEVICES_RETRIES = 3
 _VIRTUAL_DEVICES_RETRY_HOLD_S = 3.0     # at the other mode: long enough for the service to let go
+
+# The parked default, while one is in force. Module-level because a park outlives the action that
+# made it: the follow-up moves the default on to `System (RØDECaster)` once the service binds, and a
+# follow-up already running when a second switch parks has to see that park too.
+_virtual_devices_parking = None
+_PARK_ARRIVAL_S = 20.0      # longest a guard waits for the desk to come back on the bus
+_PARK_BIND_S = 6.0          # then how long it holds for the bind, which lands 1.0 to 1.4 s after
+_PARK_SYSTEM_S = 3.0        # and for System (RØDECaster) to appear once bound
+
+
+def _park_for_arrival():
+    """Park Windows' default output off the desk before an arrival, and start a guard that holds it
+    there across the arrival. Returns the Event to set once the desk is back (or the write has
+    failed), or None when nothing was parked."""
+    global _virtual_devices_parking
+    parking = _virtual_devices_parking or virtual_devices.park_output()
+    if parking is None:
+        return None
+    _virtual_devices_parking = parking
+    arrived = threading.Event()
+
+    # NEVER MUTED. A muted parking device is silence for anyone whose speech follows the default,
+    # and if this process dies mid-park nothing puts it back.
+    def guard():
+        """Windows moves the default back onto the desk the moment the desk re-appears; this puts
+        it back each time until the service has bound. "Bound" only counts once the service has
+        been seen unbound, because its flag still reads connected for a moment after the desk
+        leaves the bus."""
+        seen_down = False
+        t = time.monotonic()
+        while not arrived.is_set() and time.monotonic() - t < _PARK_ARRIVAL_S:
+            virtual_devices.keep_parked(parking)
+            seen_down = seen_down or not virtual_devices.read_status().connected
+            time.sleep(0.05)
+        t = time.monotonic()
+        while time.monotonic() - t < _PARK_BIND_S:
+            virtual_devices.keep_parked(parking)
+            connected = virtual_devices.read_status().connected
+            if connected and seen_down:
+                virtual_devices.default_to_system(_PARK_SYSTEM_S)
+                break
+            seen_down = seen_down or not connected
+            time.sleep(0.05)
+
+    threading.Thread(target=guard, daemon=True, name="park-guard").start()
+    return arrived
+
+
+def _usb_mode_arrives_expanded(old, new: int) -> bool:
+    """Whether writing `new` over `old` brings the desk back as an Expanded USB device, which is
+    when RODE's service races Windows for it. Expanded with the mix alone and Expanded with every
+    channel are different devices; pre-fader and post-fader are the same one. An unknown `old`
+    counts as an arrival."""
+    new_mode, new_exp = recorder.split_usb_multitrack(new)
+    if not new_exp:
+        return False
+    old_mode, old_exp = recorder.split_usb_multitrack(old)
+    return not old_exp or (old_mode == 0) != (new_mode == 0)
+
+
+def _write_usb_mode_parked(value: int, old) -> bool:
+    """`_write_usb_mode` with the default parked across the arrival when the desk is coming back
+    as an Expanded device (`_usb_mode_arrives_expanded`). Caller holds the HID lock."""
+    arrived = _park_for_arrival() if _usb_mode_arrives_expanded(old, value) else None
+    try:
+        return _write_usb_mode(value)
+    finally:
+        if arrived is not None:
+            arrived.set()
 
 
 def _desk_pid():
@@ -7338,14 +7402,19 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
     mode, expanded = recorder.split_usb_multitrack(raw_mode)
 
     def rearrive(value: int):
-        """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept. The
-        lock is held across the hold, so a person's own write waits and lands after this one."""
+        """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept, with the
+        default parked for the arrival. The lock is held across the hold, so a person's own write
+        waits and lands after this one."""
         with _hid_lock:
             rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(0, True))
             time.sleep(_VIRTUAL_DEVICES_RETRY_HOLD_S)
-            rcp_transfer.set_usb_multitrack_mode(value)
+            _write_usb_mode_parked(value, recorder.join_usb_multitrack(0, True))
+
+    def parked_id() -> str:
+        return _virtual_devices_parking.id if _virtual_devices_parking is not None else ""
 
     def run():
+        global _virtual_devices_parking
         # Waits out a repair, which is short; another follow-up cannot be running (see below).
         _virtual_devices_busy.acquire()
         try:
@@ -7367,9 +7436,17 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
             attempts = 0
             while True:
                 expect, arrival = _virtual_devices_expectation(value), fresh
+                # An arrival nobody parked for (the touchscreen, the desk dropping out): park now.
+                # The race may already be lost, but the retries below then start clear.
+                if (expect and arrival and _virtual_devices_parking is None
+                        and not virtual_devices.read_status().connected):
+                    late = _park_for_arrival()
+                    if late is not None:
+                        late.set()
                 # Waiting for a bind only makes sense after an arrival; otherwise read it as is.
                 out = virtual_devices.reconcile(
-                    expect_connected=expect if (arrival or not expect) else None)
+                    expect_connected=expect if (arrival or not expect) else None,
+                    parked=parked_id())
                 left = moved()
                 # Recorded even when the mode has since moved: a wait that ran out before the
                 # desk left the bus is still a missed bind, and one it left during is cut short.
@@ -7394,7 +7471,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                         _virtual_devices_retrying.clear()
                     diagnostics.event("virtual_devices.retry", "re-enumerated the desk",
                                       attempt=attempts)
-                    out = virtual_devices.reconcile(expect_connected=True)
+                    out = virtual_devices.reconcile(expect_connected=True, parked=parked_id())
                     left = moved()
                     virtual_devices.record_bind(attempts, out.status.connected,
                                                 cut_short=left and fresh)
@@ -7404,14 +7481,20 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                     attempts = 0 if fresh else attempts
                     continue
                 break
+            # Bound, or out of Expanded: the park has done its job, and reconcile has already moved
+            # the default on from it. Unbound, it stays parked, so the next arrival starts clear.
+            parking = _virtual_devices_parking
+            if out.status.connected or not recorder.split_usb_multitrack(value)[1]:
+                _virtual_devices_parking = None
             if out.sentence():
                 _ann_say(out.sentence())
             elif expect and out.status.running and not out.status.connected:
-                # STATE, NEVER AN INSTRUCTION. A replug is one more arrival at the same odds, and
-                # in a failing run it binds no better than the retries just did, so asking for one
-                # reads as "this will fix it" when it mostly will not.
+                # STATE, NEVER AN INSTRUCTION. A replug is one more arrival in the same race, so
+                # asking for one reads as "this will fix it" when it may well not.
+                where = (f" Windows sound stays on {parking.name} until it does."
+                         if parking is not None else "")
                 _ann_say("RODE's driver has not connected to the unit, so the extra inputs are "
-                         "not there.")
+                         "not there." + where)
         finally:
             _virtual_devices_busy.release()
             _virtual_devices_following.release()
@@ -7433,8 +7516,10 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                 "every channel, so pick pre-fader or post-fader for that.")
     if not arrived and st.connected:
         return ""       # the desk stayed on the bus and the service stays bound: nothing to wait for
-    return (" RODE's driver connects in a few seconds, and the virtual devices are announced "
-            "when they are ready.")
+    parking = _virtual_devices_parking
+    where = (f" Windows sound is on {parking.name} until it does, then moves to System."
+             if parking is not None else "")
+    return " RODE's driver connects in a few seconds and says so itself." + where
 
 
 def _bypass_sentence(where: str, on: bool) -> str:

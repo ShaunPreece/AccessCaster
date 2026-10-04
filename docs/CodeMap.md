@@ -62,7 +62,10 @@ after a session that moved code.
   then `_virtual_devices_follow` directly under them (the thread that runs
   `virtual_devices.reconcile` and speaks the outcome; also called from the announcer's reconnect
   in `_announce_loop` and, delayed, from `_bring_up_server`). Its helpers sit just above it:
-  `_write_usb_mode` (writes the mode, says whether the product id changed), `_desk_usb_mode` (the
+  `_write_usb_mode` (writes the mode, says whether the product id changed),
+  `_write_usb_mode_parked` (the same with Windows' default parked off the desk across an Expanded
+  arrival: `_usb_mode_arrives_expanded` decides, `_park_for_arrival` parks and guards, using
+  `virtual_devices.park_output` / `keep_parked` / `default_to_system`), `_desk_usb_mode` (the
   re-read before each retry) and `_virtual_devices_expectation`. `_virtual_devices_repair` sits beside
   it as the silent half: the callback `virtual_devices.watch_endpoints` runs on every endpoint
   change Windows reports, sharing `_virtual_devices_busy` so it never fights a mode change. The
@@ -589,11 +592,16 @@ and emits none of it. See `PROJECT_GUIDE.md` part 2 under Expanded for what both
 **`bind_history.py`** reads the per-attempt history the app itself records and compares bound
 attempts with missed ones field by field; `--last N` limits the table.
 
+**`probe_bind_hold.py`** is the causal test of the bind: it holds a stream on the desk's Main
+output from the moment it appears and reports whether the service bound before, during or after
+the hold. Four trials out of four bound 0.22 s after release and never during.
+
 **`probe_bind_default_output.py`** measures the service's bind RATE: it drives the USB output mode
 off and back through the app's API and counts binds per ARRIVAL, not per flip, because the app's own
 follow-up makes extra arrivals whenever it misses and each is another trial. `--control` runs the
-same cycles changing nothing, and **any run without it is worthless**, because the rate swings on
-its own between spells. Needs the server running; restores the default output it found.
+same cycles changing nothing, and **any run without it is worthless**, because the rate swings with
+whatever is playing to the desk's Main output. Needs the server running; restores the default
+output it found.
 
 **`check_exclusive_bind.py`** settles the two TCP facts the single-instance lock rests on, on port
 8791 so it never disturbs a running app: that `allow_reuse_address = 1` really does let two servers

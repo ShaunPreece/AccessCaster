@@ -63,19 +63,17 @@ st = parse(None, installed=True)
 check(st.installed and not st.running and "service is not running" in st.phrase(), st.phrase())
 
 # Wording.
+# The bind and the release are RODE's notification to say, never ours.
 o = vd.Outcome(status=vd.DriverStatus(), enabled=["Fader1", "Fader2", "System"],
                faders_ready=9, system_ready=True)
-check(o.sentence() == "Virtual devices ready: 9 fader inputs and System.", o.sentence())
-o = vd.Outcome(status=vd.DriverStatus(), say_ready=True, faders_ready=9, system_ready=True,
-               default_moved_to="System (RØDECaster)")
-check(o.sentence() == "Virtual devices ready: 9 fader inputs and System. "
-                      "Windows sound output is now System (RØDECaster).", o.sentence())
-o = vd.Outcome(status=vd.DriverStatus(), say_ready=True, system_ready=True, faders_missing=True)
-check(o.sentence().startswith("Virtual devices ready: System. RODE's driver is connected but has not "
-                              "created its fader inputs."), o.sentence())
+check(o.sentence() == "", o.sentence())
 o = vd.Outcome(status=vd.DriverStatus(), disabled=["System"])
-check(o.sentence() == "The virtual devices are off.", o.sentence())
-o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9, system_ready=True)
-check(o.sentence() == "", "nothing awaited and nothing flipped says nothing")
+check(o.sentence() == "", o.sentence())
+o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9, system_ready=True,
+               default_moved_to="System (RØDECaster)")
+check(o.sentence() == "Windows sound output is now System (RØDECaster).", o.sentence())
+o = vd.Outcome(status=vd.DriverStatus(), system_ready=True, faders_missing=True)
+check(o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."),
+      o.sentence())
 
 print(f"virtual_devices: {checks} checks passed")

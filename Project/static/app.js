@@ -5031,7 +5031,8 @@ async function loadRouting() {
     umHint.id = "routing-usb-mode-hint";
     umHint.textContent = "Changing this disconnects and reconnects the unit's audio devices for a "
       + "couple of seconds, so anything playing through the unit, including a screen reader, goes "
-      + "quiet while it happens.";
+      + "quiet while it happens. In Expanded, Windows' sound moves to another output for those "
+      + "seconds instead, such as your computer's own speakers, so that RODE's driver can connect.";
     um.sel.setAttribute("aria-describedby", "routing-usb-mode-hint");
     um.row.appendChild(umHint);
     routingCtl.usbMode = um.sel;

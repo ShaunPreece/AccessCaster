@@ -11,10 +11,12 @@ sending every channel.
 WHY THIS MODULE EXISTS. Three things go wrong between the service and Windows, and none of them
 is visible from the desk:
 
-  - The service binds on only SOME of the desk's arrivals (measured: twelve arrivals, six bound,
-    in every mode and with nothing of ours open), and never later. What re-runs the bind is
-    another arrival, nothing else, so `server._virtual_devices_follow` re-enumerates the desk
-    itself when the bind is missed. This module reports; the server retries.
+  - The service cannot bind while anything in Windows is playing to the desk's own Main output.
+    Its bind opens the KS render pin behind that output, the pin takes one user, and the
+    service retries every 100 ms but never takes it back from the audio engine. Whatever has a
+    stream there when the desk arrives (a screen reader on the default device, a browser, the
+    announcer) wins, and the desk stays unbound until that stream goes. `park_output` moves
+    Windows' default off the desk for the arrival; the server retries when it is lost anyway.
   - When it does bind, its endpoints can come back DISABLED: it switches them on by writing
     Windows' audio endpoint registry, which Windows re-reads only on an audio device arrival, and
     after a mode change that write can land after the pass. `reconcile` applies the service's own
@@ -139,9 +141,10 @@ def read_status() -> DriverStatus:
     return st
 
 
-# The service binds about three seconds after the desk arrives, twelve at the slowest seen, or not at
-# all: it never binds late, so waiting longer only delays the retry (`server._virtual_devices_follow`).
-CONNECT_WAIT_S = 15.0
+# The service binds 1.0 to 1.4 seconds after the desk arrives when the desk's Main output is free,
+# and 0.2 seconds after that output is released when it was not. A wait longer than this only delays
+# the retry (`server._virtual_devices_follow`).
+CONNECT_WAIT_S = 6.0
 
 
 def wait_connected(timeout_s: float = CONNECT_WAIT_S) -> DriverStatus:
@@ -345,27 +348,17 @@ class Outcome:
     disabled: list = field(default_factory=list)     # names switched off
     faders_ready: int = 0                            # Fader endpoints active once this is done
     system_ready: bool = False                       # the System playback endpoint is active
-    say_ready: bool = False                          # a bind was awaited, so say what arrived
     faders_missing: bool = False                     # connected, yet the service made no Faders
     default_moved_to: str = ""                       # new default playback name, if it moved
     error: str = ""
 
     def sentence(self) -> str:
-        """What happened, for the reply and the announcer. Empty when nothing did.
+        """What the operator needs to hear, for the reply and the announcer. Empty when nothing.
 
-        The ready line is said whether the endpoints were switched on here or created by the
-        service itself: after a mode change the operator is waiting to hear that the inputs
-        exist, and which of the two got them there is not their concern."""
+        THE BIND ITSELF IS NOT SAID. RODE's driver raises its own Windows notification when it
+        connects to the desk and when it lets go, and a screen reader reads it, so a line of ours
+        for either is the same news twice. What is said is what that notification cannot know."""
         parts = []
-        if (self.enabled or self.say_ready) and (self.faders_ready or self.system_ready):
-            what = []
-            if self.faders_ready:
-                what.append(f"{self.faders_ready} fader input{'s' if self.faders_ready != 1 else ''}")
-            if self.system_ready:
-                what.append("System")
-            parts.append("Virtual devices ready: " + " and ".join(what) + ".")
-        if self.disabled:
-            parts.append("The virtual devices are off.")
         if self.faders_missing:
             parts.append(FADERS_MISSING)
         if self.default_moved_to:
@@ -412,16 +405,17 @@ def _wait_for_faders(enum, timeout_s: float) -> list:
     return eps
 
 
-def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True) -> Outcome:
+def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True,
+              parked: str = "") -> Outcome:
     """Make Windows agree with the driver: its endpoints enabled while the service is connected
     and disabled while it is not, and the default playback device on the desk when a mode change
     has taken away the one it was on.
 
-    `expect_connected` True waits for the service to bind first (a mode write has just landed and
-    it takes about twelve seconds). None trusts the service's flag as it reads now. False means
+    `expect_connected` True waits for the service to bind first (a mode write has just landed).
+    `parked` is the endpoint id `park_output` moved the default to, if any. None trusts the service's flag as it reads now. False means
     the desk is in Standard, where the service cannot be bound: it polls, so for a few seconds
     after the desk leaves Expanded its flag still says connected, and acting on that switches the
-    endpoints ON and announces them as ready. Safe to call at any time and from any thread; it
+    endpoints ON on the way out. Safe to call at any time and from any thread; it
     opens its own COM apartment. Never raises: the desk's controls must not fail because Windows'
     audio service is having a moment.
     """
@@ -455,10 +449,10 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
             out.faders_ready = len(faders)
             out.system_ready = any(e.virtual and e.flow == "playback" and e.name.startswith("System")
                                    and e.state in ("active", "disabled") for e in eps)
-            out.say_ready = bool(expect_connected and status.connected)
             out.faders_missing = bool(expect_connected and status.connected and not faders)
         if move_default:
-            out.default_moved_to = _restore_default(enum, policy, eps, status.connected)
+            out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
+                                                    standard=expect_connected is False)
     except Exception as exc:
         out.error = f"Could not update Windows' audio devices: {exc}"
     finally:
@@ -474,19 +468,27 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     return out
 
 
-def _restore_default(enum, policy, eps: list, connected: bool) -> str:
+def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
+                     standard: bool = False) -> str:
     """Put the default playback device back on the desk if a mode change took it away.
 
-    ONLY WHEN IT WAS ON THE DESK OR IS DEAD. A default that is alive and somewhere else was
-    chosen by the user and stays. Once Expanded is on, the desk's Main output is renamed and its
-    old endpoint stays listed and dead, so Windows falls back to whatever it can find, which on a
-    laptop is the built-in speakers; RODE's own instruction is to select `System (RØDECaster)`
-    then, and that is the preference here, with the desk's Main output as the fallback when the
-    driver's endpoint is not there. Console and multimedia roles move together; communications
-    is left alone, because a call app's output is a choice this app knows nothing about."""
+    ONLY WHEN IT WAS ON THE DESK OR IS DEAD, OR IS WHERE `park_output` PUT IT. A default that is
+    alive and somewhere else was chosen by the user and stays. Once Expanded is on, the desk's Main
+    output is renamed and its old endpoint stays listed and dead, so Windows falls back to whatever
+    it can find, which on a laptop is the built-in speakers; RODE's own instruction is to select
+    `System (RØDECaster)` then, and that is the preference here, with the desk's Main output as the
+    fallback when the driver's endpoint is not there. A PARKED default stays parked until the
+    service binds, because moving it onto the desk's Main output is what keeps the service from
+    binding; in Standard (`standard`) there is no bind to wait for, and it goes back to the desk.
+    Console and multimedia roles move together; communications is left alone, because a call
+    app's output is a choice this app knows nothing about."""
     by_id = {e.id: e for e in eps}
     current = by_id.get(_default_id(enum, E_CONSOLE))
-    if current is not None and current.state == "active" and not (current.desk or current.virtual):
+    is_parked = bool(parked) and current is not None and current.id == parked
+    if is_parked and not connected and not standard:
+        return ""
+    if (current is not None and current.state == "active" and not is_parked
+            and not (current.desk or current.virtual)):
         return ""
     live_playback = [e for e in eps if e.flow == "playback" and e.state == "active"]
     target = None
@@ -499,6 +501,122 @@ def _restore_default(enum, policy, eps: list, connected: bool) -> str:
     policy.SetDefaultEndpoint(target.id, E_CONSOLE)
     policy.SetDefaultEndpoint(target.id, E_MULTIMEDIA)
     return target.name
+
+
+# --- Parking the default output while the service binds ----------------------------------------
+# The service's bind needs the KS render pin behind the desk's own Main output, which takes one
+# user (a shared stream there fails with AUDCLNT_E_DEVICE_IN_USE while the service holds it, and the
+# service gets nothing while a stream holds it). Windows moves its default back onto the desk the
+# moment the desk re-appears, and every program following the default reopens there, so the
+# service loses that race whenever anything speaks in the first second. Parking the default on any
+# other live playback device for the arrival keeps the pin free.
+#
+# NOT A FIX FOR EVERY SETUP. With no playback device besides the desk there is nowhere to park, and a
+# program set to the desk's Main output by name ignores the default. Switching the desk's Main
+# endpoint off in Windows is no way round it: the service checks that interface is enabled before it
+# tries, and misses every arrival while it is off.
+
+@dataclass
+class Parking:
+    id: str                         # the endpoint the default was moved to
+    name: str
+
+
+def _park_target(eps: list) -> Optional[Endpoint]:
+    return next((e for e in eps if e.flow == "playback" and e.state == "active"
+                 and not e.desk and not e.virtual), None)
+
+
+def park_output() -> Optional[Parking]:
+    """Move Windows' default playback (console and multimedia) off the desk onto another live
+    device. None when the default is already elsewhere (nothing to do) or there is nowhere to park.
+    Never raises."""
+    comtypes.CoInitialize()
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        eps = _endpoints(enum)
+        current = {e.id: e for e in eps}.get(_default_id(enum, E_CONSOLE))
+        if current is not None and current.state == "active" and not (current.desk or current.virtual):
+            return None
+        target = _park_target(eps)
+        if target is None:
+            return None
+        policy.SetDefaultEndpoint(target.id, E_CONSOLE)
+        policy.SetDefaultEndpoint(target.id, E_MULTIMEDIA)
+        diagnostics.event("virtual_devices.park", target.name)
+        return Parking(id=target.id, name=target.name)
+    except Exception as exc:
+        diagnostics.event("virtual_devices.park_failed", f"{exc}")
+        return None
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+
+
+def keep_parked(parking: Parking) -> bool:
+    """Put the default back on the parking device if Windows has moved it onto the desk, as it
+    does when the desk re-appears. Returns whether it had to. Never raises."""
+    comtypes.CoInitialize()
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        now = _default_id(enum, E_CONSOLE)
+        if now == parking.id or not _is_desk_usb(enum, now):
+            return False
+        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        policy.SetDefaultEndpoint(parking.id, E_CONSOLE)
+        policy.SetDefaultEndpoint(parking.id, E_MULTIMEDIA)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+
+
+def default_to_system(timeout_s: float) -> str:
+    """Once the service has bound, make `System (RØDECaster)` the default as soon as it appears,
+    which is within about a second of the bind. Returns its name, or "" if it did not appear.
+    Never raises."""
+    comtypes.CoInitialize()
+    try:
+        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                            interface=meters.IMMDeviceEnumerator)
+        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        at = time.monotonic()
+        while time.monotonic() - at < timeout_s:
+            system = next((e for e in _endpoints(enum) if e.virtual and e.flow == "playback"
+                           and e.name.startswith("System") and e.state == "active"), None)
+            if system is not None:
+                policy.SetDefaultEndpoint(system.id, E_CONSOLE)
+                policy.SetDefaultEndpoint(system.id, E_MULTIMEDIA)
+                return system.name
+            time.sleep(0.1)
+        return ""
+    except Exception:
+        return ""
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+
+
+def _is_desk_usb(enum, endpoint_id: str) -> bool:
+    """Whether one endpoint is the desk's own USB audio, as `_endpoints` tags it. Not the driver's
+    System: the default landing there means the service has bound."""
+    try:
+        store = enum.GetDevice(endpoint_id).OpenPropertyStore(meters.STGM_READ)
+        return (_prop(store, PKEY_Device_EnumeratorName).upper() == "USB"
+                and meters.is_desk_endpoint(_prop(store, PKEY_DeviceInterface_FriendlyName)))
+    except Exception:
+        return False
 
 
 def describe(expanded: Optional[bool] = None) -> dict:

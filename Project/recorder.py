@@ -239,8 +239,12 @@ USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more in
                      # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
                      # choice this app knows nothing about. The other one, pointing Windows' sound
                      # output at System (RODECaster), the app does itself (virtual_devices.py).
-                     "This app switches Windows' sound output to System (RODECaster) for you; "
-                     "then send a program to one of the four in Settings, System, Sound, App "
+                     "This app switches Windows' sound output to System (RODECaster) for you. "
+                     # SAID BEFORE THE PRESS: speech jumping to the laptop speakers unannounced
+                     # reads as something breaking. Why it moves is in virtual_devices.park_output.
+                     "While the unit reconnects, Windows' sound moves to another output for a few "
+                     "seconds, such as your computer's own speakers, so that RODE's driver can "
+                     "connect. Then send a program to one of the four in Settings, System, Sound, App "
                      "volume and device preferences, with that program running.")
 
 # What the two processing-bypass switches mean, in RODE's own terms and ours.

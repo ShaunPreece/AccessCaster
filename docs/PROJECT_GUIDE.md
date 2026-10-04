@@ -688,28 +688,40 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   ones, all six bound in about 4.5 seconds. The mode is not the factor. It exposes only `System`
   either way, because the mix alone carries no per-fader stream.
   RODE's driver is a kernel virtual audio device (enumerator ROOT, device name `RØDECaster`) plus
-  a user-mode service, `RODECasterVADService`. **The service binds on SOME arrivals of the desk and
-  never later**: twelve arrivals in one afternoon, six bound (five of the first six, one of the
-  last six), in every mode, with our announcer running and with nothing of ours open, and a desk
-  left unbound stays so (five quiet minutes, measured). When it binds it does so within three
-  seconds, twelve on one occasion, and creates its endpoints within three more. **Nothing writable
-  from user mode re-runs the bind**: not its Enable switch (re-creates `System` only), not its
-  command block, not a service restart, not stopping our HID handle; a PnP restart of the desk is
-  vetoed by `usbaudio2` while Windows has streams open, which is the normal state of a default
-  sound device. What does re-run it is another arrival, so `server._virtual_devices_follow` makes
-  one itself, flipping the output mode off and back up to three times, and then reports the state
-  and asks for NOTHING. **Never put a replug back in that sentence**: it is one more arrival at
-  whatever the odds currently are, in a failing run it binds no better than the retries just did
-  (measured at post-fader and at mix only), and phrasing it as the remedy tells the operator to go
-  and pull a cable that mostly will not help. The "only a replug brings it back" rule this
-  replaced was a description of the same coin toss. The one recovery seen in a failing run is a service restart FOLLOWED
-  by an arrival, which bound one second after the desk returned; the restart alone, with the desk
-  present, did not. One sample, and it needs elevation, so it is not built.
-  `virtual_devices.py` reads the service's own status block (shared memory
+  a user-mode service, `RODECasterVADService`.
+- **THE BIND FAILS WHEN ANYTHING IN WINDOWS IS PLAYING TO THE DESK'S OWN MAIN OUTPUT** (proved
+  4th October 2026). The service's bind opens the KS render pin behind that output, and the pin
+  takes one user: a shared stream on `Speakers (RODECaster Pro II Main Multitrack)` fails with
+  `AUDCLNT_E_DEVICE_IN_USE` while the service is bound, and the service cannot bind while a stream
+  holds it. Holding that stream from the moment the endpoint appeared kept the service unbound for
+  the full ten seconds, and it bound 0.22 s after release, four trials out of four
+  (`DevTools/probe_bind_hold.py`). The service
+  retries every 100 ms (`FUN_14000d310` in a decompile of version 1.0.5), so "never binds later"
+  was wrong: it binds the instant the pin is free. What holds the pin is whatever follows Windows'
+  default device. With the driver unbound `System (RØDECaster)` does not exist, so a screen reader
+  set to it falls back to the default, which Windows moves back onto the desk the moment the desk
+  re-appears; whoever speaks first after an arrival (the screen reader, the announcer's "USB input
+  is now Expanded" at about 1.3 s, Windows' own sounds) wins against a bind due at 1.0 to 1.4 s,
+  and once lost it stays lost, because `System` never appears for the screen reader to move to.
+  That feedback is what the "failing runs" were. **The remedy is parking**: before any write that
+  brings the desk back as an Expanded device, `virtual_devices.park_output` moves the default to
+  another live playback device, and a guard (`server._park_for_arrival`) puts it back each time
+  Windows moves it onto the desk, then moves it on to `System` the moment the service binds.
+  **The parking device is never muted**: speech heard briefly on the laptop is fine, and a muted
+  default left behind by a crash mid-park is a silent machine. **It is not a fix for every setup**:
+  a PC whose only playback device is the desk has nowhere to park, and a program set to the desk's
+  Main output by name ignores the default, so the retries stay. **Switching the desk's Main
+  playback endpoint off in Windows is NOT a way round it**: the service checks that interface is
+  enabled before it tries (`DeviceInterfaceAlias disabled`), and missed twelve arrivals out of twelve
+  with it off. **Never put a replug in the failure sentence**: it is one more arrival in the same
+  race. The real fix is RODE's: keep `System` present while unbound, or keep Windows off the pin.
+- `virtual_devices.py` reads the service's own status block (shared memory
   `Global\RODECaster_VAD{...}`, readable by anyone: connected flag, Enable, heartbeat, desk,
   firmware), which is the detector, and `reconcile` makes Windows agree with it. The follow-up
   runs after every USB mode write, on every announcer reconnect (the desk re-enumerates for its
-  own reasons too) and at startup, and speaks the outcome.
+  own reasons too) and at startup. **It never announces the bind or its loss**: RODE's driver
+  raises its own Windows notification for both, which a screen reader reads, so the follow-up
+  speaks only a miss, missing Faders, a moved default output or an error.
 - **RODE'S OWN APP DOES NOTHING TO MAKE THE BIND HAPPEN, SO THERE IS NOTHING TO CAPTURE FROM IT.**
   Its import table carries only read-only device APIs: `CM_Get_Parent`, `CM_Get_Child`,
   `CM_Get_Sibling`, `CM_Locate_DevNodeA`, `CM_Get_Device_ID_List`, `SetupDiEnumDeviceInterfaces`.
@@ -734,42 +746,26 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   carries the whole trace string table (`%s Enter`, `%s Leave, returning %#08x`, `Found Device:
   %s`) and imports `OutputDebugStringW`, which reads as a way in. It emits nothing: a global
   DBWIN listener held across four arrivals caught 49,507 lines from `audiodg` and 114 from
-  `svchost`, both session 0, and zero from the service. Its registry key holds only `Version`,
-  `Path`, `Enable` and `Latency`, so there is no flag to switch tracing on either.
+  `svchost`, both session 0, and zero from the service. Every trace call is gated on a level
+  global that nothing in the binary writes, and its registry key holds only `Version`, `Path`,
+  `Enable` and `Latency`, so there is no flag to switch tracing on either.
   `DevTools/vad_trace.py` is the listener, kept because it proves the negative in one run.
-- **A FAILING RUN OUTLASTS THE FOLLOW-UP'S THREE RETRIES, AND THE ANNOUNCER'S RECONNECT IS WHAT
-  STARTS THE CYCLE THAT WINS.** Measured through one: nine arrivals at product id 0x0094 produced
-  two binds, and each came after a cycle had already run out of retries and reported failure.
-  Nothing the first cycle did recovered it; the next follow-up, started by the announcer's own
-  reconnect, did. So the failure is reported while the app is still capable of fixing it itself,
-  which is the other reason that sentence must not ask the operator to do anything.
-- **WINDOWS' DEFAULT OUTPUT SITTING ON THE DRIVER'S OWN ENDPOINT DOES NOT AFFECT THE BIND.** It is
-  a good hypothesis, because `System (RØDECaster)` as the default means the audio engine holds a
-  render stream on the endpoint the service is rebuilding. Measured against its own matched
-  control on the same afternoon, six mode flips each way: six binds out of six with the default
-  moved to the Realtek speakers, and six out of six with it left on the driver, every one within
-  1.0 to 1.2 seconds. `DevTools/probe_bind_default_output.py --control` is the control, and it
-  earns its own flag because the first run alone looked like a cure: the rate had been two binds
-  in nine arrivals an hour earlier. **A BINDING RUN WILL VALIDATE ANY CHANGE YOU MAKE DURING ONE.**
-  Nothing about this bind may be claimed from a run without a control beside it.
-- **THE BIND IS NOT A PER-ARRIVAL COIN TOSS, SO THERE IS A FACTOR NOBODY HAS NAMED.** Measured in
-  one afternoon: 1 bind in 8 arrivals, then 18 in 18 across three runs of identical flips. No
-  fixed probability produces both, so the failures cluster on something that persists between
-  arrivals rather than being drawn fresh each time. "A failing run" and "a binding run" in this
-  guide name those clusters; they are observations, not a cause, and the cause is that unnamed
-  state. The app records the service's visible state (pid, start time, threads, handles, private
-  memory, status block) on every bind attempt, so a miss in ordinary use is compared with a bind
-  by `DevTools/bind_history.py` rather than waited for under test. The service process is the obvious place for
-  that state to live, and it is never restarted; a service restart FOLLOWED by an arrival is the
-  one recovery ever seen for a run of failures, which fits. **Do not write "it binds about half
-  the time" as though it were a property of an arrival.**
+- **WITH THE DEFAULT ALREADY ON `System (RØDECaster)`, NOTHING CONTESTS THE BIND.** Every arrival
+  between two bound states binds, because whatever plays is on `System` and the desk's Main output
+  is free: that is a "binding run", and it validates any change made during it. Only a test that
+  makes the contest itself (`DevTools/probe_bind_hold.py`) says anything about the bind.
+- **THE SERVICE'S HANDLE COUNT IS NOT THE CAUSE.** It rises about 25 per arrival and a restart
+  resets it, but misses and binds overlap across the whole range, and a restart with the desk
+  present binds nothing while the pin is held. The bind history (`DevTools/bind_history.py`)
+  records the service's state on every attempt and stays useful for spotting a miss in ordinary
+  use; it does not record who held the pin.
 - **THE FOLLOW-UP RE-READS THE DESK'S MODE BEFORE EVERY RETRY AND BEFORE IT SPEAKS.** Only one
   runs at a time and with retries it lasts over a minute, so a mode changed meanwhile gets no
   follow-up of its own. Retrying with the mode it started with put the desk back into Expanded
   after the user had left it, and judging against it reported fader inputs missing from mix only.
 - **IN STANDARD THE SERVICE'S CONNECTED FLAG IS STALE, NOT TRUE.** It polls, so for a few seconds
   after the desk leaves Expanded it still says connected; `reconcile(expect_connected=False)`
-  overrides it, or the endpoints are switched on and announced as ready on the way out.
+  overrides it, or the endpoints are switched on on the way out.
   `describe(expanded=False)` does the same for the Routing page's driver line, which is polled
   while the page is open because the bind lands, or retries, after the page has read it.
 - **BOTH USB APPLY BUTTONS ARE HELD FOR THE WHOLE SWITCH, BIND AND RETRIES INCLUDED.**
@@ -785,7 +781,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   reads as an observer effect: the first enumerates five device-interface classes eight times a
   second, and the second throttles `audiodg` by making it wait on a Python reader for 330 debug
   lines a second. The test is to run the flips WITH the observer on purpose, and that gives 6
-  binds out of 6. The correlation was with the time of day, not the instrument.
+  binds out of 6. The correlation was with whatever held the desk's Main output, not the
+  instrument.
 - **A BOUND SERVICE CAN LEAVE ITS ENDPOINTS DISABLED, AND THE APP SWITCHES THEM ON.** The service
   switches its endpoints on and off by writing Windows' audio endpoint registry, which Windows
   re-reads only on an audio device arrival; after a mode change that write can land after the
