@@ -444,19 +444,18 @@ CROSS_POINT_SOURCE_STRIDE = 13 # source is the slow axis (13 destinations)
 
 # Source index in the matrix = the channelInputSource source-CODE (that is why USB1=7,
 # Chat=8, USB2=9, BT=10, SMART=11 line up with INPUT_SOURCE_CODE). NOT the fader display
-# order. The 9 below are CONFIRMED by capture (matrix_src.pcap, all 9 faders at HP4).
-# Indices 4/5/6 are INFERRED to be the 3 SIP callers' incoming audio (CallMe1/2/3 as a
-# source): the device has 3 call slots (sipCallSlotId 0/1/2) and the app only shows caller
-# faders when a call is live, so we could not capture them. NOT confirmed - see the guard.
+# order. The first 9 below are CONFIRMED by capture (matrix_src.pcap, all 9 faders at HP4).
+# CallMe 1 is source 16: muting it moves nodes 284 to 296 (76 + 13*16 + 0..12). 4/5/6 are the
+# stereo-linked pairs, not callers.
 CROSS_POINT_SOURCE_INDEX = {
     "Mic1": 0, "Mic2": 1, "Mic3": 2, "Mic4": 3,
     "USB1": 7, "Chat": 8, "USB2": 9, "Bluetooth": 10, "SMARTpads": 11,
-    "CallMe1src": 4, "CallMe2src": 5, "CallMe3src": 6,   # INFERRED (callers as sources)
+    "CallMe1": 16,
 }
-# The 9 source indices proven byte-for-byte against a capture (Pro II). Kept as the FALLBACK for
-# a device whose MatrixSpec carries no source list; the live guard (GAP-5) validates against the
-# CONNECTED device's matrix.source_indices instead, so a Duo refuses a Pro II-only source (Mic 4).
-CONFIRMED_SOURCE_INDICES = {0, 1, 2, 3, 7, 8, 9, 10, 11}
+# The source indices proven on a Pro II. Kept as the FALLBACK for a device whose MatrixSpec
+# carries no source list; the live guard (GAP-5) validates against the CONNECTED device's
+# matrix.source_indices instead, so a Duo refuses a Pro II-only source (Mic 4).
+CONFIRMED_SOURCE_INDICES = {0, 1, 2, 3, 7, 8, 9, 10, 11, 16}
 
 # Output index. Indices 0-10 ALL CONFIRMED (captures/matrix_outputs.pcap swept
 # every visible output button; (output,Mic1) selector = 76 + output_index reads each index
@@ -492,8 +491,8 @@ def cross_point_selector(output_index: int, source_index: int) -> int:
 
 def _check_cross_point(output_index: int, source_index: int, allow_inferred: bool) -> None:
     """Hard guard: refuse any output/source index the CONNECTED device does not expose in its
-    routing matrix, unless the caller explicitly opts in to the INFERRED CallMe2/3 outputs +
-    caller-source slots. Device-aware (GAP-5): validates against the active device's MatrixSpec
+    routing matrix, unless the caller explicitly opts in to the INFERRED CallMe2/3 outputs.
+    Device-aware (GAP-5): validates against the active device's MatrixSpec
     (its exposed matrix.outputs + matrix.source_indices) rather than the Pro II capture-confirmed
     constants, so a Pro II-only cross-point (Mic 4 = source 3, Headphone 3/4 = outputs 2/3) is
     refused on a Duo instead of silently writing to a phantom slot. Falls back to the Pro II
@@ -516,11 +515,9 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
                 f"{dev.name} (exposed {sorted(valid_outputs)}; 11/12 = inferred CallMe2/3, "
                 f"pass allow_inferred=True to use them).")
     if source_index not in valid_sources:
-        if not (allow_inferred and source_index in (4, 5, 6)):
-            raise ValueError(
-                f"source_index {source_index} is not an exposed cross-point source on the "
-                f"{dev.name} (exposed {sorted(valid_sources)}; 4/5/6 = inferred callers, "
-                f"pass allow_inferred=True to use them).")
+        raise ValueError(
+            f"source_index {source_index} is not an exposed cross-point source on the "
+            f"{dev.name} (exposed {sorted(valid_sources)}).")
 
 
 def build_mix_link_request(selector: int, link: bool) -> bytes:
@@ -543,7 +540,7 @@ def set_cross_point_excluded(output_index: int, source_index: int, excluded: boo
     The output must already be in Custom mode (set_output_routing(o, 2)). Sends the
     matching link/unlink request then the mixDisabled bool, both on the cross-point
     selector. Returns total bytes written. READ BACK mixDisabled to confirm. Refuses
-    non-confirmed indices unless allow_inferred=True (CallMe2/3 + caller sources)."""
+    non-confirmed indices unless allow_inferred=True (the CallMe2/3 outputs)."""
     _check_cross_point(output_index, source_index, allow_inferred)
     sel = cross_point_selector(output_index, source_index)
     n = send_record(build_mix_link_request(sel, link=not excluded))

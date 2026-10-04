@@ -439,7 +439,7 @@ HEADPHONE_TYPES = HeadphoneTypeSpec(
 #
 # ADDING AN INPUT IS NOW ONE ENTRY. Which surfaces it appears on is stated per entry, because
 # membership genuinely differs - CallMe 1 is on the faders and the Channels page but has no matrix
-# row - and a flag that says so is checkable where three separate omissions are not.
+# row on a Duo - and a flag that says so is checkable where three separate omissions are not.
 @dataclass(frozen=True)
 class Channel:
     """One input, and everything the app needs to know about it.
@@ -574,9 +574,9 @@ CHANNELS_PRO2 = (
     # do anything.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
     # A remote caller. Like every channel its chain is the one on whichever strip carries it, so it
-    # has processing only while it is on a fader. NOT A MATRIX ROW: where its row sits in the
-    # cross-point grid has not been measured, and a guessed row would route somebody else's audio.
-    Channel(16, "CallMe1", "CallMe 1", "line", stereo=True, in_matrix=False),
+    # has processing only while it is on a fader. Its matrix row is source 16: muting it moves
+    # nodes 284 to 296.
+    Channel(16, "CallMe1", "CallMe 1", "line", stereo=True),
 ) + _VIRTUAL_DEVICES
 
 CHANNELS_DUO = (
@@ -595,6 +595,8 @@ CHANNELS_DUO = (
     # mutes all 13 of source 11's cross-points on its own. The processing chain does nothing on
     # this desk either - see CHANNELS_PRO2 above.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
+    # No matrix row: source 16's row is measured on a Pro II only, and the Duo's baseline dump
+    # reads rows 12 and up as placeholders.
     Channel(16, "CallMe1", "CallMe 1", "line", stereo=True, in_matrix=False),
 ) + _VIRTUAL_DEVICES
 
@@ -949,7 +951,7 @@ DUO_UI_CHANNELS = _ui_channel_view(CHANNELS_DUO)
 
 # --- Routing-matrix UI label maps (see MatrixSpec.sources / .outputs) ----------
 # Pro II: exactly what server.py had hardcoded in _MATRIX_SOURCES / _MATRIX_OUTPUTS, moved here
-# so the routing screen is device-aware. The 9 confirmed sources + 11 confirmed outputs (indices
+# so the routing screen is device-aware. The confirmed sources + 11 confirmed outputs (indices
 # match rcp_transfer.CROSS_POINT_SOURCE_INDEX / CROSS_POINT_OUTPUT_INDEX; the inferred CallMe2/3
 # slots stay unexposed, exactly as before).
 PRO2_MATRIX_SOURCES = _matrix_source_view(CHANNELS_PRO2)

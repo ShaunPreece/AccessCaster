@@ -1706,7 +1706,7 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
 def _overview_routing(blob: bytes) -> dict:
     """Routing reported BY EXCEPTION: only what differs from the usual, never the full grid.
 
-    Reading eleven outputs against nine sources aloud is 99 facts to get through before reaching
+    Reading eleven outputs against ten sources aloud is 110 facts to get through before reaching
     the one that matters, which defeats the point of a troubleshooting summary. So we report an
     output only when its MODE differs from the default, or when it EXCLUDES a source.
 
@@ -1739,7 +1739,7 @@ def _overview_routing(blob: bytes) -> dict:
                        if s in live)
         excluded = [src_label.get(s, f"source {s}") for s, off in cells if off]
         included = [src_label.get(s, f"source {s}") for s, off in cells if not off]
-        # Say whichever list is shorter. A typical Chat preset excludes eight of nine sources, and
+        # Say whichever list is shorter. A typical Chat preset excludes nine of ten sources, and
         # "Chat does not include Mic 2, Mic 3, Mic 4, USB 1, Chat, USB 2, Bluetooth and SMART pads"
         # is a mouthful that hides the one fact that matters: Chat carries Mic 1 only.
         if excluded and len(included) < len(excluded):

@@ -691,7 +691,7 @@ def read_settings() -> dict:
 # See RODECASTER_PROTOCOL.txt section 5.
 
 # Matrix shape (sources exposed, healthy mixDisabled block count, output count, read
-# stride) is per-device in devices.py (Pro II: 9 sources, 390 blocks, 11 outputs,
+# stride) is per-device in devices.py (Pro II: 10 sources, 390 blocks, 11 outputs,
 # stride 13). The block-count is a guard: if the live count differs the matrix changed
 # shape (a SIP caller activated hidden cross-points) so we refuse rather than read by a
 # now-wrong index. The read formula is index = row_stride * source + output.

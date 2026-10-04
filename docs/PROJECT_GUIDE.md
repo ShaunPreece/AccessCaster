@@ -617,8 +617,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   nothing comparing them. Adding the Virtual Devices updated two of the four, which left the
   routing matrix naming USB 1 after a Windows device that no longer existed and offering no rows
   for the four at all. **Adding an input is now one `Channel` entry**; which surfaces it appears on
-  is stated per entry, because membership genuinely differs (CallMe 1 takes a fader and has a
-  channel strip, but no matrix row yet). `test_specs.py` asserts the surfaces agree and that the grid
+  is stated per entry, because membership genuinely differs (on a Duo, CallMe 1 takes a fader and
+  has a channel strip, but no matrix row). `test_specs.py` asserts the surfaces agree and that the grid
   reads exactly the rows the page offers.
   **`Channel.key` IS STORED USER DATA** - profiles, mix schemes and the applied-preset record all
   save it - so renaming a key orphans somebody's saved settings. Rename the `label`, which is the
@@ -1031,8 +1031,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
     Expanded the computer's own audio arrives on those four. So "Chat = my mic only" left a screen
     reader going down the line, and a level check measured it.
   **The source COUNT in a scheme's spoken description is the one place the mode belongs**
-  (`describe(scheme, expanded=...)`): the stored scheme always holds 13 rows, and saying "1 of 13"
-  to somebody looking at 9 would name rows they cannot see.
+  (`describe(scheme, expanded=...)`): the stored scheme always holds every row (14 on a Pro II),
+  and saying "1 of 14" to somebody looking at 10 would name rows they cannot see.
 - **A mix scheme writes the output MODE FIRST, then its cross-points.** Leaving Custom mode discards
   that output's cross-point set on the desk, so the other order throws away what it just wrote.
 - **EXCLUDING a cross-point also UNLINKS it, and an unlink FREEZES the level at the fader's current
@@ -1094,7 +1094,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the strip it is on (`channelInputSource.index(16)`), so it has processing only while on a fader.
   Heard on a phone call, 3rd October 2026: mute, Level and the high-pass all reach the caller's
   audio, and `channelPan` hard left and hard right does nothing. Its cross-point row is source 16
-  (a mute moves nodes 284 to 296), but the Routing page has no row for it yet.
+  (a mute moves nodes 284 to 296), shown on the Routing page on a Pro II only: unmeasured on a Duo.
 - **A STEREO PAIR JOINS TWO ADJACENT INPUTS, NOT TWO FADERS, AND REASSIGNING FADERS CANNOT CHANGE
   WHICH PAIRS EXIST.** The pair codes are fixed positions in the firmware's input enum: 4 = inputs
   1+2, 5 = inputs 2+3, 6 = inputs 3+4. A fader is a slot you put a source on; the PAIR is formed at

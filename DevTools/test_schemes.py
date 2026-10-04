@@ -239,7 +239,7 @@ check("only outputs the Duo really has are written",
       sorted({o for _k, o, _m in [e for e in w.log if e[0] == "mode"]}),
       sorted(o["index"] for o in devices.DUO.matrix.outputs))
 check("the Pro II-only outputs are named as skipped, not guessed at",
-      sorted(res["skipped"]), sorted(["Headphone3", "Headphone4", "Mic3", "Mic4"]))
+      sorted(res["skipped"]), sorted(["CallMe1", "Headphone3", "Headphone4", "Mic3", "Mic4"]))
 check("the Duo's Headphone 1 is index 0 on both desks, so its mix does carry over",
       ("mode", 0, 2) in w.log, True)
 check("and nothing was written to index 2 or 3 (the Pro II's Headphone 3 and 4)",
@@ -298,13 +298,13 @@ print("\nDESCRIBE: what the page says before you commit to a scheme")
 with as_device(devices.PRO2):
     text = routing_schemes.describe(b["chat-mic-only"]["scheme"])
 check_true("names the output and the mode", "Sets Chat to a custom mix" in text)
-check_true("and says how many sources survive", "carrying 1 of 9 sources" in text)
-# THE COUNT FOLLOWS THE MODE while the stored scheme does not: the page shows 13 rows in Expanded
-# and 9 in Standard, so a fixed denominator would name rows the user cannot see.
+check_true("and says how many sources survive", "carrying 1 of 10 sources" in text)
+# THE COUNT FOLLOWS THE MODE while the stored scheme does not: the page shows 14 rows in Expanded
+# and 10 in Standard, so a fixed denominator would name rows the user cannot see.
 with as_device(devices.PRO2):
     wide = routing_schemes.describe(b["chat-mic-only"]["scheme"], expanded=True)
 check_true("and counts Expanded's four when the desk is in Expanded",
-           "carrying 1 of 13 sources" in wide)
+           "carrying 1 of 14 sources" in wide)
 with as_device(devices.PRO2):
     full = routing_schemes.describe(b["normal"]["scheme"])
 check("a whole-desk scheme is summarised, not listed output by output (it is read aloud)",
