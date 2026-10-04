@@ -29,11 +29,28 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.61"
+__version__ = "2.62"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
     ("2.62", [
+        ("Expanded connects reliably",
+         "RODE's Virtual Devices driver often failed to connect when Expanded was switched on, so "
+         "Game, Music, A and B never appeared. The cause was anything playing through the unit's "
+         "Main output at that moment, your screen reader included: the driver needs that output to "
+         "itself. While the unit reconnects in Expanded, AccessCaster now moves Windows' sound to "
+         "another output, such as your computer's own speakers, for a few seconds, then on to "
+         "System (RODECaster) once the driver has connected. RODE's driver announces the connection "
+         "itself, so the app no longer repeats it."),
+
+        ("The fader list follows Expanded",
+         "After switching Expanded on or off, the Faders tab now offers the right channels straight "
+         "away, Game, Music, A and B included, without reloading the page."),
+
+        ("CallMe in the output mixes",
+         "On a RODECaster Pro II, CallMe 1 now has its own row in the output mixes on the Routing "
+         "page, so a caller's voice can be kept out of a headphone mix or the recording."),
+
         ("Extend a call without the touchscreen",
          "A call on RODE's free and standard plans ends after an hour unless it is extended. In its "
          "last five minutes, Extend the call on the CallMe page gives it another hour, and so does "
