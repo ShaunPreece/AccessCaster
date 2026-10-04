@@ -4936,6 +4936,7 @@ async function loadRouting() {
   routingCtl.faders = {};
   const fm = data.fader_model || { faders: [], channels: [] };
   const chanOpts = (fm.channels || []).map((c) => [c[0], c[1]]);
+  routingCtl.faderChannelsKey = JSON.stringify(chanOpts);
   (fm.faders || []).forEach((f) => {
     // ONE APPLY PER FADER, not one for the page: a swap moves TWO faders at once, so staging
     // several and applying them together would compound into something nobody could predict from
@@ -6181,6 +6182,26 @@ function applyStereoValues(state) {
    remembered device value that Apply compares against, and the button's own availability. This is
    the ONLY place the device value is recorded, so a staged dropdown can never be mistaken for what
    the desk is doing. */
+/* THE CHANNEL LIST FOLLOWS THE USB MODE. Expanded adds Game, Music, A and B and renames USB 1, and
+   the page is built once, so a list built in the other mode is rebuilt here from the live read.
+   Only when it differs: rebuilding drops a staged choice, and the list is what a screen reader is
+   arrowing through. applyFaderValues runs straight after and puts each fader's value back. */
+function applyFaderChannels(list) {
+  const key = JSON.stringify(list);
+  if (!routingCtl.faders || routingCtl.faderChannelsKey === key) return;
+  routingCtl.faderChannelsKey = key;
+  Object.values(routingCtl.faders).forEach((sel) => {
+    if (!sel) return;
+    sel.innerHTML = "";
+    list.forEach((c) => {
+      const o = document.createElement("option");
+      o.value = String(c[0]);
+      o.textContent = c[1];
+      sel.appendChild(o);
+    });
+  });
+}
+
 function applyFaderValues(faders, labels) {
   (faders || []).forEach((code, i) => {
     const sel = routingCtl.faders && routingCtl.faders[i];
@@ -6277,6 +6298,11 @@ async function pollRoutingDriver() {
     if (!data.ok) return;
     applyUsbDriver(data.usb_driver);
     setUsbSwitching(!!data.switching);
+    // A switch has just finished, from this page, the unit's screen or anywhere else: the mode can
+    // have changed the fader channel list and cleared faders, so read the page's values again.
+    const finished = routingCtl.usbWasSwitching && !data.switching;
+    routingCtl.usbWasSwitching = !!data.switching;
+    if (finished) await refreshRoutingLive();
   } catch (e) { /* the page's own status line reports a lost service */ }
 }
 
@@ -6304,6 +6330,7 @@ function applyRoutingValues(v) {
   // Kept so a REFUSED write can put every control back without going to the device for it: see
   // routingPost. It is what the unit last said, which is exactly what a refused control must show.
   _routingValues = v;
+  if (v.fader_channels) applyFaderChannels(v.fader_channels);
   if (v.faders) applyFaderValues(v.faders, v.fader_labels);
   if (v.stereo) applyStereoValues(v.stereo);
   if (routingCtl.usbMode && v.usb_multitrack !== null && v.usb_multitrack !== undefined)

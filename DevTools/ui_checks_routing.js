@@ -457,6 +457,21 @@ async function run() {
   check("re-showing an output keeps the mode dropdown's option nodes",
     modeSel.firstElementChild === modeFirst);
 
+  // ---- the fader channel list follows the USB mode -----------------------
+  // The page is built once; a live read whose list differs (Expanded switched on or off since) must
+  // rebuild every fader's options, and the same list again must leave the nodes alone.
+  const f0 = routingCtl.faders[0];
+  const was = Array.from(f0.options).map((o) => [o.value, o.textContent]);
+  const swapped = [[0, "Mic 1"], [12, "Game"], [13, "Music"]];
+  applyFaderChannels(swapped);
+  check("a different channel list from the live read rebuilds the fader options",
+    Array.from(f0.options).map((o) => o.textContent).join("|") === "Mic 1|Game|Music",
+    Array.from(f0.options).map((o) => o.textContent).join("|"));
+  const kept = f0.firstElementChild;
+  applyFaderChannels(swapped);
+  check("the same list again leaves the option nodes alone", f0.firstElementChild === kept);
+  applyFaderChannels(was.map((p) => [parseInt(p[0], 10), p[1]]));
+
   // ---- remembered tab, and the retired group state ----------------------
   await openTab("master");
   let stored = null;

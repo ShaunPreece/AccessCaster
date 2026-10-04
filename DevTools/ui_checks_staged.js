@@ -60,7 +60,8 @@ async function checkOne(row, writePath) {
   await sleep(1200);                       // longer than the old 500 ms auto-commit
   const wrote = (await apiLog()).filter((e) => e.method === "POST");
   check(sel.id + ": arrowing it writes NOTHING", wrote.length === 0, paths(wrote).join(" "));
-  check(sel.id + ": Apply becomes available", btn.getAttribute("aria-disabled") !== "true");
+  check(sel.id + ": Apply becomes available", btn.getAttribute("aria-disabled") !== "true",
+    btn.dataset.blockedReason || "");
   check(sel.id + ": the hint now says what the unit still has",
     /still has/i.test(hint.textContent), hint.textContent);
   // AND THE HINT IS NOT SPOKEN WHILE YOU ARROW. A description is re-read as the
@@ -158,6 +159,10 @@ async function runRouting() {
                 hint: el("routing-usb-expanded-now") };
   if (exp.sel) {
     check("what this computer sends has an Apply", !!exp.btn);
+    // The receives Apply above holds BOTH USB buttons until the server says the switch is done,
+    // which the page learns from its driver poll. The poll skips a hidden page, and a headless one
+    // counts as hidden, so this is what the poll does on hearing the switch has finished.
+    setUsbSwitching(false);
     await checkOne(exp, "/api/routing/usb-expanded");
   }
 }

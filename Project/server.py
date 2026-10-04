@@ -5558,6 +5558,15 @@ def _read_fader_vector(blob=None, spec=None):
     return [cis[i] if i < len(cis) else None for i in range(spec.count)]
 
 
+def _fader_channel_options(spec) -> list:
+    """[code, name] for every channel a fader may take in the USB mode last published. It changes
+    with the mode (Expanded adds Game, Music, A and B and renames USB 1), so the live read carries it
+    as well as the static model."""
+    expanded = channels.usb_expanded()
+    labels = spec.labels_for(expanded)
+    return [[code, labels.get(code, str(code))] for code in spec.code_order_for(expanded)]
+
+
 def fader_model() -> dict:
     """Static layout the Fader assignment UI renders: the connected device's faders + the
     channels that can be placed on them (device-aware, see devices.FaderSpec)."""
@@ -5573,8 +5582,7 @@ def fader_model() -> dict:
         # THE DROPDOWN AND THE WRITE GATE MUST OFFER THE SAME SET, or Expanded's four inputs are
         # either refused after being chosen or missing from the list that can choose them. Both
         # come off `code_..._for`, so there is one answer to "what may go on a fader".
-        "channels": [[code, spec.labels_for(channels.usb_expanded()).get(code, str(code))]
-                     for code in spec.code_order_for(channels.usb_expanded())],
+        "channels": _fader_channel_options(spec),
         "read_only": _fader_write_gate() is not None,
         # The PAIRS are static (which links exist, and what to call them); whether each is currently
         # linked is live state and arrives with the layout read, not from here.
@@ -7010,6 +7018,8 @@ def read_routing_live() -> dict:
         # label and would get "Channel code 6" for a linked pair.
         "fader_labels": [_channel_name(cis[i] if i < len(cis) else None, _active_faders())
                          for i in range(_active_faders().count)],
+        # After publish_usb_expanded above, so a page built in the other mode rebuilds its lists.
+        "fader_channels": _fader_channel_options(_active_faders()),
         "multitrack": first("recordingMultitrackMode"),
         # USB audio, this page's own tab. Read by KIND as well as by name:
         # both fields are single-instance, and matching the type is what stops a same-named field

@@ -108,7 +108,10 @@ after a session that moved code.
   `usb` tab and valued by `applyRoutingValues`). The driver line under them is `applyUsbDriver`,
   kept current by `pollRoutingDriver` on `/api/routing/driver` (`read_usb_driver`) while the Routing
   page is open; the same poll's `switching` drives `setUsbSwitching`, which holds both USB Apply
-  buttons until the server's `_virtual_devices_following` is released. Writers in `rcp_transfer`:
+  buttons until the server's `_virtual_devices_following` is released, and re-reads the page's values
+  when it is. The fader dropdowns' channel list changes with the mode: the live read carries it as
+  `fader_channels` (`_fader_channel_options`) and `applyFaderChannels` rebuilds the options when it
+  differs. Writers in `rcp_transfer`:
   `set_recording_processing_bypass`, `set_usb_multitrack_mode`, `set_usb_multitrack_bypass`, all on
   `SEL_OUTPUT_GLOBAL` 0x0D beside `set_multitrack_mode`.
 - CallMe (straight after the recorder): `_callme_watcher` (started in `_bring_up_server`, seeded
