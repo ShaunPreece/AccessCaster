@@ -212,9 +212,15 @@ RODE's statement. An
 unlicensed Pro 2 on 1.7.6 reads sipLicenceMode 0, sipLicenceCheck False and an empty
 sipLicenceRenewal, with the whole Icecast set at defaults and icecastState empty
 (measured 2nd October 2026), so those three are what a licence is expected to move.
-The cheap test, and it does NOT need a licence: set icecastAddress to any destination,
-trigger icecastConnect, and read icecastState. A refusal naming the licence settles it
-one way; a connection or lookup failure settles it the other.
+
+On that unlicensed desk the connect does NOTHING (4th October 2026). The writes land and
+read back clean, and icecastConnect stays True, but icecastState stays empty, no call slot
+moves, and a listener on the target port saw no connection in 60 seconds. Tried with the
+address as a bare LAN IP and as icecast://<ip>:8000/stream, with and without a password;
+the desk and the listener could reach each other. A request that is stored and never
+consumed fits a silent licence gate, and equally a trigger that is not the one the
+touchscreen uses, so it does not settle the tier. What would: the same test on a desk
+with CallMe Pro, or a touchscreen start captured as a model diff.
 
 
 LEAD 10: which USB product ids are 0x0079 and 0x0095, and does pre-fader Expanded get Faders?
