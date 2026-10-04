@@ -320,9 +320,9 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    RECORD always appends; only the EFFECTS block allocates a region-B object.)
 3. THREE KINDS OF ORPHAN, ONE REMOVAL EACH. An ATTACHED orphan stores effectsIdx LAST, like a live
    pad's object: bare bind + clear removes it, and a delete by tree path does NOT (three tries).
-   A DETACHED one stores effectsIdx FIRST. On 1.7.6, retyping an FX pad to MIDI in RODE's app left
-   one once (4th October 2026) and collected the object cleanly the next time; retyping to Mixer
-   collected it both times tried. Nothing binds to it, so bare bind + clear never collects it, and
+   A DETACHED one stores effectsIdx FIRST. On 1.7.6 RODE's app leaves one when an FX pad MADE IN
+   RODE'S APP is retyped to MIDI (twice of twice, 4th October 2026); the same retype on a pad our
+   app made collects the object, and so does retyping to Mixer. Nothing binds to it, so bare bind + clear never collects it, and
    the delete by tree path removes exactly that node. The delete is the pad clear's shape aimed at
    PADEFFECTS[n] in transfer mode: `01 01 02 02 9d 02 01 <n>` voiceDisguiseOn ON, OFF, then
    select-begin `04 01 01 02 9d 02 01 <n>`.
@@ -335,7 +335,8 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    and our own clear of a middle FX pad (4th October 2026: make FX pads on 17 and 18, clear 17,
    clear 18). So it is the firmware, not either app, and ordinary use makes it. `clear_slot`
    deletes the partial object straight after every FX clear. Only the last object is ever deleted
-   by path; a middle one is reported and the create refuses that padIdx. A partial object in the
+   by path; a middle one is reported and the create refuses that padIdx (the detached refusal ran
+   live, 4th October 2026; clearing the FX pad after it then let clean_pool delete it). A partial object in the
    MIDDLE is harmless as far as tested: an FX pad created after it was heard working, and clearing
    that pad made the partial last, so `clear_slot` deleted it (4th October 2026, ear and whole-tree
    check).
@@ -358,7 +359,8 @@ went live on creation, no reboot; survived a power cycle):
     binding is not reboot-proven, so such a pad is never left in place.
 - DevTools/test_orphan_cleanup_live.py  makes an attached orphan and checks clean_pool restores the
     whole tree, then makes a partial object (two FX pads, clear the first, clear the second) and
-    checks clear_grid_pad leaves none. The detached branch has no test: only RODE's app makes one.
+    checks clear_grid_pad leaves none. The detached branch has no test: only RODE's app makes one
+    (make an FX pad there, retype it to MIDI).
 
 DUPLICATE on a LIVE pad (rare): clear the pad (GCs one copy, leaves the other as an orphan), then
 recreate it from its recipe with the normal live create. Not auto-run by clean_pool because rebuilding

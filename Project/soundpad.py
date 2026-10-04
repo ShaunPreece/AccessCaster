@@ -472,9 +472,10 @@ def _health_message(health: dict) -> str:
         return ""
     if health.get("detached"):
         pads = ", ".join(str(i + 1) for i in sorted(set(health["detached"])))
-        return (f"A leftover voice-effect definition for pad {pads} is stored on the desk and "
-                "cannot be removed safely from here. Avoid putting a voice effect on that pad; a "
-                "factory reset clears it.")
+        # It becomes last, and is deleted, once the voice-effect pads added after it are cleared.
+        return (f"A leftover voice-effect definition for pad {pads} is stored on the desk, so a "
+                "voice effect cannot go on that pad yet. It is removed automatically once the "
+                "voice-effect pads added after it are cleared.")
     if health.get("partial"):
         # Harmless while it waits: an FX pad whose object sits after it was heard working. It
         # becomes last, and is deleted, once the pads after it are cleared.
