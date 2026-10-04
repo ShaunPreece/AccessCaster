@@ -36,7 +36,7 @@ import threading
 import time
 import winreg
 from ctypes import wintypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import comtypes
@@ -415,11 +415,16 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     has taken away the one it was on.
 
     `expect_connected` True waits for the service to bind first (a mode write has just landed and
-    it takes about twelve seconds); False or None does not wait. Safe to call at any time and from
-    any thread; it opens its own COM apartment. Never raises: the desk's controls must not fail
-    because Windows' audio service is having a moment.
+    it takes about twelve seconds). None trusts the service's flag as it reads now. False means
+    the desk is in Standard, where the service cannot be bound: it polls, so for a few seconds
+    after the desk leaves Expanded its flag still says connected, and acting on that switches the
+    endpoints ON and announces them as ready. Safe to call at any time and from any thread; it
+    opens its own COM apartment. Never raises: the desk's controls must not fail because Windows'
+    audio service is having a moment.
     """
     status = wait_connected() if expect_connected else read_status()
+    if expect_connected is False and status.connected:
+        status = replace(status, connected=False, desk="")
     out = Outcome(status=status)
     comtypes.CoInitialize()
     try:

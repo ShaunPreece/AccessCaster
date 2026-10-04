@@ -763,6 +763,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   that state to live, and it is never restarted; a service restart FOLLOWED by an arrival is the
   one recovery ever seen for a run of failures, which fits. **Do not write "it binds about half
   the time" as though it were a property of an arrival.**
+- **THE FOLLOW-UP RE-READS THE DESK'S MODE BEFORE EVERY RETRY AND BEFORE IT SPEAKS.** Only one
+  runs at a time and with retries it lasts over a minute, so a mode changed meanwhile gets no
+  follow-up of its own. Retrying with the mode it started with put the desk back into Expanded
+  after the user had left it, and judging against it reported fader inputs missing from mix only.
+- **IN STANDARD THE SERVICE'S CONNECTED FLAG IS STALE, NOT TRUE.** It polls, so for a few seconds
+  after the desk leaves Expanded it still says connected; `reconcile(expect_connected=False)`
+  overrides it, or the endpoints are switched on and announced as ready on the way out.
+- **PRE-FADER TO POST-FADER IN EXPANDED IS NOT AN ARRIVAL.** Both are product id 0x0094 and the
+  desk stays on the bus, so the service has nothing to bind to. `_write_usb_mode` reports an
+  arrival only when the product id changes, and only arrivals go into the bind history.
 - **THE DIAGNOSTIC TOOLS ARE NOT THE CAUSE, and it was worth asking.** Every failure of that
   afternoon fell inside a window where `bind_timeline.py` or `vad_trace.py` was running, which
   reads as an observer effect: the first enumerates five device-interface classes eight times a

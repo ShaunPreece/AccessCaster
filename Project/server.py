@@ -3845,7 +3845,7 @@ def _announce_loop() -> None:
                     # The desk re-enumerated, whoever caused it: the touchscreen, a profile, or
                     # the desk leaving Expanded on its own. RODE's virtual devices need the same
                     # follow-up either way, and this is the one place that sees every case.
-                    _virtual_devices_follow(st.get("usb_mode"))
+                    _virtual_devices_follow(st.get("usb_mode"), True)
         try:
             rep = dev.read(256, timeout_ms=200)
         except Exception as exc:
@@ -7110,12 +7110,12 @@ def action_set_usb_multitrack(mode: int) -> dict:
         _, expanded = recorder.split_usb_multitrack(
             rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
         value = recorder.join_usb_multitrack(mode, expanded)
-        rcp_transfer.set_usb_multitrack_mode(value)
+        arrived = _write_usb_mode(value)
     return {"ok": True,
             "message": (f"This computer will now receive "
                         f"{recorder.USB_MULTITRACK_LABEL[mode].lower()}. The unit's audio devices "
                         f"drop out for a couple of seconds while it changes over."
-                        + _virtual_devices_follow(value))}
+                        + _virtual_devices_follow(value, arrived))}
 
 
 def _clear_extended_faders() -> list:
@@ -7185,14 +7185,14 @@ def action_set_usb_expanded(on: bool) -> dict:
         mode, _ = recorder.split_usb_multitrack(
             rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int"))
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
-        rcp_transfer.set_usb_multitrack_mode(value)
+        arrived = _write_usb_mode(value)
     tail = ("" if on or not cleared else
             f" {_join_and(cleared)} came off their faders, as the unit's own screen does; their "
             f"processing is kept.")
     return {"ok": True,
             "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
                         f"The unit's audio devices drop out for a couple of seconds while it "
-                        f"changes over.{tail}" + _virtual_devices_follow(value))}
+                        f"changes over.{tail}" + _virtual_devices_follow(value, arrived))}
 
 
 def _seed_usb_expanded() -> None:
@@ -7260,22 +7260,73 @@ _VIRTUAL_DEVICES_RETRIES = 3
 _VIRTUAL_DEVICES_RETRY_HOLD_S = 3.0     # at the other mode: long enough for the service to let go
 
 
-def _virtual_devices_follow(raw_mode) -> str:
+def _desk_pid():
+    """The desk's USB product id now, or None when it is off the bus."""
+    iface = rcp_hid.find_control_interface()
+    return iface.product_id if iface is not None else None
+
+
+def _write_usb_mode(value: int) -> bool:
+    """Write `outputMultiMode` and return whether the desk came back as a different USB device.
+
+    Only that is an ARRIVAL for RODE's service, which matches the desk by product id. Pre-fader
+    and post-fader in Expanded are the same device (0x0094) and the desk does not leave the bus
+    between them, so that switch gives the service nothing to bind to and is not a bind attempt.
+    Caller holds the HID lock."""
+    before = _desk_pid()
+    rcp_transfer.set_usb_multitrack_mode(value)
+    return _desk_pid() != before
+
+
+def _desk_usb_mode():
+    """`outputMultiMode` as the desk holds it now, or None when it cannot be read. Takes the HID
+    lock."""
+    try:
+        with _hid_lock:
+            return rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+    except Exception:
+        return None
+
+
+def _virtual_devices_expectation(raw_mode):
+    """What `virtual_devices.reconcile` should expect of the service in this mode. True: the
+    desk is sending every channel in Expanded, so a bind should come and is waited for. None:
+    the mode is unknown, or Expanded with the mix alone, where the service may bind and its flag
+    is trusted as read. False: Standard, where it cannot be bound at all."""
+    mode, expanded = recorder.split_usb_multitrack(raw_mode)
+    if expanded is None:
+        return None
+    if not expanded:
+        return False
+    return True if mode else None
+
+
+def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
     """Bring RODE's virtual devices into line with the USB mode the desk now holds, and say so.
 
     The work runs on a thread and its outcome is SPOKEN, because the service takes seconds to
     bind after the desk re-enumerates, longer with retries, and a reply held that long reads as
     a hang. The string returned is the reply's tail: what the user should know now, which is
-    only the case where nothing is coming (no driver, or a mode it will not be waited for in)."""
-    mode, expanded = recorder.split_usb_multitrack(raw_mode)
-    expect = bool(expanded) and bool(mode)
+    only the case where nothing is coming (no driver, or a mode it will not be waited for in).
 
-    def rearrive():
-        """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept."""
+    THE DESK'S MODE IS RE-READ BEFORE EVERY RETRY AND BEFORE ANYTHING IS SAID. A follow-up with
+    its retries runs for over a minute, and only one runs at a time, so a mode the person
+    changes meanwhile gets no follow-up of its own: this one moves on to it instead. Retrying
+    with the mode it started with puts the desk back into a mode the person has just left, and
+    judging the outcome against it reports fader inputs missing from a mode that has none.
+
+    `arrived` says the desk has just come back as a different USB device, which is the only
+    case where the service gets a chance to bind; only then is the attempt recorded in the bind
+    history (`virtual_devices.record_bind`)."""
+    mode, expanded = recorder.split_usb_multitrack(raw_mode)
+
+    def rearrive(value: int):
+        """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept. The
+        lock is held across the hold, so a person's own write waits and lands after this one."""
         with _hid_lock:
             rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(0, True))
             time.sleep(_VIRTUAL_DEVICES_RETRY_HOLD_S)
-            rcp_transfer.set_usb_multitrack_mode(int(raw_mode))
+            rcp_transfer.set_usb_multitrack_mode(value)
 
     def run():
         # ONE FOLLOW-UP PER RE-ENUMERATION. A mode write and the announcer's reconnect both see
@@ -7284,27 +7335,50 @@ def _virtual_devices_follow(raw_mode) -> str:
         if not _virtual_devices_busy.acquire(blocking=False):
             return
         try:
-            out = virtual_devices.reconcile(expect_connected=expect)
-            if expect and out.status.running:
-                virtual_devices.record_bind(0, out.status.connected)
-            attempts = 0
-            while (expect and out.status.running and out.status.enabled
-                   and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
-                attempts += 1
-                if attempts == 1:
-                    _ann_say("RODE's driver missed the unit. Reconnecting it; the audio drops "
-                             "again for a moment.")
-                _virtual_devices_retrying.set()
-                try:
-                    rearrive()
-                except Exception as exc:
-                    diagnostics.event("virtual_devices.retry_failed", f"{exc}")
-                    break
-                finally:
-                    _virtual_devices_retrying.clear()
-                diagnostics.event("virtual_devices.retry", "re-enumerated the desk", attempt=attempts)
-                out = virtual_devices.reconcile(expect_connected=True)
-                virtual_devices.record_bind(attempts, out.status.connected)
+            value, fresh, pid = raw_mode, arrived, _desk_pid()
+
+            def moved() -> bool:
+                """Whether someone has changed the mode since `value`; if so, follow theirs."""
+                nonlocal value, fresh, pid
+                held = _desk_usb_mode() if value is not None else None
+                if held is None or held == value:
+                    return False
+                now = _desk_pid()
+                value, fresh, pid = held, now != pid, now
+                return True
+
+            while True:
+                expect = _virtual_devices_expectation(value)
+                out = virtual_devices.reconcile(expect_connected=expect)
+                if moved():
+                    continue
+                if expect and fresh and out.status.running:
+                    virtual_devices.record_bind(0, out.status.connected)
+                attempts, left = 0, False
+                while (expect and out.status.running and out.status.enabled
+                       and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
+                    if moved():
+                        left = True
+                        break
+                    attempts += 1
+                    if attempts == 1:
+                        _ann_say("RODE's driver missed the unit. Reconnecting it; the audio drops "
+                                 "again for a moment.")
+                    _virtual_devices_retrying.set()
+                    try:
+                        rearrive(int(value))
+                    except Exception as exc:
+                        diagnostics.event("virtual_devices.retry_failed", f"{exc}")
+                        break
+                    finally:
+                        _virtual_devices_retrying.clear()
+                    diagnostics.event("virtual_devices.retry", "re-enumerated the desk",
+                                      attempt=attempts)
+                    out = virtual_devices.reconcile(expect_connected=True)
+                    virtual_devices.record_bind(attempts, out.status.connected)
+                if left or moved():
+                    continue
+                break
             if out.sentence():
                 _ann_say(out.sentence())
             elif expect and out.status.running and not out.status.connected:
@@ -7327,6 +7401,8 @@ def _virtual_devices_follow(raw_mode) -> str:
         # so nothing is waited for and the user is told what the four need.
         return (" Game, Music, A and B only reach their own inputs while this computer receives "
                 "every channel, so pick pre-fader or post-fader for that.")
+    if not arrived and st.connected:
+        return ""       # the desk stayed on the bus and the service stays bound: nothing to wait for
     return (" RODE's driver connects in a few seconds, and the virtual devices are announced "
             "when they are ready.")
 
@@ -11751,7 +11827,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
     # RODE's virtual devices may have been left switched off in Windows by a mode change made
     # while this app was not running; apply the driver's current state now. Delayed so the
     # announcer's greeting comes first, and silent unless something actually changed.
-    threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None)),
+    threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None, False)),
                      daemon=True, name="virtual-devices-start").start()
     # And keep agreeing with it. The pass above, and the one after every mode write, each act on a
     # single sample, so a bind that lands a moment later leaves Windows holding endpoints this app

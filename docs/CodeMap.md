@@ -61,7 +61,9 @@ after a session that moved code.
 - USB mode and RODE's virtual devices: `action_set_usb_multitrack` / `action_set_usb_expanded`,
   then `_virtual_devices_follow` directly under them (the thread that runs
   `virtual_devices.reconcile` and speaks the outcome; also called from the announcer's reconnect
-  in `_announce_loop` and, delayed, from `_bring_up_server`). `_virtual_devices_repair` sits beside
+  in `_announce_loop` and, delayed, from `_bring_up_server`). Its helpers sit just above it:
+  `_write_usb_mode` (writes the mode, says whether the product id changed), `_desk_usb_mode` (the
+  re-read before each retry) and `_virtual_devices_expectation`. `_virtual_devices_repair` sits beside
   it as the silent half: the callback `virtual_devices.watch_endpoints` runs on every endpoint
   change Windows reports, sharing `_virtual_devices_busy` so it never fights a mode change. The
   routing read sends `usb_driver` for the page's driver line.
