@@ -93,7 +93,7 @@ def main() -> None:
     ap.add_argument("--control", action="store_true",
                     help="THE MATCHED CONTROL: move nothing, so the same cycles run with the "
                          "default output wherever it already is. Without this run the rate means "
-                         "nothing, because a bad spell alone would produce the same drop.")
+                         "nothing, because a run of failures alone would produce the same drop.")
     args = ap.parse_args()
 
     comtypes.CoInitialize()

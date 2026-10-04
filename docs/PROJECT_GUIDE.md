@@ -699,10 +699,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   sound device. What does re-run it is another arrival, so `server._virtual_devices_follow` makes
   one itself, flipping the output mode off and back up to three times, and then reports the state
   and asks for NOTHING. **Never put a replug back in that sentence**: it is one more arrival at
-  whatever the odds currently are, in a bad spell it binds no better than the retries just did
+  whatever the odds currently are, in a failing run it binds no better than the retries just did
   (measured at post-fader and at mix only), and phrasing it as the remedy tells the operator to go
   and pull a cable that mostly will not help. The "only a replug brings it back" rule this
-  replaced was a description of the same coin toss. The one recovery seen for a bad spell is a service restart FOLLOWED
+  replaced was a description of the same coin toss. The one recovery seen in a failing run is a service restart FOLLOWED
   by an arrival, which bound one second after the desk returned; the restart alone, with the desk
   present, did not. One sample, and it needs elevation, so it is not built.
   `virtual_devices.py` reads the service's own status block (shared memory
@@ -737,7 +737,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `svchost`, both session 0, and zero from the service. Its registry key holds only `Version`,
   `Path`, `Enable` and `Latency`, so there is no flag to switch tracing on either.
   `DevTools/vad_trace.py` is the listener, kept because it proves the negative in one run.
-- **A BAD SPELL OUTLASTS THE FOLLOW-UP'S THREE RETRIES, AND THE ANNOUNCER'S RECONNECT IS WHAT
+- **A FAILING RUN OUTLASTS THE FOLLOW-UP'S THREE RETRIES, AND THE ANNOUNCER'S RECONNECT IS WHAT
   STARTS THE CYCLE THAT WINS.** Measured through one: nine arrivals at product id 0x0094 produced
   two binds, and each came after a cycle had already run out of retries and reported failure.
   Nothing the first cycle did recovered it; the next follow-up, started by the announcer's own
@@ -750,12 +750,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   moved to the Realtek speakers, and six out of six with it left on the driver, every one within
   1.0 to 1.2 seconds. `DevTools/probe_bind_default_output.py --control` is the control, and it
   earns its own flag because the first run alone looked like a cure: the rate had been two binds
-  in nine arrivals an hour earlier. **A GOOD SPELL WILL VALIDATE ANY CHANGE YOU MAKE DURING ONE.**
+  in nine arrivals an hour earlier. **A BINDING RUN WILL VALIDATE ANY CHANGE YOU MAKE DURING ONE.**
   Nothing about this bind may be claimed from a run without a control beside it.
 - **THE BIND IS NOT A PER-ARRIVAL COIN TOSS, SO THERE IS A FACTOR NOBODY HAS NAMED.** Measured in
   one afternoon: 1 bind in 8 arrivals, then 18 in 18 across three runs of identical flips. No
   fixed probability produces both, so the failures cluster on something that persists between
-  arrivals rather than being drawn fresh each time. The service process is the obvious place for
+  arrivals rather than being drawn fresh each time. "A failing run" and "a binding run" in this
+  guide name those clusters; they are observations, not a cause, and the cause is that unnamed
+  state. The app records the service's visible state (pid, start time, threads, handles, private
+  memory, status block) on every bind attempt, so a miss in ordinary use is compared with a bind
+  by `DevTools/bind_history.py` rather than waited for under test. The service process is the obvious place for
   that state to live, and it is never restarted; a service restart FOLLOWED by an arrival is the
   one recovery ever seen for a run of failures, which fits. **Do not write "it binds about half
   the time" as though it were a property of an arrival.**

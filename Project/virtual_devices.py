@@ -29,6 +29,8 @@ endpoint it was on.
 from __future__ import annotations
 
 import ctypes
+import json
+import os
 import re
 import threading
 import time
@@ -43,6 +45,7 @@ from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
 
 import diagnostics
 import meters
+from paths import data_path
 
 # Names the service creates. The status block is what its tray icon reads (readable by everyone);
 # the command block is what the tray writes (Enable, Latency), which the service mirrors into its
@@ -136,7 +139,7 @@ def read_status() -> DriverStatus:
     return st
 
 
-# The service binds about three seconds after the desk arrives, twelve on a bad day, or not at
+# The service binds about three seconds after the desk arrives, twelve at the slowest seen, or not at
 # all: it never binds late, so waiting longer only delays the retry (`server._virtual_devices_follow`).
 CONNECT_WAIT_S = 15.0
 
@@ -152,6 +155,94 @@ def wait_connected(timeout_s: float = CONNECT_WAIT_S) -> DriverStatus:
         if time.monotonic() - at >= timeout_s:
             return st
         time.sleep(0.5)
+
+
+# ---------------------------------------------------------------------------------------------
+# Bind history: what can be seen of the service from outside, once per bind attempt.
+#
+# Binds and misses come in runs, so some state persists between arrivals, and the service process
+# is the one party that is never restarted. It writes no log and its trace is compiled out, so the
+# record is what an unelevated process can read: its pid, start time, thread and handle counts,
+# private memory, and the whole status block. A missed attempt is then compared field by field with
+# a bound one (`DevTools/bind_history.py`). The file is separate from the diagnostic log because
+# a miss can be weeks apart from the bind it is compared with, and that log rolls in a session.
+
+BIND_HISTORY_NAME = "bind_history.jsonl"
+_BIND_HISTORY_MAX = 1024 * 1024        # then rolled to .previous: about a thousand attempts each
+_SERVICE_EXE = "rodecastervadservice.exe"
+
+# OpenProcess on a LocalSystem service is refused to an unelevated caller, even for limited
+# query rights. The system process list carries the same counts and needs no access to the
+# process, so it is read instead.
+SystemProcessInformation = 5
+STATUS_INFO_LENGTH_MISMATCH = 0xC0000004
+
+_ntdll = ctypes.WinDLL("ntdll")
+_ntdll.NtQuerySystemInformation.restype = ctypes.c_ulong
+_ntdll.NtQuerySystemInformation.argtypes = (ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong,
+                                            ctypes.POINTER(ctypes.c_ulong))
+
+# SYSTEM_PROCESS_INFORMATION, 64-bit offsets.
+_SPI_THREADS, _SPI_CREATE, _SPI_NAME_LEN, _SPI_NAME_PTR = 4, 32, 56, 64
+_SPI_PID, _SPI_HANDLES, _SPI_PRIVATE = 80, 96, 200
+
+
+def _service_process() -> dict:
+    """The service's entry in the system process list, or {} when it is not running."""
+    size = ctypes.c_ulong(1 << 20)
+    while True:
+        buf = ctypes.create_string_buffer(size.value)
+        status = _ntdll.NtQuerySystemInformation(SystemProcessInformation, buf, size,
+                                                 ctypes.byref(size))
+        if status != STATUS_INFO_LENGTH_MISMATCH:
+            break
+        size = ctypes.c_ulong(size.value + (64 << 10))
+    if status != 0:
+        return {}
+    base, at = ctypes.addressof(buf), 0
+    u32 = lambda off: ctypes.c_uint32.from_address(base + at + off).value       # noqa: E731
+    u64 = lambda off: ctypes.c_uint64.from_address(base + at + off).value       # noqa: E731
+    while True:
+        length = ctypes.c_uint16.from_address(base + at + _SPI_NAME_LEN).value
+        name = ctypes.wstring_at(u64(_SPI_NAME_PTR), length // 2) if length else ""
+        if name.lower() == _SERVICE_EXE:
+            return {"pid": u64(_SPI_PID), "threads": u32(_SPI_THREADS),
+                    "handles": u32(_SPI_HANDLES), "private_kb": u64(_SPI_PRIVATE) // 1024,
+                    "started": round(u64(_SPI_CREATE) / 1e7 - 11644473600)}  # FILETIME to Unix
+        step = u32(0)
+        if not step:
+            return {}
+        at += step
+
+
+def service_state() -> dict:
+    """Everything an unelevated process can see of the service right now. The status block's
+    third dword is a once-a-second heartbeat, so it is kept apart from the rest of the block,
+    which is compared whole."""
+    out = _service_process()
+    block = _read_block()
+    if block is not None:
+        out["heartbeat"] = int.from_bytes(block[8:12], "little")
+        out["block"] = (block[:8] + block[12:]).rstrip(b"\0").hex()
+    return out
+
+
+def record_bind(attempt: int, connected: bool) -> None:
+    """Append one bind attempt to the history. Attempt 0 is the arrival itself, 1 onwards the
+    follow-up's own re-enumerations. Never raises: a record that can break a bind is worse than
+    none."""
+    try:
+        folder = data_path("logs")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, BIND_HISTORY_NAME)
+        if os.path.exists(path) and os.path.getsize(path) > _BIND_HISTORY_MAX:
+            os.replace(path, path + ".previous")
+        line = {"time": round(time.time()), "attempt": attempt, "connected": connected}
+        line.update(service_state())
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+    except Exception as exc:
+        diagnostics.event("virtual_devices.history_failed", f"{exc}")
 
 
 # ---------------------------------------------------------------------------------------------

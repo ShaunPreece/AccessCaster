@@ -246,10 +246,10 @@ the service, not the id) but the protocol spec's table does.
 some arrivals of the desk and not others, and not as a fresh coin toss each time: one
 afternoon gave 1 bind in 8 arrivals, then 18 in 18. So the failures cluster on some state
 that persists between arrivals, most likely inside the service, which is never restarted.
-The only recovery seen in a bad spell was a service restart followed by a fresh arrival
+The only recovery seen in a run of failures was a service restart followed by a fresh arrival
 (one sample, and it needs elevation). RODE's own app is no help here: its import table
 holds only read-only device APIs, and it writes the same USB mode record we do. Whether
-it misses binds too during a bad spell has not been measured.
+it misses binds too during a run of failures has not been measured.
 
 
 WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT

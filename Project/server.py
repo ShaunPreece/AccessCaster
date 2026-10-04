@@ -7253,8 +7253,8 @@ _virtual_devices_retrying = threading.Event()
 # bind. What does is another arrival, so the follow-up makes one itself by flipping the output
 # mode away and back.
 #
-# THE ODDS ARE NOT EVEN, so three attempts are not the nine in ten they look like: a bad spell
-# runs, and one measured nine arrivals for two binds. A replug is one more arrival at whatever
+# THE ODDS ARE NOT EVEN, so three attempts are not the nine in ten they look like: failures come
+# in runs, and one measured nine arrivals for two binds. A replug is one more arrival at whatever
 # the current odds are, which is why nothing here asks for one.
 _VIRTUAL_DEVICES_RETRIES = 3
 _VIRTUAL_DEVICES_RETRY_HOLD_S = 3.0     # at the other mode: long enough for the service to let go
@@ -7285,6 +7285,8 @@ def _virtual_devices_follow(raw_mode) -> str:
             return
         try:
             out = virtual_devices.reconcile(expect_connected=expect)
+            if expect and out.status.running:
+                virtual_devices.record_bind(0, out.status.connected)
             attempts = 0
             while (expect and out.status.running and out.status.enabled
                    and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
@@ -7302,11 +7304,12 @@ def _virtual_devices_follow(raw_mode) -> str:
                     _virtual_devices_retrying.clear()
                 diagnostics.event("virtual_devices.retry", "re-enumerated the desk", attempt=attempts)
                 out = virtual_devices.reconcile(expect_connected=True)
+                virtual_devices.record_bind(attempts, out.status.connected)
             if out.sentence():
                 _ann_say(out.sentence())
             elif expect and out.status.running and not out.status.connected:
                 # STATE, NEVER AN INSTRUCTION. A replug is one more arrival at the same odds, and
-                # in a bad spell it binds no better than the retries just did, so asking for one
+                # in a failing run it binds no better than the retries just did, so asking for one
                 # reads as "this will fix it" when it mostly will not.
                 _ann_say("RODE's driver has not connected to the unit, so the extra inputs are "
                          "not there.")
