@@ -335,8 +335,10 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    and our own clear of a middle FX pad (4th October 2026: make FX pads on 17 and 18, clear 17,
    clear 18). So it is the firmware, not either app, and ordinary use makes it. `clear_slot`
    deletes the partial object straight after every FX clear. Only the last object is ever deleted
-   by path; a middle one is reported and the create refuses that padIdx. Whether the later pads
-   still SOUND right after a middle removal was never tested.
+   by path; a middle one is reported and the create refuses that padIdx. A partial object in the
+   MIDDLE is harmless as far as tested: an FX pad created after it was heard working, and clearing
+   that pad made the partial last, so `clear_slot` deleted it (4th October 2026, ear and whole-tree
+   check).
 
 PRIMITIVES (soundpad.py section 7b), device-proven 2026-06-20, hardened create EAR-PROVEN end to end
 (safe_assign_fx_recipe on a slot first polluted with an orphan healed it AND created a Megaphone that

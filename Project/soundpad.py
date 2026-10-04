@@ -476,8 +476,11 @@ def _health_message(health: dict) -> str:
                 "cannot be removed safely from here. Avoid putting a voice effect on that pad; a "
                 "factory reset clears it.")
     if health.get("partial"):
-        return ("An empty leftover voice-effect entry is stored on the desk. No pad uses it, and "
-                "it cannot be removed safely from here; a factory reset clears it.")
+        # Harmless while it waits: an FX pad whose object sits after it was heard working. It
+        # becomes last, and is deleted, once the pads after it are cleared.
+        return ("An empty leftover voice-effect entry is stored on the desk. No pad uses it and "
+                "your pads still work; it is removed automatically once the voice-effect pads "
+                "added after it are cleared.")
     if health["missing"]:
         # Named separately from a duplicate, which is a different fault with a different repair:
         # this is a state the desk reaches ON ITS OWN (see heal_fx_pool), not only after a crash
@@ -1728,8 +1731,9 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 #   * PARTIAL (no effectsIdx, 13 properties). Once ANY object has left the middle of the list, by
 #     a clear, a retype in RODE's app or a path delete, the next FX pad's clear leaves this shell
 #     instead of collecting its object. The delete by tree path removes it too.
-# Only the LAST object is ever deleted by path: what a delete from the middle does to the next
-# clear is the partial case above, and whether the pads after it still sound right is untested.
+# Only the LAST object is ever deleted by path: a delete from the middle is itself a middle removal,
+# so the next clear would leave a partial. A partial in the middle does not stop the FX pad after it
+# working, and becomes last (and deletable) once the pads after it are cleared.
 #
 # The bare-bind pad is used only transiently (cleared at once). Every pad we leave behind is made
 # by the normal create (assign_create_fx_recipe), which is the proven live path.
