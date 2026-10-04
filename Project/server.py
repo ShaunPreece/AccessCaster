@@ -6970,7 +6970,10 @@ def read_usb_driver() -> dict:
     leaving Expanded without the page being re-read."""
     known = channels.usb_expanded_known()
     return {"ok": True,
-            "usb_driver": virtual_devices.describe(channels.usb_expanded() if known else None)}
+            "usb_driver": virtual_devices.describe(channels.usb_expanded() if known else None),
+            # The page holds both USB Apply buttons while this is True: a switch made now would
+            # land in the middle of the bind wait or its retries.
+            "switching": _virtual_devices_following.locked()}
 
 
 def read_routing_live() -> dict:
@@ -7226,13 +7229,17 @@ def _seed_usb_expanded() -> None:
 
 _virtual_devices_busy = threading.Lock()
 _virtual_devices_watch_stop = threading.Event()
+# Held for a follow-up's whole run, retries included, and taken BEFORE its thread starts, so the
+# reply to a mode write never goes out with the switch looking finished. It is what keeps a second
+# follow-up from starting, and what the Routing page reads as "a USB switch is still in progress".
+_virtual_devices_following = threading.Lock()
 
 
 def _virtual_devices_repair() -> None:
     """Windows' endpoints moved: make them agree with the driver again. Silent, and never speaks.
 
     THE LOCK IS WHY THIS IS SAFE DURING A MODE CHANGE. `_virtual_devices_follow` holds it for the
-    whole of its wait and its retries, and those retries re-enumerate the desk on purpose, so every
+    whole of its wait and its retries (it waits for a repair to finish before taking it), and those retries re-enumerate the desk on purpose, so every
     endpoint change they cause is skipped here rather than fought over. What reaches this is a
     change with no follow-up behind it, which is exactly the case that used to go unrepaired.
 
@@ -7339,11 +7346,8 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
             rcp_transfer.set_usb_multitrack_mode(value)
 
     def run():
-        # ONE FOLLOW-UP PER RE-ENUMERATION. A mode write and the announcer's reconnect both see
-        # the same event a second apart, and two threads waiting on the same bind would announce
-        # the same inputs twice. The one already running covers it, retries included.
-        if not _virtual_devices_busy.acquire(blocking=False):
-            return
+        # Waits out a repair, which is short; another follow-up cannot be running (see below).
+        _virtual_devices_busy.acquire()
         try:
             value, fresh, pid = raw_mode, arrived, _desk_pid()
 
@@ -7410,8 +7414,13 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                          "not there.")
         finally:
             _virtual_devices_busy.release()
+            _virtual_devices_following.release()
 
-    threading.Thread(target=run, daemon=True, name="virtual-devices").start()
+    # ONE FOLLOW-UP PER RE-ENUMERATION. A mode write and the announcer's reconnect both see the
+    # same event a second apart, and two threads waiting on the same bind would announce the same
+    # inputs twice. The one already running covers it, retries and later mode changes included.
+    if _virtual_devices_following.acquire(blocking=False):
+        threading.Thread(target=run, daemon=True, name="virtual-devices").start()
     if not expanded:
         return ""
     st = virtual_devices.read_status()

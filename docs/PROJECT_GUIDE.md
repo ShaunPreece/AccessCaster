@@ -772,6 +772,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   overrides it, or the endpoints are switched on and announced as ready on the way out.
   `describe(expanded=False)` does the same for the Routing page's driver line, which is polled
   while the page is open because the bind lands, or retries, after the page has read it.
+- **BOTH USB APPLY BUTTONS ARE HELD FOR THE WHOLE SWITCH, BIND AND RETRIES INCLUDED.**
+  `_virtual_devices_following` is taken before the follow-up's thread starts, so the reply never
+  goes out with the switch looking finished, and the driver poll reports it as `switching`. The
+  page blocks the buttons with a spoken reason (`setUsbSwitching`); the server needs no gate of its
+  own, because a write that gets through anyway is followed by the running follow-up.
 - **PRE-FADER TO POST-FADER IN EXPANDED IS NOT AN ARRIVAL.** Both are product id 0x0094 and the
   desk stays on the bus, so the service has nothing to bind to. `_write_usb_mode` reports an
   arrival only when the product id changes, and only arrivals go into the bind history.

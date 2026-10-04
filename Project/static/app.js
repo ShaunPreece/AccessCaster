@@ -4727,7 +4727,9 @@ function makeStagedApply(id, text, onApply) {
       if (btn.stagedSelects[0]) btn.stagedSelects[0].focus();
       return;
     }
-    if (isBusy(btn)) return;
+    // Said, not swallowed: a press that does nothing and says nothing is indistinguishable from
+    // a press that never arrived.
+    if (isBusy(btn)) { announce("Still applying the last change.", true); return; }
     onApply(pending, btn);
   });
   return btn;
@@ -5017,8 +5019,10 @@ async function loadRouting() {
       modes, {
       applyText: "Apply what this computer receives",
       onApply: async (sel, btn) => {
+        setUsbSwitching(true, btn);
         const res = await routingPost("/api/routing/usb-multitrack",
                                       { mode: parseInt(sel.value, 10) }, btn);
+        setUsbSwitching(!!res.ok);
         if (res.ok) setStagedValue(sel, parseInt(sel.value, 10), null);
       },
     });
@@ -5042,8 +5046,10 @@ async function loadRouting() {
       data.usb_expanded_labels || [], {
         applyText: "Apply what this computer sends",
         onApply: async (sel, btn) => {
+          setUsbSwitching(true, btn);
           const res = await routingPost("/api/routing/usb-expanded",
                                         { on: sel.value === "true" }, btn);
+          setUsbSwitching(!!res.ok);
           if (res.ok) setStagedValue(sel, sel.value, null);
         },
       });
@@ -6267,8 +6273,30 @@ async function pollRoutingDriver() {
   try {
     const resp = await fetch("/api/routing/driver");
     const data = await resp.json();
-    if (data.ok) applyUsbDriver(data.usb_driver);
+    if (!data.ok) return;
+    applyUsbDriver(data.usb_driver);
+    setUsbSwitching(!!data.switching);
   } catch (e) { /* the page's own status line reports a lost service */ }
+}
+
+/* BOTH USB APPLY BUTTONS WAIT FOR A SWITCH TO FINISH, the bind and any retries included, which the
+   server reports through the poll above. A second switch made sooner lands in the middle of the
+   first. Blocked with a reason, so a press says why rather than doing nothing. `except` is the
+   button whose own request is starting: it is already busy, and blocking it would make routingPost
+   refuse the press in hand. A reason already there (a read-only device) is left alone. */
+const USB_SWITCHING = "The last USB change is still being finished. RODE's driver can take up to "
+  + "a minute to connect, longer if it has to retry. This button comes back when it is done.";
+
+function setUsbSwitching(on, except) {
+  [routingCtl.usbMode, routingCtl.usbExpanded].forEach((sel) => {
+    const btn = sel && sel.stagedApply;
+    if (!btn || btn === except) return;
+    const reason = btn.dataset.blockedReason || "";
+    if (on && !reason) blockStaged(btn, USB_SWITCHING);
+    else if (!on && reason === USB_SWITCHING) blockStaged(btn, "");
+    else return;
+    markStaged(sel, btn);
+  });
 }
 
 function applyRoutingValues(v) {
