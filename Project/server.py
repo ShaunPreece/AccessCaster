@@ -6963,6 +6963,16 @@ def routing_model() -> dict:
     }
 
 
+def read_usb_driver() -> dict:
+    """The Routing page's driver line on its own, for its poll. No device read: the service's
+    status block and Windows' endpoint list, with the desk's USB mode as last published (every
+    re-enumeration republishes it), so the line follows a bind landing, a retry, or the desk
+    leaving Expanded without the page being re-read."""
+    known = channels.usb_expanded_known()
+    return {"ok": True,
+            "usb_driver": virtual_devices.describe(channels.usb_expanded() if known else None)}
+
+
 def read_routing_live() -> dict:
     """Live-read routing-related properties for the UI."""
     try:
@@ -7010,7 +7020,7 @@ def read_routing_live() -> dict:
         "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
         # The driver's side of Expanded, in words, so the page can say whether the four inputs
         # will actually carry anything. Read from Windows, not the desk.
-        "usb_driver": virtual_devices.describe(),
+        "usb_driver": virtual_devices.describe(usb_expanded),
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
         "usb_processing_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
         "bypass_hint": recorder.BYPASS_HINT,
@@ -11002,6 +11012,7 @@ GET_ROUTES = {
     "/api/channels": action_get_channels,
     "/api/routing": routing_model,
     "/api/routing/live": read_routing_live,
+    "/api/routing/driver": read_usb_driver,
     "/api/driver/status": driver_install_status,
     "/api/faders/live": read_faders_live,
     "/api/routing/matrix/live": read_matrix_live,

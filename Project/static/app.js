@@ -6234,6 +6234,43 @@ async function onResetFaders() {
   } finally { setBusy(btn, false); }
 }
 
+/* The driver line is a live region, so it is only written when the words change: an identical
+   write every poll would be announced every poll. */
+function applyUsbDriver(drv) {
+  if (routingCtl.usbDriver && drv && typeof drv.text === "string"
+      && routingCtl.usbDriver.textContent !== drv.text)
+    routingCtl.usbDriver.textContent = drv.text;
+  applyDriverButtons(drv);
+}
+
+/* THE DRIVER LINE IS POLLED WHILE THE ROUTING PAGE IS OPEN. It changes after the page has read it:
+   the bind lands seconds after a mode change, the app's retries take up to a minute, and the desk
+   can leave Expanded from its own screen. The endpoint reads Windows and the driver's shared
+   status, never the desk, so the poll costs no device access. */
+const ROUTING_DRIVER_POLL_MS = 3000;
+let routingDriverPoll = null;
+
+function startRoutingDriverPoll() {
+  stopRoutingDriverPoll();
+  routingDriverPoll = window.setInterval(pollRoutingDriver, ROUTING_DRIVER_POLL_MS);
+}
+
+function stopRoutingDriverPoll() {
+  if (routingDriverPoll !== null) {
+    window.clearInterval(routingDriverPoll);
+    routingDriverPoll = null;
+  }
+}
+
+async function pollRoutingDriver() {
+  if (document.hidden || !routingCtl.usbDriver) return;
+  try {
+    const resp = await fetch("/api/routing/driver");
+    const data = await resp.json();
+    if (data.ok) applyUsbDriver(data.usb_driver);
+  } catch (e) { /* the page's own status line reports a lost service */ }
+}
+
 function applyRoutingValues(v) {
   // Kept so a REFUSED write can put every control back without going to the device for it: see
   // routingPost. It is what the unit last said, which is exactly what a refused control must show.
@@ -6245,10 +6282,7 @@ function applyRoutingValues(v) {
   // String, because the option values came from JSON booleans and a select's value always is one.
   if (routingCtl.usbExpanded && v.usb_expanded !== null && v.usb_expanded !== undefined)
     setStagedValue(routingCtl.usbExpanded, String(!!v.usb_expanded), null);
-  if (routingCtl.usbDriver && v.usb_driver && typeof v.usb_driver.text === "string"
-      && routingCtl.usbDriver.textContent !== v.usb_driver.text)
-    routingCtl.usbDriver.textContent = v.usb_driver.text;
-  applyDriverButtons(v.usb_driver);
+  applyUsbDriver(v.usb_driver);
   applyBypass(routingCtl.usbBypass, routingCtl.usbBypassHint, v,
               v.usb_processing_bypass, v.usb_multitrack);
   // v.multitrack is still sent by /api/routing and is deliberately not applied here any more:
@@ -6358,6 +6392,7 @@ async function readRouting() {
   clearTimeout(_routingTabReadTimer);          // a pending tab read from the last visit is stale
   if (!routingModel) await loadRouting();
   if (!(await refreshRoutingLive())) return;
+  startRoutingDriverPoll();
   const key = routingTabs ? routingTabs.current() : "mixes";
   if (ROUTING_TABS_ON_LIVE.indexOf(key) < 0) await readRoutingTab(key);
 }
@@ -8842,6 +8877,7 @@ function render(route, focusTo = "heading") {
   // outlives the page it updates is how a stale value gets announced from somewhere else.
   if (activeSection !== "sec-recording") stopRecordingPoll();
   if (activeSection !== "sec-callme") stopCallmePoll();
+  if (activeSection !== "sec-routing") stopRoutingDriverPoll();
   new Set(Object.values(ROUTES).map((r) => r.section)).forEach((id) => {
     const sec = document.getElementById(id);
     if (sec) sec.hidden = (id !== activeSection);

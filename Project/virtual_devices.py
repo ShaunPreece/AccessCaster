@@ -501,9 +501,13 @@ def _restore_default(enum, policy, eps: list, connected: bool) -> str:
     return target.name
 
 
-def describe() -> dict:
-    """For the page: the driver's state and what its endpoints are doing, as words."""
+def describe(expanded: Optional[bool] = None) -> dict:
+    """For the page: the driver's state and what its endpoints are doing, as words. `expanded`
+    False (the desk is in Standard) overrides a connected flag the service has not cleared yet,
+    exactly as `reconcile` does."""
     st = read_status()
+    if expanded is False and st.connected:
+        st = replace(st, connected=False, desk="")
     virtual = []
     comtypes.CoInitialize()
     try:

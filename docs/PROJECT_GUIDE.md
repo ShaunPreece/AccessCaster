@@ -770,6 +770,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **IN STANDARD THE SERVICE'S CONNECTED FLAG IS STALE, NOT TRUE.** It polls, so for a few seconds
   after the desk leaves Expanded it still says connected; `reconcile(expect_connected=False)`
   overrides it, or the endpoints are switched on and announced as ready on the way out.
+  `describe(expanded=False)` does the same for the Routing page's driver line, which is polled
+  while the page is open because the bind lands, or retries, after the page has read it.
 - **PRE-FADER TO POST-FADER IN EXPANDED IS NOT AN ARRIVAL.** Both are product id 0x0094 and the
   desk stays on the bus, so the service has nothing to bind to. `_write_usb_mode` reports an
   arrival only when the product id changes, and only arrivals go into the bind history.
