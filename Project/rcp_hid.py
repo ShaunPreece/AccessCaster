@@ -1,39 +1,20 @@
 """
-AccessCaster - core HID client for the RODECaster Pro II.
+AccessCaster - the HID transport: finding the desk, opening it, and the raw command channel.
 
-This is the low-level transport that speaks RODE Central's vendor USB HID
-protocol to the mixer. Everything else (the web UI, the soundpad manager) sits
-on top of this module.
+Everything that talks to the desk sits on top of this module. It imports nothing heavier than
+hidapi and the diagnostic log, so it is safe to use from a REPL or a small script.
 
-What we know about the protocol (from the Jordan-Milner/rodecaster-control
-reverse-engineering project, confirmed against Steven's unit):
+  Device:   vendor id 0x19F7 (RODE). The control interface is vendor-defined (usage page 0xFF00,
+            usage 0x01) and is MI_09 on the desk's USB 1 port; see find_control_interface.
 
-  Device:   vendor id 0x19F7 (RODE).
-  Control:  a vendor-defined HID interface (usage page 0xFF00, usage 0x01).
-            On this unit that is MI_09, product id 0x0037, named "HID Interface".
-            A second vendor interface (MI_03, pid 0x0026) also exists.
+  Report ids on the control interface:
+    0x01  Output  host -> device   command, 63 data bytes (RodeCaster.command)
+    0x02  Input   device -> host   response, [0x02] [0x41 'A' = ACK] [data ...]
+    0x03  Output  host -> device   an addressed property record (built in rcp_transfer)
+    0x04  Input   device -> host   the model dump and the desk's own pushes (read in rcp_read)
 
-  Framing on the control interface:
-    Report ID 0x01  Output  host -> device   command,  63 data bytes
-    Report ID 0x02  Input   device -> host    response, 63 data bytes
-    Report ID 0x03  Output  host -> device   bulk data (e.g. audio upload)
-    Report ID 0x04  Input   device -> host    bulk data response
-
-    A command is:   [0x01] [opcode ...] [zero padding to 64 bytes]
-    A response is:  [0x02] [0x41 'A' = ACK] [data ...]
-
-  Known read-only commands (safe, no device state change):
-    0x57 'W'  get hardware/version id, replies ASCII like "10DE-1B4F"
-    0x49 'I'  get status/info, replies status bytes
-    0x55 'U'  ping, replies a bare ACK
-
-Nothing in this module changes device state on import or on open. The write
-side (assigning sounds to pads, settings) is still being reverse engineered;
-see RODECASTER_PROTOCOL.txt (soundpads section) for how that gets filled in.
-
-This module is deliberately dependency-light: just `hid` (hidapi). It does not
-import the web server or anything heavy, so it is safe to use from a REPL or a
-small script.
+Nothing here changes device state on import or on open. The property protocol that does is
+documented in docs/RODECASTER_PROTOCOL.txt.
 """
 
 from __future__ import annotations
@@ -103,9 +84,7 @@ def write_report(dev, record: bytes) -> int:
 
     Use this instead of dev.write() anywhere outside rcp_transfer.send_record: a write that does
     not bump the generation leaves the cached model dump looking valid, so a read-back straight
-    afterwards can return the PRE-write state. That bit us on: the bank injector writes
-    on its own handle, so its verification read came from cache and made a working write look like
-    a no-op ("bank changing is broken on this firmware" - it was not).
+    afterwards returns the PRE-write state and a working write looks like a no-op.
     """
     refuse_write_in_tests()
     n = dev.write(record)
@@ -113,10 +92,10 @@ def write_report(dev, record: bytes) -> int:
     diagnostics.command(record, "write_report")
     return n
 
-# Report IDs, per the reverse-engineered protocol.
-REPORT_CMD = 0x01      # output, command
-REPORT_RESP = 0x02     # input, response
-REPORT_BULK_OUT = 0x03  # output, bulk data
+# Report ids (see the module docstring).
+REPORT_CMD = 0x01
+REPORT_RESP = 0x02
+REPORT_BULK_OUT = 0x03
 ACK = 0x41  # 'A', the second byte of a normal response
 
 # The control interface uses 64-byte reports (1 report-id byte + 63 data).
@@ -170,6 +149,7 @@ def enumerate_interfaces() -> list[RodeInterface]:
                 interface_number=d.get("interface_number", -1),
                 usage_page=d.get("usage_page", 0),
                 usage=d.get("usage", 0),
+                # The O of RØDE arrives as U+FFFD when hidapi decodes the string.
                 product_string=(d.get("product_string") or "").replace("�", "O"),
                 serial_number=d.get("serial_number") or "",
             )
@@ -191,12 +171,9 @@ def find_control_interface(
     control interface by shape and silent in fact: opened on hardware with both cables in,
     `get_version` returns '' and `ping` returns False.
 
-    SO THERE IS NO FALLBACK TO "the first control interface we found". Ending on
-    `return candidates[0]` hands MI_03 to any caller with only USB 2 plugged in, and every read then
-    returns nothing while the app looks connected - the state that presents as a freeze. Only
-    `server.read_device_status` checks the interface number, so the SMART pads page, the announcer and
-    every writer would silently do nothing. None is the honest answer: every caller already handles
-    it, and says so.
+    SO THERE IS NO FALLBACK TO "the first control interface we found". That fallback hands MI_03 to
+    any caller with only USB 2 plugged in, and every read then returns nothing while the app looks
+    connected, which presents as a freeze. None is the honest answer, and every caller handles it.
 
     Diagnosing WHICH kind of nothing (no desk at all, or a desk on the wrong port) is
     `server.read_device_status`'s job, because that is a message for a person rather than a value

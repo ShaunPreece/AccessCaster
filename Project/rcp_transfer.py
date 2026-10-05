@@ -35,9 +35,8 @@ import model_tree                    # the tree grammar, and with it the ONE add
 import devices                       # per-device matrix and fader shape
 import diagnostics                   # the app's own account of every record it sends
 import rcp_hid                       # write-generation counter (invalidates cached model reads)
-from rcp_hid import find_control_interface
+from rcp_hid import REPORT_BULK_OUT, find_control_interface
 
-REPORT_BULK_OUT = 0x03
 BULK_LEN = 256
 
 SEL_TRANSFER_MODE = 0x0F
