@@ -2159,8 +2159,7 @@ function populateChannelSelect() {
   }
 }
 
-// Rebuild the FX live-preview mic dropdown from the connected device's real mic
-// channels (Duo = Mic 1/Mic 2; Pro II = Mic 1-4) instead of a hardcoded 1-4 list.
+// Fill the FX live-preview mic dropdown with the attached desk's own mics (a Duo has two).
 function populateFxPreviewMics() {
   const sel = document.getElementById("fx-preview-mic");
   if (!sel || !channelsData) return;
@@ -2300,8 +2299,8 @@ function fillChannelSettings(body, ch) {
   // THE WIRELESS MIC'S OWN MUTE, next to the other two because that is where it is reached for.
   if (isMic) body.appendChild(buildWirelessMute(ch));
   // A BUS (the SMART pads mix) HAS NO LEVEL HERE: its level is its fader, not an input gain, so the
-  // slider is left out rather than shown reading "not read" forever. Everything else on the panel -
-  // mute, solo and the whole processing chain - is the same as any other channel.
+  // slider is left out rather than shown reading "not read" forever. Its mute and solo are the same
+  // as any other channel's.
   if (ch.kind !== "bus") {
     const min = isMic ? channelsData.gain_min_db : channelsData.level_min_db;
     const max = isMic ? channelsData.gain_max_db : channelsData.level_max_db;
@@ -2755,8 +2754,8 @@ const FX_PARAMS_BY_EFFECT = {
   echo: ["echoMix", "echoLowCut", "echoHighCut", "echoDelay", "echoDecay"],
   reverb: ["reverbMix", "reverbModel", "reverbLowCut", "reverbHighCut"],
 };
-const _fxParamDebounce = {};
-
+/* Writes as it moves (debounced) and stays quiet on success: the slider's own value is already
+   spoken, and the server's reply names the raw parameter rather than its label. */
 function buildFxParamSlider(ch, effect, param, value01) {
   const row = document.createElement("div");
   row.className = "field fx-ctl";
@@ -2772,18 +2771,21 @@ function buildFxParamSlider(ch, effect, param, value01) {
   input.value = known ? String(Math.round(value01 * 100)) : "50";
   const out = document.createElement("span");
   out.className = "fx-ctl-value"; out.setAttribute("aria-hidden", "true");
-  const fmt = () => known || input.dataset.touched ? input.value + " percent" : "not read yet";
-  const show = () => { input.setAttribute("aria-valuetext", fmt()); out.textContent = input.value + "%"; };
+  const show = () => {
+    const read = known || input.dataset.touched;
+    input.setAttribute("aria-valuetext", read ? input.value + " percent" : "not read yet");
+    out.textContent = read ? input.value + "%" : "not read";
+  };
   show();
   input.addEventListener("input", () => {
     input.dataset.touched = "1"; show();
-    clearTimeout(_fxParamDebounce[id]);
-    _fxParamDebounce[id] = setTimeout(async () => {
+    window.clearTimeout(channelDebounce[id]);
+    channelDebounce[id] = window.setTimeout(async () => {
       try {
         const res = await postJSON("/api/channels/effect-param",
           { name: ch.name, param, value: parseInt(input.value, 10) / 100 });
-        if (res && !res.ok && res.message) announce(res.message, true);
-      } catch (e) { /* transient */ }
+        if (!res.ok) announce(res.message || "Could not set the effect.", true);
+      } catch (e) { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label); row.appendChild(input); row.appendChild(out);
@@ -2975,8 +2977,10 @@ function fillPresetControls(wrap, ch) {
   const saveBtn = document.createElement("button");
   saveBtn.type = "button"; saveBtn.textContent = "Save preset";
   saveBtn.addEventListener("click", async () => {
+    if (isBusy(saveBtn)) return;
     const name = nameInput.value.trim();
     if (!name) { announce("Please enter a name for the preset.", true); nameInput.focus(); return; }
+    setBusy(saveBtn, true);
     try {
       const res = await postJSON("/api/processing/preset/save", { channel: idx, name });
       announce(res.message || "Done.", !res.ok);
@@ -2984,17 +2988,35 @@ function fillPresetControls(wrap, ch) {
       // destroys this button and throws focus to the top of the page.
       if (res.ok) { channelPresets = res.presets || channelPresets; nameInput.value = ""; fillPresetOptions(applySel); }
     } catch (err) { announce("Could not reach the device service.", true); }
+    finally { setBusy(saveBtn, false); }
   });
   const delBtn = document.createElement("button");
   delBtn.type = "button"; delBtn.textContent = "Delete selected preset";
   delBtn.addEventListener("click", async () => {
+    if (isBusy(delBtn)) return;
     const name = applySel.value;
-    if (!name) { announce("Choose a custom preset in the list first, then delete it.", true); return; }
+    if (!name) {
+      announce("Choose a custom preset in the list first, then delete it.", true);
+      applySel.focus();
+      return;
+    }
+    const preset = channelPresets.find((p) => p.name === name);
+    if (preset && !preset.custom) {
+      announce(`${name} is a built-in preset and cannot be deleted. Only your own presets can.`, true);
+      return;
+    }
+    if (!(await confirmAction("Delete this preset?",
+      `The ${name} preset is deleted for every channel. This cannot be undone.`, "Delete"))) {
+      announce("Cancelled. Nothing was deleted.");
+      return;
+    }
+    setBusy(delBtn, true);
     try {
       const res = await postJSON("/api/processing/preset/delete", { name });
       announce(res.message || "Done.", !res.ok);
       if (res.ok) { channelPresets = res.presets || channelPresets; fillPresetOptions(applySel); }
     } catch (err) { announce("Could not reach the device service.", true); }
+    finally { setBusy(delBtn, false); }
   });
   saveRow.appendChild(saveLabel);
   saveRow.appendChild(nameInput);
@@ -3311,7 +3333,9 @@ async function loadPads() {
    Both panel headings name the pad as well as the category, because the pad chooser is above the
    strip and you can be two tabs away from it. */
 function syncPadEditor() {
-  if (_volDebounce) { clearTimeout(_volDebounce); _volDebounce = null; }  // drop any pending write
+  // Drop any pending write, so it never lands on a different pad.
+  if (_volDebounce) { clearTimeout(_volDebounce); _volDebounce = null; }
+  _padSelectCancels.forEach((cancel) => cancel());
   const pad = currentPad();
   const typeSel = document.getElementById("pad-ed-type");
   if (!typeSel) return;
@@ -3404,8 +3428,8 @@ function fillPadSettings(pad) {
     volEl.setAttribute("aria-valuetext", g + " dB");   // NVDA reads "X dB", not a bare number
   }
 
-  // How the pad plays (sound pads only). Replay only means anything in Toggle mode, and Loop
-  // cannot apply in One Shot, so both rows follow the chosen mode instead of always showing.
+  // How the pad plays (sound pads only). Loop cannot apply in One Shot, so its row follows the
+  // chosen mode instead of always showing.
   showEl("pad-ed-playmode-row", isSound);
   const playEl = document.getElementById("pad-ed-playmode");
   const playMode = isSound && pad.play_mode !== null && pad.play_mode !== undefined
@@ -3451,7 +3475,7 @@ function fillPadSettings(pad) {
 }
 
 /* ---- Confirm modal (true alertdialog) for any destructive action ----------
-   NOT PAD-ONLY despite the ids: mix schemes, deleting a recording and the access link all use it.
+   NOT PAD-ONLY despite the ids: every confirm in the app uses it.
    The DOM ids stay `pad-confirm-*` because they are load-bearing in index.html and in the pads
    checks. */
 
@@ -3635,6 +3659,7 @@ async function onPadRename() {
 // once per step. _volDebounce is cleared on pad change so a pending write never lands on
 // the wrong pad.
 let _volDebounce = null;
+let _padSelectCancels = [];   // the pending-commit cancels for the Settings dropdowns
 
 function onPadVolumeInput() {
   const volEl = document.getElementById("pad-ed-volume");
@@ -3661,9 +3686,7 @@ async function onPadColour() {
   if (!pad || !pad.present || colourEl.value === "") return;
   const colour = Math.max(0, Math.min(11, parseInt(colourEl.value, 10) || 0));
   if (pad.colour === colour) return;      // already this colour; nothing to write
-  setBusy(colourEl, true);
   const res = await padEditPost("/api/pad/colour", { pad: pad.grid, colour });
-  setBusy(colourEl, false);
   if (res.ok) {
     pad.colour = colour;
   } else if (pad.colour !== null && pad.colour !== undefined) {
@@ -4038,8 +4061,8 @@ async function onPlayMode() {
   if (res.ok) {
     pad.play_mode = mode;
     if (res.loop_off) pad.loop = false;        // One Shot turns Loop off device-side
-    fillPadSettings(pad);                      // show/hide the Loop row for the new mode
   }
+  fillPadSettings(pad);   // the Loop row follows the new mode; a refusal puts the list back
 }
 
 async function onMixerTrigger() {
@@ -4050,6 +4073,9 @@ async function onMixerTrigger() {
   if (pad.mixer_trigger === mode) return;      // already there; nothing to write
   const res = await padEditPost("/api/pad/mixer-trigger", { pad: pad.grid, mode });
   if (res.ok) pad.mixer_trigger = mode;
+  else if (pad.mixer_trigger !== null && pad.mixer_trigger !== undefined) {
+    sel.value = String(pad.mixer_trigger);     // put the control back to the truth on failure
+  }
 }
 
 async function onPadClear() {
@@ -4495,6 +4521,9 @@ async function onFxCreateSave() {
 }
 
 async function onFxDelete(name, index) {
+  if (!(await confirmAction("Delete this effect?",
+    `The ${name} effect is deleted from this app. Pads already using it keep it. This cannot be `
+    + "undone.", "Delete"))) { announce("Cancelled. Nothing was deleted."); return; }
   try {
     const res = await postJSON("/api/fx/delete", { name });
     setStatus("fx-create-status", res.message || "Done.");
@@ -4641,6 +4670,17 @@ let _routingValues = null;
    is staged behind an Apply instead (makeStagedSelect), because a delay still fires while you pause
    to listen. */
 const SELECT_COMMIT_MS = 500;
+
+/* Run `commit` once the dropdown has stopped changing for SELECT_COMMIT_MS. Returns a cancel
+   function, for a pending commit that must not outlive what it was about (a pad change). */
+function commitWhenSettled(sel, commit) {
+  let timer = null;
+  sel.addEventListener("change", () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => { timer = null; commit(); }, SELECT_COMMIT_MS);
+  });
+  return () => { window.clearTimeout(timer); timer = null; };
+}
 
 /* ---- A DROPDOWN THAT STAGES, AND THE BUTTON THAT COMMITS IT ----------
    THE RULE: a dropdown that changes WHAT COMES OUT OF THE DESK gets one of these. A dropdown that
@@ -9296,11 +9336,15 @@ async function init() {
     }
   });
   document.getElementById("pad-ed-volume").addEventListener("input", onPadVolumeInput);
-  document.getElementById("pad-ed-colour").addEventListener("change", onPadColour);
+  // Debounced like the meter stream: each pad write enters transfer mode, so walking a closed list
+  // must not write every option passed. syncPadEditor cancels a pending one on a pad change.
+  _padSelectCancels = [
+    commitWhenSettled(document.getElementById("pad-ed-colour"), onPadColour),
+    commitWhenSettled(document.getElementById("pad-ed-playmode"), onPlayMode),
+    commitWhenSettled(document.getElementById("pad-ed-mixer-trigger"), onMixerTrigger),
+  ];
   document.getElementById("pad-ed-replay").addEventListener("change", (e) => onPadToggle("/api/pad/replay", e.target));
   document.getElementById("pad-ed-loop").addEventListener("change", (e) => onPadToggle("/api/pad/loop", e.target));
-  document.getElementById("pad-ed-playmode").addEventListener("change", onPlayMode);
-  document.getElementById("pad-ed-mixer-trigger").addEventListener("change", onMixerTrigger);
   document.getElementById("pad-ed-trigger-custom")
           .addEventListener("change", (e) => onTriggerCustom(e.target));
   document.getElementById("pad-ed-fade-host")

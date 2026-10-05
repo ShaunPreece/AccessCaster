@@ -1,8 +1,7 @@
 /* AccessCaster - accessible app shell + controls.
    Dark is the default theme; a toggle switches to light (saved in localStorage).
    High contrast, large hit targets, visible focus. Colour is never the only
-   signal; every state is also in text for screen-reader users. Built on the
-   AccessibleLayoutGenericHandover pattern (nav links + section router). */
+   signal; every state is also in text for screen-reader users. */
 
 :root,
 :root[data-theme="dark"] {
@@ -64,9 +63,8 @@ a { color: var(--accent); }
   padding: 0.6rem 1.25rem; border-bottom: 2px solid var(--border);
   background: var(--surface);
 }
-/* The app title is an H1 now, so its browser margins have to go or the header grows a blank band.
-   Sized here rather than left at heading defaults: it is chrome, and it must not out-shout the
-   page heading below it. */
+/* The app title is an H1, so its browser margins go or the header grows a blank band. Sized here
+   rather than left at heading defaults: it is chrome, and must not out-shout the page heading. */
 .brand { font-weight: 700; font-size: 1.25rem; margin: 0 0.5rem 0 0; }
 /* The desk line sits under the title and is deliberately quiet: it is a live region that speaks for
    itself, so on screen it should read as a caption rather than compete with the nav. */
@@ -82,7 +80,7 @@ a { color: var(--accent); }
   display: inline-flex; align-items: center;
   padding: 0.55rem 0.9rem; text-decoration: none; color: inherit;
   border-radius: 6px; background: var(--surface); border: 1px solid var(--border);
-  min-height: 44px; font: inherit; cursor: pointer;
+  min-height: 44px;
 }
 .navlink:hover { background: var(--surface-2); }
 .navlink:focus-visible {
@@ -93,13 +91,8 @@ a { color: var(--accent); }
   box-shadow: inset 3px 0 0 0 var(--accent);
 }
 
-.theme-toggle {
-  margin-left: auto; min-height: 44px; padding: 0.5rem 0.9rem; font: inherit;
-  background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-}
-.theme-toggle:hover { background: var(--surface-2); }
-.theme-toggle:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+/* A plain button (see Buttons below) at the header's font size, pushed to the end of the row. */
+.theme-toggle { margin-left: auto; padding: 0.5rem 0.9rem; font: inherit; }
 
 /* ---- Main + sections ---- */
 #main-content { max-width: 60rem; margin: 0 auto; padding: 1.25rem 1.25rem 2rem; }
@@ -175,29 +168,19 @@ input[type="file"] { font-size: 1rem; color: var(--text); padding: 0.3rem 0; }
 .status-ok { color: var(--ok); font-weight: 700; }
 .status-err { color: var(--err); font-weight: 700; }
 
-/* ---- Mic channels ---- */
-fieldset.channel {
+/* ---- Card fieldsets: a mic channel, a keyboard shortcut, a custom voice-FX effect ---- */
+fieldset.channel, fieldset.hotkey, fieldset.fx-eff {
   border: 1px solid var(--border); border-radius: 8px;
   padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
 }
-fieldset.channel legend { font-weight: 700; padding: 0 0.4rem; }
-
-/* ---- Keyboard shortcuts (one fieldset per shortcut) ---- */
-fieldset.hotkey {
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
+fieldset.channel legend, fieldset.hotkey legend, fieldset.fx-eff legend {
+  font-weight: 700; padding: 0 0.4rem;
 }
-fieldset.hotkey legend { font-weight: 700; padding: 0 0.4rem; }
 /* The four modifiers read as one row of choices rather than four separate settings. */
 fieldset.hotkey [role="group"] { display: flex; gap: 1rem; flex-wrap: wrap; }
 fieldset.hotkey [role="group"] .field { margin: 0.2rem 0; }
 
 /* ---- Custom voice-FX creator ---- */
-fieldset.fx-eff {
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
-}
-fieldset.fx-eff legend { font-weight: 700; padding: 0 0.4rem; }
 .fx-ctl { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .fx-ctl > label { min-width: 11rem; }
 .fx-ctl input[type="range"] {
@@ -218,10 +201,7 @@ fieldset.fx-eff legend { font-weight: 700; padding: 0 0.4rem; }
   gap: 1rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); max-width: 28rem;
 }
 
-/* ---- Channel processing: grouped sliders ----
-   NO `.proc-group` OR `.ac-group` RULES HERE, because neither class has any markup left to style:
-   a sub-group is a plain h3 plus an unnamed wrapper (tabSection in app.js). A NAMED group is
-   announced on the way in and again on the way out, which is what those classes cost. */
+/* ---- Channel processing sliders ---- */
 .proc-field { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .proc-field > label { min-width: 9rem; }
 .proc-field input[type="range"] {
@@ -304,11 +284,14 @@ dialog h2:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 
 
 /* ---- High contrast / forced colours ---- */
 @media (forced-colors: active) {
-  .navlink, .theme-toggle, button { border: 1px solid ButtonText; }
-  .navlink:focus-visible, .theme-toggle:focus-visible, button:focus-visible {
+  .navlink, button { border: 1px solid ButtonText; }
+  .navlink:focus-visible, button:focus-visible {
     outline: 3px solid Highlight; outline-offset: 2px;
   }
-  .navlink[aria-current="page"] {
+  /* Forced colours drop box-shadow and paint transparent borders, which erases what marks the
+     current page and the selected tab, so both take the system highlight instead. */
+  .navlink[aria-current="page"],
+  .cat-list [role="tab"][aria-selected="true"] {
     background: Highlight; color: HighlightText; box-shadow: none; border-color: HighlightText;
   }
 }
