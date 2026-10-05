@@ -1146,7 +1146,8 @@ def _callme_state_now():
         return snap, w.control_path()
     blob = _callme_dump()
     _callme_note_dump(blob)
-    return callme.read(blob), callme.paths(blob)[0]
+    d, ctl, _slots = callme.read_all(blob)
+    return d, ctl
 
 
 def action_callme_hosting(on: bool) -> dict:

@@ -11,11 +11,14 @@ browser composes none of it.
 
 from __future__ import annotations
 
+import datetime
 import json
 import threading
 import time
 
+import diagnostics
 import model_tree
+import rcp_hid
 import rcp_read
 import rcp_transfer
 from wording import describe_duration
@@ -61,7 +64,6 @@ def tier_name(mode) -> str:
 def renewal_date(text: str, year: bool = True) -> str:
     """RODE's "October 3, 2026" as "3rd October 2026", or "3rd October" without the year. Left as
     it came if it does not parse."""
-    import datetime
     try:
         d = datetime.datetime.strptime((text or "").strip(), "%B %d, %Y")
     except ValueError:
@@ -221,35 +223,12 @@ def sentence(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------------------------
-# WHERE THINGS ARE. Both node kinds are found by the property they carry, never by position.
+# WHERE THINGS ARE. The control node (SIPCALLING) and the call slots are found by the property
+# they carry (`sipIncomingCallAccept`, `sipSlotCallState`), never by position: see read_all.
 # ---------------------------------------------------------------------------------------------
 
 def _root(blob: bytes):
     return model_tree.parse(blob)[0]
-
-
-def control_path(root):
-    """The path of the node carrying the CallMe controls (SIPCALLING), or None."""
-    for n in model_tree.walk(root):
-        for p, _v, _k in n.props:
-            if p == "sipIncomingCallAccept":
-                return n.path()
-    return None
-
-
-def slot_paths(root) -> list:
-    """The call slots' paths, in slot order: the nodes carrying `sipSlotCallState`."""
-    out = []
-    for n in model_tree.walk(root):
-        if any(p == "sipSlotCallState" for p, _v, _k in n.props):
-            out.append(n.path())
-    return out
-
-
-def paths(blob: bytes):
-    """(control path, slot paths) for a model dump."""
-    root = _root(blob)
-    return control_path(root), slot_paths(root)
 
 
 def _props(node) -> dict:
@@ -354,16 +333,26 @@ def _slot_view(n: int, props: dict) -> dict:
 
 def read(blob: bytes) -> dict:
     """Everything the page shows, from one model dump. Passwords are never included."""
+    return read_all(blob)[0]
+
+
+def read_all(blob: bytes) -> tuple:
+    """(read's state, control path, slot paths) from ONE parse of the dump."""
     root = _root(blob)
-    p, slots = None, []
+    p, slots, ctl, slot_at = None, [], None, []
     for n in model_tree.walk(root):
         props = _props(n)
         if "sipIncomingCallAccept" in props:
-            p = props
+            p, ctl = props, n.path()
         elif "sipSlotCallState" in props:
             slots.append(_slot_view(len(slots) + 1, props))
+            slot_at.append(n.path())
     if p is None:
-        return {"ok": False, "message": "This unit does not publish CallMe."}
+        return {"ok": False, "message": "This unit does not publish CallMe."}, None, []
+    return _state(p, slots, blob), ctl, slot_at
+
+
+def _state(p: dict, slots: list, blob: bytes) -> dict:
     code = p.get("sipRodeCode") or ""
     hosting = bool(p.get("sipCallHostingEnabled"))
     mode = p.get("sipLicenceMode")
@@ -524,16 +513,15 @@ class Watcher(threading.Thread):
     # -- state ---------------------------------------------------------------------------------
     def seed(self, blob: bytes) -> None:
         try:
-            d = read(blob)
-            root = _root(blob)
+            d, ctl, slots = read_all(blob)
         except Exception:
             return
         if not d.get("ok"):
             return
         with self._lock:
             self._state = d
-            self._ctl = control_path(root)
-            self._slots = slot_paths(root)
+            self._ctl = ctl
+            self._slots = slots
             # A call already up when first seen started at some unknown earlier time.
             for s in d.get("slots", []):
                 if s.get("state") in CONNECTED and s.get("uuid") and s["uuid"] not in self._since:
@@ -721,8 +709,6 @@ class Watcher(threading.Thread):
 
     # -- the thread ----------------------------------------------------------------------------
     def run(self) -> None:
-        import rcp_hid      # local, so importing this module never needs the HID stack
-        import diagnostics
         dev = None
         while self.running:
             if dev is None:
