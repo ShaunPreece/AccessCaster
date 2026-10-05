@@ -155,8 +155,15 @@ address, read back exactly, restored, and pushed nothing at all. They look like 
 own app's preferences held on the desk's behalf. The one thing left open is whether an
 `eqParamMode` change shows on the touchscreen, which needs somebody watching it.
 
-Still unclaimed and more promising: `systemName`, `assignableMeterSource`, `presenterMode`
-/ `presenterSoftware`, `shareAnom` / `shareResource`.
+Still unclaimed and more promising: `assignableMeterSource`, `shareAnom` / `shareResource`.
+(`systemName` is the model name, "RODECaster Pro II", which device detection reads: not a
+setting.)
+
+`presenterMode` (bool) and `presenterSoftware` (int) are the Streamer X's "Smart Pad presentation
+mode", where the pads send PowerPoint, Google Slides or Keynote shortcuts (RODE help article
+9173965044495). The Pro II and Duo publish both, reading False and 0, but neither desk's guide
+mentions the feature. With a Streamer X: capture RODE's app switching it on and choosing each
+program, to map `presenterSoftware`'s values.
 
 One write and a read-back settles each. Mind the sweep warning at the top.
 
