@@ -155,9 +155,11 @@ address, read back exactly, restored, and pushed nothing at all. They look like 
 own app's preferences held on the desk's behalf. The one thing left open is whether an
 `eqParamMode` change shows on the touchscreen, which needs somebody watching it.
 
-Still unclaimed and more promising: `assignableMeterSource`, `shareAnom` / `shareResource`.
-(`systemName` is the model name, "RODECaster Pro II", which device detection reads: not a
-setting.)
+Still unclaimed: `assignableMeterSource` (reads 0 on a Pro II) and `shareAnom` / `shareResource`
+(both True). The pair look like anonymous usage sharing with RODE, but no RODE document names
+them, and a read-back cannot show an effect: that takes capturing the desk's own network traffic
+with each value, over long enough to catch a batched upload. (`systemName` is the model name,
+"RODECaster Pro II", which device detection reads: not a setting.)
 
 `presenterMode` (bool) and `presenterSoftware` (int) are the Streamer X's "Smart Pad presentation
 mode", where the pads send PowerPoint, Google Slides or Keynote shortcuts (RODE help article
