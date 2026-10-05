@@ -4471,14 +4471,12 @@ def _read_gain_and_processing(mic: int):
     gain = channels.input_value(blob, entry, "inputMicrophoneGain")
     bypass = rcp_read.values(blob, "channelBypassProcessing")
     # Resolve the strip from THIS dump, so the gain and the bypass state describe the same moment.
-    strip = entry.get("proc_idx")
-    if strip is None:
-        vec = rcp_read.values(blob, "channelInputSource")
-        channels.publish_strip_vector(vec)
-        try:
-            strip = vec.index(entry.get("source_code"))
-        except ValueError:
-            strip = None            # this mic is not on a fader right now
+    vec = rcp_read.values(blob, "channelInputSource")
+    channels.publish_strip_vector(vec)
+    try:
+        strip = vec.index(entry.get("source_code"))
+    except ValueError:
+        strip = None            # this mic is not on a fader right now
     on = (not bypass[strip]) if (strip is not None and 0 <= strip < len(bypass)) else None
     return gain, on
 

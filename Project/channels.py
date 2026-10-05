@@ -324,14 +324,10 @@ def cached_strip_vector():
 
 
 def _strip_index(entry) -> int:
-    """The device strip index for a ui-channel entry, resolved EXACTLY like the read path: a fixed
-    proc_idx if one is pinned, else the LIVE fader position channelInputSource.index(source_code).
-    BOTH desks now take the dynamic path: processing/effects are per fader STRIP on the Pro II too
-    (hardware-confirmed, see devices.PRO2_UI_CHANNELS), so a channel moved to another
-    fader is processed by the chain sitting on that fader."""
-    pi = entry.get("proc_idx")
-    if pi is not None:
-        return pi
+    """The device strip index for a ui-channel entry: its LIVE fader position,
+    channelInputSource.index(source_code), exactly as the read path resolves it. Processing and
+    effects are per fader STRIP (see devices.PRO2_UI_CHANNELS), so a channel moved to another fader
+    is processed by the chain sitting on that fader."""
     src = entry.get("source_code")
     try:
         return strip_vector().index(src)
@@ -355,10 +351,8 @@ def proc_selector(channel) -> int:
     """Map a channel to its processing selector (SEL_CHANNEL_PROC + strip index), DEVICE-AWARE.
 
     `channel` may be a device ui-channel name ("Mic1", "Bluetooth", "Headset", ...), a 1-based
-    PROC_CHANNEL_ORDER index, or a 1-based mic number. On a FIXED-layout desk (Pro II) the strip is
-    the pinned proc_idx, so this is byte-identical to the old static mapping (incl. CallMe1). On a
-    DYNAMIC-layout desk (Duo) the strip is the channel's LIVE fader position, matching the read path,
-    so BT/USB/Chat/Headset address the right strip instead of the wrong (Pro II-ordered) slot.
+    PROC_CHANNEL_ORDER index, or a 1-based mic number. The strip is the channel's LIVE fader
+    position, matching the read path.
     """
     return SEL_CHANNEL_PROC + _channel_strip(channel)
 
@@ -412,11 +406,9 @@ PRESET_FLOAT_PROPS = PROCESSING_PROPS | PRESET_EXTRA_FLOAT_PROPS
 def _require_processing() -> None:
     """Guard the channel processing/effects WRITE path by the active device's "processing" cap.
 
-    proc_selector()/fx_selector() are now device-aware: a fixed-layout desk (Pro II) uses its pinned
-    proc_idx and a dynamic-layout desk (Duo) resolves the strip from the LIVE fader position
-    (channelInputSource.index(source_code)), matching the read path - so non-Mic1 selectors are
-    correct on both. The cap still gates the whole write path so a desk whose processing scheme is
-    not yet verified refuses rather than writing a wrong selector (the stray-append hazard)."""
+    proc_selector()/fx_selector() resolve the strip from the LIVE fader position, matching the read
+    path. The cap gates the whole write path so a desk whose processing scheme is not verified
+    refuses rather than writing a wrong selector (the stray-append hazard)."""
     dev = devices.get_active_device()
     if "processing" not in dev.caps:
         raise RuntimeError(
@@ -785,9 +777,8 @@ PROCESSING_MODULE_BOOLS = (
 # The per-channel UI READ MAP now lives PER-DEVICE in devices.py (see DeviceModel.ui_channels). The
 # readers below use the ACTIVE device's ui_channels, so a Duo maps to its own strips instead of the
 # Pro II's. UI_CHANNELS stays as the Pro II list so external references (e.g. server.py's
-# _UI_CHAN_BY_NAME) still resolve. An entry carries "source_code" (the one per-channel number: input
-# address and matrix source alike) and an optional "proc_idx"; a missing proc_idx means "resolve
-# dynamically as channelInputSource.index(source_code)".
+# _UI_CHAN_BY_NAME) still resolve. An entry carries "source_code", the one per-channel number: input
+# address, matrix source, and (through channelInputSource.index) the processing strip.
 UI_CHANNELS = devices.PRO2.ui_channels
 
 
@@ -1101,9 +1092,8 @@ def read_channels(blob: bytes | None = None) -> list:
     INPUT values (mic gain / power / polarity / type; line inputDigitalGain) are read BY ADDRESS
     through `input_value`, never by position in a values() list. PROCESSING/EFFECTS arrays ARE
     positional, and legitimately so: they are per-STRIP and the strip index is resolved from the
-    live fader vector, so the index means something. Indexed by proc_idx when the device pins one
-    (Pro II), else channelInputSource.index(source_code) (Duo), so a source with no strip assigned
-    reads its processing as None.
+    live fader vector, so the index means something: channelInputSource.index(source_code), and a
+    source with no strip assigned reads its processing as None.
 
     Gated by the device's "channel_read" cap: a device whose per-channel read map is not yet
     verified (e.g. the Duo, pending one hardware check - see devices.DUO) refuses here rather than
@@ -1146,13 +1136,10 @@ def read_channels(blob: bytes | None = None) -> list:
         return lst[i] if (i is not None and 0 <= i < len(lst)) else None
 
     def proc_index(ch):
-        pi = ch.get("proc_idx")
-        if pi is not None:
-            return pi
         try:
             return src_vec.index(ch.get("source_code"))
         except (ValueError, TypeError):
-            return None   # source not assigned to any strip (e.g. Duo Mic2 while combo-linked)
+            return None   # source not assigned to any strip
 
     def inp(ch, prop):
         return input_value(blob, ch, prop, dev)
