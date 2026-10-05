@@ -598,7 +598,7 @@ class Watcher(threading.Thread):
         dev = None
         while self.running:
             if dev is None:
-                iface = rcp_transfer.find_control_interface()
+                iface = rcp_transfer.find_control_interface(fresh=True)
                 if iface is None:
                     diagnostics.event("device.absent", "no control interface to watch on")
                     time.sleep(2.0)               # unit unplugged; try again shortly
@@ -617,6 +617,7 @@ class Watcher(threading.Thread):
                 # always on and always reading. Its timestamp is the app's own answer to "when did
                 # it stop answering", which nothing else can give without inferring it from outside.
                 diagnostics.event("device.lost", "recorder watcher read failed", error=f"{exc}")
+                rcp_hid.forget_interfaces()
                 rcp_hid.close_handle(dev, "recorder watcher")
                 dev = None
                 time.sleep(0.5)

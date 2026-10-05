@@ -1882,7 +1882,10 @@ def read_device_status() -> dict:
     Read-only. Never changes device state. See the comment at the command for why it is only `I`.
     """
     with _hid_lock:
-        interfaces = [i.describe() for i in rcp_hid.enumerate_interfaces()]
+        # A status read is the one place a person asks "is it plugged in?", so it scans the bus
+        # rather than trusting the remembered list, and the finder below then reuses that scan.
+        found = rcp_hid.refresh_interfaces()
+        interfaces = [i.describe() for i in found]
         iface = rcp_hid.find_control_interface()
         # WHICH KIND OF NOTHING IS IT? The finder returns MI_09 or None and never guesses (see its
         # docstring), so telling "no desk at all" from "a desk on the wrong port" is done here, where
@@ -1895,7 +1898,7 @@ def read_device_status() -> dict:
         # lights while the app can do nothing with it, and that state invites a whole causal theory
         # about the protocol when the real answer is which cable is plugged in.
         if iface is None:
-            others = [i for i in rcp_hid.enumerate_interfaces() if i.is_control]
+            others = [i for i in found if i.is_control]
             if others:
                 device_name = devices.resolve_device(others[0].product_id).name
                 return {
@@ -3724,7 +3727,7 @@ def _announce_loop() -> None:
     while _announce_on.is_set():
         if dev is None:
             if iface is None:
-                iface = rcp_transfer.find_control_interface()
+                iface = rcp_transfer.find_control_interface(fresh=True)
             try:
                 dev = rcp_hid.open_handle(iface, "announcer") if iface is not None else None
             except Exception as exc:
@@ -3776,6 +3779,7 @@ def _announce_loop() -> None:
             rep = dev.read(256, timeout_ms=200)
         except Exception as exc:
             diagnostics.event("device.lost", "announcer read failed", error=f"{exc}")
+            rcp_hid.forget_interfaces()
             rcp_hid.close_handle(dev, "announcer")
             dev = None                                     # reopen on the next pass
             lost_at = time.time()

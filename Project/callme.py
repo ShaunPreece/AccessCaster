@@ -712,7 +712,7 @@ class Watcher(threading.Thread):
         dev = None
         while self.running:
             if dev is None:
-                iface = rcp_transfer.find_control_interface()
+                iface = rcp_transfer.find_control_interface(fresh=True)
                 if iface is None:
                     time.sleep(2.0)
                     continue

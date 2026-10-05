@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -159,12 +160,77 @@ def enumerate_interfaces() -> list[RodeInterface]:
     return out
 
 
+# ---- THE INTERFACE LIST, REMEMBERED ---------------------------------------------------------
+# Which desk is attached is asked several times per request (`devices.get_active_device` alone has
+# dozens of callers), and every fresh answer is a full `hid.enumerate`, which blocks for tens of
+# seconds on a desk half off the bus. So the last list is kept and reused until something says it
+# is wrong: a handle failing to open on a remembered path, a watcher losing the desk
+# (`forget_interfaces`), a re-enumeration being waited out, or the list simply ageing past
+# `_IFACE_TTL_S`. The age limit is the net under every path that never fails a handle.
+#
+# A STALE ANSWER COSTS ONE FAILED OPEN, NOT A WRONG DESK: a path is unique to one enumeration, so a
+# desk that has re-enumerated or been swapped no longer opens on it, and that failure clears the
+# list for the next caller.
+#
+# ONE SCAN AT A TIME. Callers arriving while a scan runs wait on the lock and then take its result,
+# so a slow scan is paid once rather than once per caller.
+_IFACE_TTL_S = 5.0
+_iface_lock = threading.Lock()
+_iface_cache: Optional[list[RodeInterface]] = None
+_iface_cached_at = 0.0
+# Numbers each scan as it STARTS. A fresh caller compares against it rather than a clock, because
+# Windows' monotonic clock ticks in about 16 ms steps and an older scan can share the caller's tick.
+_iface_scan_no = 0
+_iface_cached_no = 0
+
+
+def forget_interfaces() -> None:
+    """Drop the remembered interface list, so the next lookup scans the bus. Call it on any sign
+    the desk has left or changed."""
+    global _iface_cache
+    _iface_cache = None
+
+
+def _scan() -> list[RodeInterface]:
+    """Scan the bus and remember the result. Caller holds `_iface_lock`."""
+    global _iface_cache, _iface_cached_at, _iface_scan_no, _iface_cached_no
+    _iface_scan_no += 1
+    number, started = _iface_scan_no, time.monotonic()
+    found = enumerate_interfaces()
+    _iface_cache, _iface_cached_at, _iface_cached_no = found, started, number
+    return found
+
+
+def refresh_interfaces() -> list[RodeInterface]:
+    """Scan the bus now, remember the result, and return every RODE interface found."""
+    with _iface_lock:
+        return list(_scan())
+
+
+def _interfaces(fresh: bool) -> list[RodeInterface]:
+    """The remembered interface list, scanning only when asked to or when it is missing or old."""
+    asked_no = _iface_scan_no
+    with _iface_lock:
+        cache = _iface_cache
+        if cache is not None:
+            # A scan that started after this caller asked is as fresh as one of its own.
+            if _iface_cached_no > asked_no:
+                return cache
+            if not fresh and time.monotonic() - _iface_cached_at < _IFACE_TTL_S:
+                return cache
+        return _scan()
+
+
 def find_control_interface(
     prefer_pid: Optional[int] = None,
     prefer_interface: Optional[int] = None,
+    fresh: bool = False,
 ) -> Optional[RodeInterface]:
     """The MI_09 vendor control interface, or None. Callers can override with a specific product id
     or interface number; nothing else is ever returned by default.
+
+    The answer comes from the remembered interface list (see above); `fresh` scans the bus first,
+    for a caller watching for the desk to arrive or return.
 
     MI_09 IS THE ONLY INTERFACE THIS PROTOCOL WORKS OVER, and it is on the desk's USB 1 port alone
     (the one nearest the power inlet). USB 2 presents its own device, PID 0x0026 MI_03, which is a
@@ -179,7 +245,7 @@ def find_control_interface(
     `server.read_device_status`'s job, because that is a message for a person rather than a value
     for a caller.
     """
-    candidates = [i for i in enumerate_interfaces() if i.is_control]
+    candidates = [i for i in _interfaces(fresh) if i.is_control]
     if not candidates:
         return None
 
@@ -210,7 +276,11 @@ def find_control_interface(
 def open_handle(iface: RodeInterface, purpose: str):
     """Open a raw handle on `iface` and record it. The caller owns closing it."""
     dev = hid.device()
-    dev.open_path(iface.path)
+    try:
+        dev.open_path(iface.path)
+    except Exception:
+        forget_interfaces()          # the path is gone, so the remembered list is wrong
+        raise
     diagnostics.event("hid.open", purpose, pid=f"0x{iface.product_id:04x}",
                       interface=f"MI_{iface.interface_number:02d}")
     return dev
@@ -288,8 +358,9 @@ def wait_for_reenumeration(before: Optional[RodeInterface],
             if time.monotonic() - at >= expect_s:
                 return True                     # it never left: no re-enumeration to wait out
             time.sleep(0.05)
+    forget_interfaces()
     while time.monotonic() - at < timeout_s:
-        iface = find_control_interface()
+        iface = find_control_interface(fresh=True)
         if iface is not None and _path_opens(iface):
             time.sleep(REENUM_SETTLE_S)
             diagnostics.event("device.reenumerated", "back on the bus",

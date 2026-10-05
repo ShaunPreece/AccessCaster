@@ -650,6 +650,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the caller keeps its device lock across it, because nothing else could have succeeded in that
   window anyway. **Watching the OLD path die is what tells a real re-enumeration from a write the
   desk ignored**, so writing a value it already holds costs a fraction of a second and no more.
+- **`rcp_hid.find_control_interface` ANSWERS FROM A REMEMBERED INTERFACE LIST, NOT A FRESH SCAN.**
+  A `hid.enumerate` blocks for tens of seconds on a desk half off the bus, and the active device is
+  asked several times per request, so a scan per lookup stalls every one of them. The list ages out after 5 seconds
+  and is dropped by `forget_interfaces`; keep all four of these: a failed `open_handle` forgets it,
+  a watcher's lost read forgets it, `wait_for_reenumeration` forgets it and polls with `fresh=True`,
+  and every watcher's RECONNECT lookup passes `fresh=True` (without that, an arrival waits out the
+  age limit). A status read scans with `refresh_interfaces`. **Never call `enumerate_interfaces`
+  for a lookup**: it bypasses the list and brings the stall back.
 - **THE ANNOUNCER SAYS WHEN THE USB MODE MOVED WHILE IT WAS DEAF, AND A PUSH CANNOT DO THIS JOB.**
   The desk can leave Expanded unprompted (measured: off the bus with nothing written to it for
   nine minutes, back two seconds later in Standard with the setting reset), and it changes as it
