@@ -2063,12 +2063,13 @@ def read_network_status() -> dict:
         # else on this page is read-only, and the page says WHICH is which rather than leaving a
         # user to find out by pressing things.
         "writable": "network_write" in devices.get_active_device().caps,
-        # States only what the app offers, never what the desk can do: scanning behaves differently
-        # on the two desks, so a claim about it would be wrong on one of them.
+        # Bluetooth scanning is stated as what the app offers, never what the desk can do: it
+        # behaves differently on the two desks. The fixed IP IS a fact about the desk: `ipAddress`
+        # takes no write (PROJECT_GUIDE part 2).
         "still_read_only": (
             "Scanning for Bluetooth devices is not available here. Make the unit discoverable "
-            "above and pair from the phone instead. Bluetooth pairing from here, and a fixed IP "
-            "address, are still being worked on."),
+            "above and pair from the phone instead. Pairing from here is still being worked on. "
+            "A fixed IP address cannot be set: the unit reports its address but takes no other."),
         "message": "Read network and firmware from the device.",
     }
 
@@ -7884,27 +7885,14 @@ def profile_info(name: str) -> dict:
     """What the page needs to describe a profile BEFORE restoring it, above all its pad count: pads
     dominate the time (about 15 seconds each, measured), so a 40-pad profile is a ten-minute job
     rather than the minute or so a settings-only restore takes. Reads the one profile, not the whole
-    store.
-
-    IT ALSO ANSWERS WHETHER A CLEAN RESTORE IS POSSIBLE, because the restore dialog is where that
-    choice is offered and this is the call it already waits for. A clean restore backs the desk up
-    first and refuses to go on without it, so with nowhere to write it cannot be done at all. Gating
-    the option on the "shows" CAPABILITY alone is not enough: a Duo has that cap and no removable
-    storage, so the option would be offered and then refused. Asked HERE rather than on page entry
-    so the answer is fresh when the dialog is built, and it is cheap because
-    `_removable_volume_ready` reads through the cache."""
+    store."""
     loaded = profiles.load(name)
     if not loaded.get("ok"):
         return loaded
     prof = loaded["prof"]
-    can_clean = _removable_volume_ready()
     return {"ok": True, "name": loaded["safe"], "pads": len(prof.get("pads") or []),
             "saved_at": prof.get("saved_at"), "device_name": prof.get("device_name"),
-            "seconds_per_pad": PAD_RESTORE_SECONDS, "settings_seconds": SETTINGS_RESTORE_SECONDS,
-            "can_clean": can_clean,
-            "clean_blocked_reason": ("" if can_clean else
-                                     "Resetting first needs the desk backed up, and there is no "
-                                     "memory card or USB drive in it to save a backup to.")}
+            "seconds_per_pad": PAD_RESTORE_SECONDS, "settings_seconds": SETTINGS_RESTORE_SECONDS}
 
 
 def delete_profile(name: str, force: bool = False) -> dict:
@@ -8246,7 +8234,7 @@ def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = Fal
 #
 # It is offered ONCE PER DESK, not once per install: plug in a second unit later and it gets its own
 # offer. The answer (captured, or declined) is remembered against the hardware id so the dialog does
-# not reappear at every launch, and declining does not close the door - the Profiles page can still
+# not reappear at every launch, and declining does not close the door - the Backups page can still
 # capture one, and pads can be added to an existing baseline afterwards.
 _BASELINE_ASKED_KEY = "baseline_asked"
 # MEASURED: a full backup of a 16-pad desk, 8 of them sound pads and 19.7 MB of audio, takes 4.6
@@ -8320,7 +8308,7 @@ def action_baseline_skip() -> dict:
     """Decline the first-run capture. Remembered per desk so it is asked once, not every launch."""
     _note_baseline_asked()
     return {"ok": True, "message": "No baseline was captured. You can still capture one from the "
-                                   "Profiles page at any time, though it will then record the unit "
+                                   "Backups page at any time, though it will then record the unit "
                                    "as it is now rather than as you found it."}
 
 
@@ -8561,7 +8549,7 @@ def _shows_write_gate():
 
 
 def read_show_state() -> dict:
-    """The Shows section of the Profiles page: what is loaded, and what is on the drive."""
+    """The Shows section of the Backups page: what is loaded, and what is on the drive."""
     try:
         with _hid_lock:
             blob = rcp_read.read_model()

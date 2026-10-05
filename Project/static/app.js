@@ -9,8 +9,8 @@
 
 /* How long a slider waits after you stop moving before it commits to the device. It exists only
    to stop a drag or a held arrow key firing one USB write per step; it is NOT the device being
-   slow. A settings write measures about 10 ms end to end, so 150 ms is ample and the old 250-350 ms
-   was just added lag on every adjustment. Pad edits have their own, longer value: each one enters
+   slow. A settings write measures about 10 ms end to end, so 150 ms is ample; anything longer is
+   lag on every adjustment. Pad edits have their own, longer value: each one enters
    transfer mode (~0.5 s), so it is worth waiting a little longer to be sure the drag has finished. */
 const WRITE_DEBOUNCE_MS = 150;
 const PAD_WRITE_DEBOUNCE_MS = 400;
@@ -25,6 +25,18 @@ function announce(message, assertive) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+/* The visible value beside a slider, for sighted use only. <output> is a live region by default
+   (its implicit role is status), so without aria-hidden and aria-live="off" it is SPOKEN on every
+   change, on top of the slider's own aria-valuetext. */
+function sliderReadout(forId) {
+  const out = document.createElement("output");
+  out.setAttribute("for", forId);
+  out.className = "proc-value";
+  out.setAttribute("aria-hidden", "true");
+  out.setAttribute("aria-live", "off");
+  return out;
 }
 
 /* WRITE TO A STATUS LINE THAT IS ITSELF A LIVE REGION, and let that line be the only voice.
@@ -73,15 +85,18 @@ async function keepingFocus(rebuild) {
    screen-reader user is thrown to the top of the page every time they flip a switch, move a
    dropdown or press an action button. aria-disabled announces the same "unavailable" state, keeps
    focus exactly where it was, and looks identical (see style.css); the data-busy flag is what
-   actually stops a second activation while the first is still running. */
+   actually stops a second activation while the first is still running.
+   Busy and unavailable (setAvailable) share aria-disabled, so each clears it only when the other
+   does not hold it: a write that ends by re-reading the unit can make its own control unavailable
+   (Clear this pad, once the pad is empty), and ending the busy state must not undo that. */
 function setBusy(el, busy) {
   if (!el) return;
   if (busy) {
     el.setAttribute("aria-disabled", "true");
     el.dataset.busy = "1";
   } else {
-    el.removeAttribute("aria-disabled");
     delete el.dataset.busy;
+    if (el.dataset.offReason === undefined) el.removeAttribute("aria-disabled");
   }
 }
 
@@ -93,19 +108,18 @@ function isBusy(el) {
    THERE ARE NO COLLAPSIBLE GROUPS, and nothing should reintroduce them: every page uses one of the
    two helpers below. `dropRetiredGroupState()` near init() deletes the old `accesscaster.groups`
    localStorage key once, so a remembered "closed" cannot outlive a design with no closed state.
-   A page's categories become one horizontal strip of role="tab"
-   buttons with a single panel below, and ONLY the selected panel exists in the DOM.
+   A page's categories become one horizontal strip of role="tab" buttons with a single panel below,
+   and only the selected pane is visible.
 
-   Why this beats the groups it replaces:
+   Why tabs:
      - a tab is announced as a tab with its position ("Dynamics, tab, 5 of 7") and is NOT in BUTTON
        quick navigation, so B still lands only on real actions (Apply, Refresh, Reset);
      - heading navigation, form-field navigation and the tab order see one category at a time, so a
-       mic's 50-plus controls stop being one long walk;
-     - the selected tab is announced, so where you are is never a guess (a remembered "closed"
-       group was invisible until you walked it).
+       mic's 50-plus controls are not one long walk;
+     - the selected tab is announced, so where you are is never a guess.
 
-   ONE ROW, NEVER WRAPPED: wrapped tab rows are a maze for anyone zoomed in, which is why the
-   categories are merged (see the per-page maps in the plan). On a narrow screen the strip scrolls
+   ONE ROW, NEVER WRAPPED: wrapped tab rows are a maze for anyone zoomed in, which is why related
+   categories share a tab. On a narrow screen the strip scrolls
    sideways rather than wrapping, which changes nothing for a screen reader.
    Left/Right move along the strip and switch the panel as they go, Home/End jump to the ends; up
    and down are deliberately unbound, since a horizontal strip does not promise them. Roving
@@ -196,7 +210,7 @@ function wireTabStrip(pageKey, panelId, panel, panes, keys, titles, onSelect) {
   //
   // The APG suggests naming a tablist. It is not a WCAG requirement, every one of these strips
   // sits directly under a heading that says what page it is, and the cost is paid on every single
-  // move along the strip - which on this app is constant. The user it is for asked for it gone.
+  // move along the strip.
   strip.setAttribute("role", "tablist");
   panel.setAttribute("role", "tabpanel");
 
@@ -314,13 +328,11 @@ function buildTabs(pageKey, tabs, opts) {
                       tabs.map((t) => t.key), tabs.map((t) => t.title), opts.onSelect);
 }
 
-/* One sub-group inside a MERGED tab: an h3 you can jump to with H, plus a role="group" carrying the
-   same name, so a slider called Threshold still announces whether it belongs to the compressor, the
-   noise gate or the de-esser. Heading levels stay in order: page h1, panel h2, sub-group h3. */
-/* A sub-heading and a plain wrapper. NO role="group" and no name on it: a named group is
+/* One sub-group inside a tab that holds several: an h3 you can jump to with H (page h1, panel h2,
+   sub-group h3) and a plain wrapper. NO role="group" and no name on the wrapper: a named group is
    announced on the way in, before the control you are actually going to, and again as "out of
-   grouping" on the way out. The h3 says the same thing, is reachable with H, and costs nothing
-   when you are not looking for it. */
+   grouping" on the way out. The h3 says the same thing and costs nothing when you are not looking
+   for it. */
 function tabSection(body, title) {
   const h = document.createElement("h3");
   h.textContent = title;
@@ -330,17 +342,12 @@ function tabSection(body, title) {
   return wrap;
 }
 
-/* The same tab strip for a page whose controls are written in index.html rather than built in JS
-   (Routing, and the rest as they are converted). The strip itself IS the same code as buildTabs':
-   both are thin adapters over wireTabStrip, which is where the keyboard handling, the roving
-   tabindex and the focus rules live.
-   ONE DELIBERATE DIFFERENCE: the panes are NOT built and destroyed, they STAY IN THE DOCUMENT and
-   are hidden. Every control on a static page is wired by id ONCE at startup, and a lot of code
-   reaches for those ids later (loadRouting fills #routing-inputs, the read-only path inserts notes
-   into #routing-master, and so on), so a detached pane would turn every one of those lookups into
-   null. `hidden` gives the accessibility half of what we want anyway: a hidden pane is out of the
-   accessibility tree, out of the tab order and out of heading navigation, so a screen reader still
-   sees exactly one category at a time.
+/* The same tab strip for a page whose controls are written in index.html rather than built in JS.
+   Both are thin adapters over wireTabStrip, which is where the keyboard handling, the roving
+   tabindex and the focus rules live; this one finds its panes in the document instead of building
+   them. Every control on a static page is wired by id ONCE at startup and reached by id later
+   (loadRouting fills #routing-inputs, the read-only path inserts notes into #routing-master), so
+   the panes must never be detached, only hidden.
    Markup contract: `<div id="..." class="cat-panel" role="tabpanel">` holding one
    `<div class="cat-tab" data-tab-key="..." data-tab-title="...">` per tab, each opening with the h2
    that names the category. Panes after the first carry `hidden` in the markup so the page is not
@@ -425,16 +432,16 @@ function wireAccess() {
     if (!box || !box.value) return;
     // SELECT IT EITHER WAY. The clipboard call can be refused (it needs a secure context in some
     // browsers, and this is plain HTTP), so the fallback is not an error path: the text is left
-    // selected so Ctrl+C works, and the live region says which happened.
+    // selected so Ctrl+C works, and the status line (the only voice: see setStatus) says which
+    // happened.
     box.focus();
     box.select();
     try {
       await navigator.clipboard.writeText(box.value);
-      announce("The access link is on the clipboard.");
-      setStatus("dev-access-status", "Copied.");
+      setStatus("dev-access-status", "The access link is on the clipboard.");
     } catch (err) {
-      announce("Could not copy automatically. The link is selected, so press Control C.", true);
-      setStatus("dev-access-status", "The link is selected. Press Control C to copy it.");
+      setStatus("dev-access-status",
+        "Could not copy automatically. The link is selected, so press Control C to copy it.");
     }
   });
   make.addEventListener("click", async () => {
@@ -573,13 +580,12 @@ async function loadNetwork() {
       : "None set");
     setText("net-wifi-connected", w.connected ? "Yes" : "No");
     setText("net-wifi-ip", w.ip ? w.ip : "None");
-    // An EMPTY scan list means "nothing has been scanned for", not "nothing is in range", and the
-    // difference matters: we cannot start a scan from here, so a bare "None" would be read as the
-    // unit reporting an empty airwave. Same wording for both radios.
+    // An EMPTY scan list means "nothing has been scanned for", not "nothing is in range", so a bare
+    // "None" would be read as the unit reporting an empty airwave. Same wording for both radios.
     const scanText = (list) => (list && list.length)
       ? list.join(", ")
-      : "Nothing found. The unit only fills this in when a scan is run on its own screen, so this "
-        + "usually means no scan has been run rather than nothing being in range.";
+      : "Nothing found. The unit only fills this in after a scan, so this usually means no scan "
+        + "has been run rather than nothing being in range.";
     setText("net-wifi-scan", scanText(w.scan));
     const bt = data.bluetooth || {};
     setText("net-bt", bt.connected ? ("Connected to " + bt.connected_address)
@@ -592,23 +598,22 @@ async function loadNetwork() {
     setText("net-readonly", data.still_read_only || "");
     // The three controls reflect what the unit reports, so opening the tab shows its real state
     // rather than whatever was last left in the page.
+    const writable = data.writable !== false;
     const wifiToggle = document.getElementById("net-wifi-toggle");
     if (wifiToggle) {
       // "connected" means it HAS an address. The radio being on is a different fact, and the one
       // this switch owns: a radio can be on and not yet joined to anything.
       wifiToggle.checked = !!(w.on !== undefined ? w.on : (w.connected || w.ssid));
-      setBusy(wifiToggle, data.writable === false);
+      setAvailable(wifiToggle, writable, NETWORK_READ_ONLY_OFF);
     }
     const btToggle = document.getElementById("net-bt-toggle");
     if (btToggle) {
       btToggle.checked = bt.visible === true;
-      setBusy(btToggle, data.writable === false);
+      setAvailable(btToggle, writable, NETWORK_READ_ONLY_OFF);
     }
-    const joinBtn = document.getElementById("net-join-btn");
-    if (joinBtn) setBusy(joinBtn, data.writable === false);
+    setAvailable(document.getElementById("net-join-btn"), writable, NETWORK_READ_ONLY_OFF);
     // Scanning is a write (it sets `wifiScan`), so it follows the same gate as joining.
-    const scanBtn = document.getElementById("net-scan-btn");
-    if (scanBtn) setBusy(scanBtn, w.can_scan === false || data.writable === false);
+    setAvailable(document.getElementById("net-scan-btn"), writable, NETWORK_READ_ONLY_OFF);
     // The network name is prefilled with what the unit already has, so rejoining after a password
     // change is one field rather than two. The PASSWORD is never prefilled and never comes back
     // from the server, which is the whole point of the rule around it.
@@ -624,8 +629,7 @@ async function loadNetwork() {
   }
 }
 
-/* The wireless mic readout, in sentences rather than a table, like the Hardware report it came
-   from. THREE OUTCOMES, not two, and the difference matters: slots that all read off really do mean
+/* The wireless mic readout, in sentences rather than a table. THREE OUTCOMES, not two, and the difference matters: slots that all read off really do mean
    no transmitter is on, but a dump carrying NO slots at all means the unit told us nothing, and
    reading that out as "none connected" would be inventing an answer. Nothing has ever been paired
    on this desk, so the connected wording is unproven in practice (server._wireless_mics). */
@@ -667,20 +671,25 @@ function paintWirelessMics(mics) {
    never read back, never prefilled and never stored: the unit keeps it, and this app deliberately
    does not. */
 
+const NETWORK_READ_ONLY_OFF = "Changing the network settings is not enabled on this device yet. "
+  + "You can still read what it has.";
+
 async function netPost(url, body, el, working) {
   if (isBusy(el)) return null;
+  const no = unavailableReason(el);
+  if (no !== null) { setStatus("net-write-status", no); return null; }
   setBusy(el, true);
-  setText("net-write-status", working);
+  setStatus("net-write-status", working);
   let res;
   try {
     res = await postJSON(url, body);
   } catch (e) {
     setBusy(el, false);
-    setText("net-write-status", "Could not reach the AccessCaster service.");
+    setStatus("net-write-status", "Could not reach the AccessCaster service.");
     return null;
   }
   setBusy(el, false);
-  setText("net-write-status", res.message || "Done.");
+  setStatus("net-write-status", res.message || "Done.");
   return res;
 }
 
@@ -747,7 +756,7 @@ async function onWifiJoin(ev) {
   const pskBox = document.getElementById("net-join-psk");
   const ssid = (ssidBox.value || "").trim();
   if (!ssid) {
-    setText("net-write-status", "Type the name of the network to join first.");
+    setStatus("net-write-status", "Type the name of the network to join first.");
     ssidBox.focus();
     return;
   }
@@ -822,11 +831,7 @@ async function loadOverview() {
     if (!d.ok) {
       lines.push(d.message || "Could not read the unit.");
     } else {
-      // STORAGE FIRST, and only when it is a problem. Everything else on this page describes how
-      // the desk sounds; a nearly-full volume is the one thing here that stops it WORKING, and it
-      // is the fact you want before you press record rather than after. Silent when there is room,
-      // like the routing notes below.
-      // A PAD LEFT SWITCHED ON goes first, above even storage. It is the only thing reported on
+      // A PAD LEFT SWITCHED ON goes first. It is the only thing reported on
       // this page that can be changing how you SOUND right now while giving no other sign: a voice
       // effect pad makes no noise of its own, so the symptom is just that you sound wrong.
       // BY EXCEPTION, and it stays that way: do not add "no pads are switched on" to match the way
@@ -835,13 +840,14 @@ async function loadOverview() {
         lines.push(`Pad ${p.grid}, ${p.name}, is switched on and processing a live channel. `
           + "Press that pad on the unit to switch it off, or clear it from the SMART pads page.");
       });
-      // A RECORDING IN PROGRESS, reported only when there is one. It is above storage because a
-      // recording you did not know about is the thing on this page you would want to act on first.
+      // A RECORDING IN PROGRESS, reported only when there is one.
       if (d.recording) {
         lines.push(d.recording.state === 1
           ? "A recording is PAUSED. The Recording page, Alt plus 4, carries on or stops it."
           : "The unit is RECORDING. The Recording page, Alt plus 4, pauses or stops it.");
       }
+      // STORAGE, only when it is nearly full: the one thing here that stops the desk WORKING
+      // rather than changing how it sounds, so it comes before the levels and routing.
       (d.storage_low || []).forEach((v) => {
         lines.push(`${v.label} is nearly full: ${v.free_pct} percent left, about ${v.free_mb} MB.`);
       });
@@ -934,8 +940,8 @@ function summariseOverview(d) {
 
   // EVERY ALERT IS MADE INTO A SENTENCE HERE rather than trusted to be one. They come from several
   // places: some arrive with a full stop (the routing notes, written for the Device page) and some
-  // without, and some start lower case. Joined raw they produced "a custom mix.. the unit is
-  // recording", which reads fine and sounds wrong.
+  // without, and some start lower case, so joined raw they would give "a custom mix.. the unit is
+  // recording".
   const sentence = (t) => {
     const clean = String(t).trim().replace(/\.+$/, "");
     return clean.charAt(0).toUpperCase() + clean.slice(1) + ".";
@@ -972,9 +978,7 @@ async function speakStartupSummary() {
   } catch (err) { /* nothing to say is better than an error nobody asked for */ }
 }
 
-/* Device page: read-only live state (card, recorder, firmware, wired network). Written as plain
-   sentences in a polite live region rather than a table, so a screen reader reads it as a short
-   report. Anything the unit cannot tell us honestly says so instead of showing a zero. */
+/* The firmware version, with any waiting update after it. */
 function firmwareLine(fw, upd) {
   const u = upd || {};
   if (!u.available) return fw || "Unknown";
@@ -998,6 +1002,9 @@ async function onFirmwareCheck(btn) {
   setStatus("dev-fw-status", res.message || "Done.");
 }
 
+/* Device page: read-only live state (card, recorder, firmware, wired network). Written as plain
+   sentences in a polite live region rather than a table, so a screen reader reads it as a short
+   report. Anything the unit cannot tell us honestly says so instead of showing a zero. */
 async function loadDeviceState() {
   const btn = document.getElementById("dev-state-btn");
   const out = document.getElementById("dev-state");
@@ -1040,8 +1047,8 @@ async function loadDeviceState() {
     // radio links on the Wireless connections tab, not between a memory card and a recorder
     // (paintWirelessMics).
     //
-    // Firmware and the wired network came the other way, from that tab, and are a dl rather than
-    // lines in this live region: they are values you look up, not news.
+    // Firmware and the wired network are a dl rather than lines in this live region: they are
+    // values you look up, not news.
     setText("dev-firmware", firmwareLine(d.firmware, d.firmware_update));
     setText("dev-wired",
       d.wired_connected === true ? "Connected"
@@ -1101,7 +1108,7 @@ function loadMeters() {
 /* WINDOWS' OWN LEVEL for the metered stream, in dB.
    It is on this tab because it is the hidden multiplier on everything else here: Windows boosting
    an input makes it clip in Windows while the desk's meters look fine, and Windows attenuating one
-   made our own clipping warning unreachable for the whole life of the feature.
+   makes our own clipping warning unreachable.
 
    IN dB, NOT PERCENT, AND AS A NUMBER BOX. On this endpoint 50 percent is -1.08 dB and unity is
    about 55 percent, so a percentage is a number you cannot reason about, and dragging cannot land
@@ -1163,22 +1170,27 @@ function buildInputLevel(d) {
     note.id = "meter-input-note";
     note.className = "hint";
     box.appendChild(note);
-    input.addEventListener("change", () => sendInputLevel(parseFloat(input.value), input));
-    btn.addEventListener("click", () => sendInputLevel(0, btn));
+    input.addEventListener("change", () => {
+      if (refuseChange(input) !== null) { input.value = input.dataset.prev; return; }
+      sendInputLevel(parseFloat(input.value), input);
+    });
+    btn.addEventListener("click", () => {
+      if (refuseChange(btn) !== null) return;
+      sendInputLevel(0, btn);
+    });
   });
   const input = document.getElementById("meter-input-db");
   if (input) {
     input.min = String(lvl.min_db);
     input.max = String(lvl.max_db);
     input.value = lvl.db.toFixed(1);
-    // A FIXED-LEVEL ENDPOINT HAS NO CONTROL TO OFFER, so the spin button and its button are
-    // disabled rather than left to fail. Every one of RODE's virtual devices is like this - all
-    // nine Fader inputs and System - and there the level lives on the desk's own fader. A live
-    // control that silently does nothing is the worst of the three states to land a screen reader
-    // on; disabled is announced, and the note below says where the volume actually is.
-    input.disabled = !!lvl.fixed;
-    const unity = document.getElementById("meter-input-unity");
-    if (unity) unity.disabled = !!lvl.fixed;
+    input.dataset.prev = input.value;
+    // A FIXED-LEVEL ENDPOINT HAS NO CONTROL TO OFFER. Every one of RODE's virtual devices is like
+    // this - all nine Fader inputs and System - and there the level lives on the desk's own fader.
+    // aria-disabled rather than the attribute, so the controls stay in the tab order and say why.
+    const why = lvl.note || "Windows cannot change this device's level.";
+    setAvailable(input, !lvl.fixed, why);
+    setAvailable(document.getElementById("meter-input-unity"), !lvl.fixed, why);
   }
   const mutedBox = document.getElementById("meter-input-muted");
   if (mutedBox) mutedBox.checked = !!lvl.muted;
@@ -1205,8 +1217,10 @@ async function sendInputLevel(db, el) {
   // The value comes back from a READ-BACK, not from what was asked for: a driver can refuse
   // silently, and this desk's Chat input has done exactly that.
   const input = document.getElementById("meter-input-db");
-  if (input && res.level && typeof res.level.db === "number")
+  if (input && res.level && typeof res.level.db === "number") {
     input.value = res.level.db.toFixed(1);
+    input.dataset.prev = input.value;
+  }
   setText("meter-input-note", (res.level && res.level.note) || "");
   announce(res.message || "Done.", !res.ok);
 }
@@ -1313,22 +1327,21 @@ function buildMeterNumber(id, option, label, min, max, hint) {
    detail line), so the controls are built from one definition rather than hand-written twice. A
    setting added on the server appears here, in a profile, and in the profile's coverage audit.
 
-   READ ON SHOW, not on a timer and not from a cache: this reads the unit whenever the group is
-   opened, and on entering the page if the group was left open. Nothing here is pushed by the desk,
-   so a value changed on the touchscreen would otherwise sit stale. There is deliberately no Refresh
-   button - opening the group IS the refresh. */
+   READ ON SHOW, not on a timer and not from a cache: this reads the unit whenever the tab is
+   opened, and on entering the page if the tab was left selected. Nothing here is pushed by the
+   desk, so a value changed on the touchscreen would otherwise sit stale. There is deliberately no
+   Refresh button - opening the tab IS the refresh. */
 let unitSettingsWritable = true;
 const unitDebounce = {};        // per-slider write timers, so arrowing a brightness does not flood USB
 
 /* Why every one of these controls is unavailable on a desk that cannot take the writes. One string,
    because the switch, the select and the slider must all give the SAME reason - three wordings for
-   one cause is how a page starts sounding like three pages. */
-const UNIT_SETTINGS_OFF = "Changing the unit's settings is not enabled on this device yet. "
-  + "You can still read what it has.";
-
-/* aria-disabled leaves these controls in the tab order, so a change event still ARRIVES at their
+   one cause is how a page starts sounding like three pages.
+   aria-disabled leaves these controls in the tab order, so a change event still ARRIVES at their
    handlers. Each one calls refuseChange and then puts itself back to what the unit really has - a
    control left showing the value somebody just chose would report a state the desk is not in. */
+const UNIT_SETTINGS_OFF = "Changing the unit's settings is not enabled on this device yet. "
+  + "You can still read what it has.";
 
 /* What the currently built controls cover. A read whose spec matches this one UPDATES the controls
    in place; only a different spec (a different unit, or a firmware that reports a different set)
@@ -1362,7 +1375,7 @@ async function loadUnitSettings() {
   // value leaves the switch alone rather than showing a confident "off".
   const midiToggle = document.getElementById("midi-toggle");
   if (midiToggle && d.midi !== null && d.midi !== undefined) midiToggle.checked = !!d.midi;
-  // STRUCTURE ONCE, VALUES EVERY TIME - the same rule the Routing page follows. Rebuilding these ten
+  // STRUCTURE ONCE, VALUES EVERY TIME - the same rule the Routing page follows. Rebuilding these
   // controls on every read replaces the DOM underneath a screen reader that is still reading the
   // panel, and it comes out as fragments of settings in a random order: "Never", "Default", "On
   // button press" on opening the tab.
@@ -1494,7 +1507,7 @@ function buildUnitChoice(s, id, known) {
     sel.appendChild(opt);
   }
   // What a failed write reverts to. Kept ON THE ELEMENT rather than in this closure, because a
-  // re-read now updates the control in place and would otherwise leave the closure holding the value
+  // re-read updates the control in place and would otherwise leave the closure holding the value
   // this select had when it was first built.
   sel.dataset.prev = sel.value;
   sel.addEventListener("change", async () => {
@@ -1536,14 +1549,7 @@ function buildUnitSlider(s, id, known) {
   input.step = String(s.step || 1);
   input.value = String(known ? s.value : s.max);
   input.dataset.prev = input.value;      // what a refused write reverts to; see applyUnitSettingValues
-  const out = document.createElement("output");
-  out.setAttribute("for", id);
-  out.className = "proc-value";
-  // <output> is a live region by default (its implicit role is status), so this visible copy of the
-  // value would be SPOKEN on its own every time it changed or was inserted, on top of the slider's
-  // own aria-valuetext. It is here for sighted use only; the same rule the level sliders follow.
-  out.setAttribute("aria-hidden", "true");
-  out.setAttribute("aria-live", "off");
+  const out = sliderReadout(id);
   const span = Math.max(1, Number(s.max) - Number(s.min));
   const show = () => {
     const v = parseInt(input.value, 10);
@@ -1576,15 +1582,14 @@ function buildUnitSlider(s, id, known) {
 }
 
 /* ---- Device page: the tab strip, and reading per tab ---------------------
-   Six tabs, and deliberately not more: MIDI is one switch and a unit setting, so it lives on Unit
-   settings, and Technical was three facts of the kind Hardware already carries. Each tab reads its
-   own part of the unit when it is opened, which is the same rule the Routing page uses: that read is
-   a full model dump, and paying for it while nobody is looking would slow down the page the app
-   opens on.
-   HARDWARE IS THE ONE TAB THAT TAKES TWO CALLS, and neither is a dump it could have shared: the
-   folded-in Technical part comes from /api/status, which is a USB enumeration rather than a model
-   read, and page ENTRY takes it anyway for the connection line and the window title. (The Help &
-   About version does not depend on it: see loadVersion.) The MIDI switch's value rides in
+   MIDI is one switch and a unit setting, so it lives on Unit settings rather than a tab of its own.
+   Each tab reads its own part of the unit when it is opened, which is the same rule the Routing page
+   uses: that read is a full model dump, and paying for it while nobody is looking would slow down
+   the page the app opens on.
+   HARDWARE IS THE ONE TAB THAT TAKES TWO CALLS, and neither is a dump it could have shared: its
+   technical part comes from /api/status, which is a USB enumeration rather than a model read, and
+   page ENTRY takes it anyway for the connection line and the window title. (The Help & About
+   version does not depend on it: see loadVersion.) The MIDI switch's value rides in
    /api/device/settings so Unit settings still makes exactly one call.
    Reads are debounced, because selection follows the arrow keys and arrowing along the strip must
    not fire a read per tab. */
@@ -1624,7 +1629,7 @@ async function readDevice() {
   loadStatus(false);
   const key = deviceTabs ? deviceTabs.current() : "state";
   // Hardware's second call IS the status read the line above just made, so on entry it takes only
-  // its own half. This is the same skip the Technical tab had before it was folded into Hardware.
+  // its own half.
   if (key === "hardware") { await loadDeviceState(); return; }
   await readDeviceTab(key);
 }
@@ -1657,8 +1662,6 @@ async function loadAnnounceState() {
     if (el) el.checked = !!data.on;
     const lv = document.getElementById("announce-levels-toggle");
     if (lv) lv.checked = data.levels !== false;
-    // Defaults the other way round to levels: speech unless asked otherwise, so an older server
-    // that does not send the field at all reads as off rather than silently changing what mute does.
     const mt = document.getElementById("announce-mute-tones-toggle");
     if (mt) mt.checked = data.mute_tones === true;
     const ss = document.getElementById("announce-startup-summary-toggle");
@@ -1675,14 +1678,10 @@ async function loadAnnounceState() {
    these two live in the tab you sit on to listen, and replacing a select you are on would move you
    off it. "Windows default" is a real choice, not a placeholder, so it carries an empty value. */
 function fillSpeechChoices(data) {
-  const missing = [];
   const fill = (id, names, current, defaultLabel, what) => {
     const sel = document.getElementById(id);
     if (!sel) return;
-    // A service that reports no list at all (an older build still running, or a machine with no
-    // speech stack) must still leave a usable control saying what it can do. An EMPTY dropdown is
-    // the one thing this must never render: there is nothing to read and nothing to explain it.
-    if (!Array.isArray(names)) { names = []; missing.push(what); }
+    if (!Array.isArray(names)) names = [];
     const want = [""].concat(names).join("\n");
     if (sel.dataset.filled !== want) {
       sel.innerHTML = "";
@@ -1703,13 +1702,6 @@ function fillSpeechChoices(data) {
   };
   fill("announce-voice", data.voices, data.voice || "", "Windows default voice", "voices");
   fill("announce-output", data.outputs, data.output || "", "Windows default output", "outputs");
-  if (missing.length) {
-    setStatus("announce-speech-status",
-      "The app service did not report the available " + missing.join(" or ")
-      + ", so only the Windows default is on offer. If you have just updated AccessCaster, close it "
-      + "and start it again: this part of the app is served by the app service, not the page, so "
-      + "reloading the window is not enough.");
-  }
 }
 
 /* Both of these restart the speech worker on the server, and the confirmation is spoken THROUGH the
@@ -1802,10 +1794,9 @@ async function commitAnnounceVolume() {
    tables), whether a combination is legal, and whether Windows will accept it. This page shows what
    it is told and shows what comes back, so the two can never reach different answers.
 
-   THE LIST IS THE USER'S. Version one had ten fixed commands and a row of controls each, which was
-   about seventy controls to walk past and could not answer the real ask - any control the app has
-   should be bindable. Now: a dropdown of the shortcuts you have added, Add and Delete beside it,
-   and ONE set of controls that edits whichever is picked.
+   THE LIST IS THE USER'S: any control the app has can be bound. A dropdown of the shortcuts you
+   have added, Add and Delete beside it, and ONE set of controls that edits whichever is picked, so
+   the tab stays short however many shortcuts there are.
 
    THE EDITOR IS STATIC, IN index.html, and only its VALUES change. That is what makes picking a
    different shortcut safe: nothing is rebuilt, so a screen reader is never standing on a node that
@@ -2103,9 +2094,6 @@ function wireHotkeys() {
   });
 }
 
-
-/* ---- Mic channels: gain + phantom ----------------------------------- */
-
 /* ===== Channels: one adaptive panel per channel (mics + Bluetooth/USB/Chat) =====
    Driven by GET /api/channels. Mic channels add gain/phantom/polarity/type/effects;
    line channels (Bluetooth, USB 1, Chat, USB 2) have a Level. EVERY channel here has
@@ -2211,15 +2199,6 @@ const CHANNEL_PARAM_TAB = {
 // The tab strip currently on the page, so a device read can put focus back on the selected tab.
 let channelTabs = null;
 
-/* The panel is a TAB STRIP (see buildTabs), in the order you actually work: the channel's own input
-   settings first with MUTE at the top, then presets (the control reached for straight after gain),
-   then the whole-chain switches, then the parameter detail, then the effects. Only the selected
-   tab exists in the DOM, which is the whole point: a mic is over 50 controls and this page used to
-   be one long walk whatever was collapsed.
-   The channel dropdown deliberately stays ABOVE the strip (static markup) because it decides what
-   every tab acts on; inside tab one you would have to arrow back to it, and could end up editing a
-   channel you cannot see from where you are.
-   Only the layout changed here; every control still writes exactly the property it did before. */
 // WHY A CONTROL IS DEAD, in the words that let somebody act on it. A channel with no fader has
 // no strip, so it has no mute, no solo and no processing - and saying "the unit did not report
 // this" there sends a screen-reader user hunting for a fault instead of to the Routing page.
@@ -2233,6 +2212,13 @@ function noStripNote(ch, what) {
   return "";
 }
 
+/* The panel is a TAB STRIP (see buildTabs), in the order you actually work: the channel's own input
+   settings first with MUTE at the top, then presets (the control reached for straight after gain),
+   then the whole-chain switches, then the parameter detail, then the effects. A mic has over 50
+   controls, and the strip shows them one category at a time.
+   The channel dropdown deliberately stays ABOVE the strip (static markup) because it decides what
+   every tab acts on; inside tab one you would have to arrow back to it, and could end up editing a
+   channel you cannot see from where you are. */
 function renderChannelPanel(name) {
   const host = document.getElementById("channel-panel");
   host.innerHTML = "";
@@ -2281,8 +2267,7 @@ function renderChannelPanel(name) {
 
   // The channel's LABEL goes in every panel heading ("Dynamics for Mic 1"), so being several tabs
   // away from the dropdown never leaves you guessing which channel you are editing.
-  channelTabs = buildTabs("channels", tabs, { context: ch.label,
-  });
+  channelTabs = buildTabs("channels", tabs, { context: ch.label });
   host.appendChild(channelTabs.strip);
   host.appendChild(channelTabs.panel);
   // A check can outlive the pane its button was on (change channel mid-run and the panes are
@@ -2373,10 +2358,9 @@ function fillChannelProcessing(body, ch) {
   });
 }
 
-/* One or more parameter groups into a tab. A merged tab gives each group its own h3 and
-   role="group", so H walks you straight to Noise gate instead of arrowing through 17 sliders, and
-   a Threshold slider still announces which module it belongs to. A tab holding a single group of
-   the same name skips the sub-heading, since the panel's own h2 already says it. */
+/* One or more parameter groups into a tab. A tab holding several gives each group its own h3, so H
+   walks you straight to Noise gate instead of arrowing through 17 sliders. A tab holding a single
+   group of the same name skips the sub-heading, since the panel's own h2 already says it. */
 function fillParamGroups(body, ch, groups, tabTitle) {
   const single = groups.length === 1 && groups[0].group === tabTitle;
   groups.forEach((group) => {
@@ -2481,9 +2465,7 @@ function fillStereoPan(host, ch, legs) {
   input.id = id;
   input.min = "-100"; input.max = "100"; input.step = "1";
   input.value = String(entry.offset);
-  const out = document.createElement("output");
-  out.setAttribute("for", id);
-  out.className = "proc-value";
+  const out = sliderReadout(id);
   const show = () => {
     const words = panOffsetWords(parseInt(input.value, 10));
     input.setAttribute("aria-valuetext", words);
@@ -2696,9 +2678,7 @@ function buildLevelField(ch, min, max) {
   input.setAttribute("aria-valuetext", known ? ch.level_db + " decibels" : "not read yet");
   row.appendChild(input);
 
-  const out = document.createElement("output");
-  out.setAttribute("for", id);
-  out.className = "proc-value";
+  const out = sliderReadout(id);
   out.textContent = known ? ch.level_db + " dB" : "not read";
 
   input.addEventListener("input", () => {
@@ -2764,9 +2744,8 @@ function buildMicTypeField(ch, idx) {
   return made.row;
 }
 
-/* Echo + Reverb (mic channels only), matching the app's Effects tab. */
-// Channel Echo/Reverb param sliders. Names and selector decoded from an app-drive capture: global
-// float64 on selector 0x26+(ch-1). Friendly labels for the screen reader.
+/* Echo + Reverb (mic channels only), matching the RODE app's Effects tab. The server owns the
+   addresses; these are the parameter names it accepts, with friendly labels for the screen reader. */
 const FX_PARAM_LABELS = {
   echoMix: "Level", echoLowCut: "Low cut", echoHighCut: "High cut",
   echoDelay: "Delay", echoDecay: "Decay",
@@ -2811,7 +2790,7 @@ function buildFxParamSlider(ch, effect, param, value01) {
   return row;
 }
 
-/* One effect's on/off switch plus its parameter sliders, into a collapsible group's body. */
+/* One effect's on/off switch plus its parameter sliders, into a tab section. */
 function fillEffectControls(body, ch, effect, title) {
   const fx = ch.effects || {};
   body.appendChild(buildSwitch("fx-" + effect + "-" + ch.name, title, fx[effect] === true,
@@ -2842,9 +2821,7 @@ function buildParamSlider(ch, ctrl, percent) {
   const shown = (v) => (ctrl.pan ? panWords(v) : v + "%");
   input.setAttribute("aria-valuetext", known ? spoken(percent) : "not read yet");
 
-  const out = document.createElement("output");
-  out.setAttribute("for", id);
-  out.className = "proc-value";
+  const out = sliderReadout(id);
   out.textContent = known ? shown(percent) : "not read";
 
   input.addEventListener("input", () => {
@@ -2889,11 +2866,9 @@ function fillPresetOptions(sel) {
   if (keep && channelPresets.some((p) => p.name === keep)) sel.value = keep;
 }
 
-/* Mic processing presets: apply a whole voicing, or save/delete a custom one. */
-/* The factory marker names are NOT duplicated here. They live in one place,
-   server._FACTORY_MARKER_NAMES, which resolves channelCurrentFxPreset and sends back a ready-made
-   {name, edited, source}. */
-
+/* Mic processing presets: apply a whole voicing, or save/delete a custom one. The factory marker
+   names are NOT duplicated here: server._FACTORY_MARKER_NAMES resolves channelCurrentFxPreset and
+   sends back a ready-made {name, edited, source}. */
 function fillPresetControls(wrap, ch) {
   const idx = MIC_NAME_TO_INDEX[ch.name];
 
@@ -3060,9 +3035,9 @@ async function setMicType(channel, sel, ch, btn) {
 /* ---- SMART pads: replace sound -------------------------------------- */
 
 let padsData = null;
-// True when the active device's pad WRITES are not enabled (e.g. the Duo, pending a reversible
-// create/clear test). Reads still work; every write control is disabled so nothing is a silent
-// no-op. Set from the /api/soundpads read_only flag on each load.
+// True when the active device's pad WRITES are not enabled. Reads still work; every write control
+// is marked unavailable so nothing is a silent no-op. Set from the /api/soundpads read_only flag on
+// each load.
 let padsReadOnly = false;
 // The padPlayMode value that means One Shot, from the device payload. Loop cannot apply in that
 // mode, so the Loop row is hidden for it rather than offering a setting the pad ignores.
@@ -3121,10 +3096,10 @@ function installPadsGuard() {
     announce(no, true);
   }, true);
   host.addEventListener("change", (ev) => {
-    const no = refuseIf(ev);
-    if (no === null) return;
+    if (refuseIf(ev) === null) return;
     ev.stopPropagation();
-    announce(no, true);
+    // refuseChange speaks once for a burst: a slider or a closed select fires change on every arrow.
+    refuseChange(ev.target.closest("[aria-disabled='true']"));
     syncPadEditor();          // back to the pad the unit has, from the read already in hand
   }, true);
 }
@@ -3230,16 +3205,12 @@ function currentPad() {
 }
 
 /* ---- SMART pads: the tab strip, and reading per tab ---------------------
-   Three collapsible groups became FOUR tabs, and this page was REDESIGNED rather than converted
-   The old single "Edit a pad" form mixed two behaviours: an
-   Apply button that only applied to the type change, live controls that wrote as you touched them,
-   and a mode where the live controls VANISHED behind a note while a type change was staged. The
-   tabs are therefore split by BEHAVIOUR, not by subject:
+   The tabs are split by BEHAVIOUR, not by subject, so no tab mixes controls that write as you touch
+   them with controls that wait for an Apply:
      Settings   all live, no Apply
      Reassign   all deferred, one Apply, then Clear this pad
      Voice effects / Maintenance   neither, and not about the chosen pad at all
-   That split is what retires the pending-type mode: Reassign holds no live control, so there is
-   nothing to hide while a change is staged.
+   Reassign holds no live control, so nothing has to be hidden while a type change is staged.
    READING: the pad chooser sits above the strip and every tab needs it, so page ENTRY does the one
    /api/soundpads read (~1.5 s of device time) and the tab you arrive on does not repeat it. Opening
    Settings or Reassign later re-reads, so a value is never older than the moment you arrived at it;
@@ -3301,7 +3272,7 @@ async function loadPads() {
   fillPadSelect("pad-ed-select", data.pads || []);
 
   // EVERY dropdown below goes through fillOptions, which only touches the DOM when the list has
-  // really changed. This read now runs when a TAB is opened, so the pane is on screen and focus may
+  // really changed. This read runs when a TAB is opened, so the pane is on screen and focus may
   // be sitting in one of these controls; rebuilding them unconditionally would speak over a screen
   // reader and move it off the control.
   fillOptions("pad-ed-fx", (data.recipes || []).map((n) => ({ value: n, label: n })));
@@ -3318,9 +3289,6 @@ async function loadPads() {
     .filter((t) => String(t.value).startsWith("mixer:"))
     .map((t) => ({ value: String(t.value).split(":")[1], label: t.label })));  // numeric mode 0-4
 
-  // Mixer trigger modes (Latching / Momentary) and the Back Channel member list the connected
-  // desk offers. Both come from the device payload, so a desk without (say) Mic 3 is never
-  // offered it. Filled here; fillPadSettings just ticks and shows them per pad.
   padsPlayModeOneShot = data.play_mode_one_shot;
   fillOptions("pad-ed-playmode",
     (data.play_modes || []).map((m) => ({ value: m.value, label: m.label })));
@@ -3328,6 +3296,9 @@ async function loadPads() {
   // Named colour palette for the pad editor (the value per pad is set by fillPadSettings).
   fillColourOptions("pad-ed-colour", 0);
 
+  // Mixer trigger modes (Latching / Momentary) and the Back Channel member list the connected
+  // desk offers. Both come from the device payload, so a desk without (say) Mic 3 is never
+  // offered it. Filled here; fillPadSettings just ticks and shows them per pad.
   fillOptions("pad-ed-mixer-trigger",
     (data.mixer_triggers || []).map((t) => ({ value: t.value, label: t.label })));
   buildBackChannelList(data.back_channel_sources || []);
@@ -3398,12 +3369,11 @@ function fillPadSettings(pad) {
   showEl("pad-ed-settings", present);
   showEl("pad-ed-empty", !present);
   showEl("pad-ed-settings-help", present);
-  // Clearing only makes sense for a pad that has content; disable it for an empty pad so the
-  // screen reader announces it as unavailable rather than letting you press a no-op.
-  const clearBtn = document.getElementById("pad-ed-clear-btn");
-  // aria-disabled, never the attribute: a disabled button leaves the tab order, so Clear vanished
-  // and reappeared as you moved between pads. onPadClear already says "This pad is already empty."
-  setAvailable(clearBtn, present, "This pad is already empty, so there is nothing to clear.");
+  // Clearing only makes sense for a pad that has content. aria-disabled, never the attribute: a
+  // disabled button leaves the tab order, so Clear would vanish and reappear as you moved between
+  // pads.
+  setAvailable(document.getElementById("pad-ed-clear-btn"), present,
+    "This pad is already empty, so there is nothing to clear.");
   if (!present) return;
   const isSound = pad.type === 1;
 
@@ -3776,8 +3746,8 @@ function buildScaleFields(hostId, fields, unit, onCommit) {
     input.step = unit === "percent" ? "1" : "0.5";
     input.dataset.field = f.key;
     input.setAttribute("aria-describedby", helpId);
-    // The slider's own aria-valuetext carries the unit, so nothing needs a second live region
-    // reading the value out on top of it (the lesson from the brightness sliders).
+    // The slider's own aria-valuetext carries the unit, so there is no visible readout to keep
+    // quiet (see sliderReadout).
     input.addEventListener("input", () => setScaleValueText(input, unit));
     input.addEventListener("change", () => onCommit(input, f));
     const help = document.createElement("span");
@@ -3915,9 +3885,8 @@ async function onPadFlag(name, cb) {
      so, but that is for values you feel your way to (a level, an amount). A MIDI control number is a
      value you KNOW, and arrowing from 0 to 60 on a slider is 60 keypresses; a number box takes the
      digits and still arrows by one.
-   - Everything is disabled until the custom-mapping switch is on. The firmware only honours these
-     values behind that flag, and offering a control that would silently do nothing is the exact
-     failure this project keeps designing out. */
+   - Every field is unavailable until the custom-mapping switch is on. The firmware only honours
+     these values behind that flag, so a field taking a value with it off would silently do nothing. */
 function buildTriggerFields(spec) {
   const host = document.getElementById("pad-ed-trigger-fields");
   if (!host || !spec) return;
@@ -3967,7 +3936,7 @@ function buildTriggerFields(spec) {
 
 // Plain English for what the pad sends right now, so the answer to "what does this pad actually do"
 // is on the page rather than inferred from six separate controls.
-function triggerSummary(pad, t, types, modes) {
+function triggerSummary(pad, t, modes) {
   if (!t) return "";
   const label = (list, v) => {
     const hit = (list || []).find((x) => String(x.value) === String(v));
@@ -4009,7 +3978,7 @@ function fillTriggerSettings(pad) {
       + "mapping first.");
   });
   setText("pad-ed-trigger-current",
-    triggerSummary(pad, t, spec && spec.types, spec && spec.modes));
+    triggerSummary(pad, t, spec && spec.modes));
 }
 
 async function onTriggerField(el, f) {
@@ -4107,11 +4076,11 @@ async function onPadClear() {
     announce("Could not reach the device service.", true);
   } finally {
     setBusy(btn, false);
-    // Clearing worked, so this button is now genuinely unavailable (nothing left to clear) and
-    // fillPadSettings has disabled it. Move focus to the type dropdown, still on this tab, which is
-    // where you go next if you are emptying a pad to put something else on it, rather than leaving a
-    // screen-reader user on a dead control - or worse, nowhere at all.
-    if (btn.disabled) focusFirst(["pad-ed-type", "pad-ed-select"]);
+    // Clearing worked, so this button is now unavailable (nothing left to clear: fillPadSettings
+    // marked it). Move focus to the type dropdown, still on this tab, which is where you go next if
+    // you are emptying a pad to put something else on it, rather than leaving a screen-reader user
+    // on a dead control.
+    if (unavailableReason(btn) !== null) focusFirst(["pad-ed-type", "pad-ed-select"]);
   }
 }
 
@@ -4157,10 +4126,8 @@ async function onTidyPadAudio() {
   }
 }
 
-/* Restore just the six factory VOICE EFFECTS. Deliberately a separate button from Restore pad
-   defaults rather than an option inside it: the two differ in what they DESTROY, and that is not a
-   thing to bury in a dropdown. Shares the pad-restore progress channel, so it shares pollPadRestore
-   and reads the same way. */
+/* Restore just the six factory VOICE EFFECTS, with Censor and Ducking. Progress comes from the
+   pad-restore job, through pollPadRestore. */
 async function onRestoreFactoryFx() {
   const ok = await confirmAction(
     "Restore the factory voice effects, Censor and Ducking?",
@@ -4213,18 +4180,15 @@ async function onExportPad() {
 async function onOpenPadExports() {
   try {
     const res = await postJSON("/api/pads/exports/open", {});
-    announce(res.message || "Done.", !res.ok);
-    setStatus("export-pad-status", res.message || "");
+    setStatus("export-pad-status", res.message || "Done.");
   } catch (err) {
     announce("Could not reach the device service.", true);
   }
 }
 
-// Poll the pad-restore status until done, announcing each new step through the live region.
-// `statusId` is which status line to write into: the two restores share this channel, so the one
-// that started it has to be the one that reports, or a message lands under the wrong heading.
-function pollPadRestore(statusId) {
-  const line = statusId || "restore-fx-status";
+// Poll the pad-restore status until done, saying each new step on `line`, the status line of the
+// control that started it. That line is a live region and the only voice (see setStatus).
+function pollPadRestore(line) {
   return new Promise((resolve) => {
     let lastStep = 0;
     const iv = setInterval(async () => {
@@ -4236,13 +4200,11 @@ function pollPadRestore(statusId) {
       }
       if (!s.done && s.step && s.step !== lastStep) {
         lastStep = s.step;
-        setText(line, s.message || "");
-        announce(`${s.label}, ${s.step} of ${s.total}.`);
+        setStatus(line, `${s.label}, ${s.step} of ${s.total}.`);
       }
       if (s.done) {
         clearInterval(iv);
-        setText(line, s.message || "Done.");
-        announce(s.message || "Done.", !s.ok);
+        setStatus(line, s.message || "Done.");
         resolve();
       }
     }, 1200);
@@ -4368,13 +4330,14 @@ function buildFxCreator() {
     onRow.appendChild(onLab);
     fs.appendChild(onRow);
 
+    let controls = null;
     if (eff.controls.length === 0) {
       const note = document.createElement("p");
       note.className = "hint";
       note.textContent = "No settings: it is simply on or off.";
       fs.appendChild(note);
     } else {
-      const controls = document.createElement("div");
+      controls = document.createElement("div");
       controls.className = "fx-eff-controls";
       controls.hidden = true;
       const idBase = "fx-" + eff.engine;
@@ -4406,29 +4369,22 @@ function buildFxCreator() {
         controls.appendChild(advWrap);
       }
       fs.appendChild(controls);
-
-      onCb.addEventListener("change", () => {
-        controls.hidden = !onCb.checked;
-        announce((onCb.checked ? "Included " : "Removed ") + eff.label.toLowerCase() + ".");
-        streamPreview(eff.engine + "On", onCb.checked);
-        // On enable, also push this effect's current control values so it is audible straight
-        // away at the slider settings (some engines default to a silent/zero value internally).
-        if (onCb.checked) {
-          fs.querySelectorAll(".fx-ctl").forEach((c) => {
-            if (c.dataset.param && typeof c._fxRead === "function") {
-              streamPreview(c.dataset.param, c._fxRead());
-            }
-          });
-        }
-      });
     }
 
-    if (eff.controls.length === 0) {
-      onCb.addEventListener("change", () => {
-        announce((onCb.checked ? "Included " : "Removed ") + eff.label.toLowerCase() + ".");
-        streamPreview(eff.engine + "On", onCb.checked);
-      });
-    }
+    onCb.addEventListener("change", () => {
+      if (controls) controls.hidden = !onCb.checked;
+      announce((onCb.checked ? "Included " : "Removed ") + eff.label.toLowerCase() + ".");
+      streamPreview(eff.engine + "On", onCb.checked);
+      // On enable, also push this effect's current control values so it is audible straight
+      // away at the slider settings (some engines default to a silent/zero value internally).
+      if (onCb.checked) {
+        fs.querySelectorAll(".fx-ctl").forEach((c) => {
+          if (c.dataset.param && typeof c._fxRead === "function") {
+            streamPreview(c.dataset.param, c._fxRead());
+          }
+        });
+      }
+    });
     host.appendChild(fs);
   });
 
@@ -4475,7 +4431,7 @@ function applyFxLists(recipes, customFx) {
 }
 
 // Rebuilt only when the saved list has really changed. It is re-rendered by every pads read, and
-// the Settings and Reassign tabs now read on open, so an unconditional rebuild could pull the list
+// the Settings and Reassign tabs read on open, so an unconditional rebuild could pull the list
 // apart underneath a screen reader that was reading it (and would lose focus on a Delete button).
 function renderCustomFxList(names) {
   const ul = document.getElementById("fx-custom-list");
@@ -4584,8 +4540,8 @@ function refreshPreviewAvailability() {
   const toggle = document.getElementById("fx-preview-toggle");
   if (!toggle || previewState.active) return;
   const ok = emptyPadAvailable();
-  // Same rule: unavailable in place, with the reason, rather than a switch that disappears from
-  // the tab order whenever the grid happens to be full.
+  // Unavailable in place, with the reason, rather than a switch that disappears from the tab order
+  // whenever the grid happens to be full.
   setAvailable(toggle, ok, "Live preview needs one empty pad to borrow, and every pad is in use.");
   setStatus("fx-preview-status", ok ? "" :
     "Live preview needs one free pad to play through. Clear a pad to turn it on. " +
@@ -4678,13 +4634,12 @@ const MATRIX_READ_ONLY_OFF = "Changing output mixes is not enabled on this devic
    device read. Written only by applyRoutingValues. */
 let _routingValues = null;
 
-/* How long a dropdown waits after you stop moving before it writes to the unit.
-   THIS IS NOT COSMETIC. A CLOSED select fires `change` on EVERY arrow press, so walking a
-   three-item list sends three writes to the desk and leaves the intermediate value set: a desk
-   found on the wrong multitrack mode because somebody arrowed past it. Worse for a screen reader,
-   each write marks the control busy, so arrowing the list announces every option as "unavailable"
-   while still, confusingly, working. Waiting for the gesture to finish fixes both: one write, of
-   the option you actually landed on. */
+/* How long an UNSTAGED dropdown (one that writes nothing to the desk's audio: the metered stream)
+   waits after you stop moving before it commits. A CLOSED select fires `change` on EVERY arrow
+   press, so without the wait each option passed would be saved, and each write would mark the
+   control busy, announcing every option as "unavailable". Anything that changes the desk's audio
+   is staged behind an Apply instead (makeStagedSelect), because a delay still fires while you pause
+   to listen. */
 const SELECT_COMMIT_MS = 500;
 
 /* ---- A DROPDOWN THAT STAGES, AND THE BUTTON THAT COMMITS IT ----------
@@ -4829,30 +4784,6 @@ function blockStaged(btn, reason) {
   else delete btn.dataset.blockedReason;
 }
 
-function makeSelectRow(id, labelText, options, onChange) {
-  const row = document.createElement("div");
-  row.className = "field";
-  const label = document.createElement("label");
-  label.setAttribute("for", id);
-  label.textContent = labelText;
-  const sel = document.createElement("select");
-  sel.id = id;
-  options.forEach((opt) => {
-    const o = document.createElement("option");
-    o.value = String(opt[0]);
-    o.textContent = opt[1];
-    sel.appendChild(o);
-  });
-  let commit = null;
-  sel.addEventListener("change", () => {
-    if (commit !== null) window.clearTimeout(commit);
-    commit = window.setTimeout(() => { commit = null; onChange(sel); }, SELECT_COMMIT_MS);
-  });
-  row.appendChild(label);
-  row.appendChild(sel);
-  return { row, sel };
-}
-
 function makeSwitchRow(id, labelText, onChange) {
   const row = document.createElement("p");
   row.className = "field";
@@ -4955,16 +4886,14 @@ async function loadRouting() {
     routingCtl.faders[f.index] = made.sel;
     inBox.appendChild(made.row);
   });
-  // Fader writes are gated per-device (server "fader_write" cap): the Pro II is writable; the Duo
-  // is read-only until its fader write model + default layout are confirmed. When read-only, disable
-  // the dropdowns and the reset button and add a clear note so nothing is a silent no-op.
+  // Fader writes are gated per device (the server's "fader_write" cap). Read-only marks the
+  // dropdowns and the reset button unavailable and adds a note, so nothing is a silent no-op.
   routingCtl.fadersReadOnly = !!fm.read_only;
   if (fm.read_only) {
     // aria-disabled on the dropdowns too. `disabled` takes each one out of the tab order, which
-    // flatly contradicts the note below: you cannot in fact see which channel is on each fader,
-    // because there is nothing left to arrow onto. Nothing can be
-    // written by accident - the Apply button is the write, and it is blocked with the same reason -
-    // so a staged choice here is a question the page answers rather than a silent no-op.
+    // flatly contradicts the note below: you could not see which channel is on each fader, because
+    // there would be nothing left to arrow onto. Nothing can be written by accident - the Apply
+    // button is the write, and it is blocked with the same reason.
     Object.values(routingCtl.faders).forEach((sel) => {
       if (!sel) return;
       setAvailable(sel, false, FADERS_READ_ONLY_OFF);
@@ -5049,8 +4978,8 @@ async function loadRouting() {
     // EXPANDED, the INPUT direction of the same setting. Staged for the same reason as the mode
     // above and one more: turning it OFF takes every extended input off its fader (the server
     // does it, as the unit's own screen does), and that layout does not come back by turning it
-    // on again. A select rather than a
-    // switch because the two states need naming - "off" does not say what you lose.
+    // on again. A select rather than a switch because the two states need naming - "off" does not
+    // say what you lose.
     const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends (USB 1 Input)",
       data.usb_expanded_labels || [], {
         applyText: "Apply what this computer sends",
@@ -5083,13 +5012,12 @@ async function loadRouting() {
     usbBox.appendChild(drv);
 
     // GETTING THE DRIVER, offered only while it is MISSING. Expanded needs it and the line above
-    // has just said so, which is the whole argument for the buttons being here rather than in the
-    // installer: this is where the shortfall is named. Two routes, and the manual one is a button
-    // in its own right rather than something that only appears after a failure - nobody should
-    // have to make something go wrong to find the way round it.
-    // GETTING THE DRIVER. BUILT HERE, LABELLED FROM THE LIVE READ, because `usb_driver` is not in
-    // the structure payload at all - it is read from Windows, not from the desk, and arrives with
-    // the values. Deciding here whether to create these made them never appear.
+    // has just said so, which is why the buttons are here rather than in the installer. Two routes,
+    // and the manual one is a button in its own right rather than something that only appears
+    // after a failure.
+    // BUILT ALWAYS, SHOWN FROM THE LIVE READ (applyDriverButtons): `usb_driver` is read from
+    // Windows and arrives with the values, not in this structure payload, so deciding here whether
+    // to create them would never create them.
     const getBox = document.createElement("div");
     getBox.className = "row";
     const get = document.createElement("button");
@@ -5363,8 +5291,7 @@ async function loadFaderLevels(announceResult) {
                  d.toggles_message || "Solo is not enabled on this device yet.");
     fillOutputMutes(d);
     // ONE VOICE FOR THIS TAB, which is why the arrival message goes to the status line rather
-    // than to announce(): on a read-only desk the line above also has something to say, and two
-    // polite regions changing together is the fault this section exists to have fixed.
+    // than to announce(): two polite regions changing together means neither is heard properly.
     if (d.read_only && d.message) setStatus("fader-levels-status", d.message);
     else if (announceResult) setStatus("fader-levels-status", "Levels read from the device.");
   } catch (err) {
@@ -5438,9 +5365,8 @@ async function onClearFaderSolos() {
    above (outputMonMute / outputBTMute / outputBTLevel, all proven writable).
 
    Same rule as everything else on this tab: the tab RE-READS the device every time it is opened,
-   so this must never rebuild controls a screen
-   reader may be sitting in. Structure once, keyed on read_only (the only thing that changes their
-   shape), then values in place. */
+   so this must never rebuild controls a screen reader may be sitting in. Structure once, keyed on
+   read_only (the only thing that changes their shape), then values in place. */
 function fillOutputMutes(d) {
   const host = document.getElementById("routing-outmutes");
   if (!host) return;
@@ -5464,9 +5390,9 @@ function fillOutputMutes(d) {
   setLevelValue("bt-out-level", bto.percent);
 }
 
-/* A read failed, and the sliders are no longer thrown away when it does (they stay so a screen
-   reader keeps the node it is on). So say what they are: each one goes back to "not read yet"
-   rather than leaving an old number sitting there looking live. */
+/* A read failed. The sliders stay (so a screen reader keeps the node it is on), so say what they
+   are: each one goes back to "not read yet" rather than leaving an old number sitting there looking
+   live. */
 function markLevelsUnread(host) {
   if (!host) return;
   host.querySelectorAll("input[type=range]").forEach((input) => {
@@ -5615,13 +5541,12 @@ async function onMonmixReset() {
 function buildMatrix(matrix) {
   if (!matrix || routingCtl.matrixBuilt) return;
   routingCtl.matrix = matrix;
-  // Some devices (e.g. the Duo) expose the matrix for reading but not writing yet. When
-  // read-only, the switches, mode dropdown and Chat presets stay disabled so a control is
-  // never a silent no-op the user cannot hear.
+  // A desk without the matrix write cap reads the matrix but cannot write it: the switches, the
+  // mode dropdown and the presets are then marked unavailable, so no control is a silent no-op.
   routingCtl.matrixReadOnly = !!matrix.read_only;
   // Let the server's own wording win when it sends one. The static markup describes a WRITABLE
-  // matrix, and on a read-only device (the Duo) it would otherwise still invite you to "include or
-  // exclude each source" while every switch is disabled.
+  // matrix, and on a read-only desk it would otherwise still invite you to "include or exclude
+  // each source" while every switch is unavailable.
   const mxNote = document.getElementById("routing-matrix-note");
   if (mxNote && matrix.note) mxNote.textContent = matrix.note;
   routingCtl.matrixSources = {};
@@ -5772,7 +5697,7 @@ function applyMatrixForOutput() {
   updateMatrixApplyLabel();
 }
 
-function onMatrixOutputChange(ev) {
+function onMatrixOutputChange() {
   const o = currentMatrixOutput();
   updateSchemeSaveOutputLabel();    // the one-output save button names the output you are on
   // fillOptions rather than a bare rebuild: most outputs offer the SAME mode list, so switching
@@ -5795,15 +5720,14 @@ function onMatrixOutputChange(ev) {
   // without sending it back to that computer, so hiding the switch makes a hand-built mix minus
   // impossible, which is the one mode the desk does not build for you. Mix Minus MODE, where the
   // desk drops the output's own source itself, is a different thing and is handled above.
-  // Each switch names the output explicitly ("Mic 1 in Chat") so its accessible name is always
-  // correct when focused, even though a screen reader caches and will not re-read a changed
-  // <legend> group name.
+  // Each switch names the output explicitly ("Mic 1 in Chat") so its accessible name alone says
+  // which output it acts on.
   Object.keys(routingCtl.matrixSourceSpans).forEach((key) => {
     // SOURCE NAME FIRST: "Mic 1 in Chat", not "Include Mic 1 in the Chat output". A leading verb
     // delays the one fact you need, which is the source you are focused on. The verb is dropped
     // rather than moved: a checkbox announces its own checked state, so a label carrying the word
-    // "included" would read
-    // "Mic 1 included in Chat, not checked" and contradict itself on every unticked source.
+    // "included" would read "Mic 1 included in Chat, not checked" and contradict itself on every
+    // unticked source.
     // The self-source is worded "back into itself" rather than "USB 2 in USB 2", which reads as a
     // stutter and hides the one thing about that switch worth knowing.
     routingCtl.matrixSourceSpans[key].textContent = (key === o.key)
@@ -5811,12 +5735,10 @@ function onMatrixOutputChange(ev) {
       : routingCtl.matrixSourceLabels[key] + " in " + o.label;
   });
   applyMatrixForOutput();
+  // Not announced: the dropdown says the output as you arrow it, and a closed select fires change
+  // on every arrow, so an announcement here would talk over it at each step.
   setText("matrix-status", "Showing the " + o.label
     + " output. The mix and source list reflect the unit's current state.");
-  // Announce via the live region too, but only on a real user change (not the initial
-  // build): a mutated <legend> is not reliably re-read by screen readers, so the group
-  // name can lag the dropdown. This keeps the announced output in sync with the control.
-  if (ev) announce("Now configuring the " + o.label + " output mix.");
 }
 
 async function onMatrixModeApply() {
@@ -6183,12 +6105,6 @@ function applyStereoValues(state) {
   });
 }
 
-// Set each fader dropdown to the channel currently on it. Unknown codes (e.g. a
-// stereo-linked mic) get a fallback option so the control still shows the truth.
-/* THE UNIT'S ANSWER, written into every row: the dropdown, the "now on this fader" hint, the
-   remembered device value that Apply compares against, and the button's own availability. This is
-   the ONLY place the device value is recorded, so a staged dropdown can never be mistaken for what
-   the desk is doing. */
 /* THE CHANNEL LIST FOLLOWS THE USB MODE. Expanded adds Game, Music, A and B and renames USB 1, and
    the page is built once, so a list built in the other mode is rebuilt here from the live read.
    Only when it differs: rebuilding drops a staged choice, and the list is what a screen reader is
@@ -6209,6 +6125,9 @@ function applyFaderChannels(list) {
   });
 }
 
+/* Set each fader dropdown to the channel the unit has on it, through setStagedValue, so the hint,
+   the value Apply compares against and the button's availability all follow. An unknown code (a
+   stereo-linked mic) gets an option of its own so the control still shows the truth. */
 function applyFaderValues(faders, labels) {
   (faders || []).forEach((code, i) => {
     const sel = routingCtl.faders && routingCtl.faders[i];
@@ -6227,11 +6146,6 @@ function applyFaderValues(faders, labels) {
 }
 
 async function onFaderApply(index, code, sel, btn) {
-  if (isBusy(btn)) {
-    // aria-disabled, so the press still arrives here: say why rather than doing nothing.
-    announce("This fader is already set to that. Choose a different channel first.", true);
-    return;
-  }
   const res = await routingPost("/api/faders/set", { fader: index, code: code }, btn);
   // A swap can change a second fader too, so re-apply the whole returned layout - which also puts
   // every row's hint and Apply button back in step with the unit.
@@ -6347,9 +6261,9 @@ function applyRoutingValues(v) {
     setStagedValue(routingCtl.usbExpanded, String(!!v.usb_expanded), null);
   applyUsbDriver(v.usb_driver);
   applyBypass(routingCtl.usbBypass, routingCtl.usbBypassHint, v,
-              v.usb_processing_bypass, v.usb_multitrack);
-  // v.multitrack is still sent by /api/routing and is deliberately not applied here any more:
-  // the control moved to the Recording page, which reads its own value.
+              v.usb_processing_bypass, v.usb_multitrack,
+              routingModel && routingModel.output_write_read_only ? OUTPUTS_READ_ONLY_OFF : null);
+  // v.multitrack is not applied here: its control is on the Recording page, which reads it there.
   if (routingCtl.monitorMute && v.monitor_auto_mute !== null && v.monitor_auto_mute !== undefined)
     routingCtl.monitorMute.checked = !!v.monitor_auto_mute;
   if (routingCtl.btMute && v.bt_auto_mute !== null && v.bt_auto_mute !== undefined)
@@ -6377,14 +6291,12 @@ function applyRoutingValues(v) {
 }
 
 /* ---- Routing: the tab strip, and reading per tab -------------------------
-   THE RULE FOR THIS PAGE: every property is read at the moment somebody looks at it. Reading
-   everything on page ENTRY is weaker, and it has a failure mode - anything read once per page LOAD
-   shows stale values after a profile restore while everything around it is live.
-   Tabs make the rule cheaper AND stronger: each tab reads its own
-   settings when it is opened, so a value is never older than the moment you arrived at it, and
-   nothing is read for a tab nobody is on. Automatic activation means arrowing along the strip
-   selects as it goes, so the reads are DEBOUNCED - arrowing from Output mixes to Recording must not
-   fire five device reads. */
+   THE RULE FOR THIS PAGE: every property is read at the moment somebody looks at it. Anything read
+   once per page LOAD shows stale values after a profile restore while everything around it is live.
+   Each tab reads its own settings when it is opened, so a value is never older than the moment you
+   arrived at it, and nothing is read for a tab nobody is on. Automatic activation means arrowing
+   along the strip selects as it goes, so the reads are DEBOUNCED - arrowing from Output mixes to
+   Master Mix must not fire a device read per tab. */
 let routingTabs = null;
 let _routingTabReadTimer = null;
 
@@ -6401,7 +6313,7 @@ const ROUTING_TAB_READ = {
   // window (or on the phone) should be there when you come back to this one.
   mixes: async () => { await loadMatrixState(); await loadSchemes(); },
   levels: async () => {
-    await refreshRoutingLive();          // the auto-mute switches, which moved onto this tab
+    await refreshRoutingLive();          // the auto-mute switches
     await loadFaderLevels(false);
     await loadMonmixOutput();
   },
@@ -6750,8 +6662,7 @@ async function openRestoreDialog() {
   const label = entry ? entry.name : name;
   // WHICH HALF WILL DO THE WORK decides everything else in this dialog, so it is asked first and
   // once. A backup the unit still holds goes back in seconds and completely, so there is no time to
-  // quote and nothing for "reset to factory first" to clear out; one held only on this computer is
-  // the older, slower path and keeps both.
+  // quote; one held only on this computer is the slower path, and its time depends on its pads.
   let viaShow = false;
   // WHAT THIS BACKUP WILL LEAVE YOU UNABLE TO HEAR, and it goes FIRST in the description rather
   // than last. Everything the app says after a restore is spoken through the desk, so a restore
@@ -6767,13 +6678,11 @@ async function openRestoreDialog() {
   // Leads with the word so it is unmistakable, and is part of the DOM before showModal: a screen
   // reader reads a dialog once, on open, so anything arriving later is heard by nobody.
   const warnText = planWarnings.length ? ("Warning. " + planWarnings.join(" ") + " ") : "";
-  // NO "RESET TO FACTORY FIRST" IN THIS DIALOG. It runs showControlNewFromDefault, which crashes
-  // the desk about one time in five and needs its MAINS pulled, and here that risk would be taken
-  // on by somebody who believes they are restoring a backup, not resetting a desk. The most
-  // dangerous command in the app has no business being a modifier on a routine one. The standalone
-  // factory reset keeps it, where choosing it is the entire point.
-  const modeField = document.getElementById("restore-mode-field");
-  if (modeField) modeField.hidden = true;
+  // NO "RESET TO FACTORY FIRST" IN THIS DIALOG, though the server's restore takes a `clean` flag.
+  // It runs showControlNewFromDefault, which crashes the desk about one time in five and needs its
+  // MAINS pulled, and here that risk would be taken on by somebody who believes they are restoring
+  // a backup, not resetting a desk. The standalone factory reset keeps it, where choosing it is the
+  // entire point.
   if (viaShow) {
     setText("restore-form-desc",
             warnText
@@ -6808,30 +6717,11 @@ async function openRestoreDialog() {
   // showModal so the estimate is part of the dialog from the moment it opens (a screen reader reads
   // the dialog once, on open; text arriving afterwards is text nobody hears).
   let estimate = "";
-  // TWO THINGS COME BACK FROM THIS CALL, and the second decides which options exist: `can_clean`
-  // says whether there is anywhere to save the backup a clean restore must take first. Asked fresh
-  // here rather than carried over from the Shows page, because a drive can be pulled in between.
-  let canClean = true;
-  let cleanReason = "";
   try {
     const info = await postJSON("/api/profiles/info", { name });
-    if (info.ok) {
-      estimate = describeRestoreTime(info);
-      canClean = info.can_clean !== false;
-      cleanReason = info.clean_blocked_reason || "";
-    }
+    if (info.ok) estimate = describeRestoreTime(info);
   } catch (e) { /* no estimate is better than a wrong one */ }
   setText("restore-time-estimate", estimate);
-  // Always reopen on the SAFE option. A destructive choice must be made afresh each time, not
-  // inherited from whatever the last restore happened to use.
-  document.getElementById("restore-mode-merge").checked = true;
-  // A clean restore resets the unit first AND backs it up first, so it needs the CAPABILITY and
-  // somewhere to WRITE. Gating on the capability alone offers it on a Duo, which has the capability
-  // and no removable storage at all, so the option is offered and then refused.
-  setAvailable(document.getElementById("restore-mode-clean"), _showsWritable && canClean,
-    !_showsWritable
-      ? "Resetting first is not available on this unit, so its settings can only be written over."
-      : cleanReason || "Resetting first needs somewhere to save a backup first.");
   document.getElementById("restore-dialog").showModal();
   // Focus Cancel, not Restore: this dialog exists to be read before an overwrite that cannot be
   // undone, so the safe action is the one under your hands when it opens.
@@ -6845,22 +6735,13 @@ async function doRestore() {
     announce("No backup selected.", true);
     return;
   }
-  // Read the mode BEFORE the dialog closes, since closing it takes the radios with it. A hidden
-  // mode field means the unit's own copy is doing the work, where the mode has no meaning.
-  // Always false: the mode field is hidden above and the option is retired. Read from nothing
-  // rather than from a radio that can no longer be reached.
-  const clean = false;
   const label = entry ? entry.name : name;
   _profileJobRunning = true;
-  openProgressDialog("restore-dialog", "Restoring backup",
-                     clean
-                       ? `Backing the unit up, resetting it, then restoring "${label}".`
-                       : `Restoring "${label}" to the unit.`);
+  openProgressDialog("restore-dialog", "Restoring backup", `Restoring "${label}" to the unit.`);
   try {
     // ONE VERB FOR A LIST OF TWO KINDS: the server picks the unit's own copy when it is still on
-    // the drive and this computer's when it is not, and "reset first" forces the profile path
-    // because that mode exists to clear what a profile cannot carry.
-    const start = await postJSON("/api/backup/restore", { name, clean });
+    // the drive and this computer's when it is not.
+    const start = await postJSON("/api/backup/restore", { name });
     if (!start.ok) {
       finishProgressDialog("Restore failed", start.message || "Could not start the restore.");
       return;
@@ -6877,19 +6758,11 @@ async function doRestore() {
   }
 }
 
-/* ---- The unit's own Shows: export, restore, delete, factory reset ----
+/* ---- The unit's own Shows: the factory reset ----------------------------
+   Exporting, restoring and deleting a show belong to the one Backups list above, whose keys the
+   server resolves to the unit's own handle at the moment of the write. What is left here is the
+   factory reset, which shares the progress dialog and the job poller. */
 
-   Kept apart from the profile code above rather than merged into it, because they are different
-   operations on different storage and the one thing that must never happen is a user pressing the
-   wrong one. Shared where sharing is honest: the progress dialog and the job poller.
-
-   THE SNAPSHOT INDEX IS THE HANDLE, never the uid and never the uuid. A uid is a POSITION in the
-   unit's list and every export renumbers the lot; a uuid names the SHOW rather than the file, so
-   several backups of one desk state share one. Only the snapshot index stays put and stays unique
-   (measured on hardware). The dropdown's option values are snapshot indexes and
-   the server resolves them to a uid at the moment of the write. */
-
-let _showConfirmAction = null;      // which action the shared confirm dialog is armed for
 let _showsWritable = true;
 let _showsCanBackup = true;
 let _showsBackupBlockedReason = "";
@@ -6919,37 +6792,18 @@ async function loadShows() {
       + "means this cannot be undone.");
 }
 
-/* THE FACTORY RESET'S CONFIRMATION, and only that: restore and delete belong to the one Backups
-   list, so the branches here are the reset's. Focus lands on Cancel, because this is the most
-   destructive control in the app. */
-function openShowConfirm(action) {
-  const label = "";
-  _showConfirmAction = action;
+/* THE FACTORY RESET'S CONFIRMATION. Focus lands on Cancel, because this is the most destructive
+   control in the app. */
+function openShowConfirm() {
   _profileReturnFocus = document.getElementById("show-reset-btn");
   _profileJobRunning = false;
   const copy = {
-    restore: {
-      title: "Restore show",
-      go: "Restore",
-      desc: `This replaces everything on the unit with the backup "${label}": every setting, the `
-          + `routing, the fader layout and all your SMART pads. It takes a few seconds. It also `
-          + `moves the monitor speaker level, so turn speakers down before you start. What is on `
-          + `the unit now is not kept unless you back it up first.`,
-    },
-    delete: {
-      title: "Delete show",
-      go: "Delete",
-      desc: `This permanently removes the backup "${label}" from the unit's recordings drive and `
-          + `gives the space back. It does not change any setting on the unit. It cannot be undone.`,
-    },
-    reset: {
       title: "Start again from factory settings",
       go: "Reset the unit",
       // THE DROPOUT IS NAMED HERE, WITHOUT A NUMBER. Resetting is when the unit rebuilds its USB
       // connection, and sometimes it does not come back until the cable is replugged. No rate is
-      // quoted on purpose: the one we have is from a handful of trials, and a confident-sounding
-      // figure is what sent this project the wrong way when 45 clean trials on the other desk were
-      // read as "it does not happen". What the user needs is that it can happen and what to do.
+      // quoted on purpose: the one we have is from a handful of trials, too few to state as a
+      // figure. What the user needs is that it can happen and what to do.
       desc: `This puts every setting and every SMART pad back to how the unit left the factory, `
           + `including RODE's eight factory pad sounds, which the unit rebuilds from its own `
           + `firmware. That is the only way to get those sounds back, so if what you actually `
@@ -6962,27 +6816,21 @@ function openShowConfirm(action) {
           + `its own. If the app stops finding the unit afterwards, unplug the USB cable in the `
           + `socket nearest the power inlet, wait a few seconds and plug it back in. The reset `
           + `itself will still have happened and nothing is lost.`,
-    },
-  }[action];
+  };
   setText("show-confirm-title", copy.title);
   setText("show-confirm-go", copy.go);
 
-  // The backup tick-box belongs to the reset alone: it is the reset's only undo.
-  const row = document.getElementById("show-backup-row");
-  const box = document.getElementById("show-backup-first");
-  row.hidden = action !== "reset";
-
   // AN OPTION THAT CANNOT WORK IS NOT OFFERED. With no card or drive in the desk there is nowhere
   // to write a backup, and leaving the tick on means the reset runs, the backup fails, and the user
-  // lands in a failure dialog. The tick is cleared and disabled instead.
+  // lands in a failure dialog. The tick is cleared and marked unavailable instead (aria-disabled,
+  // so it keeps its place; onShowBackupFirstChange refuses a tick).
   //
-  // THE REASON GOES IN THE DESCRIPTION, NOT JUST THE HINT, and that is the whole accessibility of
-  // it: a disabled checkbox is out of the tab order, so its hint would never be reached and the
-  // control would simply seem to be missing. show-confirm-desc is the alertdialog's
+  // THE REASON ALSO GOES IN THE DESCRIPTION. show-confirm-desc is the alertdialog's
   // aria-describedby, so it is announced when the dialog opens - which is the one moment this has
   // to be heard, because it changes what the reset means: it cannot be undone.
-  const blocked = action === "reset" && !_showsCanBackup;
-  box.disabled = blocked;
+  const box = document.getElementById("show-backup-first");
+  const blocked = !_showsCanBackup;
+  setAvailable(box, !blocked, _showsBackupBlockedReason || "There is nowhere to save a backup.");
   box.checked = !blocked;
   setText("show-backup-first-desc", blocked
     ? (_showsBackupBlockedReason || "There is nowhere to save a backup.")
@@ -6998,25 +6846,22 @@ function openShowConfirm(action) {
   document.getElementById("show-confirm-cancel").focus();
 }
 
+/* The backup tick-box is unavailable when there is nowhere to write a backup; a tick then goes
+   straight back and says why. */
+function onShowBackupFirstChange(ev) {
+  const box = ev.target;
+  if (refuseChange(box) !== null) box.checked = false;
+}
+
 async function doShowConfirmed() {
-  const action = _showConfirmAction;
-  if (!action) return;
-  const snapshot = null, label = "";
-  const backupFirst = document.getElementById("show-backup-first").checked;
-  const spec = {
-    restore: { url: "/api/shows/import", body: { snapshot },
-               title: "Restoring show", first: `Restoring "${label}" to the unit.`,
-               okTitle: "Show restored", failTitle: "Restore failed" },
-    delete: { url: "/api/shows/delete", body: { snapshot },
-              title: "Deleting backup", first: `Deleting "${label}" from the unit.`,
-              okTitle: "Backup deleted", failTitle: "Delete failed" },
-    reset: { url: "/api/shows/reset", body: { backup_first: backupFirst },
-             title: "Resetting the unit",
-             first: backupFirst ? "Backing the unit up, then resetting it."
-                                : "Resetting the unit to factory settings.",
-             okTitle: "Unit reset", failTitle: "Reset failed" },
-  }[action];
-  await runShowJob("show-confirm-dialog", spec);
+  const box = document.getElementById("show-backup-first");
+  const backupFirst = box.checked && unavailableReason(box) === null;
+  await runShowJob("show-confirm-dialog", {
+    url: "/api/shows/reset", body: { backup_first: backupFirst },
+    title: "Resetting the unit",
+    first: backupFirst ? "Backing the unit up, then resetting it."
+                       : "Resetting the unit to factory settings.",
+    okTitle: "Unit reset", failTitle: "Reset failed" });
 }
 
 /* ---- This app's own settings: export and import ---------------------------
@@ -7144,16 +6989,13 @@ async function onAppSettingsImport() {
 }
 
 /* The shortcuts page and the announcement settings are both now out of step with the app, so they
-   are re-read rather than left showing what was there before the import. */
+   are re-read rather than left showing what was there before the import. Each loader reports its
+   own failure. */
 async function refreshAfterAppSettingsImport() {
-  try { if (typeof loadHotkeys === "function") await loadHotkeys(); } catch (e) { /* not built */ }
-  try { if (typeof loadAnnounceState === "function") await loadAnnounceState(); }
-  catch (e) { /* not built */ }
+  await loadHotkeys();
+  await loadAnnounceState();
 }
 
-/* Every show command follows the same shape: start it, follow the one job status, refresh the list.
-   The list refresh is NOT optional - an export renumbers every uid on the unit, so a page holding
-   the old list is holding stale positions. */
 /* Which driver buttons make sense right now, from the LIVE read.
 
    THE DOWNLOAD BUTTON GOES WHEN THE DRIVER IS IN, because installing the same version again tells
@@ -7215,6 +7057,8 @@ async function installDriver() {
   await loadRouting();
 }
 
+/* Start a show job, follow it in the progress dialog, then re-read what the reset needs to know
+   (whether the unit can back itself up now). */
 async function runShowJob(closeDialogId, spec) {
   _profileJobRunning = true;
   openProgressDialog(closeDialogId, spec.title, spec.first);
@@ -7251,7 +7095,7 @@ function openRenameDialog() {
   }
   const name = selectedBackupName();
   if (!name) {
-    announce("No profile selected.", true);
+    announce("No backup selected.", true);
     return;
   }
   _profileReturnFocus = document.getElementById("profile-rename-open");
@@ -7347,10 +7191,10 @@ async function onProfileDelete() {
 
 /* ---- First run: back up the unit as it was found ----
 
-   The single most valuable thing this app can do on the day it is installed, because the unit has
-   no software factory reset and the touchscreen wizard is not reachable by a screen reader: once we
-   write anything, how the desk came is gone. Offered once per unit (server.baseline_status), never
-   nagged, and declining still leaves the Profiles page able to capture one later. */
+   The single most valuable thing this app can do on the day it is installed: once we write
+   anything, how the desk came is gone, and a factory reset puts back the factory's settings, not
+   the owner's. Offered once per unit (server.baseline_status), never nagged, and declining still
+   leaves the Backups page able to capture one later. */
 
 async function getBaselineStatus() {
   try {
@@ -7375,7 +7219,7 @@ async function maybeOfferBaseline() {
 
 function openBaselineDialog(s) {
   // This one is not opened by a page button, so send focus back to the heading of whatever route is
-  // showing. returnProfileFocus's usual fallbacks are all on the Profiles page, which may well be
+  // showing. returnProfileFocus's usual fallbacks are all on the Backups page, which may well be
   // hidden right now, and focusing a hidden element drops focus to the document body - which
   // strands a screen reader at the top of the page with no idea what just happened.
   _profileReturnFocus = document.querySelector("section:not([hidden]) > h1[tabindex='-1']");
@@ -7416,7 +7260,7 @@ async function onBaselineSkip() {
   // Recorded server-side so it is asked ONCE and never becomes a nag at every launch.
   try { await postJSON("/api/baseline/skip", {}); } catch (e) { /* nothing to undo */ }
   closeProfileDialog("baseline-dialog");
-  announce("No backup was taken. You can still take one from the Profiles page, though it will "
+  announce("No backup was taken. You can still take one from the Backups page, though it will "
            + "then record the unit as it is now rather than as you found it.");
 }
 
@@ -7442,7 +7286,7 @@ async function onBaselineAddPads() {
   }
 }
 
-/* The Profiles page's one line about the as-found backup: whether there is one, what is in it, and
+/* The Backups page's one line about the as-found backup: whether there is one, what is in it, and
    the button to finish it off if the pads were skipped. Read on every visit to that page, because
    the answer changes when a backup is taken or deleted. */
 async function refreshBaselinePanel() {
@@ -7459,15 +7303,13 @@ async function refreshBaselinePanel() {
     line.classList.add("warn-text");
     line.textContent = s && s.connected
       ? "No as-found backup of this unit has been taken on this computer, so there is no way back "
-        + "if a change goes wrong. Save one from Create a profile above."
+        + "if a change goes wrong. Take one with Back up the unit now, above."
       : "No as-found backup, and no unit connected to take one from.";
     addBtn.hidden = true;
     return;
   }
-  // SHORTER THAN IT WAS, on purpose. The old line re-explained what a baseline IS on every visit
-  // ("the record of how the unit was before this app changed anything, and it cannot be replaced by
-  // an ordinary save"). That belongs in the page note and the Help glossary, which both carry it,
-  // not in a status line read out every time the page is opened.
+  // What a baseline IS belongs in the page note and the Help glossary, which both carry it, not in
+  // a status line read out every time the page is opened.
   const when = b.saved_at ? `, taken ${b.saved_at}` : "";
   if (b.pads) {
     line.textContent = `As-found backup: "${b.name}"${when}, with ${b.pads} SMART `
@@ -7497,17 +7339,16 @@ function wireProfileDialog(id) {
   });
 }
 
-/* Put focus back where it came from. Deleting the last profile disables the very button that
-   opened the dialog, and focusing a disabled control silently drops focus to the document, which
-   strands a screen reader at the top of the page. So fall back along the page: the dropdown, then
-   Save, then the heading. */
+/* Put focus back where it came from. Focusing a control that is gone, hidden or disabled silently
+   drops focus to the document, which strands a screen reader at the top of the page, so fall back
+   along the page: the dropdown, then Back up, then the heading. */
 function returnProfileFocus() {
   const fallbacks = [_profileReturnFocus,
                      document.getElementById("profile-select"),
                      document.getElementById("profile-save-open"),
                      document.getElementById("h-profiles")];
   for (const el of fallbacks) {
-    if (el && !el.disabled) { el.focus(); return; }
+    if (el && el.isConnected && !el.disabled && !el.closest("[hidden]")) { el.focus(); return; }
   }
 }
 
@@ -7520,11 +7361,9 @@ function closeProfileDialog(id) {
 
 /* ---- Recording -------------------------------------------------------
    THE ONE LIVE REGION RULE, and this page is where it matters most. Everything spoken here goes
-   through `rec-state` and nothing else. An earlier draft had a second status line for the result of
-   a button press, which meant pressing Start fired TWO regions at once (the outcome and the new
-   state) and a screen reader read one over the other. `announce()` REPLACES the global live region
-   rather than queueing, so that is a trap the whole app shares; here the answer is that there is
-   only ever one thing being said.
+   through `rec-state` and nothing else: a second status line for the result of a button press
+   would fire TWO regions at once (the outcome and the new state), and a screen reader reads one
+   over the other.
 
    `setRecState` clears the region before writing, so pressing "Check the recorder" twice speaks
    twice even though the words did not change - a status region that only fires on a DIFFERENT
@@ -7575,11 +7414,9 @@ async function loadRecording() {
 function loadRecordingFrom(d) {
   recordingModel = d;
   recordingSeenState = d.state;
-  fillRecordingDest(d);
+  fillRecordingSettings(d);
   fillRecordingList(d);
-  applyTransportLabels(d.state);
-  applyRecordingWritable(d);
-  applyRecordingUsable(d);
+  applyTransport(d.state);
   applyAnnouncerWarning(d);
 }
 
@@ -7607,8 +7444,8 @@ const REC_TRANSPORT = {
 function setAvailable(el, on, why) {
   if (!el) return;
   if (on) {
-    el.removeAttribute("aria-disabled");
     delete el.dataset.offReason;
+    if (!isBusy(el)) el.removeAttribute("aria-disabled");   // see setBusy
   } else {
     el.setAttribute("aria-disabled", "true");
     el.dataset.offReason = why || "";
@@ -7654,18 +7491,11 @@ function applyTransportLabels(state) {
                 : "Markers can only be dropped while something is recording.");
 }
 
-/* The wording is built SERVER-SIDE, in one place, for both the page read and the cheap live read
-   (server._recorder_sentence). Do NOT compose sentences here: bolting the elapsed time onto the end
-   of the server's sentence puts the parts in the wrong order the moment that sentence grows a
-   second clause - "Recording to the USB drive. There is room for 88 hours, for 4 minutes." */
-
-/* THE STORAGE DETAIL IS NOT ON THIS PAGE. Listing every volume here means the unit's pad storage
-   and an empty card slot, which is the last reading anyone wants while working. Where a recording
-   goes is in the status sentence and in the reply when you press record; the full picture is on
-   Device > Hardware, which is where you go to look at storage deliberately. */
-function fillRecordingDest(d) {
-  fillRecordingSettings(d);
-}
+/* The state sentence is built SERVER-SIDE, in one place, for both the page read and the cheap live
+   read (server._recorder_sentence). Do NOT compose sentences here: bolting the elapsed time onto
+   the end of the server's sentence puts the parts in the wrong order the moment that sentence grows
+   a second clause - "Recording to the USB drive. There is room for 88 hours, for 4 minutes."
+   Where a recording goes is in that sentence; the full storage picture is on Device > Hardware. */
 
 /* THE TWO PRE-TAKE DECISIONS, AND ONE APPLY BETWEEN THEM. What a take CONTAINS (multitrack) and
    what it is SAVED AS (WAV or MP3) are really one decision - neither is fixable after the take -
@@ -7678,6 +7508,8 @@ function fillRecordingDest(d) {
 
    Multitrack's write goes to /api/routing/multitrack, which owns the selector and its device gate;
    the format's goes to /api/recorder/format. Both are gated on the same "output_write" cap. */
+const REC_SETTINGS_OFF = "Changing the recording settings is not enabled on this device yet.";
+
 const REC_SETTING_WRITE = {
   "rec-multitrack-mode": {
     path: "/api/routing/multitrack",
@@ -7686,7 +7518,8 @@ const REC_SETTING_WRITE = {
     // mode is chosen, so without this it stays keyed to the mode the page was last READ with.
     after: (v) => {
       if (recordingModel) recordingModel.multitrack = v;
-      applyBypass(recordingCtl.bypass, recordingCtl.bypassHint, recordingModel || {}, null, v);
+      applyBypass(recordingCtl.bypass, recordingCtl.bypassHint, recordingModel || {}, null, v,
+                  recordingReadOnlyWhy(recordingModel));
     },
   },
   "rec-format-mode": {
@@ -7710,16 +7543,14 @@ async function onApplyRecordingSettings(pending, btn) {
       said.push(res.message || "Done.");
       if (!res.ok) {
         setRecState(said.join(" "));
-        announce(said.join(" "), true);
         return;
       }
       setStagedValue(sel, value, null);
       if (spec.after) spec.after(value);
     }
-    setRecState(said.join(" "));
-    announce(said.join(" ") || "Nothing to apply.");
+    setRecState(said.join(" ") || "Nothing to apply.");
   } catch (err) {
-    announce("Could not reach the device service.", true);
+    setRecState("Could not reach the device service.");
   } finally {
     setBusy(btn, false);
   }
@@ -7730,8 +7561,8 @@ function fillRecordingSettings(d) {
   if (!host) return;
   const modes = d.multitrack_modes || [];
   const formats = d.format_options || [];
-  // Keyed on BOTH option lists. Either is only ever missing if a caller passed a partial payload,
-  // is what empties these controls on every transport press.
+  // Keyed on BOTH option lists. A payload missing either is a partial one (a command's reply), and
+  // rebuilding from it would empty these controls, so it leaves them alone.
   if (!modes.length || !formats.length) return;
   rebuildIfChanged(host, JSON.stringify([modes, formats]), (box) => {
     const apply = makeStagedApply("rec-settings-apply", "Apply recording settings",
@@ -7793,19 +7624,15 @@ function fillRecordingSettings(d) {
   // ONE GATE FOR THE PAIR: both writes need the same "output_write" cap, so a device without it
   // blocks the shared button once rather than each dropdown separately.
   if (recordingCtl.settingsApply) {
-    if (d.multitrack_writable === false) {
-      setBusy(recordingCtl.multitrack, true);
-      setBusy(recordingCtl.format, true);
-      blockStaged(recordingCtl.settingsApply,
-                  "Changing the recording settings is not enabled on this device yet.");
-    } else {
-      blockStaged(recordingCtl.settingsApply, "");
-    }
+    const writable = d.multitrack_writable !== false;
+    setAvailable(recordingCtl.multitrack, writable, REC_SETTINGS_OFF);
+    setAvailable(recordingCtl.format, writable, REC_SETTINGS_OFF);
+    blockStaged(recordingCtl.settingsApply, writable ? "" : REC_SETTINGS_OFF);
     markStaged(recordingCtl.multitrack, recordingCtl.settingsApply);
   }
 
   applyBypass(recordingCtl.bypass, recordingCtl.bypassHint, d,
-              d.processing_bypass, d.multitrack);
+              d.processing_bypass, d.multitrack, recordingReadOnlyWhy(d));
 }
 
 
@@ -7859,15 +7686,21 @@ function applyRecordingUsable(d) {
    switch would vanish and reappear as the mode changed, and anyone sitting on it would be thrown
    somewhere else. aria-disabled keeps it in place, announced as unavailable, and carrying the
    reason - which `onBypassToggle` then speaks when it is pressed anyway. */
-function applyBypass(input, hint, d, value, mode) {
+/* `readOnlyWhy` is the page's reason when the desk cannot take this write at all, or null. It wins
+   over the multitrack rule, and is passed in on every call because each read re-decides the switch. */
+function applyBypass(input, hint, d, value, mode, readOnlyWhy) {
   if (!input) return;
   if (value !== null && value !== undefined) input.checked = Boolean(value);
-  if (d.multitrack_writable === false) setBusy(input, true);
   // `!mode` covers 0, null and undefined together: off, unknown and not-read-yet all mean the
   // separate tracks are not being made, which is the only thing this switch is about.
   const inert = !mode;
-  setAvailable(input, !inert, d.bypass_needs_multitrack || "");
   if (hint) hint.textContent = inert ? (d.bypass_needs_multitrack || "") : (d.bypass_hint || "");
+  if (readOnlyWhy) setAvailable(input, false, readOnlyWhy);
+  else setAvailable(input, !inert, d.bypass_needs_multitrack || "");
+}
+
+function recordingReadOnlyWhy(d) {
+  return d && d.multitrack_writable === false ? REC_SETTINGS_OFF : null;
 }
 
 /* Shared by BOTH raw switches, which sit on different pages: the recorder's on Recording and
@@ -8070,11 +7903,10 @@ async function onDeleteRecording() {
   } finally { setBusy(btn, false); }
 }
 
-/* A unit we can read but must not drive (the Duo: the record command's address was read off a
-   Pro II and has never been seen there). The buttons stay in the page and in the tab order, and
-   say why when pressed, rather than vanishing and leaving the page looking broken.
-   Runs AFTER applyTransportLabels, since a unit that cannot be driven at all overrules any
-   per-state judgement about which button is currently useful. */
+/* A unit we can read but must not drive (no "recorder" cap). The buttons stay in the page and in
+   the tab order, and say why when pressed, rather than vanishing and leaving the page looking
+   broken. Runs AFTER applyTransportLabels (see applyTransport), since a unit that cannot be driven
+   at all overrules any per-state judgement about which button is currently useful. */
 function applyRecordingWritable(d) {
   if (d.writable === false) {
     const why = "AccessCaster can read the recorder on this unit but not drive it.";
@@ -8082,6 +7914,15 @@ function applyRecordingWritable(d) {
       setAvailable(document.getElementById(id), false, why);
     });
   }
+}
+
+/* The transport buttons for a state the unit reported, in the one order that keeps every gate:
+   per-state labels and availability first, then nowhere-to-record, then a unit that cannot be
+   driven at all. */
+function applyTransport(state) {
+  applyTransportLabels(state);
+  applyRecordingUsable({ state });
+  applyRecordingWritable(recordingModel || {});
 }
 
 function startRecordingPoll() {
@@ -8109,8 +7950,7 @@ async function pollRecording() {
   recordingSeenState = live.state;
   // The button follows the unit even when the change came FROM the unit, so pressing REC on the
   // desk leaves this page offering Pause rather than Start.
-  applyTransportLabels(live.state);
-  applyRecordingUsable({ state: live.state });
+  applyTransport(live.state);
   // Somebody pressed record on the unit itself, or a recording finished. Re-read properly: the
   // list and the free space have both moved, and this is the only way they get updated.
   loadRecording();
@@ -8140,15 +7980,12 @@ async function onRecordCommand(cmd, btn) {
   if (res.recorder) {
     recordingModel = Object.assign({}, res.recorder, { message: res.message });
     recordingSeenState = res.state;
-    fillRecordingDest(recordingModel);
+    fillRecordingSettings(recordingModel);
     fillRecordingList(recordingModel);
   }
   // From the state the unit REPORTED, not from the command we sent: a refused command must not
   // leave the button offering the next step of something that never started.
-  if (res.state !== null && res.state !== undefined) {
-    applyTransportLabels(res.state);
-    applyRecordingUsable({ state: res.state });
-  }
+  if (res.state !== null && res.state !== undefined) applyTransport(res.state);
   setRecState(res.message || "Done.");
 }
 
@@ -8224,17 +8061,14 @@ function wireRecording() {
    So there is no onSelect, no debounce and no loader; the strip is built once at startup and that
    is the whole page.
    Because the panes hold no focusable content, setPanelTabStop() gives the PANEL tabindex="0" and
-   Tab from the strip lands inside it rather than sailing past to the next thing in the document.
-   That is the Device page's Network/Technical fault, already fixed in the shared helper, and this
-   page is the one where it applies to every tab rather than two of them. */
+   Tab from the strip lands inside it rather than sailing past to the next thing in the document. */
 let aboutTabs = null;
 
 /* THE DONATION LINK. Set this to the real page and the Support tab wires itself up; leave it empty
    and the tab says, in as many words, that there is nowhere to send anything yet.
 
    It is deliberately ONE constant rather than a setting or a fetch: it is a fixed fact about the
-   project, not something a user configures, and a hardcoded URL that is obviously a placeholder is
-   easier to find later than a config key nobody remembers. */
+   project, not something a user configures. */
 const SUPPORT_URL = "https://www.slightperception.com/support";   // the donation page
 
 /* An anchor with no href is not focusable and not announced as a link, which is exactly what we
@@ -8258,29 +8092,6 @@ function wireAboutTabs() {
   wireSupport();
 }
 
-
-/* ---- Auto gain ---------------------------------------------------------
-   Talk for half a minute and the gain sets itself. The server does the measuring (autogain.py and
-   server._autogain_run); this drives the three dialogs and the polling.
-
-   THREE DIALOGS, NOT ONE, and it is not decoration: NVDA never reads content revealed INSIDE an
-   already-open dialog, so a single dialog changing from "about to start" through "talk now" to
-   "here is the result" would leave a screen-reader user hearing only the first of the three.
-
-   NOTHING IS SPOKEN WHILE IT LISTENS except the countdown, and even that only at the start and the
-   end. The microphone being measured can hear whatever the computer plays, so a running commentary
-   would set the gain partly from the app's own voice. */
-
-// Polled often, because the gap between the unit starting to listen and the page saying so is
-// dead time the user is not talking through. The status endpoint reads no device state at all, so
-// this costs nothing.
-const AG_POLL_MS = 400;
-let agPoll = null;
-let agChannel = null;
-let agReturnFocus = null;
-let agSaidTalk = null;          // which talking phase has had its instruction said
-let agLastCount = null;
-let agFinishing = false;        // guards against two polls both finishing the same run
 
 /* ---- A talking level check, on ONE channel -------------------------------
    Not to be confused with the Device > Levels check, which meters a Windows STREAM: every stream
@@ -8345,6 +8156,29 @@ async function onLevelCheck(ch) {
     setBusy(btn, false);
   }
 }
+
+/* ---- Auto gain ---------------------------------------------------------
+   Talk for half a minute and the gain sets itself. The server does the measuring (autogain.py and
+   server._autogain_run); this drives the three dialogs and the polling.
+
+   THREE DIALOGS, NOT ONE, and it is not decoration: NVDA never reads content revealed INSIDE an
+   already-open dialog, so a single dialog changing from "about to start" through "talk now" to
+   "here is the result" would leave a screen-reader user hearing only the first of the three.
+
+   NOTHING IS SPOKEN WHILE IT LISTENS except the countdown, and even that only at the start and the
+   end. The microphone being measured can hear whatever the computer plays, so a running commentary
+   would set the gain partly from the app's own voice. */
+
+// Polled often, because the gap between the unit starting to listen and the page saying so is
+// dead time the user is not talking through. The status endpoint reads no device state at all, so
+// this costs nothing.
+const AG_POLL_MS = 400;
+let agPoll = null;
+let agChannel = null;
+let agReturnFocus = null;
+let agSaidTalk = null;          // which talking phase has had its instruction said
+let agLastCount = null;
+let agFinishing = false;        // guards against two polls both finishing the same run
 
 function buildAutoGainButton(ch) {
   const p = document.createElement("p");
@@ -8470,8 +8304,8 @@ async function agTick() {
   const undo = document.getElementById("ag-result-undo");
   // Nothing to undo when nothing was written, and a button that does nothing is worse than none.
   // The cost is that the dialog can be left with ONE focusable control, so Tab appears to do
-  // nothing and the dialog feels like it has no buttons at all - which is exactly how it read on
-  // the first run. The description therefore NAMES the buttons that are there.
+  // nothing and the dialog feels like it has no buttons at all. The description therefore NAMES
+  // the buttons that are there.
   undo.hidden = failed || st.gain_after === st.gain_before;
   const buttons = undo.hidden ? " Press OK to close." : " Press Undo to put the gain back, or OK to keep it.";
   setText("ag-result-desc", (st.message || "") + buttons);
@@ -8546,11 +8380,6 @@ function wireAutoGain() {
   });
 }
 
-/* ---- App shell: nav-link router, Alt+digit shortcuts, theme ---------- */
-
-/* Sections are permanent DOM; routing flips the `hidden` attribute and moves
-   focus to the visible section's H1. A section's onShow runs EVERY time it is
-   entered (see render), so what you read is the unit's state right now. */
 /* ---- CallMe ----------------------------------------------------------------
    Entering the page reads the unit once and leaves a cheap poll running; the poll costs no device
    read, because the server's CallMe listener hears every change as the unit pushes it. Every
@@ -8796,7 +8625,7 @@ async function onCallmeRespond(btn, path, body) {
   }
   setBusy(btn, false);
   setStatus("callme-state", res.message || "Done.");
-  // Busy cleared the button's unavailable mark too, so redraw whatever the version says.
+  // The reply can change which buttons apply, so redraw from the server's state now.
   callmeSeen.version = null;
   pollCallme();
 }
@@ -8893,16 +8722,20 @@ function wireCallme() {
   }
 }
 
+/* ---- App shell: nav-link router, Alt+digit shortcuts, theme ---------- */
+
+/* Sections are permanent DOM; routing flips the `hidden` attribute and moves
+   focus to the visible section's H1. A section's onShow runs EVERY time it is
+   entered (see render), so what you read is the unit's state right now. */
 const ROUTES = {
-  // The Device page reads PER TAB (see readDevice): each tab's read is a device dump, and taking all
-  // five of them on entry would slow the page the app opens on for things nobody is looking at.
+  // The Device page reads PER TAB (see readDevice): each tab's read is a device dump, and taking
+  // all of them on entry would slow the page for things nobody is looking at.
   status:     { title: "Device",             section: "sec-status",     onShow: () => readDevice() },
   channels:   { title: "Channels and Processing", section: "sec-channels", onShow: () => loadChannels() },
   routing:    { title: "Routing",            section: "sec-routing",    onShow: () => readRouting() },
   pads:       { title: "SMART pads",         section: "sec-pads",       onShow: () => readPads() },
-  // loadShows costs a device dump, unlike the other two, which read files on this computer. It is
-  // still done on entry rather than behind a button: the list is what every show control acts on,
-  // and a page offering a Restore with an empty dropdown is a page that cannot be used.
+  // loadShows reads the desk (whether it can be reset, and back itself up first) for the factory
+  // reset; the rest read files on this computer.
   profiles:   { title: "Backups",            section: "sec-profiles",
                 onShow: () => { loadProfiles(); refreshBaselinePanel(); loadShows(); loadAutostart(); } },
   // Entering the page reads the unit once (state, storage, recordings) and then leaves a cheap
@@ -8914,10 +8747,9 @@ const ROUTES = {
                 onShow: () => loadCallme() },
   about:      { title: "Help & About",       section: "sec-about" },
 };
-// CHANNELS, NOT DEVICE. Opening on Device to get its entry read to speak the desk's state makes
-// the opening page nav item 6, a settings page rather than a working one. The state is spoken by
-// the startup summary in its own right (see speakStartupSummary), so the app opens where you
-// actually work and where the nav order says it should.
+// CHANNELS, NOT DEVICE. Device is a settings page near the end of the nav, not a working one. The
+// desk's state is spoken by the startup summary in its own right (see speakStartupSummary), so the
+// app opens where you actually work and where the nav order says it should.
 const DEFAULT_ROUTE = "channels";
 const APP_TITLE = "AccessCaster";
 
@@ -8953,8 +8785,8 @@ function render(route, focusTo = "heading") {
   // OPENING THE APP STARTS ON THE APP'S OWN HEADING, the top of the document: the nav is one Tab
   // below it, the page content one H press away, and Alt with a digit works from anywhere. Starting
   // INSIDE the nav list puts you in the middle of a list with nothing above you. The heading names
-  // the app and the build, and the
-  // live region beneath it names the desk as soon as the enumeration answers.
+  // the app and the build, and the live region beneath it names the desk as soon as the
+  // enumeration answers.
   const appTitle = focusTo === "app" ? document.getElementById("app-title") : null;
   const h1 = document.querySelector("#" + info.section + " > h1[tabindex='-1']");
   const target = appTitle || h1;
@@ -8992,7 +8824,7 @@ function applyItemPositions(listSelector) {
    could conceivably matter. A SELECT, checkbox, radio, range slider or button does
    NOT take typed text, so the shortcut must keep working when focus is on one -
    otherwise Alt+digit dies whenever focus lands on a dropdown after tabbing through
-   a page (the "shortcuts randomly stop" bug). AltGr (Ctrl+Alt) is already excluded
+   a page. AltGr (Ctrl+Alt) is already excluded
    by the ctrlKey check, so plain Alt+digit never produces characters here. */
 function isTextEntry(t) {
   if (!t) return false;
@@ -9092,6 +8924,19 @@ function playBoundaryCue() {
   } catch (_) { /* no audio available: the stop itself still works, which is the point */ }
 }
 
+/* THE TOPMOST open dialog, which is not the same as the first one in the markup.
+   Dialogs stack: a confirm opens the progress dialog, and for a moment both are open. The document
+   order of the <dialog> elements has nothing to do with which is on top, so picking the first match
+   computes the wrong dialog's controls entirely. Last-opened is last in the open list. */
+function topmostOpenDialog() {
+  const open = document.querySelectorAll("dialog[open]");
+  if (!open.length) return null;
+  // If focus is already inside one, that is the one the user is in, whatever the order says.
+  const holding = document.activeElement && document.activeElement.closest
+    ? document.activeElement.closest("dialog[open]") : null;
+  return holding || open[open.length - 1];
+}
+
 /* A MODAL'S TAB CYCLE HAS TO BE CLOSED BY HAND. `showModal()` does NOT do it: without the wrap
    below you can tab straight out of a dialog into the browser toolbar.
 
@@ -9108,24 +8953,11 @@ function playBoundaryCue() {
 
    Two-way, unlike the page boundary below: Tab on the last control goes to the first, Shift+Tab on
    the first goes to the last. Wrapping is what the ARIA Authoring Practices require of a modal, and
-   it is not the WCAG 2.1.2 trap, because Escape still closes every one of these dialogs. */
-/* THE TOPMOST open dialog, which is not the same as the first one in the markup.
-   Dialogs stack: a confirm opens the progress dialog, and for a moment both are open. The document
-   order of the <dialog> elements has nothing to do with which is on top, so picking the first match
-   computes the wrong dialog's controls entirely. Last-opened is last in the open list. */
-function topmostOpenDialog() {
-  const open = document.querySelectorAll("dialog[open]");
-  if (!open.length) return null;
-  // If focus is already inside one, that is the one the user is in, whatever the order says.
-  const holding = document.activeElement && document.activeElement.closest
-    ? document.activeElement.closest("dialog[open]") : null;
-  return holding || open[open.length - 1];
-}
+   it is not the WCAG 2.1.2 trap, because Escape still closes every one of these dialogs.
 
-/* THE DECISION COMES BEFORE THE preventDefault, deliberately. An earlier draft prevented the
-   default up front "so Tab can never leave", then tried to step aside for the middle of a dialog -
-   which cannot be undone, and would have blocked Tab INSIDE every dialog. Each branch below owns
-   its own preventDefault, and the middle case owns none.
+   THE DECISION COMES BEFORE THE preventDefault, deliberately: a default prevented up front cannot
+   be undone for the middle of a dialog, and would block Tab INSIDE every dialog. Each branch below
+   owns its own preventDefault, and the middle case owns none.
 
    Only the two EDGES can leak (browser chrome is reachable just past the last control), so handling
    both edges plus the "focus is not on a tabbable element" case closes the cycle completely. */
@@ -9428,14 +9260,12 @@ async function init() {
           .addEventListener("click", () => { if (padsTabs) padsTabs.selectKey("reassign"); });
   document.getElementById("pad-ed-name-btn").addEventListener("click", onPadRename);
   document.getElementById("clear-all-btn").addEventListener("click", onClearAllPads);
-  // DEBOUNCED like every other dropdown: a CLOSED select fires `change` on every arrow press, so
-  // walking this list would save each stream as you passed it, and the meter would end up pointed
-  // at a stream nobody chose. It is wired by hand here rather than through makeSelectRow, which is
-  // why the shared debounce does not cover it.
+  // DEBOUNCED (SELECT_COMMIT_MS): a CLOSED select fires `change` on every arrow press, so walking
+  // this list would save each stream as you passed it, and the meter would end up pointed at a
+  // stream nobody chose.
   let meterStreamCommit = null;
   document.getElementById("meter-stream").addEventListener("change", (ev) => {
-    const no = unavailableReason(ev.target);
-    if (no !== null) { announce(no, true); return; }
+    if (refuseChange(ev.target) !== null) return;
     const value = ev.target.value;
     if (meterStreamCommit !== null) window.clearTimeout(meterStreamCommit);
     meterStreamCommit = window.setTimeout(async () => {
@@ -9495,9 +9325,7 @@ async function init() {
   document.getElementById("restore-confirm-btn").addEventListener("click", doRestore);
   document.getElementById("delete-confirm-btn").addEventListener("click", onProfileDelete);
 
-  // The unit's own Shows. Export runs straight from the page (it only ADDS a backup, so there is
-  // nothing to confirm); the three destructive ones go through the shared confirm dialog.
-  // This app's own settings, on the same page because this is where backup lives.
+  // This app's own settings, on the Backups page because this is where backup lives.
   document.getElementById("appsettings-export-btn")
     .addEventListener("click", onAppSettingsExport);
   document.getElementById("autostart-switch")
@@ -9509,8 +9337,9 @@ async function init() {
     .addEventListener("click", onAppSettingsImport);
 
   document.getElementById("show-reset-btn")
-    .addEventListener("click", () => openShowConfirm("reset"));
+    .addEventListener("click", openShowConfirm);
   document.getElementById("show-confirm-go").addEventListener("click", doShowConfirmed);
+  document.getElementById("show-backup-first").addEventListener("change", onShowBackupFirstChange);
   document.getElementById("show-confirm-cancel")
     .addEventListener("click", () => closeProfileDialog("show-confirm-dialog"));
   // Every Cancel and Close just dismisses its own dialog.
@@ -9527,31 +9356,27 @@ async function init() {
    "baseline-dialog", "show-confirm-dialog"]
     .forEach(wireProfileDialog);
 
-  // Fast, non-device layout/state loads (no USB open): mic channels + MIDI state,
-  // processing layout, pad list. The live device reads are lazy (router onShow / buttons).
-  loadChannels();
-  loadRouting();
-  // Pads are read live from the device, so they load lazily on the pads route's onShow.
+  // Channels and the Routing page's structure load at startup because other pages lean on them
+  // (the voice-effect preview's mic list comes from the channel read). Skipped for the page the app
+  // opens on, whose own entry read (render, below) takes it: doing both reads the desk twice.
+  const opening = currentRoute();
+  if (opening !== "channels") loadChannels();
+  if (opening !== "routing") loadRouting();
 
   applyItemPositions(".navlist");
   bindShortcuts();
   bindPageBoundary();
   initThemeToggle();
   window.addEventListener("hashchange", () => render(currentRoute()));
-  // RAISING THE WINDOW IS NOT ARRIVING IN IT. The global shortcut brings this window to the front,
-  // and focus then sits on the document with nothing to announce, so a screen-reader user hears
-  // silence until they press Tab and land somewhere by accident. Landing on the section heading is
-  // what the app already does when it opens (see render's focusTo), so coming back does the same.
-  //
 
   // AWAITED, unlike every other startup load: the version is part of the heading focus lands on.
   // See loadVersionBeforeRender for the timeout that stops a dead server costing us the focus too.
   await loadVersionBeforeRender();
-  render(currentRoute(), "app");
+  render(opening, "app");
   // THE DESK LINE IN THE HEADER NEEDS A STATUS READ ON EVERY ROUTE, not just the Device page, since
   // it is part of the chrome now. The Device route takes that read itself (readDevice), so asking
   // here as well would open the USB twice on the app's own opening route.
-  if (currentRoute() !== "status") loadStatus(false);
+  if (opening !== "status") loadStatus(false);
   // AFTER the status read, and after a beat: the summary costs a full model dump and takes the HID
   // lock, so firing it with the opening page's own reads makes both slower and delays the page you
   // are looking at for the sake of a sentence. The wait also spaces the two live-region updates, so

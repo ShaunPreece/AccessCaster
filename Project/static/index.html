@@ -167,8 +167,8 @@
                It is LAST and separate on purpose: everything above comes from the unit
                settings spec (one definition drives the read, the write, the control and the
                profile), while this one has its own captured write (rcp_transfer.set_midi_control)
-               and its own place in a profile. Its VALUE now comes from the same settings read, so
-               the tab still makes exactly one call. -->
+               and its own place in a profile. Its VALUE comes from the same settings read, so the
+               tab makes exactly one call. -->
           <h3 id="midi-heading">MIDI control</h3>
           <p id="midi-note" class="note">
             Turning MIDI control on lets an external MIDI app or controller handle mute,
@@ -187,9 +187,9 @@
                and the banks are all announced, and so are changes made on the unit rather than
                here. Do not narrow it to "Announce button presses". -->
           <h2 id="announce-heading">Announce Interactions on Mixer</h2>
-          <!-- What survives the cull is the part no control below says: that changes made ON THE
-               UNIT are caught, not just the ones made here. The rest of the old paragraph listed
-               what each switch already announces, and the Help page keeps the full account. -->
+          <!-- Only what no control below says: that changes made ON THE UNIT are caught, not just
+               the ones made here. What each switch announces is in its own label, and the Help
+               page keeps the full account. -->
           <p id="announce-note" class="note">
             Mute and solo are announced by channel and state, for example "Mic 2 muted", including
             changes made on the unit itself rather than here. Bank changes, channel buttons and what
@@ -289,7 +289,7 @@
             <label for="announce-volume">Announcement volume</label>
             <input type="range" id="announce-volume" min="0" max="100" step="5" value="100"
                    aria-describedby="announce-volume-help">
-            <span id="announce-volume-value" class="proc-value">100%</span>
+            <span id="announce-volume-value" class="proc-value" aria-hidden="true">100%</span>
             <span id="announce-volume-help" class="hint">
               How loud announcements are, from 0 to 100 percent. Turn it down if the announcer talks
               over what you are listening to while you ride the faders. This changes ONLY these
@@ -642,13 +642,11 @@
          processing are shown, mirroring the RODE app's per-channel panel. -->
     <section class="app-section" id="sec-channels" hidden>
       <h1 id="h-channels" tabindex="-1">Channels and Processing</h1>
-      <!-- NO PER-PAGE "this page is a tab strip, use the arrow keys" PARAGRAPH. Five of them say
-           the same thing, on every page, to somebody who learnt it on the first one, and a tab strip
-           built to the APG pattern announces itself - role, position and count - so the instruction
-           tells a screen-reader user what their screen reader has just told them. The two
-           facts those paragraphs carried that were NOT navigation (Mute versus Listen, and
-           Settings being live while Reassign waits for Apply) were already in Help & About
-           word for word, and stay there. Do not reintroduce them per page. -->
+      <!-- NO PER-PAGE "this page is a tab strip, use the arrow keys" PARAGRAPH. A tab strip built
+           to the APG pattern announces itself - role, position and count - so the instruction
+           tells a screen-reader user what their screen reader has just told them. The facts that
+           are not navigation (Mute versus Listen, and Settings being live while Reassign waits for
+           Apply) are in Help & About. -->
       <p id="mixer-note" class="note" role="note">Loading...</p>
       <div class="field">
         <label for="channel-select">Channel</label>
@@ -679,9 +677,9 @@
            pane at a time. The panes stay IN the document (hidden, so no screen reader, no tab order,
            no heading navigation) rather than being built and destroyed, because every control here is
            wired by id once at startup.
-           Each pane opens with the h2 that names the category. Where a tab merges old groups, the
-           extra groups keep an h3 plus a carrying the same name, so H still lands on
-           Headphones or Auto-mute. Heading levels never skip: page h1, pane h2, sub-group h3. -->
+           Each pane opens with the h2 that names the category. Where a tab holds several groups,
+           each keeps an h3, so H still lands on Headphones or Auto-mute. Heading levels never skip:
+           page h1, pane h2, sub-group h3. -->
       <div id="routing-panel" class="cat-panel" role="tabpanel">
 
         <div class="cat-tab" data-tab-key="mixes" data-tab-title="Output mixes">
@@ -986,9 +984,7 @@
            document (hidden, so no screen reader, no tab order, no heading navigation) rather than
            being built and destroyed, because every control here is wired by id once at startup.
            THE SPLIT IS BY BEHAVIOUR: Settings is all live with no Apply, Reassign is all deferred
-           with one Apply. That is what replaced the old single "Edit a pad" form, where an Apply
-           button sat among controls it did not apply to and the live settings vanished behind a
-           "pending" note whenever the type dropdown was moved. -->
+           with one Apply, so an Apply never sits among controls it does not apply to. -->
       <div id="pads-panel" class="cat-panel" role="tabpanel">
 
         <!-- Live, in-place settings for the pad as it is now: volume, play mode, loop and restart
@@ -1033,9 +1029,8 @@
         </div>
         <div class="field">
           <label for="pad-ed-colour">Colour</label>
-          <!-- Named colours, filled from the device payload (soundpad.PAD_COLOUR_NAME). It used to
-               be a bare 0-11 number box, which told a screen-reader user nothing about the colour
-               they were choosing. -->
+          <!-- Named colours, filled from the device payload (soundpad.PAD_COLOUR_NAME): a bare 0-11
+               number would tell a screen-reader user nothing about the colour. -->
           <select id="pad-ed-colour"></select>
         </div>
         <div class="field" id="pad-ed-playmode-row">
@@ -1165,9 +1160,9 @@
         </div>
 
         <!-- REASSIGN: nothing here touches the device until Apply, which is deliberately the last
-             control before Clear this pad. Because this tab holds no live control at all, there is
-             no longer any need to hide the pad's own settings while a type change is staged: they
-             are on the other tab, describing what the pad still is until you press Apply. -->
+             control before Clear this pad. This tab holds no live control at all, so nothing has to
+             be hidden while a type change is staged: the pad's own settings are on the other tab,
+             describing what the pad still is until you press Apply. -->
         <div class="cat-tab" data-tab-key="reassign" data-tab-title="Reassign" hidden>
         <h2 id="pad-h-reassign">Change what this pad does</h2>
         <p class="hint" id="pad-ed-content-help">
@@ -1187,10 +1182,9 @@
           <option value="mixer">Mixer action</option>
           <option value="trigger">MIDI trigger</option>
         </select>
-        <!-- NOT a live region. It is rewritten every time the pad dropdown changes, and as a
-             live region that meant every arrow key through the pad list queued "Currently:
-             Sound: Music Bed", which spoke over the option you had just moved to and left the
-             bank and pad number lagging behind. It is a description of the type dropdown, so it
+        <!-- NOT a live region. It is rewritten every time the pad dropdown changes, so as a live
+             region every arrow key through the pad list would queue "Currently: Sound: Music Bed"
+             over the option you had just moved to. It is a description of the type dropdown, so it
              is announced when you land THERE (aria-describedby) instead. -->
         <span id="pad-ed-type-note" class="hint"></span>
       </div>
@@ -1479,7 +1473,7 @@
            A HEADING DOES NOT SEPARATE IT IN THE TAB ORDER. Tab SKIPS headings; they serve H-key
            navigation only, so "its own heading, so it is never one Tab away from Restore" is not
            true of anything. The real tab order is Restore, Delete, then this. WHAT PROTECTS IT is the confirmation dialog
-           (openShowConfirm("reset")), which names the action, spells out what is lost and what is
+           (openShowConfirm), which names the action, spells out what is lost and what is
            kept, and opens with focus on Cancel. Do not re-argue the tab order in markup: a
            focusable decoy to pad the gap would be worse than the thing it guards against. -->
       <h2 id="h-show-reset">Start again from factory settings</h2>
@@ -1928,52 +1922,20 @@
     <p id="restore-form-desc"></p>
     <p id="restore-time-estimate"></p>
 
-    <!-- CLEAN vs MERGE. Two genuinely different operations, named by what they DO rather than by
-         jargon, and offered as radio buttons because the choice must be made deliberately: a
-         checkbox called "clean" would be skipped past and the destructive one is not a default.
-         A native fieldset/legend with real radios, so every screen reader announces the group name,
-         the option and "1 of 2" without any ARIA. Merge is checked, because leaving settings alone
-         is the safe choice and the one that matches what a restore has always done. -->
-    <fieldset id="restore-mode-field">
-      <legend>What to do with settings the backup does not cover</legend>
-      <p class="hint" id="restore-mode-hint">
-        This computer's copy holds the settings the app can read and write. The unit has others it
-        cannot, such as a paired Bluetooth phone or a pad's own censor sound.
-      </p>
-      <div class="field-radio">
-        <input type="radio" name="restore-mode" id="restore-mode-merge" value="merge" checked
-               aria-describedby="restore-mode-merge-desc">
-        <label for="restore-mode-merge">Leave them as they are</label>
-        <span class="hint" id="restore-mode-merge-desc">Puts your saved settings back and changes
-          nothing else. Best for putting a show back.</span>
-      </div>
-      <div class="field-radio">
-        <input type="radio" name="restore-mode" id="restore-mode-clean" value="clean"
-               aria-describedby="restore-mode-clean-desc">
-        <label for="restore-mode-clean">Reset them to factory first</label>
-        <span class="hint" id="restore-mode-clean-desc">The unit backs itself up, goes back to
-          factory settings, then your settings are put on top, so it ends up exactly as the backup
-          describes. Anything the profile does not cover is lost rather than left. Slower, because
-          the pads are put back twice.</span>
-      </div>
-    </fieldset>
-
     <div class="dialog-actions">
       <button type="button" id="restore-cancel-btn">Cancel</button>
       <button type="button" class="primary" id="restore-confirm-btn">Restore</button>
     </div>
   </dialog>
 
-  <!-- The unit's own Shows: one confirmation dialog, reused for restore, delete and the factory
-       reset, with the wording swapped per action. role="alertdialog" because every one of the three
-       is destructive and the description must be announced on open, not browsed for. -->
+  <!-- The factory reset's confirmation. role="alertdialog" because it is destructive and the
+       description must be announced on open, not browsed for. -->
   <dialog id="show-confirm-dialog" role="alertdialog"
           aria-labelledby="show-confirm-title" aria-describedby="show-confirm-desc">
-    <h2 id="show-confirm-title" tabindex="-1">Restore show</h2>
+    <h2 id="show-confirm-title" tabindex="-1">Start again from factory settings</h2>
     <p id="show-confirm-desc"></p>
-    <!-- Shown only for the factory reset, where a backup is the only way back. Ticked, and untick
-         is a deliberate act. -->
-    <div class="field-check" id="show-backup-row" hidden>
+    <!-- A backup is the reset's only way back. Ticked, and untick is a deliberate act. -->
+    <div class="field-check" id="show-backup-row">
       <input type="checkbox" id="show-backup-first" checked
              aria-describedby="show-backup-first-desc">
       <label for="show-backup-first">Back the unit up first, so this can be undone</label>
@@ -1982,7 +1944,7 @@
     </div>
     <div class="dialog-actions">
       <button type="button" id="show-confirm-cancel">Cancel</button>
-      <button type="button" class="primary" id="show-confirm-go">Restore</button>
+      <button type="button" class="primary" id="show-confirm-go">Reset the unit</button>
     </div>
   </dialog>
 

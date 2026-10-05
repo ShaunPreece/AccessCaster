@@ -85,8 +85,9 @@
       <p>Not coming, because the unit does not expose them:</p>
       <ul class="about-list">
         <li>Searching for Bluetooth devices or starting a pairing from this end. Making the unit
-          discoverable, and pairing from your phone, does work. The radio simply ignores the request
-          when it arrives over USB; this was tested three separate ways rather than assumed.</li>
+          discoverable, and pairing from your phone, does work. A RODECaster Pro 2 ignores a search
+          request when it arrives over USB; this was tested three separate ways rather than
+          assumed.</li>
         <li>Setting the unit's date and time, its time zone, or daylight saving. It sets its own
           clock over the internet, and only the touchscreen applies a time zone or daylight saving
           change: the unit stores one sent from here and leaves the clock where it was.</li>
@@ -151,7 +152,7 @@
         <li>How the unit's clock is shown: 24-hour or 12-hour, and whether the time appears on the unit's screen. Also three lockouts that can lock the unit's physical buttons or silence every headphone or line output.</li>
         <li>Level meters in words: a background watch that stays quiet until it has news, telling you when a stream clips or goes silent, and an optional level spoken on a timer while you set gains. Read from the unit's USB audio streams through Windows rather than from the unit's own meters.</li>
         <li>SMART pads: put sounds, voice effects, mixer actions or MIDI triggers on any pad; rename, and set volume, colour, loop and restart behaviour; trim a sound and fade it in and out; clear one pad or all of them; and build your own custom voice effect with a live preview. Mixer pads add latching or momentary triggering, and Back Channel pads let you pick who is in the off-air room. You can also copy a pad's sound back to this computer, and tidy up sound files no pad plays any more.</li>
-        <li>Backups: one list and one button. The unit keeps its own complete copy on its card or drive when there is one, this computer keeps the settings and pads either way, and a restore uses whichever is still there. Either written over what is on the desk, or with the unit reset to factory first so it matches the backup exactly.</li>
+        <li>Backups: one list and one button. The unit keeps its own complete copy on its card or drive when there is one, this computer keeps the settings and pads either way, and a restore uses whichever is still there.</li>
         <li>The unit's own backups: back the whole desk up to the recordings drive in seconds, delete the ones you no longer want, and start again from factory settings without needing the unit's touchscreen wizard. Restoring one of these the unit's own way is the fallback for a backup this computer has no copy of, and the dialog tells you when that is the case.</li>
         <li>A Current state summary of the whole desk in one place: what is muted or soloed, every fader level, anything unusual about the routing, and the pad bank.</li>
         <li>Hardware status the touchscreen would otherwise keep to itself: whether a memory card is in and how much room is left, the recorder, the firmware, and whether a network cable is in.</li>
@@ -1190,9 +1191,8 @@
           screen; the unit stops being discoverable again after a few minutes. Then the wireless
           mics the unit can see and their battery levels, and under those, what the unit reports:
           the network it is on, its address, what a scan last found, and which Bluetooth devices are
-          paired. Two things are missing here, and both are the unit ignoring the request when it
-          arrives over USB: searching for Bluetooth devices, and starting a pairing from this end. A
-          fixed IP address is not offered either, and that one is the unit's own limitation: it
+          paired. Two things are missing here: searching for Bluetooth devices, and starting a pairing
+          from this end. A fixed IP address is not offered either, and that one is the unit's own limitation: it
           reports its address but gives nothing to set it with. The Bluetooth CHANNEL, meaning what you hear from a
           paired phone, is on the Channels page, and what the phone hears back from the desk is the
           Bluetooth output on the Routing page.</dd>
@@ -1363,8 +1363,7 @@
         <dt>When it happens</dt>
         <dd>Only when the desk is reset by something other than this app: its own touchscreen, RØDE's
           software, or another tool. "Start again from factory settings" on the Backups page
-          rebuilds the six effects as part of the reset, and so does restoring a backup with
-          "Reset them to factory first", so you will not meet it there.</dd>
+          rebuilds the six effects as part of the reset, so you will not meet it there.</dd>
         <dt>How to recognise it</dt>
         <dd>The SMART pads page says so in as many words: six voice-effect pads have no effect to
           play, so they do nothing. Nothing on the unit's own screen shows the fault at all, and a

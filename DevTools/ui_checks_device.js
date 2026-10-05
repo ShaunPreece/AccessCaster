@@ -1,5 +1,6 @@
 /* Machine checks for the Device page's tab strip (UI rebuild phase 3).
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_device.js --route status
+   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_device.js --route status --timeout 600
+   (127 checks; the default 90, and even 240, run out before the page reports back.)
    Same shape as ui_checks_routing.js: this is NOT a screen-reader pass, it pins the things a screen
    reader depends on and the eye cannot see (roles, states, one tab stop, what is exposed, and which
    part of the unit each tab reads), so the NVDA run is about how it sounds. */

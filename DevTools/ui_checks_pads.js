@@ -570,7 +570,7 @@ async function run() {
   const maintPane = pane("maint");
   check("the Maintenance tab has all four jobs, in order",
     Array.from(maintPane.querySelectorAll("h3")).map((h) => h.textContent.trim()).join(" | ")
-      === "Clear all pads | Restore the factory effects and mixer pads | "
+      === "Clear all pads | Restore the factory voice effects, Censor and Ducking | "
         + "Export a pad's sound to your computer | Tidy up unused pad audio",
     Array.from(maintPane.querySelectorAll("h3")).map((h) => h.textContent.trim()).join(" | "));
   ["restore-fx-btn", "export-pad-btn", "open-exports-btn"].forEach((id) => {

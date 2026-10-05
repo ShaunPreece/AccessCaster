@@ -41,7 +41,13 @@ async function run() {
   check("it has a heading of its own", !!heading);
   check("the heading is level 2, like every other on the page",
     heading && heading.tagName === "H2", heading && heading.tagName);
-  const note = flat(heading && heading.nextElementSibling);
+  // The section's own note: the first role="note" paragraph after the heading (the start-at-sign-in
+  // switch sits between them).
+  let noteEl = heading && heading.nextElementSibling;
+  while (noteEl && !(noteEl.tagName === "P" && noteEl.getAttribute("role") === "note")) {
+    noteEl = noteEl.nextElementSibling;
+  }
+  const note = flat(noteEl);
   check("the note says these are the APP's settings, not the desk's",
     /no profile carries them|belong to AccessCaster/i.test(note), note);
   check("and it says outright that no desk settings are in the file",
@@ -71,12 +77,13 @@ async function run() {
   check("which warns that an unavailable device is left alone",
     /not got|left alone/i.test(flat(described)), flat(described));
 
-  // ---- The result lands somewhere a screen reader will read -------------------------------
+  // ---- The result line is READ, and announce() is the one voice ---------------------------
+  // A live region here as well as announce() would speak every result twice (index.html says why).
   const state = el("appsettings-state");
-  check("there is a live region for the result", !!state);
-  check("it is polite, not assertive", state && state.getAttribute("aria-live"), "polite");
-  check("and atomic, so the whole sentence is read",
-    state && state.getAttribute("aria-atomic"), "true");
+  check("there is a line for the result", !!state);
+  check("and it is NOT a live region: announce() speaks the result",
+    !!state && !state.hasAttribute("aria-live") && !state.getAttribute("role"),
+    state && (state.getAttribute("aria-live") || state.getAttribute("role")));
 
   // ---- Pressing Restore with nothing chosen says so, and writes nothing --------------------
   await probeClear();

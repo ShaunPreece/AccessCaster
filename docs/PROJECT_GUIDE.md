@@ -1379,7 +1379,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   and takes an export first as the undo. Two consequences people keep missing: the profile and show
   features are NOT independent, so "we could drop shows" does not remove the reset or its risks; and
   every warning that belongs on a reset belongs on the clean restore too. This is also why the dead
-  mic was a CLEAN-RESTORE bug and not a Shows-page bug. A MERGE restore touches none of it.
+  mic was a CLEAN-RESTORE bug and not a Shows-page bug. A MERGE restore touches none of it. The page
+  does not offer a clean restore (the reset's crash risk does not belong on a routine restore); it
+  is reachable through the API and the DevTools tests only.
 - **THE VERSION NUMBER LIVES IN `Project/version.py` AND NOWHERE ELSE, INCLUDING THE EXE'S WINDOWS
   VERSION RESOURCE.** `AccessCaster.spec` is ordinary Python at build time, so it reads that file
   with a regex and GENERATES `ProjectBuilds/version_info.generated.txt` (gitignored); `installer.iss`
@@ -1781,6 +1783,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `fader_write`, `output_write`, `level_write`, `matrix_write`) are ON for both desks, so no desk in
   existence reaches these branches. Feed the UI the payload a capless desk would send:
   `DevTools/make_readonly_stub.py` then `DevTools/ui_checks_readonly.js`.
+- **BUSY IS NOT UNAVAILABLE, and neither may clear the other.** `setBusy` and `setAvailable` share
+  `aria-disabled`, so `setBusy(el, false)` keeps it while `dataset.offReason` is set, and
+  `setAvailable(el, true)` keeps it while the control is busy. Without that, a write that re-reads
+  the unit and marks its own control unavailable (Clear this pad, once the pad is empty) is undone
+  the moment its busy state ends. Never use `setBusy` as a read-only gate: it says nothing when
+  pressed, and the next `setAvailable` call lifts it. A gate that a later read re-decides (the raw
+  switches' `applyBypass`) must be handed the read-only reason on EVERY call.
 - **`announce()` REPLACES the live region, it does not queue.** Two announcements in a row leave the
   first unspoken, so an action that also moves the user must return its result and speak ONE message.
 - **AUTOSTART IS ONE REGISTRY VALUE WRITTEN BY TWO THINGS THAT CANNOT SHARE CODE**, and nothing at
