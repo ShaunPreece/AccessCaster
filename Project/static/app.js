@@ -8022,7 +8022,7 @@ function fillRecordingDeleteChoices(d) {
   const btn = document.getElementById("rec-delete-btn");
   const none = !items.length;
   // Two separate reasons, and the page must not merge them: nothing to delete is a passing state,
-  // while "this device cannot" or "not proven yet" is a standing one the server explains.
+  // while "this device cannot" is a standing one the server explains.
   setAvailable(btn, !none && d.can_delete !== false,
     none ? "There are no recordings on the unit." : (d.delete_note || "Deleting is not available."));
   // NOTHING TO DELETE HIDES THE WHOLE BLOCK; the list above already says why. If focus was in it

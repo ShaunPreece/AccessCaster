@@ -10,32 +10,23 @@ WHAT IS PROVEN ON HARDWARE (DevTools/test_recorder_live.py):
   * `requestRecordState` on RECORDER selector 0x03 is the command. 2 = record, 1 = pause, 0 = stop.
     It is a REQUEST: the firmware consumes it and resets it to 3, so reading it back tells you
     nothing about whether you are recording. Read `recordState` for that.
-  * `recordState` is the RESULT: 0 ready, 1 paused, 2 recording, 3 no destination. It read 3 for
-    this whole project, which is why the recorder looked inert; it dropped to 0 the moment a drive
-    was mounted.
+  * `recordState` is the RESULT: 0 ready, 1 paused, 2 recording, 3 no destination. It reads 3
+    until a card or drive is mounted.
   * PAUSE REALLY PAUSES, and it is measured rather than assumed. A take of 14.1 s wall-clock with a
     3.2 s pause in the middle produced a 10.8 s file: the paused seconds are not in the recording.
   * The desk PUSHES `recordState` on report 0x04 with selector 0x03 within ~30 ms of the change,
     whether the change came from us or from the unit's own REC button. That is what the Watcher
     below listens to, and it is why the app can report the state without polling a 1.5 s model dump.
 
-WHAT IS NOT HERE, and why, so it is not re-planned:
-  * **Elapsed time from the unit.** `recordTimeMs` stays 0 right through a recording, in the dump
-    and in the push stream. So elapsed time is COUNTED HERE, from the state changes we saw, and is
-    honestly reported as unknown when we did not see the start.
-  * **Deleting a recording.** `requestDeleteUID` sits in the RECORDINGS block, and the selector
-    model puts that block at 0x28E - past what a one-byte selector in the global record shape can
-    address. So it is not a rule we are choosing to obey, it is an address we cannot write. Nothing
-    to try until a wider address form turns up.
-  * **Deleting a recording**, above, is still the only thing in this file that cannot be done.
+ELAPSED TIME IS NOT THE UNIT'S. `recordTimeMs` stays 0 right through a recording, in the dump and in
+the push stream, so elapsed time is COUNTED HERE from the state changes we saw, and reported as
+unknown when we did not see the start.
 
-MARKERS WORK - PROVEN BY READING THE DRIVE ON A PC, which is the only place the
-evidence exists. `requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the
-recording. Nothing over USB shows it: the desk consumes the write and pushes the field back
-cleared, and the recording's own record carries identical flags either way, which is why this was
-held back as unverifiable until the pendrive was moved to a computer. The take that settled it had
-two markers at exactly 4.0 s and 8.0 s, where they were dropped, and the take beside it with no
-markers had no cue chunk at all. Both the int and the double form of the write land; the double is
+MARKERS WORK, PROVEN BY READING THE DRIVE ON A PC, which is the only place the evidence exists.
+`requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the recording. Nothing over
+USB shows it: the desk consumes the write and pushes the field back cleared, and the recording's own
+record carries identical flags either way. A take with markers dropped at 4.0 s and 8.0 s carries
+cue points at exactly those times, and one with none has no cue chunk at all. Both the int and the double form of the write land; the double is
 used here because that is the type the desk's own echo comes back as.
 """
 from __future__ import annotations
@@ -44,6 +35,8 @@ import threading
 import time
 from datetime import datetime
 
+import diagnostics
+import rcp_hid
 import rcp_read
 import rcp_transfer
 from wording import describe_duration
@@ -136,9 +129,8 @@ def spoken_change(was, now, medium: str = "") -> str:
 # label's job. The VALUES are untouched, so the write and its validation are unaffected.
 # THE LABEL SAYS YOU GET BOTH, so the hint does not have to. Multi-track ADDS the separate files,
 # it never replaces the mix - a real
-# take writes `Stereo Mix` plus nine `Track*.wav` - and the old wording ("Pre-fader multi-track"
-# beside "Single mixed track") read as a choice between a mix and tracks, which is the thing people
-# get wrong.
+# take writes `Stereo Mix` plus nine `Track*.wav` - and a label pairing "multi-track" with "single
+# mixed track" reads as a choice between a mix and tracks, which is the thing people get wrong.
 #
 # THE DIFFERENCE IS FRONT-LOADED on purpose: arrowing a dropdown reads each option from the start,
 # so "Pre-fader" and "Post-fader" have to arrive before the part that is the same in both. Putting
@@ -162,9 +154,8 @@ MULTITRACK_HINT = ("Separate tracks use about seven times the space. Pre-fader i
 # icons, IconCompressionWAV.svg and IconCompressionMP3.svg.
 #
 # ONLY 0 AND 1 MAY EVER BE WRITTEN. The property is an unclamped raw store, so 2, 3, 99, -1 and 255
-# all stick and read back, and the recorder treats any non-zero as MP3 - which is exactly how "it
-# has four quality levels" got believed for a while. Takes at 1, 2 and 3 came back byte-identical in
-# format: 128 kbps CBR, 48 kHz, stereo. Writing a 2 would leave the desk holding a value its own
+# all stick and read back, and the recorder treats any non-zero as MP3, so it can look like a
+# quality scale when it is not. Takes at 1, 2 and 3 come back byte-identical in format: 128 kbps CBR, 48 kHz, stereo. Writing a 2 would leave the desk holding a value its own
 # screen cannot draw. See PROJECT_GUIDE.md.
 #
 # The labels carry the SIZE, because that is the whole trade and it is the part you cannot hear:
@@ -181,9 +172,8 @@ RECORDING_FORMAT_HINT = ("This is the mixed stereo file only: when you record se
 
 # THE OTHER MULTITRACK, and it is a genuinely different destination rather than a second name for
 # the same one. `outputMultiMode` decides what the desk sends THIS COMPUTER over USB; the pair
-# above decides what it writes to the card or drive. They were told apart by measurement on
-# Measured: switching this one makes the Main Multitrack USB device
-# appear with 20 channels, and moves nothing on the drive.
+# above decides what it writes to the card or drive. Measured: switching this one makes the Main
+# Multitrack USB device appear with 20 channels, and moves nothing on the drive.
 #
 # The labels say WHO RECEIVES IT, because "multitrack" on its own is the word that made these two
 # indistinguishable in the first place.
@@ -277,17 +267,14 @@ def read_state(blob: bytes):
     return vals[0] if vals else None
 
 
-# The unit's three fixed storage slots, in the order it reports them.
-#
-# THE OLD LABELS WERE WRONG and these correct them: the app called slot 1 "Card slot 2" when it is
-# the USB port, which matters the moment anyone is told where their recording went. Settled by
-# evidence, not by guessing - with a 128 GB pendrive in USB 2 and no memory card in
-# the unit, slot 0 read as empty, slot 1 reported the pendrive's capacity byte-for-byte identically
+# The unit's three fixed storage slots, in the order it reports them. Slot 1 is the USB port, not a
+# second card slot: with a 128 GB pendrive in USB 2 and no memory card in the unit, slot 0 read as
+# empty, slot 1 reported the pendrive's capacity byte-for-byte identically
 # to Windows (123042267136), and slot 2 is the unit's own ~5 GB volume that the SMART pads live on.
 # `storageVolumeRecDestination` agreed: [True, True, False].
 #
 # Two names each, and the second is not decoration: lower-casing the label to drop it into a
-# sentence turned "USB drive" into "usb drive", which a screen reader reads as "uzb".
+# sentence turns "USB drive" into "usb drive", which a screen reader reads as "uzb".
 VOLUME_NAMES = [
     ("Memory card slot", "memory card"),
     ("USB drive", "USB drive"),
@@ -313,13 +300,11 @@ def read_volumes(blob: bytes, include_extra: bool = False) -> list:
     source: the numeric storageVolumeFree / Capacity / Inserted / Mounted properties all read 0 or
     False even with a drive mounted, re-confirmed with the pendrive in.
 
-    A FOURTH VOLUME APPEARS WHILE RECORDING, and it caught this code out the first time it ran: the
-    unit adds a live view of the drive it is writing to, a duplicate of that slot whose free space
-    ticks down as the file grows, and it disappears again on stop. Listing it would name the same
-    drive twice and, worse, an earlier version of this function keyed its labels on the NUMBER of
-    volumes, so starting a recording renamed every slot mid-take ("Recording to the storage 2").
-    So the extras are dropped by default and the labels are keyed on the INDEX, which does not
-    move. `include_extra=True` returns them for anything that wants the live figure."""
+    A FOURTH VOLUME APPEARS WHILE RECORDING: the unit adds a live view of the drive it is writing
+    to, a duplicate of that slot whose free space ticks down as the file grows, and it disappears
+    again on stop. Listing it would name the same drive twice, and labels keyed on the NUMBER of
+    volumes would rename every slot mid-take. So the extras are dropped by default and the labels
+    are keyed on the INDEX, which does not move. `include_extra=True` returns them for anything that wants the live figure."""
     states = rcp_read.values(blob, "storageVolumeState", "str")
     dests = [bool(v) for v in rcp_read.values(blob, "storageVolumeRecDestination", "bool")]
     ejects = [bool(v) for v in rcp_read.values(blob, "storageVolumeEject", "bool")]
@@ -383,10 +368,8 @@ def parse_recording(uid, content: str) -> dict:
     THE TIMESTAMP IS A REAL EPOCH IN UTC, and it is shown in THIS COMPUTER'S LOCAL TIME.
 
     DO NOT render it AS UTC on the belief that the unit writes local wall clock into an epoch
-    field. That belief comes from a loose observation ("the unit stamped 10:39 while this PC's UTC
-    clock said 09:46"), which is 53 minutes and not an offset at all. Measured properly: four takes
-    made to order, each read seconds later, all match this PC's UTC clock to within the time it
-    takes to read the model, with local time at UTC+1. The field is ordinary UTC and the desk's
+    field. Four takes made to order, each read seconds later, all match this PC's UTC clock to
+    within the time it takes to read the model, with local time at UTC+1. The field is ordinary UTC and the desk's
     clock is right; rendering it as UTC shows every recording an hour early.
 
     `systemDateTimezone` does NOT move it either (indices 44, 0 and 12 each produced a take stamped
@@ -502,35 +485,19 @@ def drop_marker() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DELETING A RECORDING. The last real gap on the Recording page: today only the unit's own
-# touchscreen can remove a take, which is exactly the thing a blind operator cannot reach.
+# DELETING A RECORDING: `requestDeleteUID` in the RECORDINGS block, root child 0x28F, which is past
+# the one-byte global form and so is sent in the TWO-BYTE form (`01 01 01 02 <lo> <hi>`).
 #
-# THE ADDRESS. `requestDeleteUID` lives in the RECORDINGS block, which our block walk numbers 0x28F.
-# That is past what the one-byte global form can carry, so it is sent in the TWO-BYTE form
-# (`01 01 01 02 <lo> <hi>`), the same shape every mic gain write uses. What is known, measured:
-#   - 0x28E = SHOWCONTROL and 0x290 = TEST are both PROVEN, so
-#     RECORDINGS is bracketed one slot either side.
-#   - `requestDeleteUID` exists in exactly TWO blocks in the whole model: RECORDINGS, natively, and
-#     SHOWCONTROL, where it is the inert stray the 0x28E probe left behind.
-#   - Writing a UID that does not exist (9999) on 0x28F appended NO stray, so the address resolved
-#     to one of those two blocks and nothing else. Which means the worst a real write can do is
-#     nothing at all: the SHOWCONTROL copy is inert.
+# PROVEN ON HARDWARE: `requestDeleteUID` = 20 removed Recording 20 from the pendrive; the list went
+# from 20 to 19, `recordingUID` and `recordingContent` each lost exactly one occurrence, and nothing
+# else in the model moved. Two facts from the same run:
+#   - THE REMAINING RECORDINGS ARE NOT RENUMBERED, so a UID is a stable handle and a list held by a
+#     page does not shift under it.
+#   - THE FIELD SELF-CLEARS, so the write never confirms itself. `server.action_delete_recording`
+#     re-reads the recordings list and reports what it finds.
 #
-# >>> PROVEN ON HARDWARE. <<<
-# `requestDeleteUID` = 20 on 0x28F removed Recording 20 from the pendrive. The recordings list went
-# from 20 to 19, `recordingUID` and `recordingContent` each lost exactly one occurrence, and NOTHING
-# else in the model moved - no stray, and no other block touched. So RECORDINGS = 0x28F is now an
-# anchor in its own right rather than an inference from its neighbours.
-#
-# TWO THINGS MEASURED IN THE SAME RUN, both worth knowing before building on this:
-#   - THE REMAINING RECORDINGS ARE NOT RENUMBERED. Uids 1-19 stayed 1-19 with 20 removed, so a UID
-#     is a stable handle and a list held by a page does not silently shift under it.
-#   - THE FIELD SELF-CLEARS, so the write can never confirm itself. The read-back is the recordings
-#     list, which is why `server.action_delete_recording` re-reads it and reports what it finds
-#     rather than reporting that a write was sent.
+# SHOWCONTROL (0x28E) also carries a `requestDeleteUID`: an inert stray left by an address probe.
 SEL_RECORDINGS = 0x28F
-DELETE_PROVEN = True
-DELETE_UNPROVEN_MESSAGE = ""      # kept for the payload's shape; nothing says this any more
 
 
 def build_delete_request(uid: int) -> bytes:
@@ -628,8 +595,6 @@ class Watcher(threading.Thread):
 
     # -- the thread -------------------------------------------------------
     def run(self) -> None:
-        import rcp_hid      # local, so importing this module never needs the HID stack
-        import diagnostics
         dev = None
         while self.running:
             if dev is None:

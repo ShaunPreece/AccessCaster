@@ -648,10 +648,9 @@ def _recorder_payload(blob: bytes) -> dict:
 
     # Deleting a take. The page needs to know BEFORE it draws the control, so a button that cannot
     # work is disabled with the reason attached rather than failing when it is pressed.
-    out["can_delete"] = bool(out["writable"] and recorder.DELETE_PROVEN)
+    out["can_delete"] = bool(out["writable"])
     out["delete_note"] = ("" if out["can_delete"] else
-                          (recorder.DELETE_UNPROVEN_MESSAGE if out["writable"] else
-                           _recorder_refusal(dev.name, "delete a recording")))
+                          _recorder_refusal(dev.name, "delete a recording"))
 
     out["storage_writable"] = "storage_write" in dev.caps
     out["announcer"] = _announcer_into_desk()
@@ -876,8 +875,6 @@ def action_delete_recording(uid: int) -> dict:
     gate = _recorder_gate("delete a recording")
     if gate is not None:
         return gate
-    if not recorder.DELETE_PROVEN:
-        return {"ok": False, "message": recorder.DELETE_UNPROVEN_MESSAGE}
     w = _recorder_watcher()
     if (w.snapshot().get("state") if w else None) in (recorder.RECORDING, recorder.PAUSED):
         return {"ok": False,
