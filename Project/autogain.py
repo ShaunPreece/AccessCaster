@@ -44,9 +44,6 @@ PERCENTILE = 0.99
 # Below this the take is treated as silence and nothing is written: there is no honest gain to
 # derive from a microphone that was not used.
 MIN_USABLE_DBFS = -45.0
-# How long Windows takes to bring the multitrack endpoint up after the desk is told to expose it.
-# Measured at about three seconds; four is the comfortable side of that.
-ENDPOINT_WAIT_S = 4.0
 
 
 def to_db(amplitude: float) -> float:

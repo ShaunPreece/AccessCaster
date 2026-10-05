@@ -36,6 +36,7 @@ import rcp_transfer
 import recorder
 import routing_schemes
 from paths import data_path
+from wording import count
 
 # Saved profiles are user data, kept in the writable %LOCALAPPDATA%\AccessCaster\profiles so they
 # survive app reinstall/uninstall and work no matter where the app is installed.
@@ -382,7 +383,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     msg = (f"Saved profile '{safe}' with the unit's full current settings, and a record of all "
            f"{snap['property_count']} settings the unit reports.")
     if pads is not None:
-        msg += f" Included {len(pads)} SMART pad(s)."
+        msg += f" Included {count(len(pads), 'SMART pad')}."
     return {"ok": True, "name": safe, "message": msg}
 
 
@@ -444,7 +445,7 @@ def attach_pads(name: str, pads: list) -> dict:
     except OSError as exc:
         return {"ok": False, "message": f"Could not update the profile: {exc}"}
     return {"ok": True, "name": safe,
-            "message": f"Added {len(pads)} SMART pad(s) to '{safe}'. Its settings are still the "
+            "message": f"Added {count(len(pads), 'SMART pad')} to '{safe}'. Its settings are still the "
                        f"ones captured when it was saved."}
 
 

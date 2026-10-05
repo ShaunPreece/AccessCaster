@@ -51,15 +51,24 @@ DOWNLOAD_TIMEOUT_S = 60
 # unbounded download to somebody's disk if the URL ever stops being what we think it is.
 MAX_BYTES = 50 * 1024 * 1024
 
+# Every failure ends by pointing at the manual route, which works whatever went wrong here.
+FALLBACK = " Use the button to open RODE's software page instead."
+
 
 class DriverInstallError(Exception):
     """Anything that stops the automatic route. The message is shown to the user as-is, so it says
-    what to do next rather than only what went wrong."""
+    what to do next rather than only what went wrong; FALLBACK is added to every one."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason + FALLBACK)
 
 
-def _download(dest: str, on_step=None) -> str:
-    if on_step:
-        on_step("Downloading the driver from RODE.")
+def _no_step(_text: str) -> None:
+    pass
+
+
+def _download(dest: str, on_step=_no_step) -> str:
+    on_step("Downloading the driver from RODE.")
     try:
         req = urllib.request.Request(ZIP_URL, headers={"User-Agent": "AccessCaster"})
         with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_S) as r, open(dest, "wb") as f:
@@ -71,24 +80,21 @@ def _download(dest: str, on_step=None) -> str:
                 total += len(chunk)
                 if total > MAX_BYTES:
                     raise DriverInstallError(
-                        "The download from RODE was far larger than expected, so it was stopped. "
-                        "Use the button to open RODE's software page instead.")
+                        "The download from RODE was far larger than expected, so it was stopped.")
                 f.write(chunk)
     except DriverInstallError:
         raise
     except Exception as exc:
         raise DriverInstallError(
             f"The driver could not be downloaded ({exc}). You may have no internet connection, or "
-            f"RODE may have moved the file. Use the button to open RODE's software page instead.")
+            f"RODE may have moved the file.")
     if not os.path.getsize(dest):
-        raise DriverInstallError("The download from RODE was empty. Use the button to open their "
-                                 "software page instead.")
+        raise DriverInstallError("The download from RODE was empty.")
     return dest
 
 
-def _extract_msi(zip_path: str, into: str, on_step=None) -> str:
-    if on_step:
-        on_step("Unpacking it.")
+def _extract_msi(zip_path: str, into: str, on_step=_no_step) -> str:
+    on_step("Unpacking it.")
     try:
         with zipfile.ZipFile(zip_path) as z:
             # The MSI by EXTENSION, wherever RODE put it in the archive, rather than by a filename
@@ -96,12 +102,11 @@ def _extract_msi(zip_path: str, into: str, on_step=None) -> str:
             names = [n for n in z.namelist() if n.lower().endswith(".msi")]
             if not names:
                 raise DriverInstallError(
-                    "RODE's download did not contain an installer this app recognises. Use the "
-                    "button to open their software page instead.")
+                    "RODE's download did not contain an installer this app recognises.")
             if len(names) > 1:
                 raise DriverInstallError(
                     "RODE's download contained more than one installer, so this app will not guess "
-                    "which to run. Use the button to open their software page instead.")
+                    "which to run.")
             # EXTRACTED BY NAME, NEVER BY THE PATH IN THE ARCHIVE: a zip entry may hold `..` or an
             # absolute path and write outside the folder we chose.
             target = os.path.join(into, os.path.basename(names[0]))
@@ -111,8 +116,7 @@ def _extract_msi(zip_path: str, into: str, on_step=None) -> str:
     except DriverInstallError:
         raise
     except Exception as exc:
-        raise DriverInstallError(f"RODE's download could not be unpacked ({exc}). Use the button to "
-                                 f"open their software page instead.")
+        raise DriverInstallError(f"RODE's download could not be unpacked ({exc}).")
 
 
 def verify_signature(msi_path: str) -> str:
@@ -135,39 +139,36 @@ def verify_signature(msi_path: str) -> str:
             capture_output=True, text=True, timeout=60, env=env)
     except Exception as exc:
         raise DriverInstallError(f"The driver's signature could not be checked ({exc}), so it has "
-                                 f"not been installed. Use the button to open RODE's software page "
-                                 f"instead.")
+                                 f"not been installed.")
     lines = [ln.strip() for ln in (out.stdout or "").splitlines() if ln.strip()]
     status = lines[0] if lines else ""
     subject = lines[1] if len(lines) > 1 else ""
     if status != "Valid":
         raise DriverInstallError(
             f"The file downloaded from RODE is not validly signed (Windows reports "
-            f"'{status or 'no signature'}'), so it has NOT been installed. Use the button to open "
-            f"RODE's software page instead.")
+            f"'{status or 'no signature'}'), so it has NOT been installed.")
     if SIGNER.lower() not in subject.lower():
         raise DriverInstallError(
             f"The file downloaded from RODE is signed by someone else ({subject or 'unknown'}), so "
-            f"it has NOT been installed. Use the button to open RODE's software page instead.")
+            f"it has NOT been installed.")
     return subject
 
 
-def _launch(msi_path: str, on_step=None) -> None:
+def _launch(msi_path: str, on_step=_no_step) -> None:
     """Hand the MSI to Windows. Normal installer UI, normal UAC prompt, and we do not wait: the
     install belongs to the user from here, and holding a worker thread open for however long they
     take over a UAC prompt buys nothing."""
-    if on_step:
-        on_step("Starting RODE's installer. Windows will ask for permission.")
+    on_step("Starting RODE's installer. Windows will ask for permission.")
     try:
         os.startfile(msi_path)          # noqa: S606 - the point is to let Windows' UI and UAC run
     except Exception as exc:
-        raise DriverInstallError(f"RODE's installer could not be started ({exc}). Use the button to "
-                                 f"open their software page instead.")
+        raise DriverInstallError(f"RODE's installer could not be started ({exc}).")
 
 
 def install(on_step=None) -> dict:
     """Download, verify and start RODE's installer. Raises DriverInstallError with a sentence for
     the user. Returns {signer, msi} once their installer has been handed over."""
+    on_step = on_step or _no_step
     folder = paths.data_path("driver")
     os.makedirs(folder, exist_ok=True)
     # A fresh temp file per attempt, so a half-written download from a dropped connection can never
@@ -177,8 +178,7 @@ def install(on_step=None) -> dict:
     try:
         _download(zip_path, on_step)
         msi = _extract_msi(zip_path, folder, on_step)
-        if on_step:
-            on_step("Checking it is signed by RODE.")
+        on_step("Checking it is signed by RODE.")
         signer = verify_signature(msi)
         _launch(msi, on_step)
         return {"signer": signer, "msi": msi}

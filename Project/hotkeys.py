@@ -48,6 +48,8 @@ import ctypes
 import threading
 from ctypes import wintypes
 
+from wording import join_and
+
 # --- Win32 constants ----------------------------------------------------------------------------
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
@@ -152,10 +154,7 @@ def combo_text(mods, key: str) -> str:
     Commas and "and" rather than plus signs, because this is read aloud far more often than it is
     read on screen, and a screen reader announces "+" as "plus" in the middle of the phrase."""
     names = [label for name, label, _flag in MODIFIERS if name in (mods or [])]
-    parts = names + [key]
-    if len(parts) == 1:
-        return parts[0]
-    return ", ".join(parts[:-1]) + " and " + parts[-1]
+    return join_and(names + [key])
 
 
 def parse_binding(mods, key: str):

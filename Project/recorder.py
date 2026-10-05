@@ -46,6 +46,7 @@ from datetime import datetime
 
 import rcp_read
 import rcp_transfer
+from wording import describe_duration
 
 # RECORDER block. Read straight off the wire (recordState and requestRecordState both
 # arrived carrying this selector), so it is a confirmed address, not a derived one.
@@ -414,23 +415,6 @@ def parse_recording(uid, content: str) -> dict:
             pass
     return {"uid": uid, "name": parts[0], "path": parts[2], "when": when, "seconds": seconds,
             "duration": describe_duration(seconds)}
-
-
-def describe_duration(seconds) -> str:
-    """A length said the way a person says it. Never "0:07.3": a screen reader reads punctuation
-    and a decimal, and neither carries meaning here."""
-    if seconds is None:
-        return "length unknown"
-    seconds = int(round(seconds))
-    if seconds < 60:
-        return f"{seconds} second{'' if seconds == 1 else 's'}"
-    mins, secs = divmod(seconds, 60)
-    if mins < 60:
-        return (f"{mins} minute{'' if mins == 1 else 's'}"
-                + (f" {secs} second{'' if secs == 1 else 's'}" if secs else ""))
-    hours, mins = divmod(mins, 60)
-    return (f"{hours} hour{'' if hours == 1 else 's'}"
-            + (f" {mins} minute{'' if mins == 1 else 's'}" if mins else ""))
 
 
 def read_recordings(blob: bytes) -> list:

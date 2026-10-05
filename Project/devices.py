@@ -485,11 +485,6 @@ def _matrix_index_view(table) -> tuple:
                  if c.in_matrix and not c.expanded_only)
 
 
-def _expanded_matrix_index_view(table) -> tuple:
-    return tuple(c.code for c in sorted(table, key=lambda c: c.code)
-                 if c.in_matrix and c.expanded_only)
-
-
 def _matrix_source_view(table) -> tuple:
     """The matrix rows, IN CODE ORDER, because a row's position is its source index on the wire."""
     return tuple({"index": c.code, "key": c.key, "label": c.label}

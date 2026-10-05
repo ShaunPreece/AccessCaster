@@ -1,6 +1,6 @@
 """AccessCaster - the announcer's non-speech cues: short tones written as WAV files.
 
-WHY A TONE AT ALL (Steven's request). Mute is the one announcement that arrives
+WHY A TONE AT ALL. Mute is the one announcement that arrives
 too late to be useful as a sentence: you hit mute mid-word, and "Mic 2 muted" takes most of a second
 to say. Two tones tell you the same thing in a tenth of that, and they do not talk over the thing you
 muted for. Speech stays the default and stays available; this is an option, not a replacement.
@@ -32,9 +32,7 @@ import wave
 
 from paths import data_path
 
-# 22.05 kHz because that is SAPI's own native rate and these play through SAPI (see below). 44.1 kHz
-# was tried first and also plays, so this is a preference rather than a requirement - an earlier
-# version of this comment claimed 44.1 was silent, which was a wrong reading of a listening test.
+# 22.05 kHz is SAPI's native rate. A preference, not a requirement: 44.1 kHz plays as well.
 SAMPLE_RATE = 22050
 PEAK = 0.35                # conservative: this plays on whatever the announcer is pointed at
 FADE_S = 0.008             # a click at either end is louder than the tone; this removes both

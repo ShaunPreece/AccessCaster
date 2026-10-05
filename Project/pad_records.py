@@ -110,7 +110,6 @@ EFFECT_FLAG = {
     "reverb": "reverbOn", "echo": "echoOn", "pitchShift": "pitchShiftOn",
     "distortion": "distortionOn", "robot": "robotOn", "voiceDisguise": "voiceDisguiseOn",
 }
-ONFLAG_ENGINE = {v: k for k, v in EFFECT_FLAG.items()}
 
 # --- value-block encoders ----------------------------------------------------
 

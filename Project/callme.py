@@ -18,6 +18,7 @@ import time
 import model_tree
 import rcp_read
 import rcp_transfer
+from wording import describe_duration
 
 GUEST_LINK = "https://callme.rode.com/s?c="
 # CallMe 1's source code: what a fader carries when CallMe is on it.
@@ -397,11 +398,7 @@ def plan_lines(d: dict) -> list:
 
 
 def describe_minutes(m: int) -> str:
-    if m < 60:
-        return f"{m} minute{'s' if m != 1 else ''}"
-    h, r = divmod(m, 60)
-    hours = f"{h} hour{'s' if h != 1 else ''}"
-    return hours if not r else f"{hours} {r} minute{'s' if r != 1 else ''}"
+    return describe_duration(m * 60) if m else "0 minutes"
 
 
 def _live(d: dict) -> list:

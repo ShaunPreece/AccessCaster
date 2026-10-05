@@ -40,6 +40,7 @@ import devices
 import rcp_read
 import rcp_transfer
 from paths import data_path
+from wording import count, plural
 
 # Saved schemes are user data, beside the profiles in %LOCALAPPDATA%\AccessCaster, so they survive
 # a reinstall and do not depend on where the app is installed.
@@ -435,7 +436,7 @@ def describe(scheme: dict, device=None, expanded: bool = False) -> str:
             text += (f": {plain} to their normal mix, and " if plain else ": ")
             text += ", and ".join(one(out, spec) for out, spec in custom) + "."
     if missing:
-        text += (f" {len(missing)} part{'s' if len(missing) != 1 else ''} of this scheme "
-                 f"{'are' if len(missing) != 1 else 'is'} not on this device and would be "
+        text += (f" {count(len(missing), 'part')} of this scheme "
+                 f"{plural(len(missing), 'is', 'are')} not on this device and would be "
                  f"skipped: {', '.join(missing)}.")
     return text

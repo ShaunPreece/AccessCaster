@@ -93,6 +93,7 @@ def _require_pad_write() -> None:
 # Reverb/Echo (padIdx null), keyed by display name. The user's own saved effects live in a
 # separate file (FX_USER_FILE) and are merged in by all_recipes(); factory names win on clash.
 from paths import resource_path, data_path
+from wording import count, plural
 RECIPES = json.load(open(resource_path("fx_recipes.json"), encoding="utf-8"))  # ships read-only
 FX_USER_FILE = data_path("fx_user_presets.json")                              # user-saved, writable
 
@@ -487,8 +488,8 @@ def _health_message(health: dict) -> str:
         # this is a state the desk reaches ON ITS OWN (see heal_fx_pool), not only after a crash
         # mid-write.
         n = len(health["missing"])
-        return (f"{n} voice-effect pad{'s have' if n != 1 else ' has'} no effect to play, so "
-                f"{'they do' if n != 1 else 'it does'} nothing. Use \"Restore the factory voice "
+        return (f"{count(n, 'voice-effect pad')} {plural(n, 'has', 'have')} no effect to play, so "
+                f"{plural(n, 'it does', 'they do')} nothing. Use \"Restore the factory voice "
                 f"effects, Censor and Ducking\" on the SMART pads page to rebuild.")
     return ("One voice-effect pad has a duplicate effect definition that needs a manual rebuild "
             "(clear and recreate that pad). Other pads are unaffected.")
@@ -914,7 +915,7 @@ def clear_all_pads() -> dict:
         time.sleep(0.3)
     clean_pool()                                       # mop up any stray orphan left in the pool
     health = pool_health()
-    msg = (f"Cleared {cleared} pad(s)." if cleared else "There were no user pads to clear.")
+    msg = (f"Cleared {count(cleared, 'pad')}." if cleared else "There were no user pads to clear.")
     return {"ok": health["clean"], "cleared": cleared, "names": names,
             "message": msg + " " + _health_message(health), "health": health}
 
@@ -1858,7 +1859,7 @@ def clean_pool() -> dict:
         "health": h2,
         "unhealed_live_duplicates": unhealed,
         "message": ("Pool is clean." if h2["clean"]
-                    else f"Removed {removed} orphan object(s); left: duplicates {unhealed}, "
+                    else f"Removed {count(removed, 'orphan object')}; left: duplicates {unhealed}, "
                          f"orphans {h2['orphans']}, detached {h2['detached']}, "
                          f"partial {h2['partial']}."),
     }
@@ -2174,7 +2175,7 @@ def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
     note = ""
     if stuck:
         note = (" NOTE: " + ", ".join(nm for _p, _i, nm in stuck)
-                + (" was" if len(stuck) == 1 else " were")
+                + " " + plural(len(stuck), "was", "were")
                 + " left switched on and processing a live channel; that has been switched off.")
 
     return {
@@ -2253,8 +2254,8 @@ def heal_fx_pool(progress=None) -> dict:
 
     bits = []
     if healed:
-        bits.append(f"{len(healed)} voice-effect pad{'s' if len(healed) != 1 else ''} had no effect "
-                    f"to play and {'have' if len(healed) != 1 else 'has'} been rebuilt: "
+        bits.append(f"{count(len(healed), 'voice-effect pad')} had no effect "
+                    f"to play and {plural(len(healed), 'has', 'have')} been rebuilt: "
                     + ", ".join(f"{h['name']} (pad {h['grid']})" for h in healed)
                     + ". Worth an ear-check on each.")
     if unrecognised:
@@ -2725,7 +2726,7 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
     finally:
         t.set_transfer_mode(False)
     mb = freed / 1024 / 1024
-    msg = (f"Removed {len(removed)} unused sound file(s), freeing {mb:.1f} MB. "
+    msg = (f"Removed {count(len(removed), 'unused sound file')}, freeing {mb:.1f} MB. "
            f"Kept the {kept} in use." if removed
            else f"No unused sound files: all {kept} on the card belong to a pad.")
     return {"ok": True, "removed": removed, "bytes_freed": freed, "kept": kept, "message": msg}

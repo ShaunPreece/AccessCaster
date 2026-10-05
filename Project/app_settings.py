@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from wording import count, plural
+
 # The marker and version, so an import can tell OUR file from any other JSON somebody picks.
 MARKER = "accesscaster-app-settings"
 VERSION = 1
@@ -119,14 +121,14 @@ def describe_export(payload: dict) -> str:
     bits = []
     shortcuts = count_shortcuts(got.get("hotkeys"))
     if shortcuts:
-        bits.append(f"{shortcuts} keyboard shortcut{'s' if shortcuts != 1 else ''}")
+        bits.append(count(shortcuts, "keyboard shortcut"))
     contacts = len(got.get("callme_contacts") or ())
     if contacts:
-        bits.append(f"{contacts} CallMe contact{'s' if contacts != 1 else ''}")
+        bits.append(count(contacts, "CallMe contact"))
     others = len(got) - (1 if "hotkeys" in got else 0) - (1 if "callme_contacts" in got else 0)
     if others:
-        bits.append(f"{others} other preference{'s' if others != 1 else ''}")
-    return " and ".join(bits) if bits else f"{len(got)} settings"
+        bits.append(count(others, "other preference"))
+    return " and ".join(bits) if bits else count(len(got), "setting")
 
 
 def is_empty(payload: dict) -> bool:
@@ -204,10 +206,10 @@ def describe_import(report: dict) -> str:
     n = len(report.get("applied") or ())
     shortcuts = int(report.get("shortcuts") or 0)
     if shortcuts:
-        parts.append(f"{shortcuts} keyboard shortcut{'s' if shortcuts != 1 else ''} restored")
+        parts.append(f"{count(shortcuts, 'keyboard shortcut')} restored")
     others = n - (1 if shortcuts else 0)
     if others > 0:
-        parts.append(f"{others} other preference{'s' if others != 1 else ''} restored")
+        parts.append(f"{count(others, 'other preference')} restored")
     if not parts:
         parts.append("Nothing was restored")
     msg = ", ".join(parts) + "."
@@ -215,8 +217,8 @@ def describe_import(report: dict) -> str:
         what = {"announcer_voice": "voice", "announcer_output": "announcement output",
                 "meter_stream": "level-meter input"}.get(key, key)
         msg += (f" The saved {what}, {value!r}, is not on this computer, so it was left as it is.")
-    if report.get("ignored"):
-        msg += (f" {len(report['ignored'])} entr"
-                f"{'y was' if len(report['ignored']) == 1 else 'ies were'} not recognised "
-                f"and ignored.")
+    ignored = len(report.get("ignored") or ())
+    if ignored:
+        msg += (f" {count(ignored, 'entry', 'entries')} {plural(ignored, 'was', 'were')} not "
+                f"recognised and ignored.")
     return msg

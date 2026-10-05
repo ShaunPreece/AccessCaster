@@ -70,6 +70,7 @@ import hotkeys                  # system-wide keyboard shortcuts: the Win32 half
 import commands                 # ...and the CATALOGUE of what a shortcut can do, generated from
                                 # the app's own spec tables
 import page                     # assembles index.html from static/index.html + static/help.html
+import wording                  # plurals, spoken lists and durations
 from paths import resource_path, data_path   # frozen-build-safe asset/data locations
 from version import __version__ as APP_VERSION   # single source of truth (Project/version.py)
 
@@ -2460,7 +2461,7 @@ def action_scan_wifi() -> dict:
     for entry in found:
         entry["current"] = bool(current and entry["ssid"] == current)
     return {"ok": True, "networks": found, "current": current,
-            "message": (f"Found {len(found)} network{'' if len(found) == 1 else 's'}. "
+            "message": (f"Found {wording.count(len(found), 'network')}. "
                         f"The unit lists ten at most, so a network in range can still be missing "
                         f"from this list; you can always type the name instead.")}
 
@@ -4194,7 +4195,7 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
                    if k in proc_before and proc_before[k] != v)
     if moved:
         msg += (f" The unit also replaced this channel's processing with the {name} voicing: "
-                f"{len(moved)} setting{'' if len(moved) == 1 else 's'} changed, so anything you had "
+                f"{wording.count(len(moved), 'setting')} changed, so anything you had "
                 f"set here by hand is gone.")
     return {"ok": True, "message": msg, "gain_db": gain, "processing_changed": len(moved)}
 
@@ -4458,7 +4459,7 @@ def action_clear_solos() -> dict:
         return {"ok": True, "message": "Nothing was soloed; the headphones already carry the "
                                        "full monitor mix."}
     _ann_forget_solos()
-    return {"ok": True, "message": (f"{cleared} solo{'s' if cleared != 1 else ''} cleared; the "
+    return {"ok": True, "message": (f"{wording.count(cleared, 'solo')} cleared; the "
                                     f"headphones carry the full monitor mix again.")}
 
 
@@ -4478,9 +4479,7 @@ def _solo_summary(strip: int, on: bool) -> str:
     live = _solo_live()
     live[strip] = on
     names = [_ann_channel_label(i) for i, v in sorted(live.items()) if v]
-    if not names:
-        return "the full monitor mix"
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return wording.join_and(names) or "the full monitor mix"
 
 
 def _solo_after_clear(strip: int) -> str:
@@ -7858,13 +7857,13 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
                 "message": (f"'{label}' names no output this device has, so nothing was changed."
                             + (f" Not on this device: {', '.join(res['skipped'])}."
                                if res["skipped"] else ""))}
-    msg = f"Applied '{label}' to {len(outs)} output" + ("s" if len(outs) != 1 else "")
+    msg = f"Applied '{label}' to {wording.count(len(outs), 'output')}"
     msg += ": " + ", ".join(outs) + "."
     if res["skipped"]:
-        msg += (f" Skipped {len(res['skipped'])} part(s) this device does not have: "
+        msg += (f" Skipped {wording.count(len(res['skipped']), 'part')} this device does not have: "
                 f"{', '.join(res['skipped'])}.")
     if res["failed"]:
-        msg += f" {res['failed']} write(s) failed, so check the mix before you go on air."
+        msg += f" {wording.count(res['failed'], 'write')} failed, so check the mix before you go on air."
     return {"ok": res["ok"], "message": msg, "outputs": outs, "skipped": res["skipped"],
             "failed": res["failed"]}
 
@@ -8226,7 +8225,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
             if include_pads:
                 pad_backup = soundpad.backup_pads(profiles.pads_dir(safe), progress=None)
                 n = len(pad_backup.get("pads") or [])
-                prog(f"Settings done. Backed up {n} SMART pad{'' if n == 1 else 's'}.")
+                prog(f"Settings done. Backed up {wording.count(n, 'SMART pad')}.")
             else:
                 pad_backup = None
     except Exception as exc:
@@ -8247,7 +8246,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
                         baseline=baseline, show=show)
     if pad_backup and pad_backup.get("unrecognised"):
         grids = ", ".join(str(g) for g in pad_backup["unrecognised"])
-        res["message"] += (f" Note: the voice-FX pad(s) at grid {grids} carry a name that matches no "
+        res["message"] += (f" Note: the voice-FX {wording.plural(len(pad_backup['unrecognised']), 'pad')} at grid {grids} carry a name that matches no "
                            f"factory or saved effect (likely renamed), so the effect could not be "
                            f"identified and they will be skipped on restore.")
     return res
@@ -8450,7 +8449,7 @@ def action_baseline_add_pads() -> dict:
         return {"ok": False, "message": "There is no baseline on this computer to add pads to."}
     if existing.get("pads"):
         return {"ok": False, "message": f"'{existing['name']}' already has "
-                                        f"{existing['pads']} SMART pad(s) saved."}
+                                        f"{wording.count(existing['pads'], 'SMART pad')} saved."}
     safe = existing["name"]
 
     def _work(job):
@@ -8703,7 +8702,7 @@ def read_show_state() -> dict:
         show["label"] = (show["short_label"]
                          + (", the newest" if n == 1 and total > 1 else ""))
     state["message"] = ("Nothing has been backed up to the drive yet." if not state["shows"]
-                        else f"{total} backup{'' if total == 1 else 's'} on the recordings drive.")
+                        else f"{wording.count(total, 'backup')} on the recordings drive.")
 
     # CAN A BACKUP BE MADE AT ALL? Answered HERE because this function already has the model blob,
     # and answered with recorder.destination so the Shows page and the Recording page agree about
@@ -8959,8 +8958,8 @@ def action_show_export() -> dict:
         count = res["count"]
         return {"ok": True,
                 "message": (f"Backed up as \"{res['show']['name']}\". There "
-                            f"{'is' if count == 1 else 'are'} now {count} "
-                            f"backup{'' if count == 1 else 's'} on the drive. Each one is a new "
+                            f"{wording.plural(count, 'is', 'are')} now "
+                            f"{wording.count(count, 'backup')} on the drive. Each one is a new "
                             f"copy of about 24 megabytes, so delete the ones you no longer want.")}
     return _run_show_job("Exporting the show", work)
 
@@ -9110,7 +9109,7 @@ def wake_channels() -> dict:
         except Exception:
             continue                      # one channel failing must not leave the rest unwoken
     return {"ok": True, "woken": woken,
-            "message": (f"Nudged {len(woken)} mic channel(s) so the unit's audio engine picks them "
+            "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the unit's audio engine picks them "
                         f"up again." if woken else "No mic channels needed waking.")}
 
 
@@ -10074,7 +10073,7 @@ def _hk_mics() -> str:
             if not res.get("ok"):
                 return res.get("message", "The mics could not be opened.")
             opened.append(name)
-        return f"{len(opened)} mic{'s' if len(opened) != 1 else ''} open again."
+        return f"{wording.count(len(opened), 'mic')} open again."
     st = _ann_live_state
     muted_now = dict((st or {}).get("muted") or {})
     if not muted_now:
@@ -10097,7 +10096,7 @@ def _hk_mics() -> str:
             return res.get("message", "The mics could not be muted.")
         done.append(c["name"])
     _hk_muted_mics = done
-    return f"{len(done)} mic{'s' if len(done) != 1 else ''} muted."
+    return f"{wording.count(len(done), 'mic')} muted."
 
 
 def _hk_state() -> str:
@@ -10626,7 +10625,7 @@ def _hk_playing_now(_target: str = "") -> str:
     for position, (progress, left) in _hk_play_snapshot().items():
         name = _hk_pad_name(position) or f"The pad at position {position}"
         said[position] = (f"{name}, {round(progress * 100)} percent through, "
-                          f"{_hk_seconds_phrase(left)} left." if left is not None
+                          f"{wording.describe_duration(left)} left." if left is not None
                           else f"{name}, {round(progress * 100)} percent through.")
     if not said and _ann_live_state is None:
         said.update(_hk_playing_from_model())
@@ -10671,16 +10670,6 @@ def _hk_playing_from_model() -> list:
         else:
             out[p.position] = f"{p.name} is switched on."
     return out
-
-
-def _hk_seconds_phrase(seconds: float) -> str:
-    """A duration as it is spoken: "8 seconds", "1 minute 5 seconds"."""
-    whole = int(round(seconds))
-    if whole < 60:
-        return f"{whole} second" + ("" if whole == 1 else "s")
-    mins, secs = divmod(whole, 60)
-    return (f"{mins} minute" + ("" if mins == 1 else "s")
-            + (f" {secs} second" + ("" if secs == 1 else "s") if secs else ""))
 
 
 def _hk_window() -> str:
@@ -11043,9 +11032,9 @@ def action_add_pad_shortcuts() -> dict:
     added, had, clashed = res["added"], res["already_there"], res["clashed"]
     bits = []
     if added:
-        bits.append(f"Added {len(added)} pad shortcut{'' if len(added) == 1 else 's'}.")
+        bits.append(f"Added {wording.count(len(added), 'pad shortcut')}.")
     if had:
-        bits.append(f"{len(had)} {'was' if len(had) == 1 else 'were'} already there.")
+        bits.append(f"{len(had)} {wording.plural(len(had), 'was', 'were')} already there.")
     for command, key, taken_by in clashed:
         bits.append(f"{hotkeys.combo_text(hotkeys.DEFAULT_MODS, key)} is already used for "
                     f"{_hotkey_label(taken_by)}, so {_hotkey_label(command)} was not added.")
