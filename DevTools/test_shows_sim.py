@@ -292,7 +292,7 @@ check_in("and says so plainly", "already matched", res["message"])
 print("import that the desk rejects")
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
-DESK.import_sets_error = shows.ERROR_UUID_CLASH
+DESK.import_sets_error = shows.ERROR_REFUSED
 res = run_job(server.action_show_import(9))
 check("a rejection is reported as one", res["ok"], False)
 check_in("saying the unit refused it", "refused", res["message"])

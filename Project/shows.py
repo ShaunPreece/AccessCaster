@@ -48,30 +48,24 @@ FOUR TRAPS, each measured rather than assumed:
    and every command here resolves the uid from a FRESH read taken immediately before the write.
    `read_shows` is deliberately cheap to call for exactly this reason.
 
-2. **`showUUID` IDENTIFIES THE SHOW, NOT THE FILE, so it is NOT a unique handle.** Measured on
-   hardware: three exports of the same desk state produced three SHOW nodes all
-   carrying the SAME uuid. An early version of this module used the uuid as the handle precisely
-   because the uid was known to be positional, and it was wrong in a way that only showed up against
-   a real drive - a second export became undetectable, and a delete could never verify itself.
+2. **`showUUID` IDENTIFIES THE SHOW, NOT THE FILE, so it is NOT a unique handle.** Three exports
+   of the same desk state produce three SHOW nodes carrying the SAME uuid, so keyed on the uuid a
+   second export is undetectable and a delete can never verify itself.
 
-   **`showSnapshotIndex` IS THE STABLE PER-FILE HANDLE**, and that is measured too, in the same run:
-   exporting a third show renumbered every uid (the file at uid 0 moved to uid 1) while every
-   snapshot index STAYED PUT, and the new export took the next index up. So snapshot index is a
-   monotonically increasing export counter, and it is what this module keys on. It is resolved to a
-   uid against a fresh read at the moment of the write, because the PROTOCOL only accepts a uid.
+   **`showSnapshotIndex` IS THE STABLE PER-FILE HANDLE.** Exporting a third show renumbers every
+   uid (the file at uid 0 moves to uid 1) while every snapshot index stays put, and the new export
+   takes the next index up: a monotonically increasing export counter, which is what this module
+   keys on. It is resolved to a uid against a fresh read at the moment of the write, because the
+   PROTOCOL only accepts a uid.
 
-3. **AN IMPORT DOES *NOT* REFUSE A SHOW WHOSE UUID MATCHES THE LOADED ONE**, and believing it does
-   is expensive: since a uuid changes only on a factory reset, EVERY backup shares the loaded uuid,
-   so refusing on that basis makes shows useless for the ordinary case - back up, change something,
-   put it back.
+3. **AN IMPORT DOES *NOT* REFUSE A SHOW WHOSE UUID MATCHES THE LOADED ONE.** A uuid changes only on
+   a factory reset, so EVERY backup shares the loaded uuid, and refusing on that basis would make
+   shows useless for the ordinary case: back up, change something, put it back. Measured twice: with
+   the desk deliberately drifted, importing such a backup restored Mic 4's gain (30 to 50, and 42 to
+   50) inside four seconds, with `showControlLastError` staying 0.
 
-   Measured twice on hardware: with the desk deliberately drifted, importing a
-   backup carrying the loaded uuid restored Mic 4's gain from 30 to 50, and again from 42 to 50,
-   inside four seconds, with `showControlLastError` staying 0.
-
-   `showControlLastError` = 1 IS real (seen twice) but it is not the uuid clash
-   it was taken for. What actually provokes it is unknown, so the app sends the write and REPORTS
-   the unit's refusal rather than predicting it.
+   `showControlLastError` = 1 IS real (seen twice) but is not a uuid clash. What provokes it is
+   unknown, so the app sends the write and REPORTS the unit's refusal rather than predicting it.
 
    **The consequence for verification is the whole of `restore_fingerprint`.** With the uuid already
    equal to the target, "has the uuid become the target" is true before anything happens, so the
@@ -82,10 +76,8 @@ FOUR TRAPS, each measured rather than assumed:
    show's uuid) back and reports what it finds - the same discipline as deleting a recording.
    The idle value is -1, not 0, and 0 is a legitimate uid, so never test one for the other.
 
-`showLastModification` NOW DECODES: it is a 64-bit epoch in milliseconds. It read as nothing until
-the tree parser went in, because a reader that only takes a one-byte length
-and could not see a 64-bit type. So a backup can be dated after all, and `_describe_modified` renders
-it in this computer's local time, the same way the recordings list does.
+`showLastModification` is a 64-bit int that reads as epoch milliseconds; `_describe_modified`
+renders it in this computer's local time, the same way the recordings list does.
 
 AN IMPORT AND A RESET BOTH MOVE THE MONITOR LEVEL (0.25 -> 0.95 measured on an import). Any UI
 offering either must warn first; see docs/PROJECT_GUIDE.md.
@@ -111,17 +103,12 @@ BLOCK_SHOW = "SHOW"
 # is reported by NUMBER rather than guessed at, because
 # inventing wording for an unknown error is how a user chases the wrong problem.
 ERROR_REFUSED = 1
-ERROR_UUID_CLASH = ERROR_REFUSED     # old name, kept so existing callers and tests still resolve
 
-# CODE 8 IS "NOWHERE TO PUT IT", and unlike code 1 the circumstance IS known, because it was
-# provoked on purpose: an export asked of a Duo with no card and no drive in it.
-# The desk answered within ONE SECOND - `showControlLastError` 0 -> 8, `showControlExport` cleared
-# back to False, no show created, and nothing else in the whole tree moved. That is also the proof
-# the SHOWCONTROL address is LIVE on a Duo, because the desk did something we did not send.
-#
-# THE WORDING NAMES THE CIRCUMSTANCE, NOT A CAUSE WE GUESSED, which is the same rule code 1 follows.
-# Missing storage is what was measured; a full or unwritable volume could plausibly report the same
-# code, so the text covers that too rather than insisting the drive is absent.
+# CODE 8 IS "NOWHERE TO PUT IT", provoked on purpose: an export asked of a Duo with no card and no
+# drive in it. Within one second `showControlLastError` went 0 -> 8, `showControlExport` cleared to
+# False, no show was created and nothing else in the tree moved, which also proves the SHOWCONTROL
+# address is live on a Duo. Missing storage is what was measured; a full or unwritable volume could
+# plausibly report the same code, so the wording covers that too.
 ERROR_NO_STORAGE = 8
 ERROR_TEXT = {
     ERROR_REFUSED: ("The unit refused to restore that backup. It does not say why, and the one "
@@ -149,11 +136,10 @@ def read_shows(blob: bytes) -> list:
     and there is no guarantee a future firmware emits them in a fixed order or fills them all in.
     Grouping on the block boundary cannot mis-pair a name with someone else's uid.
 
-    NEWEST FIRST, sorted on the snapshot index rather than on stream order. The first draft copied
-    recorder.read_recordings and simply reversed the stream, on the inherited belief that the unit
-    lists oldest first. IT DOES NOT: a real dump comes back uid 0 (newest) first, so reversing put
-    the oldest at the top and labelled it "the newest". Sorting on the monotonic export counter
-    cannot be wrong either way round, and does not depend on the firmware's emission order at all.
+    NEWEST FIRST, sorted on the snapshot index rather than on stream order. Unlike recordings, a
+    real dump lists shows uid 0 (newest) first, so copying recorder.read_recordings' reversal puts
+    the oldest at the top. Sorting on the monotonic export counter does not depend on the
+    firmware's emission order at all.
     """
     out: list = []
     current: dict = {}
@@ -254,7 +240,6 @@ def restore_fingerprint(blob: bytes) -> tuple:
     window cannot tell the two apart). The loaded show's UUID does not move either: it changes only
     on `newFromDefault`, so in the ordinary case - export, change something, restore - the uuid is
     ALREADY the target and a uuid test reports success instantly whether or not anything happened.
-    That was a real bug, not a hypothetical: it shipped that way.
 
     So we watch the STATE instead. If the desk differs from the backup, an import moves at least one
     of these; if it does not move, the desk already matched, which is a true and reportable outcome
@@ -286,14 +271,12 @@ def describe(blob: bytes) -> dict:
     return {
         "shows": shows,
         "current": current,
-        # A show whose uuid matches the loaded one cannot be imported (trap 2). Marking it here
-        # means the page can say so on the control itself rather than after a failed attempt.
         "count": len(shows),
     }
 
 
 # ---------------------------------------------------------------------------
-# Writing. One command field each, and NOT ONE OF THEM VERIFIES ITSELF (trap 3).
+# Writing. One command field each, and NOT ONE OF THEM VERIFIES ITSELF (trap 4).
 
 
 def _send_bool(name: str, on: bool) -> None:
@@ -350,9 +333,8 @@ def wait_for(check, timeout: float | None = None, read=None):
     and every other read for up to forty seconds while this function did nothing but sleep, which
     presents as the app freezing. Defaults to a bare read for callers that hold no lock (tests).
     """
-    # Both resolved HERE rather than as argument defaults, which bind at import and so cannot be
-    # tuned afterwards: `timeout=COMMAND_TIMEOUT_S` in the signature made the constant look
-    # adjustable while silently ignoring any change to it.
+    # Resolved here rather than as argument defaults, which bind at import and would ignore a later
+    # change to COMMAND_TIMEOUT_S (the simulation suite tunes it).
     read = read or (lambda: rcp_read.read_model_stable(fresh=True))
     timeout = COMMAND_TIMEOUT_S if timeout is None else timeout
     deadline = time.time() + timeout
