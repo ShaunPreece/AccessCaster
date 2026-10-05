@@ -12,7 +12,7 @@ meant to be recalled DURING a show ("interview", "solo", "music bed"). They are 
 in the UI for the same reason: picking the wrong one should never be able to overwrite your mics.
 
 KEYED BY NAME, NEVER BY INDEX. Every output and source is stored by its KEY ("Chat", "Mic1"), not
-by its matrix index. Two reasons, and both have bitten this project before:
+by its matrix index, for two reasons:
   - the Duo exposes a DIFFERENT set of outputs (no Headphone 3/4) at the same index space, so a
     Pro II scheme applied by index would write Headphone 3's mix onto some other output. By key, an
     output the connected desk does not have is simply skipped and named in the reply.
@@ -21,9 +21,9 @@ by its matrix index. Two reasons, and both have bitten this project before:
 
 AND THE SAME SHAPE IN EITHER USB MODE. Capture and apply walk `MatrixSpec.all_sources`, which
 includes RODE's four Expanded rows whether the desk is in Expanded or not, because the desk
-publishes their cross-points either way. Walking the narrower DISPLAY list instead made a saved
-scheme depend on the mode the desk happened to be in: captured in Standard it held no Virtual A
-cell, so applying it in Expanded left one behind, and "Everything normal" could not reset it.
+publishes their cross-points either way. Walking the narrower DISPLAY list would make a scheme
+depend on the mode it was captured in: one saved in Standard holds no Virtual A cell, so applying it
+in Expanded leaves that cell as it was, and "Everything normal" cannot reset it.
 
 LOCK BOUNDARY: the same rule as profiles.py, and for the same reason (no circular import). This
 module never imports the server. `capture` is pure (it reads an already-read model blob), and
@@ -103,28 +103,25 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
     """Build a scheme from the model dump. Returns {ok, scheme} or {ok: False, message}.
 
     `only` is an output KEY, and it is what makes a one-output preset: the scheme then names that
-    output alone, and `apply` therefore writes that output alone. The built-in Chat presets have
-    always been this shape; this is the same thing, saved from the desk instead of derived. A
-    one-output preset is the only kind that is safe to fire mid-show, because it cannot touch a mix
+    output alone, and `apply` therefore writes that output alone: the shape of the built-in Chat
+    presets, saved from the desk instead of derived. A one-output preset is the only kind that is safe to fire mid-show, because it cannot touch a mix
     you are currently listening to.
 
     Both reads REFUSE when the matrix has changed shape (a live phone caller adds cross-points), so
     a scheme is never saved from a grid we cannot index reliably - a half-read matrix written back
     later would silently move somebody's mix.
 
-    LEVELS AND LINK STATE ARE PART OF THE SCHEME. Saving only
-    the include/exclude flags would restore a mix whose balance is wrong, which sounds like a
+    LEVELS AND LINK STATE ARE PART OF THE SCHEME. Saving only the include/exclude flags would restore a mix whose balance is wrong, which sounds like a
     working recall until you listen. A level is recorded only where the cross-point is UNLINKED: a
     linked one has no level of its own, it follows the channel fader, and writing a number there
     would quietly unlink it.
 
-    AN EXCLUDED CROSS-POINT RECORDS NOTHING BUT "excluded", and that is a measured decision rather
-    than a tidy-up (live test). Excluding a source UNLINKS it as part of the same
-    operation, and an unlink FREEZES the level at wherever that fader stood, so every excluded cell
-    reads back as "unlinked at some number". That number is inert - the cross-point carries no
-    audio, and re-including it relinks it to the fader anyway - but it drifts as the faders move, so
-    recording it makes a scheme fail to round-trip against its own read-back for a difference
-    nobody can hear.
+    AN EXCLUDED CROSS-POINT RECORDS NOTHING BUT "excluded". Excluding a source UNLINKS it as part of
+    the same operation, and an unlink FREEZES the level at wherever that fader stood, so every
+    excluded cell reads back as "unlinked at some number". That number is inert - the cross-point
+    carries no audio, and re-including it relinks it to the fader anyway - but it drifts as the
+    faders move, so recording it makes a scheme fail to round-trip against its own read-back for a
+    difference nobody can hear.
     """
     dev = device or devices.get_active_device()
     m = dev.matrix
@@ -196,8 +193,8 @@ BUILTIN_CHAT_NORMAL = "chat-normal"
 _CHAT_KEEP_SOURCE_KEY = "Mic1"
 
 
-def _all_included(m, output) -> dict:
-    """Every source of this desk included in `output` and following its fader."""
+def _all_included(m) -> dict:
+    """Every source of this desk included and following its fader."""
     return {s["key"]: {"excluded": False, "linked": True} for s in m.all_sources}
 
 
@@ -226,7 +223,7 @@ def builtins(device=None) -> list:
                         "the faders. Wipes any mix you have set by hand."),
         "destructive": True,
         "scheme": {"outputs": {o["key"]: {"mode": int(o.get("default_mode", 0)),
-                                          "sources": _all_included(m, o)}
+                                          "sources": _all_included(m)}
                                for o in m.outputs}},
     })
 
@@ -260,7 +257,7 @@ def builtins(device=None) -> list:
                             "themselves. No other output is touched."),
             "destructive": False,
             "scheme": {"outputs": {"Chat": {"mode": int(chat.get("default_mode", 1)),
-                                            "sources": _all_included(m, chat)}}},
+                                            "sources": _all_included(m)}}},
         })
     return out
 
@@ -346,8 +343,7 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
                 on_source_write(si)
 
             def _level(oi=oi, si=si, level=float(level)):
-                sel = rcp_transfer.cross_point_selector(oi, si)
-                rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=False))
+                rcp_transfer.set_cross_point_linked(oi, si, False)
                 rcp_transfer.set_cross_point_level(oi, si, level)
             attempt(_level)
         touched.append(out["label"])
@@ -365,10 +361,9 @@ _DESCRIBE_LIST_LIMIT = 3
 def scope_text(scheme: dict, device=None) -> str:
     """How much of the desk this preset writes, in three or four words, for the option LABEL.
 
-    WHY THE LABEL AND NOT THE DESCRIPTION (Michael's report): he could
-    not tell that the Chat presets leave every other output alone while the rest rewrite the whole
-    matrix. The description says so, but it hangs off the Apply button, so it is heard after the
-    choice is made rather than while it is being made. A suffix on the option is read as you arrow
+    WHY THE LABEL AND NOT THE DESCRIPTION: the description hangs off the Apply button, so it is
+    heard after the choice is made rather than while it is being made, and whether a preset leaves
+    every other output alone is exactly what the choice turns on. A suffix on the option is read as you arrow
     past it, and it cannot be put on the dropdown as a description without a screen reader
     re-announcing it over the option name (see index.html, the deliberate omission there).
 
@@ -424,14 +419,17 @@ def describe(scheme: dict, device=None, expanded: bool = False) -> str:
     if len(found) <= _DESCRIBE_LIST_LIMIT:
         text = "Sets " + ", and ".join(one(out, spec) for out, spec in found) + "."
     else:
-        custom = [(out, spec) for out, spec in found if spec.get("mode") == 2]
-        plain = len(found) - len(custom)
-        text = f"Sets all {len(found)} outputs"
-        if not custom:
+        # Only the outputs NOT going to their own default mode are worth naming one by one.
+        unusual = [(out, spec) for out, spec in found
+                   if spec.get("mode") != int(out.get("default_mode", 0))]
+        normal = len(found) - len(unusual)
+        everything = len(found) >= len(out_by_key)
+        text = f"Sets {'all ' if everything else ''}{len(found)} outputs"
+        if not unusual:
             text += " to their normal mix."
         else:
-            text += (f": {plain} to their normal mix, and " if plain else ": ")
-            text += ", and ".join(one(out, spec) for out, spec in custom) + "."
+            text += (f": {normal} to their normal mix, and " if normal else ": ")
+            text += ", and ".join(one(out, spec) for out, spec in unusual) + "."
     if missing:
         text += (f" {count(len(missing), 'part')} of this scheme "
                  f"{plural(len(missing), 'is', 'are')} not on this device and would be "

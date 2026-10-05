@@ -55,7 +55,7 @@ class as_device:
 class capture_writes:
     """Intercept every device write routing_schemes.apply can make, recording it instead.
 
-    set_cross_point_excluded and set_cross_point_level are replaced WHOLE, which also removes their
+    The set_cross_point_* writers are replaced WHOLE, which also removes their
     _check_cross_point guard - that guard is the subject of its own test below, and leaving it in
     here would make an out-of-range write raise instead of showing up in the log."""
 
@@ -65,13 +65,12 @@ class capture_writes:
     def __enter__(self):
         self.saved = {n: getattr(rcp_transfer, n) for n in
                       ("set_output_routing", "set_cross_point_excluded", "set_cross_point_level",
-                       "send_record", "build_mix_link_request")}
+                       "set_cross_point_linked")}
         log = self.log
         rcp_transfer.set_output_routing = lambda o, m: log.append(("mode", o, m))
         rcp_transfer.set_cross_point_excluded = lambda o, s, ex: log.append(("xpt", o, s, ex))
         rcp_transfer.set_cross_point_level = lambda o, s, v: log.append(("level", o, s, round(v, 3)))
-        rcp_transfer.build_mix_link_request = lambda sel, link: ("link", sel, link)
-        rcp_transfer.send_record = lambda rec: log.append(rec)
+        rcp_transfer.set_cross_point_linked = lambda o, s, linked: log.append(("link", o, s, linked))
         return self
 
     def __exit__(self, *exc):
@@ -214,7 +213,7 @@ with as_device(devices.PRO2), capture_writes() as w:
     routing_schemes.apply({"outputs": {"Headphone1": scheme["outputs"]["Headphone1"]}})
 check("the one unlinked cross-point gets its level back", w.levels(), [("level", 0, 7, 0.4)])
 check("and it is unlinked first, or the write would be ignored",
-      ("link", rcp_transfer.cross_point_selector(0, 7), False) in w.log, True)
+      ("link", 0, 7, False) in w.log, True)
 
 print("\nAPPLY: a level is never written where it would not mean anything")
 main_mix = {"outputs": {"Headphone2": {"mode": 0, "sources": {
@@ -309,6 +308,14 @@ with as_device(devices.PRO2):
     full = routing_schemes.describe(b["normal"]["scheme"])
 check("a whole-desk scheme is summarised, not listed output by output (it is read aloud)",
       full, "Sets all 11 outputs to their normal mix.")
+part = {"outputs": dict(list(b["normal"]["scheme"]["outputs"].items())[:4])}
+part["outputs"]["Chat"] = {"mode": 0, "sources": {}}
+with as_device(devices.PRO2):
+    some = routing_schemes.describe(part)
+check_true("a scheme naming SOME outputs does not claim to set all of them",
+           some.startswith("Sets 5 outputs"))
+check_true("and an output off its own default mode is named, not called normal",
+           "4 to their normal mix, and Chat to the main mix." in some)
 with as_device(devices.DUO):
     warn = routing_schemes.describe(scheme)
 check_true("a scheme with outputs this desk lacks says so up front", "would be skipped" in warn)

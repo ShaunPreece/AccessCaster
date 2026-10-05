@@ -1036,6 +1036,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (`DevTools/test_cross_point_wide_live.py`, 1st October 2026). The pad builders keep their mask
   because a pad index cannot reach 256, and `SEL_SHOWCONTROL` / `SEL_RECORDINGS` are unaffected:
   they split the index by hand through `build_channel_prop_*` and always did.
+- **EVERY CROSS-POINT WRITE GOES THROUGH A `rcp_transfer.set_cross_point_*` HELPER**
+  (`_linked`, `_excluded`, `_level`), each of which runs `_check_cross_point` first. Sending
+  `build_mix_link_request` raw skips that gate, so an index the connected desk lacks reaches the wire.
 - **READING OR WRITING THE GRID USES `MatrixSpec.all_sources`; ONLY THE DISPLAY LIST FOLLOWS THE
   MODE.** The desk publishes all 30 source rows whichever mode it is in, so rows 12 to 15 are
   ordinary MIX nodes with real state at all times. `all_sources` / `all_source_indices` is that

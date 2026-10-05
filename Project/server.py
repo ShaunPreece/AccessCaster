@@ -6675,9 +6675,8 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
             # Ensure Custom mode + the source unlinked. Both writes are idempotent (no-ops if
             # already so), so we send them unconditionally rather than pay a ~1.5s model read
             # to check first - that read was the cause of the per-slider lag.
-            sel = rcp_transfer.cross_point_selector(output_index, source_index)
             rcp_transfer.set_output_routing(output_index, 2)       # Custom
-            rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=False))
+            rcp_transfer.set_cross_point_linked(output_index, source_index, False)
             rcp_transfer.set_cross_point_level(output_index, source_index, v)
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the level: {exc}"}
@@ -6702,8 +6701,7 @@ def action_reset_monitor_output(output_index: int) -> dict:
     try:
         with _hid_lock:
             for si, _ in _monitor_sources():
-                sel = rcp_transfer.cross_point_selector(output_index, si)
-                rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=True))
+                rcp_transfer.set_cross_point_linked(output_index, si, True)
                 time.sleep(0.05)
             rcp_transfer.set_output_routing(output_index, 0)       # Main Mix
     except Exception as exc:
@@ -6789,8 +6787,7 @@ def _apply_matrix(routing: dict) -> dict:
     #    saved manual (unlinked) levels so the restore is authoritative, not additive.
     for oi, _l in _monitor_outputs():
         for si, _sl in _monitor_sources():
-            attempt(lambda oi=oi, si=si: rcp_transfer.send_record(
-                rcp_transfer.build_mix_link_request(rcp_transfer.cross_point_selector(oi, si), link=True)))
+            attempt(lambda oi=oi, si=si: rcp_transfer.set_cross_point_linked(oi, si, True))
     for cell in (routing.get("monitor_unlinked") or []):
         try:
             o, s, lvl = int(cell["o"]), int(cell["s"]), float(cell["level"])
@@ -6798,8 +6795,7 @@ def _apply_matrix(routing: dict) -> dict:
             continue
 
         def _set(o=o, s=s, lvl=lvl):
-            sel = rcp_transfer.cross_point_selector(o, s)
-            rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=False))
+            rcp_transfer.set_cross_point_linked(o, s, False)
             rcp_transfer.set_cross_point_level(o, s, lvl)
         attempt(_set)
     return {"applied": applied, "failed": failed, "skipped": False}

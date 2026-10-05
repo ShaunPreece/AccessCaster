@@ -322,6 +322,15 @@ def build_mix_link_request(selector: int, link: bool) -> bytes:
     return _frame(build_address([selector]) + name_b + b"\x00" + value_block)
 
 
+def set_cross_point_linked(output_index: int, source_index: int, linked: bool,
+                           allow_inferred: bool = False) -> int:
+    """Link one cross-point to its channel fader (True) or give it a level of its own (False).
+    Idempotent on the desk, so it is safe to send without reading the current state first."""
+    _check_cross_point(output_index, source_index, allow_inferred)
+    return send_record(build_mix_link_request(cross_point_selector(output_index, source_index),
+                                              link=linked))
+
+
 def set_cross_point_excluded(output_index: int, source_index: int, excluded: bool,
                              allow_inferred: bool = False) -> int:
     """Exclude (True) or include (False) one source in one output's Custom mix.
@@ -358,7 +367,7 @@ def set_cross_point_level(output_index: int, source_index: int, level: float,
                           allow_inferred: bool = False) -> int:
     """Set one cross-point's level (0..1). The output must be in Custom mode and the cross-point
     UNLINKED (a linked one follows the channel fader); set_cross_point_excluded(..., False) leaves
-    it linked, so send a mixUnlinkRequest first."""
+    it linked, so call set_cross_point_linked(..., False) first."""
     _check_cross_point(output_index, source_index, allow_inferred)
     sel = cross_point_selector(output_index, source_index)
     return send_record(build_cross_point_level(sel, level))
