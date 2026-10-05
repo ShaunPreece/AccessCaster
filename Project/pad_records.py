@@ -95,13 +95,6 @@ FRAME_FX = 0x9D
 
 PAD_FILE_PATH_FMT = "/Application/emmc-data/pads/{n}/{name}"
 
-# The chosen voice-FX preset = its own on-flag (turned ON in phase2-B). Params come
-# from the EFFECTS defaults block. Decoded session 21.
-EFFECT_ONFLAG = {
-    "megaphone": "distortionOn", "robot": "robotOn", "pitch": "pitchShiftOn",
-    "reverb": "reverbOn", "echo": "echoOn", "disguise": "voiceDisguiseOn",
-}
-
 # The six effect ENGINES the device offers and their on-flag property. A factory
 # voice-FX recipe layers one or more of these, each with its own params (decoded from
 # a clean-table snapshot; see fx_recipes.json / extract_recipes.py). These

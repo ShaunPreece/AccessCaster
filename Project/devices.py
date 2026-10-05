@@ -156,7 +156,7 @@ class FaderSpec:
     The fader LAYOUT is the channelInputSource int vector: vector POSITION = fader
     (index 0 = fader 1), VALUE = the channel/source CODE on that fader, written at
     selector 0x1C + index (RODECASTER_PROTOCOL.txt section 6). This is the ONLY place
-    the per-device fader shape lives; before GAP-1 it was Pro II-hardcoded in server.py.
+    the per-device fader shape lives.
       count          : number of faders the desk actually EXPOSES (Pro II 9, Duo 9). This is
                        what the UI lists and the highest index a channel can be assigned to.
                        NOT necessarily the vector length - see vector_len.
@@ -317,9 +317,9 @@ class FaderSpec:
 
 @dataclass(frozen=True)
 class InputStripSpec:
-    """Flexible input-source strips for the older by-NAME routing view (GAP-3).
+    """Flexible input-source strips for the older by-NAME routing view.
 
-    This is the pre-GAP-1 representation of fader assignment, consumed by server.py's
+    This is the older representation of fader assignment, consumed by server.py's
     routing_model / read_routing_live / action_set_input_source (the /api/routing/inputsource
     endpoint) and by legacy-profile restore (profiles._apply_legacy). It exposes the
     reassignable strips by a fixed NAME and offers a small source palette to drop onto them.
@@ -368,7 +368,7 @@ class InputStripSpec:
 
 @dataclass(frozen=True)
 class HeadphoneTypeSpec:
-    """Per-output 'headphone type' (amp profile) setting for one device (GAP-6).
+    """Per-output 'headphone type' (amp profile) setting for one device.
 
     headphoneType is a GLOBAL int property (rcp_transfer.build_global_prop_int). The SELECTOR
     picks WHICH headphone output; the VALUE picks the amp profile. Confirmed selectors:
@@ -380,7 +380,7 @@ class HeadphoneTypeSpec:
       outputs : (selector, label) per addressable headphone output, in UI order.
       values  : (int, label) per selectable amp type, in UI order.
 
-    NOT YET CONFIRMED ON HARDWARE (see PARITY.md and Completed.md "Duo support", GAP-6):
+    NOT YET CONFIRMED ON HARDWARE:
       * value 2 = "Low sensitivity" - named from the RODE app UI but not yet capture-verified.
       * HP2 (0x0A) on the PRO II specifically (confirmed on the Duo; the Pro II shares the selector).
       * The Pro II's Headphone 3/4 outputs (inferred 0x0B/0x0C) are deliberately NOT listed: their
@@ -683,8 +683,7 @@ DUO_FADERS = FaderSpec(
 
 # --- Input-strip specs (see InputStripSpec). Defined before DeviceModel so it can default to the
 # Pro II shape, keeping offline / unknown-device paths on Pro II behaviour. --------------------------
-# Pro II: EXACTLY the constants that were hardcoded in server.py before GAP-3 (_INPUT_STRIP_VEC_INDEX
-# + _INPUT_STRIP_LABEL + _INPUT_SOURCE_LABEL), preserving order and codes byte-for-byte. The five
+# Pro II: the five
 # reassignable strips sit on faders 5 to 9 (vector indices 4 to 8); mics 1 to 4 (faders 1 to 4) are
 # fixed XLR inputs and are not listed. Strip keys are CHANNEL_INPUT_SOURCE_SELECTOR keys; source
 # codes are INPUT_SOURCE_CODE values (Bluetooth 10, USB1 7, Chat 8, USB2 9, SMARTpads 11, CallMe1 16).
@@ -794,10 +793,10 @@ class DeviceModel:
     # Fader-assignment layout (see FaderSpec). Defaults to the Pro II 9-fader shape so offline /
     # unknown-device code paths keep Pro II behaviour.
     fader: FaderSpec = PRO2_FADERS
-    # Flexible input-source strips for the by-name routing view (see InputStripSpec, GAP-3).
+    # Flexible input-source strips for the by-name routing view (see InputStripSpec).
     # Defaults to the Pro II shape so offline / unknown-device code paths keep Pro II behaviour.
     input_strips: InputStripSpec = PRO2_INPUT_STRIPS
-    # Per-output headphone-type (amp profile) setting (see HeadphoneTypeSpec, GAP-6). Both desks
+    # Per-output headphone-type (amp profile) setting (see HeadphoneTypeSpec). Both desks
     # share the confirmed HP1/HP2 selectors + value enum, so this defaults to the shared spec.
     headphones: HeadphoneTypeSpec = HEADPHONE_TYPES
 
@@ -1143,7 +1142,7 @@ DUO = DeviceModel(
     # captured the master/global output-block writes. All selectors are BYTE-IDENTICAL to the Pro II -
     # recordingMultitrackMode 0x0D, outputBTAutoMute 0x0D, masterCompellorOn 0x0E, headphoneType 0x09
     # (Headphone 1) / 0x0A (Headphone 2). Our build_global_prop_* reproduce the app's writes exactly;
-    # toggled + restored on hardware, device verified byte-clean afterwards. (GAP-6: headphone type
+    # toggled + restored on hardware, device verified byte-clean afterwards. (headphone type
     # is device-model-driven via HeadphoneTypeSpec / DeviceModel.headphones -
     # both desks expose HP1 0x09 + HP2 0x0A and the 3-value amp enum. Value 2 = Low sensitivity and
     # HP2-on-Pro-II are inferred and still want a supervised live capture to confirm; HP3/HP4 remain
@@ -1161,7 +1160,7 @@ DUO = DeviceModel(
     # empty pads - WAV + MP3 upload (extension preserved), mixer create, a voice-FX create (region-B
     # 7->8) and clear (GC 8->7), and read-back in-place edits. read_only reported False (un-gated for
     # the Duo). Pool clean at every step; pads + region-B pool returned byte-clean to the 7-object baseline.
-    # "fader_write" is ON (GAP-1, CONFIRMED on hardware): a reversible, read-back-verified
+    # "fader_write" is ON (CONFIRMED on hardware): a reversible, read-back-verified
     # live test proved the Duo fader WRITE semantics via our own code - set a source on an empty strip
     # (idx8 -1 -> 16, read back 16), VACATE a strip by writing -1 (idx8 -> -1, read back -1), and write
     # the highest strip idx9/fader 10 (empty + restore), all byte-clean back to the [0,1,10,11,2,7,8,9,-1,9]

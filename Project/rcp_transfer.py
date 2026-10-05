@@ -36,7 +36,7 @@ from __future__ import annotations
 import struct
 
 import model_tree                    # the tree grammar, and with it the ONE address format
-import devices                       # per-device matrix shape (GAP-5 cross-point guard)
+import devices                       # per-device matrix shape
 import diagnostics                   # the app's own account of every record it sends
 import rcp_hid                       # write-generation counter (invalidates cached model reads)
 from rcp_hid import find_control_interface
@@ -58,7 +58,7 @@ PAD_ADDRESS = bytes.fromhex("010102029a020101")  # last byte 0x01 = grid pad 3's
 # directly (one byte shorter). byte[6]=0x00 means "no selector / internal pad".
 PAD_ADDRESS_INTERNAL = bytes.fromhex("010102029a0200")
 
-# STABLE pad identity (session 7 - confirmed on hardware):
+# STABLE pad identity (confirmed on hardware):
 #   - padIdx (0-based) == physical/app-grid position - 1.  (grid 16 -> padIdx 15;
 #     pad5sound grid 5 -> padIdx 4.)
 #   - The sound file lives in pads/<grid position>/ on the FAT volume. Confirmed:
@@ -396,12 +396,9 @@ SEL_OUTPUT_GLOBAL = 0x0D            # global output block (multitrack, auto-mute
 SEL_OUTPUT_MIXMINUS_BASE = 0x31     # outputMixMinus selector = base + output index
 SEL_HEADPHONE_TYPE = 0x09           # headphoneType Headphone 1 (default)
 # Fixed output order the outputMixMinus selectors follow (= 0x31 + output_index).
-# ALL CONFIRMED (captures/matrix_outputs.pcap). The earlier list was missing
-# REC (the session-18/19 off-by-one that mis-targeted outputs past Monitor); REC is index
-# 5, so Bluetooth=6 / USB1=7 / Chat=8 / USB2=9 / CallMe1=10. This order matches
-# CROSS_POINT_OUTPUT_INDEX exactly. NOTE: session 19's "USB1=0x37" was that off-by-one;
-# the captured truth is USB1 mode selector = 0x38 (0x37 = Bluetooth) - re-confirm by ear
-# before relying on the old USB-recording fix.
+# ALL CONFIRMED by capture. REC is index 5, so Bluetooth=6 / USB1=7 / Chat=8 / USB2=9 /
+# CallMe1=10, and the USB1 mode selector is 0x38 (0x37 is Bluetooth). This order matches
+# CROSS_POINT_OUTPUT_INDEX exactly.
 OUTPUTS = ["Headphone 1", "Headphone 2", "Headphone 3", "Headphone 4", "Monitor",
            "REC", "Bluetooth", "USB 1", "Chat", "USB 2", "CallMe 1"]
 MULTITRACK_MODES = {0: "Off", 1: "Pre-Fader", 2: "Post-Fader"}
@@ -453,7 +450,7 @@ CROSS_POINT_SOURCE_INDEX = {
     "CallMe1": 16,
 }
 # The source indices proven on a Pro II. Kept as the FALLBACK for a device whose MatrixSpec
-# carries no source list; the live guard (GAP-5) validates against the CONNECTED device's
+# carries no source list; the live guard validates against the CONNECTED device's
 # matrix.source_indices instead, so a Duo refuses a Pro II-only source (Mic 4).
 CONFIRMED_SOURCE_INDICES = {0, 1, 2, 3, 7, 8, 9, 10, 11, 16}
 
@@ -469,7 +466,7 @@ CROSS_POINT_OUTPUT_INDEX = {
     "CallMe2": 11, "CallMe3": 12,                        # INFERRED (2nd/3rd phone callers)
 }
 # The 11 output indices proven byte-for-byte against a capture (Pro II). FALLBACK only; the live
-# guard (GAP-5) validates against the CONNECTED device's matrix.outputs (so a Duo, which exposes no
+# guard validates against the CONNECTED device's matrix.outputs (so a Duo, which exposes no
 # Headphone 3/4, refuses output indices 2/3 instead of writing to a phantom slot).
 CONFIRMED_OUTPUT_INDICES = set(range(0, 11))
 
@@ -492,7 +489,7 @@ def cross_point_selector(output_index: int, source_index: int) -> int:
 def _check_cross_point(output_index: int, source_index: int, allow_inferred: bool) -> None:
     """Hard guard: refuse any output/source index the CONNECTED device does not expose in its
     routing matrix, unless the caller explicitly opts in to the INFERRED CallMe2/3 outputs.
-    Device-aware (GAP-5): validates against the active device's MatrixSpec
+    Device-aware: validates against the active device's MatrixSpec
     (its exposed matrix.outputs + matrix.source_indices) rather than the Pro II capture-confirmed
     constants, so a Pro II-only cross-point (Mic 4 = source 3, Headphone 3/4 = outputs 2/3) is
     refused on a Duo instead of silently writing to a phantom slot. Falls back to the Pro II
@@ -785,7 +782,7 @@ def set_monitor_level(level01: float) -> int:
 def set_headphone_type(value: int, selector: int = SEL_HEADPHONE_TYPE) -> int:
     """headphoneType amp profile: 0=NTH-100, 1=High Sensitivity (louder), 2=Low Sensitivity.
     `selector` picks the headphone output: 0x09=Headphone 1 (default), 0x0A=Headphone 2. Both are
-    KNOWN headphoneType selectors (GAP-6); the server resolves the selector from the active device's
+    KNOWN headphoneType selectors; the server resolves the selector from the active device's
     HeadphoneTypeSpec, so callers never pass an unmapped selector here."""
     return send_record(build_global_prop_int("headphoneType", selector, value))
 
@@ -881,7 +878,7 @@ def set_unit_setting(prop: str, value) -> int:
 
 
 # ----------------------------------------------------------------------------
-# CHANNEL PROCESSING (EQ, compressor, gate, de-esser, HPF, pan) - session 14.
+# CHANNEL PROCESSING (EQ, compressor, gate, de-esser, HPF, pan).
 #
 # Decoded + ear-verified + read-back-verified from captures (eqfreq, gainsweep,
 # harvest). The RODE app drives the whole channel-strip DSP over report-3 with ONE

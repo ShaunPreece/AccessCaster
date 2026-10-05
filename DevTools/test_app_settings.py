@@ -14,9 +14,11 @@ Run: python DevTools/test_app_settings.py
 """
 from __future__ import annotations
 import json
+import pathlib
+import re
 import sys
 
-import _bootstrap  # noqa: F401
+import _bootstrap
 import app_settings as a
 
 FAILED = 0
@@ -30,15 +32,17 @@ def check(name, got, want=None):
         FAILED += 1
 
 
-# Every key the app is known to WRITE to settings.json. Keep this in step with the update_settings
-# calls in server.py; the point of the check below is that a new preference cannot quietly become
-# unbackupable by nobody having decided about it.
-WRITTEN_BY_THE_APP = {
-    "hotkeys", "announcer_levels", "announcer_volume", "announcer_voice", "announcer_output",
-    "record_mute_announcer", "meter_stream", "meter_warn_clip", "meter_warn_silence",
-    "meter_silence_after", "meter_speak_every", "meter_clip_sound", "meter_clip_db",
-    "remote_token", "applied_presets", "baseline_asked", "callme_contacts", "callme_auto_extend",
-}
+# Every key the app WRITES to settings.json, read off the source rather than listed by hand: a hand
+# list misses exactly the new preference this check exists to catch. Three shapes cover every
+# writer: `update_settings(key=...)`, a `_KEY = "..."` constant passed as `**{_KEY: ...}`, and
+# action_set_meter_option's spec table, whose keys are the "meter_*" strings.
+_SRC = "\n".join(p.read_text(encoding="utf-8")
+                 for p in pathlib.Path(_bootstrap.PROJECT).glob("*.py"))
+_KEY_CONSTS = dict(re.findall(r'^(_\w+_KEY) = "(\w+)"', _SRC, re.M))
+WRITTEN_BY_THE_APP = (set(re.findall(r"update_settings\((\w+)=", _SRC))
+                      | {_KEY_CONSTS[c]
+                         for c in re.findall(r"update_settings\(\*\*\{(_\w+_KEY)", _SRC)}
+                      | set(re.findall(r'\("(meter_\w+)", (?:bool|float)', _SRC)))
 
 # THE REAL STORED SHAPE, copied from a live settings.json rather than invented. An invented shape
 # like {"hk1": ..., "hk2": ...} passes while the counting code is broken, because on the real shape

@@ -10,7 +10,7 @@ the stray-append hazard that costs a factory reset.
 So this file asserts, with the Duo device model forced active and no desk attached, that each
 feature is EITHER device-derived (and correct for the Duo's 4 physical / 9 total faders, its 10-strip
 vector, and source code 2 = Headset, not Mic 3) OR safely refused behind a capability flag. It is the
-offline half of ProjectMemory/DUO_SUPPORT.md (part A1); the rest still needs a Duo.
+offline half of Duo support; the rest needs a Duo (`test_duo_caps_live.py`).
 
 Run: python DevTools/test_duo_parity.py
 """

@@ -194,12 +194,10 @@ def delete_user_fx_preset(name: str) -> bool:
     return False
 
 
-# Engine on-flag name for each engine, e.g. "reverb" -> "reverbOn" (matches pad_records.EFFECT_FLAG).
-FX_ENGINE_ONFLAG = dict(pr.EFFECT_FLAG)
 # Every field a live preview edit is allowed to write: each engine's params + its on-flag, plus the
 # mic-input selector. Anything else is rejected so a stray write can never create cruft.
 _PREVIEW_FLOAT_PARAMS = {p for ps in FX_ENGINE_PARAMS.values() for p in ps if p != "pitchShiftSemitones"}
-_PREVIEW_ONFLAGS = set(FX_ENGINE_ONFLAG.values())
+_PREVIEW_ONFLAGS = set(pr.EFFECT_FLAG.values())
 
 
 def sanitise_preview_edit(param: str, value):
@@ -1693,9 +1691,6 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
 # ----------------------------------------------------------------------------------------------
 # SECTION 8 - CREATE VOICE-FX
 # ----------------------------------------------------------------------------------------------
-
-EFFECT_ONFLAG = pr.EFFECT_ONFLAG
-
 
 def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, debug=False,
                             active: bool = True):

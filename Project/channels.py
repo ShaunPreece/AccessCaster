@@ -88,11 +88,10 @@ CHANNEL_PROP = {
     "inputInstrumentGain": {"kind": "int",  "note": "instrument input gain. Set to 20 when the mic "
                                                    "type becomes Instrument; NOT cleared on the way "
                                                    "back out, so restore it explicitly."},
-    # ENCODING DECODED by reading the live desk: it is a STRING of AARRGGBB hex, e.g.
-    # 'ffd43580' on Mic 1, 'ff59dd20' on Mic 2, 'ff000000' on the unused slots. It was registered as
-    # an int here, which would have written the wrong record shape entirely, so this is a fix and not
-    # just a note. There is no string channel-property WRITER yet (build_channel_prop_int / _bool are
-    # all we have), so it is readable and backed up but not restorable - see PROFILE_COVERAGE.
+    # A STRING of AARRGGBB hex, read off the live desk: 'ffd43580' on Mic 1, 'ff59dd20' on Mic 2,
+    # 'ff000000' on the unused slots. Registering it as an int would write the wrong record shape.
+    # There is no string channel-property WRITER (build_channel_prop_int / _bool are all there is),
+    # so it is readable and backed up but not restorable.
     "inputColour":         {"kind": "str",  "note": "channel strip colour, AARRGGBB hex string "
                                                    "(decoded). No string writer yet."},
     # inputType IS DERIVED FROM inputMicrophoneType. Proven on Mic 3 (nothing plugged in)
@@ -679,7 +678,7 @@ CHANNEL_FX_ON = {"echo": "echoOn", "reverb": "reverbOn"}
 def set_channel_effect(channel: int, effect: str, on: bool) -> int:
     """Enable/disable a per-channel always-on EFFECT (echo / reverb), channel 1-4. Compact bool on the
     channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's LIVE strip index
-    (device-aware, GAP-9), so a mic moved off its default fader still hits the right strip."""
+    (device-aware), so a mic moved off its default fader still hits the right strip."""
     _require_processing()
     if not 1 <= channel <= 4:
         raise ValueError(f"channel must be 1-4, got {channel}")
@@ -703,7 +702,7 @@ _CHANNEL_FX_PARAM_SET = {p for ps in CHANNEL_FX_PARAMS.values() for p in ps}
 def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
     """Set one channel-effect PARAM (echo*/reverb*) on a mic channel 1-4, value normalised 0..1.
     Global float64 on the channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's
-    LIVE strip index (device-aware, GAP-9); byte-for-byte the app's own write."""
+    LIVE strip index (device-aware); byte-for-byte the app's own write."""
     _require_processing()
     if not 1 <= channel <= 4:
         raise ValueError(f"channel must be 1-4, got {channel}")

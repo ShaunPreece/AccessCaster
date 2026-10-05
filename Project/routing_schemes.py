@@ -251,11 +251,8 @@ def builtins(device=None) -> list:
                             for s in m.all_sources},
             }}},
         })
-        # 3. Chat back to normal. THIS REPLACES THE OLD "Chat = full mix" BUTTON, and fixes what
-        #    was wrong with it (open question, ProjectNotes): that button put Chat on MAIN MIX,
-        #    which carries the caller's own voice back to them, because it was the one line of code
-        #    that undid the preset. Chat's normal state is MIX MINUS, so that is what "back to
-        #    normal" now writes, and only the Chat output is touched.
+        # 3. Chat back to normal: MIX MINUS, which is Chat's normal state, and only the Chat output
+        #    is touched. Main Mix would carry the caller's own voice back to them.
         out.append({
             "id": BUILTIN_CHAT_NORMAL,
             "name": "Chat back to normal",

@@ -31,8 +31,11 @@ VERSION = 1
 # WHAT TRAVELS. Preferences that are about YOU rather than about a desk or a machine.
 PORTABLE = (
     "hotkeys",
+    "announcer",
     "announcer_levels",
     "announcer_volume",
+    "announcer_mute_tones",
+    "announcer_startup_summary",
     "record_mute_announcer",
     "meter_warn_clip",
     "meter_warn_silence",

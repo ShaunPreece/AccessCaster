@@ -5,10 +5,9 @@
      python DevTools/ui_probe.py --checks DevTools/ui_checks_baseline.js \
             --stub DevTools/_probe_stub_baseline.json
 
-   The stub file is generated from the REAL desk by hand (ui_probe.py has no --write-stub; the
-   original curl command is in git history of ProjectNotes.md): the installed
-   build on 8770 does not have /api/baseline/status or the preset_now field yet, so proxying would
-   only ever exercise the failure path. The channel data in it is the live unit's.
+   The stub file is generated from the REAL desk by hand (ui_probe.py has no --write-stub), so the
+   checks run against fixed data rather than whatever build is on 8770. The channel data in it is
+   the live unit's.
 
    This is NOT a screen-reader pass. It pins the things NVDA depends on and the eye cannot see: that
    the offer is a real modal alertdialog with a name and a description, that focus lands somewhere

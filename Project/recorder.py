@@ -391,7 +391,7 @@ def parse_recording(uid, content: str) -> dict:
 
     `systemDateTimezone` does NOT move it either (indices 44, 0 and 12 each produced a take stamped
     at the same UTC second), so the desk's timezone setting is a touchscreen display matter and
-    cannot be checked from here - see ProjectNotes.
+    cannot be checked from here.
     """
     parts = str(content).split("|")
     if len(parts) < 5:

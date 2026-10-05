@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
 import threading
 import time
 from ctypes import POINTER, c_float, c_int32, c_uint32, c_void_p, c_wchar_p
@@ -41,6 +42,23 @@ from ctypes import POINTER, c_float, c_int32, c_uint32, c_void_p, c_wchar_p
 import comtypes
 import comtypes.client
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
+
+# AN OFFLINE TEST NEVER CHANGES WINDOWS' AUDIO, the same rule rcp_hid applies to desk writes and
+# under the same two flags (DevTools/_bootstrap sets them by script name). Moving the default
+# output, enabling or disabling an endpoint and setting a level or mute all move the screen
+# reader's speech between devices on the machine it runs on.
+_NO_AUDIO_CHANGE = bool(os.environ.get("ACCESSCASTER_NO_DEVICE_WRITE")) and not os.environ.get(
+    "ACCESSCASTER_ALLOW_DEVICE_WRITE")
+
+
+def refuse_audio_change_in_tests() -> None:
+    """Raise if this process is an offline test. Called before every Windows audio write."""
+    if _NO_AUDIO_CHANGE:
+        raise RuntimeError(
+            "REFUSING TO CHANGE WINDOWS AUDIO: this is an offline test "
+            "(ACCESSCASTER_NO_DEVICE_WRITE). Stub the call, or set ACCESSCASTER_ALLOW_DEVICE_WRITE "
+            "if it is a live suite.")
+
 
 CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
 
@@ -762,6 +780,7 @@ def set_endpoint_mute(endpoint_id: str, muted: bool) -> dict:
     Windows dialog rather than anywhere on the desk."""
     comtypes.CoInitialize()
     try:
+        refuse_audio_change_in_tests()
         _dev, vol = _volume_interface(endpoint_id)
         vol.SetMute(1 if muted else 0, None)
         got = bool(vol.GetMute())
@@ -784,6 +803,7 @@ def set_endpoint_volume_db(endpoint_id: str, db: float) -> dict:
     a change that never happened, on a control the user cannot see."""
     comtypes.CoInitialize()
     try:
+        refuse_audio_change_in_tests()
         _dev, vol = _volume_interface(endpoint_id)
         lo, hi, _step, fixed = _offered_range(vol)
         if fixed:

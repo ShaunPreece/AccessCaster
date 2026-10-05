@@ -1,18 +1,10 @@
 """
 AccessCaster - accessible local web server.
 
-A screen-reader and keyboard friendly controller for the RODECaster Pro II.
-It talks to the unit over the same USB control channel RODE Central uses and
-presents the controls we have reverse-engineered and verified on hardware:
-
-  - System: enable/disable MIDI control (the unlock for the Access Deck app).
-  - Mic channels 1-4: input gain (dB) and 48V phantom power.
-  - SMART pads: replace a configured pad's sound (overwrite-in-place).
-
-READ-BACK (session 12): the device DOES report its current settings. One command
-(report-3 payload ad10a7b0) makes it stream its whole property model; rcp_read
-parses it. So the mixer/system controls now show the unit's REAL current state,
-read live over USB, not just the last command we sent.
+A screen-reader and keyboard friendly controller for the RODECaster Pro II and Duo. It talks to
+the unit over the same USB control channel RODE's own app uses, and every control shows the
+unit's real state: one command makes the desk stream its whole property model, which rcp_read
+parses.
 
 Design (matches the sibling Access Deck / LightSwitch apps):
 - stdlib http.server only, no web framework
@@ -39,10 +31,9 @@ import subprocess
 import tempfile
 import threading
 import urllib.parse               # to read ?t=<token> off a request path
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-import time
 
 import diagnostics            # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import rcp_hid
@@ -396,9 +387,7 @@ def read_device_state() -> dict:
     }
 
     # ---- monitor speaker level. Readable, pushed live, AND WRITABLE: the selector comes from a
-    # device push. "The RODE app has no control for it, so there is nothing to capture, so it must
-    # be unwritable" is reasoning that has been wrong five times - never file a property unreachable
-    # on it.
+    # device push. The RODE app having no control for a property never makes it unwritable.
     mon = val("outputMonLevel", "float")
     out["monitor"] = {"level_pct": (round(mon[0] * 100) if mon else None), "writable": True}
 
@@ -529,10 +518,9 @@ def _recorder_state_changed(was, now) -> None:
     off around every pause would be its own kind of noise.
 
     WHAT IS SAID COMES FROM THE TRANSITION, NOT FROM `now` ALONE (recorder.spoken_change), which is
-    what tells a drive being plugged in apart from a recording stopping. This function always had
-    `was` and simply did not use it for the wording. The SUSPENSION decisions below are unchanged
-    and still keyed on the new state, correctly: a take is over once the desk leaves RECORDING and
-    PAUSED, whatever the reason it left."""
+    what tells a drive being plugged in apart from a recording stopping. The SUSPENSION decisions
+    are keyed on the new state alone: a take is over once the desk leaves RECORDING and PAUSED,
+    whatever the reason it left."""
     ours = _ann_is_self_echo(("record",))
     # The last destination we knew about, which on a REMOVAL is the thing that just left. Best
     # effort by design: it is empty until a full page read has happened, and spoken_change falls
@@ -557,6 +545,16 @@ def _recorder_state_changed(was, now) -> None:
         return
     if _announce_on.is_set() and not ours and phrase:
         _ann_say(phrase)
+
+
+def _recorder_refusal(name: str, task: str = "") -> str:
+    so = f", so it cannot {task}" if task else ""
+    return (f"AccessCaster can read the recorder on the {name} but not drive it{so}: that has "
+            f"only been confirmed on a RODECaster Pro 2.")
+
+
+def _recorder_gate(task: str = ""):
+    return _cap_gate("recorder", lambda name: _recorder_refusal(name, task))
 
 
 def _recorder_watcher():
@@ -612,10 +610,9 @@ def _recorder_payload(blob: bytes) -> dict:
     """The whole Recording page from one dump. ONE builder, used by the page read AND by every
     transport command's reply.
 
-    That is not tidiness. When the command replied with a SMALLER payload, the page rebuilt the
-    multitrack dropdown from a missing option list and emptied it - so pressing Start wiped a
-    control, which is exactly the "nothing may replace a subtree a screen reader may be sitting in"
-    fault this project has been bitten by three times."""
+    That is not tidiness: a smaller command reply makes the page rebuild the multitrack dropdown
+    from a missing option list and empty it, replacing a control a screen reader may be sitting
+    in."""
     dev = devices.get_active_device()
     out = recorder.describe(blob)
     out["writable"] = "recorder" in dev.caps
@@ -654,8 +651,7 @@ def _recorder_payload(blob: bytes) -> dict:
     out["can_delete"] = bool(out["writable"] and recorder.DELETE_PROVEN)
     out["delete_note"] = ("" if out["can_delete"] else
                           (recorder.DELETE_UNPROVEN_MESSAGE if out["writable"] else
-                           f"AccessCaster can read the recorder on the {dev.name} but not drive "
-                           f"it, so it cannot delete a recording."))
+                           _recorder_refusal(dev.name, "delete a recording")))
 
     out["storage_writable"] = "storage_write" in dev.caps
     out["announcer"] = _announcer_into_desk()
@@ -705,9 +701,9 @@ def _note_recorder_context(payload: dict) -> None:
 def _recorder_sentence(state, elapsed: str = "") -> str:
     """What the unit is doing, said in the order it matters while you are working.
 
-    THE ORDER IS THE WHOLE DESIGN OF THIS SENTENCE: while a
-    recording is running the only things worth hearing are WHETHER it is running and HOW LONG it
-    has been going, with the time left at the END. Where it is recording to is not repeated - you
+    THE ORDER IS THE WHOLE DESIGN OF THIS SENTENCE: while a recording is running the only things
+    worth hearing are WHETHER it is running and HOW LONG it has been going, with the time left at
+    the END. Where it is recording to is not repeated - you
     were told that when you pressed record - and the storage detail is not here at all; that lives
     on the Device page, where you go to look at it deliberately.
 
@@ -766,13 +762,9 @@ def action_record(command: str) -> dict:
     cmd = (command or "").strip().lower()
     if cmd not in recorder.COMMANDS:
         return {"ok": False, "message": f"Unknown recording command: {command}."}
-    dev = devices.get_active_device()
-    if "recorder" not in dev.caps:
-        return {"ok": False,
-                "message": (f"AccessCaster can read the recorder on the {dev.name} but not drive "
-                            f"it: how to do that has only ever been confirmed on a RODECaster "
-                            f"Pro 2, so rather than risk the wrong thing on this model, it "
-                            f"refuses.")}
+    gate = _recorder_gate()
+    if gate is not None:
+        return gate
 
     w = _recorder_watcher()
     before = w.snapshot().get("state") if w else None
@@ -843,11 +835,9 @@ def action_drop_marker() -> dict:
     Refused when nothing is running, because a marker has no meaning without a position. The
     ELAPSED TIME is what makes the reply useful: "marker at 2 minutes 5 seconds" is something you
     can find again in an editor, where "marker sent" is not."""
-    dev = devices.get_active_device()
-    if "recorder" not in dev.caps:
-        return {"ok": False,
-                "message": (f"AccessCaster can read the recorder on the {dev.name} but not drive "
-                            f"it, so it cannot drop a marker.")}
+    gate = _recorder_gate("drop a marker")
+    if gate is not None:
+        return gate
     w = _recorder_watcher()
     state = w.snapshot().get("state") if w else None
     if state != recorder.RECORDING:
@@ -883,11 +873,9 @@ def action_delete_recording(uid: int) -> dict:
 
     Refuses while a recording is running: deleting a take from under the recorder is the one version
     of this that could cost somebody real material rather than a test file."""
-    dev = devices.get_active_device()
-    if "recorder" not in dev.caps:
-        return {"ok": False,
-                "message": (f"AccessCaster can read the recorder on the {dev.name} but not drive "
-                            f"it, so it cannot delete a recording.")}
+    gate = _recorder_gate("delete a recording")
+    if gate is not None:
+        return gate
     if not recorder.DELETE_PROVEN:
         return {"ok": False, "message": recorder.DELETE_UNPROVEN_MESSAGE}
     w = _recorder_watcher()
@@ -1535,10 +1523,10 @@ UNIT_SETTINGS = [
      "kind": "bool",
      "detail": "Whether the time appears on the unit's own screen. Nothing you can hear; it is here "
                "for a sighted co-host, and because turning it off is otherwise touchscreen-only."},
-    # ---- THE LOCKOUTS (same session, same method). ------------------------------------------------
-    # Each was set and cleared on the desk and left it byte-clean. They are last on the page on
-    # purpose: they are the ones that can make a working desk feel broken, so the wording has to say
-    # exactly what goes quiet and that this app can always undo it.
+    # ---- THE LOCKOUTS (selectors derived and read-back proven). ----------------------------------
+    # They are last on the page on purpose: they are the ones that can make a working desk feel
+    # broken, so the wording has to say exactly what goes quiet and that this app can always undo
+    # it.
     {"prop": "disableAllPhysicalButtons", "label": "Lock the unit's physical buttons", "kind": "bool",
      "detail": "Stops the buttons on the unit itself doing anything, so a knock or a curious guest "
                "cannot change your mix. The faders and the touchscreen still work, and this app "
@@ -1557,16 +1545,11 @@ UNIT_SETTING_BY_PROP = {s["prop"]: s for s in UNIT_SETTINGS}
 assert all(p in rcp_transfer.UNIT_SETTING_SEL for p in UNIT_SETTING_BY_PROP), \
     "a UNIT_SETTINGS entry has no selector in rcp_transfer.UNIT_SETTING_SEL"
 
-# THE OTHER DIRECTION IS THE ONE THAT DRIFTS. The assert above only says the page never names a
-# setting we cannot write. It says nothing about a setting we CAN write never reaching the page,
-# which is what happens every time a name is added to the address table and no Device page entry
-# follows. Nothing fails, because nothing is checking: the only symptom is the unit-settings suite
-# comparing the two sets and finding them unequal, which reads as a broken test rather than drift.
-#
-# So membership now has ONE source: the address table. A writable setting either appears on the
-# Device page or is named here with the reason, and `unit_settings_off_page` reports anything that
-# is neither. Same shape as profile_coverage.NOT_SAVED, which is the pattern that works in this
-# codebase: an omission has to be a decision somebody wrote down, not a gap nobody noticed.
+# THE OTHER DIRECTION IS THE ONE THAT DRIFTS: a name added to the address table with no Device page
+# entry fails nothing. So membership has ONE source, the address table: a writable setting either
+# appears on the Device page or is named here with the reason, and `unit_settings_off_page` reports
+# anything that is neither. Same shape as profile_coverage.NOT_SAVED: an omission is a written
+# decision, not a gap nobody noticed.
 UNIT_SETTINGS_NOT_ON_PAGE = {
     "outputMonMute": "Has its own control: Routing > Levels, 'Mute the monitor speakers'. A second "
                      "copy on the Device page would be two controls for one setting, which is worse "
@@ -1654,13 +1637,11 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     spec = UNIT_SETTING_BY_PROP.get(prop)
     if spec is None:
         return {"ok": False, "message": f"Unknown unit setting: {prop}."}
-    dev = devices.get_active_device()
-    if "unit_settings" not in dev.caps:
-        return {"ok": False,
-                "message": (f"These settings can be read but not changed on the {dev.name}: "
-                            f"changing them has only ever been confirmed on a RODECaster Pro 2, "
-                            f"so AccessCaster leaves them alone rather than risk changing the "
-                            f"wrong one.")}
+    gate = _cap_gate("unit_settings", lambda name:
+                     f"These settings can be read but not changed on the {name}: changing them "
+                     f"has only been confirmed on a RODECaster Pro 2.")
+    if gate is not None:
+        return gate
     try:
         v = int(value)
     except (TypeError, ValueError):
@@ -1677,11 +1658,10 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
         v = max(int(spec["min"]), min(int(spec["max"]), v))
         said = str(v)
     # WRITING outputMonFixed CLEARS outputMonMute, so switching to fixed level OPENS THE MONITOR
-    # SPEAKERS - with a live mic in the room, which is feedback (measured on a Pro II).
-    # Writing outputMonFixed back does not re-mute, so the mute is read first
-    # and PUT BACK after, and the user is told. Verified rather than assumed: the mute is only
-    # rewritten if the desk actually moved it, so if a firmware stops doing this the code goes quiet
-    # on its own instead of writing a value nobody asked for.
+    # SPEAKERS - with a live mic in the room, which is feedback (measured on a Pro II). Writing
+    # outputMonFixed back does not re-mute, so the mute is read first and PUT BACK after, and the
+    # user is told. The mute is only rewritten if the desk actually moved it, so a firmware that
+    # stops doing this gets no write nobody asked for.
     guard_mute = prop == "outputMonFixed"
     extra = ""
     try:
@@ -1713,14 +1693,13 @@ def _overview_routing(blob: bytes) -> dict:
 
     Two things shape the wording. First, the defaults in devices.py are a known-good set rather
     than a factory capture (see the provenance comment there), so this says "usually" and never
-    "wrong". Second:50 - a Mix Minus output carries no exclusion flags at all,
-    because the self-exclusion is implicit in the mode, so mode is reported before exclusions."""
+    "wrong". Second, a Mix Minus output carries no exclusion flags at all, because the
+    self-exclusion is implicit in the mode, so mode is reported before exclusions."""
     dev = devices.get_active_device()
     state = rcp_read.read_matrix_state(blob)
     if not state.get("ok"):
         return {"ok": False, "reason": state.get("reason") or "The routing could not be read.",
                 "notes": []}
-    mode_names = {0: "Main Mix", 1: "Mix Minus", 2: "Custom"}
     # NAMED FROM EVERY SOURCE, COUNTED FROM THE LIVE ONES. The desk keeps a cross-point for Game,
     # Music, A and B in both modes, but in Standard nothing can feed them, so a note that counts them
     # says "USB 2 carries only Game, Music, A and B" about an output that carries nothing at all.
@@ -1734,8 +1713,8 @@ def _overview_routing(blob: bytes) -> dict:
             continue
         default = out.get("default_mode")
         if default is not None and mode != default:
-            notes.append(f"{out['label']} is set to {mode_names.get(mode, mode)}, "
-                         f"usually {mode_names.get(default, default)}.")
+            notes.append(f"{out['label']} is set to {OUTPUT_MODE_LABEL.get(mode, mode)}, "
+                         f"usually {OUTPUT_MODE_LABEL.get(default, default)}.")
         cells = sorted((s, off) for s, off in (state["excluded"].get(o) or {}).items()
                        if s in live)
         excluded = [src_label.get(s, f"source {s}") for s, off in cells if off]
@@ -1744,19 +1723,11 @@ def _overview_routing(blob: bytes) -> dict:
         # "Chat does not include Mic 2, Mic 3, Mic 4, USB 1, Chat, USB 2, Bluetooth and SMART pads"
         # is a mouthful that hides the one fact that matters: Chat carries Mic 1 only.
         if excluded and len(included) < len(excluded):
-            notes.append(f"{out['label']} carries only {_join_and(included)}."
+            notes.append(f"{out['label']} carries only {wording.join_and(included)}."
                          if included else f"{out['label']} carries nothing at all.")
         elif excluded:
-            notes.append(f"{out['label']} does not include {_join_and(excluded)}.")
+            notes.append(f"{out['label']} does not include {wording.join_and(excluded)}.")
     return {"ok": True, "reason": "", "notes": notes}
-
-
-def _join_and(items) -> str:
-    """'a', 'a and b', 'a, b and c'. Spoken lists read badly with a trailing comma."""
-    items = list(items)
-    if len(items) <= 1:
-        return items[0] if items else ""
-    return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def _pads_engaged(blob: bytes) -> list:
@@ -1814,9 +1785,9 @@ def device_overview() -> dict:
 
     Fader positions come from the ANCHOR half of `mixLevelWithAnchor`, not from `faderLevel`:
     faderLevel is NOT the physical position (it does not move while fader 1 travels top to halfway)
-    and only the virtual slots carry a value there. The
-    anchor is the channel fader's own position and is present on every cross-point in that
-    source's row, physical faders included, so we read it from the row's first cell."""
+    and only the virtual slots carry a value there. The anchor is the channel fader's own position
+    and is present on every cross-point in that source's row, physical faders included, so we read
+    it from the row's first cell."""
     dev = devices.get_active_device()
     try:
         with _hid_lock:
@@ -1875,27 +1846,15 @@ def device_overview() -> dict:
             "device_name": dev.name,
             "muted": muted,
             "soloed": soloed,
-            # STORAGE, BY EXCEPTION like everything else here: this reports a volume that is nearly
-            # full and nothing at all when there is room. It belongs on this
-            # page rather than only on Hardware because "the card is nearly full" is the fact you
-            # need BEFORE you press record, not after, and a blind operator has no bar to glance at.
-            # No card at all is deliberately NOT an exception: this desk usually has no card in, and
-            # a warning that is always there is a warning nobody hears.
+            # EVERYTHING BELOW IS BY EXCEPTION: empty when the desk is fine. No card and no
+            # recording destination are deliberately NOT exceptions: a desk often has neither, and
+            # a warning that is always there is one nobody hears. A nearly full volume is, because
+            # it is the fact you need BEFORE you press record.
             "storage_low": _storage_low(blob),
-            # THE RECORDER, by exception like everything else here: reported only when it is
-            # actually recording or paused. "No destination" is deliberately NOT an exception -
-            # this desk usually has no drive in it, and a warning that is always there is one
-            # nobody hears (the same rule the missing memory card follows). A recording running
-            # when you thought it was not is the fact worth interrupting for.
             "recording": _overview_recording(blob),
-            # PADS LEFT SWITCHED ON, which is the single best example of what this overview is
-            # FOR: a latched voice-FX pad sits on a live mic, makes no sound of its own, changes
-            # nothing about the pad's
-            # name, type or colour, and simply makes you sound wrong with nothing on screen to say
-            # why. Reported by exception like everything else here, so it costs nothing when the
-            # desk is fine.
+            # A latched voice-FX pad sits on a live mic, makes no sound of its own and simply makes
+            # you sound wrong, with nothing on screen to say why.
             "pads_engaged": _pads_engaged(blob),
-            # By exception, like the rest: empty unless the desk says an update is waiting.
             "firmware_update": _firmware_update(blob),
             "faders": faders,
             "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,
@@ -1968,8 +1927,7 @@ def read_device_status() -> dict:
                            "audio only.",
                 "interfaces": interfaces,
             }
-        # GAP-10: name the actual connected desk (Pro II or Duo), not a hardcoded model, so the
-        # status line and the UI chrome (title/brand/About, updated in app.js) reflect reality.
+        # The connected desk's own name, which the page's title, brand and About take up.
         device_name = devices.resolve_device(iface.product_id).name
         try:
             # ONE COMMAND, `I`, AND NEVER `VER` OR THE `U` PING. With the desk in Expanded, either
@@ -2030,17 +1988,9 @@ def read_network_status() -> dict:
         """A NETWORK-block value, by block rather than by "first in the stream".
 
         `first()` cannot be used for a name that might occur in more than one block: False is a
-        meaningful value, so it has no way to tell a real answer from the wrong block's.
-
-        THE CASE THAT TAUGHT US THIS WAS A STRAY, NOT A SCHEMA. A second `btVisible` sat in SYSTEM
-        reading False, so `first()` reported "not discoverable" while the radio was discoverable
-        with a phone connected. It accepted writes, kept the value, changed nothing on the unit and
-        never tracked the radio - which is the signature of a stray, and it vanished when the desk
-        was factory reset. An earlier guess that it belonged to a sibling RODE product sharing this
-        schema was wrong.
-
-        READING BY BLOCK IS STILL RIGHT, and that is why this stays: a stray can be appended to any
-        block by one malformed write, so a name is only unambiguous when the block is named too.
+        meaningful value, so it has no way to tell a real answer from the wrong block's. A stray
+        can be appended to any block by one malformed write (a stray `btVisible` in SYSTEM reads
+        False while the radio is discoverable), so a name is only unambiguous with its block.
         """
         return rcp_read.block_value(blob, "NETWORK", name)
 
@@ -2062,12 +2012,7 @@ def read_network_status() -> dict:
     auto = first("autoReconnect")
     midi = first("systemMidiControl")
     bt_visible = net("btVisible")
-    # The 5 paired-device slots (btPairedNumber1..5); keep only non-blank ones.
-    bt_paired = []
-    for n in range(1, 6):
-        v = first(f"btPairedNumber{n}")
-        if v:
-            bt_paired.append(v)
+    bt_paired = slots("btPairedNumber", 5)
     # systemFirmwareVersion sits near the tail of the dump (whose length varies),
     # so prefer the value the startup/mixer read already captured into session state.
     with _session_state_lock:
@@ -2117,12 +2062,8 @@ def read_network_status() -> dict:
         # else on this page is read-only, and the page says WHICH is which rather than leaving a
         # user to find out by pressing things.
         "writable": "network_write" in devices.get_active_device().caps,
-        # PARKED, NOT WRITTEN OFF. The page says what is missing and what to do instead.
-        # THE TWO REMAINING CASES ARE DIFFERENT AND MUST NOT BE BLURRED. Bluetooth scanning is
-        # TESTED and does nothing: `btDoScan` written on both blocks that carry it, with a phone in
-        # pairing mode, never returns a result. Pairing and a fixed IP are simply NOT BUILT YET,
-        # which is not the same claim at all - and telling someone a thing is impossible when it is
-        # merely unfinished is the mistake this project has made seven times over (see PARITY.md).
+        # TWO DIFFERENT CLAIMS, NOT TO BE BLURRED. Bluetooth scanning is TESTED and does nothing on
+        # a Pro II. Pairing and a fixed IP are NOT BUILT YET, which is not the same as impossible.
         "still_read_only": (
             "Scanning for Bluetooth devices does not work: it was tried and the unit reports "
             "nothing back. Make the unit discoverable above and pair from the phone instead. "
@@ -2138,17 +2079,15 @@ def read_network_status() -> dict:
 # block (not the SYSTEM duplicate), leaves no stray, and a phone then finds the unit, pairs, and
 # plays audio through it. `wifiSSID` and `wifiPSK` write as strings, and with the radio on the unit
 # holds a DHCP address 15 seconds later - confirmed by PINGING it, not by the unit reporting success.
-# "The RODE app's own Network screen is read-only, so there is no capture to learn from" says
-# nothing whatsoever about the bus. Never file a block unreachable on that reasoning.
+# The RODE app's Network screen being read-only says nothing about what the bus can write.
 #
 # WHAT IS DELIBERATELY NOT OFFERED, and it is not caution:
 #   * **Bluetooth scanning.** `btDoScan` is addressable and written on both blocks that carry it,
 #     with a phone in pairing mode: it latches True and never returns a result. Beware the SYSTEM
 #     occurrence, which is a STRAY, so any "the write lands but nothing happens" reading taken there
 #     is a write into a stray; the NETWORK one is genuinely dead. Making the unit discoverable and
-#     pairing FROM the phone is the route that works, and it is offered.
-#     WIFI scanning is NOT on this list: see action_scan_wifi. "No push back means not consumed" is
-#     a bad heuristic, not a measurement, and it is what kept wifi scanning here.
+#     pairing FROM the phone is the route that works, and it is offered. WIFI scanning works: see
+#     action_scan_wifi. No push back does not mean a write was not consumed.
 #   * **Pairing, connecting and unpairing.** `btDoPair` / `btDoConnect` / `btDoDisconnect` /
 #     `btDoUnPair` are addressable, but they are ACTIONS taking an address we have never seen the
 #     format of, and nothing is paired here to test against. Making the unit DISCOVERABLE and
@@ -2164,13 +2103,11 @@ LOCAL_ONLY_ROUTES = {"/api/network/wifi/join", "/api/access", "/api/access/new"}
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 # ---------------------------------------------------------------------------
-# REMOTE ACCESS: a token, because this server binds 0.0.0.0 and had no authentication at all.
+# REMOTE ACCESS: a token, because this server binds 0.0.0.0.
 #
-# THE HAZARD IT CLOSES. The page is meant to be reachable from a phone in another room, which is a
-# real feature and stays. But until now anyone who could reach port 8770 had FULL control of the
-# desk - mutes, routing, Clear all pads - with nothing asked of them. Fine on a home LAN or a
-# tailnet, not at a venue, a shared studio or a university network. The app is for everyone, not
-# just for the machine it happens to be installed on.
+# THE HAZARD IT CLOSES. The page is meant to be reachable from a phone in another room, and without
+# a token anyone who can reach port 8770 has FULL control of the desk - mutes, routing, Clear all
+# pads. Fine on a home LAN or a tailnet, not at a venue, a shared studio or a university network.
 #
 # THE SHAPE, and each part is a deliberate trade:
 #   - REQUESTS FROM THIS MACHINE ARE ALWAYS ALLOWED. Anything already running here can drive the
@@ -2546,9 +2483,9 @@ def action_set_midi(on: bool) -> dict:
 # --- Control announcer: speak physical button presses aloud (accessibility aid) -------------
 # A background thread listens to report-04 HID events and speaks bank changes / mute / solo /
 # encoder presses via SAPI (say.ps1), so a screen-reader user knows what a physical press did
-# without seeing the touchscreen (the announce_controls.py logic, server-integrated).
+# without seeing the touchscreen.
 #
-# DEVICE-AGNOSTIC (GAP-7, verified): the decoder keys off the report-04 PROPERTY NAMES
+# DEVICE-AGNOSTIC: the decoder keys off the report-04 PROPERTY NAMES
 # (selectedBank / cmutePressed / csoloPressed / encoderPressed), which are protocol-level and shared
 # across both desks, NOT a Pro II physical control-map or channel-index table. It speaks generic
 # "Bank N" / "Mute" / "Solo" / "Select" (no per-channel index), so the Duo's fewer faders/banks need
@@ -2559,10 +2496,10 @@ def action_set_midi(on: bool) -> dict:
 # ONE read-only handle open for its whole lifetime and reads continuously, WITHOUT taking _hid_lock.
 # This is safe because the Windows HID stack delivers every input report (the report-04 control
 # events) to each open handle's own queue, so the listener never misses a press and never disturbs
-# the writes, which open their own handle under _hid_lock. (Verified on this unit: a second handle
-# opens fine and a command still ACKs while it is open, see tools/probe_concurrent_hid.py.)
-# DO NOT go back to opening and closing the handle around each poll to avoid two concurrent handles:
-# closing FLUSHES the input queue, so every press landing in the gap is dropped and bank/mute/solo
+# the writes, which open their own handle under _hid_lock (measured: a command still ACKs while a
+# second handle is open).
+# DO NOT open and close the handle around each poll to avoid two concurrent handles: closing
+# FLUSHES the input queue, so every press landing in the gap is dropped and bank/mute/solo
 # announcements go intermittent. A persistent handle has no deaf windows and no open/close churn.
 #
 # THE HANDLE IS REOPENED ON A FRESHLY RESOLVED INTERFACE, never on a remembered one. The desk
@@ -2718,8 +2655,8 @@ _ANN_WAV_PREFIX = "!wav "
 # NOTHING IS EVER PLAYED OUT LOUD UNDER THIS FLAG, set by `DevTools/_bootstrap` for any script
 # named `test_*`. The announcer speaks through SAPI to the default output, which on the machines
 # this app is built for IS THE DESK - so an offline test that happens to exercise an announcing
-# path plays tones and speech into the user's monitoring, with nothing on screen to explain it.
-# possibly mid-recording. Phrases are still LOGGED (see _ann_say), so a test can still be
+# path plays tones and speech into the user's monitoring, possibly mid-recording, with nothing on
+# screen to explain it. Phrases are still LOGGED (see _ann_say), so a test can still be
 # diagnosed; they simply never reach an audio device.
 _ANN_SILENT = bool(os.environ.get("ACCESSCASTER_SILENT"))
 
@@ -2877,9 +2814,8 @@ def _ann_say(text: str) -> None:
     to" are different faults and the log has to tell them apart.
 
     THE ANNOUNCER SWITCH IS ENFORCED HERE, because it is the only place every phrase passes
-    through. Roughly half the speech in this app comes from outside the announcer's read loop - the
-    virtual-devices follow-up after a USB mode change, the recorder watcher - so a switch that only
-    stopped the loop left all of that talking to somebody who had asked for silence. The phrases
+    through: roughly half the speech comes from outside the announcer's read loop (the
+    virtual-devices follow-up after a USB mode change, the recorder watcher). The phrases
     announcing that speech is BACK are safe: each one sets the flag before it speaks.
     """
     what = ("cue " + os.path.basename(text[len(_ANN_WAV_PREFIX):]).split("-")[0]
@@ -2925,10 +2861,10 @@ _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
 _ANN_MIXER_QUIET_S = 0.75
 _ann_mixer_quiet_until = 0.0
 # PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Hardware-measured: a short press runs
-# 475 ms down-to-up and mutes nothing; a hold
-# pushes `channelOutputMute = True` 765 ms after the press edge, WHILE STILL HELD, and mutes the
-# channel selected BEFORE the press. So the desk does not advance its encoder ring on a hold. RODE's
-# user guide documents press-and-hold only on the REC button, so it is not there either.
+# 475 ms down-to-up and mutes nothing; a hold pushes `channelOutputMute = True` 765 ms after the
+# press edge, WHILE STILL HELD, and mutes the channel selected BEFORE the press. So the desk does
+# not advance its encoder ring on a hold. RODE's user guide documents press-and-hold only on the REC
+# button, so it is not there either.
 #
 # Two consequences, both of which this handling exists for:
 #  1. ANNOUNCING THE NEXT RING POSITION ON THE PRESS EDGE IS WRONG ON A HOLD: you hear the next
@@ -2943,7 +2879,7 @@ _ann_mixer_quiet_until = 0.0
 _ANN_ENC_HOLD_S = 0.9
 # How long to wait for the STATE push after a press edge before falling back to the generic word.
 # Measured gap on this desk is ~70 ms; this is deliberately generous. The fallback keeps the
-# announcer device-agnostic (GAP-7): a desk that pushes no state still says "Mute" / "Solo".
+# announcer device-agnostic: a desk that pushes no state still says "Mute" / "Solo".
 _ANN_PENDING_S = 0.5
 
 
@@ -3017,8 +2953,7 @@ _ANN_POT_COUNT = 4
 _ANN_ENC_DEAD_S = 0.45     # a turn with no level change within this was a turn against nothing
 _ANN_ENC_DEAD_GAP_S = 4.0  # and do not repeat that message more often than this
 # A pushed cross-point selector is CROSS_POINT_BASE + 13*source + output (rcp_transfer), and the
-# matrix row IS the source code (ProjectMemory/), so one selector byte gives us the
-# source directly.
+# matrix row IS the source code, so one selector gives the source directly.
 _ANN_XPOINT_BASE = rcp_transfer.CROSS_POINT_BASE
 _ANN_XPOINT_STRIDE = rcp_transfer.CROSS_POINT_SOURCE_STRIDE
 
@@ -3026,9 +2961,9 @@ _ANN_XPOINT_STRIDE = rcp_transfer.CROSS_POINT_SOURCE_STRIDE
 def _ann_source_label(source_code: int) -> str:
     """A speakable name for a matrix SOURCE code, e.g. 'Mic 1'. Never touches the device.
 
-    `all_labels`, NOT `code_label`: a fader can HOLD a stereo-linked pair (codes 4, 5, 6) even though
-    a pair is never something you assign, and code_label covers only the assignable set. With the
-    narrow one, a linked Mic 1 + 2 is announced as "Source 4" out loud."""
+    `labels_for`, NOT `code_label`: a fader can HOLD a stereo-linked pair (codes 4, 5, 6) even
+    though a pair is never something you assign, and code_label covers only the assignable set, so
+    a linked Mic 1 + 2 would be announced as "Source 4"."""
     try:
         lbl = devices.get_active_device().fader.labels_for(channels.usb_expanded()).get(source_code)
         if lbl:
@@ -3045,12 +2980,10 @@ def _ann_channel_label(strip_idx: int) -> str:
     """A speakable name for a strip index, e.g. 'Mic 2', from the known fader layout.
 
     Never touches the device: the announcer thread holds no HID lock, so a model dump from here
-    would fight the writes. Uses the LAST KNOWN layout rather than the TTL'd cache: nothing refreshes
-    that cache while the operator is only pressing buttons, so every announcement past the 15 s TTL
-    degrades to "Channel 4". The layout is seeded once when
-    the announcer starts and kept current from the stream (see channels.note_strip_source), so a
-    stale name is only possible if the layout changed in a way the desk never reported. Falls back to
-    'Channel N' whenever we have never seen a layout or it does not name that slot."""
+    would fight the writes. Falls back to the LAST KNOWN layout when the TTL'd cache has expired:
+    nothing refreshes that cache while the operator is only pressing buttons. The layout is seeded
+    once when the announcer starts and kept current from the stream (channels.note_strip_source).
+    'Channel N' when no layout has been seen or it does not name that slot."""
     try:
         vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
         if vec and 0 <= strip_idx < len(vec):
@@ -3317,26 +3250,19 @@ def _ann_seed_layout(st: dict) -> None:
                 known[("headphone", i)] = max(0.0, min(1.0, v / _ANN_POT_LEVEL_MAX))
         mutes = rcp_read.values(blob, "channelOutputMute")
         st["muted"] = {i: v for i, v in enumerate(mutes) if isinstance(v, bool)}
-        # SEED THE SELECTED CHANNEL for the same reason as the mutes: the stream reports CHANGES,
-        # and the handler speaks whenever the pushed value differs from what it last saw. With no
-        # seed, `st["chan_sel"]` starts absent, so the FIRST push of systemChannelSelected - which
-        # is normally the resting -1, nothing selected - reads as a change and announces
-        # "Levels. Encoder sets fader and monitor levels" out of nowhere, some time after startup,
-        # as though the touchscreen had done something. Seeding makes an unchanged value silent,
-        # which is the whole contract.
+        # SEED EVERY VALUE THE HANDLER COMPARES AGAINST: the stream reports CHANGES, and an
+        # unseeded value makes the desk's first push of a resting state ("Levels", "Bank 1") read
+        # as a change and be announced out of nowhere. Seeding makes an unchanged value silent.
         sel = rcp_read.values(blob, "systemChannelSelected")
         if sel and isinstance(sel[0], int):
             st["chan_sel"] = sel[0]
-        # ...and the SELECTED BANK, for exactly the same reason: with st["bank"] left at None, the
-        # desk's first push of the resting bank announces "Bank 1" out of nowhere. Same root cause
-        # as the phantom "Levels" above, second property.
         # Stored RAW (the desk numbers banks from 0); the announcement adds 1.
         bank = [v for v in rcp_read.values(blob, "selectedBank") if isinstance(v, int)]
         if bank:
             st["bank"] = bank[0]
             _hk_note_bank(bank[0])
-        # ...and THE USB AUDIO MODE, which is seeded for the opposite reason to the three above:
-        # not to keep a resting value quiet, but so a reconnect can tell that it MOVED. The desk
+        # THE USB AUDIO MODE is seeded for the opposite reason: not to keep a resting value quiet,
+        # but so a reconnect can tell that it MOVED. The desk
         # can drop out of Expanded on its own (measured: off the bus unprompted, back two seconds
         # later in Standard with the setting reset), and the change is invisible - the operator's
         # extended inputs stop carrying anything and their computer's audio has rearranged
@@ -3347,12 +3273,9 @@ def _ann_seed_layout(st: dict) -> None:
     except Exception:
         pass
     st["known"] = known
-    # ...and SEED WHAT COUNTS AS ALREADY SPOKEN, which is the same fix as the two above and the
-    # third property to need it. `_ann_flush_pending` speaks a level unless it matches st["said"],
-    # an empty st["said"] makes the desk's first push of a RESTING level read as a change, so the
-    # announcer opens with "Monitor 95 percent" as though something had moved it. It would fire on
-    # every reconnect too, which after a crash is when a spurious announcement is least welcome.
-    # Seeding makes an unchanged value silent, which is the whole contract of a CHANGE stream.
+    # WHAT COUNTS AS ALREADY SPOKEN, seeded on the same contract: `_ann_flush_pending` speaks a
+    # level unless it matches st["said"], so an empty one opens every connect and reconnect with
+    # "Monitor 95 percent" as though something had moved it.
     st["said"] = dict(known)
 
 
@@ -3371,15 +3294,9 @@ def _ann_selected_phrase(strip_idx: int) -> str:
     the encoder with nothing to move. We work that out from the channel itself - whether its source
     has a mic-gain or line-level selector - so it is known at press time, no waiting.
 
-    "NOTHING TO ADJUST" IS WRONG FOR A BUS, and the SMART pads strip is the case that shows it: it
-    rides a fader like anything else. The phrase is true only of the CHANNEL SETUP screen the button
-    opens, where the encoder moves a gain and a bus has none. The channel still HAS a level, its
-    fader.
-
-    SO SAY WHAT THE CHANNEL HAS, NEVER WHAT IT LACKS. A bus gets "Fader level only", which is true
-    whether that fader is
-    physical or virtual, so there is no device branch here and nothing to keep in step. Only a strip
-    with NOTHING on it gets "nothing to adjust", because only then is it true."""
+    SAY WHAT THE CHANNEL HAS, NEVER WHAT IT LACKS. A bus such as the SMART pads has no gain but
+    still rides a fader, so it gets "Fader level only", which is true whether that fader is
+    physical or virtual. Only a strip with NOTHING on it gets "nothing to adjust"."""
     who = _ann_channel_label(strip_idx)
     dev = devices.get_active_device()
     try:
@@ -3409,11 +3326,9 @@ def _ann_gain_label(path, is_mic: bool):
     Mic strips carry 'gain'; line strips carry 'level', which is what the app and the desk call them,
     so the spoken phrase matches the control the operator knows.
 
-    THE ADDRESS IS THE WHOLE PATH, not the low selector byte. Taking that byte alone and looking it
-    up in a per-device table breaks on a Duo, whose table holds the dead MIX selectors: a gain turned
-    ON THE DESK then pushes at an address the lookup does not recognise, returns None, and is never
-    spoken at all. Matching the path against DeviceModel.input_path cannot drift, because the
-    announcer and the writer read the same rule."""
+    THE ADDRESS IS THE WHOLE PATH, not the low selector byte, matched against
+    DeviceModel.input_path: the announcer and the writer read the same rule, so they cannot drift.
+    A per-device selector table would miss every gain turned on a Duo's own controls."""
     dev = devices.get_active_device()
     entry = dev.channel_for_input_path(path)
     if entry is None:
@@ -3506,8 +3421,8 @@ def _ann_ring_phrase(st: dict, pos: int) -> str:
     kind, idx = ring[pos % len(ring)]
     name = "Monitor level" if kind == "monitor" else _ann_fader_label(idx)
     # A muted channel's level is not the useful fact about it, and quoting a healthy-sounding
-    # percentage for something you cannot hear is actively misleading. Say the
-    # mute instead. The map is seeded from the startup dump and kept current from every pushed
+    # percentage for something you cannot hear is actively misleading. Say the mute instead. The
+    # map is seeded from the startup dump and kept current from every pushed
     # `channelOutputMute`, so it costs no device read. Fader index and strip index are the same
     # space here: both index the channelInputSource vector.
     if kind == "fader" and (st.get("muted") or {}).get(idx):
@@ -3536,12 +3451,11 @@ def _ann_note_level(st: dict, kind: str, source: int, level: float) -> None:
     while the encoder ring's cache is keyed by FADER INDEX because that is what the encoder cycles.
     The translation below is the only crossing point; do not add another.
 
-    We have always detected the PRESS itself (`encoderPressed`, announced as "Select"), but the press
-    carries nothing that says WHICH channel it selected, and the target is chosen by touch. So the
-    first movement has to do that job: speaking it immediately means ONE click names the channel,
-    instead of nudging repeatedly and waiting for each nudge to settle to find out what is being
-    held. Later movements in the same gesture still wait for the settle, so a full sweep is one
-    closing phrase rather than a torrent."""
+    The PRESS (`encoderPressed`) carries nothing that says WHICH channel it selected, and the target
+    is chosen by touch. So the first movement has to do that job: speaking it immediately means
+    ONE click names the channel, instead of nudging repeatedly and waiting for each nudge to
+    settle to find out what is being held. Later movements in the same gesture still wait for the
+    settle, so a full sweep is one closing phrase rather than a torrent."""
     key = (kind, source)
     now = time.time()
     st.setdefault("levels", {})[key] = level
@@ -3603,14 +3517,9 @@ def _ann_flush_pending(st: dict) -> None:
         st["enc_turn_at"] = None
         if (time.time() - st.get("enc_dead_said", 0.0)) > _ANN_ENC_DEAD_GAP_S:
             st["enc_dead_said"] = time.time()
-            # Name what is holding the encoder. That is the whole of the original "the encoder has
-            # stopped working" mystery.
-            #
-            # SAY WHAT THE CHANNEL HAS, NEVER WHAT IT LACKS, the same rule _ann_selected_phrase
-            # follows. A flat "has nothing for the encoder to adjust" fires on ANY turn the ring
-            # does not see, including a mic gain that is moving perfectly well, so Mic 1 gets told
-            # it has nothing to adjust while the encoder is adjusting it. The phrase builder works
-            # out what the strip actually has, so it cannot make that claim wrongly.
+            # Name what is holding the encoder, saying what the channel HAS (_ann_selected_phrase):
+            # this fires on ANY turn the ring does not see, including a mic gain that is moving
+            # perfectly well, so a flat "nothing to adjust" would be wrong.
             #
             # The way out is MEASURED, not assumed: the channel button TOGGLES
             # (systemChannelSelected 0, then -1 on the second press), so that is what is named here.
@@ -3685,7 +3594,7 @@ def _ann_mark_self_gain(key, is_mic: bool) -> None:
         dev = devices.get_active_device()
         if is_mic:
             def matches(c):
-                return c.get("kind") == "mic" and int(c["source_code"]) + 1 == key
+                return c.get("kind") == "mic" and channels.mic_channel_number(c) == key
         else:
             def matches(c):
                 return c.get("kind") == "line" and c["name"] == key
@@ -3808,9 +3717,8 @@ def _announce_loop() -> None:
                 # THE CACHED PATH GOES STALE ON A RE-ENUMERATION, so it is dropped after any failed
                 # open and re-resolved on the next pass. The desk returns as a DIFFERENT USB product
                 # id - the id encodes the audio configuration, so `outputMultiMode` changes it - and
-                # a handle re-opened on the old path fails for ever. Holding the path was what left
-                # the announcer retrying silently until the app was restarted, which to a
-                # screen-reader user is indistinguishable from the app having died.
+                # a handle re-opened on the old path fails for ever, leaving the announcer silently
+                # retrying until the app restarts.
                 iface = None
                 misses += 1
                 time.sleep(_ANN_RETRY_S if misses <= _ANN_RETRY_FAST_TRIES
@@ -3887,8 +3795,8 @@ _ann_quiet_start = threading.Event()
 _ann_suspended_for_record = False
 
 
-# ON BY DEFAULT, and it is a CHOICE rather than a policy. Most people do not
-# want announcements in the recording, so the default has to be off-while-recording. But somebody
+# ON BY DEFAULT, and it is a CHOICE rather than a policy. Most people do not want announcements in
+# the recording, so the default has to be off-while-recording. But somebody
 # whose announcements already go to a separate output - a second pair of earbuds, say - is not
 # putting anything into the take and would rather keep hearing the unit. Assuming that away would
 # silence the operator for the whole show for no reason.
@@ -3977,8 +3885,8 @@ def action_set_announce_mute_tones(on: bool) -> dict:
     """Whether a mute or unmute is a TONE rather than a spoken sentence.
 
     The reasoning is timing: mute is pressed in the middle of something, and a sentence finishes
-    after the moment it was describing. A cue of two notes,
-    falling for muted and rising for unmuted, lands in a sixth of a second.
+    after the moment it was describing. A cue of two notes, falling for muted and rising for
+    unmuted, lands in a sixth of a second.
 
     THE TRADE IS THE CHANNEL NAME, which a tone cannot carry. That is why it is an option and why it
     is off by default. Everything else the announcer says is unaffected.
@@ -3990,11 +3898,9 @@ def action_set_announce_mute_tones(on: bool) -> dict:
     _ann_mute_tones = bool(on)
     update_settings(announcer_mute_tones=_ann_mute_tones)
     if on:
-        # PLAYED WITH A GAP, and it has to be. The pump coalesces whatever is waiting down to the
-        # newest item, which is right for speech (the latest state is the only one worth hearing) and
-        # wrong for a pair of cues: queued back to back, the low one was dropped every time and the
-        # confirmation taught the wrong half of the lesson. Long enough for the first tone to play
-        # (110 ms) and to clear the pump's own pacing.
+        # PLAYED WITH A GAP. The pump coalesces whatever is waiting down to the newest item, so two
+        # cues queued back to back play only the second. Long enough for the first tone to play and
+        # to clear the pump's own pacing.
         _ann_tone("muted")
         time.sleep(max(0.45, _ANN_PACE_S * 2 + tones.DURATION_S))
         _ann_tone("unmuted")
@@ -4200,22 +4106,19 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     return {"ok": True, "message": msg, "gain_db": gain, "processing_changed": len(moved)}
 
 
-# GAP-8: there are NO Pro II-shaped, mic-1..4-only processing endpoints. app.js drives the
-# device-aware unified Channels view (/api/channels + /api/channels/param|module|...), which
-# resolves per-channel selectors from the active device (channels.proc_selector). The shared helpers
-# (PROCESSING_CONTROLS, _PROCESSING_PROP_SET, preset_list) belong to that view.
-
-
-# --- Unified Channels view (every processing-capable strip the device exposes: on the Pro II the
-# --- four mics, BT/USB1/Chat/USB2, and the SMART pads bus) --------------------------------------
+# --- Channels view: every processing-capable strip the device exposes (on the Pro II the four
+# --- mics, BT/USB1/Chat/USB2, and the SMART pads bus) ------------------------------------------
 # One adaptive panel per channel, mirroring the RODE app: mic channels add gain/phantom/polarity/
-# mic-type/effects; line channels (BT/USB1/Chat/USB2) have Level + processing. Processing (modules
-# + params) applies to every channel here (selectors decoded and device-proven).
-# Resolve a channel name against the CONNECTED device each call (not a static Pro II map): the
-# Duo exposes "Headset"/"USB1"/... instead of "Mic 3"/"Mic 4", so a fixed map built at import time
-# would reject the Duo's channels. channels.ui_channel_map() reads the active device's ui_channels.
+# mic-type/effects; line channels have Level + processing. Selectors are resolved per channel from
+# the active device (channels.proc_selector).
+
+
 def _ui_chan(name):
+    """A channel by name on the CONNECTED device, resolved per call: the Duo's names ("Headset",
+    "USB1") differ from the Pro II's, so a map built at import would reject them."""
     return channels.ui_channel_map().get(name)
+
+
 # Module on/off toggles shown in the UI, with screen-reader labels.
 PROCESSING_MODULES = [
     {"key": "hpf", "label": "High-pass filter"}, {"key": "eq", "label": "Equaliser"},
@@ -4276,7 +4179,7 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     """Mute or unmute a channel from software (channelOutputMute, proven writable on hardware).
 
     The real accessibility win here is reach: this is the same mute as the button on the unit, so it
-    can now be pressed from a phone or another room instead of by finding the right button by touch.
+    can be pressed from a phone or another room instead of by finding the right button by touch.
 
     Two details matter. It silences the channel in EVERY mix, not just the monitor (the firmware
     propagates it into the mix matrix), so the message says so plainly rather than implying it is a
@@ -4426,7 +4329,7 @@ def action_set_channel_wireless_mute(name: str, on: bool) -> dict:
     correctly (the property sits on the same CHANNEL node as the mute, measured) but nobody here owns
     a transmitter, so it has never been heard to work, and a channel with nothing paired has nothing
     to obey it. Claiming "the mic is muted" would be the app reading its own write back as an
-    outcome, which is the fault that hid the Duo's dead gain address for two months."""
+    outcome."""
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
@@ -4586,8 +4489,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
     try:
         _autogain_set(phase="preparing", message="Getting ready. Do not talk yet.")
         # 1. WINDOWS OUT OF THE WAY. Its level scales everything we are about to measure, and a
-        #    Windows mute would make the microphone look dead - which is exactly what it did on
-        #    this machine today.
+        #    Windows mute would make the microphone look dead.
         win = ""
         stream = _meter_stream()
         if stream:
@@ -4631,9 +4533,8 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
                 # THE CUE COMES FIRST, AND IT FINISHES FIRST - not because it would otherwise be
                 # measured (it plays out on USB 1, and the isolated mix excludes everything except
                 # the microphone, so it cannot reach the measurement) but because the person should
-                # not start talking over their own start signal. Only an
-                # acoustic path through monitor speakers could put it in the take, which is a
-                # different problem and not one to slow this down for.
+                # not start talking over their own start signal. Only an acoustic path through
+                # monitor speakers could put it in the take.
                 meters.cue("start")
                 _autogain_set(phase="listening", seconds=seconds, started=time.time(),
                               message="Speak now.")
@@ -4682,12 +4583,9 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
     except Exception as exc:
         _autogain_set(phase="failed", done=True, message=f"Auto gain stopped: {exc}")
     finally:
-        # THE PROCESSING IS ALWAYS PUT BACK, whatever went wrong, and the restore is VERIFIED.
-        # It was best-effort and silent in the first version, and on the very first run it failed
-        # and left Mic 1 unprocessed with nothing said about it. That is the worst possible way for
-        # this to fail: the operator sounds different and there is no sign of why. So it reads back,
-        # retries, and if it still cannot be put back it says so LOUDLY in the result rather than
-        # swallowing the error.
+        # THE PROCESSING IS ALWAYS PUT BACK, whatever went wrong, and the restore is VERIFIED: a
+        # silent failure leaves the operator sounding different with no sign of why. So it reads
+        # back, retries, and if it still cannot be put back it says so LOUDLY in the result.
         if restore_processing and not _autogain_restore_processing(mic):
             st = _autogain_state()
             _autogain_set(phase="failed", done=True,
@@ -4699,12 +4597,10 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
 class _ChatIsolation:
     """Make the Chat output carry ONE source for the length of a measurement, then put it back.
 
-    SHAUN'S IDEA, and it replaced a much worse one. The first version isolated the channel with the
-    Main Multitrack USB device, and switching that does not merely add an endpoint - it makes the
-    unit RE-ENUMERATE ITS WHOLE USB AUDIO FUNCTION. Measured: all four desk endpoints go inactive
-    for a second or two, Windows falls back to the laptop's own sound card (which is where his
-    screen reader suddenly came from), and on the way back Windows picks a different default.
-    Twice per run. Unusable before a show.
+    NOT the Main Multitrack USB device: switching that makes the unit RE-ENUMERATE ITS WHOLE USB
+    AUDIO FUNCTION. Measured: all four desk endpoints go inactive for a second or two, Windows falls
+    back to the computer's own sound card, taking the screen reader with it, and on the way back
+    Windows picks a different default. Twice per run.
 
     A custom mix costs none of that, because nothing about the USB audio function changes. It is
     the same operation as the "Chat carries only Mic 1" preset this app already has, so it uses
@@ -4797,16 +4693,16 @@ def _autogain_restore_processing(mic: int) -> bool:
     """Switch a mic's processing back on and CHECK it took. Returns True when it is really on.
 
     Read back rather than assumed: the write is an ordinary property write and can fail while the
-    unit is busy, which is precisely what happened on the first run of this feature.
+    unit is busy. The read resolves the mic's STRIP off the live fader vector, as the run's own
+    read does, so a reordered layout checks the right strip.
     """
     for attempt in range(3):
         try:
             with _hid_lock:
                 channels.set_processing_enabled(mic, True)
                 time.sleep(0.4)
-                blob = rcp_read.read_model_stable(fresh=True)
-            bypass = rcp_read.values(blob, "channelBypassProcessing")
-            if len(bypass) >= mic and not bypass[mic - 1]:
+                _gain, on = _read_gain_and_processing(mic)
+            if on:
                 return True
         except Exception:
             pass
@@ -4846,9 +4742,10 @@ def _autogain_words(name: str, before: int, after: int, result: dict, win: str,
 def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
     """Begin an auto-gain run on one mic channel."""
     global _autogain
-    dev = devices.get_active_device()
-    if "input_mic_write" not in dev.caps:
-        return {"ok": False, "message": f"Mic gain cannot be set on the {dev.name} from here."}
+    gate = _cap_gate("input_mic_write",
+                     lambda dev_name: f"Mic gain cannot be set on the {dev_name} from here.")
+    if gate is not None:
+        return gate
     mic = _mic_number(name)
     if mic is None:
         return {"ok": False, "message": "Only microphone channels have a gain to set."}
@@ -5033,16 +4930,15 @@ _PRESET_PROPS = ("eqLowGain", "eqMidGain", "eqHighGain", "aphexBBDrive", "aphexA
                  "noiseGateThreshold", "noiseGateRange", "noiseGateRelease",
                  "channelDepth", "channelSparkle", "channelPunch",
                  # The processing MODE belongs to a voicing (see channels.CHAIN_ADVANCED_PROP).
-                 # Without it, a saved advanced voicing applied to a strip in simple
-                 # mode gets regenerated from the VoxLab knobs. Written FIRST by apply_processing_
-                 # preset; the marker below is written LAST.
+                 # Without it, a saved advanced voicing applied to a strip in simple mode gets
+                 # regenerated from the VoxLab knobs. Written FIRST by apply_processing_preset;
+                 # the marker below is written LAST.
                  channels.CHAIN_ADVANCED_PROP,
                  # The MODULE on/off flags. A voicing is not just parameter values, it is which parts
                  # of the chain are engaged: without these, applying a preset to a strip with its
                  # modules off sets every value, changes nothing audible, and reports success.
-                 # channelBypassProcessing is deliberately NOT here: the master
-                 # on/off is the operator's control, not part of the voicing (see
-                 # channels.apply_processing_preset).
+                 # channelBypassProcessing is deliberately NOT here: the master on/off is the
+                 # operator's control, not part of the voicing (channels.apply_processing_preset).
                  *channels.PROCESSING_MODULE_BOOLS,
                  "channelCurrentFxPreset")
 
@@ -5085,8 +4981,8 @@ def _device_hardware_id() -> str:
 
     PURE LOOKUP, deliberately: it reads the value read_device_status already published (see
     _note_device_id) and never opens the device itself. Two reasons. Reading it is a full device
-    round trip - enumerate, open, get_version, ping - and this is called from a channel read that
-    the UI does on every visit to the page. And read_device_status takes the HID lock, which is not
+    round trip, and this is called from a channel read that the UI does on every visit to the
+    page. And read_device_status takes the HID lock, which is not
     reentrant, so calling it from anywhere that already holds the lock would deadlock the app rather
     than merely be slow. "" is a perfectly good answer here: it only means a preference goes untagged
     until the first status read, which the page does on load."""
@@ -5221,9 +5117,8 @@ def action_apply_mic_preset(channel: int, name: str) -> dict:
     props = presets.get(name)
     if not props:
         return {"ok": False, "message": f"Preset '{name}' was not found."}
-    # Read the modules FIRST so we can say what actually changed. A preset that silently switched
-    # part of the chain on would be as bad as the silent no-op it replaces: the operator has to be
-    # told, because nothing on screen otherwise shows a module moving.
+    # Read the modules FIRST so we can say what actually changed: nothing on screen otherwise shows
+    # a module moving.
     try:
         with _hid_lock:
             before = _read_channel_modules(channel)
@@ -5240,9 +5135,9 @@ def action_apply_mic_preset(channel: int, name: str) -> dict:
     turned_off = [_MODULE_LABEL.get(p, p) for p in channels.PROCESSING_MODULE_BOOLS
                   if before.get(p) and not after.get(p)]
     if turned_on:
-        msg += f" Switched on: {', '.join(turned_on)}."
+        msg += f" Switched on: {wording.join_and(turned_on)}."
     if turned_off:
-        msg += f" Switched off: {', '.join(turned_off)}."
+        msg += f" Switched off: {wording.join_and(turned_off)}."
     # The master on/off is never part of a preset, so say so when it would mask the whole thing.
     if after.get("_processing_on") is False:
         msg += (" Note: processing is still off for this channel, so the preset is loaded but not "
@@ -5285,18 +5180,17 @@ def action_delete_mic_preset(name: str) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# Routing / output settings (decoded sessions 16-17, read-back verifiable).
+# Routing / output settings (read-back verifiable).
 # ----------------------------------------------------------------------------
 
 # Flexible channel strips that can be reassigned (the by-name routing view) + the source palette
-# now live per-device in devices.InputStripSpec (GAP-3), resolved via _active_input_strips(). Before
-# GAP-3 these were Pro II-hardcoded here as _INPUT_STRIP_VEC_INDEX / _INPUT_STRIP_LABEL /
-# _INPUT_SOURCE_LABEL / _VALID_SOURCE_CODES; the Duo uses the index-based fader_model instead, so its
-# spec is empty and the by-name endpoints below report nothing and refuse on it.
+# live per-device in devices.InputStripSpec, resolved via _active_input_strips(). The Duo uses the
+# index-based fader_model instead, so its spec is empty and the by-name endpoints below report
+# nothing and refuse on it.
 
 
 def _active_input_strips():
-    """The InputStripSpec for the currently-connected device (devices.py). See GAP-3."""
+    """The InputStripSpec for the currently-connected device (devices.py)."""
     return devices.get_active_device().input_strips
 
 
@@ -5324,7 +5218,7 @@ _check_input_strip_specs()
 # index 0 = fader 1 ... value = channel code on that fader.
 # We read the layout from the vector and write it with rcp_transfer.set_fader_source (selector
 # 0x1c + index). The per-device SHAPE (vector length, physical/virtual split, assignable channel
-# list + labels, factory-default vector) lives in devices.FaderSpec (GAP-1): the Pro II has 9
+# list + labels, factory-default vector) lives in devices.FaderSpec: the Pro II has 9
 # faders and Mic 1-4; the Duo has a 10-entry vector, code 2 = Headset (not Mic 3), no Mic3/Mic4,
 # and NO confirmed default so its 'reset faders' refuses instead of writing a guessed layout.
 
@@ -5389,8 +5283,8 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
                 continue
             chain = channels.take_chain(device_id, code)
             if chain is None:
-                homeless.append(code)      # never saw it leave (parked before this feature, or
-            else:                          # moved off-fader by the RODE app, which we cannot see)
+                homeless.append(code)      # never saw it leave (moved off-fader by the RODE
+            else:                          # app or the touchscreen, which we cannot see)
                 returns.append((code, dst, chain))
         if not moves and not returns:
             return _chain_note(spec=_active_faders(), parked=parked, homeless=homeless)
@@ -5416,7 +5310,7 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
                 bad.append(_channel_name(code, spec))
                 channels.park_chain(device_id, code, chain)   # put it back; it did not land
         if bad:
-            return (f"WARNING: the processing chain did not fully follow {', '.join(bad)} "
+            return (f"WARNING: the processing chain did not fully follow {wording.join_and(bad)} "
                     f"({written} of the writes landed). Set that channel's processing again, or "
                     f"restore a profile.")
         return _chain_note(spec=spec, parked=parked, homeless=homeless, written=written,
@@ -5432,7 +5326,7 @@ def _chain_note(spec, parked=(), homeless=(), written=0, moved=(), restored=()) 
     an off-fader channel as well as what moved: "off-fader" otherwise reads as "deleted", and the
     whole point of parking is that it is not."""
     def names(codes):
-        return ", ".join(_channel_name(c, spec) for c in codes)
+        return wording.join_and(_channel_name(c, spec) for c in codes)
 
     out = ""
     if moved and restored:
@@ -5458,7 +5352,7 @@ def _chain_note(spec, parked=(), homeless=(), written=0, moved=(), restored=()) 
 def _fader_write_gate():
     """Fader-assignment WRITES. Reads and labels are always device-aware and safe; writes gate
     because a device whose fader write model is only partly known (the Duo: empty strips encoded
-    as -1, no confirmed default vector) must refuse rather than write a guessed layout (GAP-1)."""
+    as -1, no confirmed default vector) must refuse rather than write a guessed layout."""
     return _cap_gate("fader_write", lambda name:
                      f"Changing the fader layout is not enabled on the {name} yet, so the faders "
                      f"are read-only here. You can still see the current layout.")
@@ -5476,7 +5370,7 @@ def _fader_label(i: int, spec=None) -> str:
 
 
 def _channel_name(code, spec=None) -> str:
-    # all_labels, not code_label: a fader can HOLD a stereo-linked pair even though a pair is never
+    # labels_for, not code_label: a fader can HOLD a stereo-linked pair even though a pair is never
     # something you assign, and "channel code 4" is no use to anyone reading the layout aloud.
     spec = spec or _active_faders()
     if _is_empty_fader(code):
@@ -5607,8 +5501,8 @@ def _carry_mute(new_vec, codes, muted: bool) -> str:
 
     THE DESK UNMUTES WHAT IT REARRANGES. Linking a pair clears channelOutputMute on both inputs, and
     unlinking clears it on the mic it hands back (measured), and the RODE app does not put it back
-    either. A mic that the user deliberately silenced going live because they tried a
-    stereo link is the worst failure this feature could have, so we carry the state across.
+    either. A mic that the user deliberately silenced going live because they tried a stereo link
+    is the worst failure this feature could have, so we carry the state across.
 
     ONE DIRECTION ONLY: it re-mutes, it never unmutes. Muting something the user has open is the
     same class of surprise in reverse, which is exactly why a profile restore refuses to write mutes
@@ -5626,7 +5520,7 @@ def _carry_mute(new_vec, codes, muted: bool) -> str:
         rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
             channels.MUTE_PROP, True, channels.proc_selector_for_strip(strip)))
         done.append(_channel_name(code, spec))
-    return f" {', '.join(done)} stayed muted." if done else ""
+    return f" {wording.join_and(done)} stayed muted." if done else ""
 
 
 def _stereo_link_gate():
@@ -5860,8 +5754,8 @@ def action_set_fader(fader_index: int, code: int) -> dict:
                                         spec.code_order_for(channels.usb_expanded()))
             # THE CHAIN FOLLOWS THE CHANNEL. Processing and effects are per fader STRIP, so moving a
             # channel without moving its chain leaves it being processed by whatever voicing sits on
-            # the strip it lands on. The RODE app does exactly this on its own
-            # drag - proven by diffing it. Snapshot BEFORE the layout write, off the dump we already
+            # the strip it lands on. The RODE app does exactly this on its own drag (proven by
+            # diffing it). Snapshot BEFORE the layout write, off the dump we already
             # have, so a failure can be reported precisely.
             chains_before = channels.read_chains(blob) if _chain_follow_on() else None
             # THE LEVEL FOLLOWS THE CHANNEL TOO, and for the same reason the chain does. Snapshot
@@ -5885,9 +5779,8 @@ def action_set_fader(fader_index: int, code: int) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the fader layout: {exc}"}
     changed = [i for i in range(spec.count) if i != fader_index and vec[i] != new[i]]
-    # SAY WHAT THE FADER ACTUALLY CARRIES, read back, not what was asked for. Reporting `code`
-    # unconditionally means that whenever the tidy step overrides the request, the app confidently
-    # announces the opposite of what it did, which is what keeps the empty-fader bug above invisible.
+    # SAY WHAT THE FADER ACTUALLY CARRIES, read back, not what was asked for: whenever the tidy
+    # step overrides the request, reporting `code` would announce the opposite of what it did.
     landed = new[fader_index] if fader_index < len(new) else None
     if landed == code:
         parts = [f"{_fader_label(fader_index, spec)} now carries {_channel_name(code, spec)}."]
@@ -6021,8 +5914,8 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
     """Set the monitor SPEAKER level, 0-100 percent (outputMonLevel).
 
     Named for the speaker deliberately: action_set_monitor_level further down is a different thing
-    entirely, one source's level inside a monitor MIX (a matrix cross-point). The first version of
-    this shared that name, was silently shadowed by it, and the endpoint called the wrong function."""
+    entirely, one source's level inside a monitor MIX (a matrix cross-point), and a shared name
+    would silently shadow one with the other."""
     gate = _level_write_gate()
     if gate is not None:
         return gate
@@ -6045,6 +5938,8 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
 # not work over RDP.
 _meter_watcher = None
 _meter_lock = threading.Lock()
+
+
 def _meter_prefs() -> dict:
     s = load_settings()
     return {
@@ -6139,8 +6034,8 @@ def read_meters() -> dict:
             "mix_note": _meter_mix_note(found),
             # WINDOWS' OWN LEVEL for the chosen stream, in dB. It belongs on this tab because it is
             # the thing that silently scales everything else here: an input Windows is boosting
-            # clips in Windows while the desk's meters look fine, and one Windows was attenuating
-            # made our clipping warning unreachable for the whole life of the feature.
+            # clips in Windows while the desk's meters look fine, and one Windows is attenuating
+            # can make the clipping warning unreachable.
             "input_level": _input_level(_meter_stream(found)),
             "message": found["reason"] or ""}
 
@@ -6316,10 +6211,9 @@ def action_set_meter_option(name: str, value: float) -> dict:
         elif name == "clip_sound":
             w.clip_sound = bool(v)
         elif name == "clip_db":
-            w.clip_at = _clip_level(prefs_warn_clip=True, clip_db=float(v))
-    # A running CHECK has its own Watcher, so the setting has to reach that too or turning the
-    # sound off mid-check would appear to do nothing. That check now lives on the Channels page
-    # (action_channel_level_check); the Watcher it holds takes the same two settings.
+            w.clip_at = _clip_level(_meter_prefs()["warn_clip"], float(v))
+    # A running CHECK (action_channel_level_check) has its own Watcher, so the setting has to
+    # reach that too or turning the sound off mid-check would appear to do nothing.
     with _chan_check_lock:
         c = _chan_check
     if c is not None:
@@ -6354,10 +6248,10 @@ def action_meter_watch(on: bool) -> dict:
         if not found["ok"]:
             return {"ok": False, "message": found["reason"]}
         stream = prefs["stream"] or found["streams"][0]["id"]
-        # THE LEVEL WATCH FOLLOWS THE ANNOUNCER. It speaks unasked, in the background, for as long
-        # as it is on, which is exactly the kind of voice that must go quiet when the announcer
+        # THE LEVEL WATCH FOLLOWS THE ANNOUNCER (_ann_say enforces it). It speaks unasked, in the
+        # background, which is exactly the kind of voice that must go quiet when the announcer
         # does, recordings included.
-        w = meters.Watcher(stream, _speak_if_announcing,
+        w = meters.Watcher(stream, _ann_say,
                            clip_at=_clip_level(prefs["warn_clip"], prefs["clip_db"]),
                            warn_silence=prefs["warn_silence"],
                            silence_after=prefs["silence_after"],
@@ -6401,11 +6295,9 @@ _LEVEL_CHECK_SPEAK_S = 1.5
 # ---------------------------------------------------------------------------
 # THE SAME CHECK, ON ONE CHANNEL. Channels > any channel.
 #
-# WHY IT MOVED HERE FROM DEVICE > LEVELS. The Device check meters a Windows STREAM, and every stream
-# this desk offers is a MIX: "Microphone (RODECaster Pro II Main Stereo)" is everything at once. So
-# it could answer "is something reaching the computer" and never "is MIC 2 right", which is the
-# question you actually have while setting up. The channel is the unit of work, so the check belongs
-# on the channel.
+# WHY IT IS PER CHANNEL. Every Windows STREAM this desk offers is a MIX: "Microphone (RODECaster
+# Pro II Main Stereo)" is everything at once. A stream answers "is something reaching the computer"
+# and never "is MIC 2 right", which is the question you actually have while setting up.
 #
 # IT HEARS ONE CHANNEL by the same means auto gain does: a temporary custom Chat mix carrying that
 # source alone (_ChatIsolation), snapshotted and restored with the restore VERIFIED. Everything that
@@ -6448,12 +6340,9 @@ def _chan_check_state() -> dict:
 def _chan_check_stop(speak: bool = True, run_id: int = None) -> str:
     """End the check, PUT THE CHAT MIX BACK, and say what the run came to.
 
-    The restore is the part that must not be quiet about failing. Auto gain's processing restore was
-    best-effort and silent once, it failed, and it left Mic 1 unprocessed with nothing said
-    (ProjectMemory/Completed.md, auto gain). A Chat output left carrying one microphone would break
-    the next call taken on this desk with nothing on screen to explain it, so a failed restore is
-    spoken and
-    returned, ahead of the measurement.
+    The restore is the part that must not be quiet about failing. A Chat output left carrying one
+    microphone would break the next call taken on this desk with nothing on screen to explain it,
+    so a failed restore is spoken and returned, ahead of the measurement.
 
     `run_id` is how the end-timer says WHICH run it is ending. A timer with a stale number does
     nothing at all, rather than stopping a run somebody has only just started."""
@@ -6480,7 +6369,7 @@ def _chan_check_stop(speak: bool = True, run_id: int = None) -> str:
             trouble = (f"WARNING: the Chat mix could not be put back ({exc}). It may still be "
                        "carrying one channel only. Check Routing, Output mixes, Chat. ")
     # A WATCHER THAT FELL OVER MID-RUN MUST NOT BE SUMMARISED AS A QUIET CHANNEL. It reports its own
-    # failure now (meters.Watcher._run), and that answer replaces the measurement rather than
+    # failure (meters.Watcher._run), and that answer replaces the measurement rather than
     # decorating it: the peak it reached before it broke is not what the channel did.
     broke = getattr(w, "error", "") if w is not None else ""
     if broke:
@@ -6511,9 +6400,8 @@ def _chan_check_source(name: str):
 def action_channel_level_check(name: str = "", seconds: float = 0.0) -> dict:
     """Talk and hear this channel's level, for as long as it takes to ride a fader. A toggle.
 
-    It speaks the level every 1.5 s and ends with the loudest it got plus what to do about it, the
-    same wording the Device check used, because the judgement is the same judgement. What is new is
-    that the number is about ONE channel."""
+    It speaks the level every 1.5 s and ends with the loudest it got plus what to do about it
+    (_level_check_summary), about ONE channel."""
     if _chan_check_state()["running"]:
         return {"ok": True, "running": False, "message": _chan_check_stop(speak=False)}
 
@@ -6924,13 +6812,7 @@ def _apply_matrix(routing: dict) -> dict:
 
 
 def routing_model() -> dict:
-    """Static layout of the routing controls the UI renders.
-
-    NOTE: output routing MODE (outputMixMinus, Main Mix/Mix-Minus/Custom per output)
-    is intentionally NOT exposed yet. Its per-output read is unreliable (the property
-    recurs ~23x in the model dump so stream position drifts) and the output ordering
-    is not fully pinned, so writing it can hit the wrong output. Re-add once decoded.
-    """
+    """Static layout of the routing controls the UI renders."""
     return {
         # Still sent, but no page reads it any more: the multitrack control moved to the Recording
         # page, which builds its own list from recorder.MULTITRACK_LABEL. Kept because the routing
@@ -6941,15 +6823,14 @@ def routing_model() -> dict:
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
         # EXPANDED'S OPTIONS BELONG HERE TOO, for the same reason and with the same consequence if
         # they are missing: `setStagedValue` invents a "Value true" option for a device value it has
-        # no label for, so the control renders with ONE option it cannot be changed away from. The
-        # live payload sends these as well, which is what hid it.
+        # no label for, so the control renders with ONE option it cannot be changed away from.
         "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
         "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
         "input_strips": [{"key": k, "label": lab}
                          for k, _idx, lab in _active_input_strips().strips],
         "input_sources": _active_input_strips().source_palette,
         "fader_model": fader_model(),
-        # Headphone-type controls, device-aware (GAP-6): one select per addressable headphone output,
+        # Headphone-type controls, device-aware: one select per addressable headphone output,
         # populated with that device's amp-type value list. Both desks expose HP1 + HP2.
         "headphones": {
             "outputs": [{"index": i, "label": lab}
@@ -6997,7 +6878,7 @@ def read_routing_live() -> dict:
     cis = rcp_read.values(blob, "channelInputSource")
     input_sources = {strip: (cis[idx] if idx < len(cis) else None)
                      for strip, idx in _active_input_strips().strip_vec_index.items()}
-    # All headphoneType values in dump order (GAP-6), mapped positionally to the device's outputs.
+    # All headphoneType values in dump order, mapped positionally to the device's outputs.
     headphone_types = [v for v in rcp_read.values(blob, "headphoneType")
                        if v is not None and v != ""]
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
@@ -7037,15 +6918,12 @@ def read_routing_live() -> dict:
         "usb_processing_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
         "bypass_hint": recorder.BYPASS_HINT,
         "bypass_needs_multitrack": recorder.BYPASS_NEEDS_MULTITRACK,
-        # READ BY BLOCK, and these two specifically must not go back to a by-name read. The reason
-        # is NOT prefix matching: the tree index matches names whole, so "outputMonAutoMute" cannot
-        # collide with "outputMonAutoMuteActive". It is that a name can occur in MORE THAN ONE
-        # BLOCK, and then "first in the stream" is a coin toss - the btVisible case, where the
-        # SYSTEM copy and the NETWORK copy are different facts and only one drives the radio. Say
-        # which block you mean and the question does not arise.
+        # READ BY BLOCK, never by name: a name can occur in MORE THAN ONE BLOCK, and then "first
+        # in the stream" is a coin toss (the btVisible case). Names match whole, so prefix overlap
+        # with "outputMonAutoMuteActive" is not the issue.
         "monitor_auto_mute": rcp_read.block_value(blob, "OUTPUT", "outputMonAutoMute"),
         "bt_auto_mute": rcp_read.block_value(blob, "OUTPUT", "outputBTAutoMute"),
-        # Per-output headphone types (GAP-6): the model dump carries one headphoneType per output
+        # Per-output headphone types: the model dump carries one headphoneType per output
         # (4 on the Duo: HP1,HP2,HP3,HP4); we map them POSITIONALLY to the device's exposed headphone
         # outputs (HP1 then HP2). This dump->output ordering is HARDWARE-CONFIRMED on the Duo:
         # HP1=0x09 moves dump position 0, HP2=0x0A moves position 1, value 2 accepted and read back,
@@ -7058,7 +6936,6 @@ def read_routing_live() -> dict:
     }
 
 
-
 def action_set_input_source(strip: str, source_code: int) -> dict:
     spec = _active_input_strips()
     if strip not in spec.strip_vec_index:
@@ -7066,9 +6943,8 @@ def action_set_input_source(strip: str, source_code: int) -> dict:
     if source_code not in spec.valid_source_codes:
         return {"ok": False, "message": f"Source {source_code} is not valid."}
     # This writes channelInputSource (the fader vector), so it is a fader-assignment write and gates
-    # on the same "fader_write" cap as action_set_fader (GAP-1): a device whose fader-write model is
-    # unconfirmed (the Duo) must refuse rather than drive an unconfirmed layout. Pro II: cap ON, so
-    # this returns None and behaviour is unchanged.
+    # on the same "fader_write" cap as action_set_fader: a device whose fader-write model is
+    # unconfirmed must refuse rather than drive an unconfirmed layout.
     gate = _fader_write_gate()
     if gate is not None:
         return gate
@@ -7117,8 +6993,8 @@ def action_set_usb_multitrack(mode: int) -> dict:
     """What the desk sends this computer over USB: the mix pair, or every channel.
 
     THE WARNING IS PART OF THE REPLY, not an aside. Changing this makes the desk tear down and
-    re-advertise its whole USB audio function (measured): every RODECaster input and
-    output on this machine disappears for a second or two, and Windows can move the default device
+    re-advertise its whole USB audio function (measured): every RODECaster input and output on
+    this machine disappears for a second or two, and Windows can move the default device
     while they are gone. Someone listening THROUGH the unit hears it stop, so the reply says so
     rather than leaving a silence to be interpreted."""
     gate = _output_write_gate()
@@ -7182,8 +7058,8 @@ def _tidy_after_standard(spoken: bool) -> str:
         return ""
     if not cleared:
         return ""
-    msg = (f"USB input is Standard, so {_join_and(cleared)} cannot carry anything. Took them off "
-           f"their faders; their processing is kept.")
+    msg = (f"USB input is Standard, so {wording.join_and(cleared)} cannot carry anything. Took "
+           f"them off their faders; their processing is kept.")
     if spoken:
         _ann_say(msg)
     return msg
@@ -7209,8 +7085,8 @@ def action_set_usb_expanded(on: bool) -> dict:
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
         arrived = _write_usb_mode_parked(value, old)
     tail = ("" if on or not cleared else
-            f" {_join_and(cleared)} came off their faders, as the unit's own screen does; their "
-            f"processing is kept.")
+            f" {wording.join_and(cleared)} came off their faders, as the unit's own screen does; "
+            f"their processing is kept.")
     return {"ok": True,
             "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
                         f"The unit's audio devices drop out for a couple of seconds while it "
@@ -7269,6 +7145,8 @@ def _virtual_devices_repair() -> None:
         diagnostics.event("virtual_devices.repair_failed", f"{exc}")
     finally:
         _virtual_devices_busy.release()
+
+
 # Set while the follow-up is re-enumerating the desk on purpose, so the announcer's reconnect
 # does not narrate each flip of the mode as news.
 _virtual_devices_retrying = threading.Event()
@@ -7631,7 +7509,7 @@ _AUTO_MUTE_SETTLE_S = 0.6
 
 
 def _active_headphones():
-    """The HeadphoneTypeSpec for the currently-connected device (devices.py). See GAP-6."""
+    """The HeadphoneTypeSpec for the currently-connected device (devices.py)."""
     return devices.get_active_device().headphones
 
 
@@ -7639,7 +7517,7 @@ def action_set_headphone_type(value: int, output: int = 0) -> dict:
     """Set a headphone output's amp type. `output` is an INDEX into the active device's headphone
     outputs (0 = Headphone 1, 1 = Headphone 2), `value` an amp-type code from that device's
     HeadphoneTypeSpec (0=NTH-100, 1=High sensitivity, 2=Low sensitivity). The server resolves the
-    real selector from the spec so the client never passes an unmapped selector (GAP-6)."""
+    real selector from the spec so the client never passes an unmapped selector."""
     gate = _output_write_gate()
     if gate is not None:
         return gate
@@ -7693,20 +7571,16 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# Output mix matrix (the Routing > Custom cross-points). Decoded, see
-# RODECASTER_PROTOCOL.txt section 5. Each output has a mode (Main Mix / Mix Minus / Custom); under
-# Custom, each source can be excluded from that output. The per-device source/output
-# LABEL maps now live in devices.py (MatrixSpec.sources / .outputs), so the screen adapts
-# to the connected desk; the confirmed-index write guard still lives in rcp_transfer.
+# Output mix matrix (the Routing > Custom cross-points), RODECASTER_PROTOCOL.txt section 5. Each
+# output has a mode (OUTPUT_MODE_LABEL); under Custom, each source can be excluded from that
+# output. The per-device source/output LABEL maps live in devices.py (MatrixSpec.sources /
+# .outputs), so the screen adapts to the connected desk; the confirmed-index write guard lives in
+# rcp_transfer.
 # ----------------------------------------------------------------------------
 
-_OUTPUT_MODE_NAMES = {0: "Main Mix", 1: "Mix Minus", 2: "Custom"}
-
-
-# --- Device-aware matrix helpers. The label maps now live per-device (devices.py), so the routing
-# screen shows the CONNECTED desk's real sources/outputs (e.g. source code 2 = "Headset" on the Duo,
-# "Mic 3" on the Pro II). Writes are gated on the "matrix_write" cap, which BOTH desks now hold -
-# the Duo since its matrix scheme was verified on hardware, so its matrix is no longer read-only.
+# --- Device-aware matrix helpers: the routing screen shows the CONNECTED desk's real
+# sources/outputs (source code 2 = "Headset" on the Duo, "Mic 3" on the Pro II). Writes are gated
+# on the "matrix_write" cap.
 def _active_matrix():
     return devices.get_active_device().matrix
 
@@ -7778,11 +7652,11 @@ def action_set_output_mode(output_index: int, mode: int) -> dict:
     out = _matrix_output(output_index)
     if out is None:
         return {"ok": False, "message": f"Output {output_index} is not valid."}
-    if mode not in _OUTPUT_MODE_NAMES:
+    if mode not in OUTPUT_MODE_LABEL:
         return {"ok": False, "message": f"Mode {mode} is not valid."}
     with _hid_lock:
         rcp_transfer.set_output_routing(output_index, mode)
-    return {"ok": True, "message": f"{out['label']} output set to {_OUTPUT_MODE_NAMES[mode]}."}
+    return {"ok": True, "message": f"{out['label']} output set to {OUTPUT_MODE_LABEL[mode]}."}
 
 
 def action_set_cross_point(output_index: int, source_index: int, excluded: bool) -> dict:
@@ -7855,15 +7729,16 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
     if not outs:
         return {"ok": False,
                 "message": (f"'{label}' names no output this device has, so nothing was changed."
-                            + (f" Not on this device: {', '.join(res['skipped'])}."
+                            + (f" Not on this device: {wording.join_and(res['skipped'])}."
                                if res["skipped"] else ""))}
     msg = f"Applied '{label}' to {wording.count(len(outs), 'output')}"
-    msg += ": " + ", ".join(outs) + "."
+    msg += ": " + wording.join_and(outs) + "."
     if res["skipped"]:
         msg += (f" Skipped {wording.count(len(res['skipped']), 'part')} this device does not have: "
-                f"{', '.join(res['skipped'])}.")
+                f"{wording.join_and(res['skipped'])}.")
     if res["failed"]:
-        msg += f" {wording.count(res['failed'], 'write')} failed, so check the mix before you go on air."
+        msg += (f" {wording.count(res['failed'], 'write')} failed, so check the mix before you go "
+                f"on air.")
     return {"ok": res["ok"], "message": msg, "outputs": outs, "skipped": res["skipped"],
             "failed": res["failed"]}
 
@@ -7922,8 +7797,8 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
     """Save the desk's CURRENT output mixes under a name. One model read under the lock, no writes.
 
     `output` is an output KEY and makes a ONE-OUTPUT preset, the shape the built-in Chat presets
-    have always had: applying it later writes that output and leaves every other mix alone. Empty
-    means every output, which is the older behaviour and still the default.
+    have: applying it later writes that output and leaves every other mix alone. Empty means every
+    output, the default.
 
     Overwriting an existing scheme is allowed and deliberate (unlike the as-found baseline, a scheme
     is cheap to re-take), but the page asks first so it is never a surprise."""
@@ -7989,10 +7864,10 @@ def profile_info(name: str) -> dict:
     IT ALSO ANSWERS WHETHER A CLEAN RESTORE IS POSSIBLE, because the restore dialog is where that
     choice is offered and this is the call it already waits for. A clean restore backs the desk up
     first and refuses to go on without it, so with nowhere to write it cannot be done at all. Gating
-    the option on the shows CAPABILITY alone is not enough: a Duo has that cap and no removable
+    the option on the "shows" CAPABILITY alone is not enough: a Duo has that cap and no removable
     storage, so the option would be offered and then refused. Asked HERE rather than on page entry
-    so the answer is fresh at the moment the
-    dialog is built, and it is cheap because `_removable_volume_ready` reads through the cache."""
+    so the answer is fresh when the dialog is built, and it is cheap because
+    `_removable_volume_ready` reads through the cache."""
     loaded = profiles.load(name)
     if not loaded.get("ok"):
         return loaded
@@ -8025,11 +7900,8 @@ def rename_profile(name: str, new_name: str) -> dict:
 class _BackgroundJob:
     """One long job running off the request thread: its progress, and its result.
 
-    WHY IT EXISTS. Four jobs need this shape - the profile save, the profile restore, the desk's own
-    show commands and the pad restore - and hand-rolling each one means four locks, four identical
-    state dicts, four `_worker` closures and four finish blocks. Two of the four are started from
-    two different actions, so that is six copies of the finish block, and a bug fixed in one of them
-    is fixed in exactly one.
+    ONE SHAPE FOR EVERY LONG JOB (the profile save and restore, the desk's own show commands, the
+    pad restore, the driver install), so there is one lock, one state dict and one finish block.
 
     WHY BACKGROUND AT ALL. These take from a few seconds to well over a minute (a pad backup copies
     every sound file off the unit over transfer mode). A page that can poll for progress announces
@@ -8121,7 +7993,7 @@ class _BackgroundJob:
             # backup, the restore, the reset and the pad jobs all get it without knowing it exists.
             # NOT GATED ON THE ANNOUNCER. The announcer speaks for the DESK's own controls and can
             # reasonably be off; this answers a button the user just pressed in this app and is
-            # waiting on, and silence there is the fault being fixed.
+            # waiting on.
             try:
                 _ann_tone("done" if res.get("ok") else "failed")
             except Exception:
@@ -8203,8 +8075,6 @@ def action_open_driver_page() -> dict:
                         "Virtual Device Driver, download it and run the installer inside.")}
 
 
-
-
 def profile_save_status() -> dict:
     return _profile_job.status()
 
@@ -8245,10 +8115,12 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
                         headphone_output_count=len(_active_headphones().outputs),
                         baseline=baseline, show=show)
     if pad_backup and pad_backup.get("unrecognised"):
-        grids = ", ".join(str(g) for g in pad_backup["unrecognised"])
-        res["message"] += (f" Note: the voice-FX {wording.plural(len(pad_backup['unrecognised']), 'pad')} at grid {grids} carry a name that matches no "
-                           f"factory or saved effect (likely renamed), so the effect could not be "
-                           f"identified and they will be skipped on restore.")
+        odd = pad_backup["unrecognised"]
+        grids = wording.join_and(str(g) for g in odd)
+        res["message"] += (f" Note: the voice-FX {wording.plural(len(odd), 'pad')} at grid {grids} "
+                           f"carry a name that matches no factory or saved effect (likely "
+                           f"renamed), so the effect could not be identified and they will be "
+                           f"skipped on restore.")
     return res
 
 
@@ -8310,7 +8182,7 @@ def action_backup_now(name: str) -> dict:
             return res
         res["message"] = _backup_wording(safe, show) + note
         return res
-    return _profile_job.start(lambda job: work(job),
+    return _profile_job.start(work,
                               message="Backing up, please wait.", started="Backing up.")
 
 
@@ -8481,7 +8353,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
     `clean` PICKS BETWEEN TWO GENUINELY DIFFERENT OPERATIONS, and the page names both rather than
     choosing for the user:
 
-      * MERGE (the default, and what this has always done): write the profile's values over
+      * MERGE (the default): write the profile's values over
         whatever the desk holds now. Everything the profile does not cover is LEFT ALONE. That is
         the right choice for "put my show back", and it is the only one that preserves settings this
         app cannot write - a paired Bluetooth phone, a pad's custom censor sound, the strip colours.
@@ -8499,7 +8371,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
     if not loaded.get("ok"):
         return loaded
     safe, prof = loaded["safe"], loaded["prof"]
-    # GAP-4: refuse a cross-device restore. A profile stamps the product id of the desk it was saved
+    # refuse a cross-device restore. A profile stamps the product id of the desk it was saved
     # on; its fader vector, matrix shape and channel set are device-specific, so applying a Pro II
     # profile to a Duo (or vice versa) would mis-write. Older profiles carry no product id (all saved
     # on the Pro II historically) - those are allowed, with the per-write guards still protecting.
@@ -8522,6 +8394,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                                 "on this unit. " + gate["message"] + " Restore without the reset "
                                 "instead: it puts your settings back but leaves anything the "
                                 "profile does not cover as it is.")}
+
     def _work(job):
         # TWO PROGRESS CHANNELS, deliberately. The settings phase reports its own sections (it is
         # ~20s of paced writes) so it uses job.step, which does not touch the count; the pad phase
@@ -8598,7 +8471,6 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         # six of them voice-FX pads with no effect definition behind them (soundpad.heal_fx_pool).
         # A profile that CARRIES pads has just rebuilt its own, so this finds nothing missing and
         # costs one dump; a profile saved without pads leaves the factory six needing the rebuild.
-        # Proven by `post-cleanrestore-raw.bin`, which holds only region-B object 65.
         healed = None
         if clean:
             job.step("Checking the voice effects survived the reset...")
@@ -8654,10 +8526,8 @@ def _shows_write_gate():
     carries a FACTORY RESET, so a guess could land a reset, or a stray, on some other block.
 
     BOTH KNOWN DESKS HOLD THIS CAP, so nothing refuses here today. The gate stays because the
-    hazard is a property of the ADDRESS and not of any one desk: the
-    old reason - "0x28E is a position in the Pro II's block walk and the Duo's has never been done
-    that far" - was retired by reading the Duo's own tree, and the next unknown desk gets the same
-    treatment. `DevTools/test_shows_sim.py` proves it with a synthetic capless device."""
+    hazard is a property of the ADDRESS and not of any one desk, and the next unknown desk gets the
+    same treatment. `DevTools/test_shows_sim.py` proves it with a synthetic capless device."""
     return _cap_gate("shows", lambda name:
                      f"AccessCaster can list the shows on the {name} but not export, restore or "
                      f"reset them: doing that has only ever been confirmed on a RODECaster Pro 2, "
@@ -8678,9 +8548,8 @@ def read_show_state() -> dict:
     current_uuid = (state.get("current") or {}).get("uuid") or ""
     # `is_current` says this backup holds the SHOW that is loaded. It is NOT a bar on restoring:
     # the unit happily imports one of these and puts the desk back, which is the ORDINARY case,
-    # since a uuid only changes on a factory reset. It stays
-    # because it is still worth knowing which backups belong to the loaded show, and because
-    # several can be true at once - a uuid names the show, not the file.
+    # since a uuid only changes on a factory reset. It says which backups belong to the loaded show,
+    # and several can be true at once: a uuid names the show, not the file.
     for show in state["shows"]:
         show["is_current"] = bool(current_uuid and show.get("uuid") == current_uuid)
     # Backups of one desk state are identical in name and uuid, so without this they read as several
@@ -8690,8 +8559,7 @@ def read_show_state() -> dict:
     for n, show in enumerate(state["shows"], start=1):
         # TWO labels, because one cannot do both jobs. `label` is the dropdown option, which is read
         # on its own and must carry every qualification. `short_label` is for embedding in a
-        # sentence, where the qualifications turn into nonsense: quoting the full label inside a
-        # restore confirmation produced "restore the backup ... so it cannot be restored".
+        # sentence, where the qualifications turn into nonsense.
         # THE DATE IS THE USEFUL DISCRIMINATOR: "backup 1 of 2" only says where a thing sits in a
         # list, while a date and time says which one you actually want. It comes from
         # `showLastModification`, a 64-bit epoch that needs the tree parser to read. The position is
@@ -8844,8 +8712,7 @@ def _reset_and_wait(step) -> dict:
             #
             # AND FAILING TO OPEN IT IS NOT A FAILED RESET. Listening is an optimisation over
             # reading, never a requirement, so if a handle cannot be had we do the reset anyway and
-            # fall through to the read below. This was found by the offline sim, which has no HID
-            # interface at all: the exception killed the whole job and reported "never finished".
+            # fall through to the read below (the offline sim has no HID interface at all).
             try:
                 listener.start()
                 listening = True
@@ -8871,9 +8738,8 @@ def _reset_and_wait(step) -> dict:
         listener.stop()
 
     # THE FALLBACK READ ALSO ANSWERS A SECOND QUESTION: is the desk still THERE? "It took the command
-    # and did nothing" and "it has left the USB bus" are different failures needing different words,
-    # and an earlier draft of this collapsed them - telling anyone whose reset merely did not apply
-    # to go and unplug their cable. The offline sim caught it.
+    # and did nothing" and "it has left the USB bus" are different failures needing different words:
+    # only the second needs the cable unplugged.
     answered = None
     if not after:
         step("Checking the desk...")
@@ -8892,9 +8758,8 @@ def _reset_and_wait(step) -> dict:
                     "message": ("The unit took the command but its show has not changed, so the "
                                 "reset does not look like it happened. Nothing has been lost; "
                                 "check the Shows list in a moment.")}
-        # Not answering. The old wording claimed "the desk does not look reset" and "nothing has
-        # been lost" HERE too, and both are wrong once the desk is off the bus: the command has
-        # almost certainly applied, and nothing about it can be verified at all.
+        # Not answering: the command has almost certainly applied, and nothing about it can be
+        # verified at all.
         return {"ok": False,
                 "message": ("The desk stopped answering before it could confirm the reset"
                             + (", and the connection dropped. " if listener_lost else ". ")
@@ -8948,8 +8813,7 @@ def action_show_export() -> dict:
     """Back the whole desk up to a new show file on the recordings drive.
 
     The evidence is a NEW SHOW APPEARING, not the write returning: the command field self-clears
-    either way. Since each export renumbers the list, the new one is identified by its uuid being
-    one we had not seen a moment earlier, rather than by assuming it is uid 0."""
+    either way. `_export_and_wait` identifies it by a new snapshot index."""
     def work(step):
         # About 24 MB, measured at roughly a second. Polled rather than slept so it answers quickly.
         res = _export_and_wait(step, "Writing the show to the recordings drive...")
@@ -9028,8 +8892,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # and has to be said differently. `shows.wait_for` hands back no blob when not one
             # usable dump arrived in the whole wait, and that is what a desk leaving the bus
             # mid-restore looks like from here: it stops answering about 30 s after the import
-            # command and Windows drops it a minute later. Without this branch the same case
-            # reports a cheerful success.
+            # command and Windows drops it a minute later.
             if blob_after is None:
                 return {"ok": False,
                         "message": ("The unit stopped responding during the restore and is no "
@@ -9066,24 +8929,22 @@ def wake_channels() -> dict:
     that displays a value is wasted effort.
 
     WHAT WAKES IT IS A REAL VALUE CHANGE, and only that. Writing the gain back at its CURRENT value
-    does nothing at all (measured), which is why the desk's own encoder was the
-    only thing that ever recovered it: an encoder sends a genuine change. So this nudges the gain by
+    does nothing at all (measured), which is why the desk's own encoder recovers it: an encoder
+    sends a genuine change. So this nudges the gain by
     a step and puts it straight back.
 
     Kept to MIC channels because that is where a dead input is silently catastrophic and where we
     have a cheap real-value write. Whether the fault can hit a non-mic channel is UNKNOWN: nothing
     was plugged into the others when it was reproduced, so it could not be heard either way.
     """
-    dev = devices.get_active_device()
-    if "input_mic_write" not in dev.caps:
-        return {"ok": False, "message": f"Cannot wake the channels on a {dev.name}."}
+    gate = _cap_gate("input_mic_write",
+                     lambda name: f"Cannot wake the channels on a {name}.")
+    if gate is not None:
+        return gate
     # THE GAIN COMES FROM THE DESK, NOT FROM `_session_state`. The "put it straight back" half of
     # the nudge has to write the value the desk currently holds: the only callers are a reset and
-    # an import, i.e. exactly the two moments the cache is guaranteed stale, because changing the
-    # desk is what they are for. Sourcing it from the cache puts every mic gain back to whatever
-    # the app last displayed, so a backup holding Mic 1 at 55 dB restores correctly and then has 45
-    # written over it. The damage is invisible whenever the desk is off the bus, because the write
-    # goes nowhere and the restored value survives by accident.
+    # an import, exactly the two moments the cache is guaranteed stale. Sourcing it from the cache
+    # would write the gain the app last displayed over the one the restore just put back.
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
@@ -9109,8 +8970,9 @@ def wake_channels() -> dict:
         except Exception:
             continue                      # one channel failing must not leave the rest unwoken
     return {"ok": True, "woken": woken,
-            "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the unit's audio engine picks them "
-                        f"up again." if woken else "No mic channels needed waking.")}
+            "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the unit's audio "
+                        f"engine picks them up again." if woken
+                        else "No mic channels needed waking.")}
 
 
 def _restore_silence_warnings(prof, blob) -> list:
@@ -9154,7 +9016,8 @@ def _restore_silence_warnings(prof, blob) -> list:
             movers = [_channel_name(c, spec) for i, c in enumerate(want)
                       if i < len(now_vec) and c != now_vec[i] and c is not None and c >= 0]
             if movers:
-                out.append("It rearranges the faders, moving " + ", ".join(sorted(set(movers))) + ".")
+                out.append("It rearranges the faders, moving "
+                           + wording.join_and(sorted(set(movers))) + ".")
             if not want_levels:
                 out.append("It does not set fader levels, so each channel keeps whatever level "
                            "the fader it lands on is already at.")
@@ -9190,9 +9053,9 @@ def backup_restore_plan(name: str) -> dict:
             blob = rcp_read.read_model()
     except Exception:
         blob = None
-    # `on_drive` IS NO LONGER WHAT THE RESTORE USES. It is still read because the page says whether
-    # a backup has the unit's own copy beside it, but the restore itself always takes the profile
-    # now - see action_restore_backup for the crash rate that decided it.
+    # `on_drive` IS NOT WHAT THE RESTORE USES. It is read because the page says whether a backup has
+    # the unit's own copy beside it, but the restore always takes the profile: see
+    # action_restore_backup for the crash rate that decides it.
     if paired and blob is not None and "shows" in devices.get_active_device().caps:
         try:
             on_drive = shows.find_by_snapshot(shows.read_shows(blob), paired.get("snapshot"))
@@ -9204,7 +9067,7 @@ def backup_restore_plan(name: str) -> dict:
     return {
         "ok": True,
         "name": loaded["safe"],
-        "via": "profile",             # always, now; see action_restore_backup
+        "via": "profile",             # always; see action_restore_backup
         "has_show": bool(on_drive),   # the unit's own copy is still there, and still not used
         "paired": bool(paired),
         "seconds_per_pad": PAD_RESTORE_SECONDS,
@@ -9391,8 +9254,7 @@ def action_show_reset(backup_first: bool = True) -> dict:
 
     `backup_first` DEFAULTS TO TRUE and the UI does not offer False lightly, because an export is
     the only real undo this has: it costs about a second, and without it there is no way back to
-    what the desk was. It is also what MAKES the undo legal - the reset mints a new uuid, and an
-    import is refused while the uuids match (shows.py trap 2).
+    what the desk was.
 
     What survives: wifi, language and the analytics answer all live outside the show. Recordings on
     the drive are untouched.
@@ -9504,9 +9366,8 @@ def _pad_write(grid: int, failed: str, work, invalid: str = None,
                plain_value_error: bool = False) -> dict:
     """Range-check a grid pad, take the HID lock, run `work()`, and turn a crash into a sentence.
 
-    THE SHAPE EVERY LIVE PAD EDIT HAS. Seventeen actions need these eight lines, and only one
-    sentence differs between them: `failed`, the "Could not ..." wording, which is the only part
-    worth reading at a call site.
+    THE SHAPE EVERY LIVE PAD EDIT HAS. Only one sentence differs between them: `failed`, the
+    "Could not ..." wording, which is the only part worth reading at a call site.
 
     `invalid` is a refusal message for a value this function cannot check itself (a play mode, a
     trigger field), and it is checked AFTER the range and BEFORE the lock: the pad number is the
@@ -9553,9 +9414,9 @@ def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True)
     NO CONVERSION, ear-proven: the unit's pad player accepts WAV at every rate (22k-192k), bit depth
     (16/24/32-float) and channel count tested, plus MP3, all played natively. So we write the file
     AS-IS (no resample / downmix / bit-depth change) and never degrade quality. We only require the
-    file to be WAV or MP3 (the two
-    formats the RODE manual lists) and preserve its extension on the device, because an MP3 written
-    under a .wav name plays as silence (the firmware trusts the extension).
+    file to be WAV or MP3 (the two formats the RODE manual lists) and preserve its extension on
+    the device, because an MP3 written under a .wav name plays as silence (the firmware trusts the
+    extension).
     """
     if pad_n < 1 or pad_n > _max_user_pads():
         return {"ok": False, "message": f"Pad {pad_n} is out of range."}
@@ -9728,7 +9589,8 @@ def action_clear_all_pads() -> dict:
             # genuinely unused. This is the only caller that may say so - see tidy_unused_pad_audio.
             tidy = soundpad.tidy_unused_pad_audio(allow_empty=True)
         if tidy.get("removed"):
-            res["message"] = (res.get("message") or "Cleared every user pad.") + " " + tidy["message"]
+            res["message"] = ((res.get("message") or "Cleared every user pad.") + " "
+                              + tidy["message"])
         return res
     except Exception as exc:
         return {"ok": False, "message": f"Could not clear all pads: {exc}"}
@@ -9747,10 +9609,6 @@ def pad_restore_status() -> dict:
 
 def action_restore_factory_fx() -> dict:
     """Put the six factory VOICE EFFECTS back on their original pads.
-
-    Decoded a long time ago and never wired up, because `soundpad.restore_factory_fx` was written
-    CLI-shaped: it printed and returned nothing, so there was nothing for a page to report. The
-    wrapper it needed is `restore_factory_fx_pads`.
 
     DESTRUCTIVE and narrower than it sounds, which is what the confirm dialog has to get across: it
     clears and recreates those six grid positions only. The eight factory SOUND pads are untouched,
@@ -9829,8 +9687,7 @@ def _open_folder_focused(folder: str) -> None:
         u32.GetWindowTextW(hwnd, buf, n + 1)
         # PREFIX, NOT EQUALITY. Explorer titles the window with the folder name and then appends
         # " - File Explorer" a moment later, so which of the two you see depends on how fast the poll
-        # got there. Matching only the bare name worked on the machine it was written on and would
-        # have failed silently on a slower one.
+        # got there.
         title = buf.value
         if title == want or title.startswith(want + " - "):
             found.append(hwnd)
@@ -9877,10 +9734,10 @@ def action_open_pad_exports() -> dict:
 
 
 def action_tidy_pad_audio() -> dict:
-    """Manual sweep of pad audio nothing plays. The destructive pad operations now do this for
-    themselves; this covers what earlier versions left behind, and clearing individual pads (a clear
-    is HID-only by design - it mounts nothing and writes no files, which is why it raises no drive
-    toast - so it cannot tidy up after itself without giving that up)."""
+    """Manual sweep of pad audio nothing plays. The destructive pad operations do this for
+    themselves; this covers clearing individual pads (a clear is HID-only by design - it mounts
+    nothing and writes no files, which is why it raises no drive toast - so it cannot tidy up after
+    itself without giving that up) and audio left by older builds."""
     try:
         with _hid_lock:
             return soundpad.tidy_unused_pad_audio()
@@ -10010,14 +9867,12 @@ def _hk_announcer() -> str:
     """Toggle the spoken announcer, and the case the whole shortcut layer exists for: the announcer
     talking over a guest is something you fix NOW, not after finding the window and the tab.
 
-    TURNING IT OFF IS SILENT, ON PURPOSE. The case this shortcut exists
-    for is realising mid-take that announcements are going into the mix, and "announcements off"
-    spoken into that mix is the exact thing the key was pressed to stop. Turning them back ON still
-    speaks, so the pair always leaves you knowing where you are. The silence is safe here in a way
-    it would not be elsewhere: what the shortcut did is immediately audible as the announcer going
-    quiet. (Speech would otherwise work either way - _ann_say goes to the speech worker directly and
-    never asks whether the announcer is on.) Every OTHER shortcut can be silenced too, per shortcut,
-    on the Keyboard shortcuts tab.
+    TURNING IT OFF IS SILENT, ON PURPOSE. The case this shortcut exists for is realising mid-take
+    that announcements are going into the mix, and "announcements off" spoken into that mix is the
+    exact thing the key was pressed to stop. Turning them back ON still speaks, so the pair always
+    leaves you knowing where you are. The silence is safe here in a way it would not be elsewhere:
+    what the shortcut did is immediately audible as the announcer going quiet. Every OTHER shortcut
+    can be silenced too, per shortcut, on the Keyboard shortcuts tab.
 
     NOT persisted, deliberately: this is the same toggle as the Announcements tab's switch, which
     does not persist either, and one control having two lifetimes depending on how you reached it is
@@ -10106,7 +9961,7 @@ def _hk_state() -> str:
     a second and a half is a key you press again. By exception like the page's own report - what is
     muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
     is itself the answer and takes one sentence to hear."""
-    _speak_if_announcing("Reading the unit.")   # silent whenever the announcer is
+    _ann_say("Reading the unit.")   # silent whenever the announcer is
     ov = device_overview()
     if not ov.get("ok"):
         return ov.get("message", "The unit could not be read.")
@@ -10116,13 +9971,13 @@ def _hk_state() -> str:
         bits.append(f"{rec.get('label', 'Recording')}.")
     muted = [m["label"] for m in ov.get("muted") or []]
     if muted:
-        bits.append(f"Muted: {_join_and(muted)}.")
+        bits.append(f"Muted: {wording.join_and(muted)}.")
     soloed = [s["label"] for s in ov.get("soloed") or []]
     if soloed:
-        bits.append(f"Soloed: {_join_and(soloed)}.")
+        bits.append(f"Soloed: {wording.join_and(soloed)}.")
     latched = [p["name"] for p in ov.get("pads_engaged") or []]
     if latched:
-        bits.append(f"Still switched on: {_join_and(latched)}.")
+        bits.append(f"Still switched on: {wording.join_and(latched)}.")
     for vol in ov.get("storage_low") or []:
         bits.append(f"{vol['label']} is nearly full, {vol['free_pct']} percent free.")
     # ROUTING, by exception like everything else here, and the reason it is worth the words: an
@@ -10142,11 +9997,11 @@ def _hk_state() -> str:
 #
 # A pad is engaged by writing `padActive` at its STREAM POSITION, and position is only knowable from
 # a model dump - about 1.5 seconds, which is not a cough-key or an airhorn. So the map is cached, and
-# kept honest three ways: it is built on first use, REFRESHED IN THE BACKGROUND after every press
-# (so the next press is both instant and current), and the same background pass CHECKS that the pad
-# now engaged is the one asked for. If a pad was created or cleared since the last refresh, the
-# positions can have shifted; the check catches that, switches the wrong pad off again and says so,
-# rather than leaving a stranger's voice effect on a live mic. `padIdx` is the stable identity (a
+# kept honest three ways: it is built on first use, MARKED STALE by every pad edit
+# (_hk_pads_stale) and refreshed in the background once older than _HK_PAD_CACHE_S, and after an
+# HID toggle a background pass CHECKS that the pad now engaged is the one asked for. If the
+# positions have shifted, the check switches the wrong pad off again and says so, rather than
+# leaving a stranger's voice effect on a live mic. `padIdx` is the stable identity (a
 # pad's place in the grid), and it is what a shortcut stores; position is the moving part.
 _hk_pad_map = {}                # padIdx -> (position, name, pad type, play mode)
 _hk_pad_lock = threading.Lock()
@@ -10155,9 +10010,9 @@ _hk_pads_held = set()           # padIdx of HOLD-mode sound pads whose MIDI note
 
 # WHICH BANK THE DESK IS ON, cached for the same reason the pad map is: MIDI reaches only the
 # current bank, so firing a pad in another one needs this before it can do anything, and a model
-# dump in front of a keypress is not an airhorn. Kept honest from three directions - the background
-# refresh after every press reads it off the same dump, the announcer notes the desk's own pushes,
-# and our own bank writes note themselves. None means we have genuinely never seen one, which a
+# dump in front of a keypress is not an airhorn. Kept honest from three directions - every pad-map
+# refresh reads it off the same dump, the announcer notes the desk's own pushes, and our own bank
+# writes note themselves. None means we have genuinely never seen one, which a
 # caller must not silently read as bank 1: that fires the wrong pad.
 _hk_bank = None
 
@@ -10262,8 +10117,6 @@ def _hk_pad_entry(pad_idx: int):
 _HK_PAD_CACHE_S = 90
 _hk_pads_at = 0.0
 _hk_refreshing = threading.Event()
-
-
 _hk_pads_dirty = threading.Event()
 
 
@@ -10490,7 +10343,7 @@ def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
     INJECTING THE BUTTON DOES NOT WORK, and that was the obvious route: `padButtonPressed` at the
     PADBUTTON node reads back exactly as written and moves NOTHING else in the whole 6000-property
     model, on either address encoding, for a sound pad or a mixer pad. See the padActive entry in
-    PROJECT_GUIDE.md; do not spend another evening on it.
+    PROJECT_GUIDE.md.
 
     A VOICE-FX PAD WITH NO EFFECT OBJECT IS REFUSED RATHER THAN SWITCHED ON. `padActive` latches on
     one of those perfectly happily and processes nothing, so writing it would leave the desk holding
@@ -10630,8 +10483,8 @@ def _hk_playing_now(_target: str = "") -> str:
     if not said and _ann_live_state is None:
         said.update(_hk_playing_from_model())
     # HID-ENGAGED PADS ARE NOT IN THE STREAM AT ALL. The desk does not echo our own `padActive`
-    # write (measured: engaging a voice-FX pad over HID pushes nothing whatever),
-    # so a voice effect this app switched on is only knowable from what we remember doing.
+    # write (measured: engaging a voice-FX pad over HID pushes nothing whatever), so a voice
+    # effect this app switched on is only knowable from what we remember doing.
     for pad_idx in sorted(_hk_pads_on):
         entry = _hk_pad_entry(pad_idx)
         if entry:
@@ -10649,7 +10502,7 @@ def _hk_playing_now(_target: str = "") -> str:
     return " ".join(bits) if bits else "Nothing is playing."
 
 
-def _hk_playing_from_model() -> list:
+def _hk_playing_from_model() -> dict:
     """What the DESK says is active, read fresh. The answer when the announcer is off.
 
     Returns {stream position: sentence}, keyed the same way as the tracked state so the caller can
@@ -10675,25 +10528,18 @@ def _hk_playing_from_model() -> list:
 def _hk_window() -> str:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
-    # SILENT ON SUCCESS, and that is right ONLY because the page speaks for itself: it moves focus
-    # to the current section's heading when the window is raised, so a screen reader announces
-    # where you have landed. Speaking here as well would talk over that in a second voice.
-    # SILENT ON SUCCESS. Bringing a window to the front is a WINDOWS action, and Windows tells the
-    # screen reader about it - so an announcement from here would be this app speaking over the
-    # screen reader doing its own job, in a second voice, about something it has already said. The
-    # app's own announcer is for the DESK. What this needs instead is a real activation, which is
-    # `_focus_app_window`'s problem and is documented there.
+    # SILENT ON SUCCESS: Windows announces the raised window and the page moves focus to the current
+    # section's heading, so speaking here would talk over the screen reader in a second voice. A
+    # real activation is `_focus_app_window`'s problem and is documented there.
     if _focus_app_window():
         return ""
-    # A REFUSED RAISE MUST SAY SO. Before this it fell through to open_ui and said "Opening
-    # AccessCaster" whether or not a window already existed, which is fine, but a raise that
-    # failed with the window still sitting there behind everything said nothing at all.
+    # A refused raise must say so, rather than leave the window sitting unseen behind everything.
     open_ui(f"http://localhost:{HTTP_PORT}/")
     return "Opening AccessCaster."
 
 
-# WHICH PAD TYPES A SHORTCUT MAY BE POINTED AT lives in `commands.PAD_TYPES`, and since MIDI
-# arrived it is all three that do something: sound, voice FX and mixer.
+# WHICH PAD TYPES A SHORTCUT MAY BE POINTED AT lives in `commands.PAD_TYPES`: sound, voice FX and
+# mixer.
 
 # WHAT A FRESH INSTALL GETS. (command, modifiers, key, speak). Only laid down when nothing has been
 # saved, so deleting them stays deleted.
@@ -10729,6 +10575,7 @@ def _hotkey_defaults() -> list:
         ("callme.end", hotkeys.DEFAULT_MODS, "D", True),
     ] + _pad_hotkey_scheme()
 
+
 # THE FIRST FORMAT, kept only to carry an existing settings file across. Version one bound a fixed
 # set of ten named actions; version two binds a user-built list to catalogue commands. Without this,
 # anyone who had already set their keys would silently get the defaults back.
@@ -10763,28 +10610,6 @@ def _hotkeys_migrate(saved: dict) -> dict:
     return {"enabled": bool(saved.get("enabled", True)), "shortcuts": rows}
 
 
-def _speak_if_announcing(text: str) -> None:
-    """Speak something the app decided to say, but ONLY when the control announcer is on.
-
-    **THE CONTROL ANNOUNCER IS THE LEADER, AND EVERY OTHER VOICE IN THE APP FOLLOWS IT.** One switch
-    means one answer to "will this machine talk", instead of a set of voices each with its own
-    opinion.
-
-    THE FAILURE IT PREVENTS: a recording switches the announcer off for the duration of the take so
-    nothing of ours lands in it, but a hotkey reply sent straight to `_ann_say` never asks whether
-    the announcer is on. So the one thing the suspension exists to prevent happens anyway,
-    from the very keys you reach for mid-take. Gating on `_announce_on` fixes that case and the
-    manual case together, because a record suspension IS the announcer being switched off.
-
-    TWO CONSEQUENCES, both deliberate. Turning announcements back ON still speaks, because
-    `action_set_announce(True)` has already run by the time the reply is handed over. And with
-    announcements off, a shortcut that FAILS is silent too: the leader rule is the whole point, and a
-    machine told to be quiet should not start talking because something went wrong."""
-    if not _announce_on.is_set():
-        return
-    _ann_say(text)
-
-
 def hotkey_manager():
     """The one manager, built on first use and given the saved shortcuts. Built lazily so importing
     server.py (our DevTools scripts all do) never registers a system-wide hotkey by surprise: only
@@ -10794,7 +10619,11 @@ def hotkey_manager():
     DO. The two meet here, and only here."""
     global _hotkeys
     if _hotkeys is None:
-        mgr = hotkeys.HotkeyManager(speak=_speak_if_announcing,
+        # Replies go through _ann_say, which enforces the announcer switch: a recording's
+        # suspension silences the very keys you reach for mid-take, and a shortcut that FAILS is
+        # silent too. Turning announcements back ON still speaks, because action_set_announce(True)
+        # has run by the time the reply is handed over.
+        mgr = hotkeys.HotkeyManager(speak=_ann_say,
                                     runner=commands.run,
                                     labeller=_hotkey_label)
         mgr.load(_hotkeys_migrate(load_settings().get("hotkeys") or {}),
@@ -10871,8 +10700,8 @@ def _app_settings_available() -> dict:
     out = {}
     try:
         lists = _sapi_lists()
-        # Only offer a list we actually got. On this machine over RDP, SAPI enumeration fails and
-        # both come back empty (see ProjectNotes), and an empty list must NOT be read as "this
+        # Only offer a list we actually got. Over Remote Desktop, SAPI enumeration fails with
+        # 0x80045039 and both come back empty, and an empty list must NOT be read as "this
         # computer has no voices, so refuse the setting" - it means we could not tell.
         if lists.get("voices"):
             out["announcer_voice"] = list(lists["voices"])
@@ -10956,19 +10785,28 @@ def action_import_app_settings(payload) -> dict:
 
 
 def _apply_announcer_settings(changes: dict) -> None:
-    """Push restored announcer preferences into the RUNNING announcer, not just the file."""
-    global _ann_levels_on, _ann_volume, _ann_voice, _ann_say_device
+    """Push restored announcer preferences into the RUNNING announcer, not just the file.
+
+    `announcer` (on at start-up) is left to the next launch: it is the tray's preference, and
+    switching speech on or off in the middle of an import would be its own surprise."""
+    global _ann_levels_on, _ann_volume, _ann_voice, _ann_say_device, _ann_worker_gen
+    global _ann_mute_tones, _ann_startup_summary
     if "announcer_levels" in changes:
         _ann_levels_on = bool(changes["announcer_levels"])
+    if "announcer_mute_tones" in changes:
+        _ann_mute_tones = bool(changes["announcer_mute_tones"])
+    if "announcer_startup_summary" in changes:
+        _ann_startup_summary = bool(changes["announcer_startup_summary"])
     if "announcer_volume" in changes:
-        try:
-            _ann_volume = int(changes["announcer_volume"])
-        except (TypeError, ValueError):
-            pass
+        _ann_volume = _clamp_volume(changes["announcer_volume"])
+    # The voice and the output are fixed when the speech worker starts, so a change bumps the
+    # generation and the pump restarts it before the next phrase (see _ann_worker_gen).
     if "announcer_voice" in changes:
         _ann_voice = str(changes["announcer_voice"] or "")
+        _ann_worker_gen += 1
     if "announcer_output" in changes:
         _ann_say_device = str(changes["announcer_output"] or "")
+        _ann_worker_gen += 1
 
 
 def read_autostart() -> dict:
@@ -11063,12 +10901,9 @@ def action_set_hotkeys_enabled(on: bool) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# Declarative route tables. Most endpoints share one shape, so they live in a
-# table instead of a long if/elif chain (the chain was ~17 GET + ~45 POST near-
-# identical branches). do_GET/do_POST dispatch through these; genuinely special
-# routes (raw-body upload, None-aware fields, global-state mutators, dict bodies)
-# stay explicit in the handler. Behaviour is unchanged: same functions, same
-# field names, same defaults, same coercions.
+# Declarative route tables. Most endpoints share one shape, so they live in a table that
+# do_GET/do_POST dispatch through; genuinely special routes (raw-body upload, None-aware fields,
+# global-state mutators, dict bodies) stay explicit in the handler.
 # ----------------------------------------------------------------------------
 
 # GET: path -> zero-arg callable whose result is sent as JSON.
@@ -11166,8 +11001,7 @@ POST_ROUTES = {
     "/api/meters/stream": (action_set_meter_stream, [(str, "stream", "")]),
     "/api/meters/option": (action_set_meter_option, [(str, "name", ""), (float, "value", 0)]),
     "/api/meters/watch": (action_meter_watch, [(bool, "on", None)]),
-    # 0 = "use the saved length" (30 s). The old default of 2.0 here silently overrode the
-    # setting, so a check ran for two seconds however it was configured.
+    # 0 = "use the saved length" (30 s). Any other default here would override the setting.
     "/api/channels/level-check": (action_channel_level_check,
                                  [(str, "name", ""), (float, "seconds", 0.0)]),
     "/api/meters/input-level": (action_set_input_level, [(float, "db", 0.0)]),
@@ -11274,8 +11108,8 @@ POST_ROUTES = {
     "/api/shows/delete": (action_show_delete, [(int, "snapshot", -1)]),
     "/api/shows/reset": (action_show_reset, [(bool, "backup_first", True)]),
     # ONE backup: exports a show when there is a drive to hold one, always saves a profile, and
-    # pairs them. Restore prefers the show and falls back to the profile. The four granular routes
-    # above stay: they are what a Duo (no removable storage) and the clean-restore path still use.
+    # pairs them. Restore always takes the profile (action_restore_backup). The granular show routes
+    # above serve a unit-made show with no profile beside it.
     "/api/backup": (action_backup_now, [(str, "name", "")]),
     "/api/backup/restore": (action_restore_backup, [(str, "name", ""), (bool, "clean", False)]),
     "/api/backup/plan": (backup_restore_plan, [(str, "name", "")]),
@@ -11449,10 +11283,9 @@ class Handler(BaseHTTPRequestHandler):
             # ASSEMBLED, NOT READ: page.render_index splices static/help.html in at the marker.
             self._send_body(page.render_index(), "text/html; charset=utf-8", extra_headers=extra)
             return
-        # LOCAL ONLY applies to reads too, and it did not before: `/api/access` hands back the
-        # token itself, so a remote page that is legitimately signed in must still not be able to
-        # read it out (or replace it, which is the POST half). Only the machine the desk is plugged
-        # into may see the key.
+        # LOCAL ONLY applies to reads too: `/api/access` hands back the token itself, so a remote
+        # page that is legitimately signed in must still not be able to read it out (or replace it,
+        # which is the POST half). Only the machine the desk is plugged into may see the key.
         if path in LOCAL_ONLY_ROUTES and not self._is_local():
             self._send_json({"ok": False,
                              "message": "The access link can only be seen on the computer the "
@@ -11473,9 +11306,7 @@ class Handler(BaseHTTPRequestHandler):
             ctype = (
                 "text/css; charset=utf-8" if name.endswith(".css")
                 else "application/javascript; charset=utf-8" if name.endswith(".js")
-                # Any extra page served straight out of static/. Added for the tab-layout
-                # prototype (uitest.html, deleted once every page was converted) and kept
-                # because without it an .html here arrives as text/plain and the browser
+                # Without this an .html in static/ arrives as text/plain and the browser
                 # shows the source instead of rendering it.
                 else "text/html; charset=utf-8" if name.endswith(".html")
                 else "text/plain; charset=utf-8"
@@ -11509,8 +11340,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": _focus_app_window()})
             elif self.path.startswith("/api/pad/replace"):
                 # pad number in query (?pad=N), filename in a header, body = raw WAV.
-                from urllib.parse import urlparse, parse_qs
-                q = parse_qs(urlparse(self.path).query)
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 pad_n = int((q.get("pad") or ["0"])[0])
                 # replay defaults ON (factory behaviour); ?replay=0 makes the pad pause/resume.
                 replay = (q.get("replay") or ["1"])[0] not in ("0", "false", "off")
@@ -11554,14 +11384,16 @@ class Handler(BaseHTTPRequestHandler):
                     str(data.get("param", "")),
                     data.get("value")))
             elif self.path in LOCAL_ONLY_ROUTES and not self._is_local():
-                # A wifi password must not cross the network it is for. The app serves on 0.0.0.0
-                # so a phone can drive the desk from another room, and that is exactly why this
-                # one route refuses a remote caller instead of quietly accepting one.
+                # A wifi password must not cross the network it is for, and the access token must
+                # not be replaced by the remote page it lets in.
                 self._send_json({
                     "ok": False,
-                    "message": ("Joining a wifi network can only be done from the computer the "
-                                "unit is plugged into. The password would otherwise travel across "
-                                "the network in the clear, which is the network you are joining.")})
+                    "message": (("Joining a wifi network can only be done from the computer the "
+                                 "unit is plugged into. The password would otherwise travel across "
+                                 "the network in the clear, which is the network you are joining.")
+                                if self.path == "/api/network/wifi/join" else
+                                ("The access link can only be changed on the computer the unit is "
+                                 "plugged into."))})
             elif self.path in POST_ROUTES:
                 action, specs = POST_ROUTES[self.path]
                 if specs:
@@ -11688,20 +11520,16 @@ def _focus_app_window() -> bool:
     # fine. A refusal here means the CALLER has lost the foreground right, and the fix is at that
     # end - see hotkeys._FOREGROUND_COMMANDS, where dispatching to a worker thread was spending it.
     user32.SetForegroundWindow(hwnd)
-    # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED. This returned True unconditionally,
-    # so a refused raise and a successful one were indistinguishable - and the caller stays silent
-    # on a success, which makes a refusal silent too. It also made the fault impossible to
-    # diagnose: a note recorded "the raise is refused" when the raise was in fact working and the
-    # real fault was focus landing nowhere announceable.
+    # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED: the caller stays silent on a
+    # success, so a refusal reported as success would be silent too.
     got = user32.GetForegroundWindow()
     ok = bool(got) and got == hwnd
     # LOG THE FOCUS WINDOW, NOT JUST THE FOREGROUND ONE. They are different things and only the
     # second is what a screen reader follows, so "the window came up but my screen reader still
     # says I am in the other app" has two possible causes that look identical from outside: a
     # window that is merely in front without holding focus, or a screen reader reporting a stale
-    # object because nothing generated a focus event. This one line separates them, and the
-    # question has come round three times without it. GetGUIThreadInfo(0) reports the foreground
-    # thread's own focus window.
+    # object because nothing generated a focus event. This one line separates them.
+    # GetGUIThreadInfo(0) reports the foreground thread's own focus window.
     try:
         class _GTI(ctypes.Structure):
             _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
@@ -11835,9 +11663,8 @@ def _close_previous_instances(port: int) -> bool:
     server cleanly takes over, which stops a stale zombie server answering with old code.
 
     **OUR OWN SESSION ONLY.** The holder of the port can belong to another signed-in account, and
-    killing that is taking away somebody else's running app; it fails today only because doing so
-    needs admin, which is luck rather than a design. `_other_account_holds_port` handles that case
-    properly, well before this runs.
+    killing that is taking away somebody else's running app (that it needs admin is luck, not a
+    guard). `_other_account_holds_port` handles that case properly, well before this runs.
 
     Best-effort and pure-stdlib (netstat + taskkill); no-op on non-Windows or any failure. Returns
     True if it killed at least one."""
@@ -11935,8 +11762,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
     # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something
-    # reads the Routing page. The announcer seeds it too, which is why this was invisible - but
-    # the announcer only runs while announcements are ON, and they are a user setting.
+    # reads the Routing page. The announcer seeds it too, but only while announcements are ON.
     # Skipped when something has already published, so this costs one dump at most.
     threading.Thread(target=_seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
     # RODE's virtual devices may have been left switched off in Windows by a mode change made

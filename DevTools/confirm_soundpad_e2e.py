@@ -1,9 +1,9 @@
-"""GAP-3 confirmation: soundpad create/edit/clear END-TO-END through the browser/HTTP surface.
+"""Soundpad create/edit/clear END-TO-END through the browser/HTTP surface.
 
 Drives the SAME HTTP endpoints the web UI uses (server must be running headless on :8770),
 on EMPTY user pads only, reading the pool health back via HTTP after every step, then clearing
 everything and confirming the pad table + region-B pool return byte-clean to the baseline
-(7 objects). Fully reversible. See ProjectMemory/Completed.md, Duo support.
+(7 objects). Fully reversible.
 """
 import json
 import struct

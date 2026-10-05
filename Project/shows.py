@@ -3,8 +3,8 @@
 WHAT A SHOW IS. The whole desk state as the firmware itself stores it: every setting, the fader
 layout, the routing, and the SMART pads with their audio. An export writes about 24 MB onto the
 recordings drive in roughly a second, and an import puts all of it back in a few seconds. That is
-faster and MORE COMPLETE than our own profiles, which can only put back the 148 properties this app
-knows how to write (see ProjectMemory/PROFILE_COVERAGE_<DESK>.md).
+faster and MORE COMPLETE than our own profiles, which can only put back the properties this app
+knows how to write.
 
 WHY BOTH STILL EXIST, since the obvious question is why we do not just delete profiles:
   * A show is a black box. It lives on the desk's drive, cannot be read, edited or diffed, cannot be

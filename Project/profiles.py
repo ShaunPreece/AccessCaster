@@ -44,7 +44,7 @@ PROFILES_DIR = data_path("profiles")
 PROFILE_VERSION = 2
 RESTORE_PACE = 0.02            # seconds between device writes during a restore
 # Mic channel name -> 1-based number. Pro II-shaped (Mic3/Mic4), but SAFE across devices because
-# restore refuses a cross-device restore (GAP-4): a Duo profile only ever carries Mic1/Mic2, and a
+# restore refuses a cross-device restore: a Duo profile only ever carries Mic1/Mic2, and a
 # stray higher channel would fail the device's own mic guard (channels._mic_path) anyway.
 _MIC_NAME_TO_INT = {"Mic1": 1, "Mic2": 2, "Mic3": 3, "Mic4": 4}
 
@@ -77,9 +77,9 @@ BASELINE_KEY = "baseline"
 # {"snapshot": int, "uuid": str, "name": str}: the desk's own backup taken at the same moment as
 # this profile. Present only when there was a card or drive in the unit to export to, since a show
 # can only live on removable storage (the internal volume is the pads partition and cannot hold
-# one). This is what lets ONE Backups list offer both: restore prefers the show, which is exact and
-# takes seconds, and falls back to this file when the show has gone with the drive. The profile
-# also supplies the NAME, because the unit calls every export after the loaded show and gives no
+# one). This is what lets ONE Backups list carry both. Restore always reads this file, never the
+# show, because a show import crashes the desk about one time in six (server.action_restore_backup);
+# the show stays as a complete copy on the drive. The profile also supplies the NAME, because the unit calls every export after the loaded show and gives no
 # way to rename one, so a shows-only list reads as several identical lines.
 SHOW_KEY = "show"
 
@@ -203,7 +203,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     carry a 10-slot channelInputSource whose last slot is an unexposed spare mirroring USB 2, so we
     record it for the round trip while `_apply_v2` writes only the first `fader_count` it is given.
 
-    GAP-4 (device-awareness): `product_id`/`device_name` stamp the desk the profile was saved on so
+    DEVICE-AWARENESS: `product_id`/`device_name` stamp the desk the profile was saved on so
     restore can REFUSE a cross-device restore (a Pro II profile's fader vector, matrix shape and
     channel set do not map onto a Duo). `monitor_output_indices` is the list of monitor-mix output
     indices the CONNECTED device exposes (Pro II = 0-4 Headphone 1-4 + Monitor; Duo = 0,1,4), so we
@@ -253,7 +253,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     fader_levels = [int(v) if isinstance(v, (int, float)) else None
                     for v in rcp_read.values(blob, "faderLevel")]
     mon_level = first("outputMonLevel")
-    # ONE HEADPHONE TYPE PER OUTPUT (GAP-6). The dump carries them in output order, mapped
+    # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
     # positionally to the outputs the device addresses - the same read read_routing_live does, and
     # the ordering is hardware-confirmed. The old single "headphone_type" key is still written (it
     # is Headphone 1's value) so a profile saved now still restores on an older build.
@@ -301,7 +301,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
                 if ex and s in legacy_sources:
                     matrix_excluded.append([int(o), int(s)])
     if ml.get("ok"):
-        for o in monitor_output_indices:   # the monitor outputs THIS device exposes (device-aware, GAP-4)
+        for o in monitor_output_indices:   # the monitor outputs THIS device exposes (device-aware)
             for s, cell in ml["levels"].get(o, {}).items():
                 if (s in legacy_sources and cell.get("linked") is False
                         and cell.get("level") is not None):
@@ -311,7 +311,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
         "version": PROFILE_VERSION,
         "name": safe,
         "saved_at": time.time(),
-        # The desk this profile was saved on (GAP-4). restore refuses a cross-device restore when
+        # The desk this profile was saved on. restore refuses a cross-device restore when
         # product_id is present and differs from the connected device. Older profiles have neither
         # key (all saved on the Pro II historically); those are allowed and rely on per-write guards.
         "product_id": product_id,
@@ -578,9 +578,8 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     # every restored chain is written against the OLD layout and then has the layout moved out from
     # under it, so a profile saved with a reordered layout restores its voicings onto the wrong
     # channels.
-    # Still gated on the device's "fader_write" cap (GAP-4, folding the GAP-3 follow-up): the Duo's
-    # fader vector carries empty strips encoded as -1 and its write semantics are unconfirmed, so
-    # writing a saved layout there is exactly the unconfirmed path GAP-1 refuses. On a device
+    # Gated on the device's "fader_write" cap: the Duo's fader vector carries empty strips
+    # encoded as -1 and its write semantics are unconfirmed. On a device
     # without the cap we SKIP the fader restore (and tell the user) rather than write it.
     if "fader_write" in devices.get_active_device().caps:
         step("Restoring the fader layout.")
@@ -788,11 +787,11 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
             w("monitor auto-mute", lambda v=r["monitor_auto_mute"]: rcp_transfer.set_monitor_auto_mute(bool(v)))
         if r.get("bt_auto_mute") is not None:
             w("Bluetooth auto-mute", lambda v=r["bt_auto_mute"]: rcp_transfer.set_bt_auto_mute(bool(v)))
-        # Headphone amp type, ONE PER OUTPUT (GAP-6). New profiles carry "headphone_types" (a value
+        # Headphone amp type, ONE PER OUTPUT. New profiles carry "headphone_types" (a value
         # per addressable output, positional); older ones carry only "headphone_type", which is
         # Headphone 1's, so we treat it as a one-entry list. Values are validated against the
-        # CONNECTED device's spec rather than a literal (0, 1) - that literal silently dropped
-        # "Low sensitivity" (2), which the UI has offered since GAP-6 landed - and the selector comes
+        # CONNECTED device's spec rather than a literal, so "Low sensitivity" (2) survives, and the
+        # selector comes
         # from the same spec, so an unmapped headphone output is never written.
         hp_spec = devices.get_active_device().headphones
         hp_saved = r.get("headphone_types")

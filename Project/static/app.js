@@ -517,7 +517,7 @@ async function loadStatus(announceResult) {
   // changes under a running window.
   if (data.app_version) setText("app-version", data.app_version);
 
-  // GAP-10: reflect the actually-connected desk (Pro II or Duo) in the window title, rather than a
+  // reflect the actually-connected desk (Pro II or Duo) in the window title, rather than a
   // hardcoded model. The server resolves the name from the USB product id (get_active_device().name).
   if (data.device_name)
     document.title = "AccessCaster - " + data.device_name + " controller";
@@ -5126,7 +5126,7 @@ async function loadRouting() {
   }
 
   // Headphone type: one select per addressable headphone output, both the outputs and the amp-type
-  // value list come from the device model (GAP-6), so the Duo/Pro II expose the right controls.
+  // value list come from the device model, so the Duo/Pro II expose the right controls.
   const hpBox = document.getElementById("routing-headphones");
   hpBox.innerHTML = "";
   routingCtl.headphones = [];
@@ -6347,7 +6347,7 @@ function applyRoutingValues(v) {
     routingCtl.monitorMute.checked = !!v.monitor_auto_mute;
   if (routingCtl.btMute && v.bt_auto_mute !== null && v.bt_auto_mute !== undefined)
     routingCtl.btMute.checked = !!v.bt_auto_mute;
-  // Per-output headphone types (GAP-6): headphone_types[i] lines up with routingCtl.headphones[i].
+  // Per-output headphone types: headphone_types[i] lines up with routingCtl.headphones[i].
   if (Array.isArray(v.headphone_types)) {
     v.headphone_types.forEach((hpVal, i) => {
       const sel = routingCtl.headphones[i];

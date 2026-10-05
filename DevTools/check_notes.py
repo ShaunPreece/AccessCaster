@@ -260,6 +260,31 @@ def check_code_comments() -> None:
                          f"tense, with no date.")
 
 
+# ---------------------------------------------------------------------------
+# 8. Public files never cite a private one
+# ---------------------------------------------------------------------------
+# The notes are not in this repo, so a citation of one is a dead link for everyone else. DevTools is
+# not scanned: its generators write their reports into the notes and name them as their output.
+PRIVATE_NAME = re.compile(
+    r"ProjectNotes|ProjectMemory|Completed\.md|DUO_SUPPORT|PROFILE_COVERAGE|PROPERTY_COVERAGE|"
+    r"RodeDocs")
+
+
+def check_private_citations() -> None:
+    files = [p for p in sorted((REPO / "Project").rglob("*"))
+             if p.is_file() and p.suffix in (".py", ".js", ".html", ".css", ".ps1")
+             and "dist" not in p.parts and "build" not in p.parts]
+    files += sorted(DOCS.glob("*.md")) + sorted(DOCS.glob("*.txt")) + [REPO / "README.md"]
+    for p in files:
+        if not p.exists():
+            continue
+        body = read(p)
+        for m in PRIVATE_NAME.finditer(body):
+            line = body.count("\n", 0, m.start()) + 1
+            fail(f"{p.relative_to(REPO).as_posix()}:{line}",
+                 f'cites the private "{m.group(0)}". State the fact instead.')
+
+
 def main() -> int:
     check_completed()
     check_no_status()
@@ -268,6 +293,7 @@ def main() -> int:
     check_dead_links()
     check_duplicates()
     check_code_comments()
+    check_private_citations()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

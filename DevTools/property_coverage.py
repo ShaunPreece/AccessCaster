@@ -115,7 +115,7 @@ CONTEXT_ROLE = {
     # read_solos read it. Same two-sided shape as the mute, so the same verdict.
     "CUE_PROP": "both",
     "PAD_ADDRESS_INTERNAL": "write", "_PHASE1": "write", "_EFFECTS": "write",
-    "EFFECT_ONFLAG": "write", "EFFECT_FLAG": "write", "FX_ENGINE_PARAMS": "write",
+    "EFFECT_FLAG": "write", "FX_ENGINE_PARAMS": "write",
     "BACK_CHANNEL_SOURCES": "write", "OUTPUT_MIX_MINUS": "write",
     # both (UI specs and device tables describe a property we read AND write)
     "PROCESSING_CONTROLS": "both", "_PRESET_PROPS": "both", "CHANNEL_FX_PARAMS": "both",

@@ -287,6 +287,13 @@ class IPolicyConfig(IUnknown):
 CLSID_PolicyConfigClient = GUID("{870af99c-171d-4f9e-af0d-e63df40c2bc9}")
 
 
+def _policy():
+    """The object every Windows endpoint change goes through: the default device and enabling or
+    disabling an endpoint. An offline test is refused here (meters.refuse_audio_change_in_tests)."""
+    meters.refuse_audio_change_in_tests()
+    return comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+
+
 def _prop(store, key) -> str:
     k = meters.PROPERTYKEY()
     k.fmtid, k.pid = key
@@ -427,7 +434,7 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     try:
         enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                             interface=meters.IMMDeviceEnumerator)
-        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        policy = _policy()
         eps = (_wait_for_faders(enum, FADERS_APPEAR_S) if expect_connected and status.connected
                else _endpoints(enum))
         if status.running:
@@ -535,7 +542,7 @@ def park_output() -> Optional[Parking]:
     try:
         enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                             interface=meters.IMMDeviceEnumerator)
-        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        policy = _policy()
         eps = _endpoints(enum)
         current = {e.id: e for e in eps}.get(_default_id(enum, E_CONSOLE))
         if current is not None and current.state == "active" and not (current.desk or current.virtual):
@@ -567,7 +574,7 @@ def keep_parked(parking: Parking) -> bool:
         now = _default_id(enum, E_CONSOLE)
         if now == parking.id or not _is_desk_usb(enum, now):
             return False
-        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        policy = _policy()
         policy.SetDefaultEndpoint(parking.id, E_CONSOLE)
         policy.SetDefaultEndpoint(parking.id, E_MULTIMEDIA)
         return True
@@ -588,7 +595,7 @@ def default_to_system(timeout_s: float) -> str:
     try:
         enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                             interface=meters.IMMDeviceEnumerator)
-        policy = comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
+        policy = _policy()
         at = time.monotonic()
         while time.monotonic() - at < timeout_s:
             system = next((e for e in _endpoints(enum) if e.virtual and e.flow == "playback"

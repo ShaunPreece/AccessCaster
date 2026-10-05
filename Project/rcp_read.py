@@ -1,6 +1,6 @@
 """AccessCaster - APP-FREE READ-BACK of current device settings.
 
-Discovery (session 12): selecting the device in the RODE app makes it send a
+Selecting the device in the RODE app makes it send a
 4-byte command on report-3 (payload ad10a7b0), and the device answers by
 streaming its ENTIRE property model on report-0x04 IN (gain, P48, MIDI,
 polarity, EQ, FX, ...). This module replays that command from our own code and

@@ -473,6 +473,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   thread, which READS the desk, so stubbing only the write still left the interpreter exiting with a
   HID read in flight: every check printed ok and the process then segfaulted (exit 139). Stub the
   verify too. A suite that passes and then crashes is worse than one that fails.
+  **WINDOWS' AUDIO IS GUARDED THE SAME WAY** (5th October 2026). Moving the default output,
+  enabling or disabling an endpoint, and setting an endpoint's level or mute all raise in an
+  offline test through `meters.refuse_audio_change_in_tests`: every endpoint change goes through
+  `virtual_devices._policy`, and the level and mute setters call it first. A new Windows audio
+  write must do the same. Without it, `test_announcer_reconnect`'s reconnects ran the real
+  `_virtual_devices_follow` and moved Shaun's screen reader between the laptop and the desk.
 
   **A SETTLED QUESTION DOES NOT KEEP ITS PROBE** (Shaun, 30th August 2026: "if we really want to
   reopen a property investigation we'll write a new tool"). Ten one-shot probes were deleted with
@@ -1515,7 +1521,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   silently suppress a desk's one-and-only first-run backup offer on a new machine) and
   `applied_presets` (it describes one desk, not a preference). **Adding a new preference means
   adding it to PORTABLE, MACHINE_SPECIFIC or EXCLUDED** - `test_app_settings.py` fails if a key the
-  app writes is in none of them, so a new setting cannot quietly become unbackupable.
+  app writes is in none of them, so a new setting cannot quietly become unbackupable. It finds the
+  keys by reading `update_settings(...)` calls out of `Project/`, never from a hand list: the hand
+  list missed three. A preference the import should apply LIVE also needs a line in
+  `server._apply_announcer_settings`, and a voice or output change there bumps `_ann_worker_gen`.
 - **IMPORT MERGES, IT NEVER REPLACES.** The excluded keys live in the same file, so a replace would
   delete this machine's remote-access token and its first-run record as a side effect of restoring
   somebody's shortcuts.
@@ -1546,7 +1555,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   it anywhere else and "announcements off" leaves all of that talking. The phrases announcing speech
   is BACK are safe because each sets the flag before it speaks, so no force path is needed. A
   suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
-  different faults.
+  different faults. Hotkey replies and the level watch are handed `_ann_say` itself; a second
+  "speak if announcing" wrapper would only skip that log line.
 
 - **THE PAGE IS CALLED "Backups" AND ITS ROUTE KEY IS `profiles`, DELIBERATELY.** The key, the
   section id `sec-profiles` and `/api/profiles` all keep the old word so a remembered tab position

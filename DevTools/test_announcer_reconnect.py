@@ -78,6 +78,8 @@ class Rig:
         self.dev = None
         self.speak_after = speak_after
         self.seeded_mode = None   # outputMultiMode a re-seed would read; None = unreadable
+        self.tidied = []          # every _tidy_after_standard call, by its `spoken` argument
+        self.followed = []        # every _virtual_devices_follow call, as (mode, arrived)
 
     # -- the stubs the loop calls --------------------------------------------
     def find(self, *a, **k):
@@ -98,6 +100,14 @@ class Rig:
         self.seeded += 1
         st["usb_mode"] = self.seeded_mode      # what a real dump would have found
 
+    def tidy(self, spoken):
+        self.tidied.append(spoken)
+        return ""
+
+    def follow(self, raw_mode, arrived):
+        self.followed.append((raw_mode, arrived))
+        return ""
+
     def re_enumerate(self, to_iface, gap):
         """Take the desk off the bus, wait, and bring it back as a different USB device."""
         self.dev.dead = True
@@ -111,12 +121,17 @@ class Rig:
             "open": rcp_hid.open_handle, "close": rcp_hid.close_handle,
             "say": server._ann_say, "seed": server._ann_seed_layout,
             "retry": server._ANN_RETRY_S, "speak": server._ANN_RECONNECT_SPEAK_AFTER_S,
+            "tidy": server._tidy_after_standard, "follow": server._virtual_devices_follow,
         }
         rcp_transfer.find_control_interface = self.find
         rcp_hid.open_handle = self.open
         rcp_hid.close_handle = lambda dev, purpose="": None
         server._ann_say = self.say
         server._ann_seed_layout = self.seed
+        # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
+        # Windows' default audio device, which is the user's screen reader.
+        server._tidy_after_standard = self.tidy
+        server._virtual_devices_follow = self.follow
         server._ANN_RETRY_S = 0.02             # the real 0.3 s only paces the retries
         server._ANN_RECONNECT_SPEAK_AFTER_S = self.speak_after
         server._announce_on.set()
@@ -133,6 +148,8 @@ class Rig:
         rcp_hid.close_handle = self.saved["close"]
         server._ann_say = self.saved["say"]
         server._ann_seed_layout = self.saved["seed"]
+        server._tidy_after_standard = self.saved["tidy"]
+        server._virtual_devices_follow = self.saved["follow"]
         server._ANN_RETRY_S = self.saved["retry"]
         server._ANN_RECONNECT_SPEAK_AFTER_S = self.saved["speak"]
 
@@ -173,8 +190,10 @@ print("\nA USB MODE THAT MOVED WHILE WE WERE DEAF IS SAID, NOT SWALLOWED")
 # The desk can drop out of Expanded on its own, and the change is otherwise invisible: the push
 # announcing it is sent while the desk is off the bus, so only a comparison across the reconnect
 # can see it. 5 is post-fader multitrack plus Expanded, 2 is the same output mode without it.
-check("leaving Expanded names the faders that were lost",
-      "off their faders" in server._ann_usb_mode_change(5, 2), True)
+# Leaving Expanded says only that: the faders it empties are said by _tidy_after_standard, which
+# the reconnect starts on its own thread because it writes.
+check("leaving Expanded says so", server._ann_usb_mode_change(5, 2),
+      "The unit has left Expanded USB input.")
 check("entering it says so", server._ann_usb_mode_change(2, 5), "USB input is now Expanded.")
 check("an output-mode change names the new mode",
       server._ann_usb_mode_change(0, 2),
@@ -190,7 +209,9 @@ with rig:
     rig.re_enumerate(EXPANDED, gap=0.3)
     time.sleep(0.5)
     check("the reconnect reports the change instead of just saying it is back",
-          "off their faders" in rig.said[-1], True)
+          rig.said[-1], "The unit has left Expanded USB input.")
+    check("and starts the spoken fader tidy", rig.tidied, [True])
+    check("and the virtual-devices follow-up, as an arrival", rig.followed, [(2, True)])
 
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",
