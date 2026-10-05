@@ -9,8 +9,8 @@ nine-fader layout, the virtual fader levels and the monitor speaker level, multi
 auto-mutes, each headphone output's amp type, the Master Compellor on/off + its four params, and
 output delay); and the unit's own settings (screen and button brightness, auto-brightness, screen
 dim time, meter style, haptics, what the record button does, listen mode and the monitor's fixed
-output level). SMART pad SOUNDS are files, not settings, and are a separate optional backup, so they
-are not in here yet.
+output level). SMART pad SOUNDS are files, not settings: an optional pad backup copies them into
+the profile's own pads/ folder (pads_dir) and records their metadata under "pads".
 
 FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2). Legacy flat
 profiles/<name>.json (the old settings-subset) are still listed and still restore, so nothing
@@ -79,8 +79,9 @@ BASELINE_KEY = "baseline"
 # can only live on removable storage (the internal volume is the pads partition and cannot hold
 # one). This is what lets ONE Backups list carry both. Restore always reads this file, never the
 # show, because a show import crashes the desk about one time in six (server.action_restore_backup);
-# the show stays as a complete copy on the drive. The profile also supplies the NAME, because the unit calls every export after the loaded show and gives no
-# way to rename one, so a shows-only list reads as several identical lines.
+# the show stays as a complete copy on the drive. The profile also supplies the NAME, because the
+# unit calls every export after the loaded show and gives no way to rename one, so a shows-only list
+# reads as several identical lines.
 SHOW_KEY = "show"
 
 # ---- the unit's own settings (display, buttons, haptics, listen mode) --------------------------
@@ -107,10 +108,8 @@ def _unit_settings(props: dict) -> dict:
     """{prop: int|float} for every unit setting the dump carries. Bools are stored as 0/1 so the
     profile round-trips through JSON unambiguously; a property the desk did not report is left out.
 
-    FLOATS are kept as floats (outputBTLevel is the first one). Before that every entry
-    in the table happened to be an int or a bool, and an int-only filter looked harmless - it would
-    have dropped the Bluetooth output level silently, which is the failure mode this whole audit
-    trail exists to prevent."""
+    FLOATS are kept as floats (outputBTLevel): an int-only filter would drop the Bluetooth output
+    level silently."""
     out = {}
     for prop in rcp_transfer.UNIT_SETTING_SEL:
         vals = props.get(prop) or []
@@ -207,10 +206,9 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     restore can REFUSE a cross-device restore (a Pro II profile's fader vector, matrix shape and
     channel set do not map onto a Duo). `monitor_output_indices` is the list of monitor-mix output
     indices the CONNECTED device exposes (Pro II = 0-4 Headphone 1-4 + Monitor; Duo = 0,1,4), so we
-    snapshot only that device's real monitor outputs rather than the Pro II-hardcoded range(5).
-    `headphone_output_count` is how many headphone outputs the connected device addresses
-    (devices.HeadphoneTypeSpec.outputs), so we record ONE TYPE PER OUTPUT rather than the single
-    Headphone-1 value the old format kept.
+    snapshot only that device's real monitor outputs. `headphone_output_count` is how many
+    headphone outputs the connected device addresses (devices.HeadphoneTypeSpec.outputs), so we
+    record ONE TYPE PER OUTPUT.
 
     `baseline` marks this as the AS-FOUND capture (see BASELINE_KEY). It also decides who may
     overwrite whom: an ordinary save REFUSES to replace a baseline, because the one profile that
@@ -266,12 +264,9 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # and, where unlinked, its manual level - keyed by NAME rather than by index, so a profile
     # stores that scheme verbatim rather than keeping a second, weaker copy of the same read.
     #
-    # TWO THINGS A NARROWER CAPTURE GETS WRONG:
-    #   - it walked `monitor_output_indices` ONLY, so a level set on the REC, USB or Chat mix was
-    #     simply not backed up. Every output is captured now.
-    #   - it recorded a level for EXCLUDED cross-points, whose "level" is an inert number frozen at
-    #     wherever the fader stood when the exclude unlinked it (see PROJECT_GUIDE). capture records
-    #     nothing but `excluded` for those, which is what made mix schemes round-trip cleanly.
+    # It covers EVERY output, not only the monitor ones, so a level set on the REC, USB or Chat mix is
+    # backed up; and it records nothing but `excluded` for an excluded cross-point, whose "level" is
+    # an inert number frozen where the fader stood (see PROJECT_GUIDE).
     # Writing a manual level to a non-monitor cross-point is hardware-proven (the mix-scheme live
     # test set one on the Chat output and read it back), so no new capability is being assumed here.
     #
@@ -573,7 +568,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     r = prof.get("routing") or {}
     faders = r.get("faders") or []
     # THE FADER LAYOUT GOES FIRST, before any channel processing. Processing and effects are
-    # addressed per fader STRIP (channels._strip_index; per-strip behaviour hardware-confirmed
+    # addressed per fader STRIP (channels._strip_index; per-strip behaviour hardware-confirmed),
     # so the layout decides where each channel's chain has to be written. Run this block LAST and
     # every restored chain is written against the OLD layout and then has the layout moved out from
     # under it, so a profile saved with a reordered layout restores its voicings onto the wrong
@@ -623,11 +618,9 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     # and it takes the desk a second or two to do it (Pro II). A chain write landing
     # inside that window is thrown away - PROVEN directly, by writing eqLowGain 0.3125 exactly 0.12 s
     # after a type change and reading back the voicing's 0.59375 instead.
-    # THIS IS INSURANCE, NOT A BUG BEING FIXED: with the wait disabled, an end-to-end restore still
-    # keeps its chain, because the real writes between the type and the params take longer than the
-    # 0.12 s the probe used. So the path passes on
-    # timing it never asserted, which would vary with the voicing pair, the device and any future
-    # change to what gets written in between. The wait makes it not depend on luck.
+    # Without the wait an end-to-end restore still keeps its chain today, because the writes between
+    # the type and the params take longer than 0.12 s; the wait stops that depending on timing that
+    # varies with the voicing pair, the device and whatever gets written in between.
     # Only paid when the voicing actually CHANGES, which is why the current types are read once here
     # rather than a settle being run for every channel.
     types_now = {}
@@ -639,14 +632,18 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
         types_now = {}                         # unreadable: settle after every type write instead
 
     def _chain_of(name):
+        # A FRESH DUMP EVERY TIME. Through the model cache the second read returns the first one's
+        # blob, the two always agree, and the wait below ends at once.
         try:
-            rec = next((r for r in channels.read_channels() if r.get("name") == name), None)
+            blob = rcp_read.read_model(fresh=True)
+            rec = next((r for r in channels.read_channels(blob) if r.get("name") == name), None)
         except Exception:
             return None
         return None if rec is None else dict(rec.get("params") or {})
 
     def _await_voicing(name, timeout=8.0):
-        """Block until the strip's params stop moving, so the chain lands on a settled voicing."""
+        """Block until two consecutive dumps show the strip's params unchanged, so the chain lands
+        on a settled voicing."""
         end = time.time() + timeout
         prev = _chain_of(name)
         while time.time() < end:
@@ -769,9 +766,8 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
               rcp_transfer.set_recording_format(int(v)))
         # THE USB MODE GETS ITS OWN SPOKEN STEP, because it is the one write in this whole restore
         # that the person hears happen: it re-enumerates the desk's USB audio function, so every
-        # RODECaster input and output on the machine drops for a second or two. Restored anyway
-        # rather than skipped - a profile that saves a setting and quietly declines to put it back
-        # is the mismatch this project has already been caught by once - but announced first.
+        # RODECaster input and output on the machine drops for a second or two. Restored anyway,
+        # since a profile that saves a setting must put it back, but announced first.
         # ONE WRITE FOR BOTH HALVES, because the desk keeps them in one property. Restoring them
         # separately would take two re-enumerations and let the second undo the first.
         if (r.get("usb_multitrack") is not None
@@ -791,8 +787,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
         # per addressable output, positional); older ones carry only "headphone_type", which is
         # Headphone 1's, so we treat it as a one-entry list. Values are validated against the
         # CONNECTED device's spec rather than a literal, so "Low sensitivity" (2) survives, and the
-        # selector comes
-        # from the same spec, so an unmapped headphone output is never written.
+        # selector comes from the same spec, so an unmapped headphone output is never written.
         hp_spec = devices.get_active_device().headphones
         hp_saved = r.get("headphone_types")
         if hp_saved is None and r.get("headphone_type") is not None:
@@ -874,7 +869,7 @@ def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channe
         if r.get("bt_auto_mute") is not None:
             rcp_transfer.set_bt_auto_mute(bool(r["bt_auto_mute"])); applied += 1
         # A legacy profile only ever carried Headphone 1's type. Validated against the connected
-        # device's spec (same fix as _apply_v2), so "Low sensitivity" is no longer dropped.
+        # device's spec, as in _apply_v2.
         hp_spec = devices.get_active_device().headphones
         if r.get("headphone_type") is not None and int(r["headphone_type"]) in hp_spec.value_codes:
             rcp_transfer.set_headphone_type(int(r["headphone_type"]),
