@@ -53,16 +53,20 @@ _TRAY_ICON_ID = 1
 
 
 # --- persisted preferences (in %LOCALAPPDATA%\AccessCaster\settings.json) -----------------------
-# The file is shared with the server (announcer volume lives there too), so both readers and
-# writers go through server.load_settings / server.update_settings, which MERGE. This used to
-# json.dump({"announcer": ...}) over the whole file, which would have wiped any other key the
-# moment the tray toggled the announcer.
+# The file is shared with the server, so reads and writes go through server.load_settings /
+# server.update_settings, which MERGE rather than overwrite the other keys.
 def _load_announcer_pref() -> bool:
-    return bool(server.load_settings().get("announcer", True))   # default ON, as the server always did
+    return bool(server.load_settings().get("announcer", True))
 
 
 def _save_announcer_pref(on: bool) -> None:
     server.update_settings(announcer=bool(on))
+
+
+def _show_page() -> None:
+    """Raise the app window if one is open, otherwise open a fresh one."""
+    if not server._focus_app_window():
+        server.open_ui(URL)
 
 
 class TrayApp:
@@ -120,7 +124,7 @@ class TrayApp:
         if event in (win32con.WM_CONTEXTMENU, win32con.WM_RBUTTONUP):
             self._show_menu()
         elif event in (NIN_KEYSELECT, NIN_SELECT, win32con.WM_LBUTTONDBLCLK):
-            self._open_page()
+            _show_page()
         return 0
 
     # -- the native context menu -----------------------------------------------------------------
@@ -146,7 +150,7 @@ class TrayApp:
     def _on_command(self, hwnd, msg, wparam, lparam):
         cmd = win32api.LOWORD(wparam)
         if cmd == ID_OPEN:
-            self._open_page()
+            _show_page()
         elif cmd == ID_ANNOUNCE:
             self._toggle_announcer()
         elif cmd == ID_LOG:
@@ -156,11 +160,6 @@ class TrayApp:
         return 0
 
     # -- actions ---------------------------------------------------------------------------------
-    def _open_page(self) -> None:
-        # Raise the existing app window if one is open; otherwise open a fresh app-window.
-        if not server._focus_app_window():
-            server.open_ui(URL)
-
     def _open_log(self) -> None:
         """Show the diagnostic log. IN NOTEPAD, deliberately, rather than by handing the file to
         the shell: a `.log` extension often has no registered handler, and `os.startfile` on one
@@ -215,8 +214,7 @@ def main() -> int:
         # is already serving, which is the whole point, so leave it alone and go.
         if at_login:
             return 0
-        if not server._focus_app_window():
-            server.open_ui(URL)
+        _show_page()
         return 0
 
     started = server.start_server_managed(announcer=_load_announcer_pref(),
@@ -226,8 +224,7 @@ def main() -> int:
         # reasoning as above - at login the other instance IS the outcome we wanted, silently.
         if at_login:
             return 0
-        if not server._focus_app_window():
-            server.open_ui(URL)
+        _show_page()
         return 0
 
     TrayApp()
