@@ -52,17 +52,6 @@ NOTIFYICON_VERSION_4 = 4
 _TRAY_ICON_ID = 1
 
 
-# --- persisted preferences (in %LOCALAPPDATA%\AccessCaster\settings.json) -----------------------
-# The file is shared with the server, so reads and writes go through server.load_settings /
-# server.update_settings, which MERGE rather than overwrite the other keys.
-def _load_announcer_pref() -> bool:
-    return bool(server.load_settings().get("announcer", True))
-
-
-def _save_announcer_pref(on: bool) -> None:
-    server.update_settings(announcer=bool(on))
-
-
 def _show_page() -> None:
     """Raise the app window if one is open, otherwise open a fresh one."""
     if not server._focus_app_window():
@@ -177,9 +166,8 @@ class TrayApp:
         subprocess.Popen(["notepad.exe", path])
 
     def _toggle_announcer(self) -> None:
-        new_state = not server._announce_on.is_set()
-        server.action_set_announce(new_state)
-        _save_announcer_pref(new_state)
+        # Saved or not by the server, by the same rule as the page's switch and the shortcut.
+        server.action_set_announce(not server._announce_on.is_set())
 
     def _quit(self) -> None:
         self._remove_icon()
@@ -217,8 +205,7 @@ def main() -> int:
         _show_page()
         return 0
 
-    started = server.start_server_managed(announcer=_load_announcer_pref(),
-                                          open_browser=not at_login)
+    started = server.start_server_managed(open_browser=not at_login)
     if started is None:
         # A race: someone else grabbed the port in the moment between our check and bind. Same
         # reasoning as above - at login the other instance IS the outcome we wanted, silently.

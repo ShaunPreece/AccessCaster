@@ -1568,6 +1568,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   different faults. Hotkey replies and the level watch are handed `_ann_say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
 
+- **THE ANNOUNCER STARTS ON UNLESS ITS OFF IS REMEMBERED, and only a person's toggle is saved.**
+  "Start with announcements the way I left them" (`announcer_remember`) is unticked by default,
+  because a start-up in silence sounds exactly like the app or the desk being broken. Ticked, the
+  page's switch, the tray's item and the shortcut all save `announcer` through
+  `action_set_announce(chosen=True)`; start-up and the switch-back after a take pass
+  `chosen=False` and never save, or a take would overwrite the person's choice. With no saved
+  `announcer_remember`, a saved `announcer` of False counts as ticked: the tray used to keep that
+  preference on its own.
+
 - **THE PAGE IS CALLED "Backups" AND ITS ROUTE KEY IS `profiles`, DELIBERATELY.** The key, the
   section id `sec-profiles` and `/api/profiles` all keep the old word so a remembered tab position
   and the API path do not break. So `profiles` in code is right and "Profiles page" in USER-FACING

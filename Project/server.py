@@ -2897,6 +2897,25 @@ _ann_mute_tones = bool(load_settings().get("announcer_mute_tones", False))
 # of its own rather than a side effect of which page the app opens on. Default ON: knowing the
 # desk's state without looking is the point of the app, and on a normal desk it is one sentence.
 _ann_startup_summary = bool(load_settings().get("announcer_startup_summary", True))
+
+
+def _load_ann_remember() -> bool:
+    """Whether announcements start the way they were left. OFF BY DEFAULT, so the app opens talking:
+    a start-up in silence is indistinguishable from the app or the desk being broken. With no saved
+    answer, a saved `announcer` of False counts as ticked, because before this option the tray kept
+    that preference on its own and somebody who switched announcements off there keeps it."""
+    s = load_settings()
+    if "announcer_remember" in s:
+        return bool(s["announcer_remember"])
+    return s.get("announcer") is False
+
+
+_ann_remember = _load_ann_remember()
+
+
+def announcer_starts_on() -> bool:
+    """Whether the announcer comes up on at start-up: always, unless it is remembered as off."""
+    return not (_ann_remember and load_settings().get("announcer") is False)
 _ANN_SETTLE_S = 0.12       # only a safety net now: guarantees the closing value is spoken
 _ANN_LEVEL_GAP_S = 0.10    # minimum spacing between spoken level updates while moving
 _ANN_RUN_S = 1.5           # within this of the last update on the same target, say just the number
@@ -3844,15 +3863,20 @@ def _restore_announcer_after_record() -> bool:
     if _announce_on.is_set():
         return False                       # the user turned them back on mid-take; leave it
     _ann_quiet_start.set()
-    action_set_announce(True)
+    action_set_announce(True, chosen=False)
     return True
 
 
-def action_set_announce(on: bool) -> dict:
+def action_set_announce(on: bool, chosen: bool = True) -> dict:
+    """Switch announcements on or off. `chosen` is a person's decision (the page, the tray, the
+    shortcut), which is saved when they have asked for it to be remembered; the app switching them
+    back on at start-up or after a take is not."""
     global _announce_thread, _ann_suspended_for_record
     # A DELIBERATE toggle cancels our claim on it either way, so a recording stopping later never
     # overrides what the user has since chosen.
     _ann_suspended_for_record = False
+    if chosen and _ann_remember:
+        update_settings(announcer=bool(on))
     if on:
         if not _announce_on.is_set():
             _announce_on.set()
@@ -3906,6 +3930,24 @@ def action_set_announce_mute_tones(on: bool) -> dict:
             "message": ("Mutes will play a tone instead of being spoken: two notes falling means "
                         "muted, two notes rising means unmuted."
                         if on else "Mutes will be spoken, naming the channel.")}
+
+
+def action_set_announce_remember(on: bool) -> dict:
+    """Whether announcements start the way they were left, rather than always on.
+
+    Ticking it saves the CURRENT state at once, so "the way I left them" holds from now on rather
+    than from the next toggle. A take that has suspended announcements counts as on: the person
+    left them on, the recording only paused them."""
+    global _ann_remember
+    _ann_remember = bool(on)
+    if _ann_remember:
+        update_settings(announcer_remember=True,
+                        announcer=_announce_on.is_set() or _ann_suspended_for_record)
+    else:
+        update_settings(announcer_remember=False)
+    return {"ok": True, "remember": _ann_remember,
+            "message": ("Announcements will start the way you leave them." if _ann_remember
+                        else "Announcements will always be on when the app starts.")}
 
 
 def action_set_announce_startup_summary(on: bool) -> dict:
@@ -9859,9 +9901,8 @@ def _hk_announcer() -> str:
     what the shortcut did is immediately audible as the announcer going quiet. Every OTHER shortcut
     can be silenced too, per shortcut, on the Keyboard shortcuts tab.
 
-    NOT persisted, deliberately: this is the same toggle as the Announcements tab's switch, which
-    does not persist either, and one control having two lifetimes depending on how you reached it is
-    a bug waiting to be reported. The tray menu's copy is the one that saves the preference."""
+    The same toggle as the Announcements tab's switch and the tray's, with the same lifetime: saved
+    only when "Start with announcements the way I left them" is ticked."""
     on = not _announce_on.is_set()
     res = action_set_announce(on)
     return res.get("message", "") if on else ""
@@ -10772,10 +10813,12 @@ def action_import_app_settings(payload) -> dict:
 def _apply_announcer_settings(changes: dict) -> None:
     """Push restored announcer preferences into the RUNNING announcer, not just the file.
 
-    `announcer` (on at start-up) is left to the next launch: it is the tray's preference, and
-    switching speech on or off in the middle of an import would be its own surprise."""
+    `announcer` (the remembered on or off) is left to the next launch: switching speech on or off
+    in the middle of an import would be its own surprise."""
     global _ann_levels_on, _ann_volume, _ann_voice, _ann_say_device, _ann_worker_gen
-    global _ann_mute_tones, _ann_startup_summary
+    global _ann_mute_tones, _ann_startup_summary, _ann_remember
+    if "announcer_remember" in changes:
+        _ann_remember = bool(changes["announcer_remember"])
     if "announcer_levels" in changes:
         _ann_levels_on = bool(changes["announcer_levels"])
     if "announcer_mute_tones" in changes:
@@ -10908,6 +10951,7 @@ GET_ROUTES = {
     "/api/announce": lambda: {"on": _announce_on.is_set(), "levels": _ann_levels_on,
                               "mute_tones": _ann_mute_tones,
                               "startup_summary": _ann_startup_summary,
+                              "remember": _ann_remember,
                               "volume": _ann_volume,
                               "voice": _ann_voice, "output": _ann_say_device,
                               "voices": _sapi_lists()["voices"],
@@ -10967,6 +11011,7 @@ POST_ROUTES = {
     "/api/announce/levels": (action_set_announce_levels, [(bool, "on", None)]),
     "/api/announce/mute-tones": (action_set_announce_mute_tones, [(bool, "on", None)]),
     "/api/announce/startup-summary": (action_set_announce_startup_summary, [(bool, "on", None)]),
+    "/api/announce/remember": (action_set_announce_remember, [(bool, "on", None)]),
     "/api/announce/volume": (action_set_announce_volume, [(int, "percent", 100)]),
     "/api/announce/voice": (action_set_announce_voice, [(str, "voice", "")]),
     "/api/announce/output": (action_set_announce_output, [(str, "output", "")]),
@@ -11740,10 +11785,10 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
     if watchdog:
         # App lifecycle: when the watchdog is on, the server lives only while a webpage is open.
         threading.Thread(target=_client_watchdog, daemon=True).start()
-    if announcer:
+    if announcer and announcer_starts_on():
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # The Device page can still turn it off.
-        action_set_announce(True)
+        action_set_announce(True, chosen=False)
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
     # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something

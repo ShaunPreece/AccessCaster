@@ -32,6 +32,7 @@ VERSION = 1
 PORTABLE = (
     "hotkeys",
     "announcer",
+    "announcer_remember",
     "announcer_levels",
     "announcer_volume",
     "announcer_mute_tones",

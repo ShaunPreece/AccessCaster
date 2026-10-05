@@ -44,7 +44,7 @@ def fake_say(text):
     SAID.append(text)
 
 
-def fake_set_announce(on):
+def fake_set_announce(on, chosen=True):
     """Stands in for the real one: flips the flag without starting the announcer thread (which
     would open the HID device), and clears our claim exactly as the real one does."""
     server._ann_suspended_for_record = False

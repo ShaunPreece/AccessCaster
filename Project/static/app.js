@@ -1629,6 +1629,11 @@ async function readDevice() {
   await readDeviceTab(key);
 }
 
+function onAnnounceRememberToggle(ev) {
+  return sendToggle("/api/announce/remember", { on: ev.target.checked }, ev.target,
+                    ev.target.checked);
+}
+
 function onAnnounceStartupSummaryToggle(ev) {
   return sendToggle("/api/announce/startup-summary", { on: ev.target.checked }, ev.target,
                     ev.target.checked);
@@ -1658,6 +1663,8 @@ async function loadAnnounceState() {
     if (mt) mt.checked = data.mute_tones === true;
     const ss = document.getElementById("announce-startup-summary-toggle");
     if (ss) ss.checked = data.startup_summary !== false;
+    const rm = document.getElementById("announce-remember-toggle");
+    if (rm) rm.checked = data.remember === true;
     if (typeof data.volume === "number") setAnnounceVolumeDisplay(data.volume);
     fillSpeechChoices(data);
   } catch (err) { /* leave the controls as-is if the service is unreachable */ }
@@ -9379,6 +9386,8 @@ async function init() {
           .addEventListener("change", onAnnounceMuteTonesToggle);
   document.getElementById("announce-startup-summary-toggle")
           .addEventListener("change", onAnnounceStartupSummaryToggle);
+  document.getElementById("announce-remember-toggle")
+          .addEventListener("change", onAnnounceRememberToggle);
   document.getElementById("announce-volume").addEventListener("input", onAnnounceVolumeInput);
   document.getElementById("announce-voice").addEventListener("change", onAnnounceVoiceChange);
   document.getElementById("announce-output").addEventListener("change", onAnnounceOutputChange);
