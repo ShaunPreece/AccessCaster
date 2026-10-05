@@ -106,7 +106,7 @@ VOLUME SAFETY: rcp_transfer.find_pad_volume requires a volume that READS BYTES
 ## 1d. CREATING THE OTHER PAD TYPES - Mixer, MIDI Trigger, Quick Dial  [decoded 2026-06-17]
 
 All three non-sound/FX types use the SAME create as a sound pad MINUS the region-B/EFFECTS block
-and MINUS any file: the universal blank-pad template (build_blank with_effects=False) + a commit
+and MINUS any file: the universal blank-pad template (build_blank with no fx_subhandle) + a commit
 that sets the final padType (+ any type-specific fields) + padName + padColourIndex. NONE of them
 own a region-B object (confirmed: factory Censor/Ducking carry none), so all are POOL-SAFE BY
 CONSTRUCTION (zero 0x9d writes, cannot orphan) and HID-only (no file -> no FAT mount -> silent).
@@ -235,17 +235,13 @@ soundpad.effect_objects. free_effect_subhandle(padIdx) REUSES the pad's existing
 (effectsIdx==padIdx) for an edit, or APPENDS (the child count).
 A clean factory table has exactly ONE region-B object per VFX pad = 7 total (6 VFX + special).
 
-*** SOUND-create orphan bug - FIXED + EAR-PROVEN 2026-06-16 ***: the sound create used to emit a
-20-record EFFECTS block on a region-B sub-handle for SOUND pads too. Per the model above a sound pad
-must write NOTHING to region B, so that appended a region-B object (effectsIdx==padIdx) the pad does
-not need, and clear leaves it = an orphan (removable app-free, section 5). THE FIX: build_sound_create
-now takes with_effects (DEFAULTS FALSE for sound), which
-drops the EFFECTS_PARAMETERS handoff + the 20 effects records, so a sound create sends ZERO 0x9d writes
-and cannot orphan. PROVEN 2026-06-16 on empty bank-3 pad 2 (padIdx 17): create kept region-B at 8 (no
-new object), saw_sync=True (the sync handshake was never tied to the effects block), the WAV wrote, the
-pad played (Shaun ear-confirmed), and clearing it kept region-B at 8 too. So the sound create+clear
-lifecycle is now pool-safe end to end. FX creates STILL write region B (with_effects defaults True for
-build_fx_create_recipe) - that is correct, an FX pad's effect definition is the whole point.
+*** A SOUND CREATE WRITES NOTHING TO REGION B ***: build_sound_create has no EFFECTS_PARAMETERS
+handoff and no effects records, so it sends zero 0x9d writes. An effects block on a sound create
+appends a region-B object (effectsIdx==padIdx) the pad does not need, and a clear leaves it as an
+orphan (section 5). Proven 16th June 2026 on empty bank-3 pad 2 (padIdx 17): the create kept region-B
+at 8, saw_sync=True (the sync handshake is not tied to the effects block), the pad played by ear,
+and clearing it kept region-B at 8. Only build_fx_create_recipe writes region B: an FX pad's effect
+definition is the whole point.
 
 Value-block encodings (int/float/bool/string) are in RODECASTER_PROTOCOL.txt section 2.3. Note:
 effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 block but is a
@@ -259,7 +255,7 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
 3.2 CREATE SOUND  soundpad.create_sound / assign_create (CLI `soundpad.py create <grid> <folder> <wav>
     [name] [colour]`). handoff + phase1 + sync +
     commit(padType=1) + file write mid-sequence + remount + padFilePath. handle=free_handle(count). NO
-    region-B/EFFECTS block (build_sound_create(with_effects=False), the 2026-06-16 fix - see section 2).
+    region-B/EFFECTS block (see section 2).
     Pool-safe: a sound create+clear keeps region-B unchanged (proven). saw_sync still True without the block.
     File written under its REAL name (pads/<n>/<Name>.<ext>, factory convention) and AS-IS (no
     conversion); WAV any rate/depth/channels + MP3 all play - see section 1c. .mp3 MUST keep its extension.
@@ -292,14 +288,15 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     desk. Note: set_pad_property writes any property if given an explicit kind (escape hatch).
 
 ================================================================================
-## 4. BUILDERS (pad_records.py)  [CONFIRMED - byte-for-byte selftests]
+## 4. BUILDERS (pad_records.py)  [CONFIRMED]
 Every record built from the target pad's params (no fossil replay). build_sound_create
 / build_fx_create_recipe / build_blank / build_mixer_create (padType 3, all 5 padMixerMode) /
 build_trigger_create (padType 4, default or custom CC/Note). build_fx_create_recipe(idx,name,colour,recipe)
 takes {engine:{param:value}}, engine in reverb/echo/pitchShift/distortion/robot/voiceDisguise.
-`python pad_records.py` runs THREE selftests (sound vs create9_records.pkl all 75 records; mixer vs
-mixer_censor_capture.pkl; trigger vs sp_midi_capture.pkl) - all byte-for-byte. padTriggerControl +
-effectsIdx track the target padIdx.
+`DevTools/test_pad_records.py` checks them offline: the captured padFilePath and remount bytes,
+frozen digests of every builder's output, padTriggerControl + effectsIdx tracking the target padIdx,
+and no 0x9d record outside a voice-FX create. Every builder takes its handle as a required keyword:
+there is no default, because any fixed handle lands on an existing pad once the table grows.
 
 ================================================================================
 ## 5. POOL MANAGEMENT - one effect-object per FX pad
@@ -314,7 +311,7 @@ DEVICE FACTS this rests on (measured by region-B count, app-free, no reset; 1.7.
    region-B object - the clear sends only 0x9a pad frames (zero 0x9d), yet the object vanishes.
    Measured: create FX pad -> region_b +1; clear it -> region_b -1. Persists a reboot. A MIXER pad's
    clear does NOT collect an object made with it, which is how an attached orphan arises.
-2. A BARE FX CREATE DOES NOT APPEND. build_blank(with_effects=False) sends no EFFECTS_PARAMETERS
+2. A BARE FX CREATE DOES NOT APPEND. build_blank with no fx_subhandle sends no EFFECTS_PARAMETERS
    handoff and zero 0x9d writes, so no new object is allocated; the engine binds the pad to an EXISTING
    object by the effectsIdx==padIdx rule. So an orphan can be ADOPTED without appending. (The pad
    RECORD always appends; only the EFFECTS block allocates a region-B object.)
@@ -401,7 +398,7 @@ definitions, which is what `soundpad.heal_fx_pool` repairs (PROJECT_GUIDE part 2
                         Pads and effect objects are read off the tree (pad_nodes, effect_objects);
                         stack cleaning in _sanitise_stack.
 - rcp_read.py / rcp_transfer.py / rcp_hid.py   core read / write / HID.
-- pad_records.py        low-level byte-builders (sound/fx/recipe) + byte-for-byte selftest. The
+- pad_records.py        low-level byte-builders (sound/fx/recipe/mixer/trigger). The
                         layer underneath soundpad.py; keep it.
 - DevTools/decode_effects.py   decode effect-objects from a snapshot.
 - ProjectAssets/fx_recipes.json   the factory recipes (data).

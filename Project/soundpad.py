@@ -675,7 +675,7 @@ def current_pad_count() -> int:
 
     Read FRESH right before a create: the free edit handle is derived from this count, and using
     a stale/too-low handle makes the create overwrite an existing pad's stream position (this
-    corrupted a system pad on a full table - see SOUNDPADS.md / pad_records.HANDLE).
+    corrupted a system pad on a full table - see pad_records.free_handle).
     """
     return len(pad_nodes())
 
@@ -712,21 +712,16 @@ def free_effect_subhandle(target_idx: int) -> int:
 # LOW-LEVEL HID RECORD BUILDERS + THE ONE-SESSION CREATE SENDER
 # ----------------------------------------------------------------------------------------------
 
-def _pad256(payload: bytes) -> bytes:
-    rec = bytes([0x03]) + len(payload).to_bytes(4, "little") + payload
-    return rec + bytes(256 - len(rec))
-
-
 def build_pad_bool(name: str, on: bool, sel: int, frame: int = pr.FRAME_PAD) -> bytes:
     """Compact bool on child `sel` of the pad (0x9a) or effects (0x9d) node:
     01 01 02 02 <frame> 02 01 <sel> <name> 00 01 01 <02=on/03=off>."""
-    return _pad256(bytes([0x01, 0x01, 0x02, 0x02, frame, 0x02, 0x01, sel & 0xFF]) + name.encode()
+    return t._frame(bytes([0x01, 0x01, 0x02, 0x02, frame, 0x02, 0x01, sel & 0xFF]) + name.encode()
                    + bytes([0x00, 0x01, 0x01, 0x02 if on else 0x03]))
 
 
 def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
     """select-begin on child `sel`: 04 01 01 02 <frame> 02 01 <sel>."""
-    return _pad256(bytes([0x04, 0x01, 0x01, 0x02, frame, 0x02, 0x01, sel & 0xFF]))
+    return t._frame(bytes([0x04, 0x01, 0x01, 0x02, frame, 0x02, 0x01, sel & 0xFF]))
 
 
 # CURSOR-addressed variants (addressing mode 0x00 = the device's current model-edit cursor,
@@ -738,13 +733,13 @@ def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
 # (captures/clearpos0.pcap), and verified byte-for-byte on the device.
 def build_pad_bool_cursor(name: str, on: bool) -> bytes:
     """Pad bool on the edit CURSOR: 01 01 02 02 9a 02 00 <name> 00 01 01 <02/03>."""
-    return _pad256(bytes([0x01, 0x01, 0x02, 0x02, 0x9a, 0x02, 0x00]) + name.encode()
+    return t._frame(bytes([0x01, 0x01, 0x02, 0x02, 0x9a, 0x02, 0x00]) + name.encode()
                    + bytes([0x00, 0x01, 0x01, 0x02 if on else 0x03]))
 
 
 def build_select_begin_cursor() -> bytes:
     """select-begin on the edit CURSOR: 04 01 01 02 9a 02 00 (no position byte)."""
-    return _pad256(bytes([0x04, 0x01, 0x01, 0x02, 0x9a, 0x02, 0x00]))
+    return t._frame(bytes([0x04, 0x01, 0x01, 0x02, 0x9a, 0x02, 0x00]))
 
 
 def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
@@ -1573,28 +1568,24 @@ def safe_dest_filename(src_path: str, dest_name: str | None = None) -> str:
 
 def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colour=5,
                   replay=True, debug=False, dest_filename: str | None = None):
-    """Low-level CREATE of a SOUND pad on an EMPTY slot, faithful to the app (padassign9.pcap).
+    """Low-level CREATE of a SOUND pad on an EMPTY slot, in one held-open HID session.
 
-    Sequence (one held-open HID session):
-      pre  = handoff PAD + phase1(padType=0..padIdx) + handoff EFFECTS + effects defaults
+      pre  = handoff PAD + phase 1 (no effects block: a sound pad owns no effect object)
       -- device sync (padRCVSyncPadType, async) --
-      mid  = phase2-A (padType=1, padEnvStop, padEnvFadeOut, padName, padColourIndex)
+      mid  = padType=1, padReplay, envelope, padName, padColourIndex
       -- file written to pads/<folder>/<real name> on the FAT volume here, handle still bound --
       post = remountPadStorage, padFilePath, padName ; then exit transfer mode
-    Records are BUILT FROM SCRATCH by pad_records (no capture replay); handle = free slot past the
-    pad records; fx sub-handle = REUSE the pad's effect-object or append.
+    Records are built by pad_records; the handle is pad_records.free_handle.
 
     The on-device filename uses the REAL name (factory convention pads/<n>/Name.ext), derived
     from `dest_filename` if given else the source basename - see safe_dest_filename.
     """
     handle = pr.free_handle(current_pad_count())   # FREE slot past the pad records
-    fx_sub = free_effect_subhandle(target_idx)     # REUSE pad's effect-object (or append)
     on_device = safe_dest_filename(src_wav, dest_filename)
     pre, mid, post = pr.build_sound_create(target_idx, folder, name, colour, handle=handle,
-                                           fx_subhandle=fx_sub, replay=replay,
-                                           filename=on_device)
+                                           replay=replay, filename=on_device)
     print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  folder={folder}  "
-          f"handle=0x{handle:02x}  fx_sub=0x{fx_sub:02x} (region-B reuse/append)  name={name!r}")
+          f"handle=0x{handle:02x}  name={name!r}")
     print(f"  records: {len(pre)} pre (handoff+phase1, NO region-B for a sound pad) -> sync -> "
           f"{len(mid)} phase2A -> FILE -> {len(post)} phase2B")
 
@@ -1713,7 +1704,7 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
 # An orphan is an effect object with no live FX pad. There are three kinds, and each has exactly one
 # removal that works (device-proven on 1.7.6):
 #   * ATTACHED (effectsIdx stored last, like a live pad's object). Clearing an FX pad makes the
-#     firmware collect the object bound to it, and a BARE FX create (build_blank with_effects=False,
+#     firmware collect the object bound to it, and a BARE FX create (build_blank with no fx_subhandle,
 #     zero 0x9d writes) binds a pad to an existing object without appending one. So: bare-bind a
 #     pad, clear it, and the object goes. A delete by tree path does NOT remove this kind.
 #   * DETACHED (effectsIdx stored first, see effect_objects). Nothing binds to it, so the bare-bind
@@ -1754,12 +1745,11 @@ def _delete_effect_object(index: int) -> None:
 
 def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
     """Create an FX pad bound to an EXISTING region-B object, writing NO new object
-    (build_blank with_effects=False). Transient helper for orphan GC only - do not leave
+    (build_blank with no fx_subhandle). Transient helper for orphan GC only - do not leave
     this pad in place as a user pad (its live binding is not reboot-proven)."""
     _require_pad_write()   # backstop: orphan-GC bind is a device write too
     handle = pr.free_handle(current_pad_count())
-    fx_sub = free_effect_subhandle(target_idx)     # reuse index of the existing object
-    pre = pr.build_blank(target_idx, handle, fx_sub, with_effects=False)
+    pre = pr.build_blank(target_idx, handle)
     mid = [
         pr.write_record("padType", "int", 2, handle, pr.FRAME_PAD),
         pr.write_record("padActive", "bool", True, handle, pr.FRAME_PAD),

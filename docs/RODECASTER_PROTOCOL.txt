@@ -1033,8 +1033,8 @@ padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-F
 -------------------------------------------------------------------------
   1. transferModeType = 2, remountPadStorage, wait for the volume.
   2. PRE: a PAD handoff record plus a ~44-record phase-1 "blank pad" template on
-     the pad handle (frame 0x9A). A SOUND pad sends NO 0x9D effect block
-     (with_effects = False); this keeps the effect-object pool clean.
+     the pad handle (frame 0x9A). A SOUND pad sends NO 0x9D effect block;
+     this keeps the effect-object pool clean.
   3. The device emits an async padRCVSyncPadType sync.
   4. MID (phase 2-A): padType = 1, padEnvStop, padEnvFadeOut, padName,
      padColourIndex.
@@ -1107,7 +1107,7 @@ and the select-begin as   04 01 01 02 9a 02 00.
 
 7.10 CREATING NON-SOUND PAD TYPES
 ---------------------------------
-All built with build_blank(with_effects=False): NO region-B object, NO file, plus
+All built on the blank-pad template with no effects block: NO region-B object, NO file, plus
 a commit that sets the final padType.
   Mixer (padType 3): padMixerMode int 0 Censor / 1 Trash Talk / 2 Fade In-Out /
     3 Back Channel / 4 Ducking; padMixerTriggerMode int 0 Momentary / 1 Latching.

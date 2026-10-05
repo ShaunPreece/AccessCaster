@@ -34,7 +34,6 @@ import time
 import model_tree                    # the tree grammar, and with it the ONE address format
 import devices                       # per-device matrix and fader shape
 import diagnostics                   # the app's own account of every record it sends
-import pad_records                   # the captured remount record and the pad file-path format
 import rcp_hid                       # write-generation counter (invalidates cached model reads)
 from rcp_hid import find_control_interface
 
@@ -648,7 +647,11 @@ def send_records_paced(records: list[bytes], delay: float = 0.12) -> int:
 
 # ---- TRANSFER MODE ---------------------------------------------------------
 
-REMOUNT_PAD_STORAGE = pad_records.REMOUNT_PAD_STORAGE   # replayed verbatim; see pad_records
+# remountPadStorage as the RODE app sends it, verbatim: its value block (01 01 02 00) carries a
+# trailing byte no standard bool encoding has.
+REMOUNT_PAD_STORAGE = bytes.fromhex(
+    "031a000000010101010f72656d6f756e7450616453746f726167650001010200"
+).ljust(BULK_LEN, b"\x00")
 
 
 # A pad create enters and leaves transfer mode for itself, which is right for ONE pad and wasteful
@@ -870,9 +873,7 @@ def _selftest() -> None:
         "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
         "7600"
     ).ljust(BULK_LEN, b"\x00")
-    got = build_pad_prop_string(
-        "padFilePath", pad_records.PAD_FILE_PATH_FMT.format(n=2, name="sound.wav")
-    )
+    got = build_pad_prop_string("padFilePath", "/Application/emmc-data/pads/2/sound.wav")
     assert got == expected, (
         "build_pad_prop_string mismatch:\n"
         f"  expected {expected[:64].hex()}\n  got      {got[:64].hex()}"

@@ -45,7 +45,7 @@ def tree_state():
 def make_orphan():
     handle = pr.free_handle(sp.current_pad_count())
     sub = sp.free_effect_subhandle(SLOT)
-    pre = pr.build_blank(SLOT, handle, sub, with_effects=True)
+    pre = pr.build_blank(SLOT, handle, sub)
     mid = [pr.write_record("padType", "int", 3, handle, pr.FRAME_PAD),
            pr.write_record("padName", "str", "Orphan test", handle, pr.FRAME_PAD)]
     t.set_transfer_mode(True); time.sleep(1.2)
