@@ -17,7 +17,7 @@ builds its whole index from it, so every value the app shows comes through this 
 DO NOT REPLACE IT WITH A BYTE SCAN FOR NAMES. A scan that finds a name by stepping back from a value
 marker invents properties (a phantom `iPOT`), cuts EFFECTS_PARAMETERS at the underscore, and cannot
 decode the 64-bit ints, composites or long strings (`fxPresetContents`, 316 bytes). The tree parse
-of a 143 KB dump takes 9.6 ms, about a ninth of what such a scan took.
+of a 143 KB dump takes about 10 ms, roughly nine times faster than such a scan.
 
 THE WRITE ADDRESS IS THE TREE PATH, not a flat number:
 
@@ -38,16 +38,14 @@ import struct
 
 
 class Node:
-    __slots__ = ("name", "props", "kids", "parent", "index", "start", "end")
+    __slots__ = ("name", "props", "kids", "parent", "index")
 
-    def __init__(self, name, start):
+    def __init__(self, name):
         self.name = name
         self.props = []          # [(prop name, value, kind)]
         self.kids = []           # [Node]
         self.parent = None
         self.index = 0           # position among its parent's children
-        self.start = start
-        self.end = start
 
     # ---- addressing ----------------------------------------------------------------------
     def path(self) -> list:
@@ -78,21 +76,14 @@ def encode_path(path) -> bytes:
         01 01 02 02 9a 02 01 <n>  a pad                      -> path [0x29A, n]
         01 01 02 02 9a 02 00      the "internal pad" case    -> path [0x29A, 0]
 
-    So the Duo's mysterious "trailing 0x01, not the Pro II's 0x02" is not a device quirk at all: it
-    is the HIGH BYTE of a two-byte index, and the two desks simply have that node at a different
-    position. And the internal pad, which looks like "addressed WITHOUT a selector byte, one byte
-    shorter", is just child 0.
+    The Duo's trailing 0x01 against the Pro II's 0x02 is the HIGH BYTE of a two-byte index: the two
+    desks hold that node at different positions. The internal pad is child 0.
 
-    THE LENGTH RULE: an index is emitted in the fewest bytes that hold it, MINIMUM ONE.
-
-    Zero is emitted as `01 00`, not as a zero-length count, and that is a deliberate choice rather
-    than an oversight. The grammar does allow a length of 0 to mean the value is 0, and the RODE
-    app's own internal-pad capture uses it (`...9a 02 00`). But OUR pad writes have always sent
-    `01 00` for stream position 0 and are proven on hardware; the zero-length form appears in a
-    capture we have never emitted. Changing working write bytes to match a form we have not tested
-    would be risk for nothing, on the one address family where a bad write can append a stray that
-    only a factory reset clears. So the desk evidently accepts both, and we keep sending the one we
-    know.
+    THE LENGTH RULE: an index is emitted in the fewest bytes that hold it, MINIMUM ONE. Zero is sent
+    as `01 00`, which every pad write uses and the hardware has proven. The grammar also allows a
+    zero-length count for 0, and RODE's app sends it (`...9a 02 00`), but that form has never been
+    emitted from here; do not switch to it on the one address family where a bad write can append a
+    stray that only a factory reset clears.
     """
     out = bytearray([0x01, 0x01, len(path)])
     for i in path:
@@ -134,10 +125,9 @@ def _value(blob: bytes, i: int):
     if t == 0x05:
         return payload[1:].split(b"\x00")[0].decode("latin1"), "str", end
     if t == 0x06:
-        # 64-bit int. Seen on STORAGEVOLUME[2]'s capacity/free, where the SAME property name is a
-        # 32-bit 0x01 on the other two volumes - so a property's type is per OCCURRENCE, not per
-        # name. That is why `storageVolumeCapacity` always read as a stale zero: the one volume
-        # that fills it in writes a type the old one-byte reader could not decode.
+        # 64-bit int. Seen on STORAGEVOLUME[2]'s capacity and free space, where the SAME property
+        # name is a 32-bit 0x01 on the other two volumes: a property's type is per OCCURRENCE, not
+        # per name.
         return int.from_bytes(payload[1:9], "little", signed=True), "int64", end
     if t == 0x08:
         # A COMPOSITE: two or more complete value blocks back to back (padRecordStateRequest is an
@@ -160,7 +150,7 @@ def _read_name(blob: bytes, i: int):
 
 def _parse_node(blob: bytes, i: int, parent, index: int) -> tuple:
     name, i = _read_name(blob, i)
-    node = Node(name.decode("latin1"), i)
+    node = Node(name.decode("latin1"))
     node.parent, node.index = parent, index
     nprops, i = _count(blob, i)
     for _ in range(nprops):
@@ -171,7 +161,6 @@ def _parse_node(blob: bytes, i: int, parent, index: int) -> tuple:
     for k in range(nkids):
         kid, i = _parse_node(blob, i, node, k)
         node.kids.append(kid)
-    node.end = i
     return node, i
 
 
@@ -187,7 +176,7 @@ def parse_record(buf: bytes) -> tuple:
     caller can check the record accounted for EXACTLY the bytes it was told to expect.
 
     IT IS A TEST AS WELL AS A DECODER, which is why every malformed input raises ValueError rather
-    than returning something partial: `rcp_read._push_record_len` asks "is this whole report-04 frame
+    than returning something partial: `rcp_read._push_record` asks "is this whole report-04 frame
     one complete record?" to tell an asynchronous push from a slice of the model dump, and a decoder
     that guessed would answer yes on dump content.
     """
