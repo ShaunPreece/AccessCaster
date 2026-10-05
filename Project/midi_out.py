@@ -73,6 +73,15 @@ def find_port(name: str = PORT_NAME):
     return None
 
 
+def _refuse_in_tests() -> None:
+    """GUARDED LIKE EVERY OTHER DEVICE WRITE. A send PLAYS A PAD, so an offline suite that reaches
+    one makes a noise in somebody's room and possibly in their recording."""
+    if _NO_WRITE:
+        raise RuntimeError("REFUSING TO PLAY A PAD: this is an offline test "
+                           "(ACCESSCASTER_NO_DEVICE_WRITE). Stub it, or set "
+                           "ACCESSCASTER_ALLOW_DEVICE_WRITE if it is a live suite.")
+
+
 def _cc_message(channel: int, control: int, value: int) -> int:
     """midiOutShortMsg packs a message little-endian into one DWORD: status, data1, data2."""
     return (0xB0 | (channel & 0x0F)) | ((control & 0x7F) << 8) | ((value & 0x7F) << 16)
@@ -101,14 +110,8 @@ class MidiOut:
         self._h = None      # so a send after the block says so, instead of "rc 5" from winmm
 
     def cc(self, channel: int, control: int, value: int) -> None:
-        """One control-change message. `channel` is 0-based (MIDI channel 1 = 0).
-
-        GUARDED LIKE EVERY OTHER DEVICE WRITE. This one PLAYS A PAD, so an offline suite that
-        reaches it makes a noise in somebody's room and possibly in their recording."""
-        if _NO_WRITE:
-            raise RuntimeError("REFUSING TO PLAY A PAD: this is an offline test "
-                               "(ACCESSCASTER_NO_DEVICE_WRITE). Stub it, or set "
-                               "ACCESSCASTER_ALLOW_DEVICE_WRITE if it is a live suite.")
+        """One control-change message. `channel` is 0-based (MIDI channel 1 = 0)."""
+        _refuse_in_tests()
         if self._h is None:
             raise RuntimeError("this MidiOut is closed (send inside the `with` block)")
         rc = _winmm.midiOutShortMsg(self._h, wintypes.DWORD(_cc_message(channel, control, value)))
@@ -155,11 +158,8 @@ def _close_locked() -> None:
     global _handle
     if _handle is None:
         return
-    try:
-        _winmm.midiOutReset(_handle)
-        _winmm.midiOutClose(_handle)
-    except Exception:
-        pass
+    _winmm.midiOutReset(_handle)      # winmm reports failure by return code, never by raising
+    _winmm.midiOutClose(_handle)
     _handle = None
 
 
@@ -176,6 +176,7 @@ def send_cc(channel: int, control: int, value: int) -> None:
     great many things but not across a replug, and without the retry the first unplug of a session
     would leave every later pad shortcut dead until the app was restarted - which reads as "pads
     stopped working" rather than as "the cable moved"."""
+    _refuse_in_tests()
     with _lock:
         _open_locked()
         rc = _winmm.midiOutShortMsg(_handle, wintypes.DWORD(_cc_message(channel, control, value)))

@@ -36,7 +36,7 @@ if PROJECT not in sys.path:
 # most when it is missed. An offline suite that reaches a real write fires a pad, engages a voice
 # effect on a live mic or drops the audio on a desk somebody is working on - and it PASSES while it
 # does it, because the assertion under test was about the decision, not the wire. The guard raises
-# at the write (rcp_hid.refuse_write_in_tests, midi_out.cc) rather than swallowing it, so a suite
+# at the write (rcp_hid.refuse_write_in_tests, midi_out._refuse_in_tests) rather than swallowing it, so a suite
 # that needs a device call is forced to stub it rather than quietly proving nothing.
 #
 # A `test_*_live` suite that genuinely means to drive hardware sets ACCESSCASTER_ALLOW_DEVICE_WRITE

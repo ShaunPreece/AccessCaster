@@ -462,7 +462,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **AN OFFLINE TEST CANNOT WRITE TO THE DESK, and that is a GUARD rather than a convention**
   (21st September 2026). `DevTools/_bootstrap` sets `ACCESSCASTER_NO_DEVICE_WRITE` for any script
   named `test_*`, and every write choke point raises on it: `rcp_hid.write_report`,
-  `rcp_transfer.send_record`, `rcp_transfer.send_records_paced` and `midi_out.cc`. A `test_*_live`
+  `rcp_transfer.send_record`, `rcp_transfer.send_records_paced`, `midi_out.send_cc` and `MidiOut.cc`. A `test_*_live`
   suite opts back in automatically, because driving the desk is what it is for.
   **WHY IT RAISES RATHER THAN SWALLOWING THE WRITE:** a silently dropped write leaves the test
   passing while proving nothing. Earned on 21st September 2026, when a new check in
