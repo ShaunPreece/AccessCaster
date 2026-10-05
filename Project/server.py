@@ -4528,20 +4528,6 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
     restore_processing = False
     try:
         _autogain_set(phase="preparing", message="Getting ready. Do not talk yet.")
-        # 1. WINDOWS OUT OF THE WAY. Its level scales everything we are about to measure, and a
-        #    Windows mute would make the microphone look dead.
-        win = ""
-        stream = _meter_stream()
-        if stream:
-            try:
-                if meters.endpoint_volume(stream).get("muted"):
-                    meters.set_endpoint_mute(stream, False)
-                    win = "Cleared the Windows mute. "
-                if meters.set_endpoint_volume_db(stream, 0.0).get("ok"):
-                    win += "Windows level set to no change. "
-            except Exception:
-                pass
-
         with _hid_lock:
             gain_before, proc_on = _read_gain_and_processing(mic)
         if gain_before is None:
@@ -4550,8 +4536,8 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
             return
         _autogain_set(gain_before=gain_before, processing_before=proc_on)
 
-        # 2. PROCESSING OFF. The meter reads the unit's output, which is AFTER the compressor and
-        #    limiter, so with processing on we would be measuring the safety net and not the gain.
+        # PROCESSING OFF. The meter reads the unit's output, which is AFTER the compressor and
+        # limiter, so with processing on we would be measuring the safety net and not the gain.
         if proc_on:
             with _hid_lock:
                 channels.set_processing_enabled(mic, False)
@@ -4560,11 +4546,18 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         endpoint = autogain.chat_endpoint()
         if endpoint is None:
             raise RuntimeError("the unit's Chat audio device is not available on this computer")
-        # Windows out of the way on the endpoint we ACTUALLY measure. Its own level scales the
-        # reading and its own mute would make the microphone look dead.
+        # Windows out of the way on the endpoint measured, and on no other: its level scales the
+        # reading and its mute would make the microphone look dead. The meter's chosen stream may
+        # be a different endpoint, which is left as the user set it.
+        win = ""
         try:
-            meters.set_endpoint_mute(endpoint["id"], False)
-            meters.set_endpoint_volume_db(endpoint["id"], 0.0)
+            now = meters.endpoint_volume(endpoint["id"])
+            if now.get("muted") and meters.set_endpoint_mute(endpoint["id"], False).get("ok"):
+                win = "Cleared the Windows mute on the Chat device. "
+            db = now.get("db")
+            if ((db is None or abs(db) >= 0.2)
+                    and meters.set_endpoint_volume_db(endpoint["id"], 0.0).get("ok")):
+                win += "Windows level on the Chat device set to no change. "
         except Exception:
             pass
         check = None
