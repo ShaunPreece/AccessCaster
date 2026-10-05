@@ -678,10 +678,6 @@ def read_settings() -> dict:
     }
 
 
-# read_mixer / read_channels (+ UI_CHANNELS, PROCESSING_READ_PROPS, PROCESSING_MODULE_BOOLS) moved
-# to channels.py - the single source of truth for channel + processing ops.
-
-
 # ---- Routing matrix read-back (the output Custom mixes) ---------------------
 # On the CORRECTLY-ASSEMBLED stream (read_model strips the per-frame report id) the
 # matrix is a clean grid: cell (output, source) -> the (13*source + output)th mixDisabled

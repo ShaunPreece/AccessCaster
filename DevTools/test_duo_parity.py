@@ -266,6 +266,16 @@ check_true("every setting the page offers has an address in the table",
 check_true("every exposed setting has a confirmed address",
            all(s["prop"] in rcp_transfer.UNIT_SETTING_SEL for s in server.UNIT_SETTINGS))
 
+# A CHANNEL THE DESK DOES NOT CARRY REFUSES, with no fixed fallback strip. Mic 3 from a Pro II
+# profile would otherwise land on Duo strip 2, which holds Bluetooth. Raises before any dump.
+with as_device(devices.DUO):
+    for ident in ("Mic3", 3, "Mic4", 4):
+        try:
+            channels.proc_selector(ident)
+            check(f"Duo refuses a chain write to {ident!r}", "no error", "ValueError")
+        except ValueError:
+            check(f"Duo refuses a chain write to {ident!r}", "ValueError", "ValueError")
+
 print()
 if FAILED:
     print(f"{FAILED} CHECK(S) FAILED")

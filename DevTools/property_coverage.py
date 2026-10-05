@@ -116,7 +116,7 @@ CONTEXT_ROLE = {
     "CUE_PROP": "both",
     "_PHASE1": "write", "_EFFECTS": "write",
     "EFFECT_FLAG": "write", "FX_ENGINE_PARAMS": "write",
-    "BACK_CHANNEL_SOURCES": "write", "OUTPUT_MIX_MINUS": "write",
+    "BACK_CHANNEL_SOURCES": "write",
     # both (UI specs and device tables describe a property we read AND write)
     "PROCESSING_CONTROLS": "both", "_PRESET_PROPS": "both", "CHANNEL_FX_PARAMS": "both",
     "FX_BUILD_SPEC": "both", "FX_PARAM_LABELS": "both", "FX_PARAMS_BY_EFFECT": "both",

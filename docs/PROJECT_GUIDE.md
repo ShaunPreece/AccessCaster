@@ -1093,6 +1093,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 - **Channel processing is PER FADER STRIP.** Slot N processes whatever sits on strip N. Resolve the
   strip from the LIVE fader vector (`channels._strip_index`), never from a pinned per-channel index.
+  **A channel the connected desk does not carry REFUSES** (`channels._channel_strip`); it never falls
+  back to a fixed strip number. With a fallback, Mic 3 in a Pro II profile restored onto a Duo lands
+  its chain on Duo strip 2, which holds Bluetooth. `test_duo_parity` asserts the refusal.
 - **NAME A SOURCE CODE FROM `FaderSpec.all_labels`, NEVER FROM THE ASSIGNABLE LIST.** A stereo-linked
   pair is its OWN source code (4, 5, 6) and can sit in the fader vector, but it is deliberately NOT
   assignable, so the assignable-only map cannot name it. `code_label` was that map and is DELETED
