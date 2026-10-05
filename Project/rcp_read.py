@@ -11,7 +11,10 @@ read here is served from that parse. A dump that will not parse raises
 ModelUnreadable rather than being guessed at.
 """
 from __future__ import annotations
-import queue, time, threading
+import queue
+import threading
+import time
+
 import model_tree            # THE parser: the dump is a tree, and this reads it
 import diagnostics           # the app's own account of what it read and how long it took
 import rcp_hid   # write-generation counter, so a write invalidates the cached dump below
@@ -27,10 +30,9 @@ TRIGGER = (bytes([0x03]) + (4).to_bytes(4, "little")
 
 # End-of-stream detection. The device streams the whole model as a continuous burst of 256-byte
 # report-04 frames (measured on this unit: 549 frames, ~140 KB, delivered in ~375 ms with sub-
-# millisecond gaps), then goes quiet. So the dump is finished once the line has been idle for
-# QUIET_S. That was 0.4 s, which made every dump cost ~800 ms with half of it spent waiting on a
-# stream that had already ended; 0.12 s returns a byte-identical blob (verified 10/10 dumps,
-# 139995 bytes each) for ~590 ms. READ_TIMEOUT_MS is the per-read block, and it also sets how
+# millisecond gaps), then goes quiet. 0.12 s of quiet returns a byte-identical blob (10 of 10
+# dumps) where 0.4 s spent half of every ~800 ms dump waiting on a stream that had already ended.
+# READ_TIMEOUT_MS is the per-read block, and it also sets how
 # finely we notice the quiet period, so it is well under QUIET_S.
 QUIET_S = 0.12
 READ_TIMEOUT_MS = 60
@@ -38,19 +40,19 @@ READ_TIMEOUT_MS = 60
 # ---- TELLING A DUMP FRAME FROM AN ASYNCHRONOUS PUSH -------------------------
 #
 # The desk answers the trigger with a burst of report-04 frames, and it ALSO sends report-04 frames
-# of its own accord whenever anything changes on the desk. Those two were indistinguishable here
-# unless the reader tells them apart, and confusing them costs two separate faults:
+# of its own accord whenever anything changes on the desk. Confusing the two costs two separate
+# faults:
 #
-#   * THE READ NEVER ENDED. Quiet detection alone means the deadline is pushed out by QUIET_S on
+#   * THE READ NEVER ENDS. Quiet detection alone means the deadline is pushed out by QUIET_S on
 #     every frame. A playing pad pushes `padProgress` about 20 times a second, so the line never
 #     goes quiet, and the loop runs to its `max_reads` ceiling: 240 s worst case, 172 s measured on
 #     a Duo. It reaches far wider than the pads page, because every per-channel write resolves its
 #     strip through `channels.strip_vector`, which dumps whenever its cache has expired - so mute,
 #     solo, processing and every EQ parameter could each hang for minutes while a pad played, and
 #     a hung request leaves its control busy, which reads out as "that is not available".
-#   * AND THE BLOB CAME BACK CONTAMINATED. A push frame was appended into the dump like any other,
-#     so the read was the wrong SIZE and the wrong SHAPE: 264180 and 139485 bytes against a 136170
-#     baseline, both taken just after a pad was touched. It presents as "an unstable read".
+#   * AND THE BLOB COMES BACK CONTAMINATED. A push frame appended into the dump makes the read the
+#     wrong SIZE and the wrong SHAPE (264180 and 139485 bytes against a 136170 baseline, both just
+#     after a pad was touched). It presents as "an unstable read".
 #
 # BOTH HALVES FALL OUT OF TWO MEASURED FACTS (live Duo):
 #
@@ -212,7 +214,7 @@ class PushListener:
     afterwards races it and loses. Frames are queued from the moment it opens, so there is no gap
     between opening and the first `wait_for`.
 
-    DUMP FRAMES ARE FILTERED OUT STRUCTURALLY by `_push_record_len`, because a model dump arrives on
+    DUMP FRAMES ARE FILTERED OUT STRUCTURALLY by `parse_push`, because a model dump arrives on
     report 04 as well and any dump triggered anywhere in the app is delivered to this handle too.
     The same test also drops the occasional frame that is not one complete record for other reasons;
     see `not_a_record`, which is counted separately rather than assumed to be a dump.
@@ -225,10 +227,9 @@ class PushListener:
         self._error: BaseException | None = None
         self.frames = 0            # report-04 frames seen
         self.pushes = 0            # of those, ones that were a complete addressed record
-        # NOT "dump frames", which is what this was called until it was measured: 74 of 3267 frames
-        # in a reset burst land here with no dump running anywhere, so they are mostly pushes the
-        # structural test rejected - a record over PUSH_MAX_RECORD, or one that would not parse -
-        # rather than slices of somebody's model. Naming them after the assumption hid that.
+        # Not "dump frames": 74 of 3267 frames in a reset burst land here with no dump running
+        # anywhere, so they are mostly pushes the structural test rejected (a record over
+        # PUSH_MAX_RECORD, or one that would not parse) rather than slices of somebody's model.
         self.not_a_record = 0
 
     def __enter__(self) -> "PushListener":
@@ -315,8 +316,7 @@ class PushListener:
         a property arriving. A factory reset pushes `currentShowUUID` at about t+1.8 s and then keeps
         going until t+4.96 s, so a caller that acts the moment its answer lands is WRITING TO A DESK
         THAT IS STILL REWRITING ITSELF - and on a reset that is also while it re-enumerates its USB
-        audio function. The old poll-a-dump-every-1.5 s approach was accidentally protected from
-        this by being slow; listening is fast enough to need the distinction made explicitly.
+        audio function.
 
         `idle` is comfortably above the burst's own internal gaps: measured over 3267 frames, not one
         gap reached half a second.
@@ -345,9 +345,9 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     Each 256-byte HID frame starts with the 0x04 report-id byte; the model data is the
     remaining 255 bytes. We MUST strip that report-id from every frame, otherwise a 0x04
     is left wedged into the stream at every 256-byte boundary and any property name/value
-    that spans a boundary gets a spurious 0x04 injected into it (e.g. 'o\\x04utputMixMinus').
-    That was the long-standing cause of split/missed properties and of read counts drifting
-    between dumps as value lengths shift. Stripping per frame yields one contiguous stream.
+    that spans a boundary gets a spurious 0x04 injected into it (e.g. 'o\\x04utputMixMinus'),
+    splitting properties and making read counts drift between dumps. Stripping per frame yields
+    one contiguous stream.
 
     Asynchronous PUSH frames are skipped, and the dump ends at the length it declares for itself
     rather than when the line goes quiet. See the block comment above `PUSH_MAX_RECORD` for why
@@ -378,9 +378,9 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
             b = bytes(chunk)
             if not b or b[0] != 0x04:
                 continue
-            if _push_record_len(b) is not None:
-                # The desk telling us about something else entirely. Not part of this dump, and
-                # appending it is what corrupted the blob and stopped the read ever finishing.
+            if _push_record(b) is not None:
+                # The desk telling us about something else entirely: not part of this dump (see
+                # the block comment above PUSH_MAX_RECORD).
                 pushes += 1
                 continue
             frames += 1
@@ -501,10 +501,8 @@ def values(blob: bytes, name: str, kind: str | None = None) -> list:
     """Just the VALUES for a property name, in stream order, optionally only those of one `kind`.
 
     THE ONE WAY TO READ A LIST OF VALUES, and what almost every caller actually wants. find_all
-    returns (value, kind) pairs because positional reads need the kind to filter on; unwrapping
-    that pair was written out by hand at 32 call sites, four of which had grown their own identical
-    `def val(prop, kind=None)` closure (server.py twice, channels.py twice). Filtering on `kind`
-    matters and is not cosmetic: a name can decode to more than one type across the dump, and
+    returns (value, kind) pairs because positional reads need the kind to filter on. Filtering on
+    `kind` matters and is not cosmetic: a name can decode to more than one type across the dump, and
     `[v for v, k in find_all(...)]` with no filter quietly lets the wrong one through.
 
     Positional callers must pass `kind=None` when they need EVERY occurrence, including the
@@ -520,9 +518,6 @@ def first(blob: bytes, name: str, kind: str | None = None, default=None):
     which are real settings. A name can occur in several blocks with only one of them filled in
     (systemFirmwareVersion is the standing example: it reads "" in one section and the version in
     another), so taking the literal first occurrence returns a blank often enough to matter.
-
-    This was written out as an identical local closure three times - server.read_network_status,
-    server.routing_model and profiles.save - each of them the same six lines.
     """
     for v in values(blob, name, kind):
         if v is not None and v != "":
@@ -553,8 +548,7 @@ def iter_block_properties(blob: bytes):
     `MIX`/`RCSYNCMIX` and `MIXMINUSES`/`RCSYNCMIXMINUES` share six property names, and NETWORK
     carries `ipAddress` / `wifiIpAddress` / `cellIpAddress` as separate names per transport. And
     accidentally, as a STRAY appended by one malformed write, which reads back like a real property
-    and does nothing; `btVisible` was duplicated into SYSTEM that way for a while and went with a
-    factory reset. Either way, anything reading a duplicated name must say which block it means.
+    and does nothing until a factory reset removes it. Either way, anything reading a duplicated name must say which block it means.
     """
     yield from _index(blob).flat
 
@@ -614,15 +608,12 @@ def path_value(blob: bytes, path, name: str, default=None):
     THE ADDRESSED READ, and the counterpart to every build_* writer. Prefer it over `values()` +
     an index for anything that belongs to one channel, output or pad.
 
-    WHY IT EXISTS (measured on both desks). `values()` returns every occurrence
-    of a NAME in dump order and callers were picking one out by position. That is only correct while
-    stream order happens to match the caller's numbering, and on the Pro II it did - its per-input
-    write selectors ARE the INPUTSOURCE table entries, so occurrence N really was input N. The Duo
-    proves it is luck: a write into a MIX node at 0x48+source_code CREATES the property there, and
-    one of those sitting ahead of the table shifts every index past it, so one mic's gain is
-    reported as another's. Nothing writes there now (both desks address INPUTSOURCE) but the litter
-    is permanent - a used Duo still carries it, and
-    only a factory reset removes it, so a positional read stays wrong there for good.
+    WHY NOT `values()` AND A POSITION: that is only correct while stream order matches the caller's
+    numbering. On the Pro II it does, because its per-input write selectors ARE the INPUTSOURCE
+    table entries. On a Duo a write into a MIX node at 0x48+source_code CREATES the property there,
+    and one of those ahead of the table shifts every index past it, so one mic's gain is reported
+    as another's. Nothing writes there now, but the litter survives until a factory reset, so a
+    positional read stays wrong on a used Duo.
     """
     node = node_at(blob, path)
     if node is None:
@@ -641,11 +632,6 @@ def snapshot_properties(blob: bytes) -> dict:
     return out
 
 
-# Channel order in the model stream (the unit's fixed input list).
-CHANNELS = ["Mic1", "Mic2", "Mic3", "Mic4", "Bluetooth", "SMARTpads",
-            "USB1", "Chat", "USB2"]
-
-
 def read_settings() -> dict:
     """RAW STREAM-ORDER arrays plus MIDI and firmware. A diagnostic, NOT a per-channel read.
 
@@ -658,9 +644,6 @@ def read_settings() -> dict:
     blob = read_model()
     gains = values(blob, "inputMicrophoneGain")
     p48 = values(blob, "inputPower")
-    # The real property is inputPhaseFlip (bool). Reading "inputPhase" matched INSIDE
-    # "inputPhaseFlip" and decoded the value at the wrong offset (always None -> polarity
-    # always read False); fixed to the full name so an inverted channel reads True.
     phase = values(blob, "inputPhaseFlip")
     mtype = values(blob, "inputMicrophoneType")
     midi = first(blob, "systemMidiControl")
@@ -682,9 +665,7 @@ def read_settings() -> dict:
 # On the CORRECTLY-ASSEMBLED stream (read_model strips the per-frame report id) the
 # matrix is a clean grid: cell (output, source) -> the (13*source + output)th mixDisabled
 # block, i.e. read_index == cross-point selector - 76. Verified for all 99 cells, zero
-# mismatches. (The old calibrated map + mixMute special-case were artefacts of the framing
-# bug splitting properties; matrix_read_map.json + calibrate_matrix.py are now obsolete.)
-# See RODECASTER_PROTOCOL.txt section 5.
+# mismatches. See RODECASTER_PROTOCOL.txt section 5.
 
 # Matrix shape (sources exposed, healthy mixDisabled block count, output count, read
 # stride) is per-device in devices.py (Pro II: 10 sources, 390 blocks, 11 outputs,
@@ -757,11 +738,9 @@ def read_output_modes(blob: bytes) -> list:
 def master_processing(blob: bytes) -> dict:
     """The master bus's own processing, as the SEVEN keys the page and a profile both use.
 
-    Written out twice (server.routing_model built it for the Routing page, profiles.save built the
-    identical block for a backup), which meant a property added to one and not the other would
-    silently be a setting the page could change and a profile could not put back. One source now,
-    and the key names are the wire format the browser and the profile JSON both already speak, so
-    both callers splat this straight in.
+    ONE SOURCE for the Routing page (server.routing_model) and a backup (profiles.save), so a
+    property cannot be one the page changes and a profile cannot put back. The key names are the
+    wire format the browser and the profile JSON both speak, so both callers splat this straight in.
     """
     return {
         "compellor_on": first(blob, "masterCompellorOn"),
@@ -778,11 +757,6 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
     """The matrix grid read, and the ONE copy of it. Reads `prop` for every cross-point by the
     proven formula (read_index = row_stride * source + output) and passes each raw cell through
     `cell` to get what the caller wants out of it.
-
-    read_matrix_state and read_matrix_levels were two forty-line functions differing only in the
-    property name, the result key and how one cell decodes; they are also nearly always called as a
-    PAIR (profiles.save and routing_schemes.capture both do), so the duplication was paid twice per
-    read. Merged.
 
     BOTH GUARDS ARE LOAD-BEARING and neither is cosmetic:
       * the device cap - a desk whose matrix read is not verified refuses rather than reading by an
@@ -809,8 +783,7 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
                                    f"so the live {cannot} cannot be read reliably right now."))
     out = {}
     # EVERY ROW THE GRID CARRIES, whatever mode the desk is in, so the read can never be narrower
-    # than what the page offers (Expanded's four once appeared on the grid with no state behind
-    # them) and a mix scheme captured in Standard still records the Expanded cross-points. The
+    # than what the page offers and a mix scheme captured in Standard still records the Expanded cross-points. The
     # cells all exist on the wire; which of them to DISPLAY is `sources_for`'s question.
     rows = m.all_source_indices
     for o in range(m.output_count):

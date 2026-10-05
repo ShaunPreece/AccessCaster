@@ -1351,7 +1351,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   That is why the announcer needs the 1.5 s echo-suppression window per target. The two facts sit at
   different layers; do not collapse them.
 - **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `rcp_read.PushListener`: own
-  read-only handle, no HID lock, dump frames filtered by `_push_record_len`. A factory reset pushes
+  read-only handle, no HID lock, dump frames filtered by `parse_push`. A factory reset pushes
   `currentShowUUID` itself at about t+1.75 s. **OPEN IT BEFORE THE WRITE** - the burst starts 0.02 s
   after, so a listener started afterwards loses the race.
 - **"IT WORKED" AND "IT HAS FINISHED" ARE DIFFERENT QUESTIONS.** The reset's uuid arrives at t+1.75 s
