@@ -72,7 +72,8 @@ accessible page where you can:
   from any application.
 - **Spoken announcer**: an optional feature that speaks physical button presses on the device
   (bank changes, mute, solo, encoder select, fader moves) aloud, so you know what a press did
-  without seeing the screen. Mute can be a short tone instead of a sentence.
+  without seeing the screen. Mute can be a short tone instead of a sentence. It is on every time
+  the app starts unless you tick "Start with announcements the way I left them".
 
 The longer-term goal is for the software to take over as many of the touchscreen-only functions as
 possible, so the device can be set up and run without ever needing the screen.
