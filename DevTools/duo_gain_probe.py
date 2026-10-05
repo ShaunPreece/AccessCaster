@@ -11,20 +11,19 @@ does send the MIX address, host->device, single standalone record, byte-identica
 
 SO USE THE DESK'S OWN ENGINE AS THE WITNESS, WHICH NEEDS NO EARS.
 
-Selecting a mic VOICING makes the engine apply that voicing's default preamp gain (Pro II, 29th
-August 2026: Dynamic 45, Condenser 25, PodMic 50, ...). That gain move is the ENGINE acting, not us.
+Selecting a mic VOICING makes the engine apply that voicing's default preamp gain (measured on a
+Pro II: Dynamic 45, Condenser 25, PodMic 50, ...). That gain move is the ENGINE acting, not us.
 So write only the mic TYPE, then diff the WHOLE tree:
 
   * the engine moved a gain  -> it saw the write, and the address it moved is where the live gain is
   * nothing but our own byte -> the engine never saw the write, and that address is dead storage
 
-THAT SAFETY ARGUMENT WAS "both properties already exist at both addresses, so neither write can
-append a stray" - AND IT NO LONGER HOLDS. Measured 22nd September 2026 on both desks:
-`inputMicrophoneGain` and `inputMicrophoneType` occur 30 times each, all in INPUTSOURCE, and there
-is no MIX copy at all. Whether the MIX copy was itself a stray or something the firmware stopped
-publishing is not established. Either way a write to an address that no longer carries the property
-is exactly how a stray gets appended, and a stray costs a factory reset, so `probe()` now checks the
-precondition on the live tree and refuses rather than trusting this docstring.
+THE WRITE IS SAFE ONLY IF BOTH PROPERTIES EXIST AT BOTH ADDRESSES, AND ON CURRENT FIRMWARE THEY DO
+NOT: on both desks `inputMicrophoneGain` and `inputMicrophoneType` occur 30 times each, all in
+INPUTSOURCE, with no MIX copy. Whether the MIX copy was a stray or something the firmware stopped
+publishing is not established. A write to an address that does not carry the property is exactly
+how a stray gets appended, and a stray costs a factory reset, so `probe()` checks the precondition
+on the live tree and refuses rather than trusting this docstring.
 
     python DevTools/duo_gain_probe.py            # report the current state of both copies
     python DevTools/duo_gain_probe.py probe      # run the differential, then restore

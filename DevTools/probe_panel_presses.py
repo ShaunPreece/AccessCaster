@@ -3,12 +3,11 @@
 TWO QUESTIONS IN ONE SITTING, because both need a person at the desk and neither needs more than
 that.
 
-1. DOES THE MODEL DUMP CARRY THE PHYSICAL PANEL STATE? Measured once, 22nd September 2026: with
-   every channel muted AT THE DESK, `channelOutputMute` read False on all ten and `mutePressed`
-   False on all six, while `outputMonAutoMuteActive` tracked the real state correctly. The app
-   DISPLAYS mute and fader state from the dump, so if that holds it is a defect and not a
-   curiosity. The test was designed then and never run: hold the mute on, dump, and see whether the
-   dump moved or only the push did.
+1. DOES THE MODEL DUMP CARRY THE PHYSICAL PANEL STATE? Measured once: with every channel muted AT
+   THE DESK, `channelOutputMute` read False on all ten and `mutePressed` False on all six, while
+   `outputMonAutoMuteActive` tracked the real state correctly. The app DISPLAYS mute and fader
+   state from the dump, so if that holds it is a defect and not a curiosity. The test: hold the
+   mute on, dump, and see whether the dump moved or only the push did.
 
 2. IS EVERY PUSH ONE WHOLE RECORD? The announcer acts only on a frame `rcp_read.parse_push` accepts,
    which is exactly one record. `mutePressed`, `soloPressed`, `encoderPressed`, `encoderSignal` and

@@ -1,6 +1,6 @@
 """WHICH LAYER takes the desk off the USB bus during a show factory reset?
 
-THE FAULT. A show command has dropped a desk off USB three times (Pro II, Duo 31st
+THE FAULT. A show command has dropped a desk off USB three times, on a Pro II and a Duo.
 Windows ends up with ZERO devices carrying RODE's vendor id, so the
 desk is off the bus rather than a handle being lost, and only a PHYSICAL REPLUG brings it back. All
 three were through the running app.

@@ -2088,8 +2088,8 @@ def read_network_status() -> dict:
             "dhcp": bool(dhcp) if dhcp is not None else None,
             "connected": bool(ip),               # has an IP => joined a network
             "incorrect_psk": bool(incorrect) if incorrect is not None else None,
-            # Whatever a scan last found. WE CAN NOW START ONE (action_scan_wifi, proven 29th
-            # August 2026), so this is the result of the last scan by either us or the touchscreen.
+            # Whatever a scan last found. The app can start one (action_scan_wifi), so this is the
+            # result of the last scan by either us or the touchscreen.
             # An empty list still means "nothing has been scanned for yet", not "nothing in range".
             "scan": slots("wifiScan", 10) or slots("wifiScanResultSSID", 15),
             "can_scan": "network_write" in devices.get_active_device().caps,
@@ -7249,9 +7249,9 @@ def _virtual_devices_repair() -> None:
     """Windows' endpoints moved: make them agree with the driver again. Silent, and never speaks.
 
     THE LOCK IS WHY THIS IS SAFE DURING A MODE CHANGE. `_virtual_devices_follow` holds it for the
-    whole of its wait and its retries (it waits for a repair to finish before taking it), and those retries re-enumerate the desk on purpose, so every
-    endpoint change they cause is skipped here rather than fought over. What reaches this is a
-    change with no follow-up behind it, which is exactly the case that used to go unrepaired.
+    whole of its wait and its retries (it waits for a repair to finish before taking it), and
+    those retries re-enumerate the desk on purpose, so every endpoint change they cause is skipped
+    here rather than fought over. What reaches this is a change with no follow-up behind it.
 
     `move_default` stays off: a disable is not a reason to take the output device away from
     wherever the user has put it, and the mode-change path already moves it when it has to.

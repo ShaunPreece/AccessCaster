@@ -223,6 +223,43 @@ def check_duplicates() -> None:
                 fail(p.name, f'entry written {n} times: "{key[:70]}". Keep one and delete the rest.')
 
 
+# ---------------------------------------------------------------------------
+# 7. Code comments describe the code, not its history
+# ---------------------------------------------------------------------------
+# Comments are written in the present tense with no dates: git holds the story. A date wrapped
+# across two comment lines ("4th" / "# September 2026") still matches, because the comment marker
+# between the halves is allowed. A date inside quotes is data (a format example, a test
+# expectation), not narrative, and is skipped.
+_MONTH = ("January|February|March|April|May|June|July|August|September|October|November|"
+          "December")
+CODE_DATE = re.compile(
+    r"(?:\b\d{1,2}(?:st|nd|rd|th)\s*(?:#|;|//|\*)?\s*)?\b(?:" + _MONTH + r"),?\s+20\d\d\b")
+NARRATIVE = re.compile(
+    r"shaun (?:said|asked|wanted|ruled)|\(Shaun[,:]|it turned out|earlier session|"
+    r"we (?:tried|thought|assumed|discovered)|\boriginally\b|\bat the time\b|"
+    r"\bused to (?:be|do|keep|check|go|drop|have|say|work|happen|fail)\b", re.I)
+# User-facing text, where a date or a credit is content: the release history and the help page.
+# This file is exempt too, because its own patterns spell out what they match.
+CODE_EXEMPT = {"version.py", "help.html", "check_notes.py"}
+
+
+def check_code_comments() -> None:
+    for folder in ("Project", "DevTools", "ProjectBuilds"):
+        for p in sorted((REPO / folder).rglob("*")):
+            if (p.suffix not in (".py", ".js", ".ps1", ".iss", ".css", ".html")
+                    or p.name in CODE_EXEMPT or "dist" in p.parts or "build" in p.parts):
+                continue
+            body = read(p)
+            for rx in (CODE_DATE, NARRATIVE):
+                for m in rx.finditer(body):
+                    if m.start() and body[m.start() - 1] in "\"'":
+                        continue
+                    line = body.count("\n", 0, m.start()) + 1
+                    fail(f"{p.relative_to(REPO).as_posix()}:{line}",
+                         f'"{m.group(0)}" reads as history. Say what is true now, in the present '
+                         f"tense, with no date.")
+
+
 def main() -> int:
     check_completed()
     check_no_status()
@@ -230,6 +267,7 @@ def main() -> int:
     check_style()
     check_dead_links()
     check_duplicates()
+    check_code_comments()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

@@ -480,10 +480,10 @@ server._ann_flush_pending(st)
 check("a selected MIC is described by its gain", SPOKEN[0].startswith("Mic 1 selected"), True)
 check("and is never told it has nothing to adjust", "nothing" in SPOKEN[0].lower(), False)
 
-# AN ENCODER PRESS DOES NOT TAKE THE ENCODER BACK OFF A SELECTED CHANNEL, measured on the desk 4th
-# September 2026: systemChannelSelected stayed at 0 across two presses. Advancing our ring here
-# announced USB 1 and then Chat while the desk had never left Mic 1, and left enc_pos pointing at an
-# entry the encoder is not on - the same value _ann_at_limit reads to decide "is this against a stop".
+# AN ENCODER PRESS DOES NOT TAKE THE ENCODER BACK OFF A SELECTED CHANNEL, measured on the desk:
+# systemChannelSelected stays at 0 across two presses. Advancing our ring here would announce USB 1
+# and then Chat while the desk never leaves Mic 1, and leave enc_pos pointing at an entry the
+# encoder is not on - the same value _ann_at_limit reads to decide "is this against a stop".
 st = fresh_st()
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 st["chan_sel"] = 0

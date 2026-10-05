@@ -1,8 +1,6 @@
 """`action_delete_backup` ON A REAL DESK, both of its branches.
 
-The last unrun thing on the Backups page. Everything else there met a desk on 21st September 2026
-(`read_backups`, `action_backup_now`, `backup_restore_plan`, `action_restore_backup`); this one
-needed the recordings drive in, which is the only reason it waited.
+Needs the recordings drive in.
 
 TWO BRANCHES, AND THE SECOND IS THE ONE THAT MATTERS:
 

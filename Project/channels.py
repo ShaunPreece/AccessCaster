@@ -633,8 +633,8 @@ def clear_all_solos(blob: bytes | None = None) -> int:
 # at the transmitter, which is a different thing from channelOutputMute above: that one silences the
 # strip inside the desk, this one is the desk telling the mic itself to stop sending.
 #
-# THE ADDRESS IS THE SAME FAMILY, and that is measured, not assumed. Read off a live Duo 2nd
-# September 2026: ten occurrences, CHANNEL[strip] at 0x1C..0x25, which is byte-for-byte the same set
+# THE ADDRESS IS THE SAME FAMILY, and that is measured, not assumed. Read off a live Duo: ten
+# occurrences, CHANNEL[strip] at 0x1C..0x25, which is byte-for-byte the same set
 # of nodes channelOutputMute and channelCueEnable sit on. Both desks publish ten. So it is a compact
 # bool on proc_selector(channel) like every other toggle here, and it needs no capture: a capture
 # would only re-derive an address the tree already gives.

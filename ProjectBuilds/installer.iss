@@ -100,8 +100,8 @@ Name: "startup"; Description: "Start {#AppName} automatically when &Windows star
 Name: "firewallrule"; Description: "Allow {#AppName} through Windows &Firewall (for phone / LAN access; asks for approval once)"; GroupDescription: "Network:"
 
 [InstallDelete]
-; THE SHORTCUTS THE OLD NAME LEFT BEHIND. The app was "Access Caster" with a space until 20th
-; September 2026, and Inno does not remove a previous install's Start Menu group or desktop
+; THE SHORTCUTS THE OLD NAME LEFT BEHIND. Earlier builds were named "Access Caster" with a space,
+; and Inno does not remove a previous install's Start Menu group or desktop
 ; shortcut when the name changes - it simply writes the new ones beside them. Without this an
 ; upgraded machine lists the app TWICE in the Start Menu, both entries launching the same exe.
 ;

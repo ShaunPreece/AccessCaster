@@ -321,11 +321,9 @@ check("and a relabel never changes what may be written",
 
 
 # --- ONE CHANNEL TABLE, AND THE THREE SURFACES DERIVED FROM IT ------------------------------
-# The fader dropdown, the Channels page and the routing-matrix rows used to be three hand-written
-# lists that each spelled out the same codes and labels. Nothing compared them, so adding RODE's
-# four Virtual Devices updated two of the three and left the matrix naming USB 1 after a Windows
-# device that no longer existed, with no rows for the four at all. They are now views over
-# devices.CHANNELS_<DESK>. These checks are what stops a fourth list growing back.
+# The fader dropdown, the Channels page and the routing-matrix rows are views over
+# devices.CHANNELS_<DESK>. Three hand-written lists drift apart silently, so these checks stop a
+# separate list growing back.
 print("\nTHE CHANNEL TABLE IS THE ONLY LIST")
 for _dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices.CHANNELS_DUO)):
     _n = _dev.name

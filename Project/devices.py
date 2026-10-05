@@ -274,8 +274,7 @@ class FaderSpec:
 
         THE EXPANDED FOUR ARE IN HERE EVEN IN STANDARD, deliberately. A fader keeps whatever code
         it was given, so a desk that leaves Expanded can still be holding one, and the alternative
-        to naming it is the announcer saying "0 percent, Source 12" out loud - which is exactly
-        what a linked pair used to do before `code_label` was removed for the same reason."""
+        to naming it is the announcer saying "0 percent, Source 12" out loud."""
         out = dict(self.assignable)
         out.update(self.expanded_sources)
         out.update(self.pair_label)
@@ -427,17 +426,11 @@ HEADPHONE_TYPES = HeadphoneTypeSpec(
 # slot 9 would show the layout-tidy logic a duplicated source it never meets today.
 #
 # --- THE ONE CHANNEL TABLE ---------------------------------------------------------------------
-# EVERY INPUT THIS DESK CAN CARRY, WRITTEN ONCE. The three lists the app used to keep - the fader
-# dropdown, the Channels page and the routing-matrix rows - are now VIEWS over this, derived below.
+# EVERY INPUT THIS DESK CAN CARRY, WRITTEN ONCE. The fader dropdown, the Channels page and the
+# routing-matrix rows are VIEWS over this, derived below, so an input added or renamed here reaches
+# all three and none can drift from the others.
 #
-# WHY IT IS ONE TABLE. Those three each spelled out the same source code and the same label, and
-# nothing checked them against each other, so adding an input meant remembering three places and
-# a rename meant remembering three more. Measured, 29th September 2026: adding RODE's four Virtual
-# Devices updated two of the three, which left the routing matrix naming USB 1 after a Windows
-# device that no longer exists and offering no rows at all for the four new inputs. That is not a
-# mistake anyone can be careful enough to avoid; the structure has to make it impossible.
-#
-# ADDING AN INPUT IS NOW ONE ENTRY. Which surfaces it appears on is stated per entry, because
+# ADDING AN INPUT IS ONE ENTRY. Which surfaces it appears on is stated per entry, because
 # membership genuinely differs - CallMe 1 is on the faders and the Channels page but has no matrix
 # row on a Duo - and a flag that says so is checkable where three separate omissions are not.
 @dataclass(frozen=True)
@@ -486,8 +479,8 @@ def _expanded_ui_channel_view(table) -> tuple:
 
 def _matrix_index_view(table) -> tuple:
     """Just the codes of the matrix rows, in code order. The grid read walks these; `sources`
-    carries the same set with labels for the UI, and the two cannot disagree now that both come
-    from one table - which the docstring above has always required and nothing used to check."""
+    carries the same set with labels for the UI, and both come from one table so they cannot
+    disagree."""
     return tuple(c.code for c in sorted(table, key=lambda c: c.code)
                  if c.in_matrix and not c.expanded_only)
 
@@ -527,8 +520,7 @@ def _relabel_view(table) -> tuple:
     return tuple((c.code, c.expanded_label) for c in table if c.expanded_label)
 
 
-# RODE's Virtual Devices: source codes measured on hardware 29th September 2026, each written to a
-# fader and read back. Shared by both desks - a code is a position in the firmware's
+# RODE's Virtual Devices: source codes measured on hardware, each written to a fader and read back. Shared by both desks - a code is a position in the firmware's
 # InputSourceType enum and both run the same binary, the argument that settles the pair codes too.
 # Not independently measured on a Duo; `DevTools/input_sources.py` against one would confirm it.
 # The four are functionally identical by RODE's own account, so the ORDER is theirs (guide and
@@ -611,8 +603,7 @@ PRO2_FADERS = FaderSpec(
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
     # All three codes captured from the RODE app on hardware.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4")),
-    # RODE's Virtual Devices, measured on hardware 29th September 2026: each of 12 to 15 was
-    # written to a fader and read back, and all four were accepted. They were found by their
+    # RODE's Virtual Devices, measured on hardware: each of 12 to 15 written to a fader reads back. They were found by their
     # INPUTSOURCE entries rather than guessed - every usable input carries a non-black
     # `inputColour`, and `inputDigitalGain` -12 marks the family that arrives over USB, which is
     # what separates these four from the reserved slots either side. `DevTools/input_sources.py`

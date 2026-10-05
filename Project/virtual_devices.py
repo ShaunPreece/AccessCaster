@@ -657,8 +657,8 @@ def describe(expanded: Optional[bool] = None) -> dict:
 # RECONCILE ACTS ON ONE SAMPLE, AND THE DRIVER MOVES UNDER IT. A mode write is followed by one
 # reconcile; if the service is still unbound at that instant, reconcile correctly switches the
 # virtual endpoints OFF, and when the service binds a few seconds later nothing switches them back
-# on. Measured 1st October 2026: three playback endpoints left disabled with the desk holding all
-# four channels on faders and the service reporting connected.
+# on. Measured: three playback endpoints left disabled with the desk holding all four channels on
+# faders and the service reporting connected.
 #
 # So the repair cannot be a second sample at a guessed delay. Windows already says when an endpoint
 # moves, through IMMNotificationClient, and that is the signal to reconcile on - whenever it

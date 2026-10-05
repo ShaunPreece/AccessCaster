@@ -615,7 +615,9 @@ behind it (the TIME_WAIT regression the change could have caused). Offline, no d
 **`check_notes.py` enforces the private notes' own rules, the ones a script can settle**: an entry that is
 really a cleanup, a status column creeping back into `PARITY.md`, `Now / Next` past 250 lines, a
 session-summary heading, em dashes, any file named that no longer exists (in the notes, the docs,
-and the `.py` and `.js` sources), and an entry written twice in one file. Run
+and the `.py` and `.js` sources), an entry written twice in one file, and a code comment that
+reads as history (a date, "used to be", "it turned out"; `version.py` and `help.html` are exempt
+as user-facing). Run
 `python DevTools/check_notes.py --check` before finishing a session. It does not check taste; it
 catches the specific ways these files have gone wrong before.
 

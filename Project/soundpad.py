@@ -1119,8 +1119,8 @@ TRIGGER_PROPS = list(TRIGGER_FIELD.values())
 TRIGGER_TYPE_LABEL = pr.TRIGGER_TYPE_LABEL          # 0 Control Change, 1 Note
 
 # ------------------------------------------------------------------------------------------------
-# THE OTHER PER-PAD SETTINGS A PROFILE USED TO DROP (the profile-coverage report), read here so they can be
-# backed up and, where the meaning is settled, edited. Same one-spec-drives-everything shape as the
+# THE OTHER PER-PAD SETTINGS (the profile-coverage report), read here so they can be backed up
+# and, where the meaning is settled, edited. Same one-spec-drives-everything shape as the
 # trigger fields above.
 #
 # ENVELOPE (sound pads). Four floats, and they are FOUR POSITIONS ALONG THE SOUND, 0.0 to 1.0.

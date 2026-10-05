@@ -12,8 +12,8 @@
 #   - pip packages:  pyinstaller, pillow   (python -m pip install pyinstaller pillow)
 #   - Inno Setup 6   (winget install --id JRSoftware.InnoSetup -e), at
 #                    %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
-# Missing any of these now FAILS LOUDLY below (a native tool returning non-zero used to be
-# silently ignored by PowerShell, which once let a failed icon step slip through unnoticed).
+# Missing any of these FAILS LOUDLY below: PowerShell silently ignores a native tool returning
+# non-zero, so every native call goes through Invoke-Native.
 
 $ErrorActionPreference = "Stop"
 

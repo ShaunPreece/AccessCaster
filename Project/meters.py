@@ -1069,11 +1069,11 @@ class Watcher:
 
                 self._stop.wait(self.poll)
         except Exception as exc:
-            # A FAILURE PART-WAY THROUGH USED TO BE SILENT: the thread died, `running` went False,
-            # and self.error stayed empty - so a check that broke ten seconds in reported the peak
-            # it had reached as if the run had finished, and a channel that fell over read as a
-            # QUIET channel. It happens when a run's watcher dies and the next press
-            # started a second run instead of stopping the first.
+            # A FAILURE PART-WAY THROUGH MUST SET self.error. Without it the thread dies with
+            # `running` False and no error, so a check that breaks ten seconds in reports its peak
+            # as if the run had finished, and a channel that fell over reads as a QUIET channel.
+            # It happens when a run's watcher dies and the next press starts a second run instead
+            # of stopping the first.
             self.error = f"The meter stopped part-way through: {exc}"
         finally:
             m.close()
