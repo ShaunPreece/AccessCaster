@@ -99,9 +99,14 @@ def _run_checks():
     check("the new one is on the default chord and switched on",
           added["enabled"] and sorted(added["mods"]) == sorted(hotkeys.DEFAULT_MODS),
           str(added))
-    check("adding does not collide with what is already there",
-          not mgr.state()["shortcuts"][-1]["problem"],
-          mgr.state()["shortcuts"][-1]["problem"])
+    # The default chord's first free key may be held by ANOTHER PROGRAM on this machine (a running
+    # AccessCaster holds its own shortcuts), so only a clash with our own list is a failure here.
+    problem = mgr.state()["shortcuts"][-1]["problem"]
+    check("adding does not collide with our own shortcuts",
+          not problem or "another program" in problem, problem)
+    check("and what add() reports is the registration it just made, not the previous one",
+          (problem in res["message"]) if problem else ("Added Test two on" in res["message"]),
+          res["message"])
     first = mgr.state()["shortcuts"][0]["id"]
     added_id = res["id"]
     res = mgr.set_binding(added_id, ["ctrl", "shift"], "F9", True)

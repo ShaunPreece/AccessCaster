@@ -200,10 +200,8 @@ class HotkeyManager:
     """Owns the pump thread, the user's shortcuts and the registration state.
 
     A SHORTCUT IS A KEY POINTED AT A COMMAND, and the user owns the list: they add one, choose what
-    it does, and delete it again. NOT a fixed set of hand-written actions: the standing requirement
-    is that any property the app can offer anywhere else can appear in the catalogue of available
-    hotkey commands. With a catalogue there is nothing to hand-write, so this class does not hold
-    commands at all: it holds shortcuts, and calls out to a RUNNER and a LABELLER given to it.
+    it does, and delete it again. The commands come from a catalogue (commands.py), so this class
+    holds none: it holds shortcuts, and calls out to a RUNNER and a LABELLER given to it.
 
     Each shortcut is {"id", "command", "mods", "key", "enabled", "speak"}. The id is ours and only
     has to be unique; the command is the caller's string and is opaque here. Pure Windows plumbing:
@@ -221,6 +219,11 @@ class HotkeyManager:
         self._thread = None
         self._tid = 0
         self._ready = threading.Event()
+        # reload() waits for the pump to apply its request, so a caller reading `_status` straight
+        # afterwards sees the result of ITS binding rather than the previous one.
+        self._applied = threading.Condition()
+        self._requested_gen = 0
+        self._applied_gen = 0
 
     # -- the list ---------------------------------------------------------------------------------
     def load(self, saved: dict, defaults=None) -> None:
@@ -257,9 +260,7 @@ class HotkeyManager:
         self.reload()
 
     def _new_id(self, existing=None) -> str:
-        """A short unique id. Counted rather than random, because this module must not use
-        randomness or the clock - both make a saved file impossible to reason about, and one of them
-        is unavailable in the workflow sandbox anyway."""
+        """A short unique id, counted rather than random so a saved file is easy to reason about."""
         used = {s["id"] for s in (existing if existing is not None else self._shortcuts)}
         n = 1
         while f"sc{n}" in used:
@@ -452,9 +453,19 @@ class HotkeyManager:
         self._post(_WM_STOP)
 
     def reload(self) -> None:
-        """Re-register from the current list. Safe to call from any thread and before the pump has
-        started: without a live pump there is nothing registered to fix."""
+        """Re-register from the current list and wait for the pump to finish doing it. Safe to call
+        from any thread and before the pump has started: without a live pump there is nothing
+        registered to fix."""
+        if not (self._tid and self._thread and self._thread.is_alive()):
+            return
+        with self._applied:
+            self._requested_gen += 1
+            target = self._requested_gen
         self._post(_WM_RELOAD)
+        if threading.get_ident() == self._thread.ident:
+            return                            # on the pump itself: it applies after this returns
+        with self._applied:
+            self._applied.wait_for(lambda: self._applied_gen >= target, timeout=2.0)
 
     def _post(self, message: int) -> None:
         if self._tid and self._thread and self._thread.is_alive():
@@ -492,6 +503,8 @@ class HotkeyManager:
         A registration Windows REFUSES is recorded against the shortcut that caused it and shown on
         the page. That is the whole reason RegisterHotKey is the right mechanism: the clash is
         reported at binding time instead of the shortcut silently doing nothing when you press it."""
+        with self._applied:
+            gen = self._requested_gen
         for hk_id in list(registered):
             _user32.UnregisterHotKey(None, hk_id)
         registered.clear()
@@ -521,6 +534,9 @@ class HotkeyManager:
                                f"another program is already using it. Choose a different key.")
         with self._lock:
             self._status = status
+        with self._applied:
+            self._applied_gen = max(self._applied_gen, gen)
+            self._applied.notify_all()
 
     def _fire(self, shortcut_id: str) -> None:
         """Run a shortcut OFF the pump thread, so a device write cannot delay the next press.
