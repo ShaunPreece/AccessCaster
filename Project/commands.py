@@ -1,9 +1,8 @@
 """AccessCaster - the COMMAND REGISTRY: everything a keyboard shortcut can be pointed at.
 
-WHY IT EXISTS. A fixed set of hand-written commands cannot meet the standing requirement: any
-property the app can offer anywhere else should appear in the list of available hotkey commands.
-So this is not a list. It is a CATALOGUE
-GENERATED FROM THE SPEC TABLES THE APP ALREADY HAS - the channel list, the fader layout, the pad
+WHY IT EXISTS. Anything the app offers elsewhere should be bindable to a key, and a hand-written
+list cannot keep up with that. So this is not a list but a CATALOGUE GENERATED FROM THE SPEC TABLES
+THE APP ALREADY HAS - the channel list, the fader layout, the pad
 grid, the saved mix schemes, the mic presets. Add a channel, a pad or a scheme and it appears here
 without anyone editing this file; that is the whole point, and it is why the catalogue is rebuilt on
 demand rather than stored.
@@ -31,6 +30,7 @@ from __future__ import annotations
 
 import channels
 import devices
+import recorder
 import soundpad
 
 # How far one press moves a level, as a percentage of full scale. Five is a real step you can hear
@@ -165,15 +165,20 @@ def _channel_commands() -> list:
     return out
 
 
-def _channel_state(name: str) -> dict:
-    """One channel's live state. Uses the announcer's cached mutes where it can (free), and only
-    falls back to a dump when there is no cache - the same trade the cough key makes."""
+def _muted_now(name: str) -> bool:
+    """Whether a channel is muted. The announcer's push-fed cache answers for free; a dump is the
+    fallback when it has nothing, the same trade the cough key makes."""
     import server
-    st = server._ann_live_state
-    muted = (st or {}).get("muted") or {}
+    muted = (server._ann_live_state or {}).get("muted") or {}
     strip = channels.channel_strip_index(name)
     if strip in muted:
-        return {"muted": bool(muted[strip])}
+        return bool(muted[strip])
+    return _channel_read(name).get("muted", False)
+
+
+def _channel_read(name: str) -> dict:
+    """One channel's state from a fresh read: mute, solo, processing and phantom."""
+    import server
     res = server.action_get_channels()
     for c in res.get("channels", []):
         if c.get("name") == name:
@@ -192,12 +197,11 @@ def _run_chan(arg: str) -> str:
     if ch is None:
         return f"This unit has no channel called {name}."
     if what == "mute":
-        now = _channel_state(name).get("muted", False)
-        return server.action_set_channel_mute(name, not now).get("message", "")
+        return server.action_set_channel_mute(name, not _muted_now(name)).get("message", "")
     # Solo, processing and phantom have no push-fed cache, so each reads the channel first. About a
     # second and a half, and worth it: a shortcut that guesses the current state and writes the
     # opposite is a shortcut that does the wrong thing every other press.
-    full = _channel_state(name)
+    full = _channel_read(name)
     if what == "solo":
         return server.action_set_channel_solo(name, not full.get("solo", False)).get("message", "")
     if what == "proc":
@@ -290,7 +294,6 @@ def _run_rec(arg: str) -> str:
         return server.action_drop_marker().get("message", "")
     if arg == "pause":
         live = server.read_recorder_live()
-        import recorder
         paused = live.get("state") == recorder.PAUSED
         return server.action_record("resume" if paused else "pause").get("message", "")
     return f"Unknown recording command {arg}."
