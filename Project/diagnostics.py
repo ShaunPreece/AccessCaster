@@ -39,6 +39,7 @@ owns the server writes to the file. That is also what keeps it a SINGLE-WRITER f
 from __future__ import annotations
 
 import datetime
+import faulthandler
 import os
 import sys
 import threading
@@ -183,12 +184,8 @@ def event(kind: str, detail: str = "", **fields) -> None:
 
 def command(rec: bytes, why: str = "") -> None:
     """One record written to the desk, decoded. See describe_record."""
-    if not _active:
-        return
-    try:
+    if _active:
         event("send", describe_record(rec), by=why)
-    except Exception:
-        pass
 
 
 # A device call that normally takes milliseconds. Past this it is a finding rather than a step.
@@ -273,6 +270,17 @@ def _roll() -> None:
         pass
     _fh = open(path, "a", encoding="utf-8", errors="replace")
     _size = 0
+    _bind_faulthandler()
+
+
+def _bind_faulthandler() -> None:
+    """Point faulthandler at the current file. It holds the file DESCRIPTOR, not the object, so
+    after a rollover closes the old file it must be bound again, or a native crash is written to a
+    closed descriptor that may by then belong to some other file."""
+    try:
+        faulthandler.enable(file=_fh)
+    except Exception:
+        pass
 
 
 # ---- the console, which the shipped build does not have ------------------------------------
@@ -347,15 +355,8 @@ def _install_hooks() -> None:
         event("crash", f"{args.exc_type.__name__}: {args.exc_value}",
               thread=getattr(args.thread, "name", "?"))
 
-    try:
-        threading.excepthook = _thread_hook
-    except Exception:
-        pass
-    try:
-        import faulthandler
-        faulthandler.enable(file=_fh)
-    except Exception:
-        pass
+    threading.excepthook = _thread_hook
+    _bind_faulthandler()
 
 
 def _flusher() -> None:
@@ -407,6 +408,7 @@ def stop(reason: str = "") -> None:
             _emit(time.time(), "app.stop", reason)
             _active = False
             try:
+                faulthandler.disable()
                 _fh.close()
             except Exception:
                 pass
