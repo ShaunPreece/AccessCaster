@@ -78,6 +78,13 @@ HISTORY = [
          "side sits, and a switch that links them into a single Pan control. A mic keeps its one "
          "Pan slider, which now says left or right as you move it."),
 
+        ("Announcements can stay off after a restart",
+         "Announcements now always come back on when AccessCaster starts, so it never opens in "
+         "silence. If you would rather they stayed off, tick Start with announcements the way I "
+         "left them, beside the announcements switch, and the app starts the way you left it, "
+         "whether you switched them from the page, the tray or the keyboard shortcut. If you had "
+         "already switched them off from the tray, that is kept and the box comes ticked."),
+
         ("The page notices when the app restarts",
          "If AccessCaster stops while its window is open, the window now tells you, and says when "
          "it is back. After an update the window reloads itself, so you are never left using the "

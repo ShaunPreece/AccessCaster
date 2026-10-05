@@ -51,7 +51,7 @@ after a session that moved code.
 | `tray.py` | 223 | pywin32 system-tray entry point (this is what ships). Menu: Open, Announcer, **Diagnostic log** (`_open_log`, which opens the file in NOTEPAD rather than handing it to the shell - a `.log` often has no registered handler and `os.startfile` would open the "how do you want to open this" chooser, a dialog with nothing in it to read), Quit. |
 | `paths.py` | 74 | `%LOCALAPPDATA%\AccessCaster` and friends. |
 | `page.py` | 62 | `render_index()`: splices `static/help.html` into `static/index.html` at the `<!-- INCLUDE help.html -->` marker, cached on both files' mtimes. **Server-side, not a browser fetch**, so the delivered DOM is identical to the section being written out inline and neither the router's focus target nor `buildStaticTabs` can race it. **Both servers go through it** - `server.py` and `DevTools/ui_probe.py` - or the probe's checks would see a page with no Help & About in it. Raises if the marker is gone rather than serving the page without its Help section. |
-| `version.py` | 385 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
+| `version.py` | 392 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
 | `say.ps1` | 92 | SAPI speech, and it SELF-GATES on the foreground window (silent when Claudio has focus), so it is always safe to call. |
 | `say_worker.ps1` | 130 | The speaking half `say.ps1` hands off to. |
 
