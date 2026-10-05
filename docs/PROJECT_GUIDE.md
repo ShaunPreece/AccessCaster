@@ -1640,7 +1640,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **anything spoken or displayed uses the numeral 2.** That includes `devices.PRO2.name`, which
   feeds the status line, the window title and every message that interpolates the device name.
   **THREE PLACES KEEP "Pro II" DELIBERATELY:** Windows' own audio ENDPOINT names, which we do not
-  own and must match exactly (`meters.friendly_stream_name` strips the model prefix, so none of it
+  own and must match exactly (`meters.stream_label` strips the model prefix, so none of it
   is ever spoken); code comments and docstrings, which describe RODE's product; and
   `RODECASTER_PROTOCOL.txt`. Nothing keys off the display name - per-device preferences use the
   hardware id - so changing it broke no stored data, and a profile saved earlier just carries the
@@ -1888,8 +1888,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **Default to a CAPTURE endpoint.** With no stream chosen the meter defaulted to the PLAYBACK
   endpoint, so it measured this PC's own screen reader instead of the mic. "Microphone (...
   Main Stereo)" is the desk's OUTPUT mix; label devices by direction.
-- **A capture endpoint reads 0.0 until something opens it.** `meters._EngineWaker` is that something.
-  The class was once declared with a docstring claiming an `activate()` that did not exist.
+- **A capture endpoint reads 0.0 until something opens it.** `meters._EngineWaker` is that something,
+  started by every `meters.Meter` on a capture endpoint; holding the stream open with `ffmpeg -f
+  dshow` reads 42 percent where a bare meter reads 0.0. Over Remote Desktop no desk endpoint exists,
+  so a waker that never starts is invisible there.
 - **The clip threshold must be scaled by the endpoint's LIVE volume ceiling.** Windows' endpoint
   volume scales the meter, so at -1.08 dB true full scale can never pass 0.99. `trusted_ceiling()`
   refuses an untrustworthy ceiling and falls back to 1.0, because a failed volume read would
@@ -1898,9 +1900,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **The Windows recording slider is BOOST above about 55 percent** on this endpoint: 50% is
   -1.08 dB, ~55% is unity, 75% is +7.67 dB, 100% is +30 dB. Best practice, and it is SET on this
   machine: Windows at unity, gain on the desk, peaks of -12 to -6 dBFS.
-- **The `... Chat` input REFUSES to move from -1.08 dB**, by dB and by scalar, silently. Both
-  endpoints report a hardware volume range of +0.00 to +0.00 dB with increment 0, so this is
-  driver-enforced rather than a bug in our call. Immaterial: Chat carries the chat return.
+- **The `... Chat` input REFUSES to move from -1.08 dB**, by dB and by scalar, silently, though it
+  reports a range of -96 to +30 dB like the other capture endpoints; it looks driver-enforced.
+  Immaterial: Chat carries the chat return.
 - **Chat cannot be level-checked.** The check listens on the Chat OUTPUT, which is mix-minus, so the
   caller is deliberately not in it. No button is built for it.
 - **A channel with its fader down reaches the isolation mix at 0.** That refusal is the common path,
