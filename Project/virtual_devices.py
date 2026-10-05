@@ -30,6 +30,7 @@ endpoint it was on.
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import json
 import os
@@ -314,6 +315,21 @@ class Endpoint:
     desk: bool                      # the desk's own USB audio (Main, Chat, Secondary)
 
 
+@contextlib.contextmanager
+def _audio():
+    """A COM apartment on this thread and Windows' endpoint enumerator, for one piece of work.
+    Every caller here opens its own, because each runs on whatever thread asked."""
+    comtypes.CoInitialize()
+    try:
+        yield comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                           interface=meters.IMMDeviceEnumerator)
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+
+
 def _endpoints(enum) -> list:
     """Every endpoint Windows knows about, tagged by owner. Caller holds the COM apartment."""
     out = []
@@ -419,60 +435,62 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     has taken away the one it was on.
 
     `expect_connected` True waits for the service to bind first (a mode write has just landed).
-    `parked` is the endpoint id `park_output` moved the default to, if any. None trusts the service's flag as it reads now. False means
-    the desk is in Standard, where the service cannot be bound: it polls, so for a few seconds
-    after the desk leaves Expanded its flag still says connected, and acting on that switches the
-    endpoints ON on the way out. Safe to call at any time and from any thread; it
-    opens its own COM apartment. Never raises: the desk's controls must not fail because Windows'
-    audio service is having a moment.
+    None trusts the service's flag as it reads now. False means the desk is in Standard, where the
+    service cannot be bound: it polls, so for a few seconds after the desk leaves Expanded its flag
+    still says connected, and acting on that switches the endpoints ON on the way out.
+
+    `parked` is the endpoint id `park_output` moved the default to, if any.
+
+    Safe to call at any time and from any thread. Never raises: the desk's controls must not fail
+    because Windows' audio service is having a moment.
     """
     status = wait_connected() if expect_connected else read_status()
     if expect_connected is False and status.connected:
         status = replace(status, connected=False, desk="")
     out = Outcome(status=status)
-    comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        policy = _policy()
-        eps = (_wait_for_faders(enum, FADERS_APPEAR_S) if expect_connected and status.connected
-               else _endpoints(enum))
-        if status.running:
-            # The service has already written what it wants into the registry; this applies it
-            # now instead of at the next USB arrival. Only "disabled" and "active" are ours to
-            # flip: "not present" and "unplugged" belong to the device.
-            for e in eps:
-                if not e.virtual:
-                    continue
-                if status.connected and e.state == "disabled":
-                    policy.SetEndpointVisibility(e.id, True)
-                    out.enabled.append(e.name)
-                elif not status.connected and e.state == "active":
-                    policy.SetEndpointVisibility(e.id, False)
-                    out.disabled.append(e.name)
-            # Counted AFTER the flips above, as what the operator now has, and "disabled" no
-            # longer occurs here because it was just switched on.
-            faders = [e for e in eps if _is_fader(e)]
-            out.faders_ready = len(faders)
-            out.system_ready = any(e.virtual and e.flow == "playback" and e.name.startswith("System")
-                                   and e.state in ("active", "disabled") for e in eps)
-            out.faders_missing = bool(expect_connected and status.connected and not faders)
-        if move_default:
-            out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
-                                                    standard=expect_connected is False)
+        with _audio() as enum:
+            _reconcile_windows(enum, out, expect_connected, move_default, parked)
     except Exception as exc:
         out.error = f"Could not update Windows' audio devices: {exc}"
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
     if out.enabled or out.disabled or out.faders_missing or out.default_moved_to or out.error:
         diagnostics.event("virtual_devices.reconcile", status.phrase(),
                           enabled=len(out.enabled), disabled=len(out.disabled),
                           faders=out.faders_ready, missing=out.faders_missing,
                           default=out.default_moved_to or "-", error=out.error or "-")
     return out
+
+
+def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
+                       parked: str) -> None:
+    """reconcile's Windows half, inside its COM apartment. Fills in `out`."""
+    status = out.status
+    policy = _policy()
+    eps = (_wait_for_faders(enum, FADERS_APPEAR_S) if expect_connected and status.connected
+           else _endpoints(enum))
+    if status.running:
+        # The service has already written what it wants into the registry; this applies it
+        # now instead of at the next USB arrival. Only "disabled" and "active" are ours to
+        # flip: "not present" and "unplugged" belong to the device.
+        for e in eps:
+            if not e.virtual:
+                continue
+            if status.connected and e.state == "disabled":
+                policy.SetEndpointVisibility(e.id, True)
+                out.enabled.append(e.name)
+            elif not status.connected and e.state == "active":
+                policy.SetEndpointVisibility(e.id, False)
+                out.disabled.append(e.name)
+        # Counted AFTER the flips above, as what the operator now has, and "disabled" no
+        # longer occurs here because it was just switched on.
+        faders = [e for e in eps if _is_fader(e)]
+        out.faders_ready = len(faders)
+        out.system_ready = any(e.virtual and e.flow == "playback" and e.name.startswith("System")
+                               and e.state in ("active", "disabled") for e in eps)
+        out.faders_missing = bool(expect_connected and status.connected and not faders)
+    if move_default:
+        out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
+                                                standard=expect_connected is False)
 
 
 def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
@@ -538,81 +556,61 @@ def park_output() -> Optional[Parking]:
     """Move Windows' default playback (console and multimedia) off the desk onto another live
     device. None when the default is already elsewhere (nothing to do) or there is nowhere to park.
     Never raises."""
-    comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        policy = _policy()
-        eps = _endpoints(enum)
-        current = {e.id: e for e in eps}.get(_default_id(enum, E_CONSOLE))
-        if current is not None and current.state == "active" and not (current.desk or current.virtual):
-            return None
-        target = _park_target(eps)
-        if target is None:
-            return None
-        policy.SetDefaultEndpoint(target.id, E_CONSOLE)
-        policy.SetDefaultEndpoint(target.id, E_MULTIMEDIA)
-        diagnostics.event("virtual_devices.park", target.name)
-        return Parking(id=target.id, name=target.name)
+        with _audio() as enum:
+            eps = _endpoints(enum)
+            current = {e.id: e for e in eps}.get(_default_id(enum, E_CONSOLE))
+            if (current is not None and current.state == "active"
+                    and not (current.desk or current.virtual)):
+                return None
+            target = _park_target(eps)
+            if target is None:
+                return None
+            policy = _policy()
+            policy.SetDefaultEndpoint(target.id, E_CONSOLE)
+            policy.SetDefaultEndpoint(target.id, E_MULTIMEDIA)
+            diagnostics.event("virtual_devices.park", target.name)
+            return Parking(id=target.id, name=target.name)
     except Exception as exc:
         diagnostics.event("virtual_devices.park_failed", f"{exc}")
         return None
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 def keep_parked(parking: Parking) -> bool:
     """Put the default back on the parking device if Windows has moved it onto the desk, as it
     does when the desk re-appears. Returns whether it had to. Never raises."""
-    comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        now = _default_id(enum, E_CONSOLE)
-        if now == parking.id or not _is_desk_usb(enum, now):
-            return False
-        policy = _policy()
-        policy.SetDefaultEndpoint(parking.id, E_CONSOLE)
-        policy.SetDefaultEndpoint(parking.id, E_MULTIMEDIA)
-        return True
+        with _audio() as enum:
+            now = _default_id(enum, E_CONSOLE)
+            if now == parking.id or not _is_desk_usb(enum, now):
+                return False
+            policy = _policy()
+            policy.SetDefaultEndpoint(parking.id, E_CONSOLE)
+            policy.SetDefaultEndpoint(parking.id, E_MULTIMEDIA)
+            return True
     except Exception:
         return False
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 def default_to_system(timeout_s: float) -> str:
     """Once the service has bound, make `System (RØDECaster)` the default as soon as it appears,
     which is within about a second of the bind. Returns its name, or "" if it did not appear.
     Never raises."""
-    comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        policy = _policy()
-        at = time.monotonic()
-        while time.monotonic() - at < timeout_s:
-            system = next((e for e in _endpoints(enum) if e.virtual and e.flow == "playback"
-                           and e.name.startswith("System") and e.state == "active"), None)
-            if system is not None:
-                policy.SetDefaultEndpoint(system.id, E_CONSOLE)
-                policy.SetDefaultEndpoint(system.id, E_MULTIMEDIA)
-                return system.name
-            time.sleep(0.1)
-        return ""
+        with _audio() as enum:
+            policy = _policy()
+            at = time.monotonic()
+            while time.monotonic() - at < timeout_s:
+                system = next((e for e in _endpoints(enum) if e.virtual and e.flow == "playback"
+                               and e.name.startswith("System") and e.state == "active"), None)
+                if system is not None:
+                    policy.SetDefaultEndpoint(system.id, E_CONSOLE)
+                    policy.SetDefaultEndpoint(system.id, E_MULTIMEDIA)
+                    return system.name
+                time.sleep(0.1)
+            return ""
     except Exception:
         return ""
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 def _is_desk_usb(enum, endpoint_id: str) -> bool:
@@ -634,22 +632,17 @@ def describe(expanded: Optional[bool] = None) -> dict:
     if expanded is False and st.connected:
         st = replace(st, connected=False, desk="")
     virtual = []
-    comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        # Only what the driver exposes now. Windows keeps an entry for every endpoint it has ever
-        # seen, and a virtual device's endpoint lives only while its channel is on a fader, so every
-        # one ever assigned lingers as not-present. Counting those reports "11 of 12" on a working
-        # install. Filter by STATE, never by name: those names come back when the channel does.
-        virtual = [e for e in _endpoints(enum) if e.virtual and e.state in ("active", "disabled")]
+        with _audio() as enum:
+            # Only what the driver exposes now. Windows keeps an entry for every endpoint it has
+            # ever seen, and a virtual device's endpoint lives only while its channel is on a fader,
+            # so every one ever assigned lingers as not-present. Counting those reports "11 of 12"
+            # on a working install. Filter by STATE, never by name: those names come back when the
+            # channel does.
+            virtual = [e for e in _endpoints(enum)
+                       if e.virtual and e.state in ("active", "disabled")]
     except Exception:
         pass
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
     active = sum(1 for e in virtual if e.state == "active")
     text = st.phrase()
     if st.connected:
@@ -671,7 +664,7 @@ def describe(expanded: Optional[bool] = None) -> dict:
 # moves, through IMMNotificationClient, and that is the signal to reconcile on - whenever it
 # happens, mode write or not.
 _WATCH_SETTLE_S = 1.5            # endpoint changes arrive in bursts; reconcile once the burst ends
-_WATCH_HEARTBEAT_S = 60.0        # a backstop, in case a change ever arrives without a callback
+_WATCH_POLL_S = 60.0             # how often an idle watcher looks at `stop`
 
 
 class _EndpointNotifier(comtypes.COMObject):
@@ -724,7 +717,7 @@ def watch_endpoints(on_change, stop: threading.Event) -> None:
         enum.RegisterEndpointNotificationCallback(client)
         diagnostics.event("virtual_devices.watch", "listening for endpoint changes")
         while not stop.is_set():
-            if not wake.wait(_WATCH_HEARTBEAT_S):
+            if not wake.wait(_WATCH_POLL_S):
                 continue
             # Let the burst finish: each re-arm pushes the settle point out again.
             while wake.is_set() and not stop.is_set():
