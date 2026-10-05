@@ -2445,7 +2445,7 @@ def soundpad_model() -> dict:
         with _hid_lock:
             # max_banks / pads_per_bank default to the ACTIVE DEVICE geometry (Pro II 8/bank,
             # Duo 6/bank) - do NOT force the Pro II numbers here. read_pads_live also returns a
-            # read_only flag (True on a device without the pad_write cap, e.g. the Duo).
+            # read_only flag (True on a device without the pad_write cap).
             live = soundpad.read_pads_live(min_banks=PAD_MIN_BANKS)
         base.update(live)
         base["can_edit"] = bool(live.get("health", {}).get("clean"))
@@ -9818,9 +9818,6 @@ def action_preview_update(grid: int, param: str, value) -> dict:
         return {"ok": False, "message": str(exc)}
     try:
         with _hid_lock:
-            if p == "padEffectInput":
-                soundpad._preview_pad_field(grid - 1, p, v, kind)
-                return {"ok": True}
             return soundpad.preview_update(grid, p, v, kind)
     except Exception as exc:
         return {"ok": False, "message": f"Could not update live preview: {exc}"}

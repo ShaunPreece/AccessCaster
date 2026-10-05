@@ -1268,6 +1268,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   and one of them would wipe every sound.
 - **`clear_pad` is HID-only ON PURPOSE** (no `remountPadStorage`, no file writes, hence no drive
   toast). It leaves the wav behind; the sweep or the manual button collects it.
+- **Every pad write enters transfer mode through `soundpad._transfer_mode`**, whose `finally` always
+  leaves it. A bare `set_transfer_mode(True)` with the exit on the next line leaves the desk mounted
+  and its audio dropped when anything between them raises (a copy that fails six times does).
+- **A high-level create's `ok` is NOT "the pad was made"**: it also needs a clean pool, and a
+  harmless partial object in the middle makes it False. Ask `created`. The create and every setter
+  report failure in the return value rather than raising, so `restore_pads` checks each one.
 - **A voice-FX pad EDITED IN PLACE restores at the recipe's values, not the edited ones.**
 - **Keep the pool clean, and remove each kind of orphan only its own way** (`SOUNDPADS.md`
   section 5). An ATTACHED orphan (effectsIdx stored last) goes by bare bind + clear; a delete by

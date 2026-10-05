@@ -1,10 +1,9 @@
 """Single source of truth for EVERY soundpad operation (read, health, clear, create sound,
 create voice-FX, restore factory FX).
 
-WHY THIS FILE EXISTS: ALL pad logic lives HERE and the web layer calls into it, so no second copy
-can drift. Splitting it - a clear+create path in a CLI script and an overwrite-in-place path behind
-the web UI - is how stale code gets run without anybody knowing, and overwrite-in-place is what
-truncates a pad's WAV.
+ALL pad logic lives HERE and the web layer calls into it, so no second copy can drift. A pad is
+never overwritten in place by a create: that truncates its WAV. A new sound is always clear then
+create.
 
 LAYERING: pad_records.py stays underneath as the low-level byte-builder (it has the byte-for-byte
 selftest vs the captures). soundpad.py is the operations layer over it. Nothing else holds pad logic.
@@ -16,24 +15,32 @@ can collide with a create and silence another pad's live effect.
 THE READER: pads and effect objects are read off the parsed tree (pad_nodes, effect_objects),
 never by searching the dump for a property name; field order inside a pad record varies.
 
-All the choreography here was decoded + ear-proven exactly as documented in SOUNDPADS.md. The
-load-bearing facts are kept as comments at each function (handle = count+0, REUSE-not-append the
-effect sub-handle, the create sync is an async ACK not a gate, selector = 0-based stream position).
+The choreography is documented in SOUNDPADS.md; the load-bearing facts are kept as comments at each
+function (handle = count+0, REUSE-not-append the effect sub-handle, the create sync is an async ACK
+not a gate, selector = 0-based stream position).
 
 CLI:
   python soundpad.py list                     # pad grid + pool health
   python soundpad.py health                    # pool health JSON only
+  python soundpad.py clean                     # remove orphan effect objects
   python soundpad.py positions                 # raw stream positions
-  python soundpad.py clear <grid>              # clear grid pad (1-based), gated
+  python soundpad.py clear <grid>              # clear grid pad (1-based)
   python soundpad.py create <grid> <folder> <wav> [name] [colour]   # create sound (clear+create)
-  python soundpad.py fx <grid> <recipe-name>   # assign a factory voice-FX recipe, gated
+  python soundpad.py fx <grid> <recipe-name>   # assign a voice-FX recipe
+  python soundpad.py mixer <grid> <mode> [name]   # create a mixer-action pad
+  python soundpad.py trigger <grid> [name]     # create a MIDI trigger pad (default mapping)
+  python soundpad.py set <grid> <property> <value>   # in-place edit of a PAD_PROP property
   python soundpad.py restore <name|all|list>   # restore factory FX from fx_recipes.json
 """
 from __future__ import annotations
 
+import contextlib
+import glob
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from collections import Counter
@@ -45,6 +52,8 @@ import rcp_read as rr
 import rcp_transfer as t
 import pad_records as pr
 import devices
+from paths import resource_path, data_path
+from wording import count, plural
 
 
 # ----------------------------------------------------------------------------------------------
@@ -52,12 +61,10 @@ import devices
 # ----------------------------------------------------------------------------------------------
 # Pad READS are always safe on any RODECaster (the model dump is identical in shape). Pad WRITES
 # (create/clear/edit) rely on the region-B effect-object pool choreography, which is only VERIFIED
-# on devices carrying the "pad_write" cap (Pro II yes; Duo not yet - its pad model reads identical
-# but the firmware GC behaviours still need a reversible live create/clear test, read-back verified).
-# So every device-writing pad
-# primitive calls _require_pad_write() first: on a device without the cap it refuses BEFORE any HID
-# write, so a Duo can never append a pad stray. The UI also disables the controls (server passes a
-# read_only flag), so this is a backstop, not the only guard.
+# on devices carrying the "pad_write" cap. Every device-writing pad primitive calls
+# _require_pad_write() first, so on a device without the cap it refuses BEFORE any HID write and
+# cannot append a pad stray. The UI also disables the controls (server passes a read_only flag),
+# so this is a backstop, not the only guard.
 
 class PadWriteUnsupported(RuntimeError):
     """Raised by a pad-write primitive when the active device lacks the 'pad_write' cap."""
@@ -85,6 +92,20 @@ def _require_pad_write() -> None:
     if not pad_writes_enabled():
         raise PadWriteUnsupported(_pad_ro_message())
 
+
+@contextlib.contextmanager
+def _transfer_mode(settle: float):
+    """Enter transfer mode, wait `settle` seconds, and ALWAYS leave again, even on an error. A desk
+    left in transfer mode keeps its FAT volume exposed and its audio dropped until something else
+    exits it. Inside rcp_transfer.transfer_session both calls do nothing; the session owns them."""
+    t.set_transfer_mode(True)
+    try:
+        time.sleep(settle)
+        yield
+    finally:
+        t.set_transfer_mode(False)
+
+
 # ----------------------------------------------------------------------------------------------
 # CONSTANTS
 # ----------------------------------------------------------------------------------------------
@@ -92,9 +113,9 @@ def _require_pad_write() -> None:
 # Factory voice-FX recipes (the validated multi-effect presets) plus the two shipped extras
 # Reverb/Echo (padIdx null), keyed by display name. The user's own saved effects live in a
 # separate file (FX_USER_FILE) and are merged in by all_recipes(); factory names win on clash.
-from paths import resource_path, data_path
-from wording import count, plural
-RECIPES = json.load(open(resource_path("fx_recipes.json"), encoding="utf-8"))  # ships read-only
+with open(resource_path("fx_recipes.json"), encoding="utf-8") as _f:
+    RECIPES = json.load(_f)                                                   # ships read-only
+del _f
 FX_USER_FILE = data_path("fx_user_presets.json")                              # user-saved, writable
 
 # The six effect engines and which params each one owns (for validating a custom recipe). Every
@@ -133,9 +154,8 @@ def all_recipes() -> dict:
 def _sanitise_stack(stack: dict) -> dict:
     """Drop unknown engines and params from an effect stack and clamp every value to its range.
 
-    THE ONE SANITISER. validate_fx_stack and _sanitise_stack_loose were the same eleven lines
-    twice, differing only in whether an empty result is allowed, so they are both thin wrappers
-    round this now. An engine that keeps no params is NOT an error:
+    An empty result is allowed: a preview pad starts silent and effects are switched into it.
+    validate_fx_stack is the strict form. An engine that keeps no params is NOT an error:
     voiceDisguise legitimately has none.
     """
     clean = {}
@@ -204,19 +224,22 @@ def sanitise_preview_edit(param: str, value):
     """Validate + clamp one live-preview edit. Returns (param, value, kind) or raises ValueError.
     Accepts an engine param (float 0..1), pitchShiftSemitones (-12..12), an engine on-flag (bool),
     or padEffectInput (int 0..3 = Mic 1..4)."""
-    if param in _PREVIEW_ONFLAGS:
-        return param, bool(value), "bool"
-    if param == "pitchShiftSemitones":
-        return param, max(-12.0, min(12.0, float(value))), "float"
-    if param == "padEffectInput":
-        return param, max(0, min(3, int(value))), "int"
-    if param in _PREVIEW_FLOAT_PARAMS:
-        return param, max(0.0, min(1.0, float(value))), "float"
+    try:
+        if param in _PREVIEW_ONFLAGS:
+            return param, bool(value), "bool"
+        if param == "pitchShiftSemitones":
+            return param, max(-12.0, min(12.0, float(value))), "float"
+        if param == "padEffectInput":
+            return param, max(0, min(3, int(value))), "int"
+        if param in _PREVIEW_FLOAT_PARAMS:
+            return param, max(0.0, min(1.0, float(value))), "float"
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a valid value for {param}") from None
     raise ValueError(f"{param!r} is not a previewable control")
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 3b - LIVE PREVIEW (temp pad + in-place edits; both primitives ear-proven)
+# LIVE PREVIEW (temp pad + in-place edits; both primitives ear-proven)
 # A scratch FX pad carries the in-progress effect. Creating it sets padActive ON, which engages
 # the effect on the live mic hands-free (ear-proven). Each control change is streamed
 # as an in-place edit (padActive + the one field on the FX sub-handle; ear-proven), so
@@ -246,12 +269,6 @@ def find_empty_grid(banks: int | None = None, pads_per_bank: int | None = None, 
     return None
 
 
-def _sanitise_stack_loose(stack: dict) -> dict:
-    """Like validate_fx_stack but ALLOWS an empty result: a preview pad starts silent and you
-    switch effects into it, so "nothing selected yet" is a valid state here and not an error."""
-    return _sanitise_stack(stack)
-
-
 def preview_start(stack: dict, colour: int = 8, mic: int = 1) -> dict:
     """Create the in-progress effect on an empty scratch pad and engage it live. `mic` is 1..4
     (Mic 1 is the proven default). Returns {ok, grid} or {ok:False, no_pad:True} if the grid
@@ -261,47 +278,35 @@ def preview_start(stack: dict, colour: int = 8, mic: int = 1) -> dict:
         return {"ok": False, "no_pad": True,
                 "message": "Live preview needs one free pad to play through. Clear a pad first."}
     pidx = grid - 1
-    clean = _sanitise_stack_loose(stack)
     # Build the effect (or a silent shell if nothing is on yet). safe_assign_fx_recipe scrubs the
     # slot first so the pool can never double up. Empty stack -> a VFX pad with every engine off.
-    safe_assign_fx_recipe(pidx, PREVIEW_NAME, clean, colour=max(0, min(11, int(colour))))
+    safe_assign_fx_recipe(pidx, PREVIEW_NAME, _sanitise_stack(stack),
+                          colour=max(0, min(11, int(colour))))
     time.sleep(0.4)
     if int(mic) != 1:
-        # Point the effect at a different mic (padEffectInput lives on the pad frame).
-        _preview_pad_field(pidx, "padEffectInput", max(0, min(3, int(mic) - 1)), "int")
+        preview_update(grid, "padEffectInput", max(0, min(3, int(mic) - 1)), "int")
     return {"ok": True, "grid": grid,
             "message": f"Live preview on. Talk into Mic {int(mic)} to hear it."}
 
 
-def _preview_pad_field(padidx: int, param: str, value, kind: str):
-    """In-place write of a PAD-frame field (e.g. padEffectInput) on the pad at `padidx`."""
-    _require_pad_write()   # backstop: preview field edit is a device write
-    pos = next((p for p, pi, _t, _n in pad_positions() if pi == padidx), None)
-    if pos is None:
-        return False
-    recs = [pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD),
-            pr.write_record(param, kind, value, pos, pr.FRAME_PAD)]
-    t.set_transfer_mode(True); time.sleep(0.4)
-    t.send_records_paced(recs, delay=0.1)
-    time.sleep(0.2); t.set_transfer_mode(False)
-    return True
-
-
 def preview_update(grid: int, param: str, value, kind: str = "float") -> dict:
-    """Stream one in-place edit to the live preview pad: an effect param/on-flag on the FX
-    sub-handle. Re-asserts padActive so the effect stays engaged while you tweak."""
+    """Stream one in-place edit to the live preview pad, re-asserting padActive so the effect stays
+    engaged while you tweak. padEffectInput lives on the PAD frame; every effect param and on-flag
+    lives on the pad's FX sub-handle. Pass values through sanitise_preview_edit first."""
     if not pad_writes_enabled():
         return {"ok": False, "message": _pad_ro_message()}
     padidx = grid - 1
     pos = next((p for p, pi, _t, _n in pad_positions() if pi == padidx), None)
     if pos is None:
         return {"ok": False, "message": "The preview pad is no longer there. Start preview again."}
-    sub = free_effect_subhandle(padidx)
-    recs = [pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD),
-            pr.write_record(param, kind, value, sub, pr.FRAME_FX)]
-    t.set_transfer_mode(True); time.sleep(0.4)
-    t.send_records_paced(recs, delay=0.1)
-    time.sleep(0.2); t.set_transfer_mode(False)
+    if param == "padEffectInput":
+        field = pr.write_record(param, kind, value, pos, pr.FRAME_PAD)
+    else:
+        field = pr.write_record(param, kind, value, free_effect_subhandle(padidx), pr.FRAME_FX)
+    recs = [pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD), field]
+    with _transfer_mode(0.4):
+        t.send_records_paced(recs, delay=0.1)
+        time.sleep(0.2)
     return {"ok": True}
 
 
@@ -313,17 +318,18 @@ def preview_stop(grid: int) -> dict:
     clear_grid_pad(grid)
     return {"ok": True, "message": "Live preview stopped."}
 
+
 PAD_TYPE_LABEL = {
     1: "Sound", 2: "Voice effect", 3: "Mixer", 4: "MIDI", 5: "Quick Dial", 6: "System",
 }
-# The three that firing code branches on. NOTE THAT 3 IS MIXER, NOT A VOICE EFFECT, which is why
-# "Censor" and "Ducking" read as 3; getting that backwards sends a mixer pad down the sound path.
+# NOTE THAT 3 IS MIXER, NOT A VOICE EFFECT, which is why "Censor" and "Ducking" read as 3; getting
+# that backwards sends a mixer pad down the sound path.
 PAD_TYPE_SOUND = 1        # plays audio: MIDI only, HID sets the flag and plays nothing
 PAD_TYPE_VOICE_FX = 2     # processes a live mic: HID, and the flag IS the state
 PAD_TYPE_MIXER = 3        # performs a mixer action: HID, same as voice FX
+PAD_TYPE_TRIGGER = 4      # sends a MIDI message
 # Bank 8 (padIdx 56-63): Input 1-4, Scene A/B, Auto, Cut. The desk owns these - we never create,
-# clear, back up or unlatch one. Named rather than a bare 6 at each call site, because a place
-# that SHOULD carry the check and does not is invisible otherwise.
+# clear, back up or unlatch one.
 SYSTEM_PAD_TYPE = 6
 
 # The one non-pad region-B effect-object present on a clean table (SOUNDPADS.md section 2).
@@ -335,7 +341,7 @@ SELECTOR_OFFSET = 0
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 1 - READ / STREAM POSITIONS
+# READ / STREAM POSITIONS
 # ----------------------------------------------------------------------------------------------
 
 class Pad(NamedTuple):
@@ -405,7 +411,7 @@ def _field_by_padidx(blob: bytes, field: str) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 2 - POOL HEALTH (the clean-pool gate)
+# POOL HEALTH (the clean-pool gate)
 # ----------------------------------------------------------------------------------------------
 
 def effect_objects(blob=None) -> list:
@@ -439,7 +445,8 @@ def pool_health(blob: bytes | None = None) -> dict:
     objects carry no effectsIdx, so they are listed by node index (`partial`)."""
     if blob is None:
         blob = rr.read_model_stable(fresh=True)
-    fx_pad_idxs = sorted(p.idx for p in pad_nodes(blob) if p.type == 2 and p.idx is not None)
+    fx_pad_idxs = sorted(p.idx for p in pad_nodes(blob)
+                         if p.type == PAD_TYPE_VOICE_FX and p.idx is not None)
     objects = effect_objects(blob)
     attached = [o.effects_idx for o in objects if not o.detached and not o.partial]
     counts = Counter(attached)
@@ -495,12 +502,10 @@ def _health_message(health: dict) -> str:
 
 
 def _resolve_recipe(name: str) -> str:
-    norm = name.strip().lower().replace("_", " ")
-    recipes = all_recipes()
-    for key in recipes:
-        if key.lower() == norm:
-            return key
-    raise ValueError(f"unknown voice effect {name!r}; known: {list(recipes)}")
+    key = _safe_match_recipe(name)
+    if key is None:
+        raise ValueError(f"unknown voice effect {name!r}; known: {list(all_recipes())}")
+    return key
 
 
 def _position_of(pidx: int, blob=None):
@@ -512,7 +517,7 @@ def _position_of(pidx: int, blob=None):
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 3 - LIVE PAD GRID (what the website renders)
+# LIVE PAD GRID (what the website renders)
 # ----------------------------------------------------------------------------------------------
 
 def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
@@ -542,9 +547,8 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
     play_modes = mixer_fields["padPlayMode"]
     # WHICH FILE A SOUND PAD ACTUALLY PLAYS, straight from the desk (padFilePath, e.g.
     # "/Application/emmc-data/pads/1/Music_Bed.wav"). This is the ONLY authoritative answer: a pad
-    # folder can hold more than one wav (leftovers from earlier replacements - measured on this desk
-    #, pads/1 held a stray wav next to Music_Bed.wav), so picking a file by listing the
-    # folder can pick the wrong one.
+    # folder can hold more than one wav (leftovers from earlier replacements), so picking a file by
+    # listing the folder can pick the wrong one.
     file_paths = mixer_fields["padFilePath"]
     by_idx = {}
     for p in pad_nodes(blob):
@@ -566,18 +570,18 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
         pidx = n - 1
         info = by_idx.get(pidx)
         # replay + loop only apply to sound pads (type 1); null elsewhere so the UI shows no control.
-        is_sound = bool(info and info["type"] == 1)
+        is_sound = bool(info and info["type"] == PAD_TYPE_SOUND)
         replay = info["replay"] if is_sound else None
         loop = info["loop"] if is_sound else None
         # Mixer pads (type 3) carry a trigger mode; Back Channel pads (mode 3) also carry the
         # member flags. Null on every other pad type so the UI shows no control at all.
-        is_mixer = bool(info and info["type"] == 3)
+        is_mixer = bool(info and info["type"] == PAD_TYPE_MIXER)
         members = ({p: bool(mixer_fields[p].get(pidx)) for p in bc_props}
                    if is_mixer and mixer_modes.get(pidx) == MIXER_MODE["backchannel"] else None)
         # MIDI trigger pads (type 4) carry the eight padTrigger* fields: WHAT the pad sends. Null on
         # every other type, so the UI shows no control at all. Without reading them, the page can
         # only offer the firmware's default mapping and a profile cannot back a custom one up.
-        is_trigger = bool(info and info["type"] == 4)
+        is_trigger = bool(info and info["type"] == PAD_TYPE_TRIGGER)
         trigger = ({k: mixer_fields[p].get(pidx) for k, p in TRIGGER_FIELD.items()}
                    if is_trigger else None)
         if trigger is not None:
@@ -656,14 +660,14 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
         "play_mode_one_shot": PLAY_MODE_ONE_SHOT,
         # The colour palette with real names, so the UI offers "Red" rather than the number 0.
         "colours": pad_colours(),
-        # True on a device whose pad WRITES are not verified yet (e.g. the Duo): the UI shows the
+        # True on a device whose pad WRITES are not verified (no pad_write cap): the UI shows the
         # pads but disables create/clear/edit so nothing is a silent no-op.
         "read_only": not pad_writes_enabled(),
     }
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 4 - EFFECT-OBJECT ADDRESSING (region-B sub-handle)
+# EFFECT-OBJECT ADDRESSING (region-B sub-handle)
 # ----------------------------------------------------------------------------------------------
 
 def current_pad_count() -> int:
@@ -705,7 +709,7 @@ def free_effect_subhandle(target_idx: int) -> int:
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 5 - LOW-LEVEL HID RECORD BUILDERS + THE ONE-SESSION CREATE SENDER
+# LOW-LEVEL HID RECORD BUILDERS + THE ONE-SESSION CREATE SENDER
 # ----------------------------------------------------------------------------------------------
 
 def _pad256(payload: bytes) -> bytes:
@@ -804,7 +808,7 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 6 - CLEAR
+# CLEAR
 # ----------------------------------------------------------------------------------------------
 
 def clear_pad(position: int, debug: bool = False) -> str:
@@ -828,36 +832,36 @@ def clear_pad(position: int, debug: bool = False) -> str:
     if iface is None:
         raise RuntimeError("no control interface (close the RODE app)")
 
-    t.set_transfer_mode(True); time.sleep(1.0)     # NO remountPadStorage -> no drive-F mount/toast
-    dev = rcp_hid.open_handle(iface, "pad clear")
-    n = 0
-    try:
-        for _ in range(20):                        # drain stale input
-            if not dev.read(256, timeout_ms=10):
-                break
-        if position == 0:
-            # park the edit cursor at position 0, then clear via the cursor (mode 0x00)
-            dev.set_nonblocking(False)
-            dev.write(rr.TRIGGER)                   # full model dump -> cursor at position 0
-            for _ in range(60):
-                if not dev.read(256, timeout_ms=30):
+    # NO remountPadStorage -> no drive-F mount/toast. Leaving transfer mode is what completes the clear.
+    with _transfer_mode(1.0):
+        dev = rcp_hid.open_handle(iface, "pad clear")
+        n = 0
+        try:
+            for _ in range(20):                        # drain stale input
+                if not dev.read(256, timeout_ms=10):
                     break
-            seq = [build_pad_bool_cursor("padActive", False), build_select_begin_cursor()]
-            how = "cursor (mode 0x00, dump-parked)"
-        else:
-            sel = position + SELECTOR_OFFSET
-            seq = [build_pad_bool("padActive", True, sel),    # select
-                   build_pad_bool("padActive", False, sel),   # confirm-clear part 1
-                   build_select_begin(sel)]                   # confirm-clear part 2 (define nothing)
-            how = f"position (sel=0x{sel:02x})"
-        for r in seq:
-            n += rcp_hid.write_report(dev, r)
-            time.sleep(0.08)
-        time.sleep(0.3)
-    finally:
-        rcp_hid.close_handle(dev, "pad clear")
-    time.sleep(0.2)
-    t.set_transfer_mode(False)                     # transferModeType=0 = the exit that completes it
+            if position == 0:
+                # park the edit cursor at position 0, then clear via the cursor (mode 0x00)
+                dev.set_nonblocking(False)
+                dev.write(rr.TRIGGER)                   # full model dump -> cursor at position 0
+                for _ in range(60):
+                    if not dev.read(256, timeout_ms=30):
+                        break
+                seq = [build_pad_bool_cursor("padActive", False), build_select_begin_cursor()]
+                how = "cursor (mode 0x00, dump-parked)"
+            else:
+                sel = position + SELECTOR_OFFSET
+                seq = [build_pad_bool("padActive", True, sel),    # select
+                       build_pad_bool("padActive", False, sel),   # confirm-clear part 1
+                       build_select_begin(sel)]                   # confirm-clear part 2
+                how = f"position (sel=0x{sel:02x})"
+            for r in seq:
+                n += rcp_hid.write_report(dev, r)
+                time.sleep(0.08)
+            time.sleep(0.3)
+        finally:
+            rcp_hid.close_handle(dev, "pad clear")
+        time.sleep(0.2)
     return f"cleared position {position} via {how}; sent {n} bytes"
 
 
@@ -866,7 +870,7 @@ def clear_slot(position: int, ptype) -> str:
     effect pad's clear leaves a partial object at the end of the list whenever an earlier object
     has been removed since, so that clear is followed by remove_partial_objects."""
     out = clear_pad(position)
-    if ptype == 2:
+    if ptype == PAD_TYPE_VOICE_FX:
         time.sleep(0.6)
         remove_partial_objects()
     return out
@@ -876,13 +880,13 @@ def clear_grid_pad(grid: int) -> dict:
     """Clear the pad at grid position `grid` (1-based), app-style. Reports pool health after.
 
     A SOUND pad clear is region-B-inert. A non-sound clear can interact with region-B bindings, so
-    we now AUTO-HEAL any stray orphan objects first (clean_pool, a no-op on a clean pool) rather than
+    it AUTO-HEALS any stray orphan objects first (clean_pool, a no-op on a clean pool) rather than
     refuse: pool hygiene is plumbing, not something the user should ever have to act on."""
     pidx = grid - 1
     pos, ptype, name = _position_of(pidx)
     if pos is None:
         return {"ok": True, "message": f"Pad {grid} is already empty.", "health": pool_health()}
-    if ptype != 1:                                 # non-sound clear can touch region-B binding
+    if ptype != PAD_TYPE_SOUND:                    # non-sound clear can touch region-B binding
         clean_pool()                               # silently GC stray orphans first (no-op if clean)
     clear_slot(pos, ptype)
     health = pool_health()
@@ -933,58 +937,44 @@ PAD_EDIT_DRAIN_S = 0.12     # after the last record, before leaving transfer mod
 def _commit_pad_records(recs: list) -> int:
     """Write pad-table records in ONE transfer-mode session and leave again. Returns bytes written.
     Every in-place pad edit goes through here so the dwell time is defined in one place."""
-    t.set_transfer_mode(True)
-    try:
-        time.sleep(PAD_EDIT_SETTLE_S)
+    _require_pad_write()
+    with _transfer_mode(PAD_EDIT_SETTLE_S):
         n = t.send_records_paced(recs, delay=0.12)
         time.sleep(PAD_EDIT_DRAIN_S)
-    finally:
-        t.set_transfer_mode(False)
     return n
 
 
 def set_pad_replay(grid: int, replay: bool) -> dict:
-    """Toggle padReplay on an EXISTING sound pad IN PLACE (no clear/create, no region-B touch).
-
-    padReplay True = a re-press RESTARTS the sound from the start (factory behaviour); False =
-    the second press acts as pause/resume. Written straight to the pad's stream position in
-    transfer mode (the edit_effect_live pattern), so nothing is allocated or shifted. Sound pads
-    only - FX/mixer pads carry padReplay False and the flag has no meaning for them.
-    """
-    pidx = grid - 1
-    pos, ptype, name = _position_of(pidx)
-    if pos is None:
-        return {"ok": False, "message": f"Pad {grid} is empty."}
-    if ptype != 1:
-        return {"ok": False, "message": f"Pad {grid} is not a sound pad; replay applies to sound pads only."}
-    recs = [pr.write_record("padReplay", "bool", bool(replay), pos, pr.FRAME_PAD)]
-    n = _commit_pad_records(recs)
-    state = "restart from the start" if replay else "pause/resume"
-    return {"ok": True, "replay": bool(replay),
-            "message": f"Pad {grid} '{name}' will {state} on the next press."}
+    """Sound pads: padReplay True = a re-press RESTARTS the sound from the start (factory
+    behaviour); False = the second press acts as pause/resume. FX and mixer pads carry padReplay
+    False and the flag has no meaning for them."""
+    res = set_pad_property(grid, "padReplay", bool(replay))
+    if res.get("ok"):
+        state = "restart from the start" if replay else "pause/resume"
+        res["replay"] = bool(replay)
+        res["message"] = f"Pad {grid} will {state} on the next press."
+    return res
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 6b - EDIT A PAD PROPERTY IN PLACE  (generic; the UI-agnostic editing layer)
+# EDIT A PAD PROPERTY IN PLACE  (generic; the UI-agnostic editing layer)
 # ----------------------------------------------------------------------------------------------
 
-# Registry of per-pad properties that are SAFE to edit in place (value semantics confirmed).
-# Each entry: kind (int/float/bool/str), label, optional min/max (clamped), applies_to (a tuple
-# of padTypes the property is meaningful for, or None = any), and help text. The generic
-# set_pad_property() can write ANY property by name, but this registry is the trusted, UI-facing
-# list - a future "Advanced per-pad" panel just renders whatever is in here, so the layout is
-# decoupled from the code. Properties whose enum/range we have NOT yet confirmed (padPlayMode,
-# padEffectInput, padEffectTriggerMode, the mixer sub-params) are deliberately NOT listed yet;
-# add them here once their value mapping is verified. padReplay stays its own function (set_pad_replay).
+# PAD_PROP (below) is the registry of per-pad properties that are SAFE to edit in place (value
+# semantics confirmed). Each entry: kind (int/float/bool/str), label, optional min/max (clamped),
+# applies_to (a tuple of padTypes the property is meaningful for, or None = any), and help text.
+# set_pad_property() can write an unregistered property given an explicit kind, but only registry
+# entries are clamped and type-gated. padEffectInput, padEffectTriggerMode and the mixer
+# sub-params other than those registered here have no confirmed value mapping, so they stay out.
+
 # --- Back Channel participants (mixer pads in mode 3) -----------------------------------------
 # A Back Channel pad opens a private off-air talkback room: while it is engaged the member
 # channels are taken OUT of the main mix (so nothing they say is recorded or streamed) and routed
 # to each other instead, and their Listen/Mute buttons glow yellow. Membership is stored as one
-# bool per channel ON THE PAD RECORD (padMixerBackChannel*, present on both desks - read live here
-# and in the Duo probe). There is NO padMixerBackChannelMic1: Mic 1 (the host) is always in the
-# room, so only the OTHER channels are selectable, which matches the RODE app's own page.
-# A pad created with none of these ticked links nothing and does nothing when pressed, which is
-# exactly the trap we hit: our create wrote the pad but left every member False.
+# bool per channel ON THE PAD RECORD (padMixerBackChannel*, present on both desks). There is NO
+# padMixerBackChannelMic1: Mic 1 (the host) is always in the room, so only the OTHER channels are
+# selectable, which matches the RODE app's own page. A pad created with none of these ticked links
+# nothing and does nothing when pressed.
 # `channel` = the device-side name this entry needs the connected desk to have (its ui_channels
 # name or its matrix source key), so a 2-mic desk is not offered Mic 3 / Mic 4.
 BACK_CHANNEL_SOURCES = (
@@ -1004,13 +994,11 @@ BACK_CHANNEL_SOURCES = (
 # padTriggerMode on a MIDI pad, so the two share one convention: do not invert this pair.
 MIXER_TRIGGER_LABEL = {0: "Momentary (only while held)", 1: "Latching (press on, press again off)"}
 
-# padPlayMode on SOUND pads. EAR-PROVEN on hardware, one value at a time on a real sound pad and
-# restored to baseline after: 0 press to play / press to stop / press to play
-# from the start; 1 plays only while held, stops on release, restarts from the start next hold;
-# 2 press to play, press again restarts from the beginning, CANNOT be stopped.
+# padPlayMode on SOUND pads, EAR-PROVEN one value at a time: 0 press to play / press to stop /
+# press to play from the start; 1 plays only while held, stops on release, restarts from the start
+# next hold; 2 press to play, press again restarts from the beginning, CANNOT be stopped.
 # NOTE THE ORDER. The RODE guide lists these as "Toggle / One Shot / Hold", so the obvious guess is
-# 0/1/2 in that order - and it is WRONG: 1 is Hold and 2 is One Shot. This is exactly why the
-# property stayed out of PAD_PROP until it was tested rather than inferred. Do not "tidy" it.
+# 0/1/2 in that order - and it is WRONG: 1 is Hold and 2 is One Shot. Do not "tidy" it.
 PLAY_MODE_LABEL = {
     0: "Toggle (press to play, press again to stop)",
     1: "Hold (plays only while you hold the pad)",
@@ -1072,13 +1060,17 @@ PAD_PROP = {
         "kind": "float", "label": "Pad volume (dB)", "applies_to": None, "min": -60.0, "max": 12.0,
         "help": "Per-pad output level in dB. Factory pads sit at -12.0. (Range provisional.)",
     },
+    "padReplay": {
+        "kind": "bool", "label": "Restart on re-press", "applies_to": (1,),
+        "help": "Sound pads: a second press restarts the sound; off, it pauses and resumes.",
+    },
     "padLoop": {
         "kind": "bool", "label": "Loop", "applies_to": (1,),
         "help": "Sound pads: play repeatedly until stopped (not available in One-Shot mode).",
     },
     "padPlayMode": {
         "kind": "int", "label": "How the pad plays", "applies_to": (1,), "min": 0, "max": 2,
-        "help": "Sound pads: 0 Toggle, 1 Hold, 2 One Shot. See PLAY_MODE_LABEL for the proof.",
+        "help": "Sound pads: 0 Toggle, 1 Hold, 2 One Shot (see PLAY_MODE_LABEL).",
     },
     "padMixerTriggerMode": {
         "kind": "int", "label": "Trigger mode", "applies_to": (3,), "min": 0, "max": 1,
@@ -1091,12 +1083,11 @@ PAD_PROP = {
 # payload, the writer and the profile share ONE definition. The firmware's default, which is what a
 # pad is stuck with unless these are written, is a Control Change on control = padIdx (bank 1 pad 1
 # = CC 0, counting up), channel 1, value 127 on press and 0 on release.
-# padTriggerMode IS latching versus momentary, PROVEN ON HARDWARE by listening to the
-# desk's own MIDI output (DevTools/midi_monitor.py) while the pad is pressed:
-#   mode 1 (the app's default): press sends the ON value, the NEXT press sends the OFF value. Two
-#     presses twelve seconds apart gave Note On then Note Off. LATCHING.
-#   mode 0: one press held for two seconds gave Note On at 18:35:50.833 and Note Off at
-#     18:35:53.138, i.e. on at press and off at release, one message each. MOMENTARY.
+# padTriggerMode IS latching versus momentary, PROVEN ON HARDWARE on the desk's own MIDI output
+# (DevTools/midi_monitor.py):
+#   mode 1 (the app's default): press sends the ON value, the NEXT press sends the OFF value.
+#     LATCHING.
+#   mode 0: the ON value at press and the OFF value at release, one message each. MOMENTARY.
 # A mixer pad's padMixerTriggerMode agrees with this: 0 Momentary, 1 Latching.
 # `send` is still read and backed up but NOT offered as a control: the template stamps it 2 and
 # nothing has shown what it does, so a label would be a guess dressed as knowledge.
@@ -1118,13 +1109,12 @@ TRIGGER_PROPS = list(TRIGGER_FIELD.values())
 TRIGGER_TYPE_LABEL = pr.TRIGGER_TYPE_LABEL          # 0 Control Change, 1 Note
 
 # ------------------------------------------------------------------------------------------------
-# THE OTHER PER-PAD SETTINGS (the profile-coverage report), read here so they can be backed up
-# and, where the meaning is settled, edited. Same one-spec-drives-everything shape as the
+# THE OTHER PER-PAD SETTINGS, read here so they can be backed up and, where the meaning is
+# settled, edited. Same one-spec-drives-everything shape as the
 # trigger fields above.
 #
 # ENVELOPE (sound pads). Four floats, and they are FOUR POSITIONS ALONG THE SOUND, 0.0 to 1.0.
-# EAR-PROVEN on a 44-second Music Bed, chosen because the two candidate meanings
-# (a position, or a length in seconds) could not be confused at that duration:
+# EAR-PROVEN on a 44-second sound, where a position and a length in seconds cannot be confused:
 #   start 0.5              -> playback began about halfway in, NOT half a second in. So a POSITION.
 #   start 0.5, fadeIn 0.25 -> NO fade at all, full level from halfway to the end. So fadeIn is an
 #                             ABSOLUTE POSITION too (the fade had already "finished" before playback
@@ -1190,7 +1180,7 @@ _EXTRA_PROP_OF.update(ENV_FIELD)
 _EXTRA_PROP_OF.update(FADE_FIELD)
 _EXTRA_PROP_OF["custom"] = CENSOR_FIELD["custom"]
 
-# The five fields the editor offers, in the order they are read out. Each carries its own range, so
+# The six fields the editor offers, in the order they are read out. Each carries its own range, so
 # the browser control, the write validation and the refusal message all come from here.
 TRIGGER_EDIT = [
     {"key": "mode", "prop": "padTriggerMode", "kind": "int", "min": 0, "max": 1,
@@ -1340,6 +1330,8 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
     if not pad_writes_enabled():
         return {"ok": False, "message": _pad_ro_message()}
     items = list(updates.items()) if isinstance(updates, dict) else list(updates)
+    if not items:
+        return {"ok": False, "message": "Nothing to change on the pad."}
     kinds = kinds or {}
     pos, ptype, padname = _position_of(grid - 1, blob)
     if pos is None:
@@ -1419,7 +1411,7 @@ def set_trigger_mapping(grid: int, **fields) -> dict:
     in ONE transfer-mode session, so the pad is never left momentarily half-mapped, and
     `padTriggerCustom` is set TRUE alongside unless the caller says otherwise: the firmware only
     honours a mapping when that flag is on, so writing the numbers without it would report success
-    and change nothing audible - the exact silent no-op this project keeps having to design out.
+    and change nothing audible.
     MEASURED: passing custom=False is DESTRUCTIVE. Writing that one flag makes the desk itself
     reset padTriggerControl / Channel / On / Off back to the firmware defaults (60 -> 16, channel
     2 -> 1, on 100 -> 127), and switching the flag straight back on does NOT bring the custom
@@ -1556,7 +1548,7 @@ def set_back_channel_member(grid: int, prop: str, on: bool) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 7 - CREATE SOUND  (the held-open one-session create + the website's clear+create entry)
+# CREATE SOUND  (the held-open one-session create + the website's clear+create entry)
 # ----------------------------------------------------------------------------------------------
 
 def safe_dest_filename(src_path: str, dest_name: str | None = None) -> str:
@@ -1606,14 +1598,7 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
     print(f"  records: {len(pre)} pre (handoff+phase1, NO region-B for a sound pad) -> sync -> "
           f"{len(mid)} phase2A -> FILE -> {len(post)} phase2B")
 
-    t.set_transfer_mode(True); time.sleep(1.0)
-    t.remount_pad_storage()
-    root = t.find_pad_volume()
-    if root is None:
-        t.set_transfer_mode(False); raise RuntimeError("volume did not mount")
-
     def file_copy():
-        import shutil
         dst_dir = os.path.join(root, "pads", str(folder)); os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, on_device)
         last = None
@@ -1631,22 +1616,23 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
         t.flush_volume(root)
         print(f"  wrote {os.path.basename(src_wav)} -> pads/{folder}/{on_device} (mid-sequence)")
 
-    n, saw = send_create_full(pre, mid, file_copy, post, debug=debug)
-    print(f"  sent {n} bytes; saw device sync = {saw}")
-    time.sleep(0.4)
-    # Remove the audio this pad USED to play, before the session closes. Free, because the volume is
-    # already mounted and we know exactly which file to keep: the one just written. Anything else in
-    # pads/<folder>/ is the sound being replaced, which by definition is no longer wanted.
-    # `post` has already written padFilePath, so the pad is pointing at the keeper by now.
-    stale = tidy_pad_folder(root, folder, on_device)
-    if stale:
-        print(f"  removed the previous audio for pad {folder}: {', '.join(stale)}")
-        t.flush_volume(root)
-    t.set_transfer_mode(False)
+    with _transfer_mode(1.0):
+        t.remount_pad_storage()
+        root = t.find_pad_volume()
+        if root is None:
+            raise RuntimeError("volume did not mount")
+        n, saw = send_create_full(pre, mid, file_copy, post, debug=debug)
+        print(f"  sent {n} bytes; saw device sync = {saw}")
+        time.sleep(0.4)
+        # Remove the audio this pad USED to play, before the session closes. Free, because the
+        # volume is already mounted and we know exactly which file to keep: the one just written.
+        # `post` has already written padFilePath, so the pad is pointing at the keeper by now.
+        stale = tidy_pad_folder(root, folder, on_device)
+        if stale:
+            print(f"  removed the previous audio for pad {folder}: {', '.join(stale)}")
+            t.flush_volume(root)
     # Report the REAL on-device filename (on_device), NOT os.path.basename(src_wav): the server
-    # uploads via a tempfile (accesscaster_*.wav), so the source basename is the temp name. The
-    # device correctly stores on_device (padFilePath verified = the real name); this
-    # message must match, or it looks like the temp name was stored when it was not.
+    # uploads via a tempfile (accesscaster_*.wav), so the source basename is the temp name.
     return f"created grid pad {target_idx + 1} -> {on_device}"
 
 
@@ -1656,9 +1642,7 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
     (NEVER overwrite-in-place). This is what the website calls.
 
     NOT gated on the clean pool: a sound create+clear writes NOTHING to region B
-    (SOUNDPADS section 2), so it cannot collide with an effect-object orphan. Only FX assignment,
-    which does write region B, stays gated (assign_fx_to_grid). So a lingering orphan no longer
-    blocks adding sounds.
+    (SOUNDPADS section 2), so it cannot collide with an effect-object orphan.
 
     If the grid pad is already occupied it is cleared first (app-style), then a fresh sound pad is
     created at padIdx = grid-1, writing pads/<folder>/<real name> (factory convention - see
@@ -1667,29 +1651,43 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
     filename; without it the source basename is used. `replay` True = re-press restarts from the
     start (factory behaviour); False = pause/resume.
     """
-    pidx = grid - 1
-    if folder is None:
-        folder = grid
-    pos, ptype, oldname = _position_of(pidx)
+    return _replace_slot(grid, "sound", lambda: assign_create(
+        grid - 1, grid if folder is None else folder, src_wav, name=name, colour=colour,
+        replay=replay, debug=debug, dest_filename=dest_filename))
+
+
+def _replace_slot(grid: int, what: str, create, note: str = "") -> dict:
+    """Clear grid pad `grid` if it is occupied, then run `create` (a low-level assign_create_*),
+    and report pool health. `created` is True only when the create itself ran to the end; `ok`
+    additionally needs a clean pool, so a caller asking "is the pad there?" reads `created`.
+    `note` is said after a successful create."""
+    pos, ptype, oldname = _position_of(grid - 1)
     cleared = None
     if pos is not None:
         clear_slot(pos, ptype)
         cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
         time.sleep(1.2)                            # let the record drop before the create reads count
     try:
-        result = assign_create(pidx, folder, src_wav, name=name, colour=colour, replay=replay,
-                               debug=debug, dest_filename=dest_filename)
+        result = create()
     except Exception as exc:
-        health = pool_health()
-        return {"ok": False, "message": f"Could not create the sound: {exc}", "health": health}
+        return {"ok": False, "created": False, "message": f"Could not create the {what}: {exc}",
+                "health": pool_health()}
     health = pool_health()
-    lead = f"Replaced {cleared} on pad {grid}. " if cleared else f"Created sound on pad {grid}. "
-    msg = lead + result + ". " + _health_message(health)
-    return {"ok": health["clean"], "message": msg, "health": health}
+    lead = f"Replaced {cleared} on pad {grid}. " if cleared else f"Created {what} on pad {grid}. "
+    msg = lead + result + "." + note + " " + _health_message(health)
+    return {"ok": health["clean"], "created": True, "message": msg, "health": health}
+
+
+def _send_create(pre, mid, post, debug=False) -> None:
+    """One create session for a pad with no file to copy (voice FX, mixer action, MIDI trigger)."""
+    with _transfer_mode(1.2):
+        n, saw = send_create_full(pre, mid, lambda: None, post, debug=debug)
+        print(f"  sent {n} bytes; saw device sync = {saw}")
+        time.sleep(0.4)
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 8 - CREATE VOICE-FX
+# CREATE VOICE-FX
 # ----------------------------------------------------------------------------------------------
 
 def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, debug=False,
@@ -1705,16 +1703,12 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
     print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
           f"recipe=[{stack}]  handle=0x{handle:02x}  fx_sub=0x{fx_sub:02x} (region-B reuse/append)")
     print(f"  {len(pre)} pre -> sync -> {len(mid)} commit -> {len(post)} effect-on")
-    t.set_transfer_mode(True); time.sleep(1.2)
-    n, saw = send_create_full(pre, mid, lambda: None, post, debug=debug)
-    print(f"  sent {n} bytes; saw device sync = {saw}")
-    time.sleep(0.4)
-    t.set_transfer_mode(False)
+    _send_create(pre, mid, post, debug=debug)
     return f"created FX (recipe [{stack}]) on grid pad {target_idx + 1}"
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 7b - POOL SELF-HEAL + HARDENED CREATE
+# POOL SELF-HEAL + HARDENED CREATE
 #
 # An orphan is an effect object with no live FX pad. There are three kinds, and each has exactly one
 # removal that works (device-proven on 1.7.6):
@@ -1744,19 +1738,19 @@ def _delete_effect_object(index: int) -> None:
     iface = t.find_control_interface()
     if iface is None:
         raise RuntimeError("no control interface (close the RODE app)")
-    t.set_transfer_mode(True); time.sleep(1.0)
-    dev = rcp_hid.open_handle(iface, "effect object delete")
-    try:
-        for r in (build_pad_bool("voiceDisguiseOn", True, index, pr.FRAME_FX),
-                  build_pad_bool("voiceDisguiseOn", False, index, pr.FRAME_FX),
-                  build_select_begin(index, pr.FRAME_FX)):
-            rcp_hid.write_report(dev, r)
-            time.sleep(0.08)
-        time.sleep(0.3)
-    finally:
-        rcp_hid.close_handle(dev, "effect object delete")
-    time.sleep(0.2)
-    t.set_transfer_mode(False)
+    with _transfer_mode(1.0):
+        dev = rcp_hid.open_handle(iface, "effect object delete")
+        try:
+            for r in (build_pad_bool("voiceDisguiseOn", True, index, pr.FRAME_FX),
+                      build_pad_bool("voiceDisguiseOn", False, index, pr.FRAME_FX),
+                      build_select_begin(index, pr.FRAME_FX)):
+                rcp_hid.write_report(dev, r)
+                time.sleep(0.08)
+            time.sleep(0.3)
+        finally:
+            rcp_hid.close_handle(dev, "effect object delete")
+        time.sleep(0.2)
+
 
 def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
     """Create an FX pad bound to an EXISTING region-B object, writing NO new object
@@ -1773,14 +1767,11 @@ def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
         pr.write_record("padName", "str", name, handle, pr.FRAME_PAD),
         pr.write_record("padColourIndex", "int", 8, handle, pr.FRAME_PAD),
     ]
-    t.set_transfer_mode(True); time.sleep(1.2)
-    send_create_full(pre, mid, lambda: None, [])
-    time.sleep(0.4)
-    t.set_transfer_mode(False)
+    _send_create(pre, mid, [])
 
 
 def _fx_pad_idxs() -> set:
-    return {pi for _p, pi, pt, _n in pad_positions() if pt == 2 and pi is not None}
+    return {pi for _p, pi, pt, _n in pad_positions() if pt == PAD_TYPE_VOICE_FX and pi is not None}
 
 
 def remove_orphan_objects(target_idx: int, max_iter: int = 8) -> int:
@@ -1903,7 +1894,7 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 8b - CREATE MIXER ACTION  (padType=3; no file, no region B -> pool-safe)
+# CREATE MIXER ACTION  (padType=3; no file, no region B -> pool-safe)
 # ----------------------------------------------------------------------------------------------
 
 MIXER_MODE = pr.MIXER_MODE
@@ -1948,11 +1939,7 @@ def assign_create_mixer(target_idx: int, mode, name="Mixer", colour=None,
           f"mode={mode} ({MIXER_MODE_LABEL[mode]})  trigger={trigger_mode}  handle=0x{handle:02x}  "
           f"[no file, no region B]")
     print(f"  {len(pre)} pre -> sync -> {len(mid)} commit")
-    t.set_transfer_mode(True); time.sleep(1.2)
-    n, saw = send_create_full(pre, mid, lambda: None, post, debug=debug)  # no-op file copy
-    print(f"  sent {n} bytes; saw device sync = {saw}")
-    time.sleep(0.4)
-    t.set_transfer_mode(False)
+    _send_create(pre, mid, post, debug=debug)
     return f"created mixer action ({MIXER_MODE_LABEL[mode]}) on grid pad {target_idx + 1}"
 
 
@@ -1967,33 +1954,20 @@ def create_mixer(grid: int, mode, name=None, colour=None, trigger_mode=None, deb
     mode_i = _resolve_mixer_mode(mode)
     if name is None:
         name = MIXER_MODE_LABEL[mode_i]
-    pidx = grid - 1
-    pos, ptype, oldname = _position_of(pidx)
-    cleared = None
-    if pos is not None:
-        clear_slot(pos, ptype)
-        cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
-        time.sleep(1.2)
-    try:
-        result = assign_create_mixer(pidx, mode_i, name=name, colour=colour,
-                                     trigger_mode=trigger_mode, debug=debug)
-    except Exception as exc:
-        health = pool_health()
-        return {"ok": False, "message": f"Could not create the mixer action: {exc}", "health": health}
-    health = pool_health()
-    lead = (f"Replaced {cleared} on pad {grid}. " if cleared
-            else f"Created {MIXER_MODE_LABEL[mode_i]} action on pad {grid}. ")
     # A fresh Back Channel pad has NO members (every padMixerBackChannel* defaults False), so it
     # links nothing and pressing it does nothing at all. Say so, or it reads as a broken pad.
     todo = (" Now choose who is in the Back Channel under Pad settings; until you tick someone,"
             " the pad has nobody to talk to and pressing it does nothing."
             if mode_i == MIXER_MODE["backchannel"] else "")
-    msg = lead + result + "." + todo + " " + _health_message(health)
-    return {"ok": health["clean"], "message": msg, "health": health, "mode": mode_i}
+    res = _replace_slot(grid, f"{MIXER_MODE_LABEL[mode_i]} action", lambda: assign_create_mixer(
+        grid - 1, mode_i, name=name, colour=colour, trigger_mode=trigger_mode, debug=debug),
+        note=todo)
+    res["mode"] = mode_i
+    return res
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 8c - CREATE MIDI TRIGGER  (padType=4; no file, no region B -> pool-safe)
+# CREATE MIDI TRIGGER  (padType=4; no file, no region B -> pool-safe)
 # ----------------------------------------------------------------------------------------------
 
 TRIGGER_TYPE = pr.TRIGGER_TYPE
@@ -2014,11 +1988,7 @@ def assign_create_trigger(target_idx: int, name="Trigger", colour=5, custom=Fals
     print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
           f"MIDI trigger ({kind})  handle=0x{handle:02x}  [no file, no region B]")
     print(f"  {len(pre)} pre -> sync -> {len(mid)} commit")
-    t.set_transfer_mode(True); time.sleep(1.2)
-    n, saw = send_create_full(pre, mid, lambda: None, post, debug=debug)  # no-op file copy
-    print(f"  sent {n} bytes; saw device sync = {saw}")
-    time.sleep(0.4)
-    t.set_transfer_mode(False)
+    _send_create(pre, mid, post, debug=debug)
     return f"created MIDI trigger on grid pad {target_idx + 1}"
 
 
@@ -2033,38 +2003,21 @@ def create_trigger(grid: int, name=None, colour=5, custom=False, trigger_type=0,
     """
     if name is None:
         name = "MIDI Trigger"
-    pidx = grid - 1
-    pos, ptype, oldname = _position_of(pidx)
-    cleared = None
-    if pos is not None:
-        clear_slot(pos, ptype)
-        cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
-        time.sleep(1.2)
-    try:
-        result = assign_create_trigger(pidx, name=name, colour=colour, custom=custom,
-                                       trigger_type=trigger_type, control=control,
-                                       channel=channel, on_val=on_val, off_val=off_val, debug=debug)
-    except Exception as exc:
-        health = pool_health()
-        return {"ok": False, "message": f"Could not create the MIDI trigger: {exc}", "health": health}
-    health = pool_health()
-    lead = (f"Replaced {cleared} on pad {grid}. " if cleared
-            else f"Created MIDI trigger on pad {grid}. ")
-    msg = lead + result + ". " + _health_message(health)
-    return {"ok": health["clean"], "message": msg, "health": health}
+    return _replace_slot(grid, "MIDI trigger", lambda: assign_create_trigger(
+        grid - 1, name=name, colour=colour, custom=custom, trigger_type=trigger_type,
+        control=control, channel=channel, on_val=on_val, off_val=off_val, debug=debug))
 
 
 # ----------------------------------------------------------------------------------------------
-# SECTION 9 - RESTORE FACTORY FX
+# RESTORE FACTORY FX
 # ----------------------------------------------------------------------------------------------
 
 def _match_recipe(name: str) -> str:
-    """Resolve a user-typed name to a recipe key (case/space/underscore insensitive)."""
-    norm = name.strip().lower().replace("_", " ")
-    for key in RECIPES:
-        if key.lower() == norm:
-            return key
-    raise SystemExit(f"unknown pad {name!r}; known: {list(RECIPES)}")
+    """Resolve a user-typed name to a FACTORY recipe key, for the CLI."""
+    key = _safe_match_recipe(name, RECIPES)
+    if key is None:
+        raise SystemExit(f"unknown pad {name!r}; known: {list(RECIPES)}")
+    return key
 
 
 def restore_one(pad_name: str, live: bool):
@@ -2085,16 +2038,10 @@ def restore_one(pad_name: str, live: bool):
         print("   ", clear_slot(pos, ptype))
         time.sleep(1.2)
     print("  creating factory recipe...")
-    # active=False IS LOAD-BEARING: leaving it off puts a robot voice on a live mic.
-    # assign_create_fx_recipe defaults to active=True, which ENGAGES the effect on the live mic the
-    # moment the pad is made (that default exists for the live-preview path, where it is what you
-    # want). Restoring a factory pad must leave it AT REST, exactly as the factory ships it.
-    # Why it hid: restoring six pads in a row, each pad's clear_pad switched the PREVIOUS one off,
-    # so only the LAST of the six stayed latched - one fault in six, at the end of a long run.
-    # And why the after-check missed it: the grid diff compared name, type, colour and presence,
-    # none of which a latched pad changes. It is `padActive` that changes, and nothing looked at it.
-    # The public wrapper assign_fx_to_grid already defaults active=False for exactly this reason,
-    # which is why a caller that goes through it never had this bug.
+    # active=False IS LOAD-BEARING: assign_create_fx_recipe defaults to active=True (for the live
+    # preview), which ENGAGES the effect on the live mic the moment the pad is made. A restored
+    # factory pad must be AT REST. In a run of restores each clear switches the previous pad off,
+    # so only the last one would stay latched, and nothing on the grid shows it.
     print("   ", assign_create_fx_recipe(padidx, pad_name, recipe, colour=colour, active=False))
     time.sleep(1.0)
 
@@ -2150,7 +2097,9 @@ def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
             if kind == "vfx":
                 restore_one(nm, live=live)
             elif live:
-                create_mixer(grid, mode)
+                res = create_mixer(grid, mode)
+                if not res.get("created"):
+                    raise RuntimeError(res.get("message"))
             results.append({"name": nm, "grid": grid, "ok": True})
         except Exception as exc:
             # Carry on rather than stopping: five restored pads and one named failure is a far
@@ -2159,11 +2108,9 @@ def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
     done = [r for r in results if r["ok"]]
     failed = [r for r in results if not r["ok"]]
 
-    # THE BACKSTOP, added the same day the bug it guards was found. Creating an FX pad can leave it
-    # ENGAGED on a live mic, and that is invisible: the pad's name, type and colour are all correct,
-    # so a grid diff says everything is fine while somebody sounds like a robot. `active=False`
-    # above is the fix; this is the check that it worked, because a fix nothing verifies is how the
-    # same bug comes back. It also catches a pad left latched by anything else.
+    # THE BACKSTOP. Creating an FX pad can leave it ENGAGED on a live mic, and that is invisible:
+    # the pad's name, type and colour are all correct. `active=False` in restore_one prevents it;
+    # this checks that it did, and catches a pad left latched by anything else.
     if progress:
         progress("Checking nothing was left switched on")
     stuck = unlatch_all()
@@ -2190,8 +2137,7 @@ def heal_fx_pool(progress=None) -> dict:
     """Rebuild any voice-FX pad whose effect DEFINITION is missing, and touch nothing else.
 
     THE DESK REACHES THIS STATE BY ITSELF, which is why this is a repair rather than a diagnostic.
-    Proven against captures taken weeks earlier and never read this way:
-    `pre-showreset-raw.bin` holds all seven region-B objects, `post-showreset-raw.bin` holds only the
+    Proven against model dumps: `pre-showreset-raw.bin` holds all seven region-B objects, `post-showreset-raw.bin` holds only the
     special one at 65 with all six FX pad records still present, and `default-show-raw.bin` shows
     why - RODE's factory default show ships the FX pad records with their `effectsIdx` pointers and
     no objects for them to point at. The firmware garbage-collects an object the moment no pad claims
@@ -2269,20 +2215,13 @@ def heal_fx_pool(progress=None) -> dict:
 def latched_pads(blob=None) -> list:
     """[(position, padIdx, name)] for every pad the desk currently has ENGAGED (padActive true).
 
-    NOTHING ELSE IN THIS FILE LOOKS AT `padActive`. Everything else checks the grid - name, type,
-    colour, presence - and a latched pad changes none of those, so a factory-FX restore that leaves
-    a pad engaged, with a robot voice on a live mic, reports "0 pads differing".
+    A latched pad changes nothing on the grid (name, type, colour, presence), only `padActive`. A
+    latched VOICE-FX pad is the dangerous case: it is silent in itself and processes a live mic, so
+    the only symptom is that you sound wrong, with nothing on screen to explain it.
 
-    A latched VOICE-FX pad is the dangerous case: it is silent in itself and processes a live mic,
-    so the only symptom is that you sound wrong, with nothing on screen to explain it. That is
-    precisely the class of fault a blind operator cannot spot, which is why this is now checked
-    after anything that creates a pad rather than left to be noticed.
-
-    SYSTEM PADS (padType 6, bank 8: Input 1-4, Scene A/B, Auto, Cut) ARE EXCLUDED, and that is the
-    whole difference between a safety net and a second fault. Their `padActive` is the desk showing
-    which input and scene it has selected, not a pad somebody left engaged, so `unlatch_all` was
-    switching off the desk's own state to "make it safe". Found, after a factory
-    reset: the FX rebuild finished by reporting it had switched off Input 1 and Scene A."""
+    SYSTEM PADS (padType 6, bank 8: Input 1-4, Scene A/B, Auto, Cut) ARE EXCLUDED. Their
+    `padActive` is the desk showing which input and scene it has selected, not a pad somebody left
+    engaged, so unlatching one switches off the desk's own state."""
     if blob is None:
         blob = rr.read_model_stable()
     return [(p.position, p.idx, p.name) for p in pad_nodes(blob)
@@ -2305,8 +2244,7 @@ def engage_pad(position: int) -> None:
     """Switch ONE pad on: a bare `padActive` ON at its position. The mirror of `unlatch_pad`.
 
     This is how a pad is fired from software, and it is the SAME write that create sends to leave a
-    new voice-FX pad engaged (which is how a factory-FX restore once left a robot voice on a live
-    mic). Measured: a voice-FX pad engages and releases; a MIXER pad performs its
+    new voice-FX pad engaged. Measured: a voice-FX pad engages and releases; a MIXER pad performs its
     whole action (Back Channel moved cue, talkback and two mutes together); a SOUND pad sets the
     flag and moves nothing else in the model, so whether it makes a noise is an ear question.
 
@@ -2360,8 +2298,8 @@ def select_bank(bank: int) -> None:
     AN ORDINARY HID WRITE, and that is the whole answer to the MIDI bank-select question. MIDI
     reaches only the bank the desk is currently on, and RODE's MIDI spec offers CC 0 / CC 1 for the
     bank marked "verify" - which is not needed, because `selectedBank` is an int on the GUI block
-    (selector 0x07), the same mapped node as `metering`, and it has been written and restored for
-    months. Proven with the ENGINE as the judge rather than a read-back: with the
+    (selector 0x07), the same mapped node as `metering`. Proven with the ENGINE as the judge rather
+    than a read-back: with the
     bank at 0 a MIDI press fired padIdx 0, and after this write with bank 1 the identical message
     fired padIdx 6, which is bank 2's first pad on a Duo.
 
@@ -2399,46 +2337,29 @@ def unlatch_all(blob=None) -> list:
 def export_pad_audio(grid: int, dest_dir: str) -> dict:
     """Copy ONE pad's sound off the unit into `dest_dir`. Read-only as far as the desk is concerned.
 
-    Why this is a button rather than a project: backup_pads already does exactly this copy for every
-    sound pad when a profile is saved, so the transfer-mode dance, the mount and the
-    which-file-does-this-pad-actually-play question were all solved. This is that same copy for one
-    pad, to a folder the user can find.
-
+    The same copy backup_pads makes for every sound pad, for one pad, to a folder the user can find.
     The file is named by the desk (padFilePath), NOT by whatever the directory listing returns
     first: a pad folder can hold leftovers from earlier replacements, and picking the wrong one
-    would hand the user a sound their pad does not play. That exact bug was in the backup path until
-. CALLER HOLDS THE HID LOCK."""
-    import shutil
+    would hand the user a sound their pad does not play. CALLER HOLDS THE HID LOCK."""
     live = read_pads_live()
     pad = next((p for p in live["pads"] if p["grid"] == int(grid)), None)
     if pad is None:
         return {"ok": False, "message": f"There is no pad {grid} on this unit."}
     if not pad["present"]:
         return {"ok": False, "message": f"Pad {grid} is empty, so there is no sound to export."}
-    if pad["type"] != 1:
+    if pad["type"] != PAD_TYPE_SOUND:
         return {"ok": False,
                 "message": (f"Pad {grid} is {pad['name']!r}, a {pad['type_label']} pad. Only sound "
                             f"pads have an audio file; a voice effect is a recipe, not a recording.")}
     wanted = pad.get("file")
     os.makedirs(dest_dir, exist_ok=True)
-    t.set_transfer_mode(True)
-    time.sleep(1.0)
-    try:
+    with _transfer_mode(1.0):
         t.remount_pad_storage()
         root = t.find_pad_volume()
         if root is None:
             return {"ok": False, "message": "The unit's pad storage did not appear, so nothing "
                                             "was exported. Try again in a moment."}
-        src = None
-        if wanted:
-            cand = os.path.join(root, "pads", str(int(grid)), wanted)
-            if os.path.isfile(cand):
-                src = cand
-        if src is None:
-            import glob
-            srcs = [s for s in glob.glob(os.path.join(root, "pads", str(int(grid)), "*"))
-                    if os.path.isfile(s)]
-            src = srcs[0] if srcs else None
+        src = _pad_audio_source(root, int(grid), wanted)
         if src is None:
             return {"ok": False,
                     "message": f"Pad {grid} says it plays {wanted or 'a file'}, but that file is "
@@ -2454,8 +2375,19 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         return {"ok": True, "path": dst, "folder": dest_dir, "size_mb": size_mb,
                 "message": (f"Pad {grid}, {pad['name']}, exported to {dst} ({size_mb} MB). "
                             f"The pad on the unit is unchanged.")}
-    finally:
-        t.set_transfer_mode(False)
+
+
+def _pad_audio_source(root: str, grid: int, wanted: str | None):
+    """Path on the mounted volume of the file grid pad `grid` plays, or None. `wanted` is the
+    desk's own answer (padFilePath's basename); the first file in the pad's folder is the fallback
+    only for a pad whose padFilePath the model does not report."""
+    folder = os.path.join(root, "pads", str(grid))
+    if wanted:
+        cand = os.path.join(folder, wanted)
+        if os.path.isfile(cand):
+            return cand
+    srcs = [s for s in glob.glob(os.path.join(folder, "*")) if os.path.isfile(s)]
+    return srcs[0] if srcs else None
 
 
 # ----------------------------------------------------------------------------------------------
@@ -2497,11 +2429,11 @@ FACTORY_MIXER_PADS = [(12, 0), (16, 4)]
 # or custom FX that matches nothing is recorded with fx_recipe=None and reported (restore skips it
 # rather than guessing). System pads (bank 8, padType 6) are never touched.
 
-def _safe_match_recipe(name):
-    """Resolve a pad name to a known recipe key (factory or user), case/space/underscore
+def _safe_match_recipe(name, recipes=None):
+    """Resolve a pad name to a known recipe key (default: factory or user), case and underscore
     insensitive. Returns the key or None (no raise), so backup can flag unrecognised FX."""
     norm = (name or "").strip().lower().replace("_", " ")
-    for key in all_recipes():
+    for key in (all_recipes() if recipes is None else recipes):
         if key.lower().replace("_", " ") == norm:
             return key
     return None
@@ -2510,7 +2442,6 @@ def _safe_match_recipe(name):
 def backup_pads(dest_dir: str, progress=None) -> dict:
     """Back up the current user pad grid for a profile. Returns {pads, files_copied, unrecognised}
     and copies each SOUND pad's audio file into dest_dir/<grid>/. CALLER HOLDS THE HID LOCK."""
-    import shutil
     shutil.rmtree(dest_dir, ignore_errors=True)       # clean slate so a re-save leaves no stale files
     live = read_pads_live()
     pads = []
@@ -2529,14 +2460,11 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
             "back_channel": p["back_channel"],
             # A MIDI trigger pad's mapping (what it actually sends). Without it a restored trigger
             # pad comes back on the firmware default and a custom mapping is silently lost. All
-            # eight fields are kept, including the two whose meaning we do
-            # not know, because a backup that drops what it does not understand is not a backup.
+            # eight fields are kept, including `send`, whose meaning is unknown: a backup records
+            # what the pad reads.
             "trigger": p["trigger"],
-            # The last three per-pad groups a profile dropped (profile-coverage report): a sound pad's
-            # trim/fade envelope, a Fade pad's times and host exclusion, a Censor pad's own sound.
-            # Kept verbatim, including the envelope floats whose UNITS are not settled: a backup
-            # records what the pad reads, and understanding it is not a precondition for putting the
-            # same value back.
+            # A sound pad's trim/fade envelope, a Fade pad's times and host exclusion, a Censor
+            # pad's own sound. Kept verbatim.
             "envelope": p["envelope"], "fade": p["fade"], "censor": p["censor"],
             "file": None, "fx_recipe": None,
             # What the desk says this pad plays, used below to copy the RIGHT file out of a folder
@@ -2544,7 +2472,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
             # record, and two keys naming the same thing would be one to drift.
             "live_file": p.get("file"),
         }
-        if p["type"] == 2:                            # voice FX: match the pad name to a known
+        if p["type"] == PAD_TYPE_VOICE_FX:            # voice FX: match the pad name to a known
             key = _safe_match_recipe(p["name"])       # recipe (factory OR a saved custom preset)
             entry["fx_recipe"] = key
             if key is not None:
@@ -2559,61 +2487,35 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
         pads.append(entry)
 
     # Copy every sound pad's file in ONE transfer-mode session (reads only; non-destructive).
-    sound = [e for e in pads if e["type"] == 1]
+    sound = [e for e in pads if e["type"] == PAD_TYPE_SOUND]
     copied = 0
     if sound:
-        import glob
-        t.set_transfer_mode(True); time.sleep(1.0)
-        t.remount_pad_storage()
-        root = t.find_pad_volume()
-        if root is None:
-            t.set_transfer_mode(False)
-            raise RuntimeError("pad storage volume did not mount for the backup")
-        # quiet_drive_errors: if a read fails part-way through, the caller reports it in the
-        # progress dialog. Windows must not ALSO throw its own modal "problem with this drive" box,
-        # which is a second thing to find and dismiss saying less than ours does.
-        try:
+        with _transfer_mode(1.0):
+            t.remount_pad_storage()
+            root = t.find_pad_volume()
+            if root is None:
+                raise RuntimeError("pad storage volume did not mount for the backup")
             for e in sound:
-                # NO PER-PAD LINE HERE, deliberately. Copying a pad takes about a second, so a line
-                # each is speech that interrupts itself: you hear part of each phrase before the
-                # next cuts it short, and the closing "complete" sounds like one more pad name. The
-                # caller says how many are coming and says when they are done; the count, not the
-                # roll-call, is what tells you it is still working.
-                # Copy the file the pad ACTUALLY PLAYS, named by the desk itself (padFilePath, via
-                # read_pads_live's "file"). A pad folder can hold leftovers from earlier
-                # replacements - a stray wav sitting beside the real one - so taking whatever the
-                # directory listing returns first captures the wrong sound, and the restore then
-                # puts the wrong sound back.
-                # The glob stays as a fallback for the one case it is still right for: a pad whose
-                # padFilePath the model does not report.
-                wanted = e.get("live_file")
-                src = None
+                # NO PER-PAD PROGRESS LINE, deliberately. Copying a pad takes about a second, so a
+                # line each is speech that interrupts itself. The caller says how many are coming
+                # and when they are done.
+                # quiet_drive_errors: if a read fails, the caller reports it in the progress dialog,
+                # so Windows must not ALSO throw its own modal "problem with this drive" box.
                 with t.quiet_drive_errors():
-                    if wanted:
-                        cand = os.path.join(root, "pads", str(e["grid"]), wanted)
-                        if os.path.isfile(cand):
-                            src = cand
+                    src = _pad_audio_source(root, e["grid"], e.get("live_file"))
                     if src is None:
-                        srcs = [s for s in glob.glob(os.path.join(root, "pads", str(e["grid"]), "*"))
-                                if os.path.isfile(s)]
-                        if not srcs:
-                            continue
-                        src = srcs[0]
+                        continue
                     fn = os.path.basename(src)
                     dst_dir = os.path.join(dest_dir, str(e["grid"]))
                     os.makedirs(dst_dir, exist_ok=True)
                     try:
                         shutil.copyfile(src, os.path.join(dst_dir, fn))
                     except OSError as exc:
-                        # Name the pad and the file. A bare "[Errno 22] Invalid argument" is what
-                        # this reported on and it said nothing about where it was.
                         raise RuntimeError(
                             f"could not read pad {e['grid']} ({e['name']}) from the unit's "
                             f"storage: {fn}: {exc}") from exc
                 e["file"] = fn
                 copied += 1
-        finally:
-            t.set_transfer_mode(False)
     for e in pads:
         e.pop("live_file", None)          # working field only; never goes in the profile
     return {"pads": pads, "files_copied": copied, "unrecognised": unrecognised}
@@ -2638,7 +2540,6 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
 def _pad_audio_dirs(root: str):
     """Every pads/<n>/ folder on the mounted volume. Confined to root/pads by construction: this is
     the only place either tidy function is allowed to touch."""
-    import glob
     base = os.path.join(root, "pads")
     return [d for d in glob.glob(os.path.join(base, "*")) if os.path.isdir(d)]
 
@@ -2651,7 +2552,6 @@ def tidy_pad_folder(root: str, grid: int, keep: str) -> list:
     A FACTORY SOUND IS DELETED LIKE ANY OTHER and that is deliberate: the desk keeps its own copy
     and a software factory reset restores all eight, so the file here is not the only copy and
     nothing is lost by tidying it."""
-    import glob
     removed = []
     if not keep:
         return removed                       # without a keeper we cannot safely delete anything
@@ -2687,14 +2587,12 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
     if progress:
         progress("Tidying up pad audio nothing points at.")
     removed, freed, kept = [], 0, 0
-    t.set_transfer_mode(True); time.sleep(1.0)
-    t.remount_pad_storage()
-    root = t.find_pad_volume()
-    try:
+    with _transfer_mode(1.0):
+        t.remount_pad_storage()
+        root = t.find_pad_volume()
         if root is None:
             return {"ok": False, "removed": [], "bytes_freed": 0, "kept": 0,
                     "message": "The pad storage volume did not mount, so nothing was deleted."}
-        import glob
         for d in _pad_audio_dirs(root):
             folder = os.path.basename(d)
             grid = int(folder) if folder.isdigit() else None
@@ -2718,8 +2616,6 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
                 pass
         if removed:
             t.flush_volume(root)
-    finally:
-        t.set_transfer_mode(False)
     mb = freed / 1024 / 1024
     msg = (f"Removed {count(len(removed), 'unused sound file')}, freeing {mb:.1f} MB. "
            f"Kept the {kept} in use." if removed
@@ -2752,11 +2648,10 @@ _PAD_COMPARE_FIELDS = ("name", "colour", "gain", "loop", "replay", "play_mode",
 # Types we are willing to skip. Voice FX (2) is deliberately EXCLUDED: its identity lives in the
 # effect object in region B, which we cannot verify from a model dump, and region B is where the
 # orphan damage happens. An FX pad is also cheaper to rebuild than a sound pad (no file copy).
-_SKIPPABLE_PAD_TYPES = (1, 3, 4)
+_SKIPPABLE_PAD_TYPES = (PAD_TYPE_SOUND, PAD_TYPE_MIXER, PAD_TYPE_TRIGGER)
 
 
 def _file_sha256(path: str) -> str | None:
-    import hashlib
     h = hashlib.sha256()
     try:
         with open(path, "rb") as f:
@@ -2814,9 +2709,7 @@ def _pad_metadata_matches(saved: dict, live: dict) -> bool:
             if bool(want) != bool(got):
                 return False
         elif want != got:
-            # colour, play_mode, mixer_mode, mixer_trigger: exact. An earlier version compared
-            # `bool(want) != bool(got) and want != got` here, which passed ANY two truthy values as
-            # equal, so a pad recoloured from 3 to 4 was called unchanged (caught by the tests).
+            # colour, play_mode, mixer_mode, mixer_trigger: exact.
             return False
     return True
 
@@ -2832,7 +2725,6 @@ def _pad_audio_matches(root: str, grid: int, saved_file: str, local_path: str,
 
     Name, then size, then a full content hash. The hash is the only one that actually proves it, and
     reading a couple of megabytes off the mounted volume costs a fraction of one pad rebuild."""
-    import glob
     if not saved_file or not os.path.isfile(local_path):
         return False
     if live_file:
@@ -2869,14 +2761,13 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
         candidates = [e for e in pads
                       if e.get("type") in _SKIPPABLE_PAD_TYPES
                       and _pad_metadata_matches(e, live_by_grid.get(e.get("grid")))]
-        sound = [e for e in candidates if e.get("type") == 1]
-        unchanged = {e["grid"] for e in candidates if e.get("type") != 1}
+        sound = [e for e in candidates if e.get("type") == PAD_TYPE_SOUND]
+        unchanged = {e["grid"] for e in candidates if e.get("type") != PAD_TYPE_SOUND}
         if sound:
             # ONE transfer-mode session for every audio comparison (reads only, nothing written).
-            t.set_transfer_mode(True); time.sleep(1.0)
-            t.remount_pad_storage()
-            root = t.find_pad_volume()
-            try:
+            with _transfer_mode(1.0):
+                t.remount_pad_storage()
+                root = t.find_pad_volume()
                 if root is None:
                     # THE VOLUME DID NOT MOUNT, so no sound pad can be compared and every one of
                     # them is about to be rewritten. SAY SO: silently doing the maximum work looks
@@ -2895,15 +2786,14 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
                         if _pad_audio_matches(root, e["grid"], e.get("file"), local,
                                               live_file=live_name):
                             unchanged.add(e["grid"])
-            finally:
-                t.set_transfer_mode(False)
         # WHY EACH PAD IS BEING REBUILT, in one line, because "it still finds pads to restore" is
         # otherwise unanswerable from outside. Voice FX is ALWAYS here: it is excluded from the skip by
         # `_SKIPPABLE_PAD_TYPES` because its identity lives in region B, which a model dump cannot
         # show, and the rule in this file is to skip only on a total match.
         diagnostics.event("pads.verify.end", "pads already matching", unchanged=len(unchanged),
                           rebuilding=len(pads) - len(unchanged),
-                          fx_always_rebuilt=sum(1 for e in pads if e.get("type") == 2))
+                          fx_always_rebuilt=sum(1 for e in pads
+                                                if e.get("type") == PAD_TYPE_VOICE_FX))
         return unchanged
     except Exception as exc:
         # NEVER LET THE OPTIMISATION BREAK THE RESTORE - but never let it fail quietly either. An
@@ -2942,6 +2832,18 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
     # verify pass has already established is unnecessary.
     total = len(todo)
     done = 0
+    # Every create and setting write below reports failure in its return rather than raising, so
+    # each one is checked: an unchecked failure would count the pad as restored.
+    problems = []
+
+    def check(res, what):
+        if not res.get("ok"):
+            problems.append(f"{what}: {res.get('message') or 'failed'}")
+
+    def created(res):
+        if not res.get("created"):
+            raise RuntimeError(res.get("message") or "the pad was not created")
+
     for e in todo:
         grid = e.get("grid")
         ptype = e.get("type")
@@ -2949,16 +2851,17 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
         done += 1
         if progress:
             progress(f"Pad {done} of {total}: {label}")
+        problems.clear()
         try:
-            if ptype == 1:                            # sound
+            if ptype == PAD_TYPE_SOUND:
                 fn = e.get("file")
                 src = os.path.join(src_dir, str(grid), fn) if fn else None
                 if not src or not os.path.isfile(src):
                     skipped.append(f"pad {grid} (sound file missing)"); ok = False; continue
                 replay = e.get("replay")
-                create_sound(grid, src, name=label or "Sound", colour=e.get("colour") or 5,
-                             replay=bool(replay) if replay is not None else True)
-            elif ptype == 2:                          # voice FX
+                created(create_sound(grid, src, name=label or "Sound", colour=e.get("colour") or 5,
+                                     replay=bool(replay) if replay is not None else True))
+            elif ptype == PAD_TYPE_VOICE_FX:
                 stack = e.get("fx_stack")
                 key = e.get("fx_recipe")
                 if stack:                             # self-contained: rebuild from the saved stack
@@ -2971,71 +2874,78 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                     assign_fx_to_grid(grid, key)
                 else:
                     skipped.append(f"pad {grid} ('{label}': unrecognised effect)"); continue
-            elif ptype == 3:                          # mixer action
+            elif ptype == PAD_TYPE_MIXER:
                 if e.get("mixer_mode") is None:
                     skipped.append(f"pad {grid} (mixer mode missing)"); ok = False; continue
-                create_mixer(grid, e["mixer_mode"])
-            elif ptype == 4:                          # MIDI trigger
-                create_trigger(grid, name=label or None, colour=e.get("colour") or 5)
+                created(create_mixer(grid, e["mixer_mode"]))
+            elif ptype == PAD_TYPE_TRIGGER:
+                created(create_trigger(grid, name=label or None, colour=e.get("colour") or 5))
             else:
                 skipped.append(f"pad {grid} (type {ptype} not restorable)"); continue
-            wait_for_pad_present(grid - 1)
+            if not wait_for_pad_present(grid - 1):
+                raise RuntimeError("the pad did not appear on the unit after it was created")
             # Re-apply the saved cosmetics/behaviour the create path does not already set.
             if e.get("colour") is not None:
-                set_pad_colour(grid, int(e["colour"]))
-            if ptype != 1 and label:                  # sound create already set the name
-                set_pad_name(grid, label)
-            if e.get("gain") is not None and ptype in (1, 2):
-                set_pad_gain(grid, float(e["gain"]))
+                check(set_pad_colour(grid, int(e["colour"])), "colour")
+            if ptype != PAD_TYPE_SOUND and label:     # sound create already set the name
+                check(set_pad_name(grid, label), "name")
+            if e.get("gain") is not None and ptype in (PAD_TYPE_SOUND, PAD_TYPE_VOICE_FX):
+                check(set_pad_gain(grid, float(e["gain"])), "volume")
             # PLAY MODE before loop: set_play_mode turns padLoop off when it selects One Shot
             # (loop is meaningless there), so restoring loop afterwards keeps the saved pair
-            # consistent instead of having the play-mode write clear a loop we just restored.
-            if ptype == 1 and e.get("play_mode") is not None:
-                set_play_mode(grid, int(e["play_mode"]))
-            if ptype == 1 and e.get("loop") is not None:
-                set_pad_loop(grid, bool(e["loop"]))
-            if ptype == 3 and e.get("mixer_trigger") is not None:
-                set_mixer_trigger(grid, int(e["mixer_trigger"]))
+            # consistent instead of having the play-mode write clear a loop just restored.
+            if ptype == PAD_TYPE_SOUND and e.get("play_mode") is not None:
+                check(set_play_mode(grid, int(e["play_mode"])), "play mode")
+            if ptype == PAD_TYPE_SOUND and e.get("loop") is not None:
+                check(set_pad_loop(grid, bool(e["loop"])), "loop")
+            if ptype == PAD_TYPE_MIXER and e.get("mixer_trigger") is not None:
+                check(set_mixer_trigger(grid, int(e["mixer_trigger"])), "trigger mode")
             # A MIDI trigger's mapping. Written in ONE session, and only when the saved pad actually
             # HAD a custom mapping: the create path already reproduces the firmware default exactly,
             # so writing the default numbers back would be five seconds of transfer mode to change
-            # nothing. A profile saved before has no "trigger" key at all, and that is the
-            # same case, so old profiles need no special handling.
+            # nothing. A profile with no "trigger" key at all is the same case.
             trig = e.get("trigger") or {}
-            if ptype == 4 and trig:
+            if ptype == PAD_TYPE_TRIGGER and trig:
                 want = {}
                 if trig.get("custom"):
                     want.update({k: trig.get(k) for k in
                                  ("type", "control", "channel", "on", "off")})
-                # The mode is restored WHETHER OR NOT the mapping is custom, because we do not know
-                # that the flag gates it, and a pad that came back latching when it was saved
+                # The mode is restored WHETHER OR NOT the mapping is custom, because it is not
+                # known that the flag gates it, and a pad that came back latching when it was saved
                 # momentary would be wrong in a way nothing on screen would show. 1 is what the
                 # create path leaves behind, so only a saved 0 costs a write.
                 if trig.get("mode") is not None and int(trig["mode"]) != TRIGGER_CREATE_MODE:
                     want["mode"] = int(trig["mode"])
                 if want:
-                    set_trigger_mapping(grid, custom=bool(trig.get("custom")), **want)
+                    check(set_trigger_mapping(grid, custom=bool(trig.get("custom")), **want),
+                          "MIDI mapping")
             # The envelope / fade / censor groups, each written only for the pad type that owns it
             # and only where the profile actually recorded a value. set_pad_properties puts a whole
             # group in ONE transfer-mode session, so a sound pad's four envelope floats cost one
             # session rather than four.
-            for group, applies in ((e.get("envelope"), ptype == 1),
-                                   (e.get("fade"), ptype == 3),
-                                   (e.get("censor"), ptype == 3)):
+            for what, group, applies in (("trim and fade", e.get("envelope"), ptype == PAD_TYPE_SOUND),
+                                         ("fade times", e.get("fade"), ptype == PAD_TYPE_MIXER),
+                                         ("censor sound", e.get("censor"), ptype == PAD_TYPE_MIXER)):
                 if not applies or not group:
                     continue
                 items = [(_EXTRA_PROP_OF[k], v) for k, v in group.items()
                          if v is not None and k in _EXTRA_PROP_OF]
                 if items:
-                    set_pad_properties(grid, items)
+                    check(set_pad_properties(grid, items), what)
             # Back Channel membership. The saved dict is non-null only for a Back Channel pad, and
             # every member is written (not just the ticked ones) so the restore is authoritative
             # rather than additive - a member the create path turns on but the backup had off must
             # come back off. set_back_channel_member reads a dump per call and validates against
             # what this desk offers, so this costs a second or two on the one pad that has it.
             for prop, on in (e.get("back_channel") or {}).items():
-                set_back_channel_member(grid, prop, bool(on))
-            results.append({"grid": grid, "label": label, "ok": True})
+                check(set_back_channel_member(grid, prop, bool(on)), "Back Channel member")
+            if problems:
+                results.append({"grid": grid, "label": label, "ok": False,
+                                "message": "the pad was created but not every setting went back: "
+                                           + "; ".join(problems)})
+                ok = False
+            else:
+                results.append({"grid": grid, "label": label, "ok": True})
         except Exception as exc:
             results.append({"grid": grid, "label": label, "ok": False, "message": str(exc)})
             ok = False
@@ -3092,7 +3002,8 @@ def _cli():
         arg = sys.argv[2] if len(sys.argv) > 2 else "list"
         if arg == "list":
             for nm, v in RECIPES.items():
-                print(f"  {nm:16} grid {v['padIdx'] + 1:2}  colour {v['colour']:2}  "
+                where = " -" if v.get("padIdx") is None else f"{v['padIdx'] + 1:2}"
+                print(f"  {nm:16} grid {where}  colour {v['colour']:2}  "
                       f"{' + '.join(v['stack'])}")
         else:
             restore_factory_fx(arg, live=True)

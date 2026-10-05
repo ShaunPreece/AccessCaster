@@ -272,14 +272,14 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     transfer mode. Drops the pad record AND its effect-object cleanly (no orphan). No remount = no drive-F toast.
 3.5 REASSIGN = clear (3.4) then create (3.3); re-read positions between. soundpad.restore_factory_fx
     (CLI `soundpad.py restore <name>|all`) rebuilds factory FX from fx_recipes.json this way.
-3.6 IN-PLACE EFFECT EDIT - realtime  soundpad.preview_update (the live-preview path, section 3b of
-    soundpad.py). Change an EXISTING pad's effect with no clear/create/allocation: set_transfer_mode(True) ->
+3.6 IN-PLACE EFFECT EDIT - realtime  soundpad.preview_update (the live-preview path).
+    Change an EXISTING pad's effect with no clear/create/allocation: set_transfer_mode(True) ->
     padActive=True on the pad (0x9a) -> param/on-flag on the pad's effect sub-handle (0x9d) ->
     set_transfer_mode(False). PROVEN realtime (changed Monster's pitch live while talking, no reboot,
     no neighbour disturbed). Best for editing existing pads + realtime preview. (Full-recipe-in-place
     = several flags/params at once is the natural next step; only single-param is proven so far.)
 3.7 EDIT A PAD-LEVEL PROPERTY IN PLACE  [generic, 2026-06-17] soundpad.set_pad_property(grid, name,
-    value, kind) - the UI-agnostic editing layer. Same proven pattern as set_pad_replay: resolve the
+    value, kind) - the UI-agnostic editing layer (set_pad_replay and the other setters go through it): resolve the
     pad's 0-based stream position, write ONE FRAME_PAD (0x9a) record in transfer mode, exit. No
     clear/create, no region-B touch -> pool-safe + silent. A PAD_PROP registry lists the SAFE,
     value-confirmed properties (each with kind/label/min-max/applies_to) and is what a future
