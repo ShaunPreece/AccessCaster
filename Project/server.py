@@ -2063,12 +2063,12 @@ def read_network_status() -> dict:
         # else on this page is read-only, and the page says WHICH is which rather than leaving a
         # user to find out by pressing things.
         "writable": "network_write" in devices.get_active_device().caps,
-        # TWO DIFFERENT CLAIMS, NOT TO BE BLURRED. Bluetooth scanning is TESTED and does nothing on
-        # a Pro II. Pairing and a fixed IP are NOT BUILT YET, which is not the same as impossible.
+        # States only what the app offers, never what the desk can do: scanning behaves differently
+        # on the two desks, so a claim about it would be wrong on one of them.
         "still_read_only": (
-            "Scanning for Bluetooth devices does not work: it was tried and the unit reports "
-            "nothing back. Make the unit discoverable above and pair from the phone instead. "
-            "Bluetooth pairing from here, and a fixed IP address, are still being worked on."),
+            "Scanning for Bluetooth devices is not available here. Make the unit discoverable "
+            "above and pair from the phone instead. Bluetooth pairing from here, and a fixed IP "
+            "address, are still being worked on."),
         "message": "Read network and firmware from the device.",
     }
 
@@ -2083,11 +2083,9 @@ def read_network_status() -> dict:
 # The RODE app's Network screen being read-only says nothing about what the bus can write.
 #
 # WHAT IS DELIBERATELY NOT OFFERED, and it is not caution:
-#   * **Bluetooth scanning.** `btDoScan` is addressable and written on both blocks that carry it,
-#     with a phone in pairing mode: it latches True and never returns a result. Beware the SYSTEM
-#     occurrence, which is a STRAY, so any "the write lands but nothing happens" reading taken there
-#     is a write into a stray; the NETWORK one is genuinely dead. Making the unit discoverable and
-#     pairing FROM the phone is the route that works, and it is offered. WIFI scanning works: see
+#   * **Bluetooth scanning.** `btDoScan` is not built. Its SYSTEM occurrence is a STRAY, so any
+#     "the write lands but nothing happens" reading taken there is a write into a stray. Making the
+#     unit discoverable and pairing FROM the phone is the route offered. WIFI scanning works: see
 #     action_scan_wifi. No push back does not mean a write was not consumed.
 #   * **Pairing, connecting and unpairing.** `btDoPair` / `btDoConnect` / `btDoDisconnect` /
 #     `btDoUnPair` are addressable, but they are ACTIONS taking an address we have never seen the
