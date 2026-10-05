@@ -584,8 +584,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`wifiPSK` is READABLE off the desk.** Keep it out of the API, the browser, profiles and log
   lines. `wifi_join.py` takes it on stdin, never argv, and its read-back reports only "a password is
   stored".
-- **`rcp_transfer.py` with NO argument defaults to `enter`** (enters transfer mode and remounts pad
-  storage), not the selftest. Use `rcp_transfer.py selftest`; clean up with `exit`.
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
   stayed busy (active 0.61) and mode 2's went silent (0.06). Needs a person - the mic faders are

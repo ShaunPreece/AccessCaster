@@ -92,7 +92,7 @@ def encode_path(path) -> bytes:
     capture we have never emitted. Changing working write bytes to match a form we have not tested
     would be risk for nothing, on the one address family where a bad write can append a stray that
     only a factory reset clears. So the desk evidently accepts both, and we keep sending the one we
-    know. `PAD_ADDRESS_INTERNAL` in rcp_transfer records the other form; nothing uses it.
+    know.
     """
     out = bytearray([0x01, 0x01, len(path)])
     for i in path:

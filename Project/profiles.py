@@ -881,7 +881,7 @@ def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channe
                                             hp_spec.outputs[0][0]); applied += 1
     for strip, code in (r.get("input_sources") or {}).items():
         if code is not None and strip in input_strip_vec_index and code in valid_source_codes:
-            rcp_transfer.set_channel_input_source(strip, int(code)); applied += 1
+            rcp_transfer.set_fader_source(input_strip_vec_index[strip], int(code)); applied += 1
     return {"applied": applied, "failed": 0, "errs": []}
 
 

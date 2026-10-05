@@ -5194,19 +5194,15 @@ def _active_input_strips():
     return devices.get_active_device().input_strips
 
 
-# Import-time consistency guard: every strip key must be a real channelInputSource selector whose
-# selector equals 0x1C + vec_index, and every palette code a real source code, so a future spec typo
-# fails loudly here instead of silently mis-writing (or dropping) a strip. devices.py cannot import
-# rcp_transfer (import-cycle), so the cross-check lives here where both modules are visible.
+# Import-time consistency guard: every strip sits inside the fader vector and every palette code is
+# a real source code, so a spec typo fails loudly here instead of mis-writing a strip. devices.py
+# cannot import rcp_transfer (import cycle), so the cross-check lives here where both are visible.
 def _check_input_strip_specs():
     for dev in devices.DEVICES.values():
         spec = dev.input_strips
         for key, idx, _label in spec.strips:
-            assert key in rcp_transfer.CHANNEL_INPUT_SOURCE_SELECTOR, (
-                f"{dev.name}: input strip '{key}' is not a channelInputSource selector key")
-            assert (rcp_transfer.CHANNEL_INPUT_SOURCE_SELECTOR[key]
-                    == rcp_transfer.FADER_SELECTOR_BASE + idx), (
-                f"{dev.name}: input strip '{key}' vec_index {idx} disagrees with its selector")
+            assert 0 <= idx < dev.fader.vector_length, (
+                f"{dev.name}: input strip '{key}' vec_index {idx} is outside the fader vector")
         assert set(spec.valid_source_codes) <= set(rcp_transfer.INPUT_SOURCE_CODE.values()), (
             f"{dev.name}: an input-source palette code is not a known INPUT_SOURCE_CODE value")
 
@@ -6949,7 +6945,7 @@ def action_set_input_source(strip: str, source_code: int) -> dict:
     if gate is not None:
         return gate
     with _hid_lock:
-        rcp_transfer.set_channel_input_source(strip, source_code)
+        rcp_transfer.set_fader_source(spec.strip_vec_index[strip], source_code)
         channels.invalidate_strip_vector()   # the layout is the processing strip map
     src = spec.source_label.get(source_code, str(source_code))
     return {"ok": True, "message": f"{spec.strip_label[strip]} source set to {src}."}

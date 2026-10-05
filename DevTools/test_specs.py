@@ -136,8 +136,15 @@ check("build_channel_prop_int addresses by path",
       rcp_transfer.build_channel_prop_int("x", 0, 0x6E, 0x02)[5:11]
       == model_tree.encode_path([0x026E]), "channel address drifted")
 check("build_pad_prop_int addresses by path",
-      rcp_transfer.build_pad_prop_int("padIdx", 15, 0x01)[5:13]
-      == rcp_transfer.PAD_ADDRESS, "pad address no longer matches the captured constant")
+      rcp_transfer.build_pad_prop_int("padIdx", 15, 0x01)[5:13].hex() == "010102029a020101",
+      "pad address no longer matches the captured bytes")
+try:
+    rcp_transfer._selftest()
+    _selftest_error = ""
+except AssertionError as e:
+    _selftest_error = str(e)
+check("the builders reproduce every captured record (rcp_transfer._selftest)",
+      _selftest_error == "", _selftest_error)
 
 # ZERO INDEX: we emit `01 00`, NOT the zero-length form. Both are legal by the grammar and the desk
 # takes both, but our pad writes have always used `01 00` and are proven on hardware. Changing

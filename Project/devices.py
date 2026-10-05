@@ -326,15 +326,13 @@ class InputStripSpec:
     The device-aware fader_model (FaderSpec) is the primary, INDEX-based view; this by-name
     view remains only for that endpoint and for restoring pre-full-format profiles.
 
-      strips  : (key, vec_index, label) per reassignable strip. `key` MUST be a key of
-                rcp_transfer.CHANNEL_INPUT_SOURCE_SELECTOR (its selector = 0x1C + vec_index);
-                `vec_index` is the strip's position in the channelInputSource vector.
+      strips  : (key, vec_index, label) per reassignable strip. `vec_index` is the strip's
+                position in the channelInputSource vector, written with set_fader_source.
       sources : (code, label) source palette. `code` is an rcp_transfer.INPUT_SOURCE_CODE value.
 
     A device that uses ONLY the index-based fader_model leaves this EMPTY (the default). The Duo
-    does: its flexible strips sit at different vector positions and its writes route through the
-    index-based set_fader_source, not the by-name set_channel_input_source, and its fader-write
-    model is unconfirmed anyway (fader_write cap OFF). With an empty spec the by-name endpoints
+    does: its flexible strips sit at different vector positions, and its fader-write model is
+    unconfirmed anyway (fader_write cap OFF). With an empty spec the by-name endpoints
     report nothing and refuse, and legacy profiles skip the input_sources subset - all safe.
     """
     strips: tuple = ()
@@ -685,8 +683,7 @@ DUO_FADERS = FaderSpec(
 # Pro II shape, keeping offline / unknown-device paths on Pro II behaviour. --------------------------
 # Pro II: the five
 # reassignable strips sit on faders 5 to 9 (vector indices 4 to 8); mics 1 to 4 (faders 1 to 4) are
-# fixed XLR inputs and are not listed. Strip keys are CHANNEL_INPUT_SOURCE_SELECTOR keys; source
-# codes are INPUT_SOURCE_CODE values (Bluetooth 10, USB1 7, Chat 8, USB2 9, SMARTpads 11, CallMe1 16).
+# fixed XLR inputs and are not listed. Source codes are INPUT_SOURCE_CODE values (Bluetooth 10, USB1 7, Chat 8, USB2 9, SMARTpads 11, CallMe1 16).
 PRO2_INPUT_STRIPS = InputStripSpec(
     strips=(
         ("Bluetooth", 4, "Fader 5 source"),
@@ -708,7 +705,7 @@ PRO2_INPUT_STRIPS = InputStripSpec(
 # Duo: EMPTY - the Duo uses the index-based fader_model (FaderSpec) for reassignment, not this
 # by-name view. Its flexible strips sit at different vector positions and its fader-write model is
 # unconfirmed (fader_write cap OFF), so the by-name endpoints report nothing and refuse rather than
-# drive the Pro II-shaped set_channel_input_source path. See InputStripSpec.
+# drive a Pro II-shaped strip table. See InputStripSpec.
 DUO_INPUT_STRIPS = InputStripSpec()
 
 
@@ -937,8 +934,8 @@ DUO_UI_CHANNELS = _ui_channel_view(CHANNELS_DUO)
 # --- Routing-matrix UI label maps (see MatrixSpec.sources / .outputs) ----------
 # Pro II: exactly what server.py had hardcoded in _MATRIX_SOURCES / _MATRIX_OUTPUTS, moved here
 # so the routing screen is device-aware. The confirmed sources + 11 confirmed outputs (indices
-# match rcp_transfer.CROSS_POINT_SOURCE_INDEX / CROSS_POINT_OUTPUT_INDEX; the inferred CallMe2/3
-# slots stay unexposed, exactly as before).
+# match rcp_transfer.INPUT_SOURCE_CODE / CROSS_POINT_OUTPUT_INDEX; the inferred CallMe2/3 slots
+# stay unexposed).
 PRO2_MATRIX_SOURCES = _matrix_source_view(CHANNELS_PRO2)
 PRO2_MATRIX_EXPANDED_SOURCES = _expanded_matrix_source_view(CHANNELS_PRO2)
 # "default_mode" (0 Main Mix / 1 Mix Minus / 2 Custom) is the mode "Reset all output mixes" puts

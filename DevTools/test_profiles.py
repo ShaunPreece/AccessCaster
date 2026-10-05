@@ -400,7 +400,7 @@ class recorder:
     _TRANSFER = ("set_midi_control", "set_fader_source", "set_fader_level", "set_monitor_level",
                  "set_headphone_type", "set_multitrack_mode", "set_monitor_auto_mute",
                  "set_bt_auto_mute", "set_master_compellor", "set_master_compellor_param",
-                 "set_output_delay", "set_channel_input_source", "set_unit_setting",
+                 "set_output_delay", "set_unit_setting",
                  "set_recording_processing_bypass", "set_usb_multitrack_mode",
                  "set_usb_multitrack_bypass")
     _CHANNELS = ("note_strip_source", "invalidate_strip_vector",
