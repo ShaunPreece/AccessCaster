@@ -1455,9 +1455,8 @@ function buildUnitSetting(s) {
   }
   const input = control.querySelector("input, select");
   if (input) {
-    // Appended, not assigned: a dropdown already carries the Enter-to-apply description.
-    input.setAttribute("aria-describedby",
-                       (hintId + " " + (input.getAttribute("aria-describedby") || "")).trim());
+    // Added, not assigned: a dropdown already carries the Enter-to-apply description.
+    addDescription(input, hintId);
     setAvailable(input, unitSettingsWritable, UNIT_SETTINGS_OFF);
   }
   wrap.appendChild(control);
@@ -2574,10 +2573,8 @@ function fillChannelProcessing(body, ch) {
     const hint = document.createElement("p");
     hint.className = "hint";
     hint.id = hintId;
-    hint.textContent = "With this off, the unit sets the modules and their parameters itself from "
-      + "Tone shaping (Depth, Sparkle and Punch), so values on the other tabs can change on their "
-      + "own. Turn it on to control each module yourself. Switching modes here does not wipe your "
-      + "settings.";
+    hint.textContent = "Off, Tone shaping sets the modules for you. Your settings are kept either "
+      + "way.";
     body.appendChild(hint);
   }
   (channelsData.modules || []).forEach((m) => {
@@ -2798,8 +2795,8 @@ function buildChannelSolo(ch) {
   // The caution stays where the rest went, and it earns its place: this is the one control on the
   // page that can leave a screen-reader user with no audio at all and nothing to explain it,
   // because announcements arriving on USB 1 are not what you are soloing.
-  hint.textContent = "Sends only this channel to your headphones. Care: while anything is soloed "
-    + "you will not hear announcements."
+  hint.textContent = "Only this channel in your headphones. Announcements go quiet while anything "
+    + "is soloed."
     + (ch.on_fader === false ? noStripNote(ch, "solo")
       : (ch.solo === null || ch.solo === undefined
         ? " The unit did not report this channel's solo state, so this shows off." : ""));
@@ -3080,12 +3077,13 @@ function buildParamSlider(ch, ctrl, percent) {
 /* (Re)fill a preset dropdown's options from channelPresets, keeping the current choice if it is
    still there. Saving or deleting a preset only changes this LIST, so the options are refreshed in
    place: rebuilding the panel around it would destroy the button the user just pressed. */
-function fillPresetOptions(sel) {
+function fillPresetOptions(sel, blankLabel) {
   const keep = sel.value;
   sel.innerHTML = "";
   const blank = document.createElement("option");
   blank.value = "";
-  blank.textContent = channelPresets.length ? "Choose a preset to apply..." : "No presets saved";
+  blank.textContent = blankLabel || sel.dataset.blankLabel || "Not on a preset";
+  if (blankLabel) sel.dataset.blankLabel = blankLabel;
   sel.appendChild(blank);
   channelPresets.forEach((p) => {
     const opt = document.createElement("option");
@@ -3106,57 +3104,40 @@ function fillPresetControls(wrap, ch) {
   // when it has an answer, otherwise our record of what we applied, checked against the live values
   // so an edited preset is reported as edited rather than as the preset.
   //
-  // IT RIDES ON THE SELECT'S OWN LABEL, not only on the paragraph below. Tabbing into this panel
-  // lands on the dropdown, so a label reading "Choose a preset to apply..." makes the app look like
-  // it never remembered the preset. On the label it is announced whenever you reach the control,
-  // and the paragraph is left to explain the caveat.
+  // IT IS THE DROPDOWN'S VALUE, as on every Enter-to-apply dropdown. A channel that matches a preset
+  // shows it; one that does not shows the blank option, worded with why, so choosing the preset it
+  // came from is still a change Enter can apply.
   const now = ch.preset_now || null;
-  const currently = !now ? "not on a preset we can name"
-    : now.edited === true ? `${now.name}, edited`
-    : now.edited === null ? `${now.name}, which no longer exists to check against`
-    : now.name;
+  const matches = !!now && (now.source === "device" || now.edited === false);
+  const blankLabel = !now ? "Not on a preset"
+    : now.edited === null ? `${now.name}, a preset since deleted`
+    : `${now.name}, adjusted since`;
 
   const applyRow = document.createElement("div");
   applyRow.className = "field";
   const applyLabel = document.createElement("label");
   const applyId = "preset-apply-" + ch.name;
-  const applyBtnId = "preset-apply-btn-" + ch.name;
   const hintId = "preset-apply-hint-" + ch.name;
   applyLabel.setAttribute("for", applyId);
-  applyLabel.textContent = `Preset, currently ${currently}`;
+  applyLabel.textContent = "Processing preset";
   const applySel = document.createElement("select");
   applySel.id = applyId;
   applySel.setAttribute("aria-describedby", hintId);
-  fillPresetOptions(applySel);
-  // The list DELIBERATELY does not write on change. Applying from the `change` event breaks the
-  // dropdown for anyone who does not open the popup first: a collapsed select fires `change` on
-  // EVERY arrow key, so each keypress applies a preset, re-reads the device and rebuilds the panel,
-  // destroying the select mid-interaction. It appears to work when you tab in (the screen reader
-  // opens the popup, so change fires once, on Enter) and fails when you jump straight to it with
-  // quick navigation. Choosing is free; nothing is sent until this button is pressed.
-  const applyBtn = document.createElement("button");
-  applyBtn.type = "button";
-  applyBtn.id = applyBtnId;
-  applyBtn.textContent = "Apply this preset";
-  applyBtn.addEventListener("click", async () => {
-    if (isBusy(applyBtn)) return;
-    const name = applySel.value;
-    if (!name) {
-      announce("Choose a preset in the list first, then press Apply this preset.", true);
-      applySel.focus();
-      return;
-    }
-    setBusy(applyBtn, true);
+  fillPresetOptions(applySel, blankLabel);
+  setStagedValue(applySel, matches ? now.name : "", matches ? now.name : blankLabel);
+  enterToApply(applySel, async (sel) => {
+    const name = sel.value;
+    if (!name) { revertStaged(sel, false); return; }
+    setBusy(sel, true);
     try {
       const res = await postJSON("/api/processing/preset", { channel: idx, preset: name });
       announce(res.message || "Done.", !res.ok);
-      // Re-read so the sliders show the applied voicing. That rebuilds the panel, so keep focus
-      // on this button instead of dropping the user at the top of the page.
-      if (res.ok) await keepingFocus(loadChannels);
+      // Re-read so the sliders show the applied voicing. That rebuilds the panel, which re-reads
+      // the preset onto the dropdown as well.
+      if (res.ok) { await keepingFocus(loadChannels); return; }
     } catch (err) { announce("Could not reach the device service.", true); }
-    finally {
-      setBusy(document.getElementById(applyBtnId), false);   // the rebuild replaced the element
-    }
+    finally { setBusy(sel, false); }
+    revertStaged(sel, false);         // refused: the channel is as it was, and the dropdown says so
   });
   const applyHint = document.createElement("span");
   applyHint.className = "hint";
@@ -3165,32 +3146,14 @@ function fillPresetControls(wrap, ch) {
   // are off, reports success and sounds identical, so it switches the modules the preset uses and
   // names them in the result. It still leaves the channel's own processing on/off alone, which is
   // the setting most likely to be off on purpose.
-  // The second half is the honesty about "currently" in the label. Where the claim comes from
-  // matters: the unit's marker is exact but goes blank at the first tweak, while our record is
-  // checked against the live values, so "edited" means the values really have moved.
-  applyHint.textContent =
-    "A preset sets this channel's processing values and switches on the parts of the chain it "
-    + "uses, and it tells you which ones it switched. It does not turn this channel's processing "
-    + "on or off; that stays as you left it. Move through the list freely; nothing changes on the "
-    + "unit until you press Apply this preset. "
-    + (!now
-        ? "This channel is not on a preset we can name: its settings were adjusted on the unit, or "
-          + "applied before this app was installed."
-        : now.source === "device"
-          ? `The unit itself reports this channel as on the ${now.name} preset, which means nothing `
-            + "has been changed since it was applied."
-          : now.edited === true
-            ? `This app applied the ${now.name} preset here, and the channel's values no longer `
-              + "match it, so something has been adjusted since."
-            : now.edited === null
-              ? `This app applied the ${now.name} preset here, but that preset has since been `
-                + "deleted, so there is nothing left to check the values against."
-              : `This app applied the ${now.name} preset here, and the channel's values still `
-                + "match it.");
+  applyHint.textContent = "Sets this channel's processing values, not whether processing is on.";
   applyRow.appendChild(applyLabel);
   applyRow.appendChild(applySel);
-  applyRow.appendChild(applyBtn);
   applyRow.appendChild(applyHint);
+  const waiting = document.createElement("span");      // markStaged's on-page line
+  waiting.className = "hint";
+  waiting.id = applyId + "-now";
+  applyRow.appendChild(waiting);
   wrap.appendChild(applyRow);
 
   const saveRow = document.createElement("div");
@@ -3218,39 +3181,67 @@ function fillPresetControls(wrap, ch) {
     } catch (err) { announce("Could not reach the device service.", true); }
     finally { setBusy(saveBtn, false); }
   });
+  // DELETING HAS ITS OWN DIALOG AND LIST. The preset dropdown applies on Enter and goes back to the
+  // channel's preset when you leave it, so a Delete button reading its selection would act on the
+  // wrong preset.
   const delBtn = document.createElement("button");
-  delBtn.type = "button"; delBtn.textContent = "Delete selected preset";
-  delBtn.addEventListener("click", async () => {
-    if (isBusy(delBtn)) return;
-    const name = applySel.value;
-    if (!name) {
-      announce("Choose a custom preset in the list first, then delete it.", true);
-      applySel.focus();
-      return;
-    }
-    const preset = channelPresets.find((p) => p.name === name);
-    if (preset && !preset.custom) {
-      announce(`${name} is a built-in preset and cannot be deleted. Only your own presets can.`, true);
-      return;
-    }
-    if (!(await confirmAction("Delete this preset?",
-      `The ${name} preset is deleted for every channel. This cannot be undone.`, "Delete"))) {
-      announce("Cancelled. Nothing was deleted.");
-      return;
-    }
-    setBusy(delBtn, true);
-    try {
-      const res = await postJSON("/api/processing/preset/delete", { name });
-      announce(res.message || "Done.", !res.ok);
-      if (res.ok) { channelPresets = res.presets || channelPresets; fillPresetOptions(applySel); }
-    } catch (err) { announce("Could not reach the device service.", true); }
-    finally { setBusy(delBtn, false); }
-  });
+  delBtn.type = "button"; delBtn.textContent = "Delete a preset";
+  delBtn.addEventListener("click", () => openPresetDelete(delBtn));
   saveRow.appendChild(saveLabel);
   saveRow.appendChild(nameInput);
   saveRow.appendChild(saveBtn);
   saveRow.appendChild(delBtn);
   wrap.appendChild(saveRow);
+}
+
+/* The Delete a preset dialog: its own list of the presets that can be deleted, so the choice is
+   never the channel dropdown's. The dialog is the confirmation; its description says it cannot be
+   undone. Focus goes back to the button that opened it. */
+let _presetDeleteReturn = null;
+
+function openPresetDelete(btn) {
+  const own = channelPresets.filter((p) => p.custom);
+  if (!own.length) { announce("There are no presets of your own to delete.", true); return; }
+  _presetDeleteReturn = btn;
+  const sel = document.getElementById("preset-delete-select");
+  sel.innerHTML = "";
+  own.forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+  setText("preset-delete-error", "");
+  document.getElementById("preset-delete-dialog").showModal();
+  sel.focus();
+}
+
+async function onPresetDelete(ev) {
+  ev.preventDefault();
+  const sel = document.getElementById("preset-delete-select");
+  const name = sel.value;
+  if (!name) return;
+  try {
+    const res = await postJSON("/api/processing/preset/delete", { name });
+    if (!res.ok) { setText("preset-delete-error", res.message || "Could not delete it."); return; }
+    channelPresets = res.presets || channelPresets;
+    document.querySelectorAll("select[id^='preset-apply-']").forEach((s) => fillPresetOptions(s));
+    document.getElementById("preset-delete-dialog").close();
+    announce(res.message || "Deleted.");
+  } catch (err) {
+    setText("preset-delete-error", "Could not reach the device service.");
+  }
+}
+
+function wirePresetDelete() {
+  const dlg = document.getElementById("preset-delete-dialog");
+  document.getElementById("preset-delete-form").addEventListener("submit", onPresetDelete);
+  document.getElementById("preset-delete-cancel").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("close", () => {
+    const back = _presetDeleteReturn;
+    _presetDeleteReturn = null;
+    if (back && back.isConnected) back.focus();
+  });
 }
 
 /* THE UNIT MOVES THE GAIN **AND THE WHOLE PROCESSING CHAIN** WHEN THE VOICING CHANGES, so most of
@@ -3457,20 +3448,20 @@ function currentPad() {
 /* ---- SMART pads: the tab strip, and reading per tab ---------------------
    The tabs are split by BEHAVIOUR, not by subject, so no tab mixes controls that write as you touch
    them with controls that wait for an Apply:
+     Pad Type   all deferred, one Apply, then Clear this pad
      Settings   all live, no Apply
-     Reassign   all deferred, one Apply, then Clear this pad
      Voice effects / Maintenance   neither, and not about the chosen pad at all
-   Reassign holds no live control, so nothing has to be hidden while a type change is staged.
+   Pad Type holds no live control, so nothing has to be hidden while a type change is staged.
    READING: the pad chooser sits above the strip and every tab needs it, so page ENTRY does the one
    /api/soundpads read (~1.5 s of device time) and the tab you arrive on does not repeat it. Opening
-   Settings or Reassign later re-reads, so a value is never older than the moment you arrived at it;
+   Settings or Pad Type later re-reads, so a value is never older than the moment you arrived at it;
    Voice effects and Maintenance read nothing, because neither describes the device's pad state.
    Debounced, because selection follows the arrow keys and arrowing across the strip must not fire a
    read per tab. */
 let padsTabs = null;
 let _padsTabReadTimer = null;
 let _padPreviewCleaned = false;
-const PADS_TABS_READ = ["settings", "reassign"];
+const PADS_TABS_READ = ["settings", "type"];
 
 function wirePadsTabs() {
   padsTabs = buildStaticTabs("pads", "pads-panel", { onSelect: (key) => {
@@ -3556,7 +3547,7 @@ async function loadPads() {
   syncPadEditor();
 }
 
-/* Reflect the chosen pad into BOTH pad tabs: the Reassign tab's type combo is set to what the pad
+/* Reflect the chosen pad into BOTH pad tabs: the Pad Type tab's type combo is set to what the pad
    is now, and the Settings tab is filled with the pad's live values.
    Both panel headings name the pad as well as the category, because the pad chooser is above the
    strip and you can be two tabs away from it. */
@@ -3572,7 +3563,7 @@ function syncPadEditor() {
 
   const where = pad ? padWhere(pad) : "this pad";
   setText("pad-h-settings", "Settings for " + where);
-  setText("pad-h-reassign", "Change what " + where + " does");
+  setText("pad-h-type", "Change what " + where + " does");
 
   setText("pad-ed-type-note",
     present ? ("Currently: " + padContentLabel(pad) + ".") : "This pad is empty.");
@@ -3612,7 +3603,7 @@ function updateTypeGroups(announceIt) {
 }
 
 /* Fill the Settings tab: the pad's live values, and for an empty pad the note plus the way through
-   to Reassign instead. Every control here is written in index.html, so this only ever sets VALUES
+   to Pad Type instead. Every control here is written in index.html, so this only ever sets VALUES
    and shows or hides rows; it never rebuilds a control, which is what lets the tab re-read the
    device without interrupting a screen reader. */
 function fillPadSettings(pad) {
@@ -3769,7 +3760,7 @@ async function onPadApply() {
   afterPadApply(res);
 }
 
-/* A successful Apply has finished the job Reassign exists for, and the next thing wanted is nearly
+/* A successful Apply has finished the job Pad Type exists for, and the next thing wanted is nearly
    always the new content's volume or looping, so it moves to Settings. ONE announcement carries
    both the result and where you now are: announce() replaces the live region's text rather than
    queueing, so two calls in a row would leave the first unspoken. The tab is selected FIRST, so the
@@ -3783,9 +3774,23 @@ function afterPadApply(res) {
   const pad = currentPad();
   const where = pad ? padWhere(pad) : "the pad";
   const now = pad && pad.present
-    ? " Now on Settings for " + where + ", " + padContentLabel(pad) + "."
+    ? " Now on Pad Settings for " + where + ", " + padContentLabel(pad) + "." + padNextStep(pad)
     : "";
   announce((res.message || "Done.") + now);
+}
+
+/* What the new pad's Settings holds that is worth doing next, said on arrival from an Apply, because
+   which controls live on which tab is otherwise only learnt by looking. */
+function padNextStep(pad) {
+  const bc = pad.back_channel;
+  if (bc && !Object.values(bc).some((v) => v === true))
+    return " Tick who is in the room: with nobody ticked the pad does nothing.";
+  if (bc) return " Who is in the room is here.";
+  if (pad.fade) return " The fade times are here.";
+  if (pad.censor) return " Whether it uses your own sound is here.";
+  if (pad.type === 1) return " Volume, looping, trim and fade are here.";
+  if (pad.type === 4) return " What it sends is here.";
+  return "";
 }
 
 /* Both apply paths RETURN their result and leave the announcing to afterPadApply, so a successful
@@ -4664,7 +4669,7 @@ function applyFxLists(recipes, customFx) {
 }
 
 // Rebuilt only when the saved list has really changed. It is re-rendered by every pads read, and
-// the Settings and Reassign tabs read on open, so an unconditional rebuild could pull the list
+// the Settings and Pad Type tabs read on open, so an unconditional rebuild could pull the list
 // apart underneath a screen reader that was reading it (and would lose focus on a Delete button).
 function renderCustomFxList(names) {
   const ul = document.getElementById("fx-custom-list");
@@ -4885,7 +4890,8 @@ const SELECT_COMMIT_MS = 500;
    dropdown, puts it back to what the unit has and says so. A mouse or touch pick applies at once.
    A dropdown that only changes WHAT YOU ARE LOOKING AT (which pad, which output, which shortcut)
    is not one of these and acts at once, because nothing leaves the app.
-   Each one is described by ENTER_HINT_ID, so the rule is heard on arrival. That description is
+   Each one is described by ENTER_HINT_ID FIRST, so the rule is heard on arrival before any longer
+   description, which callers add after it with addDescription. That description is
    static: a description whose TEXT changes is re-read as you arrow, which is why the "-now" line
    below is on the page and not described-by.
    The unit's value lives in `dataset.deviceValue`, written only by setStagedValue, so a choice
@@ -4922,10 +4928,9 @@ function enterToApply(sel, apply) {
   // also arrives when an EXPANDED list closes, and Windows commits the highlighted option on Escape
   // as well as on Enter, so a keyboard change can never be taken as a choice.
   let lastInput = "key";
-  const describedBy = (sel.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
-  if (!describedBy.includes(ENTER_HINT_ID)) {
-    sel.setAttribute("aria-describedby", describedBy.concat(ENTER_HINT_ID).join(" "));
-  }
+  const describedBy = (sel.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean)
+    .filter((id) => id !== ENTER_HINT_ID);
+  sel.setAttribute("aria-describedby", [ENTER_HINT_ID].concat(describedBy).join(" "));
   const commit = async () => {
     if (!isStaged(sel)) return;
     // Said, not swallowed: a press that does nothing and says nothing is indistinguishable from a
@@ -4956,6 +4961,12 @@ function enterToApply(sel, apply) {
     if (lastInput === "pointer") commit();
   });
   sel.addEventListener("blur", () => revertStaged(sel, true));
+}
+
+/* Add `id` to the END of an element's aria-describedby. */
+function addDescription(el, id) {
+  const ids = (el.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+  if (!ids.includes(id)) el.setAttribute("aria-describedby", ids.concat(id).join(" "));
 }
 
 /* A labelled dropdown row that applies on Enter: see enterToApply. */
@@ -5185,12 +5196,9 @@ async function loadRouting() {
     const umHint = document.createElement("span");
     umHint.className = "hint";
     umHint.id = "routing-usb-mode-hint";
-    umHint.textContent = "Changing this disconnects and reconnects the unit's audio devices for a "
-      + "couple of seconds, so anything playing through the unit, including a screen reader, goes "
-      + "quiet while it happens. In Expanded, Windows' sound moves to another output for those "
-      + "seconds instead, such as your computer's own speakers, so that RODE's driver can connect.";
-    um.sel.setAttribute("aria-describedby",
-                        "routing-usb-mode-hint " + um.sel.getAttribute("aria-describedby"));
+    umHint.textContent = "The unit's audio, a screen reader included, drops for a couple of seconds "
+      + "while it changes over.";
+    addDescription(um.sel, "routing-usb-mode-hint");
     um.row.appendChild(umHint);
     routingCtl.usbMode = um.sel;
     usbBox.appendChild(um.row);
@@ -5214,8 +5222,7 @@ async function loadRouting() {
     expHint.className = "hint";
     expHint.id = "routing-usb-expanded-hint";
     expHint.textContent = data.usb_expanded_hint || "";
-    exp.sel.setAttribute("aria-describedby",
-                         "routing-usb-expanded-hint " + exp.sel.getAttribute("aria-describedby"));
+    addDescription(exp.sel, "routing-usb-expanded-hint");
     exp.row.appendChild(expHint);
     routingCtl.usbExpanded = exp.sel;
     usbBox.appendChild(exp.row);
@@ -7083,7 +7090,7 @@ async function loadAutostart() {
     sw.checked = !!d.enabled;
     setAvailable(sw, !!d.supported, d.message || "This cannot be changed on this copy.");
     setText("autostart-hint", d.message
-      || "It starts in the system tray without opening this page.");
+      || "It starts in the system tray, so your shortcuts work from the moment you sign in.");
   } catch (err) {
     setAvailable(sw, false, "Could not reach the device service.");
   }
@@ -7737,8 +7744,7 @@ function fillRecordingSettings(d) {
     mtHint.className = "hint";
     mtHint.id = "rec-multitrack-hint";
     mtHint.textContent = d.multitrack_hint || "";
-    mt.sel.setAttribute("aria-describedby",
-                        "rec-multitrack-hint " + mt.sel.getAttribute("aria-describedby"));
+    addDescription(mt.sel, "rec-multitrack-hint");
     mt.row.appendChild(mtHint);
     recordingCtl.multitrack = mt.sel;
     box.appendChild(mt.row);
@@ -7749,8 +7755,7 @@ function fillRecordingSettings(d) {
     fmtHint.className = "hint";
     fmtHint.id = "rec-format-hint";
     fmtHint.textContent = d.format_hint || "";
-    fmt.sel.setAttribute("aria-describedby",
-                         "rec-format-hint " + fmt.sel.getAttribute("aria-describedby"));
+    addDescription(fmt.sel, "rec-format-hint");
     fmt.row.appendChild(fmtHint);
     recordingCtl.format = fmt.sel;
     box.appendChild(fmt.row);
@@ -9397,7 +9402,7 @@ async function init() {
   // second time puts the encoder back on the levels (measured: systemChannelSelected 0, then -1),
   // and the announcer names both the channel and that way out, so a software write for it would be
   // a control earning nothing.
-  // SMART pads: the pad is chosen above the tab strip, then Settings edits it live and Reassign
+  // SMART pads: the pad is chosen above the tab strip, then Settings edits it live and Pad Type
   // changes what it is behind one Apply.
   wirePadsTabs();
   document.getElementById("pad-ed-select").addEventListener("change", syncPadEditor);
@@ -9405,10 +9410,10 @@ async function init() {
   document.getElementById("pad-ed-apply-btn").addEventListener("click", onPadApply);
   document.getElementById("pad-ed-clear-btn").addEventListener("click", onPadClear);
   // The one thing an empty pad's Settings tab can offer: the way to the tab that fills it. Focus
-  // lands on the Reassign TAB, which announces itself, rather than jumping into the panel, so the
+  // lands on the Pad Type TAB, which announces itself, rather than jumping into the panel, so the
   // move is never silent.
-  document.getElementById("pad-ed-goto-reassign")
-          .addEventListener("click", () => { if (padsTabs) padsTabs.selectKey("reassign"); });
+  document.getElementById("pad-ed-goto-type")
+          .addEventListener("click", () => { if (padsTabs) padsTabs.selectKey("type"); });
   document.getElementById("pad-ed-name-btn").addEventListener("click", onPadRename);
   document.getElementById("clear-all-btn").addEventListener("click", onClearAllPads);
   // DEBOUNCED (SELECT_COMMIT_MS): a CLOSED select fires `change` on every arrow press, so walking
@@ -9506,6 +9511,7 @@ async function init() {
   ["save-dialog", "restore-dialog", "rename-dialog", "delete-dialog", "progress-dialog",
    "baseline-dialog", "show-confirm-dialog"]
     .forEach(wireProfileDialog);
+  wirePresetDelete();
 
   // Channels and the Routing page's structure load at startup because other pages lean on them
   // (the voice-effect preview's mic list comes from the channel read). Skipped for the page the app

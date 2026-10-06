@@ -71,9 +71,37 @@ o = vd.Outcome(status=vd.DriverStatus(), disabled=["System"])
 check(o.sentence() == "", o.sentence())
 o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9, system_ready=True,
                default_moved_to="System (RØDECaster)")
-check(o.sentence() == "Windows sound output is now System (RØDECaster).", o.sentence())
+check(o.sentence() == "Windows sound is on System.", o.sentence())
+o = vd.Outcome(status=vd.DriverStatus(),
+               default_moved_to="Speakers (RODECaster Pro II Main Stereo)")
+check(o.sentence() == "Windows sound is back on the unit.", o.sentence())
 o = vd.Outcome(status=vd.DriverStatus(), system_ready=True, faders_missing=True)
 check(o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."),
       o.sentence())
+
+# WINDOWS FALLING BACK IS TOLD APART FROM THE USER CHOOSING. Endpoints and the default are faked.
+def ep(id_, state="active", desk=False, virtual=False):
+    return vd.Endpoint(id=id_, name=id_, flow="playback", state=state, virtual=virtual, desk=desk)
+
+
+def note(default, eps):
+    saved = (vd._default_id, vd._endpoints)
+    vd._default_id, vd._endpoints = (lambda enum, role: default), (lambda enum: eps)
+    try:
+        vd._note_default(None)
+    finally:
+        vd._default_id, vd._endpoints = saved
+
+
+vd._last_default, vd._displaced = "", ""
+note("system", [ep("system", virtual=True), ep("speakers")])
+check(vd._displaced == "", "the first sample records nothing")
+note("speakers", [ep("system", state="not present", virtual=True), ep("speakers")])
+check(vd._displaced == "speakers", "System went away and Windows fell back: displaced")
+note("main", [ep("speakers"), ep("main", desk=True)])
+check(vd._displaced == "", "moving on from a live device clears it")
+note("speakers", [ep("speakers"), ep("main", desk=True)])
+check(vd._displaced == "", "the user picking the speakers while the desk is live is a choice")
+vd._last_default, vd._displaced = "", ""
 
 print(f"virtual_devices: {checks} checks passed")

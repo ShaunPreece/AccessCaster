@@ -5,15 +5,15 @@
    tab reads), so the NVDA run is about how it SOUNDS.
 
    The checks below are in two halves: the usual tab-strip checks, then the ones that pin this
-   page's own design - the behaviour split (Settings all live, Reassign all deferred behind one
-   Apply), the absence of any pending-type mode, and the empty-pad route through to Reassign. */
+   page's own design - the behaviour split (Settings all live, Pad Type all deferred behind one
+   Apply), the absence of any pending-type mode, and the empty-pad route through to Pad Type. */
 
-const TABS = ["settings", "reassign", "fx", "maint"];
+const TABS = ["type", "settings", "fx", "maint"];
 // "Pad Settings", not "Settings": the app has settings in three places, and a tab announced as
 // just "Settings" says nothing about which.
-const TITLES = ["Pad Settings", "Reassign", "Voice effects", "Maintenance"];
-// Settings and Reassign describe the device's pad state, so they re-read it; the other two do not.
-const READS = { settings: true, reassign: true, fx: false, maint: false };
+const TITLES = ["Pad Type", "Pad Settings", "Voice effects", "Maintenance"];
+// Settings and Pad Type describe the device's pad state, so they re-read it; the other two do not.
+const READS = { type: true, settings: true, fx: false, maint: false };
 const PADS_API = "/api/soundpads";
 
 const tabId = (k) => "tab-pads-" + k;
@@ -173,22 +173,22 @@ async function run() {
     check("the Settings heading names the pad, not just the category",
       el("pad-h-settings").textContent.trim() === "Settings for " + where,
       el("pad-h-settings").textContent.trim());
-    check("the Reassign heading names the pad too",
-      el("pad-h-reassign").textContent.trim() === "Change what " + where + " does",
-      el("pad-h-reassign").textContent.trim());
+    check("the Pad Type heading names the pad too",
+      el("pad-h-type").textContent.trim() === "Change what " + where + " does",
+      el("pad-h-type").textContent.trim());
   }
 
   // ---- keyboard --------------------------------------------------------
-  await openTab("settings");
-  el(tabId("settings")).focus();
+  await openTab("type");
+  el(tabId("type")).focus();
   key("ArrowRight", document.activeElement);
   check("Right arrow moves to the next tab and takes focus with it",
-    selectedKey() === "reassign" && document.activeElement.id === tabId("reassign"),
+    selectedKey() === "settings" && document.activeElement.id === tabId("settings"),
     selectedKey() + "/" + document.activeElement.id);
   key("End", document.activeElement);
   check("End jumps to the last tab", selectedKey() === "maint", selectedKey());
   key("Home", document.activeElement);
-  check("Home jumps to the first tab", selectedKey() === "settings", selectedKey());
+  check("Home jumps to the first tab", selectedKey() === "type", selectedKey());
   key("ArrowLeft", document.activeElement);
   check("Left arrow from the first tab wraps to the last", selectedKey() === "maint", selectedKey());
   key("ArrowUp", document.activeElement);
@@ -211,21 +211,21 @@ async function run() {
   await quiet();
 
   // ---- THE REDESIGN: the behaviour split -------------------------------
-  // Settings is all live and has no Apply; Reassign is all deferred behind one Apply. That is the
+  // Settings is all live and has no Apply; Pad Type is all deferred behind one Apply. That is the
   // whole point of the split, so it is worth failing on if anything drifts back.
   check("Settings holds NO Apply button",
     !pane("settings").contains(el("pad-ed-apply-btn")));
   check("Settings holds NO type dropdown (changing what a pad does is not a live edit)",
     !pane("settings").contains(el("pad-ed-type")));
-  check("Reassign holds the type dropdown, the Apply button and Clear this pad",
-    pane("reassign").contains(el("pad-ed-type"))
-    && pane("reassign").contains(el("pad-ed-apply-btn"))
-    && pane("reassign").contains(el("pad-ed-clear-btn")));
-  check("Reassign holds NONE of the live controls",
+  check("Pad Type holds the type dropdown, the Apply button and Clear this pad",
+    pane("type").contains(el("pad-ed-type"))
+    && pane("type").contains(el("pad-ed-apply-btn"))
+    && pane("type").contains(el("pad-ed-clear-btn")));
+  check("Pad Type holds NONE of the live controls",
     ["pad-ed-volume", "pad-ed-colour", "pad-ed-playmode", "pad-ed-loop", "pad-ed-replay",
-     "pad-ed-name", "pad-ed-mixer-trigger"].every((id) => !pane("reassign").contains(el(id))),
+     "pad-ed-name", "pad-ed-mixer-trigger"].every((id) => !pane("type").contains(el(id))),
     ["pad-ed-volume", "pad-ed-colour", "pad-ed-playmode", "pad-ed-loop", "pad-ed-replay",
-     "pad-ed-name", "pad-ed-mixer-trigger"].filter((id) => pane("reassign").contains(el(id)))
+     "pad-ed-name", "pad-ed-mixer-trigger"].filter((id) => pane("type").contains(el(id)))
       .join(" "));
   check("Apply is the last control before Clear this pad",
     el("pad-ed-apply-btn").compareDocumentPosition(el("pad-ed-clear-btn"))
@@ -242,7 +242,7 @@ async function run() {
     el("pad-ed-settings-pending") === null);
   if (withContent) {
     choosePad(withContent.grid);
-    await openTab("reassign");
+    await openTab("type");
     const typeSel = el("pad-ed-type");
     const other = [...typeSel.options].map((o) => o.value)
       .find((v) => v !== typeSel.value && v !== "empty");
@@ -275,11 +275,11 @@ async function run() {
     check("and it keeps its place in the tab order, with the reason",
       !el("pad-ed-clear-btn").disabled && !!el("pad-ed-clear-btn").dataset.offReason,
       el("pad-ed-clear-btn").dataset.offReason);
-    el("pad-ed-goto-reassign").click();
-    check("the empty pad's button moves you to Reassign",
-      selectedKey() === "reassign", selectedKey());
-    check("and focus lands on the Reassign TAB, which announces itself",
-      document.activeElement === el(tabId("reassign")),
+    el("pad-ed-goto-type").click();
+    check("the empty pad's button moves you to Pad Type",
+      selectedKey() === "type", selectedKey());
+    check("and focus lands on the Pad Type TAB, which announces itself",
+      document.activeElement === el(tabId("type")),
       document.activeElement.id || document.activeElement.tagName);
     await quiet();
   }
@@ -567,14 +567,14 @@ async function run() {
     writes.map((e) => e.path).join(" "));
 
   /* ---- LAST, because it is the one check that presses a write button ----
-     A successful Apply is supposed to leave Reassign for Settings, since volume and looping are
+     A successful Apply is supposed to leave Pad Type for Settings, since volume and looping are
      nearly always what you want next. The probe STUBS every POST, so this exercises the page's
      behaviour with nothing reaching the desk: an EMPTY pad needs no confirm dialog, and a MIDI
      trigger needs no file, so Apply can be pressed straight off. */
   if (empty) {
     await openTab("settings");
     choosePad(empty.grid);
-    await openTab("reassign");
+    await openTab("type");
     const typeSel = el("pad-ed-type");
     typeSel.value = "trigger";
     typeSel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -616,7 +616,7 @@ async function run() {
   });
   const fxHelp = el(el("restore-fx-btn").getAttribute("aria-describedby"));
   check("the voice-effect restore says how MUCH it destroys, so it is not read as the whole grid",
-    !!fxHelp && /six/.test(fxHelp.textContent) && /past pad 16/.test(fxHelp.textContent),
+    !!fxHelp && /eight pads/.test(fxHelp.textContent),
     fxHelp && fxHelp.textContent);
   check("and it says how long it takes, because two minutes of silence reads as a hang",
     !!fxHelp && /minute/.test(fxHelp.textContent));
@@ -624,8 +624,8 @@ async function run() {
   check("the export says WHERE the file lands, which is the whole point of a fixed folder",
     !!exHelp && /Documents/.test(exHelp.textContent) && /Pad exports/.test(exHelp.textContent),
     exHelp && exHelp.textContent);
-  check("and that a voice effect has no file to export",
-    !!exHelp && /recipe/.test(exHelp.textContent));
+  check("and that only a sound pad has a file to export",
+    !!exHelp && /Sound pads only/.test(exHelp.textContent));
   check("both status lines are polite live regions, not assertive ones",
     ["restore-fx-status", "export-pad-status"].every((id) =>
       el(id) && el(id).getAttribute("aria-live") === "polite"));

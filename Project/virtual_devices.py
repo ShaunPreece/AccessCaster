@@ -385,7 +385,11 @@ class Outcome:
         if self.faders_missing:
             parts.append(FADERS_MISSING)
         if self.default_moved_to:
-            parts.append(f"Windows sound output is now {self.default_moved_to}.")
+            # Short names: this lands among Windows and the driver announcing the same arrival.
+            name = self.default_moved_to
+            parts.append("Windows sound is on System." if name.startswith("System") else
+                         "Windows sound is back on the unit." if "RODECaster" in name else
+                         f"Windows sound is on {name}.")
         if self.error:
             parts.append(self.error)
         return " ".join(parts)
@@ -428,6 +432,52 @@ def _wait_for_faders(enum, timeout_s: float) -> list:
     return eps
 
 
+# Leaving Expanded, the desk's Main output comes back as a playback endpoint a few seconds after the
+# desk is back on the bus, so a parked default is held until it is there to move to.
+DESK_MAIN_APPEARS_S = 10.0
+
+
+# WINDOWS' OWN FALLBACK IS NOT THE USER'S CHOICE. When the endpoint the default was on goes away
+# (the desk leaving Expanded from its touchscreen takes `System` with it, a dropout takes everything),
+# Windows moves the default to whatever else is live, and that looks exactly like a device the user
+# picked. The default is sampled on every endpoint change and every reconcile; a move away from a
+# desk or driver endpoint that is no longer active is recorded as displaced, and reconcile treats
+# the displaced device as it treats a park. Any other move clears it.
+_default_lock = threading.Lock()
+_last_default = ""
+_displaced = ""
+
+
+def _note_default(enum) -> None:
+    """Sample the console default and record whether its last move was Windows falling back.
+    Caller holds the COM apartment."""
+    global _last_default, _displaced
+    with _default_lock:
+        now = _default_id(enum, E_CONSOLE)
+        if not now or now == _last_default:
+            return
+        prev = ({e.id: e for e in _endpoints(enum)}.get(_last_default) if _last_default else None)
+        fell_back = prev is not None and (prev.desk or prev.virtual) and prev.state != "active"
+        _displaced = now if fell_back else ""
+        _last_default = now
+
+
+def _desk_main(eps: list) -> Optional["Endpoint"]:
+    return next((e for e in eps if e.flow == "playback" and e.state == "active"
+                 and e.desk and "Main" in e.name), None)
+
+
+def _wait_for_desk_main(enum, timeout_s: float) -> list:
+    """Re-list endpoints until the desk's Main playback output is live, or the time is up.
+    Returns the list."""
+    at = time.monotonic()
+    eps = _endpoints(enum)
+    while _desk_main(eps) is None and time.monotonic() - at < timeout_s:
+        time.sleep(0.25)
+        eps = _endpoints(enum)
+    return eps
+
+
 def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True,
               parked: str = "") -> Outcome:
     """Make Windows agree with the driver: its endpoints enabled while the service is connected
@@ -439,7 +489,8 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     service cannot be bound: it polls, so for a few seconds after the desk leaves Expanded its flag
     still says connected, and acting on that switches the endpoints ON on the way out.
 
-    `parked` is the endpoint id `park_output` moved the default to, if any.
+    `parked` is the endpoint id `park_output` moved the default to, if any. A default Windows
+    moved there itself when its endpoint went away (`_note_default`) counts the same.
 
     Safe to call at any time and from any thread. Never raises: the desk's controls must not fail
     because Windows' audio service is having a moment.
@@ -450,7 +501,8 @@ def reconcile(expect_connected: Optional[bool] = None, move_default: bool = True
     out = Outcome(status=status)
     try:
         with _audio() as enum:
-            _reconcile_windows(enum, out, expect_connected, move_default, parked)
+            _note_default(enum)
+            _reconcile_windows(enum, out, expect_connected, move_default, parked or _displaced)
     except Exception as exc:
         out.error = f"Could not update Windows' audio devices: {exc}"
     if out.enabled or out.disabled or out.faders_missing or out.default_moved_to or out.error:
@@ -466,8 +518,12 @@ def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
     """reconcile's Windows half, inside its COM apartment. Fills in `out`."""
     status = out.status
     policy = _policy()
-    eps = (_wait_for_faders(enum, FADERS_APPEAR_S) if expect_connected and status.connected
-           else _endpoints(enum))
+    if expect_connected and status.connected:
+        eps = _wait_for_faders(enum, FADERS_APPEAR_S)
+    elif expect_connected is False and parked and move_default:
+        eps = _wait_for_desk_main(enum, DESK_MAIN_APPEARS_S)
+    else:
+        eps = _endpoints(enum)
     if status.running:
         # The service has already written what it wants into the registry; this applies it
         # now instead of at the next USB arrival. Only "disabled" and "active" are ours to
@@ -520,7 +576,7 @@ def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
     if connected:
         target = next((e for e in live_playback if e.virtual and e.name.startswith("System")), None)
     if target is None:
-        target = next((e for e in live_playback if e.desk and "Main" in e.name), None)
+        target = _desk_main(live_playback)
     if target is None or (current is not None and current.id == target.id):
         return ""
     policy.SetDefaultEndpoint(target.id, E_CONSOLE)
@@ -716,9 +772,15 @@ def watch_endpoints(on_change, stop: threading.Event) -> None:
         client = _EndpointNotifier(wake)
         enum.RegisterEndpointNotificationCallback(client)
         diagnostics.event("virtual_devices.watch", "listening for endpoint changes")
+        _note_default(enum)
         while not stop.is_set():
             if not wake.wait(_WATCH_POLL_S):
                 continue
+            # Before the settle, while the endpoint the default left is still the last one seen.
+            try:
+                _note_default(enum)
+            except Exception:
+                pass
             # Let the burst finish: each re-arm pushes the settle point out again.
             while wake.is_set() and not stop.is_set():
                 wake.clear()

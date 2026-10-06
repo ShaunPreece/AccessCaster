@@ -384,8 +384,10 @@
         <dt>Processing presets</dt>
         <dd>
           Mics only. Load a ready-made voicing like Podcast Studio, or save the current
-          settings as your own preset. Choosing in the list changes nothing on the unit until
-          you press Apply this preset, so you can move through the list freely.
+          settings as your own preset. Like every dropdown that changes the unit, arrowing through
+          the list changes nothing and Enter applies. The list shows the preset the channel is on,
+          or says it has been adjusted since. Delete a preset opens its own list of your presets,
+          since a preset goes from every channel and cannot be brought back.
         </dd>
         <dt>Processing and modules</dt>
         <dd>
@@ -599,7 +601,9 @@
           Expanded on again does not bring that layout back, so arrange your faders again
           afterwards. Either change also disconnects and reconnects the unit's audio devices for a
           couple of seconds, so anything playing through the unit, your screen reader included, goes
-          quiet while it happens.
+          quiet while it happens. Leaving Expanded takes "System (RODECaster)" away, so the app
+          moves Windows' sound to your computer's own speakers for those seconds and back onto the
+          unit's Main output once that is there, and says so.
         </dd>
         <dt>Why your sound moves for a moment when Expanded comes on</dt>
         <dd>
@@ -645,14 +649,25 @@
         <dt>Tabs</dt>
         <dd>
           The pad you are working on is chosen above the strip, because the first two tabs act on it.
-          They are split by how they behave: everything on Pad Settings takes effect the
-          moment you change it, and nothing on Reassign happens until you press Apply. Then Voice
-          effects, which is the effect builder and changes no pad at all: it saves an effect to the
-          list you then pick from on Reassign. Last is Maintenance, which is jobs on the whole grid,
-          with one exception, the pad export, which acts on the pad you chose above.
+          They are split by how they behave: nothing on Pad Type happens until you press Apply, and
+          everything on Pad Settings takes effect the moment you change it. Then Voice effects,
+          which is the effect builder and changes no pad at all: it saves an effect to the list you
+          then pick from on Pad Type. Last is Maintenance, which is jobs on the whole grid, with one
+          exception, the pad export, which acts on the pad you chose above.
           Arrow left and right along the strip, Home and
-          End for the ends, and only the tab you are on is on the page. Opening Pad Settings or
-          Reassign reads the pads from the unit again, and the tab you leave off on is remembered.
+          End for the ends, and only the tab you are on is on the page. Opening Pad Type or
+          Pad Settings reads the pads from the unit again, and the tab you leave off on is
+          remembered.
+        </dd>
+        <dt>Pad Type</dt>
+        <dd>
+          What the pad is: a sound of your own, a voice effect, a mixer action or a MIDI trigger,
+          the same types the unit's own screen offers, plus the one thing that defines it, such as
+          the sound file. Everything you adjust afterwards, Back Channel's people included, is on
+          Pad Settings. Nothing here touches the pad until you press
+          Apply, the last control before Clear this pad, so until then the pad carries on as it is
+          and Pad Settings still describes it. A successful Apply moves you to Pad Settings and says
+          what is there for the new pad.
         </dd>
         <dt>Pad Settings</dt>
         <dd>
@@ -661,7 +676,7 @@
           A mixer pad also gets its trigger mode, and a Back Channel pad who is in the room. There
           is no Apply: switches and sliders write as you change them, and the dropdowns apply on
           Enter. An empty pad has no
-          settings, so it says so and offers a button through to Reassign.
+          settings, so it says so and offers a button through to Pad Type.
         </dd>
         <dt>Trim and fade (sound pads)</dt>
         <dd>
@@ -689,14 +704,6 @@
           numbers only take effect with the custom mapping switched on, and switching it off puts the
           pad back on the default WITHOUT keeping what you typed, which is how the unit itself
           behaves.
-        </dd>
-        <dt>Reassign</dt>
-        <dd>
-          What the pad does: a sound of your own, a voice effect, a mixer action or a MIDI trigger.
-          Nothing here touches the pad until you press Apply, the last control before Clear this
-          pad, so until then the pad carries on as it is and Settings still describes it. A
-          successful Apply moves you to Settings for the new content, since volume and looping are
-          usually the next thing you want.
         </dd>
         <dt>Mixer actions explained</dt>
         <dd>

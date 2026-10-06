@@ -164,11 +164,8 @@ RECORDING_FORMAT_LABEL = {
     0: "WAV, full quality",
     1: "MP3, smaller files",
 }
-RECORDING_FORMAT_HINT = ("This is the mixed stereo file only: when you record separate tracks they "
-                         "are always 24-bit WAV whatever you choose here. WAV is uncompressed and "
-                         "about eighteen times the size, which is what you want if the recording "
-                         "will be edited. MP3 is 128 kbps, fine for speech, and fits far more on "
-                         "the card.")
+RECORDING_FORMAT_HINT = ("The mixed file only; separate tracks are always WAV. WAV is about "
+                         "eighteen times the size, for editing; MP3 is 128 kbps, fine for speech.")
 
 # THE OTHER MULTITRACK, and it is a genuinely different destination rather than a second name for
 # the same one. `outputMultiMode` decides what the desk sends THIS COMPUTER over USB; the pair
@@ -219,24 +216,16 @@ USB_EXPANDED_LABEL = {
     False: "Standard: main and chat only",
     True: "Expanded: main, chat and four separate app inputs",
 }
-USB_EXPANDED_HINT = ("Expanded splits what this computer sends into four more inputs, Game, Music, "
-                     "A and B, each assignable to its own fader, so one program can be faded "
-                     # NOT "the four behave identically": four inputs behaving like four inputs is
-                     # what a reader already assumes, and saying it out loud reads as a hint that
-                     # they might be one device under four names.
-                     "without the rest. It needs RODE's Virtual Devices driver installed here; it "
-                     "stops the RODECaster ASIO driver working, and turning it back off unassigns "
-                     "whatever you put on those faders. "
-                     # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
-                     # choice this app knows nothing about. The other one, pointing Windows' sound
-                     # output at System (RODECaster), the app does itself (virtual_devices.py).
-                     "This app switches Windows' sound output to System (RODECaster) for you. "
+USB_EXPANDED_HINT = ("Adds Game, Music, A and B, each on its own fader. Needs RODE's Virtual "
+                     "Devices driver, and stops their ASIO driver working. "
                      # SAID BEFORE THE PRESS: speech jumping to the laptop speakers unannounced
                      # reads as something breaking. Why it moves is in virtual_devices.park_output.
-                     "While the unit reconnects, Windows' sound moves to another output for a few "
-                     "seconds, such as your computer's own speakers, so that RODE's driver can "
-                     "connect. Then send a program to one of the four in Settings, System, Sound, App "
-                     "volume and device preferences, with that program running.")
+                     "While the unit reconnects, sound plays from this computer's own speakers. "
+                     # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
+                     # choice this app knows nothing about. Pointing Windows' default at System
+                     # (RODECaster) the app does itself (virtual_devices.py).
+                     "Send a program to one of the four in Windows' App volume and device "
+                     "preferences.")
 
 # What the two processing-bypass switches mean, in RODE's own terms and ours.
 #

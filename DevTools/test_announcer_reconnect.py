@@ -213,6 +213,24 @@ with rig:
     check("and starts the spoken fader tidy", rig.tidied, [True])
     check("and the virtual-devices follow-up, as an arrival", rig.followed, [(2, True)])
 
+print("\nA MODE THE APP'S OWN SWITCH WROTE IS NOT SAID AGAIN")
+# The page's reply has said it, and it would land on top of Windows and RODE's driver.
+rig = Rig(speak_after=0.05)
+rig.seeded_mode = 5
+with rig:
+    rig.seeded_mode = 2
+    server._usb_mode_written = (2, time.monotonic())
+    said_before = len(rig.said)
+    rig.re_enumerate(EXPANDED, gap=0.3)
+    time.sleep(0.5)
+    check("the reconnect stays quiet", rig.said[said_before:], [])
+    check("but still tidies and follows up", (rig.tidied, rig.followed), ([True], [(2, True)]))
+    check("and the mark is used up, so a later touchscreen change is said",
+          server._usb_mode_written_by_app(2), False)
+check("a write too old to be this reconnect is not ours",
+      (setattr(server, "_usb_mode_written", (2, time.monotonic() - 60)),
+       server._usb_mode_written_by_app(2))[1], False)
+
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",
       server._ANN_RECONNECT_SPEAK_AFTER_S > 0, True)

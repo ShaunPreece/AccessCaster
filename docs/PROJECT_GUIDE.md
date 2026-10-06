@@ -641,6 +641,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the reopen was tried on the old path for ever, and to a screen-reader user that is
   indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
   "Control announcer reconnected", because silence is the one thing that cannot be interpreted.
+  **The exception is a mode the app's own switch has just written** (`_usb_mode_written_by_app`):
+  the page's reply has said it, and a second line lands on top of Windows and RODE's driver
+  announcing the same arrival. The tidy and the follow-up still run.
 - **A WRITE THAT RECONFIGURES USB AUDIO MUST WAIT FOR THE DESK TO COME BACK, OR THE WRITES BEHIND
   IT ARE LOST.** The desk is off the bus about 60 ms after `outputMultiMode` lands and back 1.7 to
   2.5 s later, so anything sent in between goes nowhere and is reported as "no control interface",
@@ -828,7 +831,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Windows falls back to whatever it can find, the laptop speakers included. `_restore_default`
   prefers `System (RØDECaster)` while the driver is connected, then the desk's Main output, and
   moves the console and multimedia roles together, leaving communications alone. A default that is
-  alive and elsewhere was chosen by the user and stays.
+  alive and elsewhere was chosen by the user and stays. **So leaving Expanded parks as well**
+  (`_write_usb_mode_parked`): `System` goes before the desk's Main output comes back, Windows falls
+  back to the laptop speakers, and unparked that fallback reads as the user's choice and stays.
+  The Standard follow-up waits for the desk's Main output (`_wait_for_desk_main`) and moves the
+  parked default onto it. **A leave nobody parked for** (the touchscreen, a dropout) is caught by
+  `_note_default`: a default that moved off a desk or driver endpoint which is no longer active is
+  Windows falling back, recorded as displaced and treated as parked. It samples on every endpoint
+  change, so the endpoint the default left is still the last one seen.
 - **NEVER MATCH A VIRTUAL ENDPOINT AGAINST THE DRIVER'S INF NAMES.** The INF string table declares
   `RØDECaster Combo1 In`, `SmartPads In`, `Headset In` and the rest, and NONE of them appear. The
   service names endpoints from the attached desk at runtime, which is how `Fader1` to `Fader9` arise.
@@ -1645,8 +1655,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `DevTools/ui_checks_staged.js`, which must be run with BOTH `--route routing` and
   `--route channels`.
 - **`aria-describedby` can name SEVERAL ids, and every Enter-to-apply dropdown relies on it**
-  (`enterToApply` appends `enter-to-apply-hint`). Setting the attribute afterwards OVERWRITES that:
-  append, never assign. A checks helper that reads only the first id will silently miss the other.
+  (`enterToApply` puts `enter-to-apply-hint` FIRST, so the rule is heard before a longer hint).
+  Setting the attribute afterwards OVERWRITES that: add with `addDescription`, never assign. A
+  checks helper that reads only the first id will silently miss the other.
 - **AN ENTER-TO-APPLY WRITE MUST RE-RUN WHATEVER DEPENDS ON THE VALUE IT JUST SET.** Browsing
   splits the moment a value changes from the moment it is written, and anything gated on that value
   has to be re-evaluated at the WRITE, not at the next page read. The raw-tracks switch is available
@@ -1863,8 +1874,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   tab helpers; do not undo it. Without it Tab sails past the whole page.
 - **Never write to the device from a combo box's `change` event, and never rebuild a panel from
   one.** A COLLAPSED select fires `change` on every arrow key, so each keypress applied a preset and
-  destroyed the select mid-interaction. The mic preset list keeps its own Apply button because the
-  same selection also feeds "Delete selected preset", which leaving the dropdown must not undo.
+  destroyed the select mid-interaction. The mic preset list applies on Enter like the rest, so
+  deleting a preset has its OWN list in a dialog (`openPresetDelete`): a Delete button reading the
+  preset dropdown would act on whatever leaving the dropdown put back.
 - **`<output>` has an implicit role of `status`, i.e. it is a live region.** A visible value beside a
   slider announced itself on top of the slider's own `aria-valuetext`; use `aria-hidden` +
   `aria-live="off"`.
@@ -1879,6 +1891,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   button had no accessible name. Nothing looked wrong on screen.
 - **Never leave an `aria-describedby` pointing at a deleted id.** Worse than having none.
 - **`aria-describedby` is read on EVERY focus,** so length costs more there than anywhere else.
+  A description says only what the label does not, in a sentence or two: not "you are asked to
+  confirm" (the dialog says it), not "takes effect straight away" (the default), never the label
+  again. The long account belongs on the Help page.
 - **A hidden pane, not a destroyed pane.** Both tab helpers build every pane once and flip `hidden`;
   a hidden pane is already out of the accessibility tree, the tab order and heading navigation.
   Focus moves to the incoming tab BEFORE the outgoing pane is hidden.

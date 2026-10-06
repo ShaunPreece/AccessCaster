@@ -306,8 +306,9 @@ async function run() {
   fSel.dispatchEvent(new FocusEvent("blur"));
   check("leaving it without Enter puts it back", fSel.value === startValue, fSel.value);
   const note = document.getElementById("routing-inputs-note").textContent || "";
-  check("the page says nothing is sent until Enter",
-    !/sent to the unit immediately/i.test(note) && /Enter/.test(note));
+  // The Enter rule is each dropdown's own first description (checked above), not the note's job.
+  check("the page never claims a choice is sent immediately",
+    !/sent to the unit immediately/i.test(note));
 
   // ---- focus safety ----------------------------------------------------
   await openTab("faders");

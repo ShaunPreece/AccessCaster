@@ -54,8 +54,9 @@ async function checkOne(sel, writePath) {
     return;
   }
   const described = (sel.getAttribute("aria-describedby") || "").split(/\s+/);
-  check(sel.id + ": is described as applying on Enter", described.includes(ENTER_HINT),
-        sel.getAttribute("aria-describedby"));
+  // FIRST, so it is heard before a longer description rather than after it.
+  check(sel.id + ": is described as applying on Enter, before anything else",
+    described[0] === ENTER_HINT, sel.getAttribute("aria-describedby"));
   check(sel.id + ": no waiting line with nothing chosen",
         !hint || (hint.textContent || "").trim() === "", hint && hint.textContent);
   // A description whose text changes is re-read as you arrow, so the waiting line is page-only.

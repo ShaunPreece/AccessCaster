@@ -1470,72 +1470,59 @@ def callme_status_sentence() -> str:
 # builds, and the profile's restore set. Adding a setting here adds it to all four, so the Device
 # page's copy and what a profile actually carries cannot drift apart.
 #   kind    : "bool" -> a checkbox, "choice" -> a select, "int" -> a range slider
-#   detail  : what the user hears. Written for someone who cannot see the unit's screen, so it says
-#             what the setting DOES rather than naming the touchscreen control it mirrors.
+#   detail  : what the user hears after the label, so it adds only what the label does not say, in
+#             one short sentence. The Help page carries the fuller account.
 UNIT_SETTINGS = [
     {"prop": "outputPrefader", "label": "Listen mode", "kind": "choice",
      "choices": [[1, "Pre-fader listen"], [0, "After-fader listen"]],
-     "detail": "What you hear when you solo a channel. Pre-fader listen hears it at its own level "
-               "whatever its fader is doing, which is what you want for checking a mic. After-fader "
-               "listen hears it as the fader has it set, so a fader down means silence."},
+     "detail": "Pre-fader hears a soloed channel whatever its fader is doing; after-fader hears "
+               "it as the fader has it."},
     {"prop": "outputMonFixed", "label": "Fixed output level on the monitor output", "kind": "bool",
-     "detail": "With this on, the monitor output ignores the monitor level and sends a fixed level "
-               "instead. Use it when the thing you are feeding has its own volume control and you "
-               "do not want the unit's monitor level in the way."},
+     "detail": "The monitor output sends a fixed level and ignores the monitor knob, for "
+               "speakers with their own volume."},
     {"prop": "systemRecButtonSetting", "label": "What the record button does when pressed",
      "kind": "choice", "choices": [[0, "Press to pause"], [1, "Press to stop"]],
-     "detail": "Whether a press of the record button pauses the recording or stops it. Press and "
-               "hold is unaffected."},
+     "detail": "Press and hold is unaffected."},
     {"prop": "systemHapticSetting", "label": "Haptic feedback", "kind": "choice",
      "choices": [[0, "Off"], [1, "On press and hold"], [2, "Always on"]],
-     "detail": "Whether the unit buzzes when you touch a control. Worth knowing before you rely on "
-               "it: we have confirmed the setting itself, but not whether the physical buttons buzz "
-               "or only the touchscreen does."},
+     "detail": "Whether the unit buzzes when you touch a control."},
     {"prop": "metering", "label": "Meter style", "kind": "choice",
      "choices": [[0, "Default"], [1, "Broadcast"]],
-     "detail": "How the level meters are drawn on the unit's screen. This changes nothing you can "
-               "hear; it is here for a sighted co-host who reads the meters."},
+     "detail": "How the unit's screen draws its meters. Nothing you can hear."},
     {"prop": "screenBrightness", "label": "Screen brightness", "kind": "int",
      "min": 0, "max": 255, "step": 5,
-     "detail": "How bright the unit's touchscreen is, from 0 to 255."},
+     "detail": "0 to 255."},
     {"prop": "autoBrightness", "label": "Adjust screen brightness automatically", "kind": "bool",
-     "detail": "Let the unit set its own screen brightness from the light in the room. With this "
-               "on, the brightness above is overridden by the unit."},
+     "detail": "The unit sets its screen brightness from the room's light, overriding the "
+               "setting above."},
     {"prop": "screenDimAfterSeconds", "label": "Dim the screen after", "kind": "choice",
      "choices": [[0, "Never"], [30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"],
                  [300, "5 minutes"], [600, "10 minutes"], [1800, "30 minutes"]],
-     "detail": "How long the unit waits, with nothing touched, before dimming its screen."},
+     "detail": "With nothing touched."},
     {"prop": "activeButtonsBrightness", "label": "Button brightness when lit", "kind": "int",
      "min": 0, "max": 255, "step": 5,
-     "detail": "How bright a button's light is when that button is active, from 0 to 255."},
+     "detail": "0 to 255."},
     {"prop": "inactiveButtonsBrightness", "label": "Button brightness when not lit", "kind": "int",
      "min": 0, "max": 255, "step": 5,
-     "detail": "How bright a button's light is when that button is inactive, from 0 to 255. Turn it "
-               "right down to darken the unit without losing the lit buttons."},
+     "detail": "0 to 255. Turn it down to darken the unit and keep lit buttons lit."},
     # ---- THE CLOCK (selectors derived and read-back proven). -------------------------------------
     # The timezone and daylight saving are NOT offered: both store a write and leave the clock
     # alone, because the touchscreen applies them. See UNIT_SETTINGS_NOT_ON_PAGE.
     {"prop": "systemDateTime24h", "label": "24-hour clock", "kind": "bool",
-     "detail": "Show the unit's clock as 24-hour rather than 12-hour with am and pm."},
+     "detail": "Otherwise 12-hour with am and pm."},
     {"prop": "systemDateTimeOnHome", "label": "Show the clock on the unit's home screen",
      "kind": "bool",
-     "detail": "Whether the time appears on the unit's own screen. Nothing you can hear; it is here "
-               "for a sighted co-host, and because turning it off is otherwise touchscreen-only."},
+     "detail": "Nothing you can hear; for a sighted co-host."},
     # ---- THE LOCKOUTS (selectors derived and read-back proven). ----------------------------------
     # They are last on the page on purpose: they are the ones that can make a working desk feel
     # broken, so the wording has to say exactly what goes quiet and that this app can always undo
     # it.
     {"prop": "disableAllPhysicalButtons", "label": "Lock the unit's physical buttons", "kind": "bool",
-     "detail": "Stops the buttons on the unit itself doing anything, so a knock or a curious guest "
-               "cannot change your mix. The faders and the touchscreen still work, and this app "
-               "still controls everything, including switching this back off."},
+     "detail": "The faders and touchscreen still work, and this app can switch it back off."},
     {"prop": "disableAllHeadphoneOutputs", "label": "Silence every headphone output", "kind": "bool",
-     "detail": "Turns off all four headphone sockets at once. Your mixes, the recording and "
-               "anything you are streaming carry on as normal; only the headphones go quiet. Switch "
-               "it back off here to get them back."},
+     "detail": "Mixes, recording and streaming carry on. Switch it off here to get them back."},
     {"prop": "disableAllLineoutOutputs", "label": "Silence every line output", "kind": "bool",
-     "detail": "Turns off the line outputs on the back, which is what usually feeds studio "
-               "speakers. The recording and your USB outputs are unaffected."},
+     "detail": "Usually your studio speakers. Recording and USB are unaffected."},
 ]
 UNIT_SETTING_BY_PROP = {s["prop"]: s for s in UNIT_SETTINGS}
 # Every one of these is in rcp_transfer's address table, or a write here would raise at the very
@@ -3760,8 +3747,10 @@ def _announce_loop() -> None:
                 if _virtual_devices_retrying.is_set():
                     pass        # our own flip of the mode, already announced once as a retry
                 else:
-                    _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
-                             or "Control announcer reconnected.")
+                    # A mode the app's own switch wrote has been said by the page's reply.
+                    if not _usb_mode_written_by_app(st.get("usb_mode")):
+                        _ann_say(_ann_usb_mode_change(was_usb, st.get("usb_mode"))
+                                 or "Control announcer reconnected.")
                     # Out of Expanded with nobody using the app's switch (the touchscreen tidies
                     # its own faders; the desk dropping out on its own does not). On a thread: it
                     # writes, and this loop must keep reading.
@@ -6654,10 +6643,8 @@ def _monitor_sources():
 def monitor_mix_model() -> dict:
     """Static layout for the Monitor mix UI (the outputs + sources the connected device exposes)."""
     read_only = _matrix_write_gate() is not None
-    note = ("Set how loud each source is in a chosen output, for example your own headphones, "
-            "WITHOUT changing the recording or other people's outputs. Adjusting a slider "
-            "switches that output to a custom mix; \"Reset this output to follow the faders\" "
-            "returns it to following the faders. Not available while a phone caller is connected.")
+    note = ("How loud each source is in the chosen output, without changing the recording or "
+            "other outputs. Moving one makes it a custom mix. Not available during a phone call.")
     if read_only:
         note = ("Shows how loud each source is in each headphone output on this device. Changing "
                 "these levels is not enabled here yet, so the sliders are read-only.")
@@ -7018,11 +7005,11 @@ def action_set_recording_format(value: int) -> dict:
 def action_set_usb_multitrack(mode: int) -> dict:
     """What the desk sends this computer over USB: the mix pair, or every channel.
 
-    THE WARNING IS PART OF THE REPLY, not an aside. Changing this makes the desk tear down and
-    re-advertise its whole USB audio function (measured): every RODECaster input and output on
-    this machine disappears for a second or two, and Windows can move the default device
-    while they are gone. Someone listening THROUGH the unit hears it stop, so the reply says so
-    rather than leaving a silence to be interpreted."""
+    Changing this makes the desk tear down and re-advertise its whole USB audio function: every
+    RODECaster input and output on this machine disappears for a second or two. THE WARNING IS
+    THE CONTROL'S HINT, read before Enter, NOT THE REPLY: the reply lands while the audio is gone,
+    on top of Windows and RODE's driver announcing the same change, so it says the result and no
+    more."""
     gate = _output_write_gate()
     if gate is not None:
         return gate
@@ -7036,9 +7023,7 @@ def action_set_usb_multitrack(mode: int) -> dict:
         value = recorder.join_usb_multitrack(mode, expanded)
         arrived = _write_usb_mode_parked(value, old)
     return {"ok": True,
-            "message": (f"This computer will now receive "
-                        f"{recorder.USB_MULTITRACK_LABEL[mode].lower()}. The unit's audio devices "
-                        f"drop out for a couple of seconds while it changes over."
+            "message": (f"Receiving {recorder.USB_MULTITRACK_LABEL[mode].lower()}."
                         + _virtual_devices_follow(value, arrived))}
 
 
@@ -7094,11 +7079,10 @@ def _tidy_after_standard(spoken: bool) -> str:
 def action_set_usb_expanded(on: bool) -> dict:
     """The USB 1 INPUT half of the same property: Standard, or Expanded with four more app inputs.
 
-    THE REPLY CARRIES BOTH COSTS, because neither is visible from the app. Like the output mode
-    above, the change re-advertises the desk's whole USB audio function and the audio devices
-    vanish for a second or two. Turning it OFF also takes Game, Music, A and B off their faders,
-    as the unit's own screen does, and that is done FIRST, while the desk is still on the bus: the
-    mode change takes it off USB for a couple of seconds."""
+    Both costs are in the control's hint and the reply says only the result, as for the output
+    mode above. Turning it OFF also takes Game, Music, A and B off their faders, as the unit's own
+    screen does, and that is done FIRST, while the desk is still on the bus: the mode change takes
+    it off USB for a couple of seconds."""
     gate = _output_write_gate()
     if gate is not None:
         return gate
@@ -7111,12 +7095,10 @@ def action_set_usb_expanded(on: bool) -> dict:
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
         arrived = _write_usb_mode_parked(value, old)
     tail = ("" if on or not cleared else
-            f" {wording.join_and(cleared)} came off their faders, as the unit's own screen does; "
-            f"their processing is kept.")
+            f" {wording.join_and(cleared)} came off their faders.")
     return {"ok": True,
-            "message": (f"USB 1 will now send {recorder.USB_EXPANDED_LABEL[bool(on)].lower()}. "
-                        f"The unit's audio devices drop out for a couple of seconds while it "
-                        f"changes over.{tail}" + _virtual_devices_follow(value, arrived))}
+            "message": (f"Expanded is {'on' if on else 'off'}.{tail}"
+                        + _virtual_devices_follow(value, arrived))}
 
 
 def _seed_usb_expanded() -> None:
@@ -7243,9 +7225,24 @@ def _usb_mode_arrives_expanded(old, new: int) -> bool:
     return not old_exp or (old_mode == 0) != (new_mode == 0)
 
 
+def _usb_mode_leaves_expanded(old, new: int) -> bool:
+    """Whether writing `new` over `old` takes the desk out of Expanded, which takes `System
+    (RØDECaster)` away with it."""
+    return bool(recorder.split_usb_multitrack(old)[1]) and not recorder.split_usb_multitrack(new)[1]
+
+
 def _write_usb_mode_parked(value: int, old) -> bool:
     """`_write_usb_mode` with the default parked across the arrival when the desk is coming back
-    as an Expanded device (`_usb_mode_arrives_expanded`). Caller holds the HID lock."""
+    as an Expanded device (`_usb_mode_arrives_expanded`). Caller holds the HID lock.
+
+    LEAVING EXPANDED PARKS TOO, with no guard. `System` goes before the desk's Main output comes
+    back, so Windows falls back to another live device, and a default found there afterwards looks
+    like the user's own choice. Parking first marks it as ours, and the follow-up in Standard moves
+    it on to the desk's Main output once that appears."""
+    global _virtual_devices_parking
+    if _usb_mode_leaves_expanded(old, value):
+        # A fresh park first: one left from the arrival names a device the default has since left.
+        _virtual_devices_parking = virtual_devices.park_output() or _virtual_devices_parking
     arrived = _park_for_arrival() if _usb_mode_arrives_expanded(old, value) else None
     try:
         return _write_usb_mode(value)
@@ -7267,9 +7264,28 @@ def _write_usb_mode(value: int) -> bool:
     and post-fader in Expanded are the same device (0x0094) and the desk does not leave the bus
     between them, so that switch gives the service nothing to bind to and is not a bind attempt.
     Caller holds the HID lock."""
+    global _usb_mode_written
     before = _desk_pid()
+    _usb_mode_written = (value, time.monotonic())
     rcp_transfer.set_usb_multitrack_mode(value)
     return _desk_pid() != before
+
+
+# The last mode this app wrote, and when. The announcer's reconnect stays quiet about a mode the
+# app's own switch set, since the page's reply has said it; one from the touchscreen is still said.
+_usb_mode_written = (None, 0.0)
+_USB_MODE_WRITTEN_S = 30.0      # a reconnect lands within seconds; older than this is not ours
+
+
+def _usb_mode_written_by_app(mode) -> bool:
+    """Whether the desk's mode `mode` is one this app has just written. Consumed on a match, so a
+    later change to the same mode from the touchscreen is still said."""
+    global _usb_mode_written
+    value, at = _usb_mode_written
+    if mode is None or value != mode or time.monotonic() - at > _USB_MODE_WRITTEN_S:
+        return False
+    _usb_mode_written = (None, 0.0)
+    return True
 
 
 def _desk_usb_mode():
@@ -7425,14 +7441,13 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
     if not mode:
         # The service can bind here too, but the mix alone carries no fader inputs to expose,
         # so nothing is waited for and the user is told what the four need.
-        return (" Game, Music, A and B only reach their own inputs while this computer receives "
-                "every channel, so pick pre-fader or post-fader for that.")
+        return " Game, Music, A and B also need this computer to receive every channel."
     if not arrived and st.connected:
         return ""       # the desk stayed on the bus and the service stays bound: nothing to wait for
+    # The bind itself is announced by RODE's driver, so only the parked default is ours to say.
     parking = _virtual_devices_parking
-    where = (f" Windows sound is on {parking.name} until it does, then moves to System."
-             if parking is not None else "")
-    return " RODE's driver connects in a few seconds and says so itself." + where
+    return (f" Windows sound is on {parking.name} until RODE's driver connects."
+            if parking is not None else "")
 
 
 def _bypass_sentence(where: str, on: bool) -> str:

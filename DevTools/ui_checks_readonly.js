@@ -77,16 +77,21 @@ async function writesSince() {
 
 /* Press it and prove NOTHING went to the device and the reason was spoken. The probe never forwards
    a POST, so the log is the honest record of what the page tried to write. */
-async function pressAndProveSilent(label, node) {
+/* `statusId` names the button's own role="status" line when it reports there (setStatus) rather
+   than through the alert region: a status region is spoken too. */
+async function pressAndProveSilent(label, node, statusId) {
   if (!node) return;
   await probeClear();
   el("alert-region").textContent = "";
+  if (statusId && el(statusId)) el(statusId).textContent = "";
   node.click();
   await sleep(900);
   const posts = await writesSince();
   check(label + ": pressing it writes nothing to the device", posts.length === 0,
     posts.map((p) => p.path).join(","));
-  check(label + ": and it says why out loud", alertText().length > 10, alertText());
+  const said = statusId && el(statusId) && el(statusId).getAttribute("role") === "status"
+    ? el(statusId).textContent : alertText();
+  check(label + ": and it says why out loud", said.length > 10, said);
 }
 
 /* Drag it and prove it goes back to the unit's own number. A slider left where it was put would be
@@ -124,7 +129,7 @@ async function run() {
        && first.options[first.selectedIndex].textContent.trim().length),
     first && first.options[first.selectedIndex] && first.options[first.selectedIndex].textContent);
   blocked("reset faders", el("faders-reset-btn"));
-  await pressAndProveSilent("reset faders", el("faders-reset-btn"));
+  await pressAndProveSilent("reset faders", el("faders-reset-btn"), "faders-reset-status");
 
   // ---- Routing: master output settings ----------------------------------------------------
   await tab("routing", "master");
@@ -150,7 +155,8 @@ async function run() {
   // ---- Routing: output mixes --------------------------------------------------------------
   await tab("routing", "mixes");
   blocked("reset all output mixes", el("reset-outputs-btn"));
-  await pressAndProveSilent("reset all output mixes", el("reset-outputs-btn"));
+  await pressAndProveSilent("reset all output mixes", el("reset-outputs-btn"),
+                            "reset-outputs-status");
 
   // ---- Routing: levels and the monitor mix ------------------------------------------------
   await tab("routing", "levels");
@@ -158,7 +164,7 @@ async function run() {
   blocked("monitor speaker level", el("monitor-level"));
   await moveAndProveReverts("monitor speaker level", el("monitor-level"));
   blocked("reset this output's mix", el("monmix-reset-btn"));
-  await pressAndProveSilent("reset this output's mix", el("monmix-reset-btn"));
+  await pressAndProveSilent("reset this output's mix", el("monmix-reset-btn"), "monmix-status");
   const monmix = document.querySelectorAll("[id^='monmix-'][type='range']");
   blockedAll("monitor mix source sliders", monmix);
   await moveAndProveReverts("a monitor mix source slider", monmix[0]);
@@ -184,8 +190,10 @@ async function run() {
     const wasVal = sel.value;
     const other = Array.from(sel.options).find((o) => o.value !== wasVal);
     if (other) {
+      // Arrowing only stages the choice; Enter is the attempt to apply it, and the refusal.
       sel.value = other.value;
       sel.dispatchEvent(new Event("change", { bubbles: true }));
+      sel.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await sleep(900);
       check("changing a unit setting writes nothing", (await writesSince()).length === 0);
       check("and the dropdown goes back to what the unit has", sel.value === wasVal,
