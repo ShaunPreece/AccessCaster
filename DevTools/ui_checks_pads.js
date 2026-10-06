@@ -491,6 +491,39 @@ async function run() {
   check("re-reading keeps the saved-effects list",
     fxList.firstElementChild === fxFirst);
 
+  // ---- a Settings dropdown commits on Enter, not on a pause ---------------
+  // A closed select fires `change` on every arrow press, so an arrowed choice waits for Enter or
+  // for focus to leave; a mouse pick has no browsing key behind it and writes at once.
+  const COLOUR_API = "/api/pad/colour";
+  const arrowTo = (value) => {
+    key("ArrowDown", colour);
+    colour.value = value;
+    colour.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  check("a present pad is chosen for the dropdown checks", !!(currentPad() && currentPad().present));
+  const startColour = colour.value;
+  const otherColour = Array.from(colour.options)
+    .map((o) => o.value).find((v) => v !== "" && v !== startColour);
+  await probeClear();
+  arrowTo(otherColour);
+  await sleep(1500);
+  check("an arrowed colour writes nothing while you listen", !hit(await apiLog(), COLOUR_API));
+  key("Enter", colour);
+  check("Enter writes the arrowed colour", await waitForApi([COLOUR_API], 5000));
+  await quiet();
+  await probeClear();
+  arrowTo(startColour);
+  colour.dispatchEvent(new FocusEvent("blur"));
+  check("leaving the dropdown writes an arrowed colour", await waitForApi([COLOUR_API], 5000));
+  await quiet();
+  await probeClear();
+  colour.dispatchEvent(new Event("pointerdown"));
+  colour.value = otherColour;
+  colour.dispatchEvent(new Event("change", { bubbles: true }));
+  check("a mouse pick writes at once", await waitForApi([COLOUR_API], 5000));
+  await quiet();
+  await loadPads();
+
   // ---- coming back to the page re-reads --------------------------------
   await openTab("settings");
   const beforeEntry = padsData;

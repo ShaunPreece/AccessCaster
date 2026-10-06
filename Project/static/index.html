@@ -1006,11 +1006,14 @@
           <label for="pad-ed-colour">Colour</label>
           <!-- Named colours, filled from the device payload (soundpad.PAD_COLOUR_NAME): a bare 0-11
                number would tell a screen-reader user nothing about the colour. -->
-          <select id="pad-ed-colour"></select>
+          <select id="pad-ed-colour" aria-describedby="pad-ed-enter-hint"></select>
+          <span id="pad-ed-enter-hint" class="hint">
+            In these dropdowns, arrow to a choice and press Enter to apply it.
+          </span>
         </div>
         <div class="field" id="pad-ed-playmode-row">
           <label for="pad-ed-playmode">How the pad plays</label>
-          <select id="pad-ed-playmode"></select>
+          <select id="pad-ed-playmode" aria-describedby="pad-ed-enter-hint"></select>
           <span class="hint">
             Toggle means one press starts the sound and the next press stops it. Hold means it
             plays only while you hold the pad down. One Shot means each press replays it from
@@ -1034,7 +1037,7 @@
              the off-air room. Both write straight to the pad, like the settings above. -->
         <div class="field" id="pad-ed-mixer-trigger-row" hidden>
           <label for="pad-ed-mixer-trigger">How the pad triggers</label>
-          <select id="pad-ed-mixer-trigger"></select>
+          <select id="pad-ed-mixer-trigger" aria-describedby="pad-ed-enter-hint"></select>
           <span class="hint">
             Latching means one press turns the action on and the next press turns it off.
             Momentary means it is only on while you hold the pad down.

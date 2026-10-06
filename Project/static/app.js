@@ -4671,15 +4671,36 @@ let _routingValues = null;
    to listen. */
 const SELECT_COMMIT_MS = 500;
 
-/* Run `commit` once the dropdown has stopped changing for SELECT_COMMIT_MS. Returns a cancel
-   function, for a pending commit that must not outlive what it was about (a pad change). */
-function commitWhenSettled(sel, commit) {
-  let timer = null;
-  sel.addEventListener("change", () => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => { timer = null; commit(); }, SELECT_COMMIT_MS);
+/* A dropdown that writes straight to the desk with no Apply button. A change made by browsing keys
+   only commits on Enter or on leaving the dropdown: a pause to hear an option is not a choice. A
+   change with no browsing key behind it (a mouse or touch pick, or Enter in an opened list) commits
+   at once. `commit` must be a no-op when the desk already has the value, because leaving the
+   dropdown calls it. Returns a cancel function, for a pending commit that must not outlive what it
+   was about (a pad change). */
+const BROWSE_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+                             "Home", "End", "PageUp", "PageDown"]);
+function commitOnEnter(sel, commit) {
+  let browsing = false;
+  let pending = false;
+  const flush = () => { if (pending) { pending = false; commit(); } };
+  sel.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      // An opened list fires `change` after this keydown; clearing `browsing` lets that commit.
+      browsing = false;
+      flush();
+      return;
+    }
+    browsing = BROWSE_KEYS.has(e.key)
+      || (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey);   // type-to-find
   });
-  return () => { window.clearTimeout(timer); timer = null; };
+  sel.addEventListener("pointerdown", () => { browsing = false; });
+  sel.addEventListener("change", () => {
+    if (browsing) { pending = true; return; }
+    pending = false;
+    commit();
+  });
+  sel.addEventListener("blur", flush);
+  return () => { pending = false; };
 }
 
 /* ---- A DROPDOWN THAT STAGES, AND THE BUTTON THAT COMMITS IT ----------
@@ -9336,12 +9357,12 @@ async function init() {
     }
   });
   document.getElementById("pad-ed-volume").addEventListener("input", onPadVolumeInput);
-  // Debounced like the meter stream: each pad write enters transfer mode, so walking a closed list
-  // must not write every option passed. syncPadEditor cancels a pending one on a pad change.
+  // Each pad write enters transfer mode, so walking a closed list must not write every option
+  // passed. syncPadEditor cancels a pending one on a pad change.
   _padSelectCancels = [
-    commitWhenSettled(document.getElementById("pad-ed-colour"), onPadColour),
-    commitWhenSettled(document.getElementById("pad-ed-playmode"), onPlayMode),
-    commitWhenSettled(document.getElementById("pad-ed-mixer-trigger"), onMixerTrigger),
+    commitOnEnter(document.getElementById("pad-ed-colour"), onPadColour),
+    commitOnEnter(document.getElementById("pad-ed-playmode"), onPlayMode),
+    commitOnEnter(document.getElementById("pad-ed-mixer-trigger"), onMixerTrigger),
   ];
   document.getElementById("pad-ed-replay").addEventListener("change", (e) => onPadToggle("/api/pad/replay", e.target));
   document.getElementById("pad-ed-loop").addEventListener("change", (e) => onPadToggle("/api/pad/loop", e.target));

@@ -235,7 +235,7 @@ inline, because what the browser receives is unchanged.
   `sel.stagedApply`), `blockStaged`.** Used by fader assignment, the output mix mode, headphone
   type, USB multitrack, what to record, and mic type. A dropdown that only changes what you are
   looking at acts at once; the metered stream waits `SELECT_COMMIT_MS` instead, and the pad
-  Settings dropdowns (colour, play mode, mixer trigger) wait through `commitWhenSettled`.
+  Settings dropdowns (colour, play mode, mixer trigger) commit on Enter through `commitOnEnter`.
 - Rebuild guards: `fillOptions` (3169), `rebuildIfChanged` (3197), `setLevelValue` (5458),
   `markLevelsUnread` (5436), `applyUnitSettingValues` (1402).
 - Live region: `announce` (18). It REPLACES, it does not queue.

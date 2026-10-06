@@ -1640,9 +1640,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   must be run with BOTH `--route routing` and `--route channels`.
   **THREE DROPDOWNS ARE DELIBERATELY NOT STAGED and it is not an oversight:** pad play mode and
   mixer trigger (nothing is audible until the pad is pressed) and pad colour (cosmetic). Do not
-  "finish the job" by converting them. They commit through `commitWhenSettled` once the list has
-  been still for `SELECT_COMMIT_MS`, because every pad write enters transfer mode and walking the
-  list must not write each option passed; a pad change cancels a pending one.
+  "finish the job" by converting them. They commit through `commitOnEnter`: a change made by
+  browsing keys waits for Enter or for focus leaving, because every pad write enters transfer mode
+  and a pause to listen is not a choice (a timer fires on every option a screen-reader user stops
+  to hear). A mouse pick commits at once; a pad change cancels a pending one.
 - **`setStagedValue` must reach its Apply button through `sel.stagedApply`, not `getElementById`.**
   Some callers set the device value at BUILD time, before the row is in the document, and the id
   lookup then returns null - which left mic type's Apply armed with nothing staged.
