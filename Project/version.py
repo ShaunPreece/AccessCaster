@@ -34,6 +34,22 @@ __version__ = "2.62"
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
     ("2.62", [
+        ("Dropdowns apply on Enter",
+         "Every dropdown that changes the unit now works the same way: arrowing through it only "
+         "browses, Enter applies the choice you are on, and moving away without Enter puts it back "
+         "and says so. The Apply buttons beside the fader, output mix, headphone, USB, recording and "
+         "mic type dropdowns are gone, and the pad and Unit settings dropdowns no longer change "
+         "anything just because you paused on an option. With a mouse, picking an option applies "
+         "it straight away."),
+
+        ("A simpler Keyboard shortcuts tab",
+         "Your shortcuts are now one list. Arrow through it, press Enter to change a shortcut's "
+         "key, Delete to delete it, or the Applications key for a menu that also turns it off or "
+         "silences it. Every shortcut is held on the same keys, Control, Alt and Shift unless you "
+         "change them with Change the keys to hold, so adding a shortcut only asks what it does "
+         "and which key. Use the SMART pad keys adds or removes the pad keys as a set, and Restore "
+         "default shortcuts puts the list back as a new install has it."),
+
         ("Expanded connects reliably",
          "RODE's Virtual Devices driver often failed to connect when Expanded was switched on, so "
          "Game, Music, A and B never appeared. The cause was anything playing through the unit's "
@@ -81,7 +97,7 @@ HISTORY = [
         ("Announcements can stay off after a restart",
          "Announcements now always come back on when AccessCaster starts, so it never opens in "
          "silence. If you would rather they stayed off, tick Start with announcements the way I "
-         "left them, beside the announcements switch, and the app starts the way you left it, "
+         "left them, on the Announcements tab, and the app starts the way you left it, "
          "whether you switched them from the page, the tray or the keyboard shortcut. If you had "
          "already switched them off from the tray, that is kept and the box comes ticked."),
 

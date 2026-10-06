@@ -279,11 +279,12 @@ Two rules do most of the work of keeping it honest:
 
 This is a blind user's app, and several of these are non-obvious enough to be worth copying:
 
-- **Any dropdown that changes what you HEAR waits for an Apply button.** A closed `<select>` fires a
-  change event on every arrow press, and arrowing through a closed select is exactly how a screen
-  reader user reads one, so browsing a list WAS performing the action. A commit delay makes it worse,
-  not better: it fires precisely when you pause to think. Dropdowns that only change what you are
-  LOOKING at stay instant.
+- **Any dropdown that changes the desk applies on Enter.** A closed `<select>` fires a change event
+  on every arrow press, and arrowing through a closed select is exactly how a screen reader user
+  reads one, so browsing a list would perform the action. A commit delay makes it worse, not
+  better: it fires precisely when you pause to listen. Escape or leaving puts the dropdown back and
+  says so. One rule for every such dropdown, so nobody has to know which kind they are in.
+  Dropdowns that only change what you are LOOKING at stay instant.
 - **One live region per page.** Two regions talking over each other means neither is heard.
 - **Tab strips rather than long pages**, with exactly one panel in the document at a time, so
   heading navigation and the tab order only ever contain what you are actually looking at.
@@ -1629,35 +1630,29 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   desk lacking a capability still lists its shortcuts. Pressing one explains itself clearly, so it
   is not silent, only late. The reasoning: a capability gate is TEMPORARY, and building UI around a
   gap with a known expiry date is work that has to be rolled back later. Do not re-propose it.
-- **A DROPDOWN THAT CHANGES THE DESK'S AUDIO MUST STAGE, AND WAIT FOR AN APPLY.** Shaun's rule, 30th
-  August 2026: "where a dropdown changes something that affects audio is where an apply button is
-  needed. The pads selector dropdown shows you the info on the pad so instant is fine." A CLOSED
-  select fires `change` on EVERY arrow press, and arrowing a closed select is how a screen reader
-  user reads one, so browsing the list WAS the action. A delay does not fix it: it fires when you
-  pause to listen. Use `makeStagedSelect` / `setStagedValue` / `markStaged` / `blockStaged`; never
-  write from a select's own `change`. A dropdown that only changes WHAT YOU ARE LOOKING AT (which
-  pad, which output, which shortcut) stays instant. Guarded by `DevTools/ui_checks_staged.js`, which
-  must be run with BOTH `--route routing` and `--route channels`.
-  **THREE DROPDOWNS ARE DELIBERATELY NOT STAGED and it is not an oversight:** pad play mode and
-  mixer trigger (nothing is audible until the pad is pressed) and pad colour (cosmetic). Do not
-  "finish the job" by converting them. They commit through `commitOnEnter`: a change made by
-  browsing keys waits for Enter or for focus leaving, because every pad write enters transfer mode
-  and a pause to listen is not a choice (a timer fires on every option a screen-reader user stops
-  to hear). A mouse pick commits at once; a pad change cancels a pending one.
-- **`setStagedValue` must reach its Apply button through `sel.stagedApply`, not `getElementById`.**
-  Some callers set the device value at BUILD time, before the row is in the document, and the id
-  lookup then returns null - which left mic type's Apply armed with nothing staged.
-- **`aria-describedby` can name SEVERAL ids, and two staged dropdowns rely on it** (the USB mode's
-  warning plus its staged hint, and the multitrack mode's explanation plus its own). Setting the
-  attribute after `makeStagedSelect` OVERWRITES the hint: append, never assign. A checks helper that
-  reads only the first id will silently miss the other.
-- **A STAGED APPLY MUST RE-RUN WHATEVER DEPENDS ON THE VALUE IT JUST SET.** Staging split the
-  moment a value changes from the moment it is written, and anything gated on that value has to be
-  re-evaluated at the WRITE, not at the next page read. The raw-tracks switch is available only
-  while a multitrack mode is chosen; its Apply did not re-run that decision, so choosing pre-fader
-  and applying it left the switch unavailable and still saying "choose pre-fader or post-fader
-  above first". Only leaving the page and coming back cleared it (Shaun, 30th August 2026). Fix
-  shape: update the cached payload (`recordingModel`) and call the dependent applier, rather than
+- **EVERY DROPDOWN THAT CHANGES THE DESK APPLIES ON ENTER, THROUGH `enterToApply`, AND NO OTHER
+  WAY.** A CLOSED select fires `change` on EVERY arrow press, and arrowing a closed select is how a
+  screen reader user reads one, so browsing the list would be the action. A delay does not fix it:
+  it fires when you pause to listen. Arrowing or type-to-find browses; Enter on the closed list
+  applies (and must `preventDefault`, or Chromium opens the list instead); Escape or blur reverts to
+  `dataset.deviceValue` and announces "Not applied". `change` applies ONLY after a pointerdown: an
+  expanded list fires `change` as it closes, and Windows commits the highlighted option on Escape as
+  well as Enter, so a keyboard `change` must never apply. ONE RULE FOR ALL OF THEM, Apply buttons included, is Shaun's ruling: a user
+  cannot tell which kind of dropdown they are in. Never write from a select's own `change`. A
+  dropdown that only changes WHAT YOU ARE LOOKING AT (which pad, which output, which shortcut)
+  stays instant. `setStagedValue` is the only writer of `deviceValue`; an apply must call it on
+  success, and a refusal must leave the dropdown on the unit's value. Guarded by
+  `DevTools/ui_checks_staged.js`, which must be run with BOTH `--route routing` and
+  `--route channels`.
+- **`aria-describedby` can name SEVERAL ids, and every Enter-to-apply dropdown relies on it**
+  (`enterToApply` appends `enter-to-apply-hint`). Setting the attribute afterwards OVERWRITES that:
+  append, never assign. A checks helper that reads only the first id will silently miss the other.
+- **AN ENTER-TO-APPLY WRITE MUST RE-RUN WHATEVER DEPENDS ON THE VALUE IT JUST SET.** Browsing
+  splits the moment a value changes from the moment it is written, and anything gated on that value
+  has to be re-evaluated at the WRITE, not at the next page read. The raw-tracks switch is available
+  only while a multitrack mode is chosen; without the re-run, applying pre-fader leaves the switch
+  unavailable and still saying "choose pre-fader or post-fader above first" until the page is
+  re-entered. Fix shape: update the cached payload (`recordingModel`) and call the dependent applier, rather than
   re-reading the desk for a value you just set. Guarded in `ui_checks_recording.js`.
 - **USER-FACING TEXT SAYS "RODECaster Pro 2", NEVER "Pro II"** (Shaun, 30th August 2026). A screen
   reader speaks the roman numeral as "Pro aye aye". RODE's own branding is "Pro II" and the instinct
@@ -1745,10 +1740,20 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   August 2026: "the elements themselves say all you need to know"). A labelled dropdown whose
   options name themselves gets neither a hint nor an `aria-describedby`; a description on a dropdown
   is re-read on every arrow press.
-- **"Disable this shortcut" is INVERTED against the server's `enabled`.** Ticked means off. The
-  translation lives in exactly two places in app.js (`showHotkey` and `saveHotkey`, plus
-  `forceHotkeyValues` for a refusal); the server only ever sees `enabled`. "Use this shortcut" was
-  the first wording and it read like a Run button.
+- **"Turn this shortcut off" is INVERTED against the server's `enabled`.** Ticked means off. The
+  translation lives in exactly two places in app.js (`openHotkeyEdit` and `onHotkeyEditSave`); the
+  server only ever sees `enabled`. "Use this shortcut" reads like a Run button.
+- **THE SHORTCUTS LIST IS A LISTBOX, NOT A GRID OR A LIST OF BUTTONS.** A grid needs focus mode, and
+  NVDA in browse mode reads characters instead of moving between its buttons; a button per
+  shortcut is a tab stop per shortcut. The listbox is one tab stop, and every action is in its menu
+  or on Enter and Delete. The Applications key is answered on the `contextmenu` event, never the
+  keydown: opening on the keydown moves focus into the menu, the browser's own menu then opens over
+  it. A click opens the menu, because a touch screen has no Applications key. The list carries no
+  `aria-describedby`: it is re-read every time focus comes back from a dialog.
+- **A result spoken as a dialog closes goes through `announceAfterFocus`.** Said before the close,
+  the focus landing back on the page cuts it off. A successful delete says nothing at all.
+- **ONE CHORD FOR EVERY SHORTCUT** (`HotkeyManager._mods`, saved as `hotkeys.mods`). A shortcut has
+  no modifiers of its own choosing: `set_mods` moves them all, and a later duplicate is switched off.
 - **A dialog must close on ONE Escape and put focus back.** Take the `cancel` event,
   `preventDefault`, then close and restore focus yourself. Letting the dialog close itself left
   focus wherever the browser chose, which read as Escape not working (Shaun: "I have to hit esc 3
@@ -1858,7 +1863,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   tab helpers; do not undo it. Without it Tab sails past the whole page.
 - **Never write to the device from a combo box's `change` event, and never rebuild a panel from
   one.** A COLLAPSED select fires `change` on every arrow key, so each keypress applied a preset and
-  destroyed the select mid-interaction. Dropdown plus an explicit Apply button.
+  destroyed the select mid-interaction. The mic preset list keeps its own Apply button because the
+  same selection also feeds "Delete selected preset", which leaving the dropdown must not undo.
 - **`<output>` has an implicit role of `status`, i.e. it is a live region.** A visible value beside a
   slider announced itself on top of the slider's own `aria-valuetext`; use `aria-hidden` +
   `aria-live="off"`.

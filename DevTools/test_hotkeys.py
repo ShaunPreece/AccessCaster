@@ -67,8 +67,12 @@ def _run_checks():
           hotkeys.combo_text(["win", "ctrl", "alt"], "A"))
 
     # --- the defaults are laid down when nothing has been saved ---------------------------------
-    mgr.load({}, defaults=[("one", ("ctrl", "shift"), "F9", True),
-                           ("two", ("ctrl", "shift"), "F10", True)])
+    # THE WHOLE RUN IS ON CTRL+SHIFT, a chord nothing ships on: the real app is very likely RUNNING
+    # while this suite is, holding its own chord (hotkeys.DEFAULT_MODS). A saved chord with no
+    # saved shortcuts is how a test gets there, and the defaults land on it.
+    mgr.load({"mods": ["ctrl", "shift"]},
+             defaults=[("one", hotkeys.DEFAULT_MODS, "F9", True),
+                       ("two", hotkeys.DEFAULT_MODS, "F10", True)])
     mgr.start()
     time.sleep(0.4)
     st = mgr.state()
@@ -96,9 +100,8 @@ def _run_checks():
     res = mgr.add("two")
     check("a shortcut can be added, on a free key", res["ok"], res["message"])
     added = mgr.get(res["id"])
-    check("the new one is on the default chord and switched on",
-          added["enabled"] and sorted(added["mods"]) == sorted(hotkeys.DEFAULT_MODS),
-          str(added))
+    check("the new one is on the shared chord and switched on",
+          added["enabled"] and added["mods"] == ["ctrl", "shift"], str(added))
     # The default chord's first free key may be held by ANOTHER PROGRAM on this machine (a running
     # AccessCaster holds its own shortcuts), so only a clash with our own list is a failure here.
     problem = mgr.state()["shortcuts"][-1]["problem"]
@@ -109,19 +112,22 @@ def _run_checks():
           res["message"])
     first = mgr.state()["shortcuts"][0]["id"]
     added_id = res["id"]
-    res = mgr.set_binding(added_id, ["ctrl", "shift"], "F9", True)
+    res = mgr.set_binding(added_id, "F9", True)
     check("a clash with our OWN shortcut is refused, and names it",
           not res["ok"] and "Test one" in res["message"], res["message"])
-    # MOVE IT OFF THE DEFAULT CHORD. `add` puts a new shortcut on the first free key of the app's
-    # own chord, and the real app is very likely RUNNING while this suite is, holding exactly those.
-    # So the rest of the run goes on a chord NOTHING ships on. Ctrl+Alt+Shift is not that chord -
-    # it is `hotkeys.DEFAULT_MODS`, the app's own.
-    mgr.set_binding(added_id, ["ctrl", "shift"], "F8", True)
+    mgr.set_binding(added_id, "F8", True)
+    res = mgr.add("one", key="F8")
+    check("adding on a key already in use is refused, and names it",
+          not res["ok"] and "Test two" in res["message"], res["message"])
+    res = mgr.add("one", key="F7")
+    check("adding on a chosen free key puts it there",
+          res["ok"] and mgr.get(res["id"])["key"] == "F7", res["message"])
+    mgr.remove(res["id"])
 
     # --- staying quiet, per shortcut -------------------------------------------------------------
     said.clear()
     fired.clear()
-    mgr.set_binding(first, ["ctrl", "shift"], "F9", True, speak=False)
+    mgr.set_binding(first, "F9", True, speak=False)
     post(mgr, 1)
     for _ in range(30):
         if fired:
@@ -135,7 +141,7 @@ def _run_checks():
 
     # A FAILURE is spoken whatever the flag says: silencing hides a confirmation, not a fault.
     boom = mgr.add("boom")
-    mgr.set_binding(boom["id"], ["ctrl", "shift"], "F11", True, speak=False)
+    mgr.set_binding(boom["id"], "F11", True, speak=False)
     said.clear()
     mgr._run(mgr.get(boom["id"]))
     check("a silenced shortcut still speaks a FAILURE",
@@ -161,10 +167,19 @@ def _run_checks():
           and not [s for s in mgr.state()["shortcuts"] if s["problem"]],
           str([(s["combo"], s["problem"]) for s in mgr.state()["shortcuts"]]))
 
+    # --- the shared chord -----------------------------------------------------------------------
+    res = mgr.set_mods(["shift"])
+    check("a chord without Ctrl, Alt or Windows is refused",
+          not res["ok"] and mgr.state()["mods"] == ["ctrl", "shift"], res["message"])
+    res = mgr.set_mods(["ctrl", "alt", "win"])
+    check("changing the chord moves EVERY shortcut to it", res["ok"] and all(
+        s["mods"] == ["ctrl", "alt", "win"] for s in mgr.state()["shortcuts"]), res["message"])
+    mgr.set_mods(["ctrl", "shift"])
+
     # --- what gets persisted, and reloading it ---------------------------------------------------
     saved = mgr.saveable()
     check("only data is persisted, no callables",
-          set(saved) == {"enabled", "shortcuts"}
+          set(saved) == {"enabled", "mods", "shortcuts"}
           and all(set(s) == {"id", "command", "mods", "key", "enabled", "speak"}
                   for s in saved["shortcuts"]),
           str(saved))
@@ -179,6 +194,11 @@ def _run_checks():
                defaults=[("never", ("ctrl", "alt"), "F1", True)])
     check("an empty saved list stays empty: deleting them all is a choice, not a reset",
           empty.state()["shortcuts"] == [])
+    check("the saved chord loads back", fresh.state()["mods"] == ["ctrl", "shift"])
+    res = fresh.reset([("one", hotkeys.DEFAULT_MODS, "F9", True)])
+    check("restoring the defaults replaces the list and the chord",
+          res["ok"] and [s["command"] for s in fresh.state()["shortcuts"]] == ["one"]
+          and fresh.state()["mods"] == list(hotkeys.DEFAULT_MODS), res["message"])
 
     mgr.stop()
     time.sleep(0.3)

@@ -1407,17 +1407,8 @@ function applyUnitSettingValues(d) {
     if (s.kind === "bool") {
       el.checked = s.value === 1;
     } else if (s.kind === "choice") {
-      if (known) {
-        const want = String(s.value);
-        if (!Array.from(el.options).some((o) => o.value === want)) {
-          const opt = document.createElement("option");
-          opt.value = want;
-          opt.textContent = "Currently " + s.value;      // an off-list value, never a silent lie
-          el.appendChild(opt);
-        }
-        el.value = want;
-        el.dataset.prev = want;                          // what a failed write reverts to
-      }
+      // An off-list value gets its own option, never a silent lie.
+      if (known) setStagedValue(el, s.value, "Currently " + s.value);
     } else if (known) {
       el.value = String(s.value);
       el.dataset.prev = String(s.value);                 // what a refused slider write reverts to
@@ -1464,7 +1455,9 @@ function buildUnitSetting(s) {
   }
   const input = control.querySelector("input, select");
   if (input) {
-    input.setAttribute("aria-describedby", hintId);
+    // Appended, not assigned: a dropdown already carries the Enter-to-apply description.
+    input.setAttribute("aria-describedby",
+                       (hintId + " " + (input.getAttribute("aria-describedby") || "")).trim());
     setAvailable(input, unitSettingsWritable, UNIT_SETTINGS_OFF);
   }
   wrap.appendChild(control);
@@ -1491,42 +1484,35 @@ function buildUnitChoice(s, id, known) {
 
   const sel = document.createElement("select");
   sel.id = id;
-  let matched = false;
   (s.choices || []).forEach(([val, name]) => {
     const opt = document.createElement("option");
     opt.value = String(val);
     opt.textContent = name;
-    if (known && Number(s.value) === Number(val)) { opt.selected = true; matched = true; }
     sel.appendChild(opt);
   });
-  if (known && !matched) {
-    const opt = document.createElement("option");
-    opt.value = String(s.value);
-    opt.textContent = "Currently " + s.value;
-    opt.selected = true;
-    sel.appendChild(opt);
+  if (known) {
+    const match = (s.choices || []).find(([val]) => Number(s.value) === Number(val));
+    setStagedValue(sel, match ? match[0] : s.value, "Currently " + s.value);
   }
-  // What a failed write reverts to. Kept ON THE ELEMENT rather than in this closure, because a
-  // re-read updates the control in place and would otherwise leave the closure holding the value
-  // this select had when it was first built.
-  sel.dataset.prev = sel.value;
-  sel.addEventListener("change", async () => {
-    const chosen = sel.value;
-    if (refuseChange(sel) !== null) { sel.value = sel.dataset.prev; return; }
+  enterToApply(sel, async () => {
+    const chosen = parseInt(sel.value, 10);
     setBusy(sel, true);
     try {
-      const res = await postJSON("/api/device/setting",
-                                 { prop: s.prop, value: parseInt(chosen, 10) });
+      const res = await postJSON("/api/device/setting", { prop: s.prop, value: chosen });
       announce(res.message || "Done.", !res.ok);
-      if (res.ok) sel.dataset.prev = chosen; else sel.value = sel.dataset.prev;
+      if (res.ok) setStagedValue(sel, chosen, null);
     } catch (err) {
       announce("Could not reach the device service.", true);
-      sel.value = sel.dataset.prev;
     } finally {
       setBusy(sel, false);
+      revertStaged(sel, false);   // a refusal leaves the unit as it was, so the dropdown says so
     }
   });
   row.appendChild(sel);
+  const now = document.createElement("span");
+  now.className = "hint";
+  now.id = id + "-now";
+  row.appendChild(now);
   return row;
 }
 
@@ -1794,15 +1780,13 @@ async function commitAnnounceVolume() {
    tables), whether a combination is legal, and whether Windows will accept it. This page shows what
    it is told and shows what comes back, so the two can never reach different answers.
 
-   THE LIST IS THE USER'S: any control the app has can be bound. A dropdown of the shortcuts you
-   have added, Add and Delete beside it, and ONE set of controls that edits whichever is picked, so
-   the tab stays short however many shortcuts there are.
-
-   THE EDITOR IS STATIC, IN index.html, and only its VALUES change. That is what makes picking a
-   different shortcut safe: nothing is rebuilt, so a screen reader is never standing on a node that
-   gets replaced. */
+   A LISTBOX, ONE TAB STOP, one option per shortcut. Up, Down, Home, End and a letter move; Enter
+   edits; the Delete key deletes; a click, the Applications key or Shift+F10 opens that shortcut's
+   menu (Edit, Turn off or on, Speak when pressed, Delete). A click opens the menu rather than
+   Edit because a touch screen has no Applications key. */
 let hotkeyData = null;
 let hotkeyCommands = null;      // the catalogue, read once when the Add dialog is first opened
+let hotkeySelectedId = null;
 let _hotkeyReturnFocus = null;
 
 const HOTKEY_MOD_IDS = ["ctrl", "alt", "win", "shift"];
@@ -1823,122 +1807,298 @@ async function loadHotkeys() {
    write's reply, an add and a delete all land the same way. */
 function applyHotkeyState(data, keepId) {
   hotkeyData = data;
-  const sel = document.getElementById("hotkey-pick");
-  const want = keepId || (sel && sel.value);
-  fillOptions("hotkey-pick", (data.shortcuts || []).map(
-    (s) => ({ value: s.id, label: hotkeyPickLabel(s) })));
-  if (sel && want && [...sel.options].some((o) => o.value === want)) sel.value = want;
+  const rows = data.shortcuts || [];
+  if (keepId) hotkeySelectedId = keepId;
+  if (!rows.some((s) => s.id === hotkeySelectedId)) hotkeySelectedId = rows.length ? rows[0].id : null;
+  renderHotkeyList(rows);
   const master = document.getElementById("hotkeys-enabled");
   if (master && document.activeElement !== master) master.checked = data.enabled !== false;
-  showHotkey(currentHotkey());
+  setText("hotkey-mods-btn", "Change the keys to hold, now " + hotkeyModsText(data.mods));
+  const padSet = document.getElementById("hotkeys-pad-set");
+  if (padSet) {
+    padSet.checked = data.pad_set === "all";
+    padSet.indeterminate = data.pad_set === "some";   // announced as partly checked
+  }
   setText("hotkeys-status", data.enabled === false
     ? "Shortcuts are off, so none of these combinations is in use." : "");
 }
 
-/* Each option says what the shortcut does AND what it is on, so the list alone answers "what are my
-   shortcuts" without opening anything. */
-function hotkeyPickLabel(s) {
-  return s.label + (s.enabled ? ": " + s.combo : ": off");
+const hotkeyItemId = (id) => "hk-item-" + id;
+
+/* "Ctrl, Alt and Shift", from the server's own modifier labels. */
+function hotkeyModsText(mods) {
+  const labels = (((hotkeyData || {}).modifiers) || [])
+    .filter((m) => (mods || []).indexOf(m.id) >= 0).map((m) => m.label);
+  if (labels.length < 2) return labels.join("");
+  return labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+}
+
+/* Each option says what the shortcut does AND what it is on, so moving down the list alone
+   answers "what are my shortcuts". */
+function hotkeyItemText(s) {
+  if (s.problem) return s.label + ", " + s.combo + ", not working: " + s.problem;
+  return s.label + ", " + (s.enabled ? s.combo : "off");
+}
+
+/* A listbox with one tab stop and a roving tabindex, so focus sits on the option itself (VoiceOver
+   follows focus; it does not follow aria-activedescendant). Options are updated IN PLACE by id, so
+   a re-read never replaces the node a screen reader is standing on. */
+function renderHotkeyList(rows) {
+  const list = document.getElementById("hotkey-list");
+  if (!list) return;
+  const hadFocus = list.contains(document.activeElement);
+  const keep = new Set(rows.map((s) => hotkeyItemId(s.id)));
+  Array.from(list.children).forEach((li) => { if (!keep.has(li.id)) li.remove(); });
+  rows.forEach((s, i) => {
+    let li = document.getElementById(hotkeyItemId(s.id));
+    if (!li) {
+      li = document.createElement("li");
+      li.id = hotkeyItemId(s.id);
+      li.setAttribute("role", "option");
+      li.dataset.id = s.id;
+    }
+    if (list.children[i] !== li) list.insertBefore(li, list.children[i] || null);
+    const text = hotkeyItemText(s);
+    if (li.textContent !== text) li.textContent = text;
+    const selected = s.id === hotkeySelectedId;
+    li.setAttribute("aria-selected", selected ? "true" : "false");
+    li.tabIndex = selected ? 0 : -1;
+  });
+  list.hidden = !rows.length;
+  const empty = document.getElementById("hotkey-list-empty");
+  if (empty) empty.hidden = !!rows.length;
+  // A delete removes the focused option; focus follows the selection to its neighbour.
+  if (hadFocus && !list.contains(document.activeElement)) focusSelectedHotkey();
 }
 
 function currentHotkey() {
-  const sel = document.getElementById("hotkey-pick");
   const rows = (hotkeyData && hotkeyData.shortcuts) || [];
-  return rows.find((s) => s.id === (sel && sel.value)) || rows[0] || null;
+  return rows.find((s) => s.id === hotkeySelectedId) || null;
 }
 
-/* Paint the editor for one shortcut. VALUES ONLY: every control already exists. The control that
-   has focus is left alone - normally that is the picker itself, and the whole point is that
-   everything else updates under it. */
-function showHotkey(s) {
-  const editor = document.getElementById("hotkey-editor");
-  if (!editor) return;
-  const has = !!s;
-  // With no shortcuts at all there is nothing to edit, and controls that edit nothing would still
-  // be in the tab order. setAvailable keeps them readable and says why, which the raw disabled
-  // attribute cannot.
-  ["hotkey-key", "hotkey-off", "hotkey-speak", "hotkey-delete-btn"]
-    .concat(HOTKEY_MOD_IDS.map((m) => "hotkey-mod-" + m))
-    .forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) setAvailable(el, has, "You have no shortcuts yet. Add one first.");
-    });
-  if (!has) {
-    setText("hotkey-editor-name", "No shortcuts yet");
-    setText("hotkey-detail-status", "Press Add a shortcut to make one.");
-    return;
+function focusedHotkeyOption() {
+  return hotkeySelectedId ? document.getElementById(hotkeyItemId(hotkeySelectedId)) : null;
+}
+
+function focusSelectedHotkey() {
+  const li = focusedHotkeyOption();
+  if (li) { li.focus(); li.scrollIntoView({ block: "nearest" }); }
+  else document.getElementById("hotkey-add-btn").focus();
+}
+
+function selectHotkey(id) {
+  hotkeySelectedId = id;
+  renderHotkeyList((hotkeyData && hotkeyData.shortcuts) || []);
+  focusSelectedHotkey();
+}
+
+function onHotkeyListKey(ev) {
+  const rows = (hotkeyData && hotkeyData.shortcuts) || [];
+  if (!rows.length) return;
+  const i = Math.max(0, rows.findIndex((s) => s.id === hotkeySelectedId));
+  const moveTo = (j) => { ev.preventDefault(); selectHotkey(rows[j].id); };
+  switch (ev.key) {
+    case "ArrowDown": return moveTo(Math.min(rows.length - 1, i + 1));
+    case "ArrowUp": return moveTo(Math.max(0, i - 1));
+    case "Home": return moveTo(0);
+    case "End": return moveTo(rows.length - 1);
+    case "PageDown": return moveTo(Math.min(rows.length - 1, i + 10));
+    case "PageUp": return moveTo(Math.max(0, i - 10));
+    case "Enter": ev.preventDefault(); return openHotkeyEdit(focusedHotkeyOption());
+    case "Delete": ev.preventDefault(); return onHotkeyDeleteOpen(focusedHotkeyOption());
+    // The Applications key and Shift+F10 are NOT handled here: the browser follows each with a
+    // `contextmenu` event, which wireHotkeys answers. Opening the menu on the keydown as well moves
+    // focus into it, so that event lands on the menu and the browser's own menu opens over it.
+    default:
+      // Type-to-find: a letter jumps to the next shortcut whose name starts with it.
+      if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        const k = ev.key.toLowerCase();
+        for (let n = 1; n <= rows.length; n++) {
+          const j = (i + n) % rows.length;
+          if ((rows[j].label || "").toLowerCase().startsWith(k)) return moveTo(j);
+        }
+      }
   }
-  setText("hotkey-editor-name", s.label);
-  setText("hotkey-detail-status", hotkeyRowStatus(s, hotkeyData || {}));
-
-  HOTKEY_MOD_IDS.forEach((m) => {
-    const cb = document.getElementById("hotkey-mod-" + m);
-    if (cb && document.activeElement !== cb) cb.checked = (s.mods || []).indexOf(m) >= 0;
-  });
-  const keys = fillOptions("hotkey-key",
-    (((hotkeyData || {}).keys) || []).map((k) => ({ value: k, label: k })));
-  if (keys && document.activeElement !== keys && s.key) keys.value = s.key;
-  // THE SWITCH IS INVERTED: it reads "Disable this shortcut", so ticked means NOT enabled.
-  const off = document.getElementById("hotkey-off");
-  if (off && document.activeElement !== off) off.checked = !s.enabled;
-  const say = document.getElementById("hotkey-speak");
-  if (say && document.activeElement !== say) say.checked = s.speak !== false;
 }
 
-function hotkeyRowStatus(s, data) {
-  if (s.problem) return s.problem;
-  if (!s.enabled) return "Off.";
-  if (data.enabled === false) return "Shortcuts are switched off.";
-  return "Press " + s.combo + (s.speak === false ? ". It will not say so." : ".");
+/* ---- The context menu (APG menu button pattern) ---------------------------
+   Opened by the More options button or the list's own keys, beside whichever opened it. Up, Down,
+   Home and End move; Enter or Space acts; Escape closes and returns focus to the opener; Tab closes
+   it too. Its two state items say the CURRENT state of the selected shortcut. */
+let _hotkeyMenuOpener = null;
+
+function openHotkeyMenu(opener) {
+  const s = currentHotkey();
+  const menu = document.getElementById("hotkey-menu");
+  if (!s || !menu || !opener) return;
+  setText("hotkey-menu-toggle", s.enabled ? "Turn off" : "Turn on");
+  document.getElementById("hotkey-menu-speak")
+    .setAttribute("aria-checked", s.speak !== false ? "true" : "false");
+  _hotkeyMenuOpener = opener;
+  const r = opener.getBoundingClientRect();
+  menu.style.left = (r.left + window.scrollX) + "px";
+  menu.style.top = (r.bottom + window.scrollY + 2) + "px";
+  menu.hidden = false;
+  if (opener.hasAttribute("aria-expanded")) opener.setAttribute("aria-expanded", "true");
+  hotkeyMenuItems()[0].focus();
 }
 
-function onHotkeyPick() {
-  showHotkey(currentHotkey());
+function hotkeyMenuItems() {
+  return Array.from(document.querySelectorAll("#hotkey-menu [role^='menuitem']"));
 }
 
-/* Read the editor back and send the WHOLE binding, because a modifier on its own is not a shortcut:
-   the server has to see the combination to judge it. A rejected change is NOT applied, so the
-   editor is repainted from the state the reply carries. */
-async function saveHotkey() {
+function closeHotkeyMenu(refocus) {
+  const menu = document.getElementById("hotkey-menu");
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  const opener = _hotkeyMenuOpener;
+  if (opener && opener.hasAttribute("aria-expanded")) opener.setAttribute("aria-expanded", "false");
+  if (refocus && opener && opener.isConnected) opener.focus();
+}
+
+function onHotkeyMenuKey(ev) {
+  const items = hotkeyMenuItems();
+  const i = items.indexOf(document.activeElement);
+  const go = (j) => { ev.preventDefault(); items[(j + items.length) % items.length].focus(); };
+  switch (ev.key) {
+    case "ArrowDown": return go(i + 1);
+    case "ArrowUp": return go(i - 1);
+    case "Home": return go(0);
+    case "End": return go(items.length - 1);
+    case "Escape": ev.preventDefault(); return closeHotkeyMenu(true);
+    case "Tab": return closeHotkeyMenu(false);
+    case "Enter":
+    case " ":
+      ev.preventDefault();
+      return runHotkeyMenuItem(document.activeElement);
+  }
+}
+
+function runHotkeyMenuItem(item) {
+  if (!item || !item.dataset.action) return;
+  const opener = _hotkeyMenuOpener;
+  closeHotkeyMenu(true);
   const s = currentHotkey();
   if (!s) return;
-  const mods = HOTKEY_MOD_IDS.filter((m) => {
-    const cb = document.getElementById("hotkey-mod-" + m);
-    return cb && cb.checked;
-  });
-  const key = document.getElementById("hotkey-key");
-  const off = document.getElementById("hotkey-off");
-  const say = document.getElementById("hotkey-speak");
-  if (!key || !off) return;
-  try {
-    const res = await postJSON("/api/hotkeys/set", {
-      // Inverted here, and in showHotkey, and NOWHERE ELSE: the server only ever sees `enabled`.
-      id: s.id, mods, key: key.value, enabled: !off.checked, speak: !say || say.checked,
-    });
-    announce(res.message || "Done.", !res.ok);
-    if (res.state) {
-      applyHotkeyState(res.state, s.id);
-      if (!res.ok) forceHotkeyValues(currentHotkey());
-    }
-  } catch (err) {
-    announce("Could not reach the app service.", true);
+  switch (item.dataset.action) {
+    case "edit": return openHotkeyEdit(opener);
+    case "delete": return onHotkeyDeleteOpen(opener);
+    // The menu has just closed and focus is back on the shortcut, so the reply waits for that.
+    case "toggle":
+      return sendHotkey(s, { enabled: !s.enabled }, true)
+        .then((res) => announceAfterFocus(res.message || "Done.", !res.ok));
+    case "speak":
+      return sendHotkey(s, { speak: s.speak === false }, true)
+        .then((res) => announceAfterFocus(res.message || "Done.", !res.ok));
   }
 }
 
-/* showHotkey deliberately skips the control that has focus - which, after a rejected change, is the
-   very control that has to be put back. So a refusal writes those unconditionally. */
-function forceHotkeyValues(s) {
+/* Send one shortcut's key, on/off and speech with `changes` applied. The keys held are the
+   shared chord (onHotkeyModsSave), never sent per shortcut. Returns the reply, and speaks it
+   unless `quiet` (a dialog that is about to close speaks it afterwards: see announceAfterFocus). */
+async function sendHotkey(s, changes, quiet) {
+  const body = Object.assign({ id: s.id, key: s.key, enabled: s.enabled,
+                               speak: s.speak !== false }, changes);
+  let res;
+  try {
+    res = await postJSON("/api/hotkeys/set", body);
+  } catch (err) {
+    res = { ok: false, message: "Could not reach the app service." };
+  }
+  if (!quiet) announce(res.message || "Done.", !res.ok);
+  if (res.state) applyHotkeyState(res.state, s.id);
+  return res;
+}
+
+/* A result spoken just after a dialog closes. Said BEFORE, the focus moving back to the page
+   cuts it off. */
+function announceAfterFocus(text, bad) {
+  window.setTimeout(() => announce(text, bad), 250);
+}
+
+/* The key list, for the Edit and Add dialogs. */
+function fillHotkeyKeys(id, chosen) {
+  const keys = fillOptions(id, (((hotkeyData || {}).keys) || []).map((k) => ({ value: k, label: k })));
+  if (keys && chosen) keys.value = chosen;
+  return keys;
+}
+
+/* The first key no switched-on shortcut is using, which is what Add offers to begin with. */
+function firstFreeHotkey() {
+  const taken = new Set((((hotkeyData || {}).shortcuts) || [])
+    .filter((s) => s.enabled).map((s) => s.key));
+  return (((hotkeyData || {}).keys) || []).find((k) => !taken.has(k)) || "";
+}
+
+/* ---- Edit dialog ------------------------------------------------------- */
+function openHotkeyEdit(opener) {
+  const s = currentHotkey();
+  if (!s) { announce("You have no shortcuts yet. Add one first.", true); return; }
+  _hotkeyReturnFocus = opener || focusedHotkeyOption();
+  setText("hotkey-edit-title", "Edit shortcut: " + s.label);
+  setText("hotkey-edit-status", s.problem || "");
+  fillHotkeyKeys("hotkey-key", s.key);
+  // INVERTED: the switch reads "Turn this shortcut off", so ticked means NOT enabled.
+  document.getElementById("hotkey-off").checked = !s.enabled;
+  document.getElementById("hotkey-speak").checked = s.speak !== false;
+  document.getElementById("hotkey-edit-dialog").showModal();
+  document.getElementById("hotkey-key").focus();
+}
+
+async function onHotkeyEditSave() {
+  const s = currentHotkey();
   if (!s) return;
+  const btn = document.getElementById("hotkey-edit-save");
+  if (isBusy(btn)) return;
+  setBusy(btn, true);
+  const res = await sendHotkey(s, {
+    key: document.getElementById("hotkey-key").value,
+    enabled: !document.getElementById("hotkey-off").checked,     // inverted, see openHotkeyEdit
+    speak: document.getElementById("hotkey-speak").checked,
+  }, true);
+  setBusy(btn, false);
+  // A refusal keeps the dialog open with the reason, so the key can be changed and saved again.
+  if (res.ok) {
+    closeHotkeyDialog("hotkey-edit-dialog");
+    announceAfterFocus(res.message || "Saved.");
+  } else {
+    setText("hotkey-edit-status", res.message || "That could not be saved.");
+  }
+}
+
+/* ---- The keys held for every shortcut ---------------------------------- */
+function openHotkeyMods() {
+  _hotkeyReturnFocus = document.getElementById("hotkey-mods-btn");
+  const mods = (hotkeyData && hotkeyData.mods) || [];
   HOTKEY_MOD_IDS.forEach((m) => {
-    const cb = document.getElementById("hotkey-mod-" + m);
-    if (cb) cb.checked = (s.mods || []).indexOf(m) >= 0;
+    document.getElementById("hotkey-mod-" + m).checked = mods.indexOf(m) >= 0;
   });
-  const key = document.getElementById("hotkey-key");
-  if (key && s.key) key.value = s.key;
-  const off = document.getElementById("hotkey-off");
-  if (off) off.checked = !s.enabled;
-  const say = document.getElementById("hotkey-speak");
-  if (say) say.checked = s.speak !== false;
+  setText("hotkey-mods-status", "");
+  document.getElementById("hotkey-mods-dialog").showModal();
+  document.getElementById("hotkey-mod-ctrl").focus();
+}
+
+async function onHotkeyModsSave() {
+  const btn = document.getElementById("hotkey-mods-save");
+  if (isBusy(btn)) return;
+  setBusy(btn, true);
+  try {
+    const res = await postJSON("/api/hotkeys/mods", {
+      mods: HOTKEY_MOD_IDS.filter((m) => document.getElementById("hotkey-mod-" + m).checked),
+    });
+    if (res.state) applyHotkeyState(res.state);
+    // A refusal (no Ctrl, Alt or Windows) keeps the dialog open with the reason.
+    if (res.ok) {
+      closeHotkeyDialog("hotkey-mods-dialog");
+      announceAfterFocus(res.message || "Done.");
+    } else {
+      setText("hotkey-mods-status", res.message || "Those keys cannot be used.");
+    }
+  } catch (err) {
+    setText("hotkey-mods-status", "Could not reach the app service.");
+  } finally {
+    setBusy(btn, false);
+  }
 }
 
 function onHotkeysEnabledToggle(ev) {
@@ -1968,6 +2128,7 @@ async function onHotkeyAddOpen() {
   setText("hotkey-add-status", "Reading what can be put on a shortcut...");
   fillOptions("hotkey-add-category", []);
   fillOptions("hotkey-add-command", []);
+  fillHotkeyKeys("hotkey-add-key", firstFreeHotkey());
   dlg.showModal();
   // Focus the first thing there is to DO. Focusing the heading instead means the whole dialog is
   // read out and then its title again before you reach anything.
@@ -1999,11 +2160,32 @@ function fillHotkeyAddCommands() {
     ((group && group.commands) || []).map((c) => ({ value: c.id, label: c.label })));
 }
 
+/* "Use the SMART pad keys": ticking adds what is missing of the pad scheme (a partly ticked box
+   becomes ticked when pressed); unticking deletes it. */
+async function onHotkeyPadSetToggle(ev) {
+  const input = ev.target;
+  setBusy(input, true);
+  try {
+    const res = await postJSON("/api/hotkeys/pad-set", { on: input.checked });
+    announce(res.message || "Done.", !res.ok);
+    if (res.state) applyHotkeyState(res.state);
+  } catch (err) {
+    announce("Could not reach the app service.", true);
+    if (hotkeyData) applyHotkeyState(hotkeyData);
+  } finally {
+    setBusy(input, false);
+  }
+}
+
 function closeHotkeyDialog(id) {
   const dlg = document.getElementById(id);
   if (dlg.open) dlg.close();
-  if (_hotkeyReturnFocus) { try { _hotkeyReturnFocus.focus(); } catch (e) { /* gone */ } }
+  const back = _hotkeyReturnFocus;
   _hotkeyReturnFocus = null;
+  // The opener may be an option that a delete has just removed; the selection is then on its
+  // neighbour, which is where focus belongs.
+  if (back && back.isConnected) { try { back.focus(); } catch (e) { /* gone */ } }
+  else focusSelectedHotkey();
 }
 
 async function onHotkeyAddConfirm() {
@@ -2011,38 +2193,52 @@ async function onHotkeyAddConfirm() {
   const command = sel && sel.value;
   if (!command) { setText("hotkey-add-status", "Choose what the shortcut should do first."); return; }
   try {
-    const res = await postJSON("/api/hotkeys/add", { command });
-    announce(res.message || "Done.", !res.ok);
+    const res = await postJSON("/api/hotkeys/add",
+      { command, key: document.getElementById("hotkey-add-key").value });
     if (res.state) applyHotkeyState(res.state, res.id);
+    // A refused key keeps the dialog open with the reason, so another can be chosen.
+    if (!res.ok) { setText("hotkey-add-status", res.message || "That could not be added."); return; }
+    // Land on the shortcut just made.
+    _hotkeyReturnFocus = null;
     closeHotkeyDialog("hotkey-add-dialog");
-    // Land on the thing just made, so the keys can be changed straight away without hunting.
-    const pick = document.getElementById("hotkey-pick");
-    if (pick) pick.focus();
+    announceAfterFocus(res.message || "Done.");
   } catch (err) {
     setText("hotkey-add-status", "Could not reach the app service.");
   }
 }
 
-/* Add the whole pad set at once. Safe to press twice: the server skips anything already bound and
-   says what it skipped, so this never quietly makes duplicates or overwrites a key you chose. */
-async function onHotkeyAddPads() {
-  const btn = document.getElementById("hotkey-add-pads-btn");
-  setBusy(btn, true);
-  try {
-    const res = await postJSON("/api/hotkeys/add-pads", {});
-    announce(res.message || "Done.", !res.ok);
-    if (res.state) applyHotkeyState(res.state);
-  } catch (err) {
-    announce("Could not reach the app service.", true);
-  } finally {
-    setBusy(btn, false);
-  }
+function onHotkeyRestoreOpen() {
+  const d = hotkeyData || {};
+  const have = (d.shortcuts || []).length;
+  _hotkeyReturnFocus = document.getElementById("hotkey-restore-btn");
+  setText("hotkey-restore-desc",
+    "This replaces your " + have + (have === 1 ? " shortcut" : " shortcuts") + " with the "
+    + (d.default_count || 0) + " standard ones and the " + (d.default_pad_count || 0)
+    + " SMART pad keys, all on " + hotkeyModsText(d.default_mods)
+    + ". Anything you have added or changed is lost.");
+  document.getElementById("hotkey-restore-dialog").showModal();
+  // Cancel first: the safe action is the one already focused.
+  document.getElementById("hotkey-restore-cancel").focus();
 }
 
-function onHotkeyDeleteOpen() {
+async function onHotkeyRestoreConfirm() {
+  let said = "Could not reach the app service.";
+  let bad = true;
+  try {
+    const res = await postJSON("/api/hotkeys/restore-defaults", {});
+    said = res.message || "Done.";
+    bad = !res.ok;
+    hotkeySelectedId = null;          // the old selection is gone; land on the first shortcut
+    if (res.state) applyHotkeyState(res.state);
+  } catch (err) { /* said above */ }
+  closeHotkeyDialog("hotkey-restore-dialog");
+  announceAfterFocus(said, bad);
+}
+
+function onHotkeyDeleteOpen(opener) {
   const s = currentHotkey();
-  if (!s) { announce("There is no shortcut to delete.", true); return; }
-  _hotkeyReturnFocus = document.getElementById("hotkey-delete-btn");
+  if (!s) { announce("You have no shortcuts yet. Add one first.", true); return; }
+  _hotkeyReturnFocus = opener || focusedHotkeyOption();
   setText("hotkey-delete-name", s.label);
   document.getElementById("hotkey-delete-dialog").showModal();
   // Cancel first: the safe action is the one already focused.
@@ -2051,47 +2247,81 @@ function onHotkeyDeleteOpen() {
 
 async function onHotkeyDeleteConfirm() {
   const s = currentHotkey();
-  closeHotkeyDialog("hotkey-delete-dialog");
-  if (!s) return;
+  if (!s) { closeHotkeyDialog("hotkey-delete-dialog"); return; }
+  let said = "Could not reach the app service.";
+  let bad = true;
   try {
     const res = await postJSON("/api/hotkeys/delete", { id: s.id });
-    announce(res.message || "Done.", !res.ok);
+    said = res.message || "Done.";
+    bad = !res.ok;
+    if (res.ok) {
+      // Select the neighbour BEFORE the list changes, so focus has somewhere to go.
+      const rows = (hotkeyData && hotkeyData.shortcuts) || [];
+      const i = rows.findIndex((r) => r.id === s.id);
+      const next = rows[i + 1] || rows[i - 1];
+      hotkeySelectedId = next ? next.id : null;
+    }
     if (res.state) applyHotkeyState(res.state);
-    const pick = document.getElementById("hotkey-pick");
-    if (pick) pick.focus();
-  } catch (err) {
-    announce("Could not reach the app service.", true);
-  }
+  } catch (err) { /* said above */ }
+  closeHotkeyDialog("hotkey-delete-dialog");
+  // A delete that worked says nothing more: it was confirmed in the dialog, and focus landing on
+  // the next shortcut shows it is gone. Only a failure is spoken.
+  if (bad) announceAfterFocus(said, true);
+}
+
+/* A modal's Escape closes it in ONE press and puts focus back on what opened it. Letting the dialog
+   close itself leaves focus wherever the browser chose. */
+function wireHotkeyDialog(id, cancelId) {
+  document.getElementById(cancelId).addEventListener("click", () => closeHotkeyDialog(id));
+  document.getElementById(id).addEventListener("cancel", (ev) => {
+    ev.preventDefault();
+    closeHotkeyDialog(id);
+  });
 }
 
 function wireHotkeys() {
   document.getElementById("hotkeys-enabled").addEventListener("change", onHotkeysEnabledToggle);
-  document.getElementById("hotkey-pick").addEventListener("change", onHotkeyPick);
-  ["hotkey-key", "hotkey-off", "hotkey-speak"]
-    .concat(HOTKEY_MOD_IDS.map((m) => "hotkey-mod-" + m))
-    .forEach((id) => document.getElementById(id).addEventListener("change", saveHotkey));
+  const list = document.getElementById("hotkey-list");
+  list.addEventListener("keydown", onHotkeyListKey);
+  // A click or tap selects the shortcut and opens its menu, the only way to it without a keyboard.
+  list.addEventListener("click", (ev) => {
+    const li = ev.target.closest("[role='option']");
+    if (!li) return;
+    selectHotkey(li.dataset.id);
+    openHotkeyMenu(li);
+  });
+  // The Applications key, Shift+F10 and a right-click all arrive as `contextmenu`.
+  list.addEventListener("contextmenu", (ev) => {
+    const li = ev.target.closest("[role='option']");
+    if (!li) return;
+    ev.preventDefault();
+    if (li.dataset.id !== hotkeySelectedId) selectHotkey(li.dataset.id);
+    openHotkeyMenu(focusedHotkeyOption());
+  });
+  const menu = document.getElementById("hotkey-menu");
+  menu.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  menu.addEventListener("keydown", onHotkeyMenuKey);
+  menu.addEventListener("click", (ev) => runHotkeyMenuItem(ev.target.closest("[role^='menuitem']")));
+  // A click anywhere else closes it, as a context menu does.
+  document.addEventListener("pointerdown", (ev) => {
+    if (!menu.hidden && !menu.contains(ev.target)
+        && !(ev.target.closest && ev.target.closest("#hotkey-list [role='option']"))) closeHotkeyMenu(false);
+  });
   document.getElementById("hotkey-add-btn").addEventListener("click", onHotkeyAddOpen);
-  document.getElementById("hotkey-add-pads-btn").addEventListener("click", onHotkeyAddPads);
   document.getElementById("hotkey-add-category").addEventListener("change", fillHotkeyAddCommands);
+  document.getElementById("hotkeys-pad-set").addEventListener("change", onHotkeyPadSetToggle);
+  document.getElementById("hotkey-mods-btn").addEventListener("click", openHotkeyMods);
+  document.getElementById("hotkey-restore-btn").addEventListener("click", onHotkeyRestoreOpen);
+  document.getElementById("hotkey-restore-confirm").addEventListener("click", onHotkeyRestoreConfirm);
+  wireHotkeyDialog("hotkey-restore-dialog", "hotkey-restore-cancel");
+  document.getElementById("hotkey-mods-save").addEventListener("click", onHotkeyModsSave);
+  wireHotkeyDialog("hotkey-mods-dialog", "hotkey-mods-cancel");
   document.getElementById("hotkey-add-confirm").addEventListener("click", onHotkeyAddConfirm);
-  document.getElementById("hotkey-add-cancel")
-          .addEventListener("click", () => closeHotkeyDialog("hotkey-add-dialog"));
-  // ESCAPE CLOSES IT IN ONE PRESS, and puts focus back on the button that opened it. Letting the
-  // dialog close ITSELF leaves focus wherever the browser chose, and it then takes several presses
-  // to get out. Taking the cancel event and doing both halves ourselves is the same pattern the pad
-  // confirmation uses.
-  document.getElementById("hotkey-add-dialog").addEventListener("cancel", (ev) => {
-    ev.preventDefault();
-    closeHotkeyDialog("hotkey-add-dialog");
-  });
-  document.getElementById("hotkey-delete-btn").addEventListener("click", onHotkeyDeleteOpen);
+  wireHotkeyDialog("hotkey-add-dialog", "hotkey-add-cancel");
+  document.getElementById("hotkey-edit-save").addEventListener("click", onHotkeyEditSave);
+  wireHotkeyDialog("hotkey-edit-dialog", "hotkey-edit-cancel");
   document.getElementById("hotkey-delete-confirm").addEventListener("click", onHotkeyDeleteConfirm);
-  document.getElementById("hotkey-delete-cancel")
-          .addEventListener("click", () => closeHotkeyDialog("hotkey-delete-dialog"));
-  document.getElementById("hotkey-delete-dialog").addEventListener("cancel", (ev) => {
-    ev.preventDefault();
-    closeHotkeyDialog("hotkey-delete-dialog");
-  });
+  wireHotkeyDialog("hotkey-delete-dialog", "hotkey-delete-cancel");
 }
 
 /* ===== Channels: one adaptive panel per channel (mics + Bluetooth/USB/Chat) =====
@@ -2724,10 +2954,9 @@ function sendMicToggle(url, channel, on, input) {
   return sendToggle(url, { channel, on }, input, on);
 }
 
-/* MIC TYPE IS STAGED BEHIND ITS OWN APPLY, and it is the most important of the staged selects:
-   choosing a voicing makes the DESK apply that voicing's own default gain, so an arrow press
-   through this list would change the level as well as the sound. A closed select fires on every
-   arrow, and arrowing a closed select is how you read one. */
+/* MIC TYPE APPLIES ON ENTER, and it matters most here: choosing a voicing makes the DESK apply that
+   voicing's own default gain, so an arrow press through this list would change the level as well as
+   the sound. See enterToApply. */
 function buildMicTypeField(ch, idx) {
   const opts = channelsData.mic_types.map(([val, name]) => [val, name]);
   const known = opts.some(([val]) => val === ch.mic_type);
@@ -2736,8 +2965,7 @@ function buildMicTypeField(ch, idx) {
   }
   const made = makeStagedSelect("mictype-" + ch.name, "Mic type", opts, {
     className: "field proc-field",
-    applyText: "Apply mic type",
-    onApply: (sel, btn) => setMicType(idx, sel, ch, btn),
+    onApply: (sel) => setMicType(idx, sel, ch),
   });
   setStagedValue(made.sel, ch.mic_type, null);
   return made.row;
@@ -3031,16 +3259,16 @@ function fillPresetControls(wrap, ch) {
    Patching the one slider by hand is not enough, so a success re-reads the whole panel the way
    applying a preset does. The moves are also in the spoken message, because controls that silently
    update themselves announce nothing. */
-async function setMicType(channel, sel, ch, btn) {
+async function setMicType(channel, sel, ch) {
   const type = parseInt(sel.value, 10);
   if (Number.isNaN(type)) return;
-  setBusy(btn || sel, true);
+  setBusy(sel, true);
   try {
     const res = await postJSON("/api/channel/mic-type", { channel, type });
     announce(res.message || "Done.", !res.ok);
     if (res.ok) {
-      // Rebuilds the panel, which re-reads the type onto the dropdown as well, so `sel` and `btn`
-      // are detached from here on and must not be touched again.
+      // Rebuilds the panel, which re-reads the type onto the dropdown as well, so `sel` is detached
+      // from here on; clearing its busy mark below is harmless.
       await keepingFocus(loadChannels);
       return;
     }
@@ -3050,7 +3278,7 @@ async function setMicType(channel, sel, ch, btn) {
     announce("Could not reach the device service.", true);
     setStagedValue(sel, ch && ch.mic_type, null);
   } finally {
-    setBusy(btn || sel, false);
+    setBusy(sel, false);
   }
 }
 
@@ -3335,7 +3563,6 @@ async function loadPads() {
 function syncPadEditor() {
   // Drop any pending write, so it never lands on a different pad.
   if (_volDebounce) { clearTimeout(_volDebounce); _volDebounce = null; }
-  _padSelectCancels.forEach((cancel) => cancel());
   const pad = currentPad();
   const typeSel = document.getElementById("pad-ed-type");
   if (!typeSel) return;
@@ -3404,19 +3631,9 @@ function fillPadSettings(pad) {
   const nameEl = document.getElementById("pad-ed-name");
   if (nameEl) nameEl.value = pad.name ? pad.name.replace(/_/g, " ") : "";
 
-  const colourEl = document.getElementById("pad-ed-colour");
-  if (colourEl && pad.colour !== null && pad.colour !== undefined) {
-    const want = String(pad.colour);
-    // An index the palette does not name (should not happen) gets its own option rather than
-    // silently showing the wrong colour.
-    if (![...colourEl.options].some((o) => o.value === want)) {
-      const opt = document.createElement("option");
-      opt.value = want;
-      opt.textContent = "Colour " + want;
-      colourEl.appendChild(opt);
-    }
-    colourEl.value = want;
-  }
+  // An index the palette does not name (should not happen) gets its own option rather than
+  // silently showing the wrong colour.
+  setStagedValue(document.getElementById("pad-ed-colour"), pad.colour, "Colour " + pad.colour);
 
   // Volume (padGain) only applies to a pad that plays a SOUND file; a voice-FX pad has no sound
   // to set a level on (its loudness is the effect's own mix), so the control is hidden for it.
@@ -3434,10 +3651,7 @@ function fillPadSettings(pad) {
   const playEl = document.getElementById("pad-ed-playmode");
   const playMode = isSound && pad.play_mode !== null && pad.play_mode !== undefined
     ? pad.play_mode : null;
-  if (playEl && playMode !== null) {
-    const want = String(playMode);
-    if ([...playEl.options].some((o) => o.value === want)) playEl.value = want;
-  }
+  setStagedValue(playEl, playMode, null);
   const oneShot = playMode === padsPlayModeOneShot;
 
   showEl("pad-ed-replay-row", isSound);
@@ -3452,10 +3666,7 @@ function fillPadSettings(pad) {
   const isMixer = present && pad.type === 3;
   showEl("pad-ed-mixer-trigger-row", isMixer);
   const trigEl = document.getElementById("pad-ed-mixer-trigger");
-  if (trigEl && isMixer && pad.mixer_trigger !== null && pad.mixer_trigger !== undefined) {
-    const want = String(pad.mixer_trigger);
-    if ([...trigEl.options].some((o) => o.value === want)) trigEl.value = want;
-  }
+  if (isMixer) setStagedValue(trigEl, pad.mixer_trigger, null);
   // MIDI trigger pads: what the pad sends (built from the server's spec; see fillTriggerSettings).
   fillTriggerSettings(pad);
   // A sound pad's trim/fade envelope, a Fade pad's times, a Censor pad's own sound. Each shows only
@@ -3659,7 +3870,6 @@ async function onPadRename() {
 // once per step. _volDebounce is cleared on pad change so a pending write never lands on
 // the wrong pad.
 let _volDebounce = null;
-let _padSelectCancels = [];   // the pending-commit cancels for the Settings dropdowns
 
 function onPadVolumeInput() {
   const volEl = document.getElementById("pad-ed-volume");
@@ -3687,11 +3897,8 @@ async function onPadColour() {
   const colour = Math.max(0, Math.min(11, parseInt(colourEl.value, 10) || 0));
   if (pad.colour === colour) return;      // already this colour; nothing to write
   const res = await padEditPost("/api/pad/colour", { pad: pad.grid, colour });
-  if (res.ok) {
-    pad.colour = colour;
-  } else if (pad.colour !== null && pad.colour !== undefined) {
-    colourEl.value = String(pad.colour);   // put the control back to the truth on failure
-  }
+  if (res.ok) pad.colour = colour;
+  setStagedValue(colourEl, pad.colour, null);   // on a refusal, puts the control back to the truth
 }
 
 async function onPadToggle(url, cb) {
@@ -3945,7 +4152,8 @@ function buildTriggerFields(spec) {
     input.id = id;
     input.dataset.field = f.key;
     input.setAttribute("aria-describedby", helpId);
-    input.addEventListener("change", () => onTriggerField(input, f));
+    if (f.choices) enterToApply(input, () => onTriggerField(input, f));
+    else input.addEventListener("change", () => onTriggerField(input, f));
     const help = document.createElement("span");
     help.className = "hint";
     help.id = helpId;
@@ -3991,7 +4199,8 @@ function fillTriggerSettings(pad) {
   ((spec && spec.fields) || []).forEach((f) => {
     const el = document.getElementById("pad-ed-trig-" + f.key);
     if (!el || t[f.key] === null || t[f.key] === undefined) return;
-    el.value = String(t[f.key]);
+    if (el.tagName === "SELECT") setStagedValue(el, t[f.key], null);
+    else el.value = String(t[f.key]);
     // The custom flag is what the firmware honours, so a control that would do nothing says so
     // rather than accepting a value silently. aria-disabled, NOT the attribute: these are the
     // fields somebody arrows through while setting a pad up, and a disabled one is skipped with no
@@ -4073,9 +4282,7 @@ async function onMixerTrigger() {
   if (pad.mixer_trigger === mode) return;      // already there; nothing to write
   const res = await padEditPost("/api/pad/mixer-trigger", { pad: pad.grid, mode });
   if (res.ok) pad.mixer_trigger = mode;
-  else if (pad.mixer_trigger !== null && pad.mixer_trigger !== undefined) {
-    sel.value = String(pad.mixer_trigger);     // put the control back to the truth on failure
-  }
+  setStagedValue(sel, pad.mixer_trigger, null);  // on a refusal, puts the control back to the truth
 }
 
 async function onPadClear() {
@@ -4666,98 +4873,92 @@ let _routingValues = null;
 /* How long an UNSTAGED dropdown (one that writes nothing to the desk's audio: the metered stream)
    waits after you stop moving before it commits. A CLOSED select fires `change` on EVERY arrow
    press, so without the wait each option passed would be saved, and each write would mark the
-   control busy, announcing every option as "unavailable". Anything that changes the desk's audio
-   is staged behind an Apply instead (makeStagedSelect), because a delay still fires while you pause
-   to listen. */
+   control busy, announcing every option as "unavailable". Anything that changes the desk applies
+   on Enter instead (enterToApply), because a delay still fires while you pause to listen. */
 const SELECT_COMMIT_MS = 500;
 
-/* A dropdown that writes straight to the desk with no Apply button. A change made by browsing keys
-   only commits on Enter or on leaving the dropdown: a pause to hear an option is not a choice. A
-   change with no browsing key behind it (a mouse or touch pick, or Enter in an opened list) commits
-   at once. `commit` must be a no-op when the desk already has the value, because leaving the
-   dropdown calls it. Returns a cancel function, for a pending commit that must not outlive what it
-   was about (a pad change). */
-const BROWSE_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-                             "Home", "End", "PageUp", "PageDown"]);
-function commitOnEnter(sel, commit) {
-  let browsing = false;
-  let pending = false;
-  const flush = () => { if (pending) { pending = false; commit(); } };
-  sel.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      // An opened list fires `change` after this keydown; clearing `browsing` lets that commit.
-      browsing = false;
-      flush();
-      return;
-    }
-    browsing = BROWSE_KEYS.has(e.key)
-      || (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey);   // type-to-find
-  });
-  sel.addEventListener("pointerdown", () => { browsing = false; });
-  sel.addEventListener("change", () => {
-    if (browsing) { pending = true; return; }
-    pending = false;
-    commit();
-  });
-  sel.addEventListener("blur", flush);
-  return () => { pending = false; };
-}
+/* ---- A DROPDOWN THAT CHANGES THE DESK: ENTER APPLIES -----------------
+   ONE RULE FOR EVERY DROPDOWN THAT WRITES TO THE DESK, so nobody has to guess which kind they are
+   in. Arrowing, or typing to find, only browses: a CLOSED select fires `change` on every arrow
+   press, and arrowing is how a screen-reader user reads one, so neither the change nor a pause to
+   listen can be taken as a choice. Enter on the closed dropdown applies. Escape, or leaving the
+   dropdown, puts it back to what the unit has and says so. A mouse or touch pick applies at once.
+   A dropdown that only changes WHAT YOU ARE LOOKING AT (which pad, which output, which shortcut)
+   is not one of these and acts at once, because nothing leaves the app.
+   Each one is described by ENTER_HINT_ID, so the rule is heard on arrival. That description is
+   static: a description whose TEXT changes is re-read as you arrow, which is why the "-now" line
+   below is on the page and not described-by.
+   The unit's value lives in `dataset.deviceValue`, written only by setStagedValue, so a choice
+   still waiting can never be mistaken for what the desk is doing. */
+const ENTER_HINT_ID = "enter-to-apply-hint";
 
-/* ---- A DROPDOWN THAT STAGES, AND THE BUTTON THAT COMMITS IT ----------
-   THE RULE: a dropdown that changes WHAT COMES OUT OF THE DESK gets one of these. A dropdown that
-   only changes WHAT YOU ARE LOOKING AT - which pad, which output, which shortcut - acts at once,
-   because nothing leaves the app.
-
-   WHY IT IS NEEDED AT ALL: a CLOSED select fires `change` on every arrow press, and arrowing a
-   closed select is exactly how a screen-reader user reads one, so browsing the list IS the action.
-   A delay does not fix it: it fires when you pause to listen, which is when you are still
-   deciding.
-
-   THE PIECES: the dropdown, a hint that appears ONLY while something is staged (otherwise it would
-   repeat what the dropdown already says), and an Apply button that is unavailable until there is
-   something to apply, so pressing it can never be a no-op. aria-disabled throughout, never the
-   disabled attribute, so nothing leaves the tab order and every refusal can say why.
-   `opts.applyText` should NAME what it applies to when there is more than one on a page. */
-/* Is this dropdown showing something the unit does NOT have? One definition, used by the button,
-   the hint and the group logic, so they cannot disagree about what "staged" means. */
+/* Is this dropdown showing something the unit does NOT have? */
 function isStaged(sel) {
   return !!sel && sel.value !== (sel.dataset.deviceValue || "");
 }
 
-/* AN APPLY BUTTON THAT CAN SERVE SEVERAL DROPDOWNS.
-
-   WHY A GROUP IS BETTER HERE THAN ONE BUTTON EACH. Two settings that are really one decision - what
-   the take contains and what it is saved as - otherwise mean two Apply buttons a Tab apart, with
-   nothing after arrowing a dropdown to say a press is still needed. One button named for the pair
-   is fewer stops, and it is the thing you reach next either way.
-
-   It is available when ANY of its dropdowns is staged, and pressing it applies only the ones that
-   actually changed. A single-dropdown group is the same code path, so nothing else needed special
-   casing. */
-function makeStagedApply(id, text, onApply) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "secondary";
-  btn.id = id;
-  btn.textContent = text;
-  btn.stagedSelects = [];
-  btn.addEventListener("click", () => {
-    const blocked = btn.dataset.blockedReason || "";
-    if (blocked) { announce(blocked, true); return; }
-    const pending = btn.stagedSelects.filter(isStaged);
-    if (!pending.length) {
-      announce("Nothing to apply: that is what the unit already has.", true);
-      if (btn.stagedSelects[0]) btn.stagedSelects[0].focus();
-      return;
-    }
-    // Said, not swallowed: a press that does nothing and says nothing is indistinguishable from
-    // a press that never arrived.
-    if (isBusy(btn)) { announce("Still applying the last change.", true); return; }
-    onApply(pending, btn);
-  });
-  return btn;
+function stagedName(sel) {
+  const label = sel.labels && sel.labels[0];
+  return (label && label.textContent.trim()) || "This setting";
 }
 
+/* Put a waiting choice back to what the unit has. `say` announces it, so leaving a dropdown never
+   silently drops something you thought you had chosen. Nothing happens while a write is in flight:
+   the reply decides what the dropdown shows then. */
+function revertStaged(sel, say) {
+  if (!isStaged(sel) || isBusy(sel) || sel.dataset.deviceValue === undefined) return;
+  sel.value = sel.dataset.deviceValue;
+  markStaged(sel);
+  if (say) {
+    announce("Not applied. " + stagedName(sel) + " is still "
+             + (sel.dataset.deviceLabel || "unchanged") + ".");
+  }
+}
+
+/* Wire `sel` to the rule above. `apply(sel)` does the write, and on success must record the new
+   value with setStagedValue (or rebuild the control); on a refusal it puts the dropdown back. */
+function enterToApply(sel, apply) {
+  // Which kind of input came last. A `change` applies only after a pointer: from the keyboard it
+  // also arrives when an EXPANDED list closes, and Windows commits the highlighted option on Escape
+  // as well as on Enter, so a keyboard change can never be taken as a choice.
+  let lastInput = "key";
+  const describedBy = (sel.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+  if (!describedBy.includes(ENTER_HINT_ID)) {
+    sel.setAttribute("aria-describedby", describedBy.concat(ENTER_HINT_ID).join(" "));
+  }
+  const commit = async () => {
+    if (!isStaged(sel)) return;
+    // Said, not swallowed: a press that does nothing and says nothing is indistinguishable from a
+    // press that never arrived.
+    if (isBusy(sel)) { announce("Still applying the last change.", true); return; }
+    const no = unavailableReason(sel);
+    if (no !== null) { revertStaged(sel, false); announce(no, true); return; }
+    await apply(sel);
+    markStaged(sel);
+  };
+  sel.addEventListener("keydown", (e) => {
+    lastInput = "key";
+    if (e.key === "Enter") {
+      // Enter on a closed select would open its list; here it only ever applies. Alt+Down still
+      // opens the list.
+      e.preventDefault();
+      if (isStaged(sel)) commit();
+      return;
+    }
+    if (e.key === "Escape" && isStaged(sel)) {
+      e.preventDefault();
+      revertStaged(sel, true);
+    }
+  });
+  sel.addEventListener("pointerdown", () => { lastInput = "pointer"; });
+  sel.addEventListener("change", () => {
+    markStaged(sel);
+    if (lastInput === "pointer") commit();
+  });
+  sel.addEventListener("blur", () => revertStaged(sel, true));
+}
+
+/* A labelled dropdown row that applies on Enter: see enterToApply. */
 function makeStagedSelect(id, labelText, options, opts) {
   opts = opts || {};
   const row = document.createElement("div");
@@ -4776,51 +4977,24 @@ function makeStagedSelect(id, labelText, options, opts) {
   const hint = document.createElement("span");
   hint.className = "hint";
   hint.id = id + "-now";
-  // NOT aria-describedby. A description is re-read as the value changes, so the staged warning
-  // would be spoken between every option: the same noise the tablist name and the spin-button
-  // hints are kept off for. The text stays ON THE PAGE, and the Apply button is what
-  // tells you there is something waiting: it is unavailable until there is.
-
-  // ONE BUTTON OF ITS OWN, or a SHARED one passed in by the caller. Both are the same object with
-  // the same rules; a lone dropdown is simply a group of one, so there is no second code path.
-  const btn = opts.applyButton
-    || makeStagedApply(id + "-apply", opts.applyText || "Apply",
-                       (pending, b) => opts.onApply(pending[0], b));
-  btn.stagedSelects.push(sel);
-  sel.addEventListener("change", () => markStaged(sel, btn));
-  // THE BUTTON IS REMEMBERED ON THE SELECT, not looked up by id. setStagedValue is called at BUILD
-  // time by some callers (mic type), when the row is not in the document yet and getElementById
-  // would return null - which left that Apply button un-marked and armed with nothing staged.
-  sel.stagedApply = btn;
   row.appendChild(label);
   row.appendChild(sel);
   row.appendChild(hint);
-  // A SHARED button is placed by the caller, once, after the last dropdown it serves. Only a
-  // button this row owns goes in this row.
-  if (!opts.applyButton) row.appendChild(btn);
-  markStaged(sel, btn);
-  return { row, sel, btn, hint };
+  enterToApply(sel, opts.onApply);
+  return { row, sel, hint };
 }
 
-/* Recompute one staged dropdown's Apply button and its hint. Safe to call at any time. */
-function markStaged(sel, btn) {
-  if (!sel || !btn) return;
-  // THE BUTTON IS ABOUT THE WHOLE GROUP, THE HINT IS ABOUT THIS DROPDOWN. With a shared Apply,
-  // deciding the button from `sel` alone would switch it off whenever the dropdown you just moved
-  // happens to match the unit, even though the other one is still waiting.
-  const group = (btn.stagedSelects && btn.stagedSelects.length) ? btn.stagedSelects : [sel];
-  const blocked = btn.dataset.blockedReason || "";
-  setAvailable(btn, group.some(isStaged) && !blocked,
-    blocked || "That is what the unit already has. Choose something else first.");
+/* The on-page line saying a choice is waiting. For the eye only: see enterToApply. */
+function markStaged(sel) {
+  if (!sel) return;
   setText(sel.id + "-now",
     (isStaged(sel) && sel.dataset.deviceLabel)
-      ? "Not applied yet. The unit still has " + sel.dataset.deviceLabel + "."
+      ? "Not applied yet: press Enter to apply. The unit still has " + sel.dataset.deviceLabel + "."
       : "");
 }
 
-/* WHAT THE UNIT SAYS, written into a staged dropdown: the value, the label to quote back while a
-   change is pending, and the button's state. THE ONLY place deviceValue is set, so a staged choice
-   can never be mistaken for what the desk is doing. */
+/* WHAT THE UNIT SAYS, written into a dropdown that applies on Enter: the value, and the label to
+   quote back while a change is waiting. THE ONLY place deviceValue is set. */
 function setStagedValue(sel, value, label) {
   if (!sel) return;
   if (value === null || value === undefined) return;
@@ -4832,17 +5006,9 @@ function setStagedValue(sel, value, label) {
   }
   sel.value = String(value);
   sel.dataset.deviceValue = String(value);
-  const chosen = sel.options[sel.selectedIndex];
-  sel.dataset.deviceLabel = label || (chosen && chosen.textContent) || "";
-  markStaged(sel, sel.stagedApply || document.getElementById(sel.id + "-apply"));
-}
-
-/* Mark a staged dropdown's Apply as blocked for a REASON (a read-only device, say), which survives
-   every later markStaged. Pass "" to unblock. */
-function blockStaged(btn, reason) {
-  if (!btn) return;
-  if (reason) btn.dataset.blockedReason = reason;
-  else delete btn.dataset.blockedReason;
+  const held = Array.from(sel.options).find((o) => o.value === String(value));
+  sel.dataset.deviceLabel = (held && held.textContent) || label || "";
+  markStaged(sel);
 }
 
 function makeSwitchRow(id, labelText, onChange) {
@@ -4937,12 +5103,10 @@ async function loadRouting() {
   const chanOpts = (fm.channels || []).map((c) => [c[0], c[1]]);
   routingCtl.faderChannelsKey = JSON.stringify(chanOpts);
   (fm.faders || []).forEach((f) => {
-    // ONE APPLY PER FADER, not one for the page: a swap moves TWO faders at once, so staging
-    // several and applying them together would compound into something nobody could predict from
-    // the controls. The button names its fader, or nine of them read as "Apply" nine times.
+    // EACH FADER APPLIES ON ITS OWN, never several together: a swap moves TWO faders at once, so
+    // applying a batch would compound into something nobody could predict from the controls.
     const made = makeStagedSelect("routing-fader-" + f.index, f.label, chanOpts, {
-      applyText: "Apply to " + f.label.replace(/\s*\(.*$/, ""),
-      onApply: (sel, btn) => onFaderApply(f.index, parseInt(sel.value, 10), sel, btn),
+      onApply: (sel) => onFaderApply(f.index, parseInt(sel.value, 10), sel),
     });
     routingCtl.faders[f.index] = made.sel;
     inBox.appendChild(made.row);
@@ -4951,16 +5115,11 @@ async function loadRouting() {
   // dropdowns and the reset button unavailable and adds a note, so nothing is a silent no-op.
   routingCtl.fadersReadOnly = !!fm.read_only;
   if (fm.read_only) {
-    // aria-disabled on the dropdowns too. `disabled` takes each one out of the tab order, which
-    // flatly contradicts the note below: you could not see which channel is on each fader, because
-    // there would be nothing left to arrow onto. Nothing can be written by accident - the Apply
-    // button is the write, and it is blocked with the same reason.
+    // aria-disabled on the dropdowns, never `disabled`, which takes each one out of the tab order
+    // and flatly contradicts the note below: you could not see which channel is on each fader,
+    // because there would be nothing left to arrow onto. Enter on one says why and puts it back.
     Object.values(routingCtl.faders).forEach((sel) => {
-      if (!sel) return;
-      setAvailable(sel, false, FADERS_READ_ONLY_OFF);
-      const b = sel.stagedApply || document.getElementById(sel.id + "-apply");
-      blockStaged(b, FADERS_READ_ONLY_OFF);
-      markStaged(sel, b);
+      if (sel) setAvailable(sel, false, FADERS_READ_ONLY_OFF);
     });
     setAvailable(document.getElementById("faders-reset-btn"), false, FADERS_READ_ONLY_OFF);
     const p = document.createElement("p");
@@ -5008,18 +5167,17 @@ async function loadRouting() {
   if (usbBox) {
     usbBox.innerHTML = "";
     const modes = data.usb_multitrack_modes || [];
-    // STAGED behind Apply: this one does more than change the audio, it tears the USB audio
-    // function down and rebuilds it, so an accidental arrow press silences a screen reader routed
+    // Applies on Enter: this one does more than change the audio, it tears the USB audio function
+    // down and rebuilds it, so an accidental arrow press would silence a screen reader routed
     // through the unit. See the hint below, which says the same thing before you press.
     // RODE's own word is in the label because their guides, videos and menus all say "Multitrack";
     // a label that only describes leaves somebody following those instructions nothing to match.
     const um = makeStagedSelect("routing-usb-mode", "What this computer receives (Multitrack)",
       modes, {
-      applyText: "Apply what this computer receives",
-      onApply: async (sel, btn) => {
-        setUsbSwitching(true, btn);
+      onApply: async (sel) => {
+        setUsbSwitching(true, sel);
         const res = await routingPost("/api/routing/usb-multitrack",
-                                      { mode: parseInt(sel.value, 10) }, btn);
+                                      { mode: parseInt(sel.value, 10) }, sel);
         setUsbSwitching(!!res.ok);
         if (res.ok) setStagedValue(sel, parseInt(sel.value, 10), null);
       },
@@ -5031,23 +5189,23 @@ async function loadRouting() {
       + "couple of seconds, so anything playing through the unit, including a screen reader, goes "
       + "quiet while it happens. In Expanded, Windows' sound moves to another output for those "
       + "seconds instead, such as your computer's own speakers, so that RODE's driver can connect.";
-    um.sel.setAttribute("aria-describedby", "routing-usb-mode-hint");
+    um.sel.setAttribute("aria-describedby",
+                        "routing-usb-mode-hint " + um.sel.getAttribute("aria-describedby"));
     um.row.appendChild(umHint);
     routingCtl.usbMode = um.sel;
     usbBox.appendChild(um.row);
 
-    // EXPANDED, the INPUT direction of the same setting. Staged for the same reason as the mode
-    // above and one more: turning it OFF takes every extended input off its fader (the server
-    // does it, as the unit's own screen does), and that layout does not come back by turning it
-    // on again. A select rather than a switch because the two states need naming - "off" does not
-    // say what you lose.
+    // EXPANDED, the INPUT direction of the same setting. Applies on Enter for the same reason as
+    // the mode above and one more: turning it OFF takes every extended input off its fader (the
+    // server does it, as the unit's own screen does), and that layout does not come back by turning
+    // it on again. A select rather than a switch because the two states need naming - "off" does
+    // not say what you lose.
     const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends (USB 1 Input)",
       data.usb_expanded_labels || [], {
-        applyText: "Apply what this computer sends",
-        onApply: async (sel, btn) => {
-          setUsbSwitching(true, btn);
+        onApply: async (sel) => {
+          setUsbSwitching(true, sel);
           const res = await routingPost("/api/routing/usb-expanded",
-                                        { on: sel.value === "true" }, btn);
+                                        { on: sel.value === "true" }, sel);
           setUsbSwitching(!!res.ok);
           if (res.ok) setStagedValue(sel, sel.value, null);
         },
@@ -5056,7 +5214,8 @@ async function loadRouting() {
     expHint.className = "hint";
     expHint.id = "routing-usb-expanded-hint";
     expHint.textContent = data.usb_expanded_hint || "";
-    exp.sel.setAttribute("aria-describedby", "routing-usb-expanded-hint");
+    exp.sel.setAttribute("aria-describedby",
+                         "routing-usb-expanded-hint " + exp.sel.getAttribute("aria-describedby"));
     exp.row.appendChild(expHint);
     routingCtl.usbExpanded = exp.sel;
     usbBox.appendChild(exp.row);
@@ -5130,10 +5289,9 @@ async function loadRouting() {
   hpData.outputs.forEach((out) => {
     const hp = makeStagedSelect("routing-hp-type-" + out.index, out.label + " type",
       hpData.values, {
-        applyText: "Apply " + out.label.toLowerCase() + " type",
-        onApply: async (sel, btn) => {
+        onApply: async (sel) => {
           const res = await routingPost("/api/routing/headphone",
-            { value: parseInt(sel.value, 10), output: out.index }, btn);
+            { value: parseInt(sel.value, 10), output: out.index }, sel);
           if (res.ok) setStagedValue(sel, parseInt(sel.value, 10), null);
         },
       });
@@ -5186,13 +5344,6 @@ async function loadRouting() {
       .concat(routingCtl.headphones || [])
       .concat(Object.values(routingCtl.compellor || {}))
       .forEach((el) => setAvailable(el, false, OUTPUTS_READ_ONLY_OFF));
-    // The staged dropdowns' Apply buttons carry the same reason, so pressing one says why.
-    [routingCtl.usbMode].concat(routingCtl.headphones || []).forEach((sel) => {
-      if (!sel) return;
-      const b = sel.stagedApply || document.getElementById(sel.id + "-apply");
-      blockStaged(b, OUTPUTS_READ_ONLY_OFF);
-      markStaged(sel, b);
-    });
     const roMsg = "Changing this is not enabled on this device yet, so it is read-only here.";
     ["routing-automute", "routing-master", "routing-headphones", "routing-usb"]
       .forEach((id) => {
@@ -5238,7 +5389,9 @@ async function loadMonmixOutput() {
   const host = document.getElementById("monmix-sliders");
   if (!sel || !host || !_monmixModel) return;
   const oi = sel.value;
-  setText("monmix-mode", "Reading...");
+  // Cleared, not "Reading...": this line is a live region, and arrowing the output list would
+  // otherwise announce the read before every output.
+  setText("monmix-mode", "");
   let data;
   try {
     const resp = await fetch("/api/monitormix/live");
@@ -5624,14 +5777,9 @@ function buildMatrix(matrix) {
     outSel.appendChild(opt);
   });
   outSel.addEventListener("change", onMatrixOutputChange);
-  // The mode dropdown STAGES; its own Apply writes. "Output to configure" beside it is not staged,
-  // because it only changes which output you are looking at.
-  document.getElementById("matrix-mode").addEventListener("change", () => {
-    markStaged(document.getElementById("matrix-mode"),
-               document.getElementById("matrix-mode-apply"));
-    updateMatrixApplyLabel();
-  });
-  document.getElementById("matrix-mode-apply").addEventListener("click", onMatrixModeApply);
+  // The mode dropdown applies on Enter. "Output to configure" beside it acts at once, because it
+  // only changes which output you are looking at.
+  enterToApply(document.getElementById("matrix-mode"), onMatrixModeApply);
 
   const list = document.getElementById("matrix-sources-list");
   list.innerHTML = "";
@@ -5652,7 +5800,6 @@ function buildMatrix(matrix) {
     // Both carry the reason rather than the raw attribute, so they keep their place in the tab
     // order and say why when pressed.
     setAvailable(resetOutBtn, false, MATRIX_READ_ONLY_OFF);
-    blockStaged(document.getElementById("matrix-mode-apply"), MATRIX_READ_ONLY_OFF);
     setStatus("reset-outputs-status", MATRIX_READ_ONLY_OFF);
   }
   wireSchemes();
@@ -5682,21 +5829,6 @@ async function loadMatrixState() {
   applyMatrixForOutput();
 }
 
-/* THE APPLY BUTTON NAMES WHAT IT WILL DO, never a generic "Apply mix for this output". A generic
-   label reads as covering the whole section - dropdown, Apply and sources together - so the source
-   switches look like something you set BEFORE pressing it. They are not: the mode dropdown is
-   staged behind this button and the source switches write immediately. "Set this output to Custom"
-   cannot be read the wrong way, and it lets the hints underneath stay short instead of explaining
-   the staging in prose. */
-function updateMatrixApplyLabel() {
-  const sel = document.getElementById("matrix-mode");
-  const btn = document.getElementById("matrix-mode-apply");
-  if (!sel || !btn) return;
-  const chosen = sel.options[sel.selectedIndex];
-  const label = (chosen && chosen.textContent || "").trim();
-  btn.textContent = label ? "Set this output to " + label : "Apply mix for this output";
-}
-
 /* Reflect the cached live state (mode + per-source) for the selected output. */
 function applyMatrixForOutput() {
   const o = currentMatrixOutput();
@@ -5707,7 +5839,7 @@ function applyMatrixForOutput() {
   }
   // EVERYTHING BELOW READS THE DEVICE VALUE, not the dropdown: while a change is staged the
   // dropdown shows what you have chosen, and the source switches must keep describing the mix the
-  // output actually carries until Apply is pressed.
+  // output actually carries until Enter applies it.
   const deviceMode = modeSel.dataset.deviceValue || modeSel.value;
   const isCustom = deviceMode === "2";
   const modeLabel = (o.modes.find((m) => String(m[0]) === deviceMode) || [, "this mode"])[1];
@@ -5755,7 +5887,6 @@ function applyMatrixForOutput() {
     ? "This shows the unit's live mix. Changing it is not enabled on this device yet."
     : "Ticked sources are included. Each switch takes effect straight away.";
   setText("matrix-sources-note", note);
-  updateMatrixApplyLabel();
 }
 
 function onMatrixOutputChange() {
@@ -5767,7 +5898,7 @@ function onMatrixOutputChange() {
   const modeSel = fillOptions("matrix-mode", o.modes.map((m) => ({ value: m[0], label: m[1] })));
   if (modeSel) {
     modeSel.selectedIndex = 0;
-    // FORGET THE PREVIOUS OUTPUT'S MODE. Without this, Apply would be comparing this output's
+    // FORGET THE PREVIOUS OUTPUT'S MODE. Without this, Enter would be comparing this output's
     // dropdown against the mode of the output you were looking at a moment ago.
     delete modeSel.dataset.deviceValue;
     delete modeSel.dataset.deviceLabel;
@@ -5802,20 +5933,11 @@ function onMatrixOutputChange() {
     + " output. The mix and source list reflect the unit's current state.");
 }
 
-async function onMatrixModeApply() {
-  const modeSel = document.getElementById("matrix-mode");
-  const btn = document.getElementById("matrix-mode-apply");
-  const blocked = btn.dataset.blockedReason || "";
-  if (blocked) { announce(blocked, true); return; }
-  if (modeSel.value === (modeSel.dataset.deviceValue || "")) {
-    announce("That is the mix this output already carries. Choose another one first.", true);
-    modeSel.focus();
-    return;
-  }
+async function onMatrixModeApply(modeSel) {
   const o = currentMatrixOutput();
   const mode = parseInt(modeSel.value, 10);
   const res = await routingPost("/api/routing/outputmode",
-    { output: o.index, mode: mode }, btn);
+    { output: o.index, mode: mode }, modeSel);
   setText("matrix-status", res.message || "");
   if (routingCtl.matrixModes && res.ok) routingCtl.matrixModes[String(o.index)] = mode;
   // Either way, repaint from what the unit now has: on success that is the new mode and the source
@@ -6097,10 +6219,9 @@ async function onSchemeDelete() {
 /* STEREO LINKED INPUTS - one switch per legal pair, built from the device's own pair table so a
    device with no proven pairs simply gets no section rather than three dead switches.
 
-   A switch and not a staged Apply, unlike the fader dropdowns above. The Apply pattern exists
-   because arrowing a closed SELECT fires change on every option, so browsing the list performed the
-   swap. A checkbox has no such reading mode: you land on it, hear its state, and it only changes
-   when you deliberately activate it. So immediate is safe here, and it matches the auto-mute
+   A switch, written at once, unlike the fader dropdowns above. Those apply on Enter because
+   arrowing a closed SELECT fires change on every option. A checkbox has no such reading mode: you
+   land on it, hear its state, and it only changes when you deliberately activate it. So immediate is safe here, and it matches the auto-mute
    switches on the same page. */
 function buildStereoLinks(fm) {
   const box = document.getElementById("stereo-links");
@@ -6168,7 +6289,7 @@ function applyStereoValues(state) {
 
 /* THE CHANNEL LIST FOLLOWS THE USB MODE. Expanded adds Game, Music, A and B and renames USB 1, and
    the page is built once, so a list built in the other mode is rebuilt here from the live read.
-   Only when it differs: rebuilding drops a staged choice, and the list is what a screen reader is
+   Only when it differs: rebuilding drops a waiting choice, and the list is what a screen reader is
    arrowing through. applyFaderValues runs straight after and puts each fader's value back. */
 function applyFaderChannels(list) {
   const key = JSON.stringify(list);
@@ -6186,8 +6307,8 @@ function applyFaderChannels(list) {
   });
 }
 
-/* Set each fader dropdown to the channel the unit has on it, through setStagedValue, so the hint,
-   the value Apply compares against and the button's availability all follow. An unknown code (a
+/* Set each fader dropdown to the channel the unit has on it, through setStagedValue, so the waiting
+   line and the value Enter compares against both follow. An unknown code (a
    stereo-linked mic) gets an option of its own so the control still shows the truth. */
 function applyFaderValues(faders, labels) {
   (faders || []).forEach((code, i) => {
@@ -6206,10 +6327,10 @@ function applyFaderValues(faders, labels) {
   });
 }
 
-async function onFaderApply(index, code, sel, btn) {
-  const res = await routingPost("/api/faders/set", { fader: index, code: code }, btn);
+async function onFaderApply(index, code, sel) {
+  const res = await routingPost("/api/faders/set", { fader: index, code: code }, sel);
   // A swap can change a second fader too, so re-apply the whole returned layout - which also puts
-  // every row's hint and Apply button back in step with the unit.
+  // every row's dropdown and hint back in step with the unit.
   if (res.ok && res.faders) applyFaderValues(res.faders, res.labels);
   else if (!res.ok) applyFaderValues(lastFaderLayout());
   // A swap can also seat a channel on top of a linked pair, which unlinks it.
@@ -6298,13 +6419,10 @@ const USB_SWITCHING = "The last USB change is still being finished. RODE's drive
 
 function setUsbSwitching(on, except) {
   [routingCtl.usbMode, routingCtl.usbExpanded].forEach((sel) => {
-    const btn = sel && sel.stagedApply;
-    if (!btn || btn === except) return;
-    const reason = btn.dataset.blockedReason || "";
-    if (on && !reason) blockStaged(btn, USB_SWITCHING);
-    else if (!on && reason === USB_SWITCHING) blockStaged(btn, "");
-    else return;
-    markStaged(sel, btn);
+    if (!sel || sel === except) return;
+    const reason = sel.dataset.offReason;
+    if (on && reason === undefined) setAvailable(sel, false, USB_SWITCHING);
+    else if (!on && reason === USB_SWITCHING) setAvailable(sel, true);
   });
 }
 
@@ -7558,14 +7676,9 @@ function applyTransportLabels(state) {
    a second clause - "Recording to the USB drive. There is room for 88 hours, for 4 minutes."
    Where a recording goes is in that sentence; the full storage picture is on Device > Hardware. */
 
-/* THE TWO PRE-TAKE DECISIONS, AND ONE APPLY BETWEEN THEM. What a take CONTAINS (multitrack) and
-   what it is SAVED AS (WAV or MP3) are really one decision - neither is fixable after the take -
-   so they read as a pair and share one button named for the pair. Two Apply buttons a Tab apart
-   say less and cost more stops.
-
-   THE RAW SWITCH STAYS OUTSIDE IT, because it is INSTANT: a checkbox cannot be changed by arrowing
-   past it, so it needs no staging. It sits after the Apply, which also means it becomes available
-   exactly when you reach it.
+/* THE TWO PRE-TAKE DECISIONS: what a take CONTAINS (multitrack) and what it is SAVED AS (WAV or
+   MP3). Each applies on Enter (enterToApply). The raw switch after them is a checkbox, which cannot
+   be changed by arrowing past it, so it writes at once.
 
    Multitrack's write goes to /api/routing/multitrack, which owns the selector and its device gate;
    the format's goes to /api/recorder/format. Both are gated on the same "output_write" cap. */
@@ -7589,31 +7702,23 @@ const REC_SETTING_WRITE = {
   },
 };
 
-/* Apply every dropdown that is actually waiting, in page order, and report what happened ONCE.
-   Stops at the first failure rather than carrying on: if the desk refused one write there is no
-   reason to trust the next, and two failures spoken together say nothing useful. */
-async function onApplyRecordingSettings(pending, btn) {
-  setBusy(btn, true);
-  const said = [];
+async function onApplyRecordingSetting(sel) {
+  const spec = REC_SETTING_WRITE[sel.id];
+  if (!spec) return;
+  const value = parseInt(sel.value, 10);
+  setBusy(sel, true);
   try {
-    for (const sel of pending) {
-      const spec = REC_SETTING_WRITE[sel.id];
-      if (!spec) continue;
-      const value = parseInt(sel.value, 10);
-      const res = await postJSON(spec.path, spec.body(value));
-      said.push(res.message || "Done.");
-      if (!res.ok) {
-        setRecState(said.join(" "));
-        return;
-      }
+    const res = await postJSON(spec.path, spec.body(value));
+    setRecState(res.message || "Done.");
+    if (res.ok) {
       setStagedValue(sel, value, null);
       if (spec.after) spec.after(value);
     }
-    setRecState(said.join(" ") || "Nothing to apply.");
   } catch (err) {
     setRecState("Could not reach the device service.");
   } finally {
-    setBusy(btn, false);
+    setBusy(sel, false);
+    revertStaged(sel, false);   // a refusal leaves the unit as it was, so the dropdown says so
   }
 }
 
@@ -7626,41 +7731,29 @@ function fillRecordingSettings(d) {
   // rebuilding from it would empty these controls, so it leaves them alone.
   if (!modes.length || !formats.length) return;
   rebuildIfChanged(host, JSON.stringify([modes, formats]), (box) => {
-    const apply = makeStagedApply("rec-settings-apply", "Apply recording settings",
-                                  onApplyRecordingSettings);
-
     const mt = makeStagedSelect("rec-multitrack-mode", "What to record", modes,
-                                { applyButton: apply });
+                                { onApply: onApplyRecordingSetting });
     const mtHint = document.createElement("span");
     mtHint.className = "hint";
     mtHint.id = "rec-multitrack-hint";
-    // THE STANDING NOTE IS IN THE STATIC HINT, not in the changing one, or nothing says an Apply
-    // is still needed. A static description is read when you arrive at the control and never again
-    // as you arrow, so it costs nothing per option; the "Not applied yet" line changes and is
-    // deliberately NOT described-by, for exactly that reason.
-    mtHint.textContent = (d.multitrack_hint || "")
-      + " Nothing is sent until you press Apply recording settings.";
-    mt.sel.setAttribute("aria-describedby", "rec-multitrack-hint");
+    mtHint.textContent = d.multitrack_hint || "";
+    mt.sel.setAttribute("aria-describedby",
+                        "rec-multitrack-hint " + mt.sel.getAttribute("aria-describedby"));
     mt.row.appendChild(mtHint);
     recordingCtl.multitrack = mt.sel;
     box.appendChild(mt.row);
 
     const fmt = makeStagedSelect("rec-format-mode", "Save recordings as", formats,
-                                 { applyButton: apply });
+                                 { onApply: onApplyRecordingSetting });
     const fmtHint = document.createElement("span");
     fmtHint.className = "hint";
     fmtHint.id = "rec-format-hint";
-    fmtHint.textContent = (d.format_hint || "")
-      + " Nothing is sent until you press Apply recording settings.";
-    fmt.sel.setAttribute("aria-describedby", "rec-format-hint");
+    fmtHint.textContent = d.format_hint || "";
+    fmt.sel.setAttribute("aria-describedby",
+                         "rec-format-hint " + fmt.sel.getAttribute("aria-describedby"));
     fmt.row.appendChild(fmtHint);
     recordingCtl.format = fmt.sel;
     box.appendChild(fmt.row);
-
-    const applyRow = document.createElement("p");
-    applyRow.appendChild(apply);
-    box.appendChild(applyRow);
-    recordingCtl.settingsApply = apply;
 
     // THE RAW SWITCH, instant and last. It only ever means anything alongside a multitrack choice,
     // and reading them one after the other is how the decision is actually made.
@@ -7682,14 +7775,11 @@ function fillRecordingSettings(d) {
   if (recordingCtl.format && d.format !== null && d.format !== undefined)
     setStagedValue(recordingCtl.format, d.format, null);
 
-  // ONE GATE FOR THE PAIR: both writes need the same "output_write" cap, so a device without it
-  // blocks the shared button once rather than each dropdown separately.
-  if (recordingCtl.settingsApply) {
+  // Both writes need the same "output_write" cap.
+  if (recordingCtl.multitrack) {
     const writable = d.multitrack_writable !== false;
     setAvailable(recordingCtl.multitrack, writable, REC_SETTINGS_OFF);
     setAvailable(recordingCtl.format, writable, REC_SETTINGS_OFF);
-    blockStaged(recordingCtl.settingsApply, writable ? "" : REC_SETTINGS_OFF);
-    markStaged(recordingCtl.multitrack, recordingCtl.settingsApply);
   }
 
   applyBypass(recordingCtl.bypass, recordingCtl.bypassHint, d,
@@ -9357,13 +9447,9 @@ async function init() {
     }
   });
   document.getElementById("pad-ed-volume").addEventListener("input", onPadVolumeInput);
-  // Each pad write enters transfer mode, so walking a closed list must not write every option
-  // passed. syncPadEditor cancels a pending one on a pad change.
-  _padSelectCancels = [
-    commitOnEnter(document.getElementById("pad-ed-colour"), onPadColour),
-    commitOnEnter(document.getElementById("pad-ed-playmode"), onPlayMode),
-    commitOnEnter(document.getElementById("pad-ed-mixer-trigger"), onMixerTrigger),
-  ];
+  enterToApply(document.getElementById("pad-ed-colour"), onPadColour);
+  enterToApply(document.getElementById("pad-ed-playmode"), onPlayMode);
+  enterToApply(document.getElementById("pad-ed-mixer-trigger"), onMixerTrigger);
   document.getElementById("pad-ed-replay").addEventListener("change", (e) => onPadToggle("/api/pad/replay", e.target));
   document.getElementById("pad-ed-loop").addEventListener("change", (e) => onPadToggle("/api/pad/loop", e.target));
   document.getElementById("pad-ed-trigger-custom")

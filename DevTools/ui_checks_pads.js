@@ -491,9 +491,9 @@ async function run() {
   check("re-reading keeps the saved-effects list",
     fxList.firstElementChild === fxFirst);
 
-  // ---- a Settings dropdown commits on Enter, not on a pause ---------------
-  // A closed select fires `change` on every arrow press, so an arrowed choice waits for Enter or
-  // for focus to leave; a mouse pick has no browsing key behind it and writes at once.
+  // ---- a Settings dropdown applies on Enter, not on a pause ---------------
+  // A closed select fires `change` on every arrow press, so an arrowed choice waits for Enter, and
+  // leaving puts it back; a mouse pick has no browsing key behind it and writes at once.
   const COLOUR_API = "/api/pad/colour";
   const arrowTo = (value) => {
     key("ArrowDown", colour);
@@ -508,17 +508,21 @@ async function run() {
   arrowTo(otherColour);
   await sleep(1500);
   check("an arrowed colour writes nothing while you listen", !hit(await apiLog(), COLOUR_API));
-  key("Enter", colour);
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  colour.dispatchEvent(enter);
   check("Enter writes the arrowed colour", await waitForApi([COLOUR_API], 5000));
+  check("and does not open the list on top", enter.defaultPrevented);
   await quiet();
   await probeClear();
   arrowTo(startColour);
   colour.dispatchEvent(new FocusEvent("blur"));
-  check("leaving the dropdown writes an arrowed colour", await waitForApi([COLOUR_API], 5000));
-  await quiet();
+  check("leaving the dropdown puts an arrowed colour back", colour.value === otherColour,
+        colour.value);
+  await sleep(800);
+  check("and writes nothing", !hit(await apiLog(), COLOUR_API));
   await probeClear();
   colour.dispatchEvent(new Event("pointerdown"));
-  colour.value = otherColour;
+  colour.value = startColour;
   colour.dispatchEvent(new Event("change", { bubbles: true }));
   check("a mouse pick writes at once", await waitForApi([COLOUR_API], 5000));
   await quiet();

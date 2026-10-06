@@ -283,46 +283,31 @@ async function run() {
   await waitForApi(TAB_READS.master);
   await quiet();
 
-  // ---- FADER ASSIGNMENT STAGES, IT DOES NOT WRITE ---------
-  // The fault this replaced: every dropdown wrote on `change`, a closed select fires change on
-  // EVERY arrow press, and arrowing a closed select is how a screen reader reads one - so browsing
-  // the list performed the swap. These checks are the guard against it coming back.
+  // ---- FADER ASSIGNMENT APPLIES ON ENTER, NOT ON ARROWING ---------
+  // A closed select fires change on EVERY arrow press, and arrowing a closed select is how a screen
+  // reader reads one, so writing on change performed the swap while you browsed. The full rule is
+  // ui_checks_staged.js; this is the page-level guard.
   await openTab("faders");
   await probeClear();
   const fSel = document.querySelector("#routing-inputs select");
-  const fBtn = document.getElementById(fSel.id + "-apply");
-  check("every fader has an Apply button of its own", !!fBtn, fSel.id);
-  check("and it NAMES its fader, so nine of them are still tellable apart",
-    /apply to fader/i.test(fBtn.textContent), fBtn.textContent);
-  check("with nothing changed, Apply is marked unavailable rather than being a no-op",
-    fBtn.getAttribute("aria-disabled") === "true");
-  check("and there is no hint repeating what the dropdown already says",
-    (document.getElementById(fSel.id + "-now").textContent || "").trim() === "");
-  // Move the dropdown the way an arrow press does, and check NOTHING went to the unit.
-  const other = [...fSel.options].find((o) => o.value !== fSel.value);
+  check("a fader has no Apply button", !document.getElementById(fSel.id + "-apply"), fSel.id);
+  check("it is described as applying on Enter",
+    (fSel.getAttribute("aria-describedby") || "").includes("enter-to-apply-hint"),
+    fSel.getAttribute("aria-describedby"));
+  const startValue = fSel.dataset.deviceValue;
+  const other = [...fSel.options].find((o) => o.value !== startValue);
+  fSel.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   fSel.value = other.value;
   fSel.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(1200);                     // longer than the old commit delay
-  check("changing the dropdown writes NOTHING to the unit",
+  await sleep(1200);                     // longer than any pause a timer would have taken
+  check("arrowing the dropdown writes NOTHING to the unit",
     !(await apiLog()).some((e) => e.method === "POST" && e.path.indexOf("/api/faders/set") === 0),
     paths(await apiLog()).join(" "));
-  check("Apply becomes available once something is staged",
-    fBtn.getAttribute("aria-disabled") !== "true");
-  check("and the hint now says what the unit still has",
-    /still has/i.test(document.getElementById(fSel.id + "-now").textContent),
-    document.getElementById(fSel.id + "-now").textContent);
-  check("but the hint is NOT wired as a description, or it would be spoken between every option",
-    (fSel.getAttribute("aria-describedby") || "").indexOf(fSel.id + "-now") < 0,
-    fSel.getAttribute("aria-describedby"));
-  // Put it back the way it was; the probe stubs POSTs anyway, so nothing here reaches the desk.
-  fSel.value = fSel.dataset.deviceValue;
-  fSel.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(200);
-  check("returning to the unit's value makes Apply unavailable again",
-    fBtn.getAttribute("aria-disabled") === "true");
+  fSel.dispatchEvent(new FocusEvent("blur"));
+  check("leaving it without Enter puts it back", fSel.value === startValue, fSel.value);
   const note = document.getElementById("routing-inputs-note").textContent || "";
-  check("the page no longer promises that changes are sent immediately",
-    !/sent to the unit immediately/i.test(note) && /Apply/.test(note));
+  check("the page says nothing is sent until Enter",
+    !/sent to the unit immediately/i.test(note) && /Enter/.test(note));
 
   // ---- focus safety ----------------------------------------------------
   await openTab("faders");

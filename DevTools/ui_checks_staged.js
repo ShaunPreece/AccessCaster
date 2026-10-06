@@ -1,21 +1,24 @@
-/* THE STAGED DROPDOWNS: every control that changes the DESK'S AUDIO waits for an Apply.
+/* THE DROPDOWNS THAT CHANGE THE DESK: arrowing browses, Enter applies, leaving puts it back.
    Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_staged.js --route routing
+   and again with --route channels.
 
-   THE RULE THIS GUARDS: a dropdown that changes the AUDIO needs an Apply button; one that only
-   shows information, like the pad selector, can act instantly. A CLOSED select fires `change` on
-   every arrow press, and arrowing a closed select is how a screen reader user reads one - so
-   without the gate, browsing the list IS the action.
+   THE RULE THIS GUARDS (app.js enterToApply): a CLOSED select fires `change` on every arrow press,
+   and arrowing a closed select is how a screen reader user reads one, so neither the change nor a
+   pause may write. One that only shows information, like the output chooser, acts at once.
 
    The probe never forwards a POST, so nothing here can reach the unit. What it proves is that
-   changing a dropdown sends NOTHING, and that the Apply button is the only thing that would. */
+   browsing sends NOTHING, that Enter sends exactly one write, and that leaving or Escape puts the
+   dropdown back. */
 
 const el = (id) => document.getElementById(id);
 const paths = (log) => log.map((e) => e.method + " " + e.path);
+const ENTER_HINT = "enter-to-apply-hint";
 
 async function apiLog() {
   return (await probeLog()).filter((e) => e.path.indexOf("/api/") === 0
                                           && e.path.indexOf("/api/ping") < 0);
 }
+const posts = async () => (await apiLog()).filter((e) => e.method === "POST");
 
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 20000);
@@ -26,144 +29,131 @@ async function waitFor(fn, ms) {
   return false;
 }
 
-/* Every staged dropdown on the page, by the ids the helper gives them. */
-function stagedRows() {
-  return [...document.querySelectorAll("select[id]")]
-    .map((sel) => ({ sel, btn: el(sel.id + "-apply"), hint: el(sel.id + "-now") }))
-    .filter((r) => r.btn && r.hint);
-}
+const keydown = (sel, key) => {
+  const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  sel.dispatchEvent(ev);
+  return ev;
+};
+const arrowTo = (sel, value) => {
+  keydown(sel, "ArrowDown");
+  sel.value = value;
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+};
 
-async function checkOne(row, writePath) {
-  const { sel, btn, hint } = row;
-  // A STAGED SELECT WITH ONE OPTION IS ALWAYS A BUG, never a skip. It exists to change something,
-  // so a single option is a control that cannot be changed away from - and the way it happens is
+async function checkOne(sel, writePath) {
+  const hint = el(sel.id + "-now");
+  // A SELECT WITH ONE OPTION IS ALWAYS A BUG, never a skip. It exists to change something, so a
+  // single option is a control that cannot be changed away from - and the way it happens is
   // silent: `setStagedValue` invents a "Value true" option for a device value whose label list
-  // never arrived, which renders and reads as a real control. Skipping it here reported that as a
-  // pass and hid a routing control nobody could use.
-  const other = [...sel.options].find((o) => o.value !== sel.value);
+  // never arrived, which renders and reads as a real control.
+  const start = sel.dataset.deviceValue;
+  const other = [...sel.options].find((o) => o.value !== start);
   if (!other) {
     check(sel.id + ": offers more than one option", false,
           [...sel.options].map((o) => o.textContent).join(" | ") || "no options at all");
     return;
   }
-
-  check(sel.id + ": Apply is unavailable with nothing staged",
-    btn.getAttribute("aria-disabled") === "true", btn.getAttribute("aria-disabled"));
-  check(sel.id + ": no hint repeating what the dropdown already says",
-    (hint.textContent || "").trim() === "", hint.textContent);
-  check(sel.id + ": its Apply button names what it applies to",
-    btn.textContent.trim().length > "Apply".length, btn.textContent.trim());
+  const described = (sel.getAttribute("aria-describedby") || "").split(/\s+/);
+  check(sel.id + ": is described as applying on Enter", described.includes(ENTER_HINT),
+        sel.getAttribute("aria-describedby"));
+  check(sel.id + ": no waiting line with nothing chosen",
+        !hint || (hint.textContent || "").trim() === "", hint && hint.textContent);
+  // A description whose text changes is re-read as you arrow, so the waiting line is page-only.
+  check(sel.id + ": the waiting line is NOT announced between options",
+        !hint || !described.includes(hint.id), sel.getAttribute("aria-describedby"));
 
   await probeClear();
+  arrowTo(sel, other.value);
+  await sleep(1200);                       // longer than any pause a timer would have taken
+  check(sel.id + ": arrowing it writes NOTHING", (await posts()).length === 0,
+        paths(await posts()).join(" "));
+  if (hint) check(sel.id + ": the page says what the unit still has",
+                  /still has/i.test(hint.textContent), hint.textContent);
+
+  sel.dispatchEvent(new FocusEvent("blur"));
+  check(sel.id + ": leaving without Enter puts it back", sel.value === start, sel.value);
+  check(sel.id + ": and writes nothing", (await posts()).length === 0);
+
+  arrowTo(sel, other.value);
+  keydown(sel, "Escape");
+  check(sel.id + ": Escape puts it back too", sel.value === start, sel.value);
+
+  // AN EXPANDED LIST CLOSED WITH ESCAPE. Windows commits the highlighted option as the list closes,
+  // so `change` arrives after the Escape keydown, with nothing staged when the key was pressed.
+  await probeClear();
+  keydown(sel, "Escape");
   sel.value = other.value;
   sel.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(1200);                       // longer than the old 500 ms auto-commit
-  const wrote = (await apiLog()).filter((e) => e.method === "POST");
-  check(sel.id + ": arrowing it writes NOTHING", wrote.length === 0, paths(wrote).join(" "));
-  check(sel.id + ": Apply becomes available", btn.getAttribute("aria-disabled") !== "true",
-    btn.dataset.blockedReason || "");
-  check(sel.id + ": the hint now says what the unit still has",
-    /still has/i.test(hint.textContent), hint.textContent);
-  // AND THE HINT IS NOT SPOKEN WHILE YOU ARROW. A description is re-read as the
-  // value changes, so linking it announced "not applied yet" between every option. The text is on
-  // the page; the Apply button is what says there is something waiting.
-  check(sel.id + ": the hint is NOT announced between options",
-    (sel.getAttribute("aria-describedby") || "").indexOf(hint.id) < 0,
-    sel.getAttribute("aria-describedby"));
+  await sleep(800);
+  check(sel.id + ": closing an expanded list with Escape writes NOTHING",
+        (await posts()).length === 0, paths(await posts()).join(" "));
+  keydown(sel, "Escape");
+  check(sel.id + ": and a second Escape puts it back", sel.value === start, sel.value);
 
   await probeClear();
-  btn.click();
+  arrowTo(sel, other.value);
+  const enter = keydown(sel, "Enter");
   await sleep(800);
-  const sent = (await apiLog()).filter((e) => e.method === "POST");
-  check(sel.id + ": Apply is what writes, and it writes ONCE",
+  const sent = await posts();
+  check(sel.id + ": Enter writes, and writes ONCE",
     sent.length === 1 && (!writePath || sent[0].path.indexOf(writePath) === 0),
     paths(sent).join(" "));
+  check(sel.id + ": Enter does not open the list on top", enter.defaultPrevented);
 
   // Put the page back: the probe stubbed the write, so the unit's value is unchanged.
-  sel.value = sel.dataset.deviceValue;
-  sel.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(150);
+  if (sel.isConnected) setStagedValue(sel, start, null);
 }
 
 async function run() {
-  // TWO PAGES, ONE SUITE: mic type lives on Channels and the rest on Routing, and the rule they
-  // follow is the same one. Run it with --route routing and again with --route channels.
+  // TWO PAGES, ONE SUITE: mic type lives on Channels and the rest on Routing.
   // WAIT FOR THE ROUTER FIRST: every section starts hidden, so asking which page is showing before
-  // the hash route has run picks the wrong one (it did, and ran the Channels half twice).
+  // the hash route has run picks the wrong one.
   await waitFor(() => !el("sec-routing").hidden || !el("sec-channels").hidden, 25000);
   if (!el("sec-routing").hidden) await runRouting();
   else await runChannels();
   await probeDone();
 }
 
-/* MIC TYPE is the most important of the lot: choosing a voicing makes the DESK move that channel's
-   gain, so an arrow press through the list changed the level as well as the sound. */
+/* MIC TYPE matters most: choosing a voicing makes the DESK move that channel's gain, so an arrow
+   press through the list would change the level as well as the sound. */
 async function runChannels() {
-  const found = await waitFor(() => [...document.querySelectorAll("select[id^='mictype-']")]
-    .some((s) => el(s.id + "-apply")), 25000);
-  check("a mic channel offers a staged Mic type with its own Apply", found);
+  const found = await waitFor(() => document.querySelector("select[id^='mictype-']"), 25000);
+  check("a mic channel offers a Mic type dropdown", found);
   if (!found) return;
-  const sel = document.querySelector("select[id^='mictype-']");
-  await checkOne({ sel, btn: el(sel.id + "-apply"), hint: el(sel.id + "-now") },
-                 "/api/channel/mic-type");
-  // The mic PRESET list beside it has had an Apply since before this rule was written down, for
-  // exactly the same reason. It is not built by the shared helper, so it is checked by name.
-  const preset = document.querySelector("select[id^='preset-apply-']");
-  if (preset) {
-    check("the mic preset list also waits for its own Apply",
-      !!document.querySelector("button[id^='preset-apply-btn']")
-      || !!el(preset.id + "-btn"), preset.id);
-  }
+  await checkOne(document.querySelector("select[id^='mictype-']"), "/api/channel/mic-type");
 }
 
 async function runRouting() {
   await waitFor(() => el("routing-fader-0"), 25000);
   await sleep(1500);
 
-  // ---- Faders (one per fader, because a swap moves two) ----------------
-  const fader = { sel: el("routing-fader-0"), btn: el("routing-fader-0-apply"),
-                  hint: el("routing-fader-0-now") };
-  check("a fader row has a dropdown, a hint and its own Apply",
-    !!fader.sel && !!fader.btn && !!fader.hint);
-  await checkOne(fader, "/api/faders/set");
+  // ---- Faders: each applies on its own, because a swap moves two ------
+  check("a fader row has no Apply button", !el("routing-fader-0-apply"));
+  await checkOne(el("routing-fader-0"), "/api/faders/set");
 
   // ---- The output mix mode --------------------------------------------
   el("tab-routing-mixes").click();
   await sleep(1200);
-  const modeRow = { sel: el("matrix-mode"), btn: el("matrix-mode-apply"),
-                    hint: el("matrix-mode-now") };
-  check("the output mix mode has an Apply", !!modeRow.btn);
-  await checkOne(modeRow, "/api/routing/outputmode");
-  // The OUTPUT chooser beside it is deliberately NOT staged: it changes what you are looking at.
-  check("but choosing WHICH output to configure has no Apply, because it changes nothing on the "
-    + "unit", !el("matrix-output-apply"));
+  check("the output mix mode has no Apply button", !el("matrix-mode-apply"));
+  await checkOne(el("matrix-mode"), "/api/routing/outputmode");
+  // The OUTPUT chooser beside it changes what you are looking at, so it acts at once.
+  const outSel = el("matrix-output");
+  check("but choosing WHICH output to configure is not described as needing Enter",
+    !(outSel.getAttribute("aria-describedby") || "").includes(ENTER_HINT));
 
   // ---- Headphone type and USB audio -----------------------------------
   el("tab-routing-master").click();
   await sleep(1500);
-  const hp = { sel: el("routing-hp-type-0"), btn: el("routing-hp-type-0-apply"),
-               hint: el("routing-hp-type-0-now") };
-  if (hp.sel) {
-    check("headphone type has an Apply", !!hp.btn);
-    await checkOne(hp, "/api/routing/headphone");
-  }
-  const usb = { sel: el("routing-usb-mode"), btn: el("routing-usb-mode-apply"),
-                hint: el("routing-usb-mode-now") };
-  if (usb.sel) {
-    check("what this computer receives has an Apply", !!usb.btn);
-    await checkOne(usb, "/api/routing/usb-multitrack");
-  }
-  // Staged for a harder reason than the mode: turning Expanded off makes the unit unassign every
-  // extended input from its fader, so an accidental arrow press costs a layout, not just a pause.
-  const exp = { sel: el("routing-usb-expanded"), btn: el("routing-usb-expanded-apply"),
-                hint: el("routing-usb-expanded-now") };
-  if (exp.sel) {
-    check("what this computer sends has an Apply", !!exp.btn);
-    // The receives Apply above holds BOTH USB buttons until the server says the switch is done,
-    // which the page learns from its driver poll. The poll skips a hidden page, and a headless one
-    // counts as hidden, so this is what the poll does on hearing the switch has finished.
+  if (el("routing-hp-type-0")) await checkOne(el("routing-hp-type-0"), "/api/routing/headphone");
+  if (el("routing-usb-mode")) await checkOne(el("routing-usb-mode"), "/api/routing/usb-multitrack");
+  // Turning Expanded off makes the unit unassign every extended input from its fader, so an
+  // accidental arrow press would cost a layout, not just a pause.
+  if (el("routing-usb-expanded")) {
+    // The receives write above holds the other USB dropdown until the server says the switch is
+    // done, which the page learns from its driver poll. The poll skips a hidden page, and a
+    // headless one counts as hidden, so this is what the poll does on hearing the switch finished.
     setUsbSwitching(false);
-    await checkOne(exp, "/api/routing/usb-expanded");
+    await checkOne(el("routing-usb-expanded"), "/api/routing/usb-expanded");
   }
 }
 

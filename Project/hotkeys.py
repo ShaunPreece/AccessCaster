@@ -104,8 +104,8 @@ _STRONG_MODS = ("ctrl", "alt", "win")
 # key", it is that a popular chord plus the number row is contested and you cannot know by whom.
 # RegisterHotKey refusing is the only authority; do not reason about what "should" be free.
 #
-# CHANGING THIS DOES NOT MOVE ANYBODY'S SAVED SHORTCUTS, deliberately: a key someone chose is
-# theirs, and silently relocating it is worse than an inconsistency they can see.
+# This is the chord a fresh install starts on. The user can change it (HotkeyManager.set_mods),
+# which moves every shortcut at once: shortcuts do not carry modifiers of their own choosing.
 DEFAULT_MODS = ("ctrl", "alt", "shift")
 
 
@@ -205,7 +205,11 @@ class HotkeyManager:
 
     Each shortcut is {"id", "command", "mods", "key", "enabled", "speak"}. The id is ours and only
     has to be unique; the command is the caller's string and is opaque here. Pure Windows plumbing:
-    nothing in this file knows what a RODECaster is."""
+    nothing in this file knows what a RODECaster is.
+
+    ONE CHORD FOR EVERY SHORTCUT: `_mods`, the keys held, is a single setting, and a shortcut's own
+    "mods" always equals it once set_mods has run. A settings file from before the shared chord can
+    hold shortcuts on other modifiers; they keep them until the chord is next changed."""
 
     def __init__(self, speak=None, runner=None, labeller=None):
         self._speak = speak or (lambda text: None)
@@ -216,6 +220,7 @@ class HotkeyManager:
         self._busy = set()            # shortcuts running now, so a re-press is ignored
         self._lock = threading.Lock()
         self._enabled = True          # the master switch; off unregisters everything
+        self._mods = list(DEFAULT_MODS)   # the chord every shortcut is held on
         self._thread = None
         self._tid = 0
         self._ready = threading.Event()
@@ -234,6 +239,11 @@ class HotkeyManager:
         used ONLY when nothing has been saved, so deleting every shortcut stays deleted."""
         saved = saved if isinstance(saved, dict) else {}
         self._enabled = bool(saved.get("enabled", True))
+        chord = saved.get("mods")
+        if isinstance(chord, list):
+            tidy = [n for n, _l, _f in MODIFIERS if n in chord]
+            if any(m in tidy for m in _STRONG_MODS):
+                self._mods = tidy
         rows = saved.get("shortcuts")
         out = []
         if isinstance(rows, list):
@@ -252,8 +262,8 @@ class HotkeyManager:
                             "enabled": bool(row.get("enabled", True)),
                             "speak": bool(row.get("speak", True))})
         elif defaults:
-            for command, mods, key, speak in defaults:
-                out.append({"id": self._new_id(out), "command": command, "mods": list(mods),
+            for command, _mods, key, speak in defaults:
+                out.append({"id": self._new_id(out), "command": command, "mods": list(self._mods),
                             "key": key, "enabled": True, "speak": bool(speak)})
         with self._lock:
             self._shortcuts = out
@@ -270,21 +280,31 @@ class HotkeyManager:
     def saveable(self) -> dict:
         """What belongs in settings.json: the shortcuts and the master switch, no callables."""
         with self._lock:
-            return {"enabled": self._enabled,
+            return {"enabled": self._enabled, "mods": list(self._mods),
                     "shortcuts": [dict(s) for s in self._shortcuts]}
 
-    def add(self, command: str, speak: bool = True) -> dict:
-        """Create a shortcut for `command`, on the first free key of the default chord.
+    def add(self, command: str, speak: bool = True, key: str = "") -> dict:
+        """Create a shortcut for `command` on the shared chord: on `key` if one is given, otherwise
+        on the first free key.
 
         It arrives ALREADY USABLE rather than as a blank row waiting to be filled in: a new shortcut
         with no key is a thing you have to notice is unfinished, and the point of Add is to get one
-        working in a press or two. If every key in the default chord is taken it comes in switched
-        off, with the reason said out loud, instead of silently colliding."""
+        working in a press or two. If every key in the chord is taken it comes in switched off, with
+        the reason said out loud, instead of silently colliding."""
         command = str(command or "")
         if not command:
             return {"ok": False, "message": "No command was chosen."}
-        mods = list(DEFAULT_MODS)
-        key = self._free_key(mods)
+        mods = list(self._mods)
+        if key:
+            _flags, _vk, _tidy, problem = parse_binding(mods, key)
+            if problem:
+                return {"ok": False, "message": problem}
+            clash = self._clash("", mods, key)
+            if clash:
+                return {"ok": False, "message": f"{combo_text(mods, key)} is already the shortcut "
+                                                f"for {clash}. Choose a different key."}
+        else:
+            key = self._free_key(mods)
         # `speak` is the CALLER's judgement, not ours: this module does not know what any command
         # does, and some of them (firing a pad) are their own feedback and want no voice over them.
         row = {"id": self._new_id(), "command": command, "mods": mods,
@@ -317,15 +337,16 @@ class HotkeyManager:
         key that is already taken by something else (yours wins; ours is the newcomer). Reports both,
         because a set that silently dropped half of itself would look like the feature was broken.
 
-        `rows` is [(command, mods, key, speak)], the same shape as `defaults`."""
+        `rows` is [(command, mods, key, speak)], the same shape as `defaults`; the set lands on the
+        shared chord whatever `mods` says."""
         added, had, clashed = [], [], []
         with self._lock:
             bound = {s["command"] for s in self._shortcuts}
-            for command, mods, key, speak in rows:
+            for command, _mods, key, speak in rows:
                 if command in bound:
                     had.append(command)
                     continue
-                tidy = [n for n, _l, _f in MODIFIERS if n in list(mods)]
+                tidy = list(self._mods)
                 clash = next((s for s in self._shortcuts
                               if s.get("enabled") and s["key"] == key
                               and sorted(s.get("mods") or []) == sorted(tidy)), None)
@@ -365,15 +386,16 @@ class HotkeyManager:
             row = next((s for s in self._shortcuts if s["id"] == shortcut_id), None)
             return dict(row) if row else None
 
-    def set_binding(self, shortcut_id: str, mods, key: str, enabled: bool, speak=None) -> dict:
-        """Change one shortcut. Validated here, so the caller never persists a binding that could
-        not work. Returns {"ok", "message"}; the message is what gets spoken and shown."""
+    def set_binding(self, shortcut_id: str, key: str, enabled: bool, speak=None) -> dict:
+        """Change one shortcut's key, on/off and speech; it is held on the shared chord. Validated
+        here, so the caller never persists a binding that could not work. Returns {"ok", "message"};
+        the message is what gets spoken and shown."""
         current = self.get(shortcut_id)
         if current is None:
             return {"ok": False, "message": "That shortcut is not there any more."}
         if speak is None:
             speak = current.get("speak", True)
-        flags, vk, tidy, problem = parse_binding(mods, key)
+        flags, vk, tidy, problem = parse_binding(self._mods, key)
         if problem and enabled:
             return {"ok": False, "message": problem}
         clash = self._clash(shortcut_id, tidy, key)
@@ -395,6 +417,63 @@ class HotkeyManager:
             return {"ok": True, "message": f"{label}: shortcut off."}
         quiet = "" if speak else ", and it will not say so"
         return {"ok": True, "message": f"{label}: {combo_text(tidy, key)}{quiet}."}
+
+    def reset(self, defaults) -> dict:
+        """Replace the whole list with `defaults` ([(command, mods, key, speak)]) on DEFAULT_MODS,
+        which is what a fresh install has. The master switch is left as it is."""
+        with self._lock:
+            self._mods = list(DEFAULT_MODS)
+            out = []
+            for command, _mods, key, speak in defaults:
+                out.append({"id": self._new_id(out), "command": command,
+                            "mods": list(self._mods), "key": key, "enabled": True,
+                            "speak": bool(speak)})
+            self._shortcuts = out
+        self.reload()
+        with self._lock:
+            refused = [s for s in self._shortcuts if self._status.get(s["id"])]
+        msg = (f"Restored the {len(self._shortcuts)} default shortcuts, on "
+               f"{join_and([l for n, l, _f in MODIFIERS if n in self._mods])}.")
+        if refused:
+            msg += (f" {len(refused)} could not be used, because another program holds "
+                    f"{'it' if len(refused) == 1 else 'them'}: "
+                    + join_and([self._labeller(s["command"]) for s in refused]) + ".")
+        return {"ok": True, "message": msg}
+
+    def set_mods(self, mods) -> dict:
+        """Move EVERY shortcut to a new chord. Two shortcuts that end up on the same combination
+        (possible only for ones that were on different modifiers before) keep the first and switch
+        the later one off, and Windows refusing a combination is reported per shortcut, so the
+        result says exactly what is not working rather than "done"."""
+        tidy = [n for n, _l, _f in MODIFIERS if n in (mods or [])]
+        _flags, _vk, _tidy, problem = parse_binding(tidy, "A")
+        if problem:
+            return {"ok": False, "message": problem}
+        switched_off = []
+        with self._lock:
+            self._mods = tidy
+            used = set()
+            for s in self._shortcuts:
+                s["mods"] = list(tidy)
+                if not s.get("enabled"):
+                    continue
+                if s["key"] in used:
+                    s["enabled"] = False
+                    switched_off.append(s)
+                else:
+                    used.add(s["key"])
+        self.reload()
+        bits = [f"Every shortcut now uses {join_and([l for n, l, _f in MODIFIERS if n in tidy])}."]
+        for s in switched_off:
+            bits.append(f"{self._labeller(s['command'])} was on the same key as another shortcut, "
+                        f"so it is switched off.")
+        with self._lock:
+            refused = [s for s in self._shortcuts if self._status.get(s["id"])]
+        if refused:
+            bits.append(f"{len(refused)} could not be used, because another program holds "
+                        f"{'it' if len(refused) == 1 else 'them'}: "
+                        + join_and([self._labeller(s["command"]) for s in refused]) + ".")
+        return {"ok": True, "message": " ".join(bits)}
 
     def set_enabled(self, on: bool) -> dict:
         with self._lock:
@@ -436,6 +515,7 @@ class HotkeyManager:
         return {"ok": True, "enabled": enabled,
                 "running": bool(self._thread and self._thread.is_alive()),
                 "shortcuts": out,
+                "mods": list(self._mods),
                 "default_mods": list(DEFAULT_MODS),
                 "modifiers": [{"id": n, "label": l} for n, l, _f in MODIFIERS],
                 "keys": [n for n, _vk in KEYS]}

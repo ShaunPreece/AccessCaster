@@ -194,17 +194,15 @@
         and Alt with a number all still get you anywhere on the page.
       </p>
       <p class="hint">
-        And one about dropdowns. Any dropdown that changes what you HEAR waits for an Apply button,
-        and nothing is sent to the unit until you press it. That is because arrowing through a
-        closed dropdown is how a screen reader reads one, and every one of those presses counts as a
-        choice: without the Apply, browsing the mic type list would put your mic through four
-        different preamps on the way past. Usually the button sits directly after its own dropdown;
-        where two dropdowns are really one decision, as on the Recording page, they share a single
-        Apply that follows both and sends only what you changed. Each dropdown's own description
-        says which Apply it is waiting for. Dropdowns that only change what you are LOOKING at, such
-        as which channel or which output you are working on, act straight away and have no Apply,
-        because there is nothing to undo. Switches are instant too: you cannot change one by
-        arrowing past it.
+        And one about dropdowns. In any dropdown that changes the unit, arrowing through the list
+        only browses, and Enter applies the choice you are on. Moving away without pressing Enter
+        puts it back to what the unit has, and the app says so. That is because
+        arrowing through a closed dropdown is how a screen reader reads one: otherwise, browsing the
+        mic type list would put your mic through four different preamps on the way past. Each of
+        these dropdowns says "Press Enter to apply" when you reach it. With a mouse, picking an
+        option applies it straight away. Dropdowns that only change what you are LOOKING at, such
+        as which channel or which output you are working on, act straight away, because there is
+        nothing to undo. Switches are instant too: you cannot change one by arrowing past it.
       </p>
 
       <h3>Where everything is on a RODECaster Pro 2</h3>
@@ -308,8 +306,8 @@
       <dl class="help-list">
         <dt>Channel</dt>
         <dd>Choose which channel you are working on. The controls below change to match it. This
-          one acts straight away and has no Apply: it changes what you are looking at, not what
-          the desk is doing.</dd>
+          one acts straight away, with no Enter needed: it changes what you are looking at, not
+          what the desk is doing.</dd>
         <dt>Tabs</dt>
         <dd>
           Everything under the channel is on a tab strip: Channel settings, Presets, Processing,
@@ -381,7 +379,7 @@
         <dd>
           Which microphone is on that input. The unit uses it to set the preamp up, and choosing one
           also loads that mic's own default gain, so expect the Level slider to move when you apply
-          it. Nothing happens until you press Apply mic type.
+          it. Nothing happens until you press Enter.
         </dd>
         <dt>Processing presets</dt>
         <dd>
@@ -425,7 +423,7 @@
           you include or exclude each source for that one output by hand. Pick an output at the top
           and the list below shows the real mix, read live from the unit. The output you pick acts
           straight away, since it only changes what you are looking at; the mix you choose for it
-          waits for Apply.
+          waits for Enter.
         </dd>
         <dt>What Mix Minus actually means</dt>
         <dd>
@@ -494,7 +492,7 @@
           Choose which channel sits on each fader (your unit's physical faders plus its
           virtual ones), each one labelled with which kind it is. Every fader can be reassigned,
           mic faders included. Putting a channel where another already sits swaps them, so you can
-          rearrange your layout. Nothing is sent until you press that fader's own Apply button. A
+          rearrange your layout. Nothing is sent until you press Enter on that fader. A
           reset puts the standard layout back. A channel's processing moves with it, on both
           units.
         </dd>
@@ -660,8 +658,9 @@
         <dd>
           The chosen pad as it is now: its name (with a Rename button, the one thing here that
           needs pressing), volume, colour, how it plays, whether a press restarts it, and looping.
-          A mixer pad also gets its trigger mode, and a Back Channel pad who is in the room. Each
-          one writes to the unit as you change it, so there is no Apply. An empty pad has no
+          A mixer pad also gets its trigger mode, and a Back Channel pad who is in the room. There
+          is no Apply: switches and sliders write as you change them, and the dropdowns apply on
+          Enter. An empty pad has no
           settings, so it says so and offers a button through to Reassign.
         </dd>
         <dt>Trim and fade (sound pads)</dt>
@@ -785,14 +784,9 @@
           separate tracks, those are always 24-bit WAV whatever you choose here, so choosing MP3
           gives you lossless tracks to work on plus a small mix to listen back to. A backup
           remembers your choice.</dd>
-        <dt>Apply recording settings</dt>
-        <dd>One button for both of the dropdowns above, because they are really one decision. Change
-          either or both, then press it; it only sends what you actually changed, and it stays
-          unavailable while there is nothing waiting. Neither dropdown does anything to the unit
-          until you press it, which is what lets you arrow through the choices safely.</dd>
         <dt>Record the separate tracks raw</dt>
-        <dd>Last of the four, and unlike the two dropdowns it takes effect the moment you switch it,
-          with no Apply: a switch cannot be changed by arrowing past it, so there is nothing to
+        <dd>Last of the three, and unlike the two dropdowns it takes effect the moment you switch
+          it, with no Enter: a switch cannot be changed by arrowing past it, so there is nothing to
           protect you from. It decides what is IN the separate tracks, not how many you get or what
           format they are. Off, each track carries that channel's own processing, the EQ, compressor
           and gate. On, the tracks are the bare microphone or input, so you can do that work yourself
@@ -1113,23 +1107,28 @@
           was muted rather than that one was.</dd>
         <dt>Keyboard shortcuts</dt>
         <dd>Shortcuts that work anywhere in Windows, whatever program you are in, and even with this
-          window closed, for as long as AccessCaster is running. The list is yours to build: Add
-          offers a catalogue of over 100 commands, sorted into kinds (channels, levels, recording,
-          CallMe, pads, outputs, mixes, the unit and the app itself), so anything you can do on a page you
-          can put on a key. Delete removes one. Every shortcut the app ships is on the same three
-          keys, Ctrl, Alt and Shift held together, so there is only ever one thing to hold and the
-          key you press decides what happens. A new install starts with seven of its own: turn
-          announcements off and on, mute every mic and open them again (the cough key), start or
-          stop a recording, hear what the unit is doing, bring this window to the front, answer a
-          CallMe call or extend one about to end (C), and decline one or hang up (D). A list you already had does not gain those two on
-          its own: add them from the CallMe kind. The
-          SMART pad keys are there from the start too, described below. "Add the SMART pad
-          shortcuts" is for anyone who has cleared them, or who had a list from before they
-          shipped: your own choices are never overwritten, so a set you have changed has to be
-          asked for again rather than being put back for you.
-          Pick a shortcut from the dropdown, which names it and says which keys it is on, and the
-          settings below are for that one: which keys to hold, which key to press, whether to use it
-          at all, and whether it says what it did. A shortcut has to include Ctrl, Alt or Windows, so
+          window closed, for as long as AccessCaster is running. Every shortcut is held on the same
+          keys, Ctrl, Alt and Shift to begin with, so there is only ever one thing to hold and the
+          key you press decides what happens. "Change the keys to hold" moves every shortcut to
+          different ones at once.
+          Your shortcuts are one list: arrow up and down through it, and each one says what it does
+          and which key it is on. Enter opens it for editing (which key to press, whether it is on,
+          and whether it says what it did), and nothing changes until you press Save. Delete
+          removes it, after asking. The Applications key or Shift+F10 opens a menu that also turns
+          it off or on, or switches its speech, in one step; with a mouse or a touch screen, click
+          the shortcut instead.
+          The list is yours to build: Add a shortcut offers a catalogue of over 100 commands,
+          sorted into kinds (channels, levels, recording, CallMe, pads, outputs, mixes, the unit and
+          the app itself), so anything you can do on a page you can put on a key, and you choose its
+          key there too. A new install starts with seven of its own: turn announcements off and on,
+          mute every mic and open them again (the cough key), start or stop a recording, hear what
+          the unit is doing, bring this window to the front, answer a CallMe call or extend one
+          about to end (C), and decline one or hang up (D), plus the SMART pad keys described below.
+          "Use the SMART pad keys" adds or removes the pad keys as a set, and "Restore default
+          shortcuts" puts the whole list back as a new install has it, after asking, because
+          anything you have added or changed is lost. To copy your shortcuts to another computer,
+          save this app's settings on the Backups page.
+          A shortcut has to include Ctrl, Alt or Windows, so
           it cannot take a plain key away from your screen reader; if another program already owns
           the combination you pick, this page says so rather than leaving you with a key that does
           nothing. The cough key opens again only the mics it muted, so it never puts a channel live

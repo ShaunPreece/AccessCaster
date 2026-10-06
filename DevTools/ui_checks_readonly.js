@@ -170,11 +170,10 @@ async function run() {
                                                     + "#dev-unit-controls select"));
   blockedAll("unit settings controls", unit);
   // The description is the half the raw attribute took away, so it is checked by itself.
-  const described = unit.filter((n) => {
-    const id = n.getAttribute("aria-describedby");
-    const p = id && el(id);
-    return p && p.textContent.trim().length > 0;
-  });
+  // aria-describedby can name several ids (a dropdown also carries the Enter-to-apply hint), so
+  // the setting's own explanation is found among them rather than taken as the whole attribute.
+  const described = unit.filter((n) => (n.getAttribute("aria-describedby") || "").split(/\s+/)
+    .some((id) => id.endsWith("-hint") && el(id) && el(id).textContent.trim().length > 0));
   check("every unit setting still carries its explanation",
     described.length === unit.length, described.length + " of " + unit.length);
 

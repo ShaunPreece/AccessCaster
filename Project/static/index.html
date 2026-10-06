@@ -55,6 +55,8 @@
       <span class="theme-toggle-label">Dark mode currently on. Press to turn off.</span>
     </button>
     <span id="theme-toggle-status" class="sr-only" role="status" aria-live="polite"></span>
+    <!-- The description of every dropdown that changes the desk (app.js enterToApply). -->
+    <span id="enter-to-apply-hint" class="sr-only">Press Enter to apply.</span>
   </div>
 
   <!-- NO role="group" ANYWHERE ON THESE PAGES, deliberately. A named group is announced on the way
@@ -280,22 +282,11 @@
              own on/off switch, and that is the case the whole tab exists for: the announcer talking
              over a guest is something you deal with NOW, from whatever program you are in, not after
              finding this window and this tab.
-             ONE CHOOSER AND ONE EDITOR, never a row per shortcut: ten shortcuts x seven controls
-             is about seventy controls to walk past, every one of them the same seven again under a
-             different name. Instead: pick the shortcut from a dropdown, edit the one below it.
-             Seven controls instead of seventy, and the dropdown doubles as the at-a-glance list
-             because each option carries its own combination.
-             NO ADD OR DELETE BUTTONS: the list of commands is fixed by what the app can do, and the
-             five pad slots are already the "add" mechanism. Switching a shortcut off IS the delete.
-             THE LIST IS YOURS, NOT OURS: any property the app can offer anywhere else can appear
-             in the catalogue of available commands. So
-             the dropdown holds the shortcuts you have ADDED, and Add offers a catalogue that
-             `Project/commands.py` GENERATES from the app's own spec tables - channels, faders,
-             pads, mix schemes, presets. Add a control to the app and it can be put on a key without
-             anyone editing this page.
-             THE CONTROLS BELOW ARE STATIC: they are the same few whatever is selected, so they are
-             written once here and wired once at startup, and picking a different shortcut only
-             changes their VALUES - it never rebuilds a control a screen reader may be sitting in.
+             A LISTBOX, ONE TAB STOP: each option reads what the shortcut does and its keys, and
+             Enter opens a menu of everything that can be done to it (app.js renderHotkeyList).
+             Editing is a dialog with Save, so nothing is registered while you browse its key list.
+             THE LIST IS YOURS, NOT OURS: Add offers a catalogue that `Project/commands.py` GENERATES
+             from the app's own spec tables - channels, faders, pads, mix schemes, presets.
              NO "PRESS THE KEYS YOU WANT" CAPTURE FIELD, deliberately. That is the usual way to set a
              shortcut and it is hostile to a screen reader: the field swallows the keys the screen
              reader needs, and you cannot hear what you just typed. Checkboxes and a dropdown say the
@@ -305,8 +296,7 @@
           <p id="hotkeys-note" class="note">
             These work anywhere in Windows, whatever program you are in and even with this window
             closed, for as long as AccessCaster is running. Each one needs Ctrl, Alt or Windows in
-            it, so it cannot take a plain key away from your screen reader, and each normally speaks
-            what it did, because when you press it you will be looking at something else.
+            it, so it cannot take a plain key away from your screen reader.
           </p>
           <p class="field">
             <label class="switch">
@@ -319,82 +309,51 @@
             do with them.
           </p>
 
-          <div class="field">
-            <label for="hotkey-pick">Your shortcuts</label>
-            <!-- NO HINT AT ALL. A hint is for a control that is not obvious, or one that affects
-                 something else; a labelled dropdown whose options name themselves is neither. -->
-            <select id="hotkey-pick"></select>
-          </div>
+          <p id="hotkey-list-label" class="field-label">Your shortcuts</p>
+          <!-- The hint is BEFORE the list and NOT a description of it: a description is read every
+               time focus comes back into the list, after every dialog, ahead of anything else. -->
+          <p id="hotkey-list-help" class="hint">
+            Press Enter to edit a shortcut, Delete to delete it, or the Applications key for more
+            options.
+          </p>
+          <ul id="hotkey-list" class="hotkey-items" role="listbox"
+              aria-labelledby="hotkey-list-label"></ul>
+          <p id="hotkey-list-empty" class="hint" hidden>
+            You have no shortcuts yet. Press Add a shortcut to make one.
+          </p>
           <p>
             <button type="button" class="secondary" id="hotkey-add-btn">Add a shortcut</button>
-            <button type="button" class="secondary" id="hotkey-delete-btn">Delete this shortcut</button>
-            <button type="button" class="secondary" id="hotkey-add-pads-btn"
-                    aria-describedby="hotkey-add-pads-help">Add the SMART pad shortcuts</button>
+            <!-- Names the keys held now (applyHotkeyState), so the setting is heard without
+                 opening it. -->
+            <button type="button" class="secondary" id="hotkey-mods-btn">Change the keys to hold</button>
+            <button type="button" class="secondary" id="hotkey-restore-btn">Restore default
+              shortcuts</button>
           </p>
-          <!-- WHY THIS BUTTON EXISTS AT ALL. The shipped set is only ever laid down on a machine
-               that has saved nothing, because re-applying it would undo somebody's deliberate
-               deletion on every start. That rule is right, and it also means a set added in a later
-               version can never reach anyone who had already set their keys. So the pad scheme is
-               offered rather than imposed, and pressing it twice is safe. -->
-          <p id="hotkey-add-pads-help" class="hint">
-            Puts the whole pad set on the number row in one go, on Ctrl, Alt and Shift like
-            everything else: the number keys play the pads of the bank the unit is on, Dash and
-            Equals step down and up a bank, and P says what is playing. Anything you have already
-            set is left alone, and if another program has one of these keys the shortcut says so
-            rather than failing quietly.
+          <!-- Ticked when the whole pad scheme is bound, partly ticked when some of it is (app.js
+               applyHotkeyState). Unticking deletes those shortcuts; ticking adds what is missing. -->
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="hotkeys-pad-set" aria-describedby="hotkeys-pad-set-help">
+              <span>Use the SMART pad keys</span>
+            </label>
           </p>
-          <!-- A PAD FOLLOWS ITS OWN TRIGGER SETTING, which is a desk setting and not ours, so a
-               second press does different things on different pads. Said here rather than left to
-               be discovered, because "it started again instead of stopping" reads as a bug. -->
+          <p id="hotkeys-pad-set-help" class="hint">
+            The number keys play the pads of the bank the unit is on, Dash and Equals change bank,
+            and P says what is playing.
+          </p>
           <p class="hint">
-            What a second press does is the pad's own setting, made on the SMART pads page or on
-            the unit.
-            A sound pad set to Toggle stops, one set to One Shot starts again from the beginning,
-            and one set to Hold plays until you press the key again. A mixer pad follows its own
-            trigger setting the same way.
+            To copy your shortcuts to another computer, save this app's settings on the
+            <a href="#/profiles">Backups page</a>.
           </p>
+          <!-- The menu every shortcut button opens, positioned under it; see openHotkeyMenu. -->
+          <ul id="hotkey-menu" class="context-menu" role="menu" aria-label="Shortcut options" hidden>
+            <li role="menuitem" tabindex="-1" data-action="edit">Edit</li>
+            <li role="menuitem" tabindex="-1" data-action="toggle" id="hotkey-menu-toggle">Turn off</li>
+            <li role="menuitemcheckbox" tabindex="-1" data-action="speak" id="hotkey-menu-speak"
+                aria-checked="true">Speak when pressed</li>
+            <li role="menuitem" tabindex="-1" data-action="delete">Delete</li>
+          </ul>
 
-          <fieldset class="hotkey" id="hotkey-editor">
-            <legend id="hotkey-editor-name">Shortcut</legend>
-
-            <p id="hotkey-mods-label" class="hint">Keys to hold</p>
-            <div role="group" aria-labelledby="hotkey-mods-label" id="hotkey-mods">
-              <p class="field">
-                <label class="switch"><input type="checkbox" id="hotkey-mod-ctrl"><span>Ctrl</span></label>
-              </p>
-              <p class="field">
-                <label class="switch"><input type="checkbox" id="hotkey-mod-alt"><span>Alt</span></label>
-              </p>
-              <p class="field">
-                <label class="switch"><input type="checkbox" id="hotkey-mod-win"><span>Windows</span></label>
-              </p>
-              <p class="field">
-                <label class="switch"><input type="checkbox" id="hotkey-mod-shift"><span>Shift</span></label>
-              </p>
-            </div>
-
-            <div class="field">
-              <label for="hotkey-key">Key to press</label>
-              <select id="hotkey-key"></select>
-            </div>
-
-            <!-- "Disable this shortcut", NOT "Use this shortcut", which sounds like it will run the
-                 shortcut now. So the switch is INVERTED against
-                 the server's `enabled` - ticked means off. showHotkey and saveHotkey are the only
-                 two places that translate, and they are commented; do not add a third. -->
-            <p class="field">
-              <label class="switch">
-                <input type="checkbox" id="hotkey-off"><span>Disable this shortcut</span>
-              </label>
-            </p>
-            <p class="field">
-              <label class="switch">
-                <input type="checkbox" id="hotkey-speak">
-                <span>Speak keyboard shortcut when pressed</span>
-              </label>
-            </p>
-            <p id="hotkey-detail-status" class="hint"></p>
-          </fieldset>
 
           <p id="hotkeys-status" role="status" aria-live="polite"></p>
         </div>
@@ -668,19 +627,12 @@
             <label for="matrix-output">Output to configure</label>
             <select id="matrix-output"></select>
           </div>
-          <!-- STAGED behind Apply. This dropdown changes what an output CARRIES, and a closed
-               select fires on every arrow press, so writing on change means reading the list
-               rebuilds the mix. "Output to configure" above is not staged, and deliberately: it only changes
-               what you are looking at. -->
+          <!-- Applies on Enter (app.js enterToApply). "Output to configure" above acts at once,
+               and deliberately: it only changes what you are looking at. -->
           <div class="field">
             <label for="matrix-mode">Mix for this output</label>
-            <!-- NOT described by the hint below: a description is re-read as the value changes, so
-                 the staged warning would be spoken between every option. -->
             <select id="matrix-mode"></select>
             <span id="matrix-mode-now" class="hint"></span>
-            <button type="button" class="secondary" id="matrix-mode-apply">
-              Apply mix for this output
-            </button>
           </div>
           <!-- WHAT THE APPLIED MIX MEANS, in one line, and it lives OUTSIDE the source fieldset
                because that fieldset is hidden on anything but Custom. -->
@@ -738,13 +690,14 @@
                  tab, so there is no separate control whose state you have to check before pressing.
                  The one-output kind is what the built-in Chat presets are, and it is the only kind
                  that is safe to apply mid-show, because it cannot disturb a mix you are listening
-                 to. updateSchemeSaveOutputLabel keeps the second label in step with the output. -->
+                 to. updateSchemeSaveOutputLabel keeps the second label in step with the output.
+                 Not described by scheme-save-help: the name box straight before them already is,
+                 and each label says what it saves. -->
             <p>
-              <button type="button" class="secondary" id="scheme-save-btn"
-                      aria-describedby="scheme-save-help">Save every output's mix as a preset</button>
-              <button type="button" class="secondary" id="scheme-save-output-btn"
-                      aria-describedby="scheme-save-help">Save only this output's mix as a
-                preset</button>
+              <button type="button" class="secondary" id="scheme-save-btn">Save every output's mix
+                as a preset</button>
+              <button type="button" class="secondary" id="scheme-save-output-btn">Save only this
+                output's mix as a preset</button>
             </p>
             <!-- NOT a live region. Adding role="status" here puts the SAME words in two polite
                  regions at the same moment, and the result goes unspoken: you press Apply and hear
@@ -783,8 +736,8 @@
             Putting a channel on a fader that already holds it elsewhere swaps the two, so you
             can rearrange your layout. A channel's processing and effects move with it on both
             units, so a voicing stays with its channel wherever you put it.
-            Nothing is sent to the unit until you press that fader's own Apply button, so you can
-            arrow through the choices safely. The current layout is read from the unit every time
+            Arrow through the choices freely: nothing is sent to the unit until you press Enter.
+            The current layout is read from the unit every time
             you open this tab.
           </p>
           <div id="routing-inputs" aria-describedby="routing-inputs-note"></div>
@@ -1006,14 +959,13 @@
           <label for="pad-ed-colour">Colour</label>
           <!-- Named colours, filled from the device payload (soundpad.PAD_COLOUR_NAME): a bare 0-11
                number would tell a screen-reader user nothing about the colour. -->
-          <select id="pad-ed-colour" aria-describedby="pad-ed-enter-hint"></select>
-          <span id="pad-ed-enter-hint" class="hint">
-            In these dropdowns, arrow to a choice and press Enter to apply it.
-          </span>
+          <select id="pad-ed-colour"></select>
+          <span id="pad-ed-colour-now" class="hint"></span>
         </div>
         <div class="field" id="pad-ed-playmode-row">
           <label for="pad-ed-playmode">How the pad plays</label>
-          <select id="pad-ed-playmode" aria-describedby="pad-ed-enter-hint"></select>
+          <select id="pad-ed-playmode"></select>
+          <span id="pad-ed-playmode-now" class="hint"></span>
           <span class="hint">
             Toggle means one press starts the sound and the next press stops it. Hold means it
             plays only while you hold the pad down. One Shot means each press replays it from
@@ -1037,7 +989,8 @@
              the off-air room. Both write straight to the pad, like the settings above. -->
         <div class="field" id="pad-ed-mixer-trigger-row" hidden>
           <label for="pad-ed-mixer-trigger">How the pad triggers</label>
-          <select id="pad-ed-mixer-trigger" aria-describedby="pad-ed-enter-hint"></select>
+          <select id="pad-ed-mixer-trigger"></select>
+          <span id="pad-ed-mixer-trigger-now" class="hint"></span>
           <span class="hint">
             Latching means one press turns the action on and the next press turns it off.
             Momentary means it is only on while you hold the pad down.
@@ -1969,10 +1922,67 @@
       <label for="hotkey-add-command">What it does</label>
       <select id="hotkey-add-command"></select>
     </div>
+    <div class="field">
+      <label for="hotkey-add-key">Key to press</label>
+      <select id="hotkey-add-key"></select>
+    </div>
     <p id="hotkey-add-status" class="hint" role="status" aria-live="polite"></p>
     <div class="dialog-actions">
       <button type="button" id="hotkey-add-cancel">Cancel</button>
       <button type="button" class="primary" id="hotkey-add-confirm">Add</button>
+    </div>
+  </dialog>
+
+  <!-- Editing a shortcut. Nothing is registered until Save, so browsing the key list is free.
+       Focus opens on the first modifier. A refused Save keeps the dialog open and says why. -->
+  <dialog id="hotkey-edit-dialog" aria-labelledby="hotkey-edit-title">
+    <h2 id="hotkey-edit-title">Edit shortcut</h2>
+    <div class="field">
+      <label for="hotkey-key">Key to press</label>
+      <select id="hotkey-key"></select>
+    </div>
+    <!-- "Turn this shortcut off", NOT "Use this shortcut", which sounds like it will run the
+         shortcut now. So the switch is INVERTED against the server's `enabled`: ticked means off.
+         openHotkeyEdit and onHotkeyEditSave are the only two places that translate. -->
+    <p class="field">
+      <label class="switch">
+        <input type="checkbox" id="hotkey-off"><span>Turn this shortcut off</span>
+      </label>
+    </p>
+    <p class="field">
+      <label class="switch">
+        <input type="checkbox" id="hotkey-speak"><span>Speak when pressed</span>
+      </label>
+    </p>
+    <p id="hotkey-edit-status" class="hint" role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button type="button" id="hotkey-edit-cancel">Cancel</button>
+      <button type="button" class="primary" id="hotkey-edit-save">Save</button>
+    </div>
+  </dialog>
+
+  <!-- The keys held for EVERY shortcut. Saved as one change, because ticking them one at a time
+       would pass through combinations that are not allowed (Shift alone) on the way. -->
+  <dialog id="hotkey-mods-dialog" aria-labelledby="hotkey-mods-title">
+    <h2 id="hotkey-mods-title">Keys to hold for every shortcut</h2>
+    <div role="group" aria-labelledby="hotkey-mods-title" id="hotkey-mods" class="hotkey-mods">
+      <p class="field">
+        <label class="switch"><input type="checkbox" id="hotkey-mod-ctrl"><span>Ctrl</span></label>
+      </p>
+      <p class="field">
+        <label class="switch"><input type="checkbox" id="hotkey-mod-alt"><span>Alt</span></label>
+      </p>
+      <p class="field">
+        <label class="switch"><input type="checkbox" id="hotkey-mod-win"><span>Windows</span></label>
+      </p>
+      <p class="field">
+        <label class="switch"><input type="checkbox" id="hotkey-mod-shift"><span>Shift</span></label>
+      </p>
+    </div>
+    <p id="hotkey-mods-status" class="hint" role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button type="button" id="hotkey-mods-cancel">Cancel</button>
+      <button type="button" class="primary" id="hotkey-mods-save">Save</button>
     </div>
   </dialog>
 
@@ -1988,6 +1998,18 @@
     <div class="dialog-actions">
       <button type="button" id="hotkey-delete-cancel">Cancel</button>
       <button type="button" class="primary" id="hotkey-delete-confirm">Delete</button>
+    </div>
+  </dialog>
+
+  <!-- Restoring the default shortcuts throws away every change to the list, so it asks first and
+       says what it will leave. The counts are written in by onHotkeyRestoreOpen. -->
+  <dialog id="hotkey-restore-dialog" role="alertdialog" aria-labelledby="hotkey-restore-title"
+          aria-describedby="hotkey-restore-desc">
+    <h2 id="hotkey-restore-title" tabindex="-1">Restore the default shortcuts?</h2>
+    <p id="hotkey-restore-desc"></p>
+    <div class="dialog-actions">
+      <button type="button" id="hotkey-restore-cancel">Cancel</button>
+      <button type="button" class="primary" id="hotkey-restore-confirm">Restore</button>
     </div>
   </dialog>
 

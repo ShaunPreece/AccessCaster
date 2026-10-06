@@ -5519,10 +5519,10 @@ def fader_model() -> dict:
                         "its fader and its processing back."),
         # NEVER WRITE A FADER ON `change`. A closed select fires on EVERY arrow press, and arrowing
         # a closed select is how a screen-reader user reads one, so writing on change means simply
-        # browsing the list performs the swap. Each fader has its own Apply.
+        # browsing the list performs the swap. Each fader applies on Enter.
         "note": ("Choose which channel sits on each fader." + phys_note + " Putting a channel "
                  "on a fader that already holds it elsewhere swaps the two. Nothing is sent to the "
-                 "unit until you press that fader's own Apply button."),
+                 "unit until you press Enter."),
     }
 
 
@@ -6885,7 +6885,7 @@ def read_usb_driver() -> dict:
     known = channels.usb_expanded_known()
     return {"ok": True,
             "usb_driver": virtual_devices.describe(channels.usb_expanded() if known else None),
-            # The page holds both USB Apply buttons while this is True: a switch made now would
+            # The page holds both USB dropdowns while this is True: a switch made now would
             # land in the middle of the bind wait or its retries.
             "switching": _virtual_devices_following.locked()}
 
@@ -10659,7 +10659,24 @@ def _hotkey_label(command_id: str) -> str:
 
 
 def hotkey_state() -> dict:
-    return hotkey_manager().state()
+    return _hotkey_page_state(hotkey_manager())
+
+
+def _pad_set_commands() -> set:
+    return {cid for cid, _mods, _key, _speak in _pad_hotkey_scheme()}
+
+
+def _hotkey_page_state(mgr) -> dict:
+    """The manager's state plus `pad_set`: "all", "some" or "none" of the pad scheme is bound,
+    which is what the "Use the SMART pad keys" switch shows (ticked, mixed or clear)."""
+    state = mgr.state()
+    want = _pad_set_commands()
+    have = want & {row["command"] for row in state["shortcuts"]}
+    state["pad_set"] = "all" if have == want else ("some" if have else "none")
+    # What "Restore default shortcuts" would leave, for its confirmation to say.
+    state["default_count"] = len(_hotkey_defaults()) - len(want)
+    state["default_pad_count"] = len(want)
+    return state
 
 
 def hotkey_commands() -> dict:
@@ -10846,24 +10863,36 @@ def action_open_app_settings_folder() -> dict:
     return {"ok": True, "message": f"Opened {folder}."}
 
 
-def action_set_hotkey(id: str, mods, key: str, enabled: bool, speak: bool = True) -> dict:
+def action_set_hotkey(id: str, key: str, enabled: bool, speak: bool = True) -> dict:
     """Change one shortcut, and persist it only if it was accepted. The manager validates and
     registers first, so the settings file can never hold a binding that does not work."""
     mgr = hotkey_manager()
-    res = mgr.set_binding(str(id or ""), mods or [], str(key or ""), bool(enabled), bool(speak))
+    res = mgr.set_binding(str(id or ""), str(key or ""), bool(enabled), bool(speak))
     if res.get("ok"):
         update_settings(hotkeys=mgr.saveable())
-    res["state"] = mgr.state()
+    res["state"] = _hotkey_page_state(mgr)
     return res
 
 
-def action_add_hotkey(command: str) -> dict:
-    """Add a shortcut for a catalogue command. It arrives on a free key and already working."""
+def action_set_hotkey_mods(mods) -> dict:
+    """Change the keys held for EVERY shortcut."""
     mgr = hotkey_manager()
-    res = mgr.add(str(command or ""), speak=commands.speaks_by_default(command))
+    res = mgr.set_mods(list(mods or []))
     if res.get("ok"):
         update_settings(hotkeys=mgr.saveable())
-    res["state"] = mgr.state()
+    res["state"] = _hotkey_page_state(mgr)
+    return res
+
+
+def action_add_hotkey(command: str, key: str = "") -> dict:
+    """Add a shortcut for a catalogue command, on `key` or else the first free key, already
+    working."""
+    mgr = hotkey_manager()
+    res = mgr.add(str(command or ""), speak=commands.speaks_by_default(command),
+                  key=str(key or ""))
+    if res.get("ok"):
+        update_settings(hotkeys=mgr.saveable())
+    res["state"] = _hotkey_page_state(mgr)
     return res
 
 
@@ -10872,9 +10901,10 @@ def action_add_pad_shortcuts() -> dict:
 
     THE ONE THING A SHIPPED DEFAULT CANNOT DO. Defaults land only on a machine that has saved
     nothing, so anybody who had already chosen their keys before the pad scheme existed would never
-    see it. This is the same set behind a button, so it stays an explicit choice rather than a
-    start-up surprise, and it can be pressed again after switching desks - a Duo has six pads in a
-    bank where a Pro II has eight, and the missing two are added without disturbing anything."""
+    see it. This is the "Use the SMART pad keys" switch ticked, so it stays an explicit choice
+    rather than a start-up surprise, and it can be ticked again after switching desks - a Duo has six
+    pads in a bank where a Pro II has eight, and the missing two are added without disturbing
+    anything."""
     mgr = hotkey_manager()
     res = mgr.add_scheme(_pad_hotkey_scheme())
     update_settings(hotkeys=mgr.saveable())
@@ -10885,11 +10915,37 @@ def action_add_pad_shortcuts() -> dict:
     if had:
         bits.append(f"{len(had)} {wording.plural(len(had), 'was', 'were')} already there.")
     for command, key, taken_by in clashed:
-        bits.append(f"{hotkeys.combo_text(hotkeys.DEFAULT_MODS, key)} is already used for "
+        bits.append(f"{hotkeys.combo_text(mgr.state()['mods'], key)} is already used for "
                     f"{_hotkey_label(taken_by)}, so {_hotkey_label(command)} was not added.")
     if not bits:
         bits.append("Every pad shortcut was already there.")
-    return {"ok": True, "message": " ".join(bits), "state": mgr.state()}
+    return {"ok": True, "message": " ".join(bits), "state": _hotkey_page_state(mgr)}
+
+
+def action_restore_hotkey_defaults() -> dict:
+    """Replace every shortcut with what a fresh install has, keys to hold included. The page asks
+    first: anything added or changed is lost."""
+    mgr = hotkey_manager()
+    res = mgr.reset(_hotkey_defaults())
+    update_settings(hotkeys=mgr.saveable())
+    res["state"] = _hotkey_page_state(mgr)
+    return res
+
+
+def action_set_pad_shortcuts(on: bool) -> dict:
+    """The "Use the SMART pad keys" switch: on adds whatever of the pad scheme is missing, off
+    deletes every shortcut for a pad-scheme command, on whatever key it had been moved to."""
+    if on:
+        return action_add_pad_shortcuts()
+    mgr = hotkey_manager()
+    want = _pad_set_commands()
+    gone = [row for row in mgr.state()["shortcuts"] if row["command"] in want]
+    for row in gone:
+        mgr.remove(row["id"])
+    update_settings(hotkeys=mgr.saveable())
+    msg = (f"Removed {wording.count(len(gone), 'pad shortcut')}." if gone
+           else "There were no pad shortcuts to remove.")
+    return {"ok": True, "message": msg, "state": _hotkey_page_state(mgr)}
 
 
 def action_delete_hotkey(id: str) -> dict:
@@ -10897,7 +10953,7 @@ def action_delete_hotkey(id: str) -> dict:
     res = mgr.remove(str(id or ""))
     if res.get("ok"):
         update_settings(hotkeys=mgr.saveable())
-    res["state"] = mgr.state()
+    res["state"] = _hotkey_page_state(mgr)
     return res
 
 
@@ -10907,7 +10963,7 @@ def action_set_hotkeys_enabled(on: bool) -> dict:
     mgr = hotkey_manager()
     res = mgr.set_enabled(bool(on))
     update_settings(hotkeys=mgr.saveable())
-    res["state"] = mgr.state()
+    res["state"] = _hotkey_page_state(mgr)
     return res
 
 
@@ -11001,12 +11057,13 @@ POST_ROUTES = {
     "/api/announce/devices": (action_refresh_speech_devices, []),
     # Global keyboard shortcuts. `mods` is a list of modifier ids ("ctrl", "alt", "win", "shift");
     # the manager validates and registers before anything is persisted.
-    "/api/hotkeys/set": (action_set_hotkey, [(str, "id", ""), (list, "mods", []),
-                                             (str, "key", ""), (bool, "enabled", True),
-                                             (bool, "speak", True)]),
-    "/api/hotkeys/add": (action_add_hotkey, [(str, "command", "")]),
-    "/api/hotkeys/add-pads": (action_add_pad_shortcuts, []),
+    "/api/hotkeys/set": (action_set_hotkey, [(str, "id", ""), (str, "key", ""),
+                                             (bool, "enabled", True), (bool, "speak", True)]),
+    "/api/hotkeys/mods": (action_set_hotkey_mods, [(list, "mods", [])]),
+    "/api/hotkeys/add": (action_add_hotkey, [(str, "command", ""), (str, "key", "")]),
     "/api/hotkeys/delete": (action_delete_hotkey, [(str, "id", "")]),
+    "/api/hotkeys/pad-set": (action_set_pad_shortcuts, [(bool, "on", None)]),
+    "/api/hotkeys/restore-defaults": (action_restore_hotkey_defaults, []),
     "/api/hotkeys/enabled": (action_set_hotkeys_enabled, [(bool, "on", None)]),
     "/api/faders/level": (action_set_fader_level,
                           [(int, "fader", -1), (int, "percent", 0)]),

@@ -45,7 +45,7 @@ after a session that moved code.
 | `rcp_hid.py` | 533 | HID transport and the lock. **`open_handle(iface, purpose)` / `close_handle` / the `handle` context manager are how EVERY handle in the app is opened**, so the diagnostic log can say who holds the device and for how long; `hid` is imported HERE ALONE. `purpose` is named after the job ("model dump", "pad create", "announcer"), because the log is read by somebody asking what the app was doing. `find_control_interface` answers from a remembered interface list (`refresh_interfaces`, `forget_interfaces`, `fresh=True`; PROJECT_GUIDE part 2). |
 | `diagnostics.py` | 416 | **THE DIAGNOSTIC LOG**, `%LOCALAPPDATA%\AccessCaster\logs\diagnostic.log` with one rollover. `start()` (called ONLY from `server._bring_up_server`, which every entry point funnels through, so the file has exactly one writer), `event(kind, detail, **fields)`, `command(rec, why)` (decodes a report-3 record to `property = value at [path]`), the `phase` context manager (start / end / how long), `flush`, `stop`, `log_path`, `folder`. It TEES stdout and stderr, which is what makes every existing `print` visible in the windowed build, and installs `sys.excepthook`, `threading.excepthook` and `faulthandler`. Identical events collapse into one `repeated ... xN` line; the FIRST of anything is always written immediately. Silent until `start()`, so the offline suites and DevTools write nothing. |
 | `autogain.py` | 136 | Auto gain measurement and the gain decision, off a WINDOWS endpoint (`chat_endpoint` -> `measure_endpoint` -> `verdict`). |
-| `hotkeys.py` | 568 | **The Win32 half of global keyboard shortcuts, and it knows nothing about the desk.** `MODIFIERS`, `KEYS` (incl. `KEY_DASH` / `KEY_EQUALS`, the two at the end of the number row the pad scheme uses), **`DEFAULT_MODS` = Ctrl+Alt+Shift, the ONE chord the whole app ships on** (read its comment before changing it: it moved off Ctrl+Alt+Windows because that chord cannot have the digits), `combo_text`, `parse_binding` (the validation, incl. "must carry Ctrl, Alt or Windows"), `HotkeyManager` (holds the USER'S LIST of {id, command, mods, key, enabled, speak}: `load`, `saveable`, `add`, **`add_scheme`** (lays a whole named SET onto an existing list, which `load(defaults=)` may never do), `remove`, `get`, `set_binding`, `set_enabled`, `state`, `start`/`stop`/`reload` (which WAITS for the pump to apply it, so `add` and `set_binding` report their own registration), and the `_pump` thread that both registers and pumps). It calls out to a `runner` and a `labeller`; what a command MEANS is `commands.py`. |
+| `hotkeys.py` | 568 | **The Win32 half of global keyboard shortcuts, and it knows nothing about the desk.** `MODIFIERS`, `KEYS` (incl. `KEY_DASH` / `KEY_EQUALS`, the two at the end of the number row the pad scheme uses), **`DEFAULT_MODS` = Ctrl+Alt+Shift, the chord a fresh install starts on** (read its comment before changing it: it moved off Ctrl+Alt+Windows because that chord cannot have the digits), `combo_text`, `parse_binding` (the validation, incl. "must carry Ctrl, Alt or Windows"), `HotkeyManager` (holds the USER'S LIST of {id, command, mods, key, enabled, speak}: `load`, `saveable`, `add`, **`add_scheme`** (lays a whole named SET onto an existing list, which `load(defaults=)` may never do), `remove`, `get`, `set_binding` (key, on/off, speech), **`set_mods` (the ONE chord every shortcut is held on, `_mods`)**, `reset` (Restore default shortcuts), `set_enabled`, `state`, `start`/`stop`/`reload` (which WAITS for the pump to apply it, so `add` and `set_binding` report their own registration), and the `_pump` thread that both registers and pumps). It calls out to a `runner` and a `labeller`; what a command MEANS is `commands.py`. |
 | `commands.py` | 545 | **The catalogue of everything a shortcut can be pointed at, GENERATED from the app's own spec tables** (channels, faders, pads, mix schemes, presets) - never hand-written. `catalogue()`, `label_for()`, `run()` (splits the id on the FIRST DOT), `CATEGORIES`, `LEVEL_STEP`, `PAD_TYPES` (all three kinds since MIDI), **`speaks_by_default`** (the ONE place that decides a shortcut arrives silent; pad firing does), `_pad_control_commands` (bank / slot / what-is-playing, no model dump so they render instantly) vs `_pad_commands` (one per real pad, needs a dump). Imports `server` INSIDE the functions, because server imports this. |
 | `midi_out.py` | 233 | **The desk's own USB MIDI port, and the ONLY way to play a sound pad.** winmm through ctypes, no package and no driver. `ports` / `find_port` (prefix match: Windows truncates a port name at 31 chars), module-level `send_cc` / `press_pad` / `release_pad` / `play_pad` over ONE long-lived shared handle (lazy open, one reopen on a failed send, which is what a replug looks like), `MidiOut` as a context manager for tools, `close`, and `midi_enabled()` which is FOR TOOLS ONLY - the app arms MIDI at the point of use and leaves it on. **CC 35 is play-a-pad and the MIDI CHANNEL is which pad**, within the current bank; the bank is an ordinary HID write (`soundpad.select_bank`). |
 | `tray.py` | 223 | pywin32 system-tray entry point (this is what ships). Menu: Open, Announcer, **Diagnostic log** (`_open_log`, which opens the file in NOTEPAD rather than handing it to the shell - a `.log` often has no registered handler and `os.startfile` would open the "how do you want to open this" chooser, a dialog with nothing in it to read), Quit. |
@@ -75,11 +75,12 @@ after a session that moved code.
   in `hotkey_manager()`. Here: the actions the catalogue calls into (`_hk_announcer`, `_hk_record`,
   `_hk_mics` with `_hk_muted_mics` above it, `_hk_state`, `_hk_window`),
   `_hotkey_defaults()` (what a fresh install gets) and `_pad_hotkey_scheme()` (the pad half on its
-  own, so `action_add_pad_shortcuts` can offer it to a list that already exists),
+  own, so the "Use the SMART pad keys" switch, `action_set_pad_shortcuts`, can add or remove it),
   `_HOTKEY_V1_COMMANDS` + `_hotkeys_migrate` (carries an old settings file across),
   `_hotkey_label` (cached, because the catalogue can touch the desk), `hotkey_state`,
-  `hotkey_commands` (the only part that reads the desk), `action_set_hotkey`, `action_add_hotkey`,
-  `action_delete_hotkey`, `action_set_hotkeys_enabled`. Registered in `_bring_up_server` under
+  `hotkey_commands` (the only part that reads the desk), `_hotkey_page_state` (adds `pad_set` and
+  the default counts), `action_set_hotkey`, `action_set_hotkey_mods`, `action_add_hotkey`,
+  `action_delete_hotkey`, `action_restore_hotkey_defaults`, `action_set_hotkeys_enabled`. Registered in `_bring_up_server` under
   `shortcuts=`, released in `stop_server`.
 - **Firing a pad from a shortcut.** `_hk_fire_pad` dispatches PER PAD by type: `_hk_pad_play`
   (sound, over MIDI, selecting the bank first) or `_hk_pad_toggle` (voice FX / mixer, over HID,
@@ -230,12 +231,12 @@ inline, because what the browser receives is unchanged.
   index.html) are thin adapters over it and differ only in where the panes come from: built, or
   found in the document. Also `tabSection` (336, sub-headings inside a merged tab),
   `setPanelTabStop` (164).
-- **Staged dropdowns (anything that changes the desk's audio): `makeStagedSelect`, `markStaged`,
-  `setStagedValue` (the ONLY place a device value is recorded; reaches its button via
-  `sel.stagedApply`), `blockStaged`.** Used by fader assignment, the output mix mode, headphone
-  type, USB multitrack, what to record, and mic type. A dropdown that only changes what you are
-  looking at acts at once; the metered stream waits `SELECT_COMMIT_MS` instead, and the pad
-  Settings dropdowns (colour, play mode, mixer trigger) commit on Enter through `commitOnEnter`.
+- **Dropdowns that change the desk apply on Enter: `enterToApply` (the rule), `makeStagedSelect`
+  (a labelled row built on it), `setStagedValue` (the ONLY place a device value is recorded),
+  `revertStaged`, `markStaged` (the on-page waiting line).** Used by fader assignment, the output
+  mix mode, headphone type, both USB audio settings, what to record and its format, mic type, the
+  Unit settings choices, the pad Settings dropdowns and the MIDI trigger choices. A dropdown that
+  only changes what you are looking at acts at once; the metered stream waits `SELECT_COMMIT_MS`.
 - Rebuild guards: `fillOptions` (3169), `rebuildIfChanged` (3197), `setLevelValue` (5458),
   `markLevelsUnread` (5436), `applyUnitSettingValues` (1402).
 - Live region: `announce` (18). It REPLACES, it does not queue.
@@ -275,11 +276,13 @@ inline, because what the browser receives is unchanged.
   truth for it).
 - Keyboard shortcuts (Device page, tab key `shortcuts`): `wireHotkeys` (all the listeners, called
   from init), `loadHotkeys`, `applyHotkeyState` (the ONE place a payload becomes the whole tab),
-  `hotkeyPickLabel`, `currentHotkey`, `showHotkey` (values only, and it skips the focused control),
-  `hotkeyRowStatus`, `saveHotkey`, `forceHotkeyValues` (puts the FAILING row back, which
-  `showHotkey` deliberately cannot), `onHotkeysEnabledToggle`, and the dialogs:
-  `onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm` / `onHotkeyDeleteOpen` /
-  `onHotkeyDeleteConfirm` / `closeHotkeyDialog`. The editor's controls are STATIC in index.html.
+  the listbox (`renderHotkeyList`, updated in place by id; `onHotkeyListKey`; `selectHotkey`), the
+  menu (`openHotkeyMenu`, `onHotkeyMenuKey`, `runHotkeyMenuItem`), `sendHotkey`,
+  `announceAfterFocus`, `onHotkeyPadSetToggle`, and the dialogs: Edit (`openHotkeyEdit` /
+  `onHotkeyEditSave`), keys to hold (`openHotkeyMods` / `onHotkeyModsSave`), Add
+  (`onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm`), Delete
+  (`onHotkeyDeleteOpen` / `onHotkeyDeleteConfirm`), Restore (`onHotkeyRestoreOpen` /
+  `onHotkeyRestoreConfirm`), all closed through `closeHotkeyDialog`.
 - `dropRetiredGroupState` (9241) drops the whole retired `accesscaster.groups` key.
 
 Page shortcuts (`bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,

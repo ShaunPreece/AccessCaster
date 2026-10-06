@@ -328,26 +328,30 @@ async function run() {
   // The switch is available only while a multitrack mode is chosen, so that decision has to be
   // re-run after an Apply. Left keyed to the mode the page was last READ with, it goes on saying
   // "choose pre-fader or post-fader above first" - which you just did - and only leaving the page
-  // and coming back clears it. This drives the real gesture: arrow, Apply, and it must free up with
+  // and coming back clears it. This drives the real gesture: arrow, Enter, and it must free up with
   // no re-entry. POSTs are stubbed by the probe, so this tests the WIRING, not the desk write.
+  const key = (s, k) => s.dispatchEvent(new KeyboardEvent("keydown",
+                                        { key: k, bubbles: true, cancelable: true }));
+  const arrowToIndex = (s, i) => {
+    key(s, "ArrowDown");
+    s.selectedIndex = i;
+    s.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   const mtSel = el("rec-multitrack-mode");
-  const mtApply = el("rec-settings-apply");
   const bypass = () => el("rec-bypass");
-  if (mtSel && mtApply && bypass()) {
+  if (mtSel && bypass()) {
     const wasIndex = mtSel.selectedIndex;
     // Start from "single mixed track", which is the state that makes the switch unavailable.
-    mtSel.selectedIndex = 0;
-    mtSel.dispatchEvent(new Event("change", { bubbles: true }));
-    mtApply.click();
+    arrowToIndex(mtSel, 0);
+    key(mtSel, "Enter");
     await waitFor(() => bypass().hasAttribute("aria-disabled"), 12000);
     check("with no multitrack chosen, the raw switch is unavailable",
       bypass().hasAttribute("aria-disabled"));
     // Now choose a multitrack mode and apply it.
-    mtSel.selectedIndex = 1;
-    mtSel.dispatchEvent(new Event("change", { bubbles: true }));
-    check("arrowing alone does not free it: it is still staged",
+    arrowToIndex(mtSel, 1);
+    check("arrowing alone does not free it: nothing is applied yet",
       bypass().hasAttribute("aria-disabled"));
-    mtApply.click();
+    key(mtSel, "Enter");
     await waitFor(() => !bypass().hasAttribute("aria-disabled"), 12000);
     check("APPLYING a multitrack mode frees the raw switch, with no page re-entry",
       !bypass().hasAttribute("aria-disabled"),
@@ -355,9 +359,8 @@ async function run() {
     check("and its hint switches to the real explanation",
       !/does nothing/i.test(flatText(el("rec-bypass-hint"))),
       flatText(el("rec-bypass-hint")).slice(0, 70));
-    mtSel.selectedIndex = wasIndex;                 // leave the control as we found it
-    mtSel.dispatchEvent(new Event("change", { bubbles: true }));
-    mtApply.click();
+    arrowToIndex(mtSel, wasIndex);                  // leave the control as we found it
+    key(mtSel, "Enter");
     await sleep(500);
   }
 
@@ -378,33 +381,22 @@ async function run() {
   check("its hint gives the trade in plain words (size against quality)",
     /size|smaller|uncompressed/i.test(flatText(described(fmt))), flatText(described(fmt)));
 
-  // STAGED: arrowing it must send NOTHING. Same rule as every other audio-changing dropdown, and
+  // ARROWING IT MUST SEND NOTHING. Same rule as every other audio-changing dropdown, and
   // this one decides a whole take's format, so a stray arrow press would be expensive.
   await probeClear();
   if (fmt) {
-    fmt.selectedIndex = (fmt.selectedIndex + 1) % fmt.options.length;
-    fmt.dispatchEvent(new Event("change", { bubbles: true }));
+    arrowToIndex(fmt, (fmt.selectedIndex + 1) % fmt.options.length);
     await sleep(900);
   }
   const fPosts = posts(await probeLog()).filter((r) => r.path.indexOf("/api/recorder/format") === 0);
-  check("arrowing the format dropdown writes NOTHING until Apply", fPosts.length === 0,
+  check("arrowing the format dropdown writes NOTHING until Enter", fPosts.length === 0,
     JSON.stringify(fPosts.map((r) => r.path)));
-  // ONE APPLY FOR THE PAIR. What a take contains and what it is saved as are
-  // one decision, so they share a button named for the pair; two buttons a Tab apart said less.
-  // A per-dropdown Apply reappearing here would be the regression.
-  const shared = el("rec-settings-apply");
-  check("the two dropdowns SHARE one Apply, named for the pair",
-    !!shared && /recording settings/i.test(shared.textContent),
-    shared && shared.textContent.trim());
-  check("and neither dropdown has an Apply of its own any more",
-    !el("rec-format-mode-apply") && !el("rec-multitrack-mode-apply"));
-  check("the shared Apply serves both dropdowns",
-    shared && shared.stagedSelects && shared.stagedSelects.length === 2,
-    shared && shared.stagedSelects && shared.stagedSelects.length);
-  check("each dropdown SAYS an Apply is needed, in its static hint",
-    /apply recording settings/i.test(flatText(described(el("rec-format-mode"))))
-    && /apply recording settings/i.test(flatText(described(el("rec-multitrack-mode")))),
-    flatText(described(el("rec-format-mode"))).slice(-60));
+  if (fmt) fmt.dispatchEvent(new FocusEvent("blur"));   // leaving puts it back
+  check("neither dropdown has an Apply button",
+    !el("rec-settings-apply") && !el("rec-format-mode-apply") && !el("rec-multitrack-mode-apply"));
+  check("each dropdown is described as applying on Enter",
+    ["rec-format-mode", "rec-multitrack-mode"].every((id) =>
+      (el(id).getAttribute("aria-describedby") || "").includes("enter-to-apply-hint")));
 
   // THE STORAGE DETAIL IS NOT HERE AT ALL. It listed every volume including the unit's pad
   // storage and an empty card slot - a reading nobody wants mid-session. It lives on Device >

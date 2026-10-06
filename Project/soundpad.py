@@ -1044,31 +1044,36 @@ def pad_colours() -> list[dict]:
 
 PAD_PROP = {
     "padName": {
-        "kind": "str", "label": "Pad name", "applies_to": None,
+        "kind": "str", "label": "Pad name", "said": "name", "applies_to": None,
         "help": "The on-screen name of the pad.",
     },
     "padColourIndex": {
-        "kind": "int", "label": "Pad colour", "applies_to": None, "min": 0, "max": 11,
+        "kind": "int", "label": "Pad colour", "said": "colour", "applies_to": None,
+        "min": 0, "max": 11,
         "help": "The pad's display colour (0-11; the app's fixed palette, see PAD_COLOUR_NAME).",
     },
     "padGain": {
-        "kind": "float", "label": "Pad volume (dB)", "applies_to": None, "min": -60.0, "max": 12.0,
+        "kind": "float", "label": "Pad volume (dB)", "said": "volume", "applies_to": None,
+        "min": -60.0, "max": 12.0,
         "help": "Per-pad output level in dB. Factory pads sit at -12.0. (Range provisional.)",
     },
     "padReplay": {
-        "kind": "bool", "label": "Restart on re-press", "applies_to": (1,),
+        "kind": "bool", "label": "Restart on re-press", "said": "restart on re-press",
+        "applies_to": (1,),
         "help": "Sound pads: a second press restarts the sound; off, it pauses and resumes.",
     },
     "padLoop": {
-        "kind": "bool", "label": "Loop", "applies_to": (1,),
+        "kind": "bool", "label": "Loop", "said": "loop", "applies_to": (1,),
         "help": "Sound pads: play repeatedly until stopped (not available in One-Shot mode).",
     },
     "padPlayMode": {
-        "kind": "int", "label": "How the pad plays", "applies_to": (1,), "min": 0, "max": 2,
+        "kind": "int", "label": "How the pad plays", "said": "play mode", "applies_to": (1,),
+        "min": 0, "max": 2,
         "help": "Sound pads: 0 Toggle, 1 Hold, 2 One Shot (see PLAY_MODE_LABEL).",
     },
     "padMixerTriggerMode": {
-        "kind": "int", "label": "Trigger mode", "applies_to": (3,), "min": 0, "max": 1,
+        "kind": "int", "label": "Trigger mode", "said": "trigger mode", "applies_to": (3,),
+        "min": 0, "max": 1,
         "help": "Mixer pads: 0 Momentary (only while held), 1 Latching (press on, press again off). "
                 "Confirmed from the factory pads (Censor = Momentary, Ducking = Latching).",
     },
@@ -1131,15 +1136,15 @@ ENV_FIELD = {
 # 50 percent" is something a screen reader reads usefully and a slider arrows through sensibly, while
 # seconds would need the file's duration, which the desk does not report.
 ENV_EDIT = [
-    {"key": "start", "label": "Start playing at",
+    {"key": "start", "label": "Start playing at", "said": "start point",
      "help": "How far into the sound playback begins, as a percentage. 0 is the very beginning."},
-    {"key": "fade_in", "label": "Fade in until",
+    {"key": "fade_in", "label": "Fade in until", "said": "fade in end",
      "help": "The sound fades up from silence until this point. Set it to the same as Start playing "
              "at for no fade in."},
-    {"key": "fade_out", "label": "Fade out from",
+    {"key": "fade_out", "label": "Fade out from", "said": "fade out start",
      "help": "The sound fades down to silence from this point. Set it to the same as Stop playing at "
              "for no fade out."},
-    {"key": "stop", "label": "Stop playing at",
+    {"key": "stop", "label": "Stop playing at", "said": "stop point",
      "help": "How far into the sound playback ends, as a percentage. 100 is the very end."},
 ]
 # FADE mixer pads (padMixerMode 2). The names say seconds, so the unit is not in doubt. The upper
@@ -1153,9 +1158,9 @@ FADE_FIELD = {
 }
 FADE_MAX_SECONDS = 60.0
 FADE_EDIT = [
-    {"key": "in_seconds", "label": "Fade in over, in seconds",
+    {"key": "in_seconds", "label": "Fade in over, in seconds", "said": "fade in time",
      "help": "How long the mix takes to come up when the pad fades in."},
-    {"key": "out_seconds", "label": "Fade out over, in seconds",
+    {"key": "out_seconds", "label": "Fade out over, in seconds", "said": "fade out time",
      "help": "How long the mix takes to go down when the pad fades out."},
 ]
 # CENSOR mixer pads (padMixerMode 0): whether the pad lays your OWN sound over the mix instead of the
@@ -1179,7 +1184,7 @@ _EXTRA_PROP_OF["custom"] = CENSOR_FIELD["custom"]
 # the browser control, the write validation and the refusal message all come from here.
 TRIGGER_EDIT = [
     {"key": "mode", "prop": "padTriggerMode", "kind": "int", "min": 0, "max": 1,
-     "label": "How the pad triggers", "choices": "modes",
+     "label": "How the pad triggers", "said": "trigger mode", "choices": "modes",
      "help": "Latching means the first press sends the pressed value and the next press sends the "
              "released value. Momentary means the pressed value goes as you press and the released "
              "value as you let go. Heard on the desk's own MIDI output, not assumed."},
@@ -1230,7 +1235,8 @@ def trigger_choices() -> dict:
 # padLoop. Registered here (rather than written out by hand) so the list and the editor cannot drift.
 for _bc in BACK_CHANNEL_SOURCES:
     PAD_PROP[_bc["prop"]] = {
-        "kind": "bool", "label": "Back Channel member: " + _bc["label"], "applies_to": (3,),
+        "kind": "bool", "label": "Back Channel member: " + _bc["label"],
+        "said": _bc["label"] + " in the Back Channel", "applies_to": (3,),
         "help": f"Back Channel pads: include {_bc['label']} in the off-air talkback room.",
     }
 del _bc
@@ -1240,7 +1246,7 @@ del _bc
 # sound or mixer pad, where the field exists in the record but means nothing.
 for _tf in TRIGGER_EDIT:
     PAD_PROP[_tf["prop"]] = {
-        "kind": _tf["kind"], "label": _tf["label"], "applies_to": (4,),
+        "kind": _tf["kind"], "label": _tf["label"], "said": _tf.get("said"), "applies_to": (4,),
         "min": _tf["min"], "max": _tf["max"],
         "help": "MIDI trigger pads: " + _tf["help"],
     }
@@ -1249,30 +1255,34 @@ del _tf
 # so it is clamped; the fade seconds are clamped to a sanity bound rather than a device limit.
 for _e in ENV_EDIT:
     PAD_PROP[ENV_FIELD[_e["key"]]] = {
-        "kind": "float", "label": _e["label"], "applies_to": (1,), "min": 0.0, "max": 1.0,
+        "kind": "float", "label": _e["label"], "said": _e["said"], "applies_to": (1,),
+        "min": 0.0, "max": 1.0,
         "help": "Sound pads: " + _e["help"] + " Stored as a fraction of the whole sound.",
     }
 del _e
 for _f in FADE_EDIT:
     PAD_PROP[FADE_FIELD[_f["key"]]] = {
-        "kind": "float", "label": _f["label"], "applies_to": (3,),
+        "kind": "float", "label": _f["label"], "said": _f["said"], "applies_to": (3,),
         "min": 0.0, "max": FADE_MAX_SECONDS,
         "help": "Fade mixer pads: " + _f["help"],
     }
 del _f
 PAD_PROP[FADE_FIELD["exclude_host"]] = {
-    "kind": "bool", "label": "Fade excludes the host", "applies_to": (3,),
+    "kind": "bool", "label": "Fade excludes the host", "said": "leaving the host out of the fade",
+    "applies_to": (3,),
     "help": "Fade mixer pads: leave the host's own mic out of the fade, so you can still be heard "
             "while everything else fades.",
 }
 PAD_PROP[CENSOR_FIELD["custom"]] = {
-    "kind": "bool", "label": "Censor uses your own sound", "applies_to": (3,),
+    "kind": "bool", "label": "Censor uses your own sound", "said": "your own censor sound",
+    "applies_to": (3,),
     "help": "Censor pads: lay your own sound over the mix instead of the factory beep. The sound "
             "file itself has to already be on the unit.",
 }
 
 PAD_PROP["padTriggerCustom"] = {
-    "kind": "bool", "label": "Custom MIDI mapping", "applies_to": (4,),
+    "kind": "bool", "label": "Custom MIDI mapping", "said": "custom MIDI mapping",
+    "applies_to": (4,),
     "help": "MIDI trigger pads: send the mapping set here rather than the firmware's default "
             "(a Control Change on the pad's own number, channel 1, 127 on and 0 off).",
 }
@@ -1345,12 +1355,42 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
         if err:
             return {"ok": False, "message": err}
         recs.append(pr.write_record(name, kind, value, pos, pr.FRAME_PAD))
-        labels.append(f"{spec['label'] if spec else name} to {value!r}")
+        said = (spec.get("said") or spec["label"]) if spec else name
+        labels.append(f"{said} is now {_spoken_value(name, value)}")
         values[name] = value
     _commit_pad_records(recs)
     first = items[0][0]
     return {"ok": True, "name": first, "value": values[first], "values": values,
-            "message": f"Set {', '.join(labels)} on pad {grid} '{padname}'."}
+            "message": f"Pad {grid} {', '.join(labels)}."}
+
+
+# Values that are said by name rather than by number.
+_SPOKEN_CHOICES = {
+    "padColourIndex": PAD_COLOUR_NAME,
+    "padPlayMode": PLAY_MODE_LABEL,
+    "padMixerTriggerMode": MIXER_TRIGGER_LABEL,
+    "padTriggerMode": TRIGGER_MODE_LABEL,
+    "padTriggerType": TRIGGER_TYPE_LABEL,
+}
+
+
+def _spoken_value(name: str, value) -> str:
+    """A written pad value as it is said back: a choice by its short name (the label before any
+    bracketed explanation), a switch as on or off, and a number in its unit."""
+    choices = _SPOKEN_CHOICES.get(name)
+    if choices and value in choices:
+        return choices[value].split(" (")[0]
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if name == "padGain":
+        return f"{value:g} dB"
+    if name in ENV_FIELD.values():
+        return f"{value * 100:g} percent"         # stored as a fraction of the sound
+    if name in (FADE_FIELD["in_seconds"], FADE_FIELD["out_seconds"]):
+        return f"{value:g} seconds"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
 
 
 def set_pad_property(grid: int, name: str, value, kind: str | None = None, blob=None) -> dict:
@@ -1389,7 +1429,7 @@ def set_play_mode(grid: int, mode: int) -> dict:
     updates = [("padPlayMode", mode)] + ([("padLoop", False)] if one_shot else [])
     res = set_pad_properties(grid, updates)
     if res.get("ok") and one_shot:
-        res["message"] += " Loop turned off, One Shot cannot loop."
+        res["message"] += " One Shot cannot loop."
         res["loop_off"] = True
     return res
 

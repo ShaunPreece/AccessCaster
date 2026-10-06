@@ -177,8 +177,34 @@ fieldset.channel legend, fieldset.hotkey legend, fieldset.fx-eff legend {
   font-weight: 700; padding: 0 0.4rem;
 }
 /* The four modifiers read as one row of choices rather than four separate settings. */
-fieldset.hotkey [role="group"] { display: flex; gap: 1rem; flex-wrap: wrap; }
-fieldset.hotkey [role="group"] .field { margin: 0.2rem 0; }
+.hotkey-mods { display: flex; gap: 1rem; flex-wrap: wrap; }
+.hotkey-mods .field { margin: 0.2rem 0; }
+
+/* ---- Keyboard shortcuts: the list view and its context menu ---- */
+.field-label { font-weight: 600; margin: 1rem 0 0.3rem; }
+.hotkey-items {
+  list-style: none; margin: 0; padding: 0.2rem;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  max-height: 24rem; overflow-y: auto;
+}
+.hotkey-items [role="option"] { padding: 0.45rem 0.6rem; border-radius: 6px; cursor: default; }
+.hotkey-items [role="option"][aria-selected="true"] { background: var(--accent-soft); }
+.hotkey-items [role="option"]:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+.context-menu [role^="menuitem"]:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 1px;
+}
+.context-menu {
+  position: absolute; z-index: 20; list-style: none; margin: 0; padding: 0.25rem;
+  min-width: 14rem; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.context-menu [role^="menuitem"] { padding: 0.45rem 0.7rem; border-radius: 6px; cursor: default; }
+.context-menu [role^="menuitem"]:hover,
+.context-menu [role^="menuitem"]:focus { background: var(--accent); color: var(--accent-fg); }
+/* The tick is for the eye only: the "/ ''" alt text keeps a screen reader from reading the symbol,
+   which would repeat the state the item already announces. */
+.context-menu [role="menuitemcheckbox"]::before { content: "\2610  " / ""; }
+.context-menu [role="menuitemcheckbox"][aria-checked="true"]::before { content: "\2611  " / ""; }
 
 /* ---- Custom voice-FX creator ---- */
 .fx-ctl { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
