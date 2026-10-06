@@ -191,9 +191,8 @@
                the ones made here. What each switch announces is in its own label, and the Help
                page keeps the full account. -->
           <p id="announce-note" class="note">
-            Mute and solo are announced by channel and state, for example "Mic 2 muted", including
-            changes made on the unit itself rather than here. Bank changes, channel buttons and what
-            the encoder is set to are announced too.
+            Mutes, solos, bank changes, channel buttons and the encoder, including changes made on
+            the unit itself.
           </p>
           <p class="field">
             <label class="switch">
@@ -202,9 +201,8 @@
             </label>
           </p>
           <p id="announce-levels-note" class="note">
-            Whatever you turn is announced by name, so the encoder set to a channel gives you that
-            channel and its gain in decibels, not the monitor. A muted channel is announced as muted
-            rather than with a level.
+            Says the name and level of whatever you turn: a fader, the monitor, or the channel the
+            encoder is set to.
           </p>
           <p class="field">
             <label class="switch">
@@ -213,11 +211,8 @@
             </label>
           </p>
           <p id="announce-startup-summary-note" class="note">
-            When the app opens it can tell you what is wrong with the desk, and only that: anything
-            muted or soloed, a voice-effect pad left switched on, a recording already running, a
-            drive nearly full, or an output not on its usual mix. On a desk with nothing to report it
-            is one sentence saying so. The full picture, including every fader level, stays on the
-            Device page.
+            When the app opens, says anything that needs attention, such as a mute, a solo or a
+            recording already running.
           </p>
           <p class="field">
             <label class="switch">
@@ -227,11 +222,8 @@
             </label>
           </p>
           <p id="announce-mute-tones-note" class="note">
-            A mute is pressed in the middle of something, and a spoken sentence finishes after the
-            moment it was describing. A short cue says it faster: two notes FALLING means muted, two
-            notes RISING means unmuted. Turning this on plays both, in that order, so you hear which
-            is which. The trade is the channel name, which a cue cannot carry, so leave it off if you
-            need to know which channel was muted rather than that one was.
+            Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does not
+            say which channel.
           </p>
           <p class="field">
             <label class="switch">
@@ -241,8 +233,7 @@
             </label>
           </p>
           <p id="announce-remember-note" class="note">
-            Announcements are on every time the app starts, so it never opens in silence. Tick this
-            if you would rather they stay off after a restart when you have switched them off.
+            Without this, announcements switch back on every time the app starts.
           </p>
           <p class="field">
             <label class="switch">
@@ -255,33 +246,22 @@
             <label for="announce-voice">Announcement voice</label>
             <select id="announce-voice" aria-describedby="announce-voice-help"></select>
             <span id="announce-voice-help" class="hint">
-              Which of the computer's installed speech voices reads announcements out. Choosing one
-              speaks a sample in it straight away, so you can hear what you have picked. This is only
-              for these announcements: your screen reader keeps its own voice. The list is whatever
-              Windows has installed, so if you install another voice it appears here.
+              Choosing one plays a sample. Your screen reader keeps its own voice.
             </span>
           </div>
           <div class="field">
             <label for="announce-output">Where announcements play</label>
             <select id="announce-output" aria-describedby="announce-output-help"></select>
             <span id="announce-output-help" class="hint">
-              Which audio output these announcements come out of. This changes OUR speech only: it
-              does not move the Windows default output, and it does not affect your screen reader or
-              any other program. It matters because the default output on this machine is usually the
-              RODECaster itself, so announcements arrive on USB 1 and disappear the moment you solo
-              another channel or mute USB 1. Monitor auto-mute does it too: with that on, the unit
-              silences the speakers whenever a mic is live, so an announcement can reach your
-              headphones and not the room, or the other way round, depending on what you had just
-              pressed. Pointing them at a different output, your computer's own
-              speakers or headphones, keeps them audible whatever the desk is doing, and keeps them
-              out of your recording and your stream.
+              Your computer's own speakers or headphones keep announcements audible when the desk
+              mutes or solos, and out of your recording. Other programs are not affected.
             </span>
           </div>
           <p>
             <button type="button" class="secondary" id="announce-devices-refresh"
                     aria-describedby="announce-devices-help">Refresh voices and outputs</button>
             <span id="announce-devices-help" class="hint">
-              Read the two lists above again, after plugging in headphones or installing a voice.
+              Use after plugging in headphones or installing a voice.
             </span>
           </p>
           <p id="announce-speech-status" role="status" aria-live="polite"></p>
@@ -291,12 +271,7 @@
                    aria-describedby="announce-volume-help">
             <span id="announce-volume-value" class="proc-value" aria-hidden="true">100%</span>
             <span id="announce-volume-help" class="hint">
-              How loud announcements are, from 0 to 100 percent. Turn it down if the announcer talks
-              over what you are listening to while you ride the faders. This changes ONLY these
-              announcements: it does not touch your Windows volume, any other program, or the unit's
-              own audio. It applies a moment after you stop moving it, and the confirmation is spoken
-              at the new level so you can hear what you have chosen. At 0 the announcer stays on but
-              says nothing aloud.
+              Announcements only. Windows, your screen reader and the desk are not affected.
             </span>
           </div>
         </div>
