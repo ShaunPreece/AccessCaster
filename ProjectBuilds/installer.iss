@@ -153,6 +153,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
     ValueName: "Access Caster"; Flags: deletevalue
 
 [Run]
+; Which window ends up in front, the app's page or the release notes, is a race whichever order
+; these run in, so reordering them is not a fix.
 ; Launch the app when the installer finishes (the "open the server/page when finished" step).
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent
