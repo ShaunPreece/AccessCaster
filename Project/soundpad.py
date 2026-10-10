@@ -41,6 +41,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 import time
 from collections import Counter
@@ -96,8 +97,7 @@ def _require_pad_write() -> None:
 @contextlib.contextmanager
 def _transfer_mode(settle: float):
     """Enter transfer mode, wait `settle` seconds, and ALWAYS leave again, even on an error. A desk
-    left in transfer mode keeps its FAT volume exposed and its audio dropped until something else
-    exits it. Inside rcp_transfer.transfer_session both calls do nothing; the session owns them."""
+    left in transfer mode keeps its FAT volume exposed until something else exits it. Inside rcp_transfer.transfer_session both calls do nothing; the session owns them."""
     t.set_transfer_mode(True)
     try:
         time.sleep(settle)
@@ -619,7 +619,7 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
             "file": (os.path.basename(file_paths.get(pidx) or "") or None) if is_sound else None,
             # which mixer action (0-4), for mixer pads only; lets the UI pre-select the mode.
             "mixer_mode": (mixer_modes.get(pidx) if is_mixer else None),
-            # Latching(0)/Momentary(1), mixer pads only.
+            # Momentary(0)/Latching(1), mixer pads only.
             "mixer_trigger": (mixer_triggers.get(pidx) if is_mixer else None),
             # {prop: bool} for Back Channel pads only; null for anything else.
             "back_channel": members,
@@ -2675,10 +2675,10 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
 _PAD_COMPARE_FIELDS = ("name", "colour", "gain", "loop", "replay", "play_mode",
                        "mixer_mode", "mixer_trigger", "back_channel", "trigger")
 
-# Types we are willing to skip. Voice FX (2) is deliberately EXCLUDED: its identity lives in the
-# effect object in region B, which we cannot verify from a model dump, and region B is where the
-# orphan damage happens. An FX pad is also cheaper to rebuild than a sound pad (no file copy).
-_SKIPPABLE_PAD_TYPES = (PAD_TYPE_SOUND, PAD_TYPE_MIXER, PAD_TYPE_TRIGGER)
+# Types we are willing to skip. A voice-FX pad's effect lives in its region-B object, which the
+# model dump carries in full, so it is compared there (_fx_effect_matches). Skipping one also spares
+# a clear and create in region B, the one place a wrong write is factory-reset-only.
+_SKIPPABLE_PAD_TYPES = (PAD_TYPE_SOUND, PAD_TYPE_VOICE_FX, PAD_TYPE_MIXER, PAD_TYPE_TRIGGER)
 
 
 def _file_sha256(path: str) -> str | None:
@@ -2778,6 +2778,56 @@ def _pad_audio_matches(root: str, grid: int, saved_file: str, local_path: str,
     return device_hash is not None and device_hash == _file_sha256(local_path)
 
 
+def _same_float32(a, b) -> bool:
+    """Effect params are float32 on the desk and travel widened to doubles, so two values are the
+    same when they are the same float32."""
+    try:
+        return struct.pack("<f", float(a)) == struct.pack("<f", float(b))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _fx_effect_matches(saved: dict, pad_props: dict | None, objects: list, pool_clean: bool) -> bool:
+    """True when a voice-FX pad's region-B object is exactly what restoring it would create.
+
+    `pad_props` is the live pad node's properties, `objects` every region-B object's properties.
+    The comparison is against pad_records.expected_effect_object, which is every property the create
+    writes, so it is a total match: the same property set, every on-flag, every param. The pad must
+    also rest as a restored one does (padActive off, padEffectTriggerMode 1), and the pool must be
+    clean, because a duplicate or orphan is what the rebuild's scrub repairs."""
+    if not pool_clean or not pad_props:
+        return False
+    stack = saved.get("fx_stack")
+    if not stack and saved.get("fx_recipe"):
+        stack = (all_recipes().get(saved["fx_recipe"]) or {}).get("stack")
+    grid = saved.get("grid")
+    if not stack or not isinstance(grid, int):
+        return False
+    pidx = grid - 1
+    try:
+        want = pr.expected_effect_object(pidx, stack)
+    except ValueError:
+        return False
+    if (pad_props.get("padIdx") != pidx or pad_props.get("padType") != PAD_TYPE_VOICE_FX
+            or pad_props.get("padActive") is not False
+            or pad_props.get("padEffectTriggerMode") != 1):
+        return False
+    mine = [o for o in objects if o.get("effectsIdx") == pidx]
+    if len(mine) != 1 or set(mine[0]) != set(want):
+        return False
+    got = mine[0]
+    for name, value in want.items():
+        if isinstance(value, bool) or isinstance(got[name], bool):
+            if got[name] is not value:
+                return False
+        elif name == "effectsIdx":
+            if got[name] != value:
+                return False
+        elif not _same_float32(value, got[name]):
+            return False
+    return True
+
+
 def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
     """Which of these saved pads are ALREADY on the unit exactly as saved, and can be left alone.
     CALLER HOLDS THE HID LOCK. Never raises: any trouble means an empty set, i.e. restore everything,
@@ -2792,7 +2842,19 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
                       if e.get("type") in _SKIPPABLE_PAD_TYPES
                       and _pad_metadata_matches(e, live_by_grid.get(e.get("grid")))]
         sound = [e for e in candidates if e.get("type") == PAD_TYPE_SOUND]
-        unchanged = {e["grid"] for e in candidates if e.get("type") != PAD_TYPE_SOUND}
+        fx = [e for e in candidates if e.get("type") == PAD_TYPE_VOICE_FX]
+        unchanged = {e["grid"] for e in candidates
+                     if e.get("type") not in (PAD_TYPE_SOUND, PAD_TYPE_VOICE_FX)}
+        if fx:
+            # The stability-checked dump read_pads_live has just made, from the cache.
+            blob = rr.read_model_stable()
+            clean = pool_health(blob)["clean"]
+            props_by_idx = {p.idx: p.props for p in pad_nodes(blob)}
+            fx_node = _top_node(blob, "PADEFFECTS")
+            objects = [{p: v for p, v, _k in node.props} for node in (fx_node.kids if fx_node else ())]
+            unchanged |= {e["grid"] for e in fx
+                          if _fx_effect_matches(e, props_by_idx.get((e.get("grid") or 0) - 1),
+                                                objects, clean)}
         if sound:
             # ONE transfer-mode session for every audio comparison (reads only, nothing written).
             with _transfer_mode(1.0):
@@ -2816,14 +2878,12 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
                         if _pad_audio_matches(root, e["grid"], e.get("file"), local,
                                               live_file=live_name):
                             unchanged.add(e["grid"])
-        # WHY EACH PAD IS BEING REBUILT, in one line, because "it still finds pads to restore" is
-        # otherwise unanswerable from outside. Voice FX is ALWAYS here: it is excluded from the skip by
-        # `_SKIPPABLE_PAD_TYPES` because its identity lives in region B, which a model dump cannot
-        # show, and the rule in this file is to skip only on a total match.
+        # WHY PADS ARE BEING REBUILT, in one line, because "it still finds pads to restore" is
+        # otherwise unanswerable from outside.
         diagnostics.event("pads.verify.end", "pads already matching", unchanged=len(unchanged),
                           rebuilding=len(pads) - len(unchanged),
-                          fx_always_rebuilt=sum(1 for e in pads
-                                                if e.get("type") == PAD_TYPE_VOICE_FX))
+                          fx_rebuilding=sum(1 for e in pads if e.get("type") == PAD_TYPE_VOICE_FX
+                                            and e.get("grid") not in unchanged))
         return unchanged
     except Exception as exc:
         # NEVER LET THE OPTIMISATION BREAK THE RESTORE - but never let it fail quietly either. An
@@ -2841,7 +2901,7 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
     files come from src_dir/<grid>/<file>. CALLER HOLDS THE HID LOCK, and should also hold ONE
     `rcp_transfer.transfer_session()` around this: without it every
     create enters transfer mode, remounts the volume and leaves again for itself - sixteen cycles
-    for sixteen pads, each one dropping the desk's audio and popping a Windows device sound. The
+    for sixteen pads, each one popping a Windows device sound as the volume mounts. The
     per-pad calls are unchanged; while a session is held they simply do nothing. Returns {ok,
     results, skipped, health}. Waits for each pad to register before the next create (the stale-handle
     guard against a stale free handle)."""

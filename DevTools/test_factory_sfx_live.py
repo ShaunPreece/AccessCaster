@@ -9,8 +9,8 @@ WHAT IT DOES. Enters transfer mode, mounts the pad volume, LISTS it, and leaves.
 at all: no pad record, no file, no deletion. The only device state it changes is transfer mode
 itself, which it always puts back.
 
-THE COST, so nobody is surprised: entering transfer mode DROPS THE DESK'S AUDIO for a second or two
-and re-presents a USB mass-storage gadget, which makes Windows play its device-connect sound. That
+THE COST, so nobody is surprised: entering transfer mode re-presents a USB mass-storage gadget,
+which makes Windows play its device-connect sound. The desk's audio devices stay in place. That
 is unavoidable - the volume is not mountable any other way - and it is why this is a `_live` script
 you run deliberately.
 

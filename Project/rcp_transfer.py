@@ -703,8 +703,8 @@ class transfer_session:
 def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
     rec = build_global_prop_int("transferModeType", SEL_TRANSFER_MODE, 2 if on else 0)
-    # Logged as its own event as well as the record below it: entering transfer mode drops the
-    # desk's audio and re-presents a USB mass-storage gadget, so it is the one write whose
+    # Logged as its own event as well as the record below it: entering transfer mode
+    # re-presents a USB mass-storage gadget, so it is the one write whose
     # position in the timeline is worth being able to find without decoding anything.
     diagnostics.event("transfer.enter" if on else "transfer.exit")
     return send_record(rec)
@@ -1062,7 +1062,7 @@ _USAGE = "usage: rcp_transfer.py enter | exit | remount | selftest | midi on|off
 
 if __name__ == "__main__":
     import sys
-    # No default command: a bare run must not enter transfer mode and drop the desk's audio.
+    # No default command: a bare run must not enter transfer mode.
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg in ("enter", "on"):
         print("transferModeType=2 (enter) ...")

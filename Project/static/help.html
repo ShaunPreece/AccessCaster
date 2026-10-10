@@ -848,12 +848,21 @@
         Remote guests, over the unit's own wifi or network cable rather than this computer. A guest
         either has a RODECaster of their own and dials your code, or opens your guest link in a web
         browser. Calls are announced wherever you are, so the page is for setting up and checking
-        rather than somewhere you have to be when the phone rings.
+        rather than somewhere you have to be when the phone rings. The current call is at the top,
+        then three tabs: Make a call, Incoming calls and Plan.
       </p>
       <dl class="help-list">
-        <dt>Call</dt>
+        <dt>Not ready for calls</dt>
+        <dd>A call cannot work while the unit is offline or CallMe 1 is on no fader: a guest's Join
+          Call gives up and the unit never hears of it, and neither the unit nor the guest's page
+          says why. While either is the case, the page shows only what is wrong, with the fix beside
+          it: a link to Wireless connections on the Device page, or a dropdown of faders for CallMe 1,
+          each saying what it carries now; press Enter on the one to give up. The full page
+          comes back as soon as both are fixed.</dd>
+        <dt>Current call</dt>
         <dd>One line says what is happening: nothing, who is calling, who you are calling, or who
-          you are talking to, and after a call, why it ended. Below it are three buttons. Answer takes
+          you are talking to. Afterwards it says only what needs knowing: a call you missed, or why a
+          call went wrong. Below it are three buttons. Answer takes
           a ringing call. The second is named for what it will do: Decline while a call is ringing,
           Hang up otherwise, and it always turns a ringing call away first, so a second caller
           arriving mid-conversation is declined rather than the guest you are with being cut off.
@@ -870,25 +879,25 @@
         <dt>The one-hour limit</dt>
         <dd>On RODE's free and standard plans a call ends after an hour unless it is extended. Five
           minutes before, the announcer says so, and Extend the call, or the answer shortcut, gives
-          it another hour. Switch on Extend calls automatically and AccessCaster does it for you and
-          says so.</dd>
-        <dt>You need CallMe on a fader to hear a guest</dt>
-        <dd>A call can be answered with CallMe on no fader, but then the guest is heard nowhere. The
-          page warns you when that is the case; put CallMe 1 on a fader on Routing, under Faders.</dd>
-        <dt>Letting guests call in</dt>
+          it another hour. Switch on Extend calls automatically, on the Plan tab, and AccessCaster
+          does it for you and says so.</dd>
+        <dt>Incoming calls</dt>
         <dd>The Accept incoming calls switch is the unit's own call hosting. Switched on, the unit
           is given a code by RODE's service, which another RODECaster dials, and a guest link built
-          from it, which anyone else opens in a browser. Copy the guest link puts it on the
-          clipboard to send. Switching hosting off and on again gets a NEW code, so a link you have
-          already shared stops working; leave it on if you have sent one out. It cannot be changed
-          during a call.</dd>
-        <dt>Your plan</dt>
+          from it, which anyone else opens in a web browser, types their name and allows the
+          microphone, with nothing to install. Copy the guest link puts it on the clipboard to send.
+          Switching incoming calls off and on again gets a NEW code, so a link you have already shared
+          stops working; leave it on if you have sent one out. It cannot be changed during a call.
+          With it off you can still call out. Ring for incoming calls plays a ringtone after the
+          caller is announced, until the call is answered or stops ringing; it plays wherever
+          announcements play, and is silent while they are off.</dd>
+        <dt>Plan</dt>
         <dd>Which CallMe plan the unit is on, how many minutes are left, and when they reset, one
           to a line. The free
           plan, CallMe Lite, takes one guest at a time with ten hours a month of calls between
           RODECasters and five of browser calls; a browser call counts against both. RODE's paid
           plans, bought from your RODE account, add guests and remove the limits.</dd>
-        <dt>Call a RODECaster</dt>
+        <dt>Make a call</dt>
         <dd>Type the code shown on the other unit's CallMe screen and press Call, or Enter. A guest
           link they have sent you works too. The page says straight away whether the call is
           ringing, or why not: no RODECaster has that code, or they declined. When they answer, the
@@ -914,7 +923,7 @@
           putting a mute back could silence somebody at the worst moment, and passwords, so your
           wifi is never stored and never restored.
           Underneath, a backup is kept in two places at once when it can be. The unit writes its own
-          complete copy to the card or drive, which goes back in seconds, and this computer keeps a
+          complete copy to the card or drive, and this computer keeps a
           copy of the settings and pads, which survives the drive being pulled, erased or filled.
           You never have to choose between them: one name covers both. Restoring uses this
           computer's copy, because asking the unit to load its own can crash it - see Known issues,

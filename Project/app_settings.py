@@ -46,6 +46,7 @@ PORTABLE = (
     "meter_clip_db",
     "callme_contacts",
     "callme_auto_extend",
+    "callme_ringtone",
 )
 
 # WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice, an audio output and a

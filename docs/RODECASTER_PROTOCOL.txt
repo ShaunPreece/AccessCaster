@@ -1440,6 +1440,10 @@ software replaces the operational controls directly, not by puppeteering the kno
     (root child 0x10) rather than SYSTEM: btVisible makes the desk discoverable, and
     btDoScan fills btScan1..10 on a Duo (not on the one Pro II tested). Wifi
     scanning and joining work too (wifiScan, then the SSID and PSK properties).
+    wifiPSK is write-only in effect on 1.7.6: it reads back empty while the desk
+    is joined with a password (10th October 2026). Earlier firmware returned it
+    in clear. Joined means wifiIpAddress is non-empty; the wifi bool is only the
+    radio.
     Earlier negatives here were taken while stray copies of btVisible and btDoScan
     sat in SYSTEM, so writes landed on the strays and did nothing.
 

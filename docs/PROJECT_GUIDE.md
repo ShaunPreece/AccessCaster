@@ -378,7 +378,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   carried out (`requestRecordState`, `requestDropMarker`, `showControlExport` back to False,
   `showControlImport` back to -1). A field that reads back exactly as written was merely STORED.
   `padRecordStateRequest`, `storageVolumeTransfer` and `toneGeneration` all stick and do nothing.
-  `btDoScan` also sticks, yet scans on a Duo, so a flag that never self-clears is not proof of a
+  `btDoScan` also sticks, yet scanned once on a Duo, so a flag that never self-clears is not proof of a
   dead one: test for the result too (see the `btDoScan` entry). Use it before concluding a
   feature works: a clean read-back is NOT evidence of an effect.
 - **PROVED INACTIVE: written, read back, and they do nothing. Do not re-test any of these.**
@@ -410,15 +410,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **Not filed as PROVED INACTIVE**, because that phrase is for a property whose JOB we know and
   which fails to do it; nobody has watched the touchscreen while an `eqParamMode` changed, and
   that is the only thing left they could plausibly move.
-- **`btDoScan` WAS ON THAT LIST AND IS NOT DEAD: IT SCANS.** Written True on a Duo it filled
-  `btScan1` with `'<MAC> - <device name>'` for a real device in range, so Bluetooth discovery is
+- **`btDoScan` WAS ON THAT LIST AND DOES NOT BELONG THERE.** Written True on a Duo it once filled
+  `btScan1` with `'<MAC> - <device name>'` for a real device in range. ONCE, never repeated: that
+  is enough to take it off a list of dead properties, not enough to call Bluetooth discovery
   reachable from software. The old entry read "no results on either block, phone in pairing mode",
   which is the weakest kind of negative: a scan that finds nothing is indistinguishable from a scan
   that did not run, because the answer depends on what happened to be in range. **A NEGATIVE THAT
   DEPENDS ON THE ENVIRONMENT DOES NOT BELONG ON THIS LIST AT ALL** - "the desk ignored the value" is
   a fact about the desk, "the desk found nothing" is a fact about the room.
-  **THE DUO SCANS AND THE PRO 2 DOES NOT, AND THAT IS THE POINT OF THE ENTRY.** The Duo half is not
-  in doubt: a dump taken minutes earlier has `btScan1` empty, so the write caused it. The Pro 2 half
+  **ONE DUO SCAN, ONE PRO 2 SILENCE.** On the Duo, a dump taken minutes earlier has `btScan1`
+  empty, so that write caused that result; whether it repeats is untested. The Pro 2 half
   took four attempts to test properly and the first three were worthless, which is the useful part:
   an Echo Pop of unknown state, then a Windows PC assumed to be advertising because its pairing
   dialog was open, then an iPhone (Apple biases to BLE and is not reliably discoverable to a classic
@@ -582,9 +583,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `mutePressed`. Injecting the record button does nothing; use `requestRecordState`.
 - **Read back the first write on any NEW string property.** `build_global_prop_string` combines two
   separately-proven halves, and the combination itself is only proven per property.
-- **`wifiPSK` is READABLE off the desk.** Keep it out of the API, the browser, profiles and log
-  lines. `wifi_join.py` takes it on stdin, never argv, and its read-back reports only "a password is
-  stored".
+- **`wifiPSK` WAS READABLE off the desk, and on 1.7.6 reads empty** (10th October 2026, a Pro II
+  joined to a password-protected network), so "has a password saved" never shows there. Older
+  firmware may still publish it, so keep it out of the API, the browser, profiles and log lines
+  regardless. `wifi_join.py` takes it on stdin, never argv, and its read-back reports only "a
+  password is stored".
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
   stayed busy (active 0.61) and mode 2's went silent (0.06). Needs a person - the mic faders are
@@ -1293,11 +1296,19 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   toast). It leaves the wav behind; the sweep or the manual button collects it.
 - **Every pad write enters transfer mode through `soundpad._transfer_mode`**, whose `finally` always
   leaves it. A bare `set_transfer_mode(True)` with the exit on the next line leaves the desk mounted
-  and its audio dropped when anything between them raises (a copy that fails six times does).
+  when anything between them raises (a copy that fails six times does). Transfer mode does not
+  remove the desk's audio devices (measured 10th October 2026, Standard USB).
 - **A high-level create's `ok` is NOT "the pad was made"**: it also needs a clean pool, and a
   harmless partial object in the middle makes it False. Ask `created`. The create and every setter
   report failure in the return value rather than raising, so `restore_pads` checks each one.
 - **A voice-FX pad EDITED IN PLACE restores at the recipe's values, not the edited ones.**
+- **A restore skips a voice-FX pad only when its region-B object matches the recipe IN FULL**:
+  all twenty properties, compared as float32, against `pad_records.expected_effect_object`, which
+  reads the same `_EFFECTS` table the create writes. Never narrow it to the engines that are on: the
+  object is the whole of what a rebuild would write, and a partial compare could leave a pad wrong
+  that a rebuild would have fixed. The pad must also rest disengaged with `padEffectTriggerMode` 1,
+  and the pool must be clean. `test_fx_skip_live` is the hardware proof (all six factory pads match;
+  a one-param edit is caught).
 - **Keep the pool clean, and remove each kind of orphan only its own way** (`SOUNDPADS.md`
   section 5). An ATTACHED orphan (effectsIdx stored last) goes by bare bind + clear; a delete by
   tree path does not touch it. A DETACHED one (effectsIdx stored first, left by RODE's app) and a
@@ -1347,16 +1358,27 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   captured from the touchscreen. A single bool is stored and ignored. Auto-extend runs from the
   Watcher's `on_expiring` hook, which is called under the Watcher's lock, so it only starts a
   thread.
+- **CallMe codes in tests are made up, never a real desk's.** The repo is public, and a code plus
+  the guest link rings that desk.
 - **The call id comes from the `sipIncomingCallDetails` push, never from a counter.** It rises by one
   per call today, but nothing promises that.
-- **Both calls that went Active had CallMe 1 (source code 16) on a fader**, so whether a call
-  connects with no CallMe fader is unmeasured. The TRUE-bool failure happened either way, so the
-  fader is not what decided that.
-- **Every off/on of `sipCallHostingEnabled` reissues `sipRodeCode`**, so a guest link shared before
-  it stops working. Do not toggle hosting as a way of refreshing state.
-- **`sipSlotCallState` is a bare "Idle" until a slot has carried a call, JSON after.** Parse both.
-- **Strings in `sipIncomingCallDetails` are UTF-8 and the model decoder reads latin-1**, so a default
-  guest name arrives as mojibake unless re-decoded.
+- **A GUEST'S CALL NEVER REACHES A DESK WITH CALLME 1 (source code 16) ON NO FADER, OR AN OFFLINE
+  ONE** (10th October 2026). With no fader, Join Call on the guest's page does nothing; offline, it
+  spins for a few seconds and gives up. Either way the desk pushes nothing at all, so neither shows
+  anywhere but in `callme.readiness`. While either is wrong the CallMe page is that list alone,
+  with a fix beside each; every item must keep a focusable fix, or the page has nothing to Tab to
+  (the fault the Recording page's "nothing is ever hidden" rule exists for). Hosting off is not an
+  item: a call out still works. Online
+  comes from the last dump the app took (`server._note_desk_network`), since the page's poll reads
+  none. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
+  cycle cleared it.
+- **THE RING AND THE CALLER'S NAME TAKE TURNS, NEVER OVERLAP.** The speech worker purges before it
+  speaks, so a name queued while the ring plays cuts it short, or the ring cuts the name off; and a
+  second SpVoice playing the ring on the same output does not mix with the worker's, it holds the
+  name back until the ring ends (measured: three names sent over the ring, none heard). So
+  `_callme_ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
+  `_ann_say_and_wait`, and starts again every `_CALLME_RING_CYCLE_S`. It stops when the SAME call id
+  is no longer ringing, the ringtone is switched off, or past the desk's 120 s.
 
 ## The desk pushes, and does not echo
 
@@ -2345,6 +2367,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   there, so only the process that actually owns the server ever writes to it. Starting it in each
   entry point instead would put two processes on one file the moment a second launch raced the
   first. It is SILENT until then, so the offline suites and the DevTools scripts write nothing.
+- **THE LOG NEVER HOLDS A CREDENTIAL.** It is meant to be safe to send to somebody, and every record
+  sent is logged decoded, so `diagnostics.describe_record` hides the value of `wifiPSK` and every
+  `*Password` (`_is_secret`). A new credential property whose name matches neither needs adding.
 - **MONITOR AUTO-MUTE NEEDS A MIC THAT IS BOTH UNMUTED AND FADED UP, AND RODE'S GUIDE ONLY MENTIONS
   THE FADER.** Their wording is "muted whenever a microphone channel fader is turned up", which is
   incomplete and sends you the wrong way twice: a muted mic with its fader up does NOT engage it.

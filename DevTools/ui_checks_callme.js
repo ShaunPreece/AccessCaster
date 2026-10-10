@@ -6,7 +6,8 @@
    WHAT IS WORTH ASSERTING:
      1. ONE live region. A ringing call is spoken by the announcer; the page's status line speaks
         what its own buttons did. Two regions would talk over each other.
-     2. The incoming call comes FIRST, ahead of the settings: it is the one thing with a deadline.
+     2. On a ready unit the Not ready section is hidden and the call comes first, above the tabs:
+        it is the one thing with a deadline. (ui_checks_callme_ready.js covers a unit not ready.)
      3. Answer and Decline never leave the tab order. With nothing ringing they are aria-disabled
         and say why when pressed, and they post NOTHING.
      4. Entering the page reads the unit once, and after that only the free live poll runs.
@@ -62,8 +63,19 @@ async function run() {
   const live = sec().querySelectorAll("[aria-live]");
   check("ONE live region on the page", live.length === 1 && live[0].id === "callme-state",
     Array.from(live).map((n) => n.id).join(","));
-  const headings = Array.from(sec().querySelectorAll("h2")).map((h) => h.textContent.trim());
-  check("the call comes first", /^call$/i.test(headings[0] || ""), headings.join(" | "));
+  check("a ready unit shows the full page, not the Not ready section",
+    el("callme-gate").hidden && !el("callme-main").hidden);
+  const headings = Array.from(sec().querySelectorAll("h2"))
+    .filter((h) => !h.closest("[hidden]")).map((h) => h.textContent.trim());
+  check("the current call comes first", /^current call$/i.test(headings[0] || ""),
+    headings.join(" | "));
+  const tabs = Array.from(sec().querySelectorAll("[role='tab']")).map((t) => t.textContent.trim());
+  check("then three tabs", tabs.join("|") === "Make a call|Incoming calls|Plan", tabs.join("|"));
+  check("the tabs sit after the call", el("callme-h-call").compareDocumentPosition(
+    sec().querySelector("[role='tablist']")) & Node.DOCUMENT_POSITION_FOLLOWING);
+  check("no intro note on the page", !sec().querySelector(".note"));
+  callmeTabs.selectKey("dial");     // the contact checks below focus controls on this tab
+  await sleep(200);
 
   // ---- controls -------------------------------------------------------------
   const answer = el("callme-answer");
@@ -86,6 +98,9 @@ async function run() {
     host && host.type === "checkbox" && /accept incoming calls/i.test(nameOf(host)), nameOf(host));
   check("hosting says what switching it costs",
     /new code/i.test((el(host.getAttribute("aria-describedby")) || {}).textContent || ""));
+  const ring = el("callme-ringtone");
+  check("there is a ringtone switch, named for what it does",
+    ring && ring.type === "checkbox" && /ring for incoming calls/i.test(nameOf(ring)), nameOf(ring));
   for (const id of ["callme-code", "callme-link"]) {
     const box = el(id);
     check(`${id} is labelled and read-only`, box && box.readOnly && nameOf(box).length > 0,

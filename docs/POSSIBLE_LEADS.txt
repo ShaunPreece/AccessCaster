@@ -35,11 +35,12 @@ it does not recover by replugging USB, and the power lead has to come out. Back 
 and expect it.
 
 
-LEAD 1: Bluetooth scanning works on a Duo and not on a Pro 2. Is that every Pro 2?
----------------------------------------------------------------------------------
+LEAD 1: Bluetooth scanning worked once on a Duo and not on a Pro 2. Does it repeat?
+----------------------------------------------------------------------------------
 
-**What we found.** Writing `btDoScan` = true on a RODECaster Duo fills `btScan1` with
-`'<MAC address> - <device name>'` for a discoverable device in range. On a Pro 2, the
+**What we found.** Writing `btDoScan` = true on a RODECaster Duo filled `btScan1` with
+`'<MAC address> - <device name>'` for a discoverable device in range. That happened ONCE
+and has not been repeated, so it is a lead, not a finding. On a Pro 2, the
 same write with the same code returns nothing: a Pixel phone on its Bluetooth screen, a
 fresh false-to-true transition, sixty seconds, no slot filled.
 
@@ -47,8 +48,8 @@ fresh false-to-true transition, sixty seconds, no slot filled.
 and played audio through it minutes before the test. And it does publish Bluetooth state
 into the model - `btConnectedAddress` read back the phone's address while connected.
 
-**What we cannot tell.** Whether that is our particular Pro 2 or every Pro 2. One unit
-cannot answer it.
+**What we cannot tell.** Whether the Duo's scan repeats, and whether the Pro 2's silence
+is our particular unit or every Pro 2. One unit of each cannot answer it.
 
 **What to run.** Write `btDoScan` = true on the NETWORK block with something
 unambiguously discoverable nearby - an Android phone on its Bluetooth settings screen is

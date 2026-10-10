@@ -307,8 +307,8 @@ def stream_label(name: str, flow: str) -> str:
 
 def desk_streams() -> dict:
     """What the app can meter right now. With nothing to meter, the reason distinguishes a Remote
-    Desktop session (nothing is wrong) from a console with no desk audio (unplugged, driver, or the
-    unit in transfer mode, which removes its audio device while it mounts as a drive)."""
+    Desktop session (nothing is wrong) from a console with no desk audio (unplugged, or the
+    driver). Transfer mode leaves the desk's audio devices in place."""
     endpoints = list_endpoints()
     desk = [e for e in endpoints if is_desk_endpoint(e["name"])]
     active = [e for e in desk if e["active"]]
@@ -324,8 +324,7 @@ def desk_streams() -> dict:
                            "USB directly. Run the app at the computer itself to use the meters.")}
     return {"ok": False, "streams": [], "all_desk": desk, "remote": False,
             "reason": ("Windows is not reporting any RODECaster audio streams. That usually means "
-                       "the unit's USB audio is not connected, or the unit is in transfer mode: "
-                       "while it is mounted as a drive its audio device disappears.")}
+                       "the unit's USB audio is not connected.")}
 
 
 # How often a running Watcher re-reads the Windows endpoint volume.

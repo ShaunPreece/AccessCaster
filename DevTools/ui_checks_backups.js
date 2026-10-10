@@ -85,8 +85,8 @@
     el("profile-select").value = profOpt.value;
     el("profile-select").dispatchEvent(new Event("change", { bubbles: true }));
     await sleep(150);
-    check("choosing one held on this computer says how it will go back",
-      textOf("backup-detail").length > 20, textOf("backup-detail"));
+    check("choosing one held on this computer says where it is held",
+      /this computer/i.test(textOf("backup-detail")), textOf("backup-detail"));
   }
 
   // ---- the state line is about the half the user can change --------------

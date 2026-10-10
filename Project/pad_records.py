@@ -288,6 +288,35 @@ def build_trigger_create(target_idx: int, name: str, colour: int, *, handle: int
     return pre, mid, []
 
 
+def _recipe_parts(recipe: dict) -> tuple[list[str], dict]:
+    """(on-flags, param overrides) for a recipe of {engine: {param: value}}."""
+    param_overrides: dict = {}
+    onflags: list[str] = []
+    for engine, params in recipe.items():
+        if engine not in EFFECT_FLAG:
+            raise ValueError(f"unknown effect engine {engine!r}; known: {sorted(EFFECT_FLAG)}")
+        onflags.append(EFFECT_FLAG[engine])
+        param_overrides.update(params or {})
+    return onflags, param_overrides
+
+
+def expected_effect_object(target_idx: int, recipe: dict) -> dict:
+    """{property: value} for every property of the region-B object that build_fx_create_recipe
+    leaves behind: the effects block in full (defaults with the recipe's params baked in) plus the
+    recipe's on-flags. A create writes all twenty, so this is the whole object, not a subset."""
+    onflags, overrides = _recipe_parts(recipe)
+    out = {}
+    for name, _kind, value in _EFFECTS:
+        if name == "effectsIdx":
+            value = target_idx
+        elif name in overrides:
+            value = overrides[name]
+        out[name] = value
+    for flag in onflags:
+        out[flag] = True
+    return out
+
+
 def build_fx_create_recipe(target_idx: int, name: str, colour: int, recipe: dict, *,
                            handle: int, fx_subhandle: int, active: bool = True):
     """A VOICE-FX pad create (padType 2) for a recipe of one or more engines. Returns
@@ -302,13 +331,7 @@ def build_fx_create_recipe(target_idx: int, name: str, colour: int, recipe: dict
     live-engage flag: True processes the target mic at once (a preview wants that); a restored pad
     rests like a factory one, with it False.
     """
-    param_overrides: dict = {}
-    onflags: list[str] = []
-    for engine, params in recipe.items():
-        if engine not in EFFECT_FLAG:
-            raise ValueError(f"unknown effect engine {engine!r}; known: {sorted(EFFECT_FLAG)}")
-        onflags.append(EFFECT_FLAG[engine])
-        param_overrides.update(params or {})
+    onflags, param_overrides = _recipe_parts(recipe)
     pre = build_blank(target_idx, handle, fx_subhandle, param_overrides)
     mid = [
         write_record("padType", "int", 2, handle),

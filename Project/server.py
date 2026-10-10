@@ -1053,7 +1053,7 @@ def _callme_watcher():
     if _callme_watch is None:
         try:
             w = callme.Watcher(on_say=_ann_say, read_model=_callme_dump,
-                               on_expiring=_callme_on_expiring)
+                               on_expiring=_callme_on_expiring, on_ring=_callme_on_ring)
             w.start()
             _callme_watch = w
         except Exception:
@@ -1079,10 +1079,36 @@ def _callme_note_dump(blob: bytes) -> None:
         w.seed(blob)
 
 
+def _desk_network(blob: bytes) -> dict:
+    """How the unit reaches the internet, read BY BLOCK (see read_network_status for why). A wifi
+    address means joined; the radio being on does not."""
+    def net(name):
+        return rcp_read.block_value(blob, "NETWORK", name)
+    wired = next((v for v in rcp_read.values(blob, "wiredConnected") if v is not None), None)
+    ip = net("wifiIpAddress") or ""
+    return {"wifi_on": bool(net("wifi")), "wifi_ssid": net("wifiSSID") or "", "wifi_ip": ip,
+            "wired": bool(wired), "online": bool(ip) or bool(wired)}
+
+
+# Whether the unit was online at the last dump this app took. CallMe's live poll reads no dump, and
+# the network changes rarely, so the page's readiness check uses the last one seen.
+_desk_online = None
+
+
+def _note_desk_network(blob: bytes) -> dict:
+    global _desk_online
+    net = _desk_network(blob)
+    _desk_online = net["online"]
+    return net
+
+
 def _callme_payload(d: dict) -> dict:
     """The page's reply: the state, plus the sentences the page shows, all worded here."""
     d = dict(d)
+    d["online"] = _desk_online
     w = _callme_watcher()
+    if w is not None and "missed" not in d:
+        d["missed"] = w.missed()        # a dump has no memory of a missed call; the Watcher does
     for s in d.get("slots", []):
         # A page read straight off a dump has no length: the Watcher holds it, keyed by the call.
         if "since" not in s and w is not None:
@@ -1092,12 +1118,12 @@ def _callme_payload(d: dict) -> dict:
     d["now"] = callme.call_now(d)
     d["details"] = [{"label": k, "value": v} for k, v in callme.call_details(d)]
     d["end_label"] = callme.end_label(d)
-    d["status"] = callme.status_sentence(d)
-    d["fader_note"] = ("No fader carries CallMe 1, so a call can be answered but you will not hear "
-                       "the guest. Put CallMe 1 on a fader on Routing, Alt plus 2, under Faders."
-                       if d.get("on_fader") is False else "")
+    d["ready"] = callme.readiness(d)
+    d["callme1_code"] = callme.CALLME1_SOURCE
     d["contacts"] = _callme_contact_rows(_callme_contacts())
-    d["auto_extend"] = bool(load_settings().get("callme_auto_extend"))
+    settings = load_settings()
+    d["auto_extend"] = bool(settings.get("callme_auto_extend"))
+    d["ringtone"] = bool(settings.get("callme_ringtone", True))
     return d
 
 
@@ -1140,6 +1166,7 @@ def read_callme() -> dict:
     if not d.get("ok"):
         return d
     _callme_note_dump(blob)
+    _note_desk_network(blob)
     return _callme_payload(d)
 
 
@@ -1177,7 +1204,7 @@ def action_callme_hosting(on: bool) -> dict:
         if path is None:
             return {"ok": False, "message": "This unit does not publish CallMe."}
         if d.get("hosting_locked"):
-            return {"ok": False, "message": "Hosting cannot be changed while a call is up."}
+            return {"ok": False, "message": "Incoming calls cannot be switched while a call is up."}
         with _hid_lock:
             rcp_transfer.send_record(callme.build_hosting(on, path))
             # The code comes from RODE's service over the network, about a second after the switch.
@@ -1194,16 +1221,16 @@ def action_callme_hosting(on: bool) -> dict:
         return {"ok": False, "message": f"Could not change hosting: {exc}"}
     out = _callme_payload(d)
     if d.get("hosting") != on:
-        out.update(ok=False, message="The unit did not take that: hosting is still "
+        out.update(ok=False, message="The unit did not take that: incoming calls are still "
                                      + ("on." if d.get("hosting") else "off."))
     elif not on:
-        out.update(ok=True, message="Hosting is off. Nobody can call in.")
+        out.update(ok=True, message="Incoming calls are off.")
     elif d.get("code"):
-        out.update(ok=True, message=(f"Hosting is on. Your CallMe code is "
+        out.update(ok=True, message=(f"Guests can call in. Your unit's code is "
                                      f"{callme.spell(d['code'])}."))
     else:
-        out.update(ok=True, message="Hosting is on, but RODE's service has not sent a code yet. "
-                                    "Check the unit is online.")
+        out.update(ok=True, message="Incoming calls are on, but RODE's service has not sent a code "
+                                    "yet. Check the unit is online.")
     return out
 
 
@@ -1361,7 +1388,7 @@ def action_callme_dial(code: str) -> dict:
         if s.get("ended", 0) > ended_before:
             msg = f"Could not call {who}: {callme.end_reason(s.get('reason'))}."
             if callme.contact_name(code) and s.get("reason", "").startswith("404"):
-                msg += (f" {who}'s code changes whenever they switch hosting off and on. Ask "
+                msg += (f" {who}'s code changes whenever they switch incoming calls off and on. Ask "
                         f"them for the new one and edit the contact.")
             return {"ok": False, "message": msg}
         # An unknown code goes through Connecting before it fails, so Connecting only counts as
@@ -1392,6 +1419,61 @@ def action_callme_auto_extend(on: bool) -> dict:
     return {"ok": True, "auto_extend": bool(on),
             "message": ("Calls will be extended automatically before the hour runs out." if on
                         else "Calls will no longer be extended automatically.")}
+
+
+# The desk stops ringing an unanswered call after 120 s; the loop is capped a little past that so a
+# missed clear cannot leave it ringing for ever.
+_CALLME_RING_MAX_S = 130.0
+# One ring, then who is calling, starting again every this many seconds while the call rings.
+_CALLME_RING_CYCLE_S = 4.0
+
+
+def _callme_on_ring(call: dict, sentence: str) -> bool:
+    """The Watcher's hook when a new call starts ringing. With the ringtone on, a thread of its own
+    rings and says who is calling in turn (see _callme_ring); True tells the Watcher the sentence is
+    taken care of."""
+    if not load_settings().get("callme_ringtone", True):
+        return False
+    threading.Thread(target=_callme_ring, args=(call.get("id"), sentence), daemon=True,
+                     name="callme-ring").start()
+    return True
+
+
+def _callme_ring(call_id, sentence: str) -> None:
+    """Ring until that call stops ringing (answered, declined, given up or timed out): one ring,
+    then who is calling, again every _CALLME_RING_CYCLE_S.
+
+    IN TURN, NEVER TOGETHER, both through the speech worker: it purges before it speaks, so
+    anything queued while the ring plays cuts it short, and a second SpVoice on the same output
+    waits for the first rather than mixing with it. So the ring is queued and given its own length
+    to play, and the name is spoken with _ann_say_and_wait. Nothing plays between turns, so the call
+    and the ringtone switch are checked only before each one. The announcer switch silences both."""
+    path = tones.tone_path("ring")
+    start = time.monotonic()
+
+    def still_ringing() -> bool:
+        w = _callme_watcher()
+        snap = w.snapshot() if w is not None else None
+        ringing = (snap or {}).get("incoming") or {}
+        return (ringing.get("id") == call_id and time.monotonic() - start < _CALLME_RING_MAX_S
+                and load_settings().get("callme_ringtone", True))
+
+    while still_ringing():
+        cycle = time.monotonic()
+        if path:
+            _ann_say(_ANN_WAV_PREFIX + path)
+            time.sleep(tones.RING_DURATION_S + 0.15)
+        if not still_ringing():
+            return
+        _ann_say_and_wait(sentence)
+        time.sleep(max(0.0, _CALLME_RING_CYCLE_S - (time.monotonic() - cycle)))
+
+
+def action_callme_ringtone(on: bool) -> dict:
+    update_settings(callme_ringtone=bool(on))
+    return {"ok": True, "ringtone": bool(on),
+            "message": ("An incoming call rings until it is answered." if on
+                        else "An incoming call is announced without ringing.")}
 
 
 def action_callme_extend(auto: bool = False) -> dict:
@@ -1857,6 +1939,11 @@ def device_overview() -> dict:
             # you sound wrong, with nothing on screen to say why.
             "pads_engaged": _pads_engaged(blob),
             "firmware_update": _firmware_update(blob),
+            # Always reported, unlike the exceptions above: whether the unit is online decides
+            # whether CallMe and the firmware check can work at all. `callme_hosting` lets the
+            # spoken summary call an offline unit a problem only when guests expect to reach it.
+            "network": dict(_note_desk_network(blob),
+                            callme_hosting=bool(rcp_read.first(blob, "sipCallHostingEnabled"))),
             "faders": faders,
             "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,
             "bank": (bank[0] + 1) if bank else None,       # the desk numbers banks from 0
@@ -2043,9 +2130,10 @@ def read_network_status() -> dict:
             # An empty list still means "nothing has been scanned for yet", not "nothing in range".
             "scan": slots("wifiScan", 10) or slots("wifiScanResultSSID", 15),
             "can_scan": "network_write" in devices.get_active_device().caps,
-            # Never returned, and this is deliberate rather than an oversight: wifiPSK IS readable
-            # off this desk, and putting a password into a JSON payload, a browser page and a log
-            # line is not a thing to do casually. Whether the network HAS a password is enough.
+            # Never returned, and this is deliberate rather than an oversight: firmware before
+            # 1.7.6 publishes wifiPSK, and putting a password into a JSON payload, a browser page
+            # and a log line is not a thing to do casually. Whether the network HAS a password is
+            # enough. On 1.7.6 it reads empty, so this is False there whatever is stored.
             "has_password": bool(first("wifiPSK")),
         },
         "bluetooth": {
@@ -2098,10 +2186,10 @@ def read_network_status() -> dict:
 #   * **Static IP and DNS.** Derived but untried, and a bad write drops the unit off the network,
 #     which is exactly the state that then needs the touchscreen to fix.
 
-# The password is the reason this endpoint is not like the others. wifiPSK is READABLE off the unit,
-# and this app serves its pages on 0.0.0.0 so a phone on the LAN can use it - which means a password
-# typed into that page would cross the very network it is for, in clear. So the join is refused
-# unless the request came from this machine.
+# The password is the reason this endpoint is not like the others. This app serves its pages on
+# 0.0.0.0 so a phone on the LAN can use it, which means a password typed into that page would cross
+# the very network it is for, in clear. So the join is refused unless the request came from this
+# machine.
 LOCAL_ONLY_ROUTES = {"/api/network/wifi/join", "/api/access", "/api/access/new"}
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
@@ -2188,8 +2276,9 @@ def action_new_access_token() -> dict:
 def _wifi_state(blob) -> dict:
     """Just enough of the wifi state to report a join honestly, read BY BLOCK.
 
-    Never returns the password. `wifiPSK` is readable, and "there is a password stored" is the most
-    that should ever leave this process - not in a JSON payload, not in the page, not in a log."""
+    Never returns the password. `wifiPSK` is readable on older firmware, and "there is a password
+    stored" is the most that should ever leave this process - not in a JSON payload, not in the
+    page, not in a log."""
     def net(name):
         return rcp_read.block_value(blob, "NETWORK", name)
     return {"on": bool(net("wifi")), "ssid": net("wifiSSID") or "",
@@ -2216,11 +2305,39 @@ def action_set_wifi(on: bool) -> dict:
                            + ("on" if state["on"] else "off") + "."}
     if not on:
         return {"ok": True, "wifi": state, "message": "Wifi is off."}
+    if not state["ssid"]:
+        return {"ok": True, "wifi": state, "message": "Wifi is on, but no network is set up yet. Scan for "
+                                                       "networks, or type one in, to join."}
+    # The radio is on at once, but the network takes several seconds more, and "on" without
+    # "connected" leaves the user checking back by hand. So the reply waits for the address.
+    if not state["ip"]:
+        state = _wait_for_wifi_address() or state
+    if state.get("ip"):
+        return {"ok": True, "wifi": state, "message": f"Wifi connected to {state['ssid']}."}
+    if state.get("wrong_password"):
+        return {"ok": True, "wifi": state,
+                "message": f"Wifi is on, but {state['ssid']} refused the stored password."}
     return {"ok": True, "wifi": state,
-            "message": ("Wifi is on." if not state["ssid"]
-                        else f"Wifi is on, set to {state['ssid']}." +
-                             (f" It has the address {state['ip']}." if state["ip"] else
-                              " It has not been given an address yet; check again in a moment."))}
+            "message": f"Wifi is on, but has not connected to {state['ssid']} yet. It may be out "
+                       f"of range, or still connecting."}
+
+
+def _wait_for_wifi_address():
+    """Poll until the unit has a wifi address or reports a wrong password, for up to
+    WIFI_JOIN_TIMEOUT_S. Polls rather than sleeping the whole timeout so a quick join answers
+    quickly. Returns the last state read, or None if no read succeeded."""
+    deadline = time.time() + WIFI_JOIN_TIMEOUT_S
+    state = None
+    while time.time() < deadline:
+        time.sleep(2.5)
+        try:
+            with _hid_lock:
+                state = _wifi_state(rcp_read.read_model_stable(fresh=True))
+        except Exception:
+            continue
+        if state.get("wrong_password") or state.get("ip"):
+            break
+    return state
 
 
 def action_join_wifi(ssid: str, password: str) -> dict:
@@ -2264,19 +2381,8 @@ def action_join_wifi(ssid: str, password: str) -> dict:
     finally:
         del password           # not kept a moment longer than the write needs it
 
-    # Wait for an ADDRESS, which is the only honest evidence of a join. Polls rather than sleeping
-    # the whole timeout so a quick join answers quickly.
-    deadline = time.time() + WIFI_JOIN_TIMEOUT_S
-    state = {}
-    while time.time() < deadline:
-        time.sleep(2.5)
-        try:
-            with _hid_lock:
-                state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-        except Exception:
-            continue
-        if state.get("wrong_password") or state.get("ip"):
-            break
+    # Wait for an ADDRESS, which is the only honest evidence of a join.
+    state = _wait_for_wifi_address() or {}
     if state.get("wrong_password"):
         return {"ok": False, "wifi": state,
                 "message": f"{ssid} refused the password. The name and password are still stored "
@@ -2375,6 +2481,11 @@ def action_scan_wifi() -> dict:
         return gate
     try:
         with _hid_lock:
+            # The scan uses the wifi radio, so with it off there is nothing to scan with; a
+            # wired connection does not change that.
+            if rcp_read.block_value(rcp_read.read_model(), "NETWORK", "wifi") is False:
+                return {"ok": False, "message": "The wifi is off. Turn it on to scan for "
+                                                "networks."}
             rcp_transfer.send_record(
                 rcp_transfer.build_global_prop_bool("wifiScan", True, rcp_transfer.SEL_NETWORK))
         time.sleep(WIFI_SCAN_SETTLE_S)
@@ -8301,13 +8412,12 @@ def action_backup_now(name: str) -> dict:
 
 
 def _backup_wording(safe: str, show) -> str:
-    """What a finished backup says. Names what it can restore FROM, not which mechanisms ran."""
+    """What a finished backup says. A restore always reads the copy on this computer, so that is
+    what both wordings lead with; the unit's own copy is an extra, and its absence is not a fault."""
     if show:
-        return (f"Backed up as {safe}. It holds the unit's own complete backup, which restores "
-                f"everything in seconds, plus a copy of your settings and pads on this computer in "
-                f"case the drive is removed or erased.")
-    return (f"Backed up as {safe}, on this computer. There is no card or drive in the unit, so "
-            f"the unit's own backup could not be made; this holds your settings and pads.")
+        return (f"Backed up as {safe}: your settings and pads on this computer, plus a copy of "
+                f"the whole unit on its own drive.")
+    return f"Backed up as {safe}: your settings and pads, on this computer."
 
 
 def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = False) -> dict:
@@ -11187,6 +11297,7 @@ POST_ROUTES = {
     "/api/callme/end": (action_callme_end, []),
     "/api/callme/extend": (action_callme_extend, []),
     "/api/callme/auto-extend": (action_callme_auto_extend, [(bool, "on", None)]),
+    "/api/callme/ringtone": (action_callme_ringtone, [(bool, "on", None)]),
     "/api/callme/dial": (action_callme_dial, [(str, "code", "")]),
     "/api/callme/contact/save": (action_callme_contact_save,
                                  [(str, "name", ""), (str, "code", ""), (str, "was", "")]),

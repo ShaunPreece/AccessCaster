@@ -34,44 +34,39 @@ __version__ = "2.62"
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
     ("2.62", [
-        ("Dropdowns apply on Enter",
-         "Every dropdown that changes the unit now works the same way: arrowing through it only "
-         "browses, Enter applies the choice you are on, and moving away without Enter puts it back "
-         "and says so. The Apply buttons beside the fader, output mix, headphone, USB, recording and "
-         "mic type dropdowns are gone, and the pad and Unit settings dropdowns no longer change "
-         "anything just because you paused on an option. With a mouse, picking an option applies "
-         "it straight away."),
+        ("CallMe: take guests' calls without the touchscreen",
+         "RODE's CallMe lets a guest join your show from another RODECaster or from a web browser, "
+         "over the unit's own internet connection, and until now every part of it was on the "
+         "touchscreen. It has its own page now, CallMe, on Alt plus 5. Switch on Accept incoming "
+         "calls and the page gives you the unit's code, which another RODECaster dials, and a guest "
+         "link with a copy button, which anyone else opens in a browser. When someone calls, you "
+         "hear who it is wherever you are, followed by a ringtone until you answer or it stops "
+         "ringing, and Answer takes the call. The second button is Decline while a call is ringing "
+         "and Hang up once you are talking, and the details of a connected call, how long it has "
+         "been going, how fast the sound is arriving and how much is lost, are listed below them. "
+         "You can also call another RODECaster by typing its code. The page shows your plan and "
+         "the minutes left. The ringtone plays wherever announcements play, and Ring for incoming "
+         "calls turns it off."),
 
-        ("A simpler Keyboard shortcuts tab",
-         "Your shortcuts are now one list. Arrow through it, press Enter to change a shortcut's "
-         "key, Delete to delete it, or the Applications key for a menu that also turns it off or "
-         "silences it. Every shortcut is held on the same keys, Control, Alt and Shift unless you "
-         "change them with Change the keys to hold, so adding a shortcut only asks what it does "
-         "and which key. Use the SMART pad keys adds or removes the pad keys as a set, and Restore "
-         "default shortcuts puts the list back as a new install has it."),
+        ("CallMe tells you when calls cannot work",
+         "A guest's call never reaches the unit while it is offline or while CallMe 1 is on no "
+         "fader, and neither the unit nor the guest is told why. While either is the case, the "
+         "CallMe page shows only what is wrong, with the fix beside it: a link to the wifi "
+         "settings, or a list of faders to put CallMe 1 on, each saying what it carries now. The "
+         "full page comes back as soon as both are fixed."),
 
-        ("Expanded connects reliably",
-         "RODE's Virtual Devices driver often failed to connect when Expanded was switched on, so "
-         "Game, Music, A and B never appeared. The cause was anything playing through the unit's "
-         "Main output at that moment, your screen reader included: the driver needs that output to "
-         "itself. While the unit reconnects in Expanded, AccessCaster now moves Windows' sound to "
-         "another output, such as your computer's own speakers, for a few seconds, then on to "
-         "System (RODECaster) once the driver has connected. RODE's driver announces the connection "
-         "itself, so the app no longer repeats it."),
+        ("Answer, hang up and extend from any program",
+         "Control, Alt and Shift with C answers a call, and with D declines a ringing call or hangs "
+         "up the one you are on, from any program. A new install has them already. If you have set "
+         "up your own shortcuts, add them on the Device page under Keyboard shortcuts, from the "
+         "CallMe kind."),
 
-        ("The fader list follows Expanded",
-         "After switching Expanded on or off, the Faders tab now offers the right channels straight "
-         "away, Game, Music, A and B included, without reloading the page."),
-
-        ("CallMe in the output mixes",
-         "On a RODECaster Pro II, CallMe 1 now has its own row in the output mixes on the Routing "
-         "page, so a caller's voice can be kept out of a headphone mix or the recording."),
-
-        ("Extend a call without the touchscreen",
-         "A call on RODE's free and standard plans ends after an hour unless it is extended. In its "
-         "last five minutes, Extend the call on the CallMe page gives it another hour, and so does "
-         "the answer shortcut, Control, Alt and Shift with C, when nothing is ringing. Switch on "
-         "Extend calls automatically and AccessCaster does it for you at the five-minute warning."),
+        ("Extend a call past the hour",
+         "A call on RODE's free and standard plans ends after an hour unless it is extended. "
+         "AccessCaster tells you five minutes before, and then Extend the call on the CallMe page "
+         "gives it another hour, and so does the answer shortcut when nothing is ringing. Switch "
+         "on Extend calls automatically and AccessCaster does it for you at the five-minute "
+         "warning."),
 
         ("CallMe contacts",
          "Give a CallMe code a name and it becomes a contact, with its own Call, Edit and Delete "
@@ -80,92 +75,11 @@ HISTORY = [
          "calls off and on, the app says so. Contacts are saved with the app's own settings, so "
          "they travel with a settings export."),
 
-        ("More about the call you are on",
-         "The call details now include how long the call has been connected, and a call nobody "
-         "picks up is announced as nobody answering rather than as a timeout."),
+        ("The caller is a channel like any other",
+         "CallMe 1 has its own Level, mute and processing on the Channels page while it is on a "
+         "fader, and on a RODECaster Pro II its own row in the output mixes on the Routing page, "
+         "so a caller's voice can be kept out of a headphone mix or the recording."),
 
-        ("The CallMe channel on the Channels page",
-         "CallMe 1 now has its own Level, mute and processing on the Channels page, like any other "
-         "input, while it is on a fader."),
-
-        ("Pan on stereo channels",
-         "Pan on a stereo channel, such as USB, Chat, Bluetooth or CallMe, did nothing, because the "
-         "unit pans those differently. A stereo channel now has two sliders, one for where each "
-         "side sits, and a switch that links them into a single Pan control. A mic keeps its one "
-         "Pan slider, which now says left or right as you move it."),
-
-        ("Announcements can stay off after a restart",
-         "Announcements now always come back on when AccessCaster starts, so it never opens in "
-         "silence. If you would rather they stayed off, tick Start with announcements the way I "
-         "left them, on the Announcements tab, and the app starts the way you left it, "
-         "whether you switched them from the page, the tray or the keyboard shortcut. If you had "
-         "already switched them off from the tray, that is kept and the box comes ticked."),
-
-        ("The page notices when the app restarts",
-         "If AccessCaster stops while its window is open, the window now tells you, and says when "
-         "it is back. After an update the window reloads itself, so you are never left using the "
-         "old page with the new app."),
-
-        ("The firmware check says when you are up to date",
-         "Checking for new firmware on the Device page now tells you plainly when the unit already "
-         "has the latest, rather than only naming the latest version."),
-
-        ("Daylight saving is off the Device page",
-         "The unit stores the setting but only its own touchscreen ever applies it, so the switch "
-         "here did nothing. It still comes back with a backup."),
-    ]),
-    ("2.61", [
-        ("CallMe: take guests' calls without the touchscreen",
-         "RODE's CallMe lets a guest join your show from another RODECaster or from a web browser, "
-         "over the unit's own internet connection, and until now every part of it was on the "
-         "touchscreen. It has its own page now, CallMe, on Alt plus 5. Switch on Accept incoming "
-         "calls and the page gives you the unit's code, which another RODECaster dials, and a guest "
-         "link with a copy button, which anyone else opens in a browser. When someone calls, you "
-         "hear who it is wherever you are, and Answer takes the call. The second button is Decline "
-         "while a call is ringing and Hang up once you are talking, and the details of a connected "
-         "call, how fast the sound is arriving and how much is lost, are listed below them. You can "
-         "also call another RODECaster by typing its code. The page shows your plan and the "
-         "minutes left."),
-
-        ("Two new keyboard shortcuts for calls",
-         "Control, Alt and Shift with C answers a call, and with D declines a ringing call or hangs "
-         "up the one you are on, from any program. A new install has them already. If you have set "
-         "up your own shortcuts, add them on the Device page under Keyboard shortcuts, from the "
-         "CallMe kind."),
-
-        ("You are told before a call reaches the plan's hour",
-         "On RODE's free and standard plans a call ends after an hour unless it is extended. "
-         "AccessCaster now tells you five minutes before. Extending still has to be done on the "
-         "unit's screen."),
-
-        ("The page shortcuts moved up by one",
-         "CallMe took Alt plus 5, so Backups is now Alt plus 6, Device Alt plus 7, and Help and "
-         "About Alt plus 8."),
-
-        ("Leaving Expanded no longer leaves four dead faders",
-         "Switching what this computer sends back to Standard used to leave Game, Music, A and B "
-         "on their faders, where nothing could feed them. They now come off, as the unit's own "
-         "screen does it, with their processing kept for when you switch back. A unit already in "
-         "that state is tidied when AccessCaster starts, and it tells you so. The summary spoken at "
-         "start-up also names those four properly instead of calling them by number."),
-
-        ("Eject and erase the card or drive",
-         "The Recording page has a new section, The card and drive. Eject one before you pull it "
-         "out, and reconnect it from the same button without unplugging it. Erase deletes "
-         "everything on it, after asking you first. The unit's own storage, where your pad sounds "
-         "live, is never offered."),
-
-        ("Find out when there is new firmware",
-         "The Device page, under Hardware, can ask RODE whether there is newer firmware for your "
-         "unit, and the summary at start-up says so when there is. Installing it is still done on "
-         "the unit's screen or with RODE's app, because an update restarts the unit and your "
-         "computer's sound may be going through it."),
-
-        ("Less to tab past on the Recording page",
-         "With no recordings on the unit, the delete controls are hidden, and with no card or drive "
-         "in, the card and drive section is a single line."),
-    ]),
-    ("2.60", [
         ("Four more inputs from this computer, each on its own fader",
          "Normally your computer looks to the unit like one stereo input, so everything Windows "
          "plays arrives on a single channel already mixed together. RODE's Expanded mode splits it "
@@ -175,7 +89,16 @@ HISTORY = [
          "on its own, keep one out of what a caller hears, or record them apart. It is on the "
          "Routing page under Master Mix, as \"What this computer sends\". One thing to know, and "
          "it is the unit's own rule rather than ours: each of the four appears in Windows only "
-         "while that channel is sitting on a fader, so turning Expanded on is half the job."),
+         "while that channel is sitting on a fader, so turning Expanded on is half the job. "
+         "Switching back to Standard takes the four off their faders, as the unit's own screen "
+         "does, with their processing kept for when you switch back."),
+
+        ("Why your sound moves for a few seconds",
+         "RODE's Virtual Devices driver fails to connect if anything is playing through the unit's "
+         "Main output when Expanded comes on, your screen reader included. So while the unit "
+         "reconnects, AccessCaster moves Windows' sound to another output, such as your "
+         "computer's own speakers, for a few seconds, then on to System (RODECaster) once the "
+         "driver has connected."),
 
         ("Nine separate inputs for recording and streaming",
          "Expanded together with \"Every channel, post-fader\" gives this computer nine separate "
@@ -186,27 +109,67 @@ HISTORY = [
 
         ("AccessCaster can fetch RODE's driver for you",
          "Expanded needs RODE's Virtual Devices driver on this computer. If it is missing, a button "
-         "now appears on the Routing page that downloads RODE's own file, checks it really is "
-         "signed by RODE, and runs their installer, which asks Windows for permission in the usual "
-         "way. There is a second button beside it that just opens RODE's software page if you would "
+         "appears on the Routing page that downloads RODE's own file, checks it really is signed "
+         "by RODE, and runs their installer, which asks Windows for permission in the usual way. "
+         "There is a second button beside it that just opens RODE's software page if you would "
          "rather do it by hand, and that one stays once the driver is in, because it is also how "
          "you repair or reinstall it. This download is the only thing AccessCaster does that "
-         "connects to the internet, and it only ever happens when you press that button: never when "
-         "the app starts, never on a timer, and never to check for a newer version."),
+         "connects to the internet, and it only ever happens when you press that button: never "
+         "when the app starts, never on a timer, and never to check for a newer version."),
 
         ("The output mixes cover the new inputs, and so do your mix presets",
          "Game, Music, A and B are sources in the routing matrix and the monitor mix like any "
          "other, so you can include or exclude them per output and set how loud each one is in your "
          "own headphones. Mix presets save and restore them too, whichever mode the unit happened "
-         "to be in when you saved. \"Chat = my mic only\" now leaves them out as well, which "
-         "matters more than it sounds: in Expanded your screen reader arrives on one of those four, "
-         "so without this it would have gone down the line to a caller."),
+         "to be in when you saved. \"Chat = my mic only\" leaves them out as well, which matters "
+         "more than it sounds: in Expanded your screen reader arrives on one of those four, so "
+         "without this it would go down the line to a caller."),
+
+        ("Dropdowns apply on Enter",
+         "Every dropdown that changes the unit now works the same way: arrowing through it only "
+         "browses, Enter applies the choice you are on, and moving away without Enter puts it back "
+         "and says so. The Apply buttons beside the fader, output mix, headphone, USB, recording, "
+         "mic type and mic preset dropdowns are gone, and the pad and Unit settings dropdowns no "
+         "longer change anything just because you paused on an option. With a mouse, picking an "
+         "option applies it straight away. The mic preset list now shows the preset the channel is "
+         "on, and deleting a preset has its own dialog."),
+
+        ("A simpler Keyboard shortcuts tab",
+         "Your shortcuts are now one list. Arrow through it, press Enter to change a shortcut's "
+         "key, Delete to delete it, or the Applications key for a menu that also turns it off or "
+         "silences it. Every shortcut is held on the same keys, Control, Alt and Shift unless you "
+         "change them with Change the keys to hold, so adding a shortcut only asks what it does "
+         "and which key. Use the SMART pad keys adds or removes the pad keys as a set, and Restore "
+         "default shortcuts puts the list back as a new install has it."),
+
+        ("The page shortcuts moved up by one",
+         "CallMe took Alt plus 5, so Backups is now Alt plus 6, Device Alt plus 7, and Help and "
+         "About Alt plus 8."),
+
+        ("Pan on stereo channels",
+         "Pan on a stereo channel, such as USB, Chat, Bluetooth or CallMe, did nothing, because the "
+         "unit pans those differently. A stereo channel now has two sliders, one for where each "
+         "side sits, and a switch that links them into a single Pan control. A mic keeps its one "
+         "Pan slider, which now says left or right as you move it."),
 
         ("Turning announcements off now silences all of them",
          "About half the app's speech did not come from the announcer's own reading of the unit, so "
          "switching announcements off left those still talking: a USB mode change would speak to "
          "you with announcements turned off. The switch is now enforced in the one place every "
          "spoken phrase passes through, so off means off."),
+
+        ("Announcements can stay off after a restart",
+         "Announcements now always come back on when AccessCaster starts, so it never opens in "
+         "silence. If you would rather they stayed off, tick Start with announcements the way I "
+         "left them, on the Announcements tab, and the app starts the way you left it, "
+         "whether you switched them from the page, the tray or the keyboard shortcut. If you had "
+         "already switched them off from the tray, that is kept and the box comes ticked."),
+
+        ("Announcements speak while a recording is paused",
+         "If announcements are switched off while recording, they now speak while the recording is "
+         "paused, since nothing is being recorded, starting with Recording paused. They go quiet "
+         "again when it resumes. Resuming from the app or the shortcut says Resuming and waits "
+         "until it has finished, so the word does not end up in the recording."),
 
         ("A Back Channel pad no longer narrates what you just asked for",
          "One press of a mixer pad moves four channel states at once, both members' mute and their "
@@ -220,6 +183,44 @@ HISTORY = [
          "you set up in the app behaved as the opposite when you pressed it. If you have a mixer "
          "pad that never felt right, set its trigger mode again."),
 
+        ("Eject and erase the card or drive",
+         "The Recording page has a new section, The card and drive. Eject one before you pull it "
+         "out, and reconnect it from the same button without unplugging it. Erase deletes "
+         "everything on it, after asking you first. The unit's own storage, where your pad sounds "
+         "live, is never offered. With no recordings on the unit the delete controls are hidden, "
+         "and with no card or drive in, the section is a single line, so there is less to tab "
+         "past."),
+
+        ("Find out when there is new firmware",
+         "The Device page, under Hardware, can ask RODE whether there is newer firmware for your "
+         "unit, and tells you plainly when you already have the latest. The summary at start-up "
+         "says so when there is an update. Installing it is still done on the unit's screen or "
+         "with RODE's app, because an update restarts the unit and your computer's sound may be "
+         "going through it."),
+
+        ("Wifi says when it has connected",
+         "Switching the unit's wifi on now waits until it has joined your network and says so, "
+         "rather than leaving you to check back. With wifi off, its settings show only the switch. "
+         "The Current state report on the Device page now includes the unit's network, and the "
+         "summary spoken at start-up says when the unit is offline while incoming calls are on."),
+
+        ("Your wifi password stays out of the log",
+         "The diagnostic log records what the app sends to the unit, and that included your wifi "
+         "password when you joined a network. Passwords are now left out, so the log is safe to "
+         "send to somebody."),
+
+        ("Restoring a backup is quicker with voice effect pads",
+         "A restore no longer rebuilds voice effect pads that already match the backup, which "
+         "saves about a minute and a half on a unit with the factory pads."),
+
+        ("The page notices when the app restarts",
+         "If AccessCaster stops while its window is open, the window now tells you, and says when "
+         "it is back. After an update the window reloads itself, so you are never left using the "
+         "old page with the new app."),
+
+        ("Daylight saving is off the Device page",
+         "The unit stores the setting but only its own touchscreen ever applies it, so the switch "
+         "here did nothing. It still comes back with a backup."),
     ]),
 
     ("2.53", [

@@ -612,8 +612,8 @@ async function loadNetwork() {
       setAvailable(btToggle, writable, NETWORK_READ_ONLY_OFF);
     }
     setAvailable(document.getElementById("net-join-btn"), writable, NETWORK_READ_ONLY_OFF);
-    // Scanning is a write (it sets `wifiScan`), so it follows the same gate as joining.
-    setAvailable(document.getElementById("net-scan-btn"), writable, NETWORK_READ_ONLY_OFF);
+    netWritable = writable;
+    paintWifiRadio(wifiToggle ? wifiToggle.checked : !!w.on);
     // The network name is prefilled with what the unit already has, so rejoining after a password
     // change is one field rather than two. The PASSWORD is never prefilled and never comes back
     // from the server, which is the whole point of the rule around it.
@@ -693,14 +693,29 @@ async function netPost(url, body, el, working) {
   return res;
 }
 
+let netWritable = true;            // the last /api/network read's verdict on network writes
+
+/* With the radio off, everything about wifi except its switch is hidden (see #net-wifi-off).
+   Scanning is a write (it sets `wifiScan`), so it follows the same gate as joining. */
+function paintWifiRadio(radioOn) {
+  document.getElementById("net-wifi-off").hidden = radioOn;
+  document.getElementById("net-wifi-options").hidden = !radioOn;
+  document.getElementById("net-wifi-details").hidden = !radioOn;
+  setAvailable(document.getElementById("net-scan-btn"), netWritable, NETWORK_READ_ONLY_OFF);
+}
+
 async function onWifiToggle(ev) {
   const box = ev.currentTarget;
   const on = box.checked;
   const res = await netPost("/api/network/wifi", { on },
-    box, on ? "Turning the wifi on..." : "Turning the wifi off...");
+    box, on ? "Turning the wifi on and waiting for it to connect. Please wait."
+            : "Turning the wifi off. Please wait.");
   // Put the switch back if the unit did not take it, so the page never claims a state the unit
   // is not in. Same contract as sendToggle uses everywhere else.
   if (!res || res.ok === false) box.checked = !on;
+  paintWifiRadio(box.checked);
+  // Back on, the readings it has just revealed are from before it went off.
+  if (res && res.ok !== false && on) loadNetwork();
 }
 
 async function onBtVisibleToggle(ev) {
@@ -877,6 +892,7 @@ async function loadOverview() {
       if (d.monitor_percent !== null && d.monitor_percent !== undefined) {
         lines.push(`Monitor speaker level: ${d.monitor_percent} percent.`);
       }
+      if (d.network) lines.push(networkLine(d.network));
       const rt = d.routing || {};
       if (!rt.ok) {
         lines.push(rt.reason || "The routing could not be read.");
@@ -902,6 +918,18 @@ async function loadOverview() {
   });
 }
 
+/* The unit's internet connection in one sentence. Offline is not a fault in itself, so the sentence
+   says what it costs rather than sounding an alarm. */
+function networkLine(n) {
+  if (n.wired && n.wifi_ip) return `Network: online by cable, and on wifi to ${n.wifi_ssid}.`;
+  if (n.wired) return "Network: online by cable.";
+  if (n.wifi_ip) return `Network: online over wifi, connected to ${n.wifi_ssid}.`;
+  return "Network: offline. " + (n.wifi_on && n.wifi_ssid
+    ? `Wifi is on but not connected to ${n.wifi_ssid}. `
+    : (n.wifi_on ? "Wifi is on but not joined to a network. " : "Wifi is off. "))
+    + "CallMe and the firmware check need wifi or a network cable.";
+}
+
 /* THE SPOKEN STARTUP SUMMARY: the overview reduced to what is WRONG, in one sentence.
    Deliberately NOT the Device page's list, which is the same payload read the other way round. That
    page answers "tell me everything", and its fader levels alone are nine clauses; this answers "is
@@ -922,6 +950,12 @@ function summariseOverview(d) {
   (d.storage_low || []).forEach((v) => {
     alerts.push(`${v.label} is nearly full, ${v.free_pct} percent left`);
   });
+  // OFFLINE IS A PROBLEM ONLY WHEN GUESTS EXPECT TO REACH THE UNIT. Plenty of desks never go online,
+  // and a warning that is always there is one nobody hears.
+  const net = d.network || {};
+  if (net.online === false && net.callme_hosting) {
+    alerts.push("the unit is offline, so CallMe guests cannot reach it");
+  }
   const fwu = d.firmware_update || {};
   if (fwu.available) {
     alerts.push((fwu.version ? `firmware ${fwu.version}` : "a firmware update")
@@ -6582,8 +6616,7 @@ const PROFILE_ACTION_BTNS = ["profile-restore-open", "profile-rename-open", "pro
    /api/backups returns every backup this desk can be put back from, whatever holds it: a profile
    on this computer, the unit's own show on the drive, or both paired under one name. The kind is
    this page's business and is never made the user's problem.
-   What they DO get told, on the detail line under the list, is what the selected one can still do,
-   because "restores in seconds" and "takes a few minutes" is a difference they can feel. */
+   What they DO get told, on the detail line under the list, is where the selected one is held. */
 
 let backupsData = null;          // the last /api/backups payload, for the detail line and the kinds
 
@@ -6641,11 +6674,10 @@ async function loadProfiles(preferName) {
           !data.shows_capable
             ? "Backups are saved on this computer."
             : (data.storage
-                 ? "Backups are saved on this computer and on the unit's own drive, so a restore "
-                   + "takes seconds."
+                 ? "Backups are saved on this computer, and the unit keeps its own copy on its "
+                   + "drive too."
                  : "There is no card or drive in the unit, so backups are saved on this computer "
-                   + "only. Put one in and the unit keeps its own copy too, which restores far "
-                   + "faster."));
+                   + "only."));
   if (data.note) setText("backup-state", data.note);
   updateBackupDetail();
 }
@@ -6658,14 +6690,10 @@ function updateBackupDetail() {
   if (b.kind === "unit") {
     text = "Made on the unit itself, so it holds everything and puts the whole desk back in "
          + "seconds. There is no copy on this computer, and it cannot be renamed.";
-  } else if (b.kind === "paired") {
-    text = "The unit still has its own copy of this one, so restoring it takes seconds and puts "
-         + "back everything, including what this app cannot write.";
   } else {
     const pads = b.pads || 0;
     text = "Held on this computer" + (pads ? `, with ${pads} SMART pad${pads === 1 ? "" : "s"}` : "")
-         + ". The unit's own copy is not on the drive, so a restore writes your settings back one "
-         + "at a time and takes longer.";
+         + (b.kind === "paired" ? ". The unit has its own copy on its drive too." : ".");
   }
   if (b.baseline) text += " This is the as-found backup: how the unit was before anything changed it.";
   setText("backup-detail", text);
@@ -6730,9 +6758,9 @@ function describeRestoreTime(info) {
   const mins = Math.round(total / 60);
   const roughly = total < 90 ? "about a minute"
                              : (mins === 1 ? "about a minute" : `roughly ${mins} minutes`);
-  return `This profile has ${pads} SMART ${pads === 1 ? "pad" : "pads"}. Pads are restored one at a `
-       + `time at about ${perPad} seconds each, so allow ${roughly} in total. The dialog reports `
-       + `each pad as it goes.`;
+  return `This profile has ${pads} SMART ${pads === 1 ? "pad" : "pads"}. A pad already as saved is `
+       + `left alone, and any other takes about ${perPad} seconds, so allow up to ${roughly}. The `
+       + `dialog reports each pad as it goes.`;
 }
 
 /* Poll a background profile job until it reports done. Only a CHANGED message is written, so the
@@ -6847,8 +6875,8 @@ async function openRestoreDialog() {
   _profileJobRunning = false;
   const label = entry ? entry.name : name;
   // WHICH HALF WILL DO THE WORK decides everything else in this dialog, so it is asked first and
-  // once. A backup the unit still holds goes back in seconds and completely, so there is no time to
-  // quote; one held only on this computer is the slower path, and its time depends on its pads.
+  // once. Only a backup made on the unit itself goes back through the unit's own copy, in seconds;
+  // every other one takes this computer's copy, and its time depends on its pads.
   let viaShow = false;
   // WHAT THIS BACKUP WILL LEAVE YOU UNABLE TO HEAR, and it goes FIRST in the description rather
   // than last. Everything the app says after a restore is spoken through the desk, so a restore
@@ -6925,8 +6953,8 @@ async function doRestore() {
   _profileJobRunning = true;
   openProgressDialog("restore-dialog", "Restoring backup", `Restoring ${label} to the unit.`);
   try {
-    // ONE VERB FOR A LIST OF TWO KINDS: the server picks the unit's own copy when it is still on
-    // the drive and this computer's when it is not.
+    // ONE VERB FOR A LIST OF TWO KINDS: the server takes this computer's copy whenever there is
+    // one, and the unit's own only for a backup the unit made by itself.
     const start = await postJSON("/api/backup/restore", { name });
     if (!start.ok) {
       finishProgressDialog("Restore failed", start.message || "Could not start the restore.");
@@ -8563,7 +8591,9 @@ async function loadCallme() {
   }
   callmeSeen = { version: null, incoming: d.incoming ? d.incoming.id : null };
   applyCallme(d);
-  setStatus("callme-state", d.status || "");
+  // EMPTY ON ARRIVAL: the Current call section says what is happening, the code is on the Incoming calls tab and
+  // an offline unit gets the Not ready section, so a summary here would only repeat them.
+  setText("callme-state", "");
   startCallmePoll();
 }
 
@@ -8591,21 +8621,122 @@ function applyCallme(d) {
 
   const host = document.getElementById("callme-hosting");
   if (host && document.activeElement !== host) host.checked = !!d.hosting;
-  setAvailable(host, !d.hosting_locked, "Hosting cannot be changed while a call is up.");
+  setAvailable(host, !d.hosting_locked, "Incoming calls cannot be switched while a call is up.");
   const code = document.getElementById("callme-code");
   if (code) code.value = d.code || "";
   const link = document.getElementById("callme-link");
   if (link) link.value = d.link || "";
   setAvailable(document.getElementById("callme-copy"), !!d.link,
-               "There is no guest link while hosting is off.");
+               "There is no guest link while incoming calls are off.");
+
+  const ring = document.getElementById("callme-ringtone");
+  if (ring && document.activeElement !== ring) ring.checked = !!d.ringtone;
 
   fillCallmeList("callme-plan", (d.plan || []).map((p) => p.label + ": " + p.value + "."));
-  const note = document.getElementById("callme-fader-note");
-  if (note) {
-    note.textContent = d.fader_note || "";
-    note.hidden = !d.fader_note;
-  }
+  renderCallmeReady(d);
   renderCallmeContacts(d.contacts);
+}
+
+/* NOT READY FOR CALLS: while anything in the readiness list is wrong, the page is that list alone,
+   each problem with its fix beside it, and the rest of the page is hidden, because none of it can
+   work yet. The fader dropdown is filled on demand from the live layout, and only while CallMe 1
+   needs a fader, so a ready page costs no extra read.
+   The swap can also come from the unit (CallMe 1 taken off its fader on the touchscreen), so focus
+   inside the half being hidden is moved to the other half's heading first. */
+let callme1Code = null;
+let callmeTabs = null;
+
+function renderCallmeReady(d) {
+  const problems = (d.ready || []).filter((r) => !r.ok);
+  callme1Code = d.callme1_code === undefined ? callme1Code : d.callme1_code;
+  const gate = document.getElementById("callme-gate");
+  const main = document.getElementById("callme-main");
+  const blocked = problems.length > 0;
+  if (gate.hidden === blocked) {
+    const leaving = blocked ? main : gate;
+    const moveFocus = leaving.contains(document.activeElement);
+    gate.hidden = !blocked;
+    main.hidden = blocked;
+    if (moveFocus) document.getElementById(blocked ? "callme-h-ready" : "h-callme").focus();
+  }
+  if (!blocked) return;
+  setText("callme-ready-summary", problems.length === 1
+    ? "One thing needs sorting before calls work:"
+    : `${problems.length} things need sorting before calls work:`);
+  fillCallmeList("callme-ready-list", problems.map((r) => r.text));
+  const need = (key) => problems.some((r) => r.key === key);
+  document.getElementById("callme-ready-wifi").hidden = !need("online");
+  const faderBox = document.getElementById("callme-ready-fader");
+  const wasHidden = faderBox.hidden;
+  faderBox.hidden = !need("fader");
+  if (!faderBox.hidden && wasHidden) fillCallmeFaders();
+}
+
+async function fillCallmeFaders() {
+  let d;
+  try {
+    d = await (await fetch("/api/faders/live")).json();
+  } catch (e) {
+    return;
+  }
+  if (!d.ok) return;
+  const labels = d.labels || [];
+  fillOptions("callme-fader-select", [{ value: "none", label: "None" }].concat(
+    labels.map((l, i) => ({ value: String(i), label: `Fader ${i + 1} is currently ${l}` }))));
+  setStagedValue(document.getElementById("callme-fader-select"), "none", "None");
+}
+
+/* Enter on the fader dropdown. The new value is recorded BEFORE the re-read, because a successful
+   fix hides the dropdown and the blur that follows would otherwise put it back and say "Not
+   applied". */
+async function onCallmeFaderApply(sel) {
+  if (callme1Code === null) return;
+  setBusy(sel, true);
+  setStatus("callme-state", "Please wait.");
+  let res;
+  try {
+    res = await postJSON("/api/faders/set", { fader: Number(sel.value), code: callme1Code });
+  } catch (e) {
+    res = { ok: false, message: "Could not reach the AccessCaster service." };
+  }
+  setBusy(sel, false);
+  if (!res.ok) {
+    revertStaged(sel, false);
+    await callmeAfterFix(res);
+    return;
+  }
+  // WORDED FOR THIS PAGE. The server's reply is the Routing page's account of a layout change,
+  // which read here sounds like a different page. What matters here is where CallMe 1 went and
+  // which channel lost its fader.
+  const fader = Number(sel.value);
+  const gaveUp = (sel.selectedOptions[0].textContent.match(/ is currently (.+)$/) || [])[1];
+  setStagedValue(sel, sel.value);
+  const lost = gaveUp && !(res.labels || []).includes(gaveUp)
+    ? ` ${gaveUp} is now on no fader.` : "";
+  await callmeAfterFix(res, (nowReady) =>
+    `${nowReady ? "Ready for calls. " : ""}CallMe 1 is on fader ${fader + 1}.${lost}`);
+}
+
+/* After a fix: re-read the whole page (the fader and the network only come from a dump), say what
+   happened, and put focus on a heading, because the control just used has gone: the Not ready
+   heading if something is still wrong, the page's own heading if the full page is now showing.
+   `say(nowReady)`, when given, words a success instead of the server's message. */
+async function callmeAfterFix(res, say) {
+  let text = res.message || "Done.";
+  if (res.ok) {
+    await loadCallme();
+    const ready = document.getElementById("callme-gate").hidden;
+    document.getElementById(ready ? "h-callme" : "callme-h-ready").focus();
+    if (say) text = say(ready);
+  }
+  setStatus("callme-state", text);
+}
+
+/* The wifi link: the Device page, opened on its Wireless connections tab. */
+function onCallmeWifiLink(e) {
+  e.preventDefault();
+  if (deviceTabs) deviceTabs.selectKey("network");
+  location.hash = "#/status";
 }
 
 /* THE CONTACTS LIST is rebuilt only when it has changed, because a rebuild destroys the button a
@@ -8794,8 +8925,8 @@ async function onCallmeHosting(input) {
     return;
   }
   const wanted = input.checked;
-  setStatus("callme-state", wanted ? "Switching hosting on, please wait."
-                                   : "Switching hosting off, please wait.");
+  setStatus("callme-state", wanted ? "Switching incoming calls on, please wait."
+                                   : "Switching incoming calls off, please wait.");
   let res;
   try {
     res = await postJSON("/api/callme/hosting", { on: wanted });
@@ -8808,6 +8939,7 @@ async function onCallmeHosting(input) {
 }
 
 function wireCallme() {
+  callmeTabs = buildStaticTabs("callme", "callme-panel");
   const answer = document.getElementById("callme-answer");
   const end = document.getElementById("callme-end");
   const host = document.getElementById("callme-hosting");
@@ -8833,6 +8965,23 @@ function wireCallme() {
       setStatus("callme-state", res.message || "Done.");
     });
   }
+  const ring = document.getElementById("callme-ringtone");
+  if (ring) {
+    ring.addEventListener("change", async () => {
+      let res;
+      try {
+        res = await postJSON("/api/callme/ringtone", { on: ring.checked });
+      } catch (e) {
+        res = { ok: false, message: "Could not reach the AccessCaster service." };
+      }
+      if (!res.ok) ring.checked = !ring.checked;
+      setStatus("callme-state", res.message || "Done.");
+    });
+  }
+  const faderSel = document.getElementById("callme-fader-select");
+  if (faderSel) enterToApply(faderSel, onCallmeFaderApply);
+  const wifiLink = document.getElementById("callme-ready-wifi-link");
+  if (wifiLink) wifiLink.addEventListener("click", onCallmeWifiLink);
   const dialForm = document.getElementById("callme-dial-form");
   if (dialForm) {
     dialForm.addEventListener("submit", (e) => {

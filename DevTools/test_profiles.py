@@ -304,9 +304,47 @@ check("a member missing from the live read is caught",
       m(SAVED_BC, dict(LIVE_BC, back_channel={"padBcMic1": True})), False)
 check("no live membership at all is caught", m(SAVED_BC, dict(LIVE_BC, back_channel=None)), False)
 
-print("\nPAD VERIFY: voice-FX pads are never skipped (their identity lives in region B)")
-check("type 2 is not in the skippable set", 2 in soundpad._SKIPPABLE_PAD_TYPES, False)
-check("sound, mixer and trigger pads are", soundpad._SKIPPABLE_PAD_TYPES, (1, 3, 4))
+print("\nPAD VERIFY: voice-FX pads are compared by their region-B object")
+check("sound, voice FX, mixer and trigger pads are skippable",
+      soundpad._SKIPPABLE_PAD_TYPES, (1, 2, 3, 4))
+MEGAPHONE = {"reverb": {"reverbLowCut": 0.30000001192092896, "reverbHighCut": 0.0},
+             "distortion": {"distortionIntensity": 0.699999988079071}}
+SAVED_FX = {"grid": 10, "type": 2, "name": "Megaphone", "fx_recipe": "Megaphone",
+            "fx_stack": MEGAPHONE}
+FX_PAD = {"padIdx": 9, "padType": 2, "padActive": False, "padEffectTriggerMode": 1}
+FX_OBJ = soundpad.pr.expected_effect_object(9, MEGAPHONE)
+f = soundpad._fx_effect_matches
+check("the object holds all twenty properties", len(FX_OBJ), 20)
+check("the recipe's engines are on and the rest off",
+      (FX_OBJ["reverbOn"], FX_OBJ["distortionOn"], FX_OBJ["echoOn"]), (True, True, False))
+check_true("an object exactly as the create leaves it matches",
+           f(SAVED_FX, FX_PAD, [FX_OBJ], True))
+check_true("a param read back at double precision of the same float32 matches",
+           f(SAVED_FX, FX_PAD, [dict(FX_OBJ, reverbLowCut=0.3)], True))
+check("a changed param is caught",
+      f(SAVED_FX, FX_PAD, [dict(FX_OBJ, reverbLowCut=0.31)], True), False)
+check("a default param on an engine that is off is still compared",
+      f(SAVED_FX, FX_PAD, [dict(FX_OBJ, echoMix=0.4)], True), False)
+check("an extra engine switched on is caught",
+      f(SAVED_FX, FX_PAD, [dict(FX_OBJ, echoOn=True)], True), False)
+check("a recipe engine switched off is caught",
+      f(SAVED_FX, FX_PAD, [dict(FX_OBJ, reverbOn=False)], True), False)
+check("a missing property is caught",
+      f(SAVED_FX, FX_PAD, [{k: v for k, v in FX_OBJ.items() if k != "robotMix"}], True), False)
+check("an unknown extra property is caught",
+      f(SAVED_FX, FX_PAD, [dict(FX_OBJ, futureParam=1.0)], True), False)
+check("no object for the pad is caught", f(SAVED_FX, FX_PAD, [], True), False)
+check("two objects for the pad are caught", f(SAVED_FX, FX_PAD, [FX_OBJ, FX_OBJ], True), False)
+check("a pool that is not clean means rebuild", f(SAVED_FX, FX_PAD, [FX_OBJ], False), False)
+check("a pad left engaged means rebuild",
+      f(SAVED_FX, dict(FX_PAD, padActive=True), [FX_OBJ], True), False)
+check("a pad on another trigger mode means rebuild",
+      f(SAVED_FX, dict(FX_PAD, padEffectTriggerMode=0), [FX_OBJ], True), False)
+check("a pad of another type means rebuild",
+      f(SAVED_FX, dict(FX_PAD, padType=1), [FX_OBJ], True), False)
+check("an unrecognised effect (no recipe) means rebuild",
+      f(dict(SAVED_FX, fx_recipe=None, fx_stack=None), FX_PAD, [FX_OBJ], True), False)
+check("no live pad means rebuild", f(SAVED_FX, None, [FX_OBJ], True), False)
 
 print("\nPAD VERIFY: audio comparison (name, then size, then a full content hash)")
 vtmp = tempfile.mkdtemp(prefix="ac_pad_verify_")

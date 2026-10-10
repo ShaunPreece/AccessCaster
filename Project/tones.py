@@ -69,26 +69,69 @@ DURATION_S = 2 * NOTE_S + GAP_S
 TONE_VERSION = 3
 
 
-def _write_wav(path: str, freqs) -> None:
+def _note_samples(freqs) -> list:
     frames = int(SAMPLE_RATE * NOTE_S)
     fade = max(1, int(SAMPLE_RATE * FADE_S))
-    gap = bytes(2 * int(SAMPLE_RATE * GAP_S))
-    out = bytearray()
+    out = []
     for i, freq in enumerate(freqs):
         if i:
-            out += gap
+            out += [0.0] * int(SAMPLE_RATE * GAP_S)
         for n in range(frames):
             # Linear fade in and out, PER NOTE. Both ends matter: without the fade the step between
             # the two notes is a click, and a click is louder and more startling than the cue.
             gain = min(1.0, n / fade, (frames - n) / fade)
-            sample = PEAK * gain * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE)
-            out += struct.pack("<h", int(max(-1.0, min(1.0, sample)) * 32767))
+            out.append(PEAK * gain * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE))
+    return out
+
+
+# THE RINGTONE: one ring of a British phone, the 400 and 450 Hz pair in two 0.4 s bursts 0.2 s
+# apart, with a soft bell two octaves up glinting at the start of each burst so it is recognisably a
+# phone but not this computer's or anyone's mobile. One ring per file; the caller alternates it with
+# the caller's name.
+RING_BURST_S = 0.4
+RING_GAP_S = 0.2
+RING_VERSION = 4
+# A short linear fade is heard as a click at the start of each burst, so the fades are raised
+# cosines long enough not to be a transient (25 ms in, 40 ms out), and silence leads the first
+# burst so the output is already running when the sound starts.
+RING_ATTACK_S = 0.025
+RING_RELEASE_S = 0.04
+RING_LEAD_S = 0.05
+# The whole file, for a caller that has to wait for it to finish.
+RING_DURATION_S = RING_LEAD_S + 2 * RING_BURST_S + RING_GAP_S
+
+
+def _smooth(x: float) -> float:
+    """0 to 1 along a raised cosine: no corner at either end, unlike a straight ramp."""
+    x = max(0.0, min(1.0, x))
+    return 0.5 - 0.5 * math.cos(math.pi * x)
+
+
+def _ring_samples() -> list:
+    frames = int(SAMPLE_RATE * RING_BURST_S)
+    burst = []
+    for n in range(frames):
+        t = n / SAMPLE_RATE
+        s = (math.sin(2 * math.pi * 400 * t) + math.sin(2 * math.pi * 450 * t)) / 2
+        s += 0.22 * math.sin(2 * math.pi * 1800 * t) * math.exp(-t / 0.08)
+        gain = (_smooth(t / RING_ATTACK_S)
+                * _smooth((frames - n) / SAMPLE_RATE / RING_RELEASE_S))
+        burst.append(s * gain)
+    peak = max(abs(v) for v in burst) or 1.0
+    burst = [PEAK * v / peak for v in burst]
+    return ([0.0] * int(SAMPLE_RATE * RING_LEAD_S) + burst
+            + [0.0] * int(SAMPLE_RATE * RING_GAP_S) + burst)
+
+
+def _write_wav(path: str, samples) -> None:
+    frames = struct.pack(f"<{len(samples)}h",
+                         *(int(max(-1.0, min(1.0, v)) * 32767) for v in samples))
     tmp = path + ".part"
     with wave.open(tmp, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
-        w.writeframes(bytes(out))
+        w.writeframes(frames)
     os.replace(tmp, path)          # never leave a half-written file where a player will find it
 
 
@@ -113,15 +156,18 @@ def tone_path(name: str) -> str:
     WAV that plays as a click forever after. Returns "" for a name we do not have, rather than
     raising: a missing cue must never take the announcer down with it.
     """
-    freq = TONES.get(name)
-    if not freq:
+    if name == "ring":
+        make, version = _ring_samples, RING_VERSION
+    elif TONES.get(name):
+        make, version = (lambda: _note_samples(TONES[name])), TONE_VERSION
+    else:
         return ""
     folder = data_path("tones")
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, f"{name}-v{TONE_VERSION}.wav")
+    path = os.path.join(folder, f"{name}-v{version}.wav")
     if not _usable(path):
         try:
-            _write_wav(path, freq)
+            _write_wav(path, make())
         except OSError:
             return ""
         # Sweep up any earlier shape of this cue, so the folder does not accumulate one file per

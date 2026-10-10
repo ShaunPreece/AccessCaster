@@ -311,7 +311,7 @@ def _callme_commands() -> list:
         _cmd("callme.end", "CallMe", "Decline the ringing CallMe call, or else hang up"),
         _cmd("callme.extend", "CallMe", "Extend the CallMe call before the hour runs out"),
         _cmd("callme.status", "CallMe", "Say who is calling and who is connected"),
-        _cmd("callme.hosting", "CallMe", "CallMe hosting on or off"),
+        _cmd("callme.hosting", "CallMe", "CallMe incoming calls on or off"),
     ] + _callme_contact_commands()
 
 

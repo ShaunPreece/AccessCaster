@@ -157,6 +157,9 @@ async function run() {
   await sleep(400);
   check("THE PASSWORD FIELD IS EMPTIED once the attempt is over", psk.value === "", psk.value);
 
+  // A successful join re-reads the unit, and that read repaints the switch from the real radio.
+  // Let it land first, or it flips the switch back underneath the click below.
+  await sleep(2500);
   await probeClear();
   wifi.click();
   await waitFor(async () => posts(await probeLog()).length > 0, 10000);
@@ -164,6 +167,16 @@ async function run() {
   check("the wifi switch posts to /api/network/wifi",
     log.length === 1 && log[0].path === "/api/network/wifi",
     JSON.stringify(log.map((r) => r.path)));
+  // The switch started on (it reflects the unit), so that click switched the radio off.
+  await sleep(400);
+  check("with wifi off, the networks, the join form and the wifi readings are hidden",
+    el("net-wifi-options").hidden && el("net-wifi-details").hidden && !wifi.checked);
+  check("and one line says why, beside the switch, which is still there",
+    !el("net-wifi-off").hidden && !wifi.hidden, el("net-wifi-off").textContent.trim());
+  wifi.click();
+  await sleep(600);
+  check("switched back on, they all come back",
+    !el("net-wifi-options").hidden && !el("net-wifi-details").hidden && el("net-wifi-off").hidden);
 
   await probeClear();
   bt.click();

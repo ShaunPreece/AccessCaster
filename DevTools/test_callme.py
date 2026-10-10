@@ -169,10 +169,14 @@ check("a hang-up on the unit is said in plain words", said[-1],
 print("the call area")
 idle = {"incoming": None, "slots": [{"slot": 1, "state": "Idle", "reason": ""}]}
 check("nothing happening", callme.call_now(idle), "No call.")
-check("after a call, why it ended",
+check("after an ordinary hang-up, nothing more",
       callme.call_now({"incoming": None, "slots": [{"slot": 1, "state": "Idle",
                                                     "reason": "Remote drop"}]}),
-      "No call. The last one ended because the guest hung up.")
+      "No call.")
+check("after a call that went wrong, why it ended",
+      callme.call_now({"incoming": None, "slots": [{"slot": 1, "state": "Idle",
+                                                    "reason": "486 Rejected"}]}),
+      "No call. The last one ended because they declined the call.")
 ringing = {"incoming": {"id": 5, "name": "a guest"}, "slots": idle["slots"]}
 check("ringing", callme.call_now(ringing), "A guest is calling.")
 check("the second button declines a ringing call", callme.end_label(ringing), "Decline")
@@ -235,6 +239,10 @@ w, said = watcher()
 w.apply(CTL, "sipIncomingCallDetails", DETAILS)
 w.apply(CTL, "sipIncomingCallDetails", CLEARED)
 check("a ring that runs out is missed", said[-1], "Missed CallMe call from Shaun.")
+check("and the page's line keeps it afterwards", callme.call_now(w.snapshot()),
+      "No call. You missed a call from Shaun.")
+w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+check("until the next call rings", w.snapshot()["missed"], None)
 w, said = watcher()
 w.apply(CTL, "sipIncomingCallDetails", DETAILS)
 w.apply(CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":-1}', "str"), (True, "bool")])
@@ -282,26 +290,56 @@ w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("an extension does not restart the count", w.snapshot()["slots"][0]["since"], s0["since"])
 
 print("\nCONTACTS")
-book, msg = callme.save_contact([], " Steven ", "https://callme.rode.com/s?c=xy34zw")
-check("a guest link is saved as its code", book, [{"name": "Steven", "code": "XY34ZW"}])
-check("saving says so, code spelt", msg, "Saved Steven, code X Y 3 4 Z W.")
-check("a duplicate code is refused", callme.save_contact(book, "Steve", "XY34ZW")[1],
-      "That code is already saved as Steven.")
-check("a duplicate name is refused", callme.save_contact(book, "steven", "ABC123")[1],
-      "You already have a contact called Steven.")
+book, msg = callme.save_contact([], " Alex ", "https://callme.rode.com/s?c=xy34zw")
+check("a guest link is saved as its code", book, [{"name": "Alex", "code": "XY34ZW"}])
+check("saving says so, code spelt", msg, "Saved Alex, code X Y 3 4 Z W.")
+check("a duplicate code is refused", callme.save_contact(book, "Al", "XY34ZW")[1],
+      "That code is already saved as Alex.")
+check("a duplicate name is refused", callme.save_contact(book, "alex", "ABC123")[1],
+      "You already have a contact called Alex.")
 check("a name is required", callme.save_contact(book, " ", "ABC123")[0], None)
-book2, _ = callme.save_contact(book, "Steven", "XYZ789", was="XY34ZW")
-check("an edit replaces the entry, not adds one", book2, [{"name": "Steven", "code": "XYZ789"}])
+book2, _ = callme.save_contact(book, "Alex", "XYZ789", was="XY34ZW")
+check("an edit replaces the entry, not adds one", book2, [{"name": "Alex", "code": "XYZ789"}])
 check("a malformed stored entry is dropped",
       callme.clean_contacts([{"name": "A", "code": "!!"}, "junk", {"name": "B", "code": "b1"}]),
       [{"name": "B", "code": "B1"}])
 callme.set_contacts(book)
-check("a saved code is spoken by name", callme.peer_name("rode:xy34zw"), "Steven")
+check("a saved code is spoken by name", callme.peer_name("rode:xy34zw"), "Alex")
 check("an unsaved code is still spelt", callme.peer_name("rode:AB12CD"), "RODECaster A B 1 2 C D")
-check("deleting", callme.delete_contact(book, "XY34ZW"), ([], "Deleted Steven."))
+check("deleting", callme.delete_contact(book, "XY34ZW"), ([], "Deleted Alex."))
 check("deleting what is not there", callme.delete_contact(book, "ZZZ"),
       (None, "That contact is not saved."))
 callme.set_contacts([])
+
+print("a new call rings once, and only once")
+w, said = watcher()
+rang = []
+w._on_ring = lambda call, text: rang.append((call["id"], text)) or True
+w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+check("the ring hook gets the call and its sentence, once", rang, [(5, "CallMe call from Shaun.")])
+check("and the Watcher does not say it as well, or the first ring would cut it off", said, [])
+w.apply(CTL, "sipIncomingCallDetails", CLEARED)
+check("a clear does not ring", len(rang), 1)
+w, said = watcher()
+w._on_ring = lambda call, text: False
+w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+check("with the ringtone off, the Watcher says it itself", said, ["CallMe call from Shaun."])
+
+print("ready for calls")
+READY = {"online": True, "on_fader": True, "hosting": True}
+check("all in place: nothing to fix",
+      [r["key"] for r in callme.readiness(READY) if not r["ok"]], [])
+check("offline and no fader: both, most basic first",
+      [r["key"] for r in callme.readiness({"online": False, "on_fader": False, "hosting": False})
+       if not r["ok"]], ["online", "fader"])
+check("hosting off is a setting, not a fault",
+      [r["key"] for r in callme.readiness(dict(READY, hosting=False)) if not r["ok"]], [])
+check("not knowing whether it is online is not taken as online",
+      callme.readiness(dict(READY, online=None))[0]["ok"], False)
+check("offline outranks hosting in the status line",
+      callme.status_sentence(dict(READY, online=False, slots=[], incoming=None)).endswith(
+          "The unit is offline, so no call can connect."), True)
 
 print()
 if FAILS:

@@ -49,8 +49,8 @@ accessible page where you can:
   pads, with dynamic banks, and play any pad from the keyboard.
 - **Recording**: start, pause and stop the recorder, choose multitrack or mixed, see what
   storage is in the unit and how much room is left, and eject or erase the card or drive.
-- **CallMe**: RODE's remote calls without the touchscreen. Switch hosting on and share the guest
-  link, hear who is calling and answer or decline from a keyboard shortcut in any program, call
+- **CallMe**: RODE's remote calls without the touchscreen. Switch incoming calls on and share
+  the guest link, hear who is calling and answer or decline from a keyboard shortcut in any program, call
   another RODECaster by its code or from a contacts list, extend a call before the free plan's
   one-hour limit (or have it extended for you), and set the caller's level and processing like
   any other channel.

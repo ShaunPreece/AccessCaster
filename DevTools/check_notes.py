@@ -285,6 +285,19 @@ def check_private_citations() -> None:
                  f'cites the private "{m.group(0)}". State the fact instead.')
 
 
+# ---------------------------------------------------------------------------
+# 9. CodeMap's numbers match the source
+# ---------------------------------------------------------------------------
+# codemap_lines.py derives every line reference and count in CodeMap.md. Run here too, because a
+# separate tool is one more thing to remember, and this is the one run before every finish.
+def check_codemap_lines() -> None:
+    import codemap_lines
+    _fixed, drift = codemap_lines.rewrite(read(codemap_lines.CODEMAP))
+    if drift:
+        fail("CodeMap.md", f"{len(drift)} line number(s) out of date, first: {drift[0]}. "
+                           f"Run python DevTools/codemap_lines.py to correct them.")
+
+
 def main() -> int:
     check_completed()
     check_no_status()
@@ -294,6 +307,7 @@ def main() -> int:
     check_duplicates()
     check_code_comments()
     check_private_citations()
+    check_codemap_lines()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

@@ -45,6 +45,8 @@ END_REASONS = {
     "408 request timeout": "nobody answered",
     "idle timeout": "it reached the plan's one-hour limit",
 }
+# Endings that need no explanation afterwards: "No call." says enough.
+ORDINARY_ENDS = ("remote drop", "local drop")
 # A call is CONNECTED while Active, and still while Expiring: the state the Lite and standard plans
 # give it five minutes before their one-hour limit ends it. UP adds the ringing-out Connecting.
 CONNECTED = ("Active", "Expiring")
@@ -415,9 +417,14 @@ def call_now(d: dict) -> str:
     else:
         parts += [f"Call {s['slot']}: {_doing(s)}." for s in live]
     if not parts:
+        # A missed call is always the latest event, since any later call clears it.
         last = next((s.get("reason") for s in d.get("slots", []) if s.get("reason")), "")
-        parts.append("No call." + (f" The last one ended because {end_reason(last)}." if last
-                                   else ""))
+        if d.get("missed"):
+            parts.append(f"No call. You missed a call from {d['missed']}.")
+        elif last and last.strip().lower() not in ORDINARY_ENDS:
+            parts.append(f"No call. The last one ended because {end_reason(last)}.")
+        else:
+            parts.append("No call.")
     return " ".join(parts)
 
 
@@ -462,16 +469,41 @@ def _loss_words(loss) -> str:
 def status_sentence(d: dict) -> str:
     """The spoken summary: what is happening, and whether calls can come in."""
     parts = [call_now(d)]
-    if d.get("hosting"):
-        parts.append(f"Hosting is on, code {spell(d.get('code') or '')}." if d.get("code")
-                     else "Hosting is on.")
+    if d.get("online") is False:
+        parts.append("The unit is offline, so no call can connect.")
+    elif d.get("hosting"):
+        parts.append(f"Your unit's code is {spell(d.get('code') or '')}."
+                     if d.get("code") else "Guests can call in.")
     else:
-        parts.append("Hosting is off, so nobody can call in.")
+        parts.append("Incoming calls are off.")
     return " ".join(parts)
 
 
+def readiness(d: dict) -> list:
+    """What has to be in place before a call can work, as [{key, ok, text}], most basic first. The
+    page shows only this, with a fix beside each item, until every item is ok.
+
+    Offline, Join Call on the guest's page spins for a few seconds and gives up with nothing reaching
+    the desk; with CallMe 1 on no fader it does nothing at all, and the desk never hears of the call.
+    Neither shows on the desk or the guest's page. An unknown (None) is reported as not ok, never
+    assumed fine. Hosting is not listed: with it off a call out still works, so it is a setting,
+    not a fault."""
+    out = []
+    online = d.get("online")
+    out.append({"key": "online", "ok": online is True,
+                "text": "The unit is online." if online else
+                        ("The unit is offline, so no call can connect either way. Join it to wifi "
+                         "or plug in a network cable." if online is False else
+                         "Whether the unit is online is not known yet.")})
+    out.append({"key": "fader", "ok": d.get("on_fader") is True,
+                "text": "CallMe 1 is on a fader." if d.get("on_fader") else
+                        "CallMe 1 is on no fader, so a guest's call never reaches the unit. "
+                        "Put it on a fader."})
+    return out
+
+
 def spell(code: str) -> str:
-    """A code read out one character at a time, so AB12CD is not spoken as a word."""
+    """A code read out one character at a time, so a screen reader does not try it as a word."""
     return " ".join(code)
 
 
@@ -492,9 +524,13 @@ class Watcher(threading.Thread):
     back from a replug is re-read before its pushes are trusted, and every full page read re-seeds
     it too (`seed`). A push that arrives before any seed is dropped."""
 
-    def __init__(self, on_say=None, read_model=None, on_expiring=None):
+    def __init__(self, on_say=None, read_model=None, on_expiring=None, on_ring=None):
         super().__init__(daemon=True, name="callme-watch")
         self._on_say = on_say
+        # Called outside the lock as on_ring(call, sentence) when a NEW call starts ringing. True
+        # means it is announcing the call itself (so it can ring AFTER the sentence, which a ring
+        # queued alongside would cut off); False leaves the sentence to on_say.
+        self._on_ring = on_ring
         self._read_model = read_model
         # Called with the slot index when a call goes Expiring, under the Watcher's lock, so it
         # must not block. True means it is extending the call and the warning goes unsaid.
@@ -507,6 +543,9 @@ class Watcher(threading.Thread):
         self._quiet = set()             # slot indices whose next "Connected" the reply speaks
         self._quiet_end = set()         # slot indices whose next "ended" the reply speaks
         self._since = {}                # call uuid -> (connected at, exact): see since_for
+        # Who the last missed call was from, until the next call rings or goes up. Kept here, not
+        # in _state, because every page read re-seeds _state from a dump, which has no memory.
+        self._missed = None
         self.version = 0                # bumped on every change the page would show
         self.running = True
 
@@ -543,9 +582,15 @@ class Watcher(threading.Thread):
                 return None
             d = json.loads(json.dumps(self._state))
             d["version"] = self.version
+            d["missed"] = self._missed
             for s in d.get("slots", []):
                 s["since"], s["since_exact"] = self._since.get(s.get("uuid"), (None, None))
             return d
+
+    def missed(self):
+        """Who the last missed call was from, or None."""
+        with self._lock:
+            return self._missed
 
     def since_for(self, uuid) -> tuple:
         """(time the call connected, whether that is exact) for a call, or (None, None)."""
@@ -577,20 +622,27 @@ class Watcher(threading.Thread):
     # -- one push -------------------------------------------------------------------------------
     def apply(self, path, name: str, value) -> None:
         """Fold one pushed property into the state and speak what deserves it."""
-        say = []
+        say, ring = [], []
         with self._lock:
             d = self._state
             if d is None:
                 return
             changed = True
             if path and self._ctl is not None and list(path) == list(self._ctl):
-                changed = self._apply_control(d, name, value, say)
+                changed = self._apply_control(d, name, value, say, ring)
             elif path in self._slots:
                 changed = self._apply_slot(d, self._slots.index(path), name, value, say)
             else:
                 changed = False
             if changed:
                 self.version += 1
+        for call, text in ring:
+            try:
+                taken = bool(self._on_ring(call, text))
+            except Exception:
+                taken = False
+            if not taken:
+                say.insert(0, text)
         for text in say:
             if self._on_say:
                 try:
@@ -598,18 +650,24 @@ class Watcher(threading.Thread):
                 except Exception:
                     pass
 
-    def _apply_control(self, d, name, value, say) -> bool:
+    def _apply_control(self, d, name, value, say, ring) -> bool:
         if name == "sipIncomingCallDetails":
             call = parse_call(value)
             was = d.get("incoming")
             d["incoming"] = call
             if call and (not was or was.get("id") != call["id"]):
-                say.append(f"CallMe call from {call['name']}.")
+                self._missed = None
+                text = f"CallMe call from {call['name']}."
+                if self._on_ring:
+                    ring.append((call, text))
+                else:
+                    say.append(text)
             elif not call and was:
                 # Cleared. An answer or decline from this app, or from the touchscreen (whose
                 # accept push arrives first and marks it handled), has been spoken already. What is
                 # left is a call nobody took: the 120 s ring ran out, or the guest gave up.
                 if was["id"] not in self._handled:
+                    self._missed = was["name"]
                     say.append(f"Missed CallMe call from {was['name']}.")
             return True
         if name == "sipIncomingCallAccept":
@@ -666,6 +724,8 @@ class Watcher(threading.Thread):
             state, reason = parse_slot_state(value)
             was = s.get("state")
             s["state"], s["reason"] = state, reason
+            if state in UP:
+                self._missed = None
             who = s.get("peer") or "the guest"
             if state == "Expiring" and was != "Expiring":
                 if not (self._on_expiring and self._on_expiring(i)):
