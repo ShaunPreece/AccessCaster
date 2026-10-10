@@ -1538,7 +1538,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   class names like `InputAssignSourcePage::LinkButton`, which is how the stereo-pair codes were shown
   to be firmware-wide rather than per-desk. Embedded Linux (Amlogic); the touchscreen is JUCE, with
   a 4787-entry UI string table. RODE's, so it stays OUTSIDE the repo; `DevTools/firmware_dig.py`
-  expects it at `C:\Users\shaun\rode-firmware`. **Look here before calling anything blocked.**
+  looks for a `rode-firmware` folder beside the repo or in your home folder. **Look here before
+  calling anything blocked.**
 - **THE DUO MIX NODES CARRYING AN INPUT PROPERTY ARE OUR OWN LITTER, and only a factory reset removes
   them.** Of 390 MIX nodes on a used Duo, 387 carry exactly six properties; the exceptions are the
   three this app wrote to. That count is the cheapest way to spot a write landing where it does not

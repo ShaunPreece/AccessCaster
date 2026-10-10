@@ -9,13 +9,13 @@ into a route.
 WHERE IT COMES FROM, and none of this is a secret: the RODE app fetches
 `http://update.rode.com/manifest.json`, which names `update.rode.com/rcp2/<version>/app.zip` (the
 two Linux binaries) and `os.tar.gz` (the whole OS, 169 MB). The zip's md5 is published beside it and
-this project verified it. The firmware is RODE's, so it lives OUTSIDE the repo, at
-`C:\\Users\\shaun\\rode-firmware`, and is never committed.
+this project verified it. The firmware is RODE's, so it lives OUTSIDE the repo, in a
+`rode-firmware` folder beside the repo or in your home folder, and is never committed.
 
-    C:\\Users\\shaun\\rode-firmware\\app-1.7.6\\usr\\bin\\rc_audio_mixer   the engine: owns the
-                                                                          property tree and speaks
-                                                                          report-3 to us
-    C:\\Users\\shaun\\rode-firmware\\app-1.7.6\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE
+    rode-firmware\\app-1.7.6\\usr\\bin\\rc_audio_mixer   the engine: owns the
+                                                        property tree and speaks
+                                                        report-3 to us
+    rode-firmware\\app-1.7.6\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE
                                                                           app: every screen we
                                                                           cannot reach lives here
 

@@ -549,7 +549,7 @@ Transfer Mode actually mounts, per `transferModeType` value),
 what the desk PUBLISHES, the RODE app shows what the app KNOWS, the firmware shows what the desk
 DOES. RODE publish it: `update.rode.com/manifest.json` names `rcp2/<version>/app.zip` (the two Linux
 binaries, md5 published beside it and verified) and `os.tar.gz` (the whole OS, 169 MB, not fetched).
-The image is RODE's, so it lives OUTSIDE the repo at `C:\Users\shaun\rode-firmware` and is never
+The image is RODE's, so it lives OUTSIDE the repo, in a `rode-firmware` folder beside the repo or in your home folder, and is never
 committed. Unpack each release as `app-<version>`: the newest is used by default, and pointing
 `ACCESSCASTER_FIRMWARE` at an older one is how two releases get compared. `rc_audio_mixer` is the
 engine that speaks report-3 to us; `rc_gui_juce` is the TOUCHSCREEN, so every screen we cannot reach
