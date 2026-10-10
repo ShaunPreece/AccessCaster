@@ -195,7 +195,7 @@ def save_user_fx_preset(name: str, stack: dict, colour: int = 8) -> str:
     if not name:
         raise ValueError("the effect needs a name")
     if name in RECIPES:
-        raise ValueError(f"'{name}' is a built-in effect name; choose another")
+        raise ValueError(f"{name} is a built-in effect name; choose another")
     clean = validate_fx_stack(stack)
     colour = max(0, min(11, int(colour)))
     user = load_user_fx_presets()
@@ -885,7 +885,7 @@ def clear_grid_pad(grid: int) -> dict:
         clean_pool()                               # silently GC stray orphans first (no-op if clean)
     clear_slot(pos, ptype)
     health = pool_health()
-    msg = f"Cleared pad {grid} ({PAD_TYPE_LABEL.get(ptype, 'pad')} '{name}'). " + _health_message(health)
+    msg = f"Cleared pad {grid} ({PAD_TYPE_LABEL.get(ptype, 'pad')} {name}). " + _health_message(health)
     return {"ok": health["clean"], "message": msg, "health": health}
 
 
@@ -1696,7 +1696,7 @@ def _replace_slot(grid: int, what: str, create, note: str = "") -> dict:
     cleared = None
     if pos is not None:
         clear_slot(pos, ptype)
-        cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} '{oldname}'"
+        cleared = f"{PAD_TYPE_LABEL.get(ptype, 'pad')} {oldname}"
         time.sleep(1.2)                            # let the record drop before the create reads count
     try:
         result = create()
@@ -1919,7 +1919,7 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
     recipe, colour = spec["stack"], spec["colour"]
     res = safe_assign_fx_recipe(pidx, key, recipe, colour=colour, active=active)
     health = res["health"]
-    msg = f"Assigned voice effect '{key}' to pad {grid}. " + _health_message(health)
+    msg = f"Assigned voice effect {key} to pad {grid}. " + _health_message(health)
     return {"ok": health["clean"], "message": msg, "health": health, "effect": key}
 
 
@@ -2903,7 +2903,7 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                 elif key:                             # older backup: fall back to the live recipe
                     assign_fx_to_grid(grid, key)
                 else:
-                    skipped.append(f"pad {grid} ('{label}': unrecognised effect)"); continue
+                    skipped.append(f"pad {grid} ({label}: unrecognised effect)"); continue
             elif ptype == PAD_TYPE_MIXER:
                 if e.get("mixer_mode") is None:
                     skipped.append(f"pad {grid} (mixer mode missing)"); ok = False; continue

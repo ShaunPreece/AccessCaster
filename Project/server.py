@@ -514,8 +514,11 @@ def _recorder_state_changed(was, now) -> None:
     no reply to carry it, so one short phrase at the top of the recording is the price of the
     operator knowing what just happened.
 
-    A PAUSE COUNTS AS RECORDING here: the take is not finished, and switching announcements on and
-    off around every pause would be its own kind of noise.
+    A PAUSE GIVES ANNOUNCEMENTS BACK until the take resumes. Nothing reaches the take while it is
+    paused, and without speech a paused desk sounds exactly like a recording one. A resume from the
+    UNIT says "Recording again" as it suspends them, which lands at the start of the resumed section
+    for the same reason "Recording started" does; a resume from this app says "Resuming" first and
+    waits for it to finish (action_record).
 
     WHAT IS SAID COMES FROM THE TRANSITION, NOT FROM `now` ALONE (recorder.spoken_change), which is
     what tells a drive being plugged in apart from a recording stopping. The SUSPENSION decisions
@@ -527,13 +530,21 @@ def _recorder_state_changed(was, now) -> None:
     # back to naming no medium at all rather than guessing one.
     medium = _recorder_context.get("where") or ""
     phrase = recorder.spoken_change(was, now, medium)
-    if now in (recorder.RECORDING, recorder.PAUSED):
-        going_quiet = _announce_on.is_set() and _record_mutes_announcer()
+    if now == recorder.RECORDING:
+        # Only a NEW take explains the silence: after a pause it is already known.
+        going_quiet = (_announce_on.is_set() and _record_mutes_announcer()
+                       and was != recorder.PAUSED)
         if _announce_on.is_set() and not ours and phrase:
             # One phrase, not two: the speech pump coalesces, so a second would silence the first.
             _ann_say(f"{phrase}."
                      + (" Announcements off until you stop." if going_quiet else ""))
         _suspend_announcer_for_record()
+        return
+    if now == recorder.PAUSED:
+        # Restored only if the take suspended them, so the resume suspends them again the same way.
+        _restore_announcer_after_record()
+        if _announce_on.is_set() and not ours and phrase:
+            _ann_say(f"{phrase}.")
         return
     if now in (recorder.READY, recorder.NO_DESTINATION):
         # Unconditional, and before the speech: a take that ended because the drive was pulled must
@@ -773,6 +784,10 @@ def action_record(command: str) -> dict:
         return {"ok": True, "message": "It is already recording."}
     if cmd == "stop" and before in (recorder.READY, recorder.NO_DESTINATION):
         return {"ok": True, "message": "Nothing is recording."}
+    if cmd == "resume" and before == recorder.PAUSED:
+        # Announcements are back on during a pause (_recorder_state_changed), and this is the one
+        # resume where the notice can be finished before the take carries on.
+        _ann_say_and_wait("Resuming")
 
     # Mark it BEFORE the write: the unit pushes the new state back in about 30 ms, which can beat
     # this function's own reply to the page.
@@ -792,9 +807,9 @@ def action_record(command: str) -> dict:
     # unit's push, but a missed push must not leave announcements talking into a take, or leave
     # them off after one.
     announcer_back = False
-    if state in (recorder.RECORDING, recorder.PAUSED):
+    if state == recorder.RECORDING:
         _suspend_announcer_for_record()
-    elif state in (recorder.READY, recorder.NO_DESTINATION):
+    elif state in (recorder.PAUSED, recorder.READY, recorder.NO_DESTINATION):
         announcer_back = _restore_announcer_after_record()
     info = _recorder_payload(blob)
     _note_recorder_context(info)
@@ -812,7 +827,7 @@ def action_record(command: str) -> dict:
                 msg = f"Stopped. Saved {newest['name']}, {newest['duration']}."
         # SAID IN THE REPLY, not spoken: this is the one path where the notice can reach the
         # operator without making a sound, and therefore without landing in the recording.
-        if cmd in ("start", "resume") and _ann_suspended_for_record:
+        if cmd == "start" and _ann_suspended_for_record:
             msg += " Announcements are off until you stop."
         elif cmd == "stop" and announcer_back:
             msg += " Announcements are back on."
@@ -899,7 +914,8 @@ def action_delete_recording(uid: int) -> dict:
                             f"unit did not act on it.")}
     return {"ok": True, "recorder": info,
             "message": (f"Deleted {target['name']}, {target['duration']}. "
-                        f"{len(info.get('recordings') or [])} recordings left on the unit.")}
+                        f"{wording.count(len(info.get('recordings') or []), 'recording')} left "
+                        f"on the unit.")}
 
 
 # ----------------------------------------------------------------------------
@@ -2523,6 +2539,14 @@ _ANN_SAY_QMAX = 1          # newest wins: the worker purges anyway, so queueing 
 _ANN_PACE_S = 0.20         # never hand the worker phrases faster than this (see the pump)
 _ann_speak_thread = None
 _ann_speak_lock = threading.Lock()
+# A phrase somebody waits on (_ann_say_and_wait) travels the same queue as "!sync <id> <text>". The
+# worker speaks it synchronously and replies "DONE <id>" on stdout. A sync phrase that is dropped
+# or superseded before it is spoken must still release its waiter (_ann_release).
+_ANN_SYNC_PREFIX = "!sync "
+_ANN_SYNC_TIMEOUT_S = 4.0  # longest anyone is held up if the worker never answers
+_ann_sync_waiters = {}
+_ann_sync_lock = threading.Lock()
+_ann_sync_next = 0
 # Which Windows output device announcements go to (a name from _ann_audio_outputs(), matched by the
 # worker); "" = the system default. This desk's default output IS the RODECaster, so speech arrives
 # on USB 1 and is inaudible while another channel is SOLOed (the cue bus replaces the headphone feed)
@@ -2673,6 +2697,9 @@ def _ann_say_oneshot(text: str) -> None:
     """The original one-process-per-phrase path. Fallback only (see _ann_say). Carries the same
     volume, VOICE and OUTPUT DEVICE as the worker, so degrading to this path does not suddenly get
     loud again, change voice, or (worst of the three) start speaking into the desk."""
+    sync_id = None
+    if text.startswith(_ANN_SYNC_PREFIX):
+        sync_id, _, text = text[len(_ANN_SYNC_PREFIX):].partition(" ")
     try:
         # A CUE IS NOT A PHRASE. The queue carries "!wav <path>" for the mute tones (see _ann_tone),
         # and without this the fallback path would cheerfully read a Windows file path aloud.
@@ -2689,10 +2716,56 @@ def _ann_say_oneshot(text: str) -> None:
             cmd += ["-Voice", _ann_voice]
         if _ann_say_device:
             cmd += ["-Device", _ann_say_device]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=_NO_WINDOW)
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=_NO_WINDOW)
+        if sync_id is not None:
+            p.wait(timeout=_ANN_SYNC_TIMEOUT_S)    # say.ps1 exits when it has finished speaking
     except Exception:
         pass
+    if sync_id is not None:
+        _ann_sync_done(sync_id)
+
+
+def _ann_sync_done(sync_id: str) -> None:
+    with _ann_sync_lock:
+        ev = _ann_sync_waiters.pop(sync_id, None)
+    if ev is not None:
+        ev.set()
+
+
+def _ann_release(text) -> None:
+    """Free whoever waits on `text` if it is a sync phrase that will now never be spoken."""
+    if isinstance(text, str) and text.startswith(_ANN_SYNC_PREFIX):
+        _ann_sync_done(text[len(_ANN_SYNC_PREFIX):].partition(" ")[0])
+
+
+def _ann_worker_replies(proc) -> None:
+    """Read the speech worker's stdout until it exits, releasing each finished sync phrase."""
+    try:
+        for line in proc.stdout:
+            if line.startswith("DONE "):
+                _ann_sync_done(line[5:].strip())
+    except Exception:
+        pass
+
+
+def _ann_say_and_wait(text: str) -> None:
+    """Speak `text` and return once it has finished playing, so the caller can act after it: the
+    words "Resuming" must be over before the desk starts recording again. Returns at once when
+    announcements are off, and after _ANN_SYNC_TIMEOUT_S at worst."""
+    global _ann_sync_next
+    if not _announce_on.is_set() or _ANN_SILENT:
+        _ann_say(text)                     # logged, and suppressed or silent there
+        return
+    ev = threading.Event()
+    with _ann_sync_lock:
+        _ann_sync_next += 1
+        sync_id = str(_ann_sync_next)
+        _ann_sync_waiters[sync_id] = ev
+    _ann_say(f"{_ANN_SYNC_PREFIX}{sync_id} {text}")
+    ev.wait(_ANN_SYNC_TIMEOUT_S)
+    with _ann_sync_lock:
+        _ann_sync_waiters.pop(sync_id, None)
 
 
 def _ann_speak_pump() -> None:
@@ -2720,6 +2793,7 @@ def _ann_speak_pump() -> None:
                 break
             if newer is None:
                 return
+            _ann_release(text)
             text = newer
         # Pace the hand-off, preferring anything that arrives while we wait.
         gap = _ANN_PACE_S - (time.time() - last_sent)
@@ -2730,6 +2804,7 @@ def _ann_speak_pump() -> None:
                 break
             if newer is None:
                 return
+            _ann_release(text)
             text = newer
             gap = _ANN_PACE_S - (time.time() - last_sent)
         last_sent = time.time()
@@ -2756,9 +2831,12 @@ def _ann_speak_pump() -> None:
             if device:
                 cmd += ["-Device", device]
             try:
-                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
                                         text=True, bufsize=1)
+                # Drained for as long as the worker lives: it writes a line per phrase, and an
+                # unread pipe fills and blocks it mid-sentence.
+                threading.Thread(target=_ann_worker_replies, args=(proc,), daemon=True).start()
                 sent_vol = vol
                 spawned_gen = gen
             except Exception:
@@ -2805,13 +2883,19 @@ def _ann_say(text: str) -> None:
     virtual-devices follow-up after a USB mode change, the recorder watcher). The phrases
     announcing that speech is BACK are safe: each one sets the flag before it speaks.
     """
-    what = ("cue " + os.path.basename(text[len(_ANN_WAV_PREFIX):]).split("-")[0]
-            if text.startswith(_ANN_WAV_PREFIX) else text[:90])
+    if text.startswith(_ANN_WAV_PREFIX):
+        what = "cue " + os.path.basename(text[len(_ANN_WAV_PREFIX):]).split("-")[0]
+    elif text.startswith(_ANN_SYNC_PREFIX):
+        what = text[len(_ANN_SYNC_PREFIX):].partition(" ")[2][:90]
+    else:
+        what = text[:90]
     if not _announce_on.is_set():
         diagnostics.event("say", what + "  [suppressed: announcements off]")
+        _ann_release(text)
         return
     diagnostics.event("say", what)
     if _ANN_SILENT:
+        _ann_release(text)
         return                  # a test run: recorded above, never played. See _ANN_SILENT.
     global _ann_speak_thread
     with _ann_speak_lock:
@@ -2820,7 +2904,7 @@ def _ann_say(text: str) -> None:
             _ann_speak_thread.start()
     while _ann_speak_q.qsize() >= _ANN_SAY_QMAX:
         try:
-            _ann_speak_q.get_nowait()
+            _ann_release(_ann_speak_q.get_nowait())
         except queue.Empty:
             break
     try:
@@ -3096,7 +3180,8 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
             # Record it either way, so a suppressed echo is not spoken by a later duplicate push.
             st["gain_said"] = (who, ival)
             if not _ann_is_self_echo(("gain", who)):
-                _ann_say(f"{who} {ival} d B")
+                # Number first, as for any level that moved (see _ann_level_words).
+                _ann_say(f"{ival} d B, {who}")
         return
     if name == "encoderColour":
         # -1 = the encoder is bound to nothing; anything else is the colour of what it drives.
@@ -3999,7 +4084,7 @@ def action_set_announce_voice(voice: str) -> dict:
     picked = _ann_pick(voice, offered)
     if picked is None:
         return {"ok": False, "voice": _ann_voice,
-                "message": f"This computer has no speech voice called '{voice}'."}
+                "message": f"This computer has no speech voice called {voice}."}
     _ann_voice = picked
     _ann_worker_gen += 1
     update_settings(announcer_voice=_ann_voice)
@@ -4019,7 +4104,7 @@ def action_set_announce_output(output: str) -> dict:
     picked = _ann_pick(output, offered)
     if picked is None:
         return {"ok": False, "output": _ann_say_device,
-                "message": f"This computer has no audio output called '{output}'."}
+                "message": f"This computer has no audio output called {output}."}
     _ann_say_device = picked
     _ann_worker_gen += 1
     update_settings(announcer_output=_ann_say_device)
@@ -4034,7 +4119,8 @@ def action_refresh_speech_devices() -> dict:
     changes them, and neither is worth restarting the app for."""
     lists = _sapi_lists(refresh=True)
     return {"ok": True, "voices": lists["voices"], "outputs": lists["outputs"],
-            "message": f"{len(lists['voices'])} voices and {len(lists['outputs'])} outputs found."}
+            "message": f"{wording.count(len(lists['voices']), 'voice')} and "
+                       f"{wording.count(len(lists['outputs']), 'output')} found."}
 
 
 def action_set_gain(channel: int, db: int) -> dict:
@@ -5139,7 +5225,7 @@ def action_apply_mic_preset(channel: int, name: str) -> dict:
     presets = {**_load_factory_presets(), **_load_user_presets()}
     props = presets.get(name)
     if not props:
-        return {"ok": False, "message": f"Preset '{name}' was not found."}
+        return {"ok": False, "message": f"Preset {name} was not found."}
     # Read the modules FIRST so we can say what actually changed: nothing on screen otherwise shows
     # a module moving.
     try:
@@ -5152,7 +5238,7 @@ def action_apply_mic_preset(channel: int, name: str) -> dict:
     # Remember it, so coming back to this channel can still say what it is on. The device marker
     # cannot do that job for a custom preset, or for a factory one once a slider moves (_preset_now).
     _note_applied_preset(channel, name)
-    msg = f"Mic {channel} set to the '{name}' preset."
+    msg = f"Mic {channel} set to the {name} preset."
     turned_on = [_MODULE_LABEL.get(p, p) for p in channels.PROCESSING_MODULE_BOOLS
                  if after.get(p) and not before.get(p)]
     turned_off = [_MODULE_LABEL.get(p, p) for p in channels.PROCESSING_MODULE_BOOLS
@@ -5175,7 +5261,7 @@ def action_save_mic_preset(channel: int, name: str) -> dict:
     if not name:
         return {"ok": False, "message": "Please enter a name for the preset."}
     if name in _load_factory_presets():
-        return {"ok": False, "message": f"'{name}' is a built-in preset name; choose another."}
+        return {"ok": False, "message": f"{name} is a built-in preset name; choose another."}
     try:
         with _hid_lock:
             props = _read_channel_preset_props(channel)
@@ -5189,17 +5275,17 @@ def action_save_mic_preset(channel: int, name: str) -> dict:
     # The channel now IS this preset by definition - it was saved from these very values - so the
     # strip adopts the new name straight away rather than still claiming whatever it was based on.
     _note_applied_preset(channel, name)
-    return {"ok": True, "message": f"Saved Mic {channel}'s current settings as '{name}'.",
+    return {"ok": True, "message": f"Saved Mic {channel}'s current settings as {name}.",
             "presets": preset_list()}
 
 
 def action_delete_mic_preset(name: str) -> dict:
     user = _load_user_presets()
     if name not in user:
-        return {"ok": False, "message": f"'{name}' is not a custom preset (built-ins can't be deleted)."}
+        return {"ok": False, "message": f"{name} is not a custom preset (built-ins can't be deleted)."}
     del user[name]
     _save_user_presets(user)
-    return {"ok": True, "message": f"Deleted the '{name}' preset.", "presets": preset_list()}
+    return {"ok": True, "message": f"Deleted the {name} preset.", "presets": preset_list()}
 
 
 # ----------------------------------------------------------------------------
@@ -7769,10 +7855,10 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
     outs = res["outputs"]
     if not outs:
         return {"ok": False,
-                "message": (f"'{label}' names no output this device has, so nothing was changed."
+                "message": (f"{label} names no output this device has, so nothing was changed."
                             + (f" Not on this device: {wording.join_and(res['skipped'])}."
                                if res["skipped"] else ""))}
-    msg = f"Applied '{label}' to {wording.count(len(outs), 'output')}"
+    msg = f"Applied {label} to {wording.count(len(outs), 'output')}"
     msg += ": " + wording.join_and(outs) + "."
     if res["skipped"]:
         msg += (f" Skipped {wording.count(len(res['skipped']), 'part')} this device does not have: "
@@ -7826,7 +7912,7 @@ def action_apply_routing_scheme(name: str, builtin: bool = False) -> dict:
     if builtin:
         b = routing_schemes.builtin(name)
         if b is None:
-            return {"ok": False, "message": f"There is no built-in mix preset '{name}'."}
+            return {"ok": False, "message": f"There is no built-in mix preset {name}."}
         return _apply_scheme(b["scheme"], b["name"])
     loaded = routing_schemes.load(name)
     if not loaded.get("ok"):
@@ -7859,7 +7945,7 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
     if not res.get("ok"):
         return res
     return {"ok": True, "name": safe,
-            "message": (f"Saved the mix scheme '{safe}'. "
+            "message": (f"Saved the mix scheme {safe}. "
                         f"{routing_schemes.describe(cap['scheme'], expanded=channels.usb_expanded())}")}
 
 
@@ -8217,10 +8303,10 @@ def action_backup_now(name: str) -> dict:
 def _backup_wording(safe: str, show) -> str:
     """What a finished backup says. Names what it can restore FROM, not which mechanisms ran."""
     if show:
-        return (f"Backed up as '{safe}'. It holds the unit's own complete backup, which restores "
+        return (f"Backed up as {safe}. It holds the unit's own complete backup, which restores "
                 f"everything in seconds, plus a copy of your settings and pads on this computer in "
                 f"case the drive is removed or erased.")
-    return (f"Backed up as '{safe}', on this computer. There is no card or drive in the unit, so "
+    return (f"Backed up as {safe}, on this computer. There is no card or drive in the unit, so "
             f"the unit's own backup could not be made; this holds your settings and pads.")
 
 
@@ -8332,7 +8418,7 @@ def action_baseline_save(include_pads: bool = True) -> dict:
     dialog as an ordinary profile save; only the name, the marking and the protections differ."""
     existing = profiles.find_baseline()
     if existing:
-        return {"ok": False, "message": f"This unit already has a baseline, '{existing['name']}', "
+        return {"ok": False, "message": f"This unit already has a baseline, {existing['name']}, "
                                         f"and there can only be one. Nothing was changed."}
     _note_baseline_asked()          # asked and answered, whichever way the capture then goes
     return snapshot_profile(_baseline_name(), include_pads=include_pads, baseline=True)
@@ -8348,7 +8434,7 @@ def action_baseline_add_pads() -> dict:
     if not existing:
         return {"ok": False, "message": "There is no baseline on this computer to add pads to."}
     if existing.get("pads"):
-        return {"ok": False, "message": f"'{existing['name']}' already has "
+        return {"ok": False, "message": f"{existing['name']} already has "
                                         f"{wording.count(existing['pads'], 'SMART pad')} saved."}
     safe = existing["name"]
 
@@ -9803,7 +9889,7 @@ def action_save_fx_preset(name: str, stack: dict, colour: int) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not save the effect: {exc}"}
     return {"ok": True,
-            "message": f"Saved '{saved}'. It is now in the Assign a voice effect list.",
+            "message": f"Saved {saved}. It is now in the Assign a voice effect list.",
             "recipes": list(soundpad.all_recipes().keys()),
             "custom_fx": list(soundpad.load_user_fx_presets().keys())}
 
@@ -9816,9 +9902,9 @@ def action_delete_fx_preset(name: str) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not delete the effect: {exc}"}
     if not existed:
-        return {"ok": False, "message": f"'{name}' is not one of your custom effects."}
+        return {"ok": False, "message": f"{name} is not one of your custom effects."}
     return {"ok": True,
-            "message": f"Deleted '{name}'.",
+            "message": f"Deleted {name}.",
             "recipes": list(soundpad.all_recipes().keys()),
             "custom_fx": list(soundpad.load_user_fx_presets().keys())}
 

@@ -1413,8 +1413,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   keeping: `recordState` 3 is a STORAGE state and not a transport one, so a card or drive going in or
   out is identifiable from the pair of states with no extra device read; and a `was` of None is not a
   change, which is what stops the app greeting you with "Recording stopped" on startup. The
-  announcer-SUSPENSION decisions stay keyed on the new state, correctly: a take is over once the desk
-  leaves RECORDING or PAUSED, whatever the reason.
+  announcer-SUSPENSION decisions stay keyed on the new state, correctly: announcements are off only
+  while RECORDING, whatever the reason the desk left it. A PAUSE gives them back, because nothing
+  reaches the take then and a silent pause sounds exactly like recording. A resume from the app
+  speaks "Resuming" and waits for it to finish (`_ann_say_and_wait`) before it sends the command; a
+  resume from the unit's button is already recording by the time we hear it.
 
 ## Reading the model dump
 
@@ -1570,6 +1573,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   to check it against.
 
 ## Web UI and screen reader
+
+- **NO QUOTE MARKS AROUND A NAME IN ANY MESSAGE.** A quote straight after a digit is read as a
+  unit: "Saved as 'Tester1'." is heard as "Tester 1 feet", and a double quote as inches. Write
+  `Saved Mic 2's current settings as {name}.`, never `'{name}'` or `"${name}"`.
 
 - **A STAGED SELECT'S OPTION LIST MUST SHIP IN THE STRUCTURE PAYLOAD, NOT THE LIVE ONE.** The
   controls are built once from `/api/routing`; the live read only sets values. Put the list only in

@@ -10,7 +10,7 @@ THE RULES THIS PINS, each of which is a way it could go wrong and be very annoyi
   * a user who had announcements OFF must not find them ON after a recording;
   * a user who turns them back on MID-TAKE must not have them switched off again at the end;
   * suspending must not SPEAK ("Control announcer is off" would be the first thing in the take);
-  * a pause counts as recording, so it does not toggle around every pause;
+  * a pause gives them back and says so, and a resume takes them away again;
   * the notice is spoken only when the recording was started ON THE UNIT - started from the app,
     the reply carries the same words silently, and silence is the whole point.
 
@@ -114,15 +114,36 @@ server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 check("announcements are still switched off", server._announce_on.is_set(), False)
 check("but nothing was said out loud, so nothing lands in the take", SAID, [])
 
-print("\nA PAUSE IS STILL A TAKE")
+print("\nA PAUSE ON THE UNIT GIVES ANNOUNCEMENTS BACK UNTIL IT RESUMES")
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
 server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-check("pausing does not bring announcements back", server._announce_on.is_set(), False)
-check("and does not chatter about it", SAID, [])
+check("pausing brings announcements back", server._announce_on.is_set(), True)
+check("and says it paused", SAID, ["Recording paused."])
+SAID.clear()
 server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
-check("neither does resuming", server._announce_on.is_set(), False)
+check("resuming switches them off again", server._announce_on.is_set(), False)
+check("saying only that it is recording again, not the off notice a second time",
+      SAID, ["Recording again."])
+server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+check("and the stop still gives them back", server._announce_on.is_set(), True)
+
+print("\nA PAUSE WITH ANNOUNCEMENTS OFF SAYS NOTHING AND LEAVES THEM OFF")
+reset(announcing=False)
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+check("still off while paused", server._announce_on.is_set(), False)
+check("nothing spoken", SAID, [])
+
+print("\nA PAUSE FROM THE APP: announcements come back, the reply carries the word")
+reset(announcing=True)
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+SAID.clear()
+mark_ours()
+server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+check("back on", server._announce_on.is_set(), True)
+check("nothing spoken by the watcher", SAID, [])
 
 print("\nTHE USER TURNS THEM BACK ON MID-TAKE")
 reset(announcing=True)
@@ -195,6 +216,41 @@ reset(announcing=True)
 server._recorder_state_changed(None, recorder.READY)
 check("the first state we ever see is announced as nothing at all", SAID, [])
 server._note_recorder_context({})
+
+print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
+import threading, time, types
+reset(announcing=False)
+t0 = time.time()
+server._ann_say_and_wait("Resuming")
+check("with announcements off it does not wait", time.time() - t0 < 0.5, True)
+
+
+def fake_say_worker_done(text):
+    """The worker's side: speak, then answer DONE for a sync phrase."""
+    SAID.append(text)
+    if text.startswith(server._ANN_SYNC_PREFIX):
+        sid = text[len(server._ANN_SYNC_PREFIX):].partition(" ")[0]
+        threading.Timer(0.2, server._ann_worker_replies,
+                        args=(types.SimpleNamespace(stdout=iter(["SAID x\n", f"DONE {sid}\n"])),)
+                        ).start()
+
+
+server._ann_say = fake_say_worker_done
+_silent, server._ANN_SILENT = server._ANN_SILENT, False    # the stubbed worker plays nothing
+reset(announcing=True)
+t0 = time.time()
+server._ann_say_and_wait("Resuming")
+took = time.time() - t0
+check("it waits for the worker's DONE", 0.15 < took < 2.0, True)
+check("and the phrase travels as a sync line carrying the words",
+      len(SAID) == 1 and SAID[0].endswith(" Resuming"), True)
+check("no waiter is left behind", server._ann_sync_waiters, {})
+ev = threading.Event()
+server._ann_sync_waiters["99"] = ev
+server._ann_release(server._ANN_SYNC_PREFIX + "99 Resuming")
+check("a sync phrase that is dropped releases its waiter", ev.is_set(), True)
+server._ann_say = fake_say
+server._ANN_SILENT = _silent
 
 print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
 for f in FAILS:

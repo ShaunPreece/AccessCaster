@@ -10,6 +10,7 @@
 # Usage (the server does this, see server.py _ann_say):
 #   powershell -File say_worker.ps1 [-Rate 3] [-Voice Zira] [-Device "Realtek"] [-Volume 100] [-NoGate]
 #   then write "some text`n" to its stdin for each phrase. A blank line is ignored; EOF exits.
+#   "!sync <id> <text>" speaks and then answers "DONE <id>" (see below).
 #
 # -Volume is SAPI's own 0-100 volume, which scales ONLY this voice's output stream: it does not
 # touch Windows system volume, other applications, or the desk's audio. It can also be changed
@@ -119,6 +120,16 @@ while ($true) {
         Write-Output "TONE $wav"
       } catch { Write-Output "TONE-FAILED $wav" }
     } else { Write-Output "TONE-MISSING $wav" }
+    continue
+  }
+  # A PHRASE SOMEBODY WAITS FOR ("!sync <id> <text>"): spoken SYNCHRONOUSLY, then "DONE <id>", so
+  # the server can act only once the words have finished. DONE is written straight to the console
+  # stream and flushed, because the server is blocked on it. Sent even when gated, so a waiter is
+  # never held up by silence.
+  if ($line -match '^!sync\s+(\S+)\s+(.+)$') {
+    $sid = $Matches[1]
+    if (-not (Test-Gated)) { $spv.Speak($Matches[2], 2) | Out-Null }   # 2 = purge, not async
+    [Console]::Out.WriteLine("DONE $sid"); [Console]::Out.Flush()
     continue
   }
   if (Test-Gated) { Write-Output "SKIP $line"; continue }

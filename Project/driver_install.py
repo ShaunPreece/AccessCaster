@@ -146,7 +146,7 @@ def verify_signature(msi_path: str) -> str:
     if status != "Valid":
         raise DriverInstallError(
             f"The file downloaded from RODE is not validly signed (Windows reports "
-            f"'{status or 'no signature'}'), so it has NOT been installed.")
+            f"{status or 'no signature'}), so it has NOT been installed.")
     if SIGNER.lower() not in subject.lower():
         raise DriverInstallError(
             f"The file downloaded from RODE is signed by someone else ({subject or 'unknown'}), so "

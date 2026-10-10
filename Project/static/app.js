@@ -6872,7 +6872,7 @@ async function openRestoreDialog() {
   if (viaShow) {
     setText("restore-form-desc",
             warnText
-            + `This puts the whole unit back from its own copy of "${label}": every setting, the `
+            + `This puts the whole unit back from its own copy of ${label}: every setting, the `
             + "routing, the fader layout and all your SMART pads, exactly as they were. It takes a "
             + "few seconds, and it moves the monitor speaker level, so turn speakers down first.");
     // THE WARNING IS HERE BECAUSE THIS IS WHERE THE DECISION IS MADE, before the Restore button is
@@ -6895,7 +6895,7 @@ async function openRestoreDialog() {
   setText("restore-form-desc",
           warnText
           + `This puts your saved settings back onto the unit from this computer's copy of `
-          + `"${label}". Anything the unit does not accept is skipped and reported afterwards. `
+          + `${label}. Anything the unit does not accept is skipped and reported afterwards. `
           + "The SMART pads saved in it are put back and any other pad on the unit is left alone; "
           + "to make the grid match exactly, clear all pads first. It cannot be undone except by "
           + "restoring another backup.");
@@ -6923,7 +6923,7 @@ async function doRestore() {
   }
   const label = entry ? entry.name : name;
   _profileJobRunning = true;
-  openProgressDialog("restore-dialog", "Restoring backup", `Restoring "${label}" to the unit.`);
+  openProgressDialog("restore-dialog", "Restoring backup", `Restoring ${label} to the unit.`);
   try {
     // ONE VERB FOR A LIST OF TWO KINDS: the server picks the unit's own copy when it is still on
     // the drive and this computer's when it is not.
@@ -7498,11 +7498,11 @@ async function refreshBaselinePanel() {
   // a status line read out every time the page is opened.
   const when = b.saved_at ? `, taken ${b.saved_at}` : "";
   if (b.pads) {
-    line.textContent = `As-found backup: "${b.name}"${when}, with ${b.pads} SMART `
+    line.textContent = `As-found backup: ${b.name}${when}, with ${b.pads} SMART `
       + `${b.pads === 1 ? "pad" : "pads"}.`;
   } else {
     line.classList.add("warn-text");
-    line.textContent = `As-found backup: "${b.name}"${when}, settings only. Its SMART pads were `
+    line.textContent = `As-found backup: ${b.name}${when}, settings only. Its SMART pads were `
       + "not copied, so the pad sounds as they came are not backed up anywhere.";
   }
   addBtn.hidden = !!b.pads;

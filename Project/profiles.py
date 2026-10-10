@@ -223,7 +223,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     existing = load(safe)
     if existing.get("ok") and is_baseline(existing["prof"]) and not baseline:
         return {"ok": False, "message":
-                f"'{safe}' is the as-found baseline of this unit, the only record of how it was "
+                f"{safe} is the as-found baseline of this unit, the only record of how it was "
                 f"before this app changed anything, so it cannot be replaced by an ordinary save. "
                 f"Choose another name."}
     if monitor_output_indices is None:
@@ -375,7 +375,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     except OSError as exc:
         return {"ok": False, "message": f"Could not save the profile: {exc}"}
     snap = profile[SNAPSHOT_KEY]
-    msg = (f"Saved profile '{safe}' with the unit's full current settings, and a record of all "
+    msg = (f"Saved profile {safe} with the unit's full current settings, and a record of all "
            f"{snap['property_count']} settings the unit reports.")
     if pads is not None:
         msg += f" Included {count(len(pads), 'SMART pad')}."
@@ -387,7 +387,7 @@ def load(name: str) -> dict:
     safe = safe_name(name)
     path = _profile_read_path(safe) if safe else None
     if not safe or not path:
-        return {"ok": False, "message": f"Profile '{name}' not found."}
+        return {"ok": False, "message": f"Profile {name} not found."}
     try:
         with open(path, encoding="utf-8") as f:
             return {"ok": True, "safe": safe, "prof": json.load(f)}
@@ -440,7 +440,7 @@ def attach_pads(name: str, pads: list) -> dict:
     except OSError as exc:
         return {"ok": False, "message": f"Could not update the profile: {exc}"}
     return {"ok": True, "name": safe,
-            "message": f"Added {count(len(pads), 'SMART pad')} to '{safe}'. Its settings are still the "
+            "message": f"Added {count(len(pads), 'SMART pad')} to {safe}. Its settings are still the "
                        f"ones captured when it was saved."}
 
 
@@ -456,14 +456,14 @@ def rename(name: str, new_name: str) -> dict:
     old = safe_name(name)
     new = safe_name(new_name)
     if not old:
-        return {"ok": False, "message": f"Profile '{name}' not found."}
+        return {"ok": False, "message": f"Profile {name} not found."}
     if not new:
         return {"ok": False, "message": "The new name must be 1 to 40 letters, digits, spaces, "
                                         "dashes or underscores."}
     if new == old:
         return {"ok": False, "message": "That is already the profile's name."}
     if new in _list_profile_names():
-        return {"ok": False, "message": f"There is already a profile called '{new}'. "
+        return {"ok": False, "message": f"There is already a profile called {new}. "
                                         f"Pick another name."}
     old_folder = os.path.join(PROFILES_DIR, old)
     new_folder = os.path.join(PROFILES_DIR, new)
@@ -477,10 +477,10 @@ def rename(name: str, new_name: str) -> dict:
         elif os.path.isfile(old_flat):
             os.rename(old_flat, new_flat)
         else:
-            return {"ok": False, "message": f"Profile '{old}' not found."}
+            return {"ok": False, "message": f"Profile {old} not found."}
     except OSError as exc:
         return {"ok": False, "message": f"Could not rename the profile: {exc}"}
-    return {"ok": True, "message": f"Renamed '{old}' to '{new}'."}
+    return {"ok": True, "message": f"Renamed {old} to {new}."}
 
 
 def delete(name: str, force: bool = False) -> dict:
@@ -497,12 +497,12 @@ def delete(name: str, force: bool = False) -> dict:
     an ordinary profile: the caller gets `baseline: True` back and has to ask first."""
     safe = safe_name(name)
     if not safe:
-        return {"ok": False, "message": f"Profile '{name}' not found."}
+        return {"ok": False, "message": f"Profile {name} not found."}
     if not force:
         got = load(safe)
         if got.get("ok") and is_baseline(got["prof"]):
             return {"ok": False, "baseline": True, "name": safe, "message":
-                    f"'{safe}' is the as-found baseline: how this unit was set up before "
+                    f"{safe} is the as-found baseline: how this unit was set up before "
                     f"AccessCaster changed anything. It cannot be captured again, and the unit has no "
                     f"software factory reset to fall back on. Confirm to delete it anyway."}
     folder = os.path.join(PROFILES_DIR, safe)
@@ -520,8 +520,8 @@ def delete(name: str, force: bool = False) -> dict:
     except OSError as exc:
         return {"ok": False, "message": f"Could not delete the profile: {exc}"}
     if not removed:
-        return {"ok": False, "message": f"Profile '{safe}' not found."}
-    return {"ok": True, "message": f"Deleted the profile '{safe}' from this computer. "
+        return {"ok": False, "message": f"Profile {safe} not found."}
+    return {"ok": True, "message": f"Deleted the profile {safe} from this computer. "
                                    f"The unit's settings were not changed."}
 
 
@@ -883,7 +883,7 @@ def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channe
 def restore_result(safe, res) -> dict:
     """Format the user-facing message for a completed restore."""
     applied, failed, errs = res["applied"], res["failed"], res["errs"]
-    msg = f"Restored profile '{safe}': applied {applied} settings"
+    msg = f"Restored profile {safe}: applied {applied} settings"
     if failed:
         msg += f", {failed} could not be set ({'; '.join(errs)})"
     msg += ". Open Channels, Processing or Routing to read them back and confirm."

@@ -53,7 +53,7 @@ after a session that moved code.
 | `page.py` | 62 | `render_index()`: splices `static/help.html` into `static/index.html` at the `<!-- INCLUDE help.html -->` marker, cached on both files' mtimes. **Server-side, not a browser fetch**, so the delivered DOM is identical to the section being written out inline and neither the router's focus target nor `buildStaticTabs` can race it. **Both servers go through it** - `server.py` and `DevTools/ui_probe.py` - or the probe's checks would see a page with no Help & About in it. Raises if the marker is gone rather than serving the page without its Help section. |
 | `version.py` | 392 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
 | `say.ps1` | 92 | SAPI speech, and it SELF-GATES on the foreground window (silent when Claudio has focus), so it is always safe to call. |
-| `say_worker.ps1` | 130 | The speaking half `say.ps1` hands off to. |
+| `say_worker.ps1` | 141 | The speaking half `say.ps1` hands off to. |
 
 ### server.py landmarks
 
@@ -146,6 +146,9 @@ after a session that moved code.
   and `action_set_announce_remember` (3927), the "Start with announcements the way I left them" option.
   A mixer pad's `padActive` silences the mute and cue lines for `_ANN_MIXER_QUIET_S` (2861), using
   the positions `_hk_refresh_pads` caches in `_hk_mixer_pos`.
+- Speech: `_ann_say` (2867, every phrase, and where the announcer switch is enforced),
+  `_ann_speak_pump` (2770, the one feeder of `say_worker.ps1`), `_ann_say_and_wait` (2751, speak
+  and block until the worker answers `DONE`, read by `_ann_worker_replies`; the app's resume uses it).
 - Auto gain: `_autogain_run` (4516), `_ChatIsolation` (4631), `_autogain_restore_processing` (4715).
 - Per-channel level check: `action_channel_level_check` (6419), `_chan_check_stop` (6359),
   `_level_check_summary` (6288).

@@ -77,7 +77,7 @@ def load(name: str) -> dict:
     """{ok, safe, scheme} or {ok: False, message}."""
     safe = safe_name(name)
     if not safe or not os.path.isfile(_path(safe)):
-        return {"ok": False, "message": f"Mix scheme '{name}' not found."}
+        return {"ok": False, "message": f"Mix scheme {name} not found."}
     try:
         with open(_path(safe), "r", encoding="utf-8") as f:
             scheme = json.load(f)
@@ -89,12 +89,12 @@ def load(name: str) -> dict:
 def delete(name: str) -> dict:
     safe = safe_name(name)
     if not safe or not os.path.isfile(_path(safe)):
-        return {"ok": False, "message": f"Mix scheme '{name}' not found."}
+        return {"ok": False, "message": f"Mix scheme {name} not found."}
     try:
         os.remove(_path(safe))
     except OSError as exc:
         return {"ok": False, "message": f"Could not delete the mix scheme: {exc}"}
-    return {"ok": True, "message": f"Deleted the mix scheme '{safe}'."}
+    return {"ok": True, "message": f"Deleted the mix scheme {safe}."}
 
 
 # ---- capture (pure: an already-read model blob in, a scheme dict out) --------------------------
@@ -127,7 +127,7 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
     m = dev.matrix
     wanted = [o for o in m.outputs if not only or o["key"] == only]
     if only and not wanted:
-        return {"ok": False, "message": f"This device has no output called '{only}'."}
+        return {"ok": False, "message": f"This device has no output called {only}."}
     st = rcp_read.read_matrix_state(blob)
     if not st.get("ok"):
         return {"ok": False, "message": st.get("reason", "The output mixes could not be read.")}
