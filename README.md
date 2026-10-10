@@ -50,10 +50,12 @@ accessible page where you can:
 - **Recording**: start, pause and stop the recorder, choose multitrack or mixed, see what
   storage is in the unit and how much room is left, and eject or erase the card or drive.
 - **CallMe**: RODE's remote calls without the touchscreen. Switch incoming calls on and share
-  the guest link, hear who is calling and answer or decline from a keyboard shortcut in any program, call
+  the guest link, hear who is calling (with a ringtone, if you want one) and answer or decline
+  from a keyboard shortcut in any program, call
   another RODECaster by its code or from a contacts list, extend a call before the free plan's
   one-hour limit (or have it extended for you), and set the caller's level and processing like
-  any other channel.
+  any other channel. If the unit is offline or the caller's channel is on no fader, which stops
+  calls without saying so anywhere, the page tells you and offers the fix.
 - **Backups**: one button to back the unit up, and one list to restore it from. A copy of your
   settings and pads is kept on this computer and that is what a restore uses, because asking the
   unit to reload its own copy can lock it up. The unit's own copy is still made alongside, and is
@@ -93,9 +95,11 @@ Accessibility is the entire point of this project, not an afterthought.
 
 - **NVDA: developed and used with it daily**, on a real desk, by a blind user. This is the one that
   is genuinely exercised.
-- **JAWS, Narrator and VoiceOver: not tested, and feedback is wanted.** Building to the standards
-  above should mean it behaves the same, but "should" is not "does", and nobody has walked the
-  interface with a second screen reader.
+- **VoiceOver on an iPhone: walked once, page by page.** Everything read and worked, though the
+  layout is built for a computer, so there is a lot of swiping. That is the web page only, opened
+  from the PC running the app; it is not a Mac or iPhone version.
+- **JAWS and Narrator: not tested, and feedback is wanted.** Building to the standards above should
+  mean they behave the same, but "should" is not "does".
 
 If you use JAWS or Narrator and something does not work, please open an issue. Reports from a screen
 reader this has not been exercised on are the most useful thing anyone can send.
