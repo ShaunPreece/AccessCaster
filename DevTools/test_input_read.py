@@ -136,7 +136,7 @@ print("\nDUO: THE REGRESSION. A STALE MIX COPY MUST NOT BE READ")
 # Every Duo that this app has ever written to carries these, and they cannot be removed without a
 # factory reset. They are an INERT copy: reading them back after a write reports the app's own last
 # write as the desk's setting, so the display goes stale the moment anyone touches the desk. That is
-# why the refusal is asserted rather than merely left undone. The numbers are measured on scottpc.
+# why the refusal is asserted rather than merely left undone. The numbers are read from a real Duo.
 stale = dict(factory)
 stale[0x148] = ("MIX", {"mixMute": False, "inputMicrophoneGain": 20, "inputMicrophoneType": 4})
 stale[0x149] = ("MIX", {"mixMute": False, "inputMicrophoneGain": 33, "inputPhaseFlip": True})

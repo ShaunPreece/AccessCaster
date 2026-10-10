@@ -129,9 +129,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ;
 ; DELIBERATELY HKCU EVEN IN AN ALL-USERS INSTALL, and this is the one place where the scopes should
 ; NOT match. AccessCaster is a server on a FIXED port (8770), so a machine-wide Run entry would
-; launch an instance for every user who logs in and they would fight over that port - which is not
-; hypothetical on scottpc, where a helper sits at the console while Shaun works in an RDP session
-; at the same time. Autostart is therefore a choice each account makes for itself.
+; launch an instance for every user who logs in and they would fight over that port, as happens on
+; a PC with one user at the console and another in a Remote Desktop session. Autostart is therefore
+; a choice each account makes for itself.
 ;
 ; THE --startup FLAG MATTERS AND MUST MATCH Project/autostart.py. Started at sign-in the app comes up
 ; in the tray with the announcer and the global shortcuts live and opens NO page; started by hand it
@@ -204,8 +204,8 @@ const
   different admin account than the one holding the per-user copy, HKCU is that admin's hive and this
   finds nothing - correctly, because it could not cleanly remove another user's install either
   (their uninstaller and their registry entries live in a profile Setup has no business rewriting).
-  So a second user's stray copy stays until that user runs an installer themselves. Measured on
-  scottpc, where a copy in another profile was found via its firewall rule and could not be touched. }
+  So a second user's stray copy stays until that user runs an installer themselves; its firewall
+  rule shows it exists, but it cannot be touched from here. }
 
 function PreviousInstall(Hive: Integer; var UninstallString: String; var Version: String): Boolean;
 begin

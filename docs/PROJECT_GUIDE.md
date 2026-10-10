@@ -1846,7 +1846,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `uninsdeletevalue`, so an uninstall leaves a Run entry pointing at a deleted exe - a startup error
   every login with nothing left to turn it off. `DevTools/test_autostart.py` reads the `.iss` and
   asserts it. **HKCU, never HKLM**: the server holds a fixed port, so a machine-wide entry starts an
-  instance per account and they fight over it (real on scottpc).
+  instance per account and they fight over it (seen with one user at the console and another over
+  Remote Desktop).
   **RENAMING THE APP MEANS MIGRATING FOUR THINGS THAT LIVE ON THE USER'S MACHINE**, learned on 20th
   September 2026 when "Access Caster" became "AccessCaster": the Run value, the firewall rule (netsh
   keys a rule by NAME, so the old one is orphaned for ever otherwise), the Start Menu group and the
@@ -2411,8 +2412,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 ## USB dropout
 
 - **WHAT IT IS.** The desk vanishes from USB, Windows shows ZERO devices with vendor id `19F7`, and
-  only a physical replug returns it. Three known on scottpc: 20th July, 31st August and 3rd
-  September 2026. Nothing is lost by it.
+  only a physical replug returns it. Nothing is lost by it.
 - **READ THE EVENT LOG FIRST. It answers in seconds what took a whole session to guess at.**
   `Microsoft-Windows-Kernel-PnP/Device Management` (enabled by default) logs event **1010** "surprise
   removed" naming `VID_19F7`. A FAILED return then adds `USB\VID_0000&PID_0002` with **error 411** in
