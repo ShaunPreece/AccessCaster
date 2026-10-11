@@ -2668,7 +2668,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   0, MIDI pad 1 fired padIdx 0; after writing `selectedBank` 1, the identical MIDI message fired
   padIdx 6, which is bank 2's first pad on a Duo. Restored clean. **So the MIDI bank-select question
   (CC 0 or CC 1, marked "verify" in RODE's spec) never needs answering** - do not spend time on it.
-  Banks are 0-indexed here and bank 8 (index 7) is the system / function pads.
+  Banks are 0-indexed here and bank 8 (index 7) is the system pads, which are video switching
+  controls for a paired RODECaster Video.
 - **`inject_button.py`'s `cmutePressed` is `mutePressed` at path [0, 0x63].** The 'c' is the address
   byte, not part of the name, and 0x63 is child 99 of PHYSICALINTERFACE - the first SOLOMUTEBUTTON.
   PADBUTTON is children 35 to 98. Do not go looking for a property called `cmutePressed`.

@@ -398,7 +398,8 @@ Channels: 9, in this FIXED read/selector order:
     Mic1, Mic2, Mic3, Mic4, Bluetooth, SMARTpads, USB1, Chat, USB2
 Faders: 9. Routing matrix: 390 cells in MIX, internal stride 13, 11 exposed
 outputs. Headphones: 4 outputs (headphoneType x4). SMART pads: 8 pads x 8 banks =
-64 slots (56 user-assignable, banks 1-7; system pads at padIdx 56-63).
+64 slots (56 user-assignable, banks 1-7; system pads at padIdx 56-63, which are
+video switching controls, see 7.1).
 
 3.2 DUO
 -------
@@ -426,8 +427,9 @@ Routing matrix: 390 cells in MIX, internal stride 13, 13 outputs; exposed
 Outputs / headphones: 13 outputs internally; 4 headphoneType slots in the model
     but only 2 physical HP jacks (HP1 0x09 / HP2 0x0A). Exposed outputs skip the
     Pro II HP3/HP4 indices but keep the same indexing for the rest.
-SMART pads: 6 pads x 8 banks = 48 slots (42 user-assignable, banks 1-7; system /
-    function pads Input1/SceneA/Auto/Input2/SceneB/Cut at padIdx 42-47 = bank 8).
+SMART pads: 6 pads x 8 banks = 48 slots (42 user-assignable, banks 1-7; system
+    pads Input1/SceneA/Auto/Input2/SceneB/Cut at padIdx 42-47 = bank 8; these are
+    video switching controls, see 7.1).
 Named inputs: Mic1, Mic2, Headset, USB1, Chat, USB2, Bluetooth (source codes 5.3).
 
 STRAYS NOTE (Duo, historical): a global write with an UNMAPPED selector does NOT
@@ -979,11 +981,30 @@ IDENTICAL on both units. Only the GEOMETRY differs (7.1).
 ------------------------
 padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-FX,
 3 = Mixer, 4 = MIDI, 5 = QuickDial, 6 = factory system pads (not user-assignable).
-  PRO II: 8 pads x 8 banks = 64 slots. System pads at padIdx 56..63. => 56
-    user-assignable pads (banks 1..7).
-  DUO: 6 pads x 8 banks = 48 slots. user_banks = 7, system_bank = 8. System /
-    function pads (Input1, SceneA, Auto, Input2, SceneB, Cut) at padIdx 42..47 =
+  PRO II: 8 pads x 8 banks = 64 slots. System pads at padIdx 56..63
+    (Input 1-4, Scene A/B, Auto, Cut). => 56 user-assignable pads (banks 1..7).
+  DUO: 6 pads x 8 banks = 48 slots. user_banks = 7, system_bank = 8. System
+    pads (Input1, SceneA, Auto, Input2, SceneB, Cut) at padIdx 42..47 =
     bank 8. => 42 user-assignable pads (banks 1..7).
+
+  THE SYSTEM PADS ARE VIDEO SWITCHING CONTROLS for a RODECaster Video paired over
+  RODECaster Sync, not audio functions. RODE's user guides (Video Core: "RODECaster
+  Sync"; RODECaster Video: "Video Switching and Auto-Switching"):
+    Input N   selects a camera / video input.
+    Scene X   selects a saved layout.
+    Cut       switches instantly.
+    Auto      switches using the transition settings (a fade, for example).
+  In the Video unit's Instant mode an input or scene goes live at once; in Studio
+  mode it goes to the Preview feed and Cut / Auto sends Preview to Program. Paired,
+  the pad type list gains a user-assignable "Video" type with Input 1-4, Scene A-E,
+  Media A-E, Overlay A-E, Auto, Cut and FTB (fade to black). What these pads do with
+  no Video unit paired is unrecorded, and firing them over MIDI is untested. Their
+  padActive shows which input and scene the switcher has selected.
+
+  THE DESK'S BANK BUTTONS WRAP, AND DO NOT VISIT ALL 8 BANKS. Seen on a Pro II,
+  11th October 2026: "next bank" on bank 3 returns to bank 1. Storage is still the
+  fixed 8 banks above; every slot exists whether the desk's buttons reach its bank
+  or not, and a selectedBank write (MIDI bank select, below) reaches any of them.
 
 7.2 TWO INDEPENDENT CHANNELS FOR PADS
 -------------------------------------
@@ -1287,7 +1308,7 @@ software replaces the operational controls directly, not by puppeteering the kno
 
       send_record(build_global_prop_int("selectedBank", SEL_GUI, bank))
 
-  0-indexed, 8 banks, and bank index 7 is the system / function pads. Same mapped
+  0-indexed, 8 banks, and bank index 7 is the system (video switching) pads. Same mapped
   node as `metering`, which we have written and restored for months.
 
   PROVEN 2026-09-02 BY THE ENGINE, not by a read-back: with the bank at 0, MIDI

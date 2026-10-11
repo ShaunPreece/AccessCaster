@@ -10672,10 +10672,11 @@ def _hk_bank_step(target: str) -> str:
         return f"The bank would not change: {exc}"
     _hk_note_bank(want)
     _hk_maybe_refresh_pads()
-    # The system bank is the desk's own function pads, not sounds anyone assigned, so say so: the
-    # number keys still work there and would otherwise fire "Scene A" with no warning.
+    # The system bank is the video switching pads for a paired RODECaster Video, not sounds anyone
+    # assigned, so say so: the number keys still work there and would otherwise fire "Scene A" with
+    # no warning.
     if want == banks - 1:
-        return f"Bank {want + 1}, the desk's own function pads."
+        return f"Bank {want + 1}, the video switching pads."
     return f"Bank {want + 1}."
 
 

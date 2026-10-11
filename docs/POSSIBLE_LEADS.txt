@@ -262,6 +262,21 @@ holds only read-only device APIs, and it writes the same USB mode record we do. 
 it misses binds too during a run of failures has not been measured.
 
 
+LEAD 11: what bank 8 does with a RODECaster Video paired
+--------------------------------------------------------
+
+Bank 8 holds the factory system pads (padType 6): Input 1-4, Scene A/B, Auto and Cut on a
+Pro 2, six of them on a Duo. RODE documents them as video switching controls for a
+RODECaster Video paired over RODECaster Sync (protocol spec 7.1). With no Video unit, the
+desk's own bank buttons never reach bank 8, so our bank shortcuts leave it out.
+
+**What we need from someone with a RODECaster Video:** pair it, then (1) read rcSyncState,
+rcSyncDeviceModel and rcSyncModeRequest before and after pairing, so software can tell a
+pairing from a read; (2) say whether the desk's bank buttons now visit bank 8; (3) say
+whether firing a bank 8 pad over MIDI switches the video. All three are reads or a pad
+press. Do not write rcSyncModeRequest: it starts a sync mode nobody has decoded.
+
+
 WHAT WE ALREADY SETTLED, SO YOU DO NOT REPEAT IT
 -------------------------------------------------
 

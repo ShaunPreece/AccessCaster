@@ -50,7 +50,8 @@ The whole pad section = "SMART pads": 8 pads x 8 banks = 64 slots (padIdx 0-63, 
 The app exposes ALL banks, incl. the empty middle banks 3-7 (padIdx 16-55) - nothing is locked.
 padType enumeration (capture-confirmed, app type tabs Sound/FX/Mixer/MIDI/QuickDial):
   1 = Sound | 2 = Effects (FX, voice) | 3 = Mixer | 4 = MIDI (Trigger) | 5 = QuickDial
-  6 = factory system/function pads (Input/Scene/Auto/Cut at 56-63) - not a user-assignable type.
+  6 = factory system pads (Input/Scene/Auto/Cut at 56-63) - not a user-assignable type. They are
+      video switching controls for a paired RODECaster Video (RODECASTER_PROTOCOL.txt 7.1).
 Mixer (padType 3) subtypes via padMixerMode: Censor, Trash Talk, Fade In/Out, Back Channel, Ducking.
 MIDI/Trigger (4): padTrigger* (default CC on Control = padIdx, Channel 1, On 127, Off 0);
   READ + WRITE + MIDI-PROVEN 2026-08-27, see the MIDI TRIGGER section below.
