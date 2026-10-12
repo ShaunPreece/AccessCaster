@@ -515,8 +515,8 @@ def set_channel_mute(channel, on: bool) -> int:
 
     `channel` is anything proc_selector accepts (1-4 = Mic 1-4, or a channel name), so the write
     follows the channel to whichever fader STRIP it is currently on, exactly as processing does.
-    Muting here is the same mute as the desk's button: it silences that channel in every mix, not
-    just the monitor."""
+    Muting here is the same mute as the desk's button: it silences that channel in every mix that
+    follows the fader, not just the monitor. A cross-point unlinked at a manual level keeps playing."""
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool(MUTE_PROP, bool(on), proc_selector(channel)))
 

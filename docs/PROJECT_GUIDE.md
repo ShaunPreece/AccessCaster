@@ -1230,6 +1230,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
   source rows wide and a desk uses 13 of them.
 
+- **A CHANNEL MUTE DOES NOT SILENCE AN UNLINKED CROSS-POINT.** `channelOutputMute` reaches each
+  mix through the cross-points that follow the fader; one unlinked at a manual level keeps playing.
+  Measured on the Pro II, 12th October 2026: USB 1 muted, Headphone 1 (USB 1 linked) went silent,
+  the monitor (USB 1 unlinked at 50%) kept playing. So "silent in every mix" is only true when
+  every one of that source's cross-points is linked, and a listener on the unlinked output hears
+  no mute at all.
+
 - **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
   (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names
   (`mixDisabled`, `mixMute`, `mixLevelWithAnchor`, `mixLink`, `mixLinkRequest`, `mixUnlinkRequest`)

@@ -2768,8 +2768,8 @@ function fillChannelEffects(body, ch) {
 /* MUTE for one channel (channelOutputMute, writable).
    Two things the wording has to get right, because a mute you misunderstand is worse than no mute.
    It is the unit's OWN mute, so pressing the button on the desk changes this checkbox's real state
-   (and, with the announcer on, is spoken); and it silences the channel in EVERY mix, not just what
-   you are monitoring. The state shown is read live from the unit, so a channel muted on the desk
+   (and, with the announcer on, is spoken); and it silences the channel in every mix that follows the
+   fader, not just what you are monitoring; the server's reply names any output it does not reach. The state shown is read live from the unit, so a channel muted on the desk
    already reads as muted when the panel opens. */
 function buildChannelMute(ch) {
   const wrap = document.createElement("div");
