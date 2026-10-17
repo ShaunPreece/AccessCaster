@@ -2361,6 +2361,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `python server.py` runs with the watchdog on. **Any theory of the form "the watchdog stopped it"
   is wrong for the installed app**, and it cost an hour on 21st September 2026 before anyone read
   the call site.
+- **THE TRAY ICON MUST OPEN ON `WM_LBUTTONUP`, NOT ONLY ON `NIN_SELECT`.** On Windows 11 an icon in
+  the hidden-icons overflow receives only `WM_LBUTTONDOWN`/`WM_LBUTTONUP` when pressed, by mouse,
+  Enter, a screen reader or UIA Invoke (measured 17th October 2026, `NOTIFYICON_VERSION_4`), so an
+  icon answering only `NIN_SELECT`/`NIN_KEYSELECT` does nothing there. One taskbar click can send
+  both, so `TrayApp._on_tray` drops repeat open events within `_OPEN_DEBOUNCE_S`; without that,
+  `_show_page` can open two app windows before the first exists.
 - **A RUNNING JOB OUTRANKS EVERY STOP TRIGGER** (added 21st September 2026, `_lifecycle_stop_reason`
   takes `job_running`). A backup is mid-read of the model and a restore is part way through writing
   settings and pads; a page closing must not abandon either. This is right on the

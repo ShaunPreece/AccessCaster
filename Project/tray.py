@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 
 import win32api
 import win32con
@@ -51,6 +52,11 @@ NIN_KEYSELECT = win32con.WM_USER + 1     # Enter on the selected icon
 NOTIFYICON_VERSION_4 = 4
 _TRAY_ICON_ID = 1
 
+# One press can arrive as several open events (see _on_tray); repeats inside this window are
+# dropped so they cannot open a second browser window before the first one exists.
+_OPEN_DEBOUNCE_S = 1.0
+_OPEN_EVENTS = (NIN_SELECT, NIN_KEYSELECT, win32con.WM_LBUTTONUP, win32con.WM_LBUTTONDBLCLK)
+
 
 def _show_page() -> None:
     """Raise the app window if one is open, otherwise open a fresh one."""
@@ -61,6 +67,7 @@ def _show_page() -> None:
 class TrayApp:
     def __init__(self):
         self.hwnd = None
+        self._last_open = float("-inf")
         self._create_window()
         self._add_icon()
 
@@ -112,8 +119,14 @@ class TrayApp:
         event = win32api.LOWORD(lparam)
         if event in (win32con.WM_CONTEXTMENU, win32con.WM_RBUTTONUP):
             self._show_menu()
-        elif event in (NIN_KEYSELECT, NIN_SELECT, win32con.WM_LBUTTONDBLCLK):
-            _show_page()
+        elif event in _OPEN_EVENTS:
+            # WM_LBUTTONUP is the only event the Windows 11 hidden-icons overflow sends, for a
+            # click, Enter, a screen reader or UIA Invoke alike: it never sends NIN_SELECT. On the
+            # taskbar the same click can send WM_LBUTTONUP and NIN_SELECT, hence the debounce.
+            now = time.monotonic()
+            if now - self._last_open >= _OPEN_DEBOUNCE_S:
+                self._last_open = now
+                _show_page()
         return 0
 
     # -- the native context menu -----------------------------------------------------------------
