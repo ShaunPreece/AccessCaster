@@ -49,6 +49,7 @@ import app_settings            # THIS APP's own settings (shortcuts, announcemen
                                # import. Pure, like profiles: it never touches a file.
 import profiles                 # settings backup/restore (save+restore live here, not in server)
 import routing_schemes          # saved output-mix schemes (the matrix under a name) + the built-ins
+import layout_routing           # output-mix writes on a layout desk (PID 0x0092), checked + confirmed
 import meters                   # level metering, read from Windows' audio endpoints (not over USB)
 import virtual_devices          # RODE's Virtual Device Driver: its state, and switching its endpoints on
 import driver_install           # fetching that driver from RODE: the app's ONLY outbound call
@@ -635,7 +636,7 @@ def _recorder_payload(blob: bytes) -> dict:
     out["multitrack"] = mt[0] if mt else None
     out["multitrack_modes"] = [[k, v] for k, v in sorted(recorder.MULTITRACK_LABEL.items())]
     out["multitrack_hint"] = recorder.MULTITRACK_HINT
-    out["multitrack_writable"] = "output_write" in dev.caps
+    out["multitrack_writable"] = devices.has_write_cap(dev, "output_write")
 
     # WHAT THE FILE IS WRITTEN AS, beside what it contains: the two questions you answer before a
     # take, and neither can be fixed afterwards. Reported as the raw value AND normalised, because
@@ -647,7 +648,7 @@ def _recorder_payload(blob: bytes) -> dict:
     out["format_raw"] = raw_fmt
     out["format_options"] = [[k, v] for k, v in sorted(recorder.RECORDING_FORMAT_LABEL.items())]
     out["format_hint"] = recorder.RECORDING_FORMAT_HINT
-    out["format_writable"] = "output_write" in dev.caps
+    out["format_writable"] = devices.has_write_cap(dev, "output_write")
 
     # The recorder's processing bypass, reported WITH the mode it depends on so the page can say
     # "this does nothing yet" rather than offering a switch that looks dead. The USB destination's
@@ -1697,6 +1698,14 @@ def read_unit_settings() -> dict:
         return {"ok": False, "message": f"Could not read the unit's settings: {exc}"}
     values = _unit_setting_values(blob)
     settings = [dict(s, value=values.get(s["prop"])) for s in UNIT_SETTINGS]
+    if dev.layout_required:
+        # Asked of the dump just read: a setting this unit publishes in another form (or not at
+        # all) is marked with the gate's own sentence, and only that control is unavailable.
+        dev = devices.get_active_device()
+        for s in settings:
+            why = _layout_unit_setting_refusal(dev, s["prop"])
+            if why:
+                s["write_refused"] = why
     # MIDI LIVES ON THIS TAB, not on one of its own for a single switch, so its value is reported
     # here and the tab still makes exactly ONE call. It is NOT a UNIT_SETTINGS
     # entry and deliberately so: that spec drives the profile's restore set as well as the page, and
@@ -1705,9 +1714,31 @@ def read_unit_settings() -> dict:
     # restore. Read off the dump we already have, by exact name for the reason in
     # _unit_setting_values.
     midi = (rcp_read.snapshot_properties(blob).get("systemMidiControl") or [None])[0]
-    return {"ok": True, "settings": settings, "device_name": dev.name,
-            "midi": bool(midi) if midi is not None else None,
-            "writable": "unit_settings" in dev.caps}
+    out = {"ok": True, "settings": settings, "device_name": dev.name,
+           "midi": bool(midi) if midi is not None else None,
+           "writable": devices.has_write_cap(dev, "unit_settings")}
+    if dev.layout_required:
+        out["midi_refused"] = _layout_unit_setting_refusal(dev, "systemMidiControl")
+    return out
+
+
+def _layout_unit_setting_refusal(dev, prop: str):
+    """The generalised gate's sentence for one unit setting on a layout desk, or None if it may be
+    written: its block found by name in the desk's dump, the name on it, the same kind."""
+    if prop == "systemMidiControl":
+        sel, kind = rcp_transfer.SEL_SYSTEM, "bool"
+    else:
+        entry = rcp_transfer.UNIT_SETTING_SEL.get(prop)
+        if entry is None:
+            return f"{prop} is not a setting this app writes."
+        sel, kind = entry
+    try:
+        path = [devices.layout_block_selector(
+            dev, rcp_transfer._UNIT_SETTING_BLOCK.get(sel, "SYSTEM"))]
+    except devices.WriteRefused as exc:
+        return str(exc)
+    dummy = {"bool": False, "int": 0, "float": 0.0}[kind]
+    return devices.layout_write_ok(dev, path, prop, dummy, kind)
 
 
 def action_set_unit_setting(prop: str, value: int) -> dict:
@@ -1878,16 +1909,19 @@ def device_overview() -> dict:
     except Exception as exc:
         return {"ok": False, "device_name": dev.name,
                 "message": f"Could not read the unit: {exc}"}
+    if dev.layout_required:
+        # A desk whose geometry comes from its own tree may have had it recorded by that very read.
+        dev = devices.get_active_device()
 
     spec = dev.fader
-    vec = rcp_read.values(blob, "channelInputSource")
+    vec = channels.strip_values(blob, "channelInputSource", dev=dev)
     channels.publish_strip_vector(vec)
-    mutes = rcp_read.values(blob, "channelOutputMute")
-    cues = rcp_read.values(blob, "channelCueEnable")
+    mutes = channels.strip_values(blob, "channelOutputMute", dev=dev)
+    cues = channels.strip_values(blob, "channelCueEnable", dev=dev)
 
     # The anchor lookup, guarded on the matrix keeping its expected shape - the same guard
     # rcp_read uses, because a connected SIP caller shifts the grid and every index would be wrong.
-    cells = rcp_read.block_values(blob, dev.matrix.block, "mixLevelWithAnchor")
+    cells = rcp_read.matrix_cells(blob, dev.matrix, "mixLevelWithAnchor")
     shape_ok = len(cells) == dev.matrix.cell_count
 
     def anchor_pct(source_code):
@@ -2528,9 +2562,13 @@ def _cap_gate(cap: str, refusal) -> dict:
 
     Each gate below keeps its own sentence, because what the user can and cannot do differs per
     family and a generic "not supported" would be useless to them.
+
+    A LAYOUT desk (PID 0x0092) passes "output_write" and "unit_settings" through its generalised
+    gate ("tree_write", devices.has_write_cap): every write there is still judged record by record
+    against that desk's own dump, checked before and confirmed after (layout_tree).
     """
     dev = devices.get_active_device()
-    if cap in dev.caps:
+    if devices.has_write_cap(dev, cap):
         return None
     return {"ok": False, "message": refusal(dev.name)}
 
@@ -2587,8 +2625,13 @@ def soundpad_model() -> dict:
 # ----------------------------------------------------------------------------
 
 def action_set_midi(on: bool) -> dict:
-    with _hid_lock:
-        rcp_transfer.set_midi_control(on)
+    try:
+        with _hid_lock:
+            rcp_transfer.set_midi_control(on)
+    except (devices.WriteRefused, channels.WriteNotConfirmed) as exc:
+        # A layout desk judges this record against its own dump (it refuses it there today: the
+        # PID 0x0092 dump carries systemMidiControl as an int), and says why.
+        return {"ok": False, "message": str(exc)}
     with _session_state_lock:
         _session_state["midi"] = on
     return {"ok": True, "message": f"MIDI control turned {'on' if on else 'off'}."}
@@ -3031,8 +3074,106 @@ def _ann_say(text: str) -> None:
 # it catches a mute from any source (button, touchscreen, MIDI), not just a press edge. Still
 # strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
 # BUTTON, which names no channel, so it is only the fallback when no state follows.
+#
+# THAT 0x1C IS THE PRO II AND DUO CHANNEL BASE. A desk whose geometry comes from its own tree
+# (DeviceModel.layout_required) pushes these at ITS CHANNEL run - measured 0x1A for fader 1 on the
+# PID 0x0092 desk - so for that desk the strip is taken from the pushed address against the layout
+# instead (_ann_strip_of).
 _ANN_STATE_SEL_BASE = channels.SEL_CHANNEL_PROC      # 0x1C + strip index
 _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
+# {source code: inputType} for a LAYOUT desk's labelled inputs, seeded from the dump and kept current
+# from pushes. Used only to word a channel selection on an input no ui_channel lists.
+_ann_input_types: dict = {}
+_ANN_DEV_TTL_S = 2.0
+_ann_dev_cache = {"dev": None, "at": 0.0}
+
+
+def _ann_device():
+    """The active DeviceModel for decoding pushes, re-resolved at most every _ANN_DEV_TTL_S.
+
+    The announcer decodes a push per frame, up to twenty a second while a fader moves, and resolving
+    the desk enumerates USB; a pinned desk (devices.force_device, tests only) is always honoured
+    at once."""
+    if devices._FORCED_DEVICE is not None:
+        return devices._FORCED_DEVICE
+    now = time.time()
+    c = _ann_dev_cache
+    if c["dev"] is None or now - c["at"] > _ANN_DEV_TTL_S:
+        c["dev"], c["at"] = devices.get_active_device(), now
+    return c["dev"]
+
+
+def _ann_strip_of(path) -> int:
+    """The fader STRIP a pushed per-strip property (mute, cue, channelInputSource) belongs to, or
+    -1. Pro II and Duo: a one-level path at SEL_CHANNEL_PROC + strip. A layout desk: the pushed
+    address must be one block of its main CHANNEL run."""
+    path = list(path or ())
+    if len(path) != 1:
+        return -1
+    dev = _ann_device()
+    if not dev.layout_required:
+        strip = path[0] - _ANN_STATE_SEL_BASE
+        return strip if 0 <= strip < 16 else -1
+    run = dev.layout.run("CHANNEL") if dev.layout is not None else None
+    i = run.index_of(path[0]) if run is not None else None
+    return -1 if i is None else i
+
+
+def _ann_xpoint(path):
+    """(source code, output index) of a pushed routing cross-point, or None.
+
+    Pro II and Duo: the path element against CROSS_POINT_BASE, as upstream. A layout desk: the
+    pushed address must fall inside its MAIN MIX run (cell = row_stride * source + output); a push
+    from a later block named MIX is not a cross-point of the routing matrix and gives None."""
+    path = list(path or ())
+    if len(path) != 1:
+        return None
+    dev = _ann_device()
+    if not dev.layout_required:
+        if path[0] < _ANN_XPOINT_BASE:
+            return None
+        i = path[0] - _ANN_XPOINT_BASE
+        return i // _ANN_XPOINT_STRIDE, i % _ANN_XPOINT_STRIDE
+    mx = dev.matrix
+    if mx.base is None or not mx.row_stride:
+        return None
+    i = path[0] - mx.base
+    if not 0 <= i < mx.cell_count:
+        return None
+    return i // mx.row_stride, i % mx.row_stride
+
+
+def _ann_physical_index(path, node: str, static_base: int) -> int:
+    """Which FADER / POT a pushed PHYSICALINTERFACE property came from, or -1.
+
+    Pro II and Duo: [0, static_base + i], as upstream. A layout desk: the first run of `node` under
+    PHYSICALINTERFACE as its own dump names it (layout.physical), so nothing assumes where that run
+    starts."""
+    path = list(path or ())
+    dev = _ann_device()
+    if not dev.layout_required:
+        return (path[1] - static_base) if len(path) == 2 and path[0] == 0 else -1
+    lay = dev.layout
+    run = lay.physical(node) if lay is not None else None
+    if run is None or len(path) != 2 or path[0] != lay.single("PHYSICALINTERFACE"):
+        return -1
+    i = run.index_of(path[1])
+    return -1 if i is None else i
+
+
+def _ann_on_block(path, block: str) -> bool:
+    """Did a pushed global property (outputMonLevel, systemChannelSelected) come from `block`?
+
+    Always True on the Pro II and the Duo, which decode these by name as upstream does. On a layout
+    desk the pushed address must be that block's root index in its own dump (OUTPUT 0x0B, SYSTEM
+    0x0D on PID 0x0092): its tree carries stray copies of properties at other blocks, and one of
+    those must not be announced as the real setting."""
+    dev = _ann_device()
+    if not dev.layout_required:
+        return True
+    lay = dev.layout
+    want = lay.single(block) if lay is not None else None
+    return want is not None and list(path or ()) == [want]
 # HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
 # these at once (both members' mute and cue), and each edge of a momentary pad brings its own burst,
 # so speaking them turns a two-second talkback push into eight announcements describing a state the
@@ -3212,10 +3353,9 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
     fval = val if kind == "float" else None
-    # The strip a one-level push at SEL_CHANNEL_PROC + strip is addressed at, else -1.
-    strip = path[0] - _ANN_STATE_SEL_BASE if len(path) == 1 else -1
-    if not 0 <= strip < 16:
-        strip = -1
+    # The strip a one-level push at SEL_CHANNEL_PROC + strip is addressed at (a layout desk: its own
+    # CHANNEL run), else -1.
+    strip = _ann_strip_of(path)
 
     if name == "selectedBank":
         if ival is None:
@@ -3250,13 +3390,14 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
         # Virtual B are addressed with a two-byte index: use the whole path element, never a byte.
         if not _ann_levels_on or kind != "str" or "|" not in val or len(path) != 1:
             return
-        if path[0] < _ANN_XPOINT_BASE:
+        xp = _ann_xpoint(path)                # a layout desk: its own main MIX run
+        if xp is None:
             return
         try:
             lvl = float(val.split("|", 1)[0])
         except ValueError:
             return
-        _ann_note_level(st, "fader", (path[0] - _ANN_XPOINT_BASE) // _ANN_XPOINT_STRIDE, lvl)
+        _ann_note_level(st, "fader", xp[0], lvl)
         return
     if name == "encoderSignal":
         # Raw rotation, a COMPOSITE whose first member is the signed step (+1 clockwise, -1 anti).
@@ -3272,6 +3413,8 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
         # INDEX: that channel is selected and the encoder now moves its gain. The channel buttons
         # emit no press edge of their own - this state change IS the event.
         if ival is None or ival == st.get("chan_sel"):
+            return
+        if not _ann_on_block(path, "SYSTEM"):
             return
         st["chan_sel"] = ival
         _ann_say("Levels. Encoder sets fader and monitor levels" if ival < 0
@@ -3304,12 +3447,12 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
         # what it just moved, and its address names the FADER directly
         # (PHYSICALINTERFACE.FADER[base + index]), so it is the cleanest signal for re-seating the
         # ring - the cross-point pushes that follow say the same thing by source.
-        idx = (path[1] - devices.FADER_NODE_BASE) if len(path) == 2 and path[0] == 0 else -1
+        idx = _ann_physical_index(path, "FADER", devices.FADER_NODE_BASE)
         if ival is not None and 0 <= idx < 16:
             _ann_ring_seat(st, "fader", idx, max(0.0, min(1.0, ival / _ANN_FADER_LEVEL_MAX)))
         return
     if name == "outputMonLevel":
-        if _ann_levels_on and fval is not None:
+        if _ann_levels_on and fval is not None and _ann_on_block(path, "OUTPUT"):
             _ann_ring_seat(st, "monitor", 0, fval)
             _ann_note_level(st, "monitor", 0, fval)
         return
@@ -3321,9 +3464,17 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
     # seated on the encoder ring: the ring cycles what the ENCODER selects, and a headphone knob is
     # not on it.
     if name == "potLevel":
-        idx = path[1] if len(path) == 2 and path[0] == 0 else -1
+        idx = _ann_physical_index(path, "POT", 0)
         if _ann_levels_on and ival is not None and 0 <= idx < _ANN_POT_COUNT:
             _ann_note_level(st, "headphone", idx, max(0.0, min(1.0, ival / _ANN_POT_LEVEL_MAX)))
+        return
+    if name == "inputType":
+        # Silent. On a layout desk, remember an input's path (mic / line) so a later channel
+        # selection is worded by what the encoder will really move (_ann_selected_phrase).
+        dev = _ann_device()
+        if dev.layout_required and dev.input_table_base is not None and ival is not None \
+                and len(path) == 1:
+            _ann_input_types[path[0] - dev.input_table_base] = ival
         return
     if name == "channelInputSource":
         # A fader source changed. Keep the naming layout current and drop the TTL'd cache, so a
@@ -3431,12 +3582,22 @@ def _ann_seed_layout(st: dict) -> None:
     try:
         with _hid_lock:
             blob = rcp_read.read_model()
-        vec = rcp_read.values(blob, "channelInputSource")
+        _ann_dev_cache["dev"] = None      # that dump may have recorded a layout desk's geometry
+        dev = devices.get_active_device()
+        if dev.layout_required and dev.input_table_base is not None:
+            for code in dev.fader.all_labels:
+                try:
+                    v = channels.input_value(blob, {"source_code": code}, "inputType", dev)
+                except Exception:
+                    v = None
+                if isinstance(v, int) and not isinstance(v, bool):
+                    _ann_input_types[code] = v
+        vec = channels.strip_values(blob, "channelInputSource")
         channels.publish_strip_vector(vec)
         # Seed the encoder ring's level cache too, so the FIRST press can already say "Chat 97
         # percent" instead of just naming it. faderLevel is 0-127 and only the virtual faders hold a
         # value; outputMonLevel is a 0-1 float.
-        fl = rcp_read.values(blob, "faderLevel")
+        fl = rcp_read.physical_values(blob, "FADER", "faderLevel")
         for i, v in enumerate(fl):
             if isinstance(v, int):
                 known[("fader", i)] = max(0.0, min(1.0, v / _ANN_FADER_LEVEL_MAX))
@@ -3447,10 +3608,10 @@ def _ann_seed_layout(st: dict) -> None:
         # value can never be announced as a change. They are read positionally because the four POT
         # nodes appear in pot order under PHYSICALINTERFACE[0] - the same order the pushed path
         # gives - and that is the only place `potLevel` occurs.
-        for i, v in enumerate(rcp_read.values(blob, "potLevel")):
+        for i, v in enumerate(rcp_read.physical_values(blob, "POT", "potLevel")):
             if isinstance(v, int) and i < _ANN_POT_COUNT:
                 known[("headphone", i)] = max(0.0, min(1.0, v / _ANN_POT_LEVEL_MAX))
-        mutes = rcp_read.values(blob, "channelOutputMute")
+        mutes = channels.strip_values(blob, "channelOutputMute")
         st["muted"] = {i: v for i, v in enumerate(mutes) if isinstance(v, bool)}
         # SEED EVERY VALUE THE HANDLER COMPARES AGAINST: the stream reports CHANGES, and an
         # unseeded value makes the desk's first push of a resting state ("Levels", "Bank 1") read
@@ -3515,6 +3676,16 @@ def _ann_selected_phrase(strip_idx: int) -> str:
         return f"{who} selected. Encoder sets its gain"
     if entry and entry.get("kind") == "line":
         return f"{who} selected. Encoder sets its input level in decibels"
+    # A LAYOUT DESK'S UNLISTED INPUT, such as the Mic 3 + 4 pair: what the encoder moves follows the
+    # input's own inputType as the desk last reported it - 0 mic (inputMicrophoneGain), 2 line
+    # (inputDigitalGain). Measured on PID 0x0092: the pair reads 2, and turning the encoder on it
+    # pushed inputDigitalGain. Anything else, or not known yet, keeps the wording below.
+    if entry is None and code is not None and dev.layout_required:
+        itype = _ann_input_types.get(code)
+        if itype == 0:
+            return f"{who} selected. Encoder sets its gain"
+        if itype == 2:
+            return f"{who} selected. Encoder sets its input level in decibels"
     # No gain of its own: a bus, or a source this desk's read map does not list (CallMe 1 on either
     # desk). It still has a fader, so say so.
     if code is not None and code >= 0:
@@ -3533,6 +3704,17 @@ def _ann_gain_label(path, is_mic: bool):
     A per-device selector table would miss every gain turned on a Duo's own controls."""
     dev = devices.get_active_device()
     entry = dev.channel_for_input_path(path)
+    if entry is None and dev.layout_required and dev.input_table_base is not None and path:
+        # A LAYOUT DESK NAMES ANY INPUT IT CAN LABEL, a stereo-linked pair included. Its fader 3
+        # holds the Mic 3 + 4 pair (code 6), which no ui_channel lists, so a gain moved on it was
+        # dropped here - and because the branch above has already cleared the encoder's "turned
+        # against nothing" timer, the turn was met with total silence. The Pro II and the Duo are
+        # left exactly as they were.
+        code = int(list(path)[0]) - dev.input_table_base
+        label = dev.fader.all_labels.get(code) if len(list(path)) == 1 else None
+        if label:
+            return f"{label} gain" if is_mic else f"{label} input level"
+        return None
     if entry is None:
         return None
     if is_mic:
@@ -4234,14 +4416,26 @@ def action_refresh_speech_devices() -> dict:
                        f"{wording.count(len(lists['outputs']), 'output')} found."}
 
 
+# An input write that was refused before sending, or sent and not confirmed by the unit (a layout
+# desk checks every input write - channels._layout_input_write). Either way the user is told it did
+# NOT happen, in the reply the page reads out, instead of being told it did.
+_INPUT_WRITE_FAILED = (devices.WriteRefused, channels.WriteNotConfirmed)
+
+
 def action_set_gain(channel: int, db: int) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     if db < GAIN_MIN_DB or db > GAIN_MAX_DB:
         return {"ok": False, "message": f"Gain must be between {GAIN_MIN_DB} and "
                                         f"{GAIN_MAX_DB} dB."}
-    with _hid_lock:
-        channels.set_mic_gain(channel, db)
+    # Marked BEFORE as well: a layout desk confirms the write by re-reading, and its echo can land
+    # during that read, before the mark below would have been made.
+    _ann_mark_self_gain(channel, True)
+    try:
+        with _hid_lock:
+            channels.set_mic_gain(channel, db)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"Mic {channel} gain was not changed. {exc}"}
     _ann_mark_self_gain(channel, True)     # the desk echoes this; the UI already reports it
     with _session_state_lock:
         _session_state["channels"][channel]["gain_db"] = db
@@ -4251,8 +4445,11 @@ def action_set_gain(channel: int, db: int) -> dict:
 def action_set_phantom(channel: int, on: bool) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    with _hid_lock:
-        channels.set_phantom(channel, on)
+    try:
+        with _hid_lock:
+            channels.set_phantom(channel, on)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"Mic {channel} phantom power was not changed. {exc}"}
     with _session_state_lock:
         _session_state["channels"][channel]["phantom"] = on
     return {"ok": True,
@@ -4262,8 +4459,11 @@ def action_set_phantom(channel: int, on: bool) -> dict:
 def action_set_polarity(channel: int, on: bool) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    with _hid_lock:
-        channels.set_polarity(channel, on)
+    try:
+        with _hid_lock:
+            channels.set_polarity(channel, on)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"Mic {channel} polarity was not changed. {exc}"}
     with _session_state_lock:
         _session_state["channels"][channel]["polarity"] = on
     return {"ok": True,
@@ -4313,11 +4513,14 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
         was = _session_state["channels"][channel].get("gain_db")
     # ALL THREE READS INSIDE THE LOCK, like every other read that has to line up with a write of
     # ours: the readers do not take _hid_lock themselves, the caller does.
-    with _hid_lock:
-        proc_before = _mic_processing_snapshot(channel)
-        channels.set_mic_type(channel, type_value)
-        gain, _proc = _read_gain_and_processing(channel)
-        proc_after = _mic_processing_snapshot(channel)
+    try:
+        with _hid_lock:
+            proc_before = _mic_processing_snapshot(channel)
+            channels.set_mic_type(channel, type_value)    # refuses on a layout desk, sends nothing
+            gain, _proc = _read_gain_and_processing(channel)
+            proc_after = _mic_processing_snapshot(channel)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": str(exc)}
     with _session_state_lock:
         _session_state["channels"][channel]["mic_type"] = type_value
         if gain is not None:
@@ -4398,8 +4601,12 @@ def action_set_channel_level(name: str, db: int) -> dict:
         return action_set_gain(channels.mic_channel_number(ch), db)
     if db < LEVEL_MIN_DB or db > LEVEL_MAX_DB:
         return {"ok": False, "message": f"Level must be between {LEVEL_MIN_DB} and {LEVEL_MAX_DB} dB."}
-    with _hid_lock:
-        channels.set_channel_level(name, db)
+    _ann_mark_self_gain(name, False)       # before as well: see action_set_gain
+    try:
+        with _hid_lock:
+            channels.set_channel_level(name, db)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} level was not changed. {exc}"}
     _ann_mark_self_gain(name, False)       # line strips push inputDigitalGain back at us
     return {"ok": True, "message": f"{ch['label']} level set to {db} dB."}
 
@@ -4440,7 +4647,13 @@ def _strip_toggle_gate(what: str):
     which is the wrong way round on a device where the write is unproven.
 
     The Channels page's by-name mute reaches the same gate through channels._require_processing;
-    this is the by-fader route's half, so the two cannot drift apart."""
+    this is the by-fader route's half, so the two cannot drift apart.
+
+    A layout desk with "strip_write" passes: its mute and solo go through channels.set_strip_toggle,
+    checked and confirmed against its own CHANNEL run."""
+    dev = devices.get_active_device()
+    if dev.layout_required and "strip_write" in dev.caps:
+        return None
     return _cap_gate("processing", lambda name:
                      f"{what} a channel is not enabled on the {name} yet, so this is read-only "
                      f"here. You can still see which channels are muted or soloed.")
@@ -4472,8 +4685,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
                 return {"ok": False,
                         "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to mute. Put a channel on it first.")}
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-                channels.MUTE_PROP, bool(on), channels.proc_selector_for_strip(int(fader))))
+            channels.set_strip_toggle(int(fader), channels.MUTE_PROP, bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     _ann_publish_mute(int(fader), bool(on))
@@ -4506,8 +4718,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
                 return {"ok": False,
                         "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to solo.")}
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-                channels.CUE_PROP, bool(on), channels.proc_selector_for_strip(int(fader))))
+            channels.set_strip_toggle(int(fader), channels.CUE_PROP, bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
     _ann_publish_solo(int(fader), bool(on))
@@ -4698,9 +4909,9 @@ def _read_gain_and_processing(mic: int):
     if entry is None:
         return None, None
     gain = channels.input_value(blob, entry, "inputMicrophoneGain")
-    bypass = rcp_read.values(blob, "channelBypassProcessing")
+    bypass = channels.strip_values(blob, "channelBypassProcessing")
     # Resolve the strip from THIS dump, so the gain and the bypass state describe the same moment.
-    vec = rcp_read.values(blob, "channelInputSource")
+    vec = channels.strip_values(blob, "channelInputSource")
     channels.publish_strip_vector(vec)
     try:
         strip = vec.index(entry.get("source_code"))
@@ -4848,7 +5059,11 @@ class _ChatIsolation:
     def _snapshot(self):
         blob = rcp_read.read_model_stable(fresh=True)
         m = devices.get_active_device().matrix
-        excl = [bool(v) for v in rcp_read.block_values(blob, m.block, "mixDisabled", "bool")]
+        if m.base is None:
+            excl = [bool(v) for v in rcp_read.block_values(blob, m.block, "mixDisabled", "bool")]
+        else:
+            # A layout desk: its MAIN MIX run by address (later blocks also named MIX are not it).
+            excl = [bool(v) for v in rcp_read.matrix_cells(blob, m, "mixDisabled")]
         if len(excl) != m.cell_count:
             raise RuntimeError("the unit's mix grid is not the shape this expects "
                                "(a phone caller may be connected)")
@@ -4962,10 +5177,14 @@ def _autogain_words(name: str, before: int, after: int, result: dict, win: str,
 def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
     """Begin an auto-gain run on one mic channel."""
     global _autogain
-    gate = _cap_gate("input_mic_write",
-                     lambda dev_name: f"Mic gain cannot be set on the {dev_name} from here.")
-    if gate is not None:
-        return gate
+    dev = devices.get_active_device()
+    # A layout desk's mic gain is written under "input_write" (checked and confirmed), and its Chat
+    # isolation goes through its own routing path (rcp_transfer delegates to layout_routing).
+    if not (dev.layout_required and "input_write" in dev.caps and "routing_write" in dev.caps):
+        gate = _cap_gate("input_mic_write",
+                         lambda dev_name: f"Mic gain cannot be set on the {dev_name} from here.")
+        if gate is not None:
+            return gate
     mic = _mic_number(name)
     if mic is None:
         return {"ok": False, "message": "Only microphone channels have a gain to set."}
@@ -5022,8 +5241,11 @@ def action_set_processing_enabled(name: str, on: bool) -> dict:
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
-    with _hid_lock:
-        channels.set_processing_enabled(name, on)
+    try:
+        with _hid_lock:
+            channels.set_processing_enabled(name, on)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} processing was not changed. {exc}"}
     return {"ok": True,
             "message": f"{ch['label']} processing turned {'on' if on else 'off'}."}
 
@@ -5059,6 +5281,8 @@ def action_set_channel_module(name: str, module: str, on: bool) -> dict:
     try:
         with _hid_lock:
             channels.set_processing_module(name, module, on)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} {module} was not changed. {exc}"}
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
     return {"ok": True,
@@ -5074,6 +5298,8 @@ def action_set_channel_effect(name: str, effect: str, on: bool) -> dict:
     try:
         with _hid_lock:
             channels.set_channel_effect(channels.mic_channel_number(ch), effect, on)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} {effect} was not changed. {exc}"}
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
     return {"ok": True, "message": f"{ch['label']} {effect} turned {'on' if on else 'off'}."}
@@ -5089,6 +5315,8 @@ def action_set_channel_effect_param(name: str, param: str, value01: float) -> di
         v = max(0.0, min(1.0, float(value01)))
         with _hid_lock:
             channels.set_channel_effect_param(channels.mic_channel_number(ch), param, v)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} {param} was not changed. {exc}"}
     except (ValueError, TypeError) as exc:
         return {"ok": False, "message": str(exc)}
     return {"ok": True, "message": f"{ch['label']} {param} set to {round(v * 100)} percent."}
@@ -5105,8 +5333,11 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
         v = max(0.0, min(1.0, float(value01)))
     except (TypeError, ValueError):
         return {"ok": False, "message": "Value must be a number from 0 to 1."}
-    with _hid_lock:
-        channels.set_channel_processing(name, prop, v)
+    try:
+        with _hid_lock:
+            channels.set_channel_processing(name, prop, v)
+    except _INPUT_WRITE_FAILED as exc:
+        return {"ok": False, "message": f"{ch['label']} {prop} was not changed. {exc}"}
     ctrl = _PROCESSING_CONTROL_BY_PROP[prop]
     pct = round(v * 100)
     if ctrl.get("pan"):
@@ -5574,6 +5805,26 @@ def _fader_write_gate():
                      f"are read-only here. You can still see the current layout.")
 
 
+def _fader_choices(spec=None) -> tuple:
+    """The (code, label) channels the user may PUT on a fader on the connected desk: the same set
+    the dropdown offers (_fader_channel_options), so the write gate and the list cannot differ."""
+    spec = spec or _active_faders()
+    return tuple((c, lab) for c, lab in _fader_channel_options(spec))
+
+
+def _swap_fader_target(vec, fader_index, code):
+    """The layout-desk target: `code` onto `fader_index` and the channel it displaces onto wherever
+    `code` sat, NOTHING ELSE. No tidy and no gap-fill (_tidy_fader_target does both), because on such
+    a desk no channel may move as a side effect, least of all the line pair on fader 3."""
+    target = list(vec)
+    old = target[fader_index]
+    target[fader_index] = code
+    j = next((j for j in range(len(target)) if j != fader_index and target[j] == code), None)
+    if j is not None:
+        target[j] = old
+    return target
+
+
 def _is_empty_fader(code) -> bool:
     """True for an empty/unsourced fader strip. The Duo's vector carries -1 for an empty
     logical strip; None appears when the read vector is shorter than the fader count."""
@@ -5659,10 +5910,10 @@ def _read_fader_vector(blob=None, spec=None):
     Every layout write re-reads through here immediately afterwards, so publishing here keeps both
     caches honest with no extra dump. The FULL vector is published, not the per-fader-count slice,
     so the spare 10th strip still names its source."""
-    spec = spec or _active_faders()
     if blob is None:
         blob = rcp_read.read_model()
-    cis = rcp_read.values(blob, "channelInputSource")
+    spec = spec or _active_faders()
+    cis = channels.strip_values(blob, "channelInputSource")
     channels.publish_strip_vector(cis)
     return [cis[i] if i < len(cis) else None for i in range(spec.count)]
 
@@ -5670,10 +5921,16 @@ def _read_fader_vector(blob=None, spec=None):
 def _fader_channel_options(spec) -> list:
     """[code, name] for every channel a fader may take in the USB mode last published. It changes
     with the mode (Expanded adds Game, Music, A and B and renames USB 1), so the live read carries it
-    as well as the static model."""
+    as well as the static model.
+
+    Narrowed on a layout desk to the codes its fader write allows (devices.LAYOUT_FADER_CODES), so
+    the page never offers a channel the desk would refuse."""
     expanded = channels.usb_expanded()
     labels = spec.labels_for(expanded)
-    return [[code, labels.get(code, str(code))] for code in spec.code_order_for(expanded)]
+    opts = [[code, labels.get(code, str(code))] for code in spec.code_order_for(expanded)]
+    if devices.get_active_device().layout_required:
+        opts = [o for o in opts if o[0] in devices.LAYOUT_FADER_CODES]
+    return opts
 
 
 def fader_model() -> dict:
@@ -5727,7 +5984,7 @@ def _carry_mute(new_vec, codes, muted: bool) -> str:
     if not muted:
         return ""
     spec = _active_faders()
-    mutes = rcp_read.values(rcp_read.read_model(fresh=True), "channelOutputMute")
+    mutes = channels.strip_values(rcp_read.read_model(fresh=True), "channelOutputMute")
     done = []
     for code in codes:
         strip = next((i for i, c in enumerate(new_vec) if c == code), None)
@@ -5838,7 +6095,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             # the write, since a linked mic has no strip of its own to read afterwards. A pair counts
             # as muted only when BOTH its inputs were, so linking never silences something that was
             # open, and unlinking hands the pair's own state to both mics.
-            mutes = rcp_read.values(blob, "channelOutputMute")
+            mutes = channels.strip_values(blob, "channelOutputMute")
 
             def muted_now(code):
                 i = next((j for j, c in enumerate(vec) if c == code), None)
@@ -5950,11 +6207,12 @@ def action_set_fader(fader_index: int, code: int) -> dict:
     spec = _active_faders()
     if not 0 <= fader_index < spec.count:
         return {"ok": False, "message": f"Fader {fader_index + 1} is not valid."}
-    # THE OFFERED SET WIDENS IN EXPANDED, where Game, Music, A and B become real inputs. In
-    # Standard they are nameable but not assignable: putting one on a fader there gives somebody a
-    # channel that can never carry audio.
-    if code not in spec.code_set_for(channels.usb_expanded()):
+    # THE DROPDOWN AND THE WRITE GATE MUST OFFER THE SAME SET (_fader_choices). THE OFFERED SET
+    # WIDENS IN EXPANDED, where Game, Music, A and B become real inputs; in Standard they are
+    # nameable but not assignable. A layout desk narrows it to the codes its fader write allows.
+    if code not in {c for c, _lab in _fader_choices(spec)}:
         return {"ok": False, "message": f"Channel code {code} is not assignable."}
+    layout_desk = devices.get_active_device().layout_required
     chain_note = ""
     try:
         with _hid_lock:
@@ -5966,8 +6224,9 @@ def action_set_fader(fader_index: int, code: int) -> dict:
                         "labels": [_channel_name(c, spec) for c in vec],
                         "message": f"{_fader_label(fader_index, spec)} already carries "
                                    f"{_channel_name(code, spec)}."}
-            target = _tidy_fader_target(vec, fader_index, code,
-                                        spec.code_order_for(channels.usb_expanded()))
+            target = (_swap_fader_target(vec, fader_index, code) if layout_desk
+                      else _tidy_fader_target(vec, fader_index, code,
+                                              spec.code_order_for(channels.usb_expanded())))
             # THE CHAIN FOLLOWS THE CHANNEL. Processing and effects are per fader STRIP, so moving a
             # channel without moving its chain leaves it being processed by whatever voicing sits on
             # the strip it lands on. The RODE app does exactly this on its own drag (proven by
@@ -5978,12 +6237,22 @@ def action_set_fader(fader_index: int, code: int) -> dict:
             # before the write, off the dump we already have; see _follow_levels for the silence
             # this prevents. Gated, because a desk with no confirmed faderLevel selectors must not
             # be written to at all.
-            levels_before = (rcp_read.values(blob, "faderLevel")
+            levels_before = (rcp_read.physical_values(blob, "FADER", "faderLevel")
                              if _level_write_gate() is None else None)
             # Only write the faders that actually change.
-            for i in range(spec.count):
-                if target[i] != vec[i]:
-                    rcp_transfer.set_fader_source(i, target[i])
+            if layout_desk:
+                # The same writes in the same order, sent as ONE checked unit and confirmed as the
+                # whole vector (channels.set_layout_faders); `fader_index` is the user's choice.
+                try:
+                    channels.set_layout_faders(
+                        {i: target[i] for i in range(spec.count) if target[i] != vec[i]},
+                        chosen=fader_index, planned_from=vec)
+                finally:
+                    channels.invalidate_strip_vector()
+            else:
+                for i in range(spec.count):
+                    if target[i] != vec[i]:
+                        rcp_transfer.set_fader_source(i, target[i])
             # The layout IS the processing/effects strip map (channels._strip_index), so a stale
             # cached vector here would address the next processing write to the old strip.
             channels.invalidate_strip_vector()
@@ -6037,6 +6306,18 @@ def _level_write_gate():
     return None
 
 
+def _output_level_gate():
+    """The monitor speaker level, the two output mutes and the Bluetooth output level. On the Pro II
+    and the Duo the same gate as the fader levels (_level_write_gate), exactly as before. On a layout
+    desk they are ordinary OUTPUT-block settings and pass under its generalised gate ("tree_write",
+    as "output_write"), checked before and confirmed after - while its FADER levels stay refused:
+    which of its faders are virtual has not been measured there."""
+    dev = devices.get_active_device()
+    if dev.layout_required and devices.has_write_cap(dev, "output_write"):
+        return None
+    return _level_write_gate()
+
+
 def fader_levels_live() -> dict:
     """Read the levels we can set: each writable (virtual) fader, plus the monitor speaker.
 
@@ -6044,16 +6325,18 @@ def fader_levels_live() -> dict:
     the announcements say too. `channel` names whatever sits on that fader right now."""
     dev = devices.get_active_device()
     spec = dev.fader
-    gate = _level_write_gate()
+    # The monitor / Bluetooth OUTPUT levels' gate. On the Pro II and the Duo it IS the fader-level
+    # gate; on a layout desk it opens while the fader list stays empty (no level selectors there).
+    gate = _output_level_gate()
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
-        raw = rcp_read.values(blob, "faderLevel")
+        raw = rcp_read.physical_values(blob, "FADER", "faderLevel")
         # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
         # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
         # the encoder cycles onto the virtual faders (_ann_encoder_ring).
-        mutes = rcp_read.values(blob, "channelOutputMute")
-        solos = rcp_read.values(blob, channels.CUE_PROP)
+        mutes = channels.strip_values(blob, "channelOutputMute")
+        solos = channels.strip_values(blob, channels.CUE_PROP)
         mon = rcp_read.values(blob, "outputMonLevel")
         # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
         # They ride on this read rather than on /api/routing/live because they belong beside the
@@ -6132,7 +6415,7 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
     Named for the speaker deliberately: action_set_monitor_level further down is a different thing
     entirely, one source's level inside a monitor MIX (a matrix cross-point), and a shared name
     would silently shadow one with the other."""
-    gate = _level_write_gate()
+    gate = _output_level_gate()
     if gate is not None:
         return gate
     pct = max(0, min(100, int(percent)))
@@ -6630,7 +6913,10 @@ def action_channel_level_check(name: str = "", seconds: float = 0.0) -> dict:
     if ag.get("phase") in ("preparing", "listening", "verifying", "working"):
         return {"ok": False, "running": False,
                 "message": "Auto gain is running. Wait for it to finish, or stop it first."}
-    gate = _matrix_write_gate()      # None when writes are allowed; a refusal dict otherwise
+    # None when writes are allowed; a refusal dict otherwise. _routing_write_gate is "matrix_write"
+    # on the Pro II and the Duo, exactly as before, and a layout desk's "routing_write": its Chat
+    # isolation goes through rcp_transfer, which hands it to layout_routing there.
+    gate = _routing_write_gate()
     if gate is not None:
         return {"ok": False, "running": False, "message": gate["message"]}
 
@@ -6725,7 +7011,7 @@ def action_set_output_mute(which: str, on: bool) -> dict:
     if which not in targets:
         return {"ok": False, "message": f"Unknown output: {which}."}
     prop, label, effect = targets[which]
-    gate = _level_write_gate()
+    gate = _output_level_gate()
     if gate is not None:
         return gate
     try:
@@ -6743,7 +7029,7 @@ def action_set_bt_output_level(percent: int) -> dict:
     This is what a paired phone HEARS from the desk. It is not the Bluetooth channel on the Channels
     page, which is what the phone SENDS us; the two have almost the same name and opposite meanings,
     so every label and message about this one says "output" out loud."""
-    gate = _level_write_gate()
+    gate = _output_level_gate()
     if gate is not None:
         return gate
     pct = max(0, min(100, int(percent)))
@@ -6779,8 +7065,17 @@ def action_reset_faders() -> dict:
     if gate is not None:
         return gate
     spec = _active_faders()
+    dev = devices.get_active_device()
+    if dev.layout_required:
+        # Refused by NAME, not only by the missing default: a reset moves every channel at once,
+        # and on this desk fader 3 carries a line input that must never move unless the user puts
+        # something else on that fader themselves.
+        return {"ok": False,
+                "message": (f"Resetting the faders to a default layout is not available on the "
+                            f"{dev.name}: its factory layout is not known, and a reset would move "
+                            f"every channel at once, including the line input on fader 3. Move "
+                            f"channels one fader at a time instead.")}
     if not spec.default_vector:
-        dev = devices.get_active_device()
         return {"ok": False,
                 "message": (f"Resetting the faders to a default layout is not available on the "
                             f"{dev.name} yet: its factory-default fader layout has not been "
@@ -6839,7 +7134,7 @@ def _monitor_sources():
 
 def monitor_mix_model() -> dict:
     """Static layout for the Monitor mix UI (the outputs + sources the connected device exposes)."""
-    read_only = _matrix_write_gate() is not None
+    read_only = _routing_write_gate() is not None
     note = ("How loud each source is in the chosen output, without changing the recording or "
             "other outputs. Moving one makes it a custom mix. Not available during a phone call.")
     if read_only:
@@ -6880,7 +7175,7 @@ def read_monitor_mix_live() -> dict:
 def action_set_monitor_level(output_index: int, source_index: int, level01: float) -> dict:
     """Set one source's level in one output. Switches the output to Custom mode if needed, unlinks
     that source, then writes the level. Only affects this output."""
-    gate = _matrix_write_gate()
+    gate = _routing_write_gate()
     if gate is not None:
         return gate
     mon_out = dict(_monitor_outputs())
@@ -6889,6 +7184,19 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
         return {"ok": False, "message": "That output is not adjustable here."}
     if source_index not in mon_src:
         return {"ok": False, "message": "That source is not adjustable here."}
+    if _layout_routing():
+        try:
+            v = max(0.0, min(1.0, float(level01)))
+        except (TypeError, ValueError):
+            return {"ok": False, "message": "That level is not a number."}
+        refused, _n = _layout_routing_call(layout_routing.set_cross_point_level,
+                                           output_index, source_index, v)
+        if refused:
+            return refused
+        _ann_mark_self_write(("fader", int(source_index)))
+        return {"ok": True,
+                "message": f"{mon_src[source_index]} in {mon_out[output_index]} "
+                           f"set to {round(v * 100)} percent."}
     try:
         v = max(0.0, min(1.0, float(level01)))
         with _hid_lock:
@@ -6912,12 +7220,17 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
 def action_reset_monitor_output(output_index: int) -> dict:
     """Reset one output to follow the faders: re-link every source (level back to the fader value)
     and put the output back to Main Mix mode."""
-    gate = _matrix_write_gate()
+    gate = _routing_write_gate()
     if gate is not None:
         return gate
     mon_out = dict(_monitor_outputs())
     if output_index not in mon_out:
         return {"ok": False, "message": "That output is not adjustable here."}
+    if _layout_routing():
+        refused, _n = _layout_routing_call(layout_routing.relink_output, output_index)
+        if refused:
+            return refused
+        return {"ok": True, "message": f"{mon_out[output_index]} reset to follow the faders."}
     try:
         with _hid_lock:
             for si, _ in _monitor_sources():
@@ -6945,7 +7258,11 @@ def action_reset_all_outputs() -> dict:
 
     THIS IS THE "Everything normal" BUILT-IN MIX SCHEME, applied through the one scheme path
     (routing_schemes.apply). The button stays because it is where people look for it and it carries
-    its own confirmation, but there is no second copy of the sweep to drift."""
+    its own confirmation, but there is no second copy of the sweep to drift.
+
+    A LAYOUT desk (PID 0x0092) takes it too: its default modes are the Pro II order
+    (devices._LAYOUT_OUTPUTS - the very modes the unit reads), and routing_schemes.apply writes it
+    one output at a time through layout_routing.apply_output, checked and confirmed per output."""
     b = routing_schemes.builtin(routing_schemes.BUILTIN_NORMAL)
     if b is None:                       # no matrix outputs on this device model at all
         return {"ok": False, "message": "This device exposes no output mixes to reset."}
@@ -6965,10 +7282,14 @@ def _apply_matrix(routing: dict) -> dict:
       - `output_modes` + `matrix_excluded` + `monitor_unlinked`: the old index-keyed form, below.
     """
     # The saved matrix is Pro II-shaped; a desk that cannot write the matrix (e.g. the Duo, cap off)
-    # must not have Pro II cross-points written to it, so skip the matrix re-apply there.
-    if _matrix_write_gate() is not None:
+    # must not have Pro II cross-points written to it, so skip the matrix re-apply there. A layout
+    # desk writes it by KEY through its own routing path (routing_schemes.apply), and only from the
+    # current `mix_scheme` form: the legacy index-keyed form below addresses Pro II cross-points.
+    if _routing_write_gate() is not None:
         return {"applied": 0, "failed": 0, "skipped": True}
     scheme = routing.get("mix_scheme")
+    if devices.get_active_device().layout_required and not (scheme and scheme.get("outputs")):
+        return {"applied": 0, "failed": 0, "skipped": True}
     if scheme and scheme.get("outputs"):
         # Same announcer suppression as _apply_scheme: our own cross-point writes come back on the
         # push stream as mixLevelWithAnchor on the SOURCE, which the announcer would otherwise
@@ -7030,12 +7351,18 @@ def routing_model() -> dict:
         "multitrack_modes": [[k, v] for k, v in sorted(recorder.MULTITRACK_LABEL.items())],
         # USB audio's option list. The STRUCTURE endpoint carries it because loadRouting builds the
         # controls once from this payload; the VALUES arrive with /api/routing/live.
-        "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
+        "usb_multitrack_modes": _usb_mode_options(),
         # EXPANDED'S OPTIONS BELONG HERE TOO, for the same reason and with the same consequence if
         # they are missing: `setStagedValue` invents a "Value true" option for a device value it has
         # no label for, so the control renders with ONE option it cannot be changed away from.
         "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
         "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
+        # A layout desk's USB controls are writable under its own cap ("usbmode_write") while the
+        # rest of the master output block may stay read-only there; on the Pro II and the Duo both
+        # follow "output_write" exactly as upstream. Its Expanded asks first, in these words.
+        "usb_mode_read_only": _usb_mode_gate() is not None,
+        "usb_expanded_confirm": (devices.LAYOUT_USBMODE_WARNING if _layout_cap("usbmode_write")
+                                 else None),
         "input_strips": [{"key": k, "label": lab}
                          for k, _idx, lab in _active_input_strips().strips],
         "input_sources": _active_input_strips().source_palette,
@@ -7046,6 +7373,16 @@ def routing_model() -> dict:
             "outputs": [{"index": i, "label": lab}
                         for i, (_sel, lab) in enumerate(_active_headphones().outputs)],
             "values": [[code, lab] for code, lab in _active_headphones().values],
+            # Its own cap on a layout desk ("headphone_write"), "output_write" elsewhere.
+            "read_only": _headphone_gate() is not None,
+            # A layout desk's measured loudness: (from, to) pairs that make the output LOUDER are
+            # confirmed before they are written, in the words below. None / [] on the Pro II and the
+            # Duo, whose page is unchanged.
+            "note": devices.LAYOUT_HEADPHONE_NOTE if _layout_cap("headphone_write") else None,
+            "louder": ([list(p) for p in sorted(devices.LAYOUT_HEADPHONE_LOUDER)]
+                       if _layout_cap("headphone_write") else []),
+            "louder_warning": (devices.LAYOUT_HEADPHONE_LOUDER_WARNING
+                               if _layout_cap("headphone_write") else None),
         },
         # Master/global output controls (multitrack, auto-mute, headphone type, Compellor, delay)
         # are read-only on a device without the "output_write" cap (the Duo, pending capture).
@@ -7085,12 +7422,18 @@ def read_routing_live() -> dict:
     def first(name):
         return rcp_read.first(blob, name)
 
-    cis = rcp_read.values(blob, "channelInputSource")
+    cis = channels.strip_values(blob, "channelInputSource")
     input_sources = {strip: (cis[idx] if idx < len(cis) else None)
                      for strip, idx in _active_input_strips().strip_vec_index.items()}
     # All headphoneType values in dump order, mapped positionally to the device's outputs.
     headphone_types = [v for v in rcp_read.values(blob, "headphoneType")
                        if v is not None and v != ""]
+    dev = devices.get_active_device()
+    if dev.layout_required:
+        # A layout desk reads its HEADPHONE run BY ADDRESS, one entry per output, never by name.
+        outs = devices.layout_headphone_outputs(dev.layout)
+        headphone_types = (rcp_read.run_values(blob, outs[0][0], len(outs), "headphoneType", "int",
+                                               block="HEADPHONE") if outs else [])
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))
     # Publish it exactly as the strip vector above is published: this is the routing read every
@@ -7124,7 +7467,7 @@ def read_routing_live() -> dict:
         # The driver's side of Expanded, in words, so the page can say whether the four inputs
         # will actually carry anything. Read from Windows, not the desk.
         "usb_driver": virtual_devices.describe(usb_expanded),
-        "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
+        "usb_multitrack_modes": _usb_mode_options(),
         "usb_processing_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
         "bypass_hint": recorder.BYPASS_HINT,
         "bypass_needs_multitrack": recorder.BYPASS_NEEDS_MULTITRACK,
@@ -7165,14 +7508,30 @@ def action_set_input_source(strip: str, source_code: int) -> dict:
     return {"ok": True, "message": f"{spec.strip_label[strip]} source set to {src}."}
 
 
+def _checked_write(fn, *args):
+    """Run one settings write under the HID lock. None when it went through, else the refusal dict.
+
+    Only the two answers a LAYOUT desk's checked path gives are caught here - refused before
+    sending (devices.WriteRefused) and sent but not confirmed (channels.WriteNotConfirmed), each
+    already a sentence for the user. The Pro II and the Duo never raise either from these helpers,
+    so for them this is the plain locked call it always was, and anything else still propagates."""
+    try:
+        with _hid_lock:
+            fn(*args)
+    except (devices.WriteRefused, channels.WriteNotConfirmed) as exc:
+        return {"ok": False, "message": str(exc)}
+    return None
+
+
 def action_set_multitrack(mode: int) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
     if mode not in rcp_transfer.MULTITRACK_MODES:
         return {"ok": False, "message": f"Multitrack mode {mode} is not valid."}
-    with _hid_lock:
-        rcp_transfer.set_multitrack_mode(mode)
+    refused = _checked_write(rcp_transfer.set_multitrack_mode, mode)
+    if refused:
+        return refused
     # Answered in the same words the control offers (recorder.MULTITRACK_LABEL), not in the unit's
     # own "Pre-Fader" / "Post-Fader", which never say whether you are getting multitrack at all.
     return {"ok": True,
@@ -7190,8 +7549,9 @@ def action_set_recording_format(value: int) -> dict:
         return gate
     if value not in recorder.RECORDING_FORMAT_LABEL:
         return {"ok": False, "message": f"Recording format {value} is not valid."}
-    with _hid_lock:
-        rcp_transfer.set_recording_format(value)
+    refused = _checked_write(rcp_transfer.set_recording_format, value)
+    if refused:
+        return refused
     # NOT lowercased, unlike the multitrack reply: these labels open with an initialism, and
     # "written as mp3, smaller files" reads as a typo and is spoken as a word by some voices.
     return {"ok": True,
@@ -7206,7 +7566,12 @@ def action_set_usb_multitrack(mode: int) -> dict:
     RODECaster input and output on this machine disappears for a second or two. THE WARNING IS
     THE CONTROL'S HINT, read before Enter, NOT THE REPLY: the reply lands while the audio is gone,
     on top of Windows and RODE's driver announcing the same change, so it says the result and no
-    more."""
+    more.
+
+    A LAYOUT desk (cap "usbmode_write") goes through _layout_usb_split instead: only the values
+    measured there, and the desk comes back on USB under another product id."""
+    if _layout_cap("usbmode_write"):
+        return _layout_usb_split(mode=mode)
     gate = _output_write_gate()
     if gate is not None:
         return gate
@@ -7279,12 +7644,18 @@ def action_set_usb_expanded(on: bool) -> dict:
     Both costs are in the control's hint and the reply says only the result, as for the output
     mode above. Turning it OFF also takes Game, Music, A and B off their faders, as the unit's own
     screen does, and that is done FIRST, while the desk is still on the bus: the mode change takes
-    it off USB for a couple of seconds."""
+    it off USB for a couple of seconds.
+
+    A LAYOUT desk (cap "usbmode_write") goes through _layout_usb_split: only the values measured
+    there. Its faders never carry the Expanded four (devices.LAYOUT_FADER_CODES), so none are
+    cleared."""
+    if on is None:
+        return {"ok": False, "message": "Expanded needs on or off."}
+    if _layout_cap("usbmode_write"):
+        return _layout_usb_split(expanded=bool(on))
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    if on is None:
-        return {"ok": False, "message": "Expanded needs on or off."}
     cleared = [] if on else _clear_extended_faders()
     with _hid_lock:
         old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
@@ -7647,6 +8018,91 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
             if parking is not None else "")
 
 
+def _layout_cap(cap: str) -> bool:
+    """True on a LAYOUT desk that holds this narrow write cap (headphone_write, usbmode_write)."""
+    dev = devices.get_active_device()
+    return dev.layout_required and cap in dev.caps
+
+
+def _usb_mode_gate():
+    """The USB-mode control's gate: a layout desk's "usbmode_write", else "output_write"."""
+    return None if _layout_cap("usbmode_write") else _output_write_gate()
+
+
+def _headphone_gate():
+    """The headphone-type controls' gate: a layout desk's "headphone_write", else "output_write"."""
+    return None if _layout_cap("headphone_write") else _output_write_gate()
+
+
+def _usb_mode_options() -> list:
+    """The USB OUTPUT-half choices for the connected desk: on a layout desk only those measured
+    there (devices.LAYOUT_USBMODE_PIDS: every channel pre-fader, with USB 1 Input on Standard or
+    Expanded), the Pro II / Duo three everywhere else (as upstream)."""
+    if _layout_cap("usbmode_write"):
+        measured = {recorder.split_usb_multitrack(v)[0] for v in devices.LAYOUT_USBMODE_PIDS}
+        return [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items()) if k in measured]
+    return [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())]
+
+
+def _layout_usb_split(mode=None, expanded=None) -> dict:
+    """A layout desk's two USB halves - the output mode (0-2) and USB 1 Input Expanded - written as
+    the one outputMultiMode value they share (recorder.join_usb_multitrack), the half not asked
+    about carried over from what the unit holds in its OWN OUTPUT block. Only a value measured on
+    that unit goes out (_layout_usb_mode refuses the rest)."""
+    try:
+        with _hid_lock:
+            dev = rcp_read.device_for_read()
+            blob = rcp_read.read_model_stable(fresh=True)
+            old = rcp_read.path_value(blob, layout_routing.usb_mode_path(dev),
+                                      devices.LAYOUT_USBMODE_PROP)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read what this computer receives: {exc}"}
+    cur_mode, cur_exp = recorder.split_usb_multitrack(old if isinstance(old, int) else None)
+    if cur_mode is None:
+        return {"ok": False, "message": "The unit did not report its USB mode, so nothing was sent."}
+    if mode is not None and mode not in recorder.USB_MULTITRACK_LABEL:
+        return {"ok": False, "message": f"USB multitrack mode {mode} is not valid."}
+    value = recorder.join_usb_multitrack(cur_mode if mode is None else int(mode),
+                                         cur_exp if expanded is None else bool(expanded))
+    return _layout_usb_mode(value)
+
+
+def _layout_usb_mode(mode: int) -> dict:
+    """outputMultiMode on a layout desk: checked and sent under the HID lock, then the desk is
+    waited for WITHOUT the lock while it drops off USB and comes back under the product id that
+    mode belongs to (layout_routing.confirm_usb_mode), and only then read. Three honest answers:
+    confirmed, not taken (the desk reports another value), or sent and not back yet."""
+    label = devices.LAYOUT_USBMODE_LABEL.get(mode)
+    if label is None:
+        return {"ok": False, "message": ("That USB setting has not been measured on this unit; only "
+                                         "every channel pre-fader, with USB 1 Input on Standard or "
+                                         "Expanded, can be chosen here.")}
+    try:
+        with _hid_lock:
+            sent = layout_routing.send_usb_mode(mode)
+    except (devices.WriteRefused, ValueError) as exc:
+        return {"ok": False, "message": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not change what this computer receives: {exc}"}
+    if not sent["sent"]:
+        return {"ok": True, "message": f"The unit is already on {label}. Nothing was sent."}
+    try:
+        res = layout_routing.confirm_usb_mode(mode, lock=_hid_lock)
+    except channels.WriteNotConfirmed as exc:
+        return {"ok": False, "message": str(exc)}
+    after = (" Other programs can no longer play to the Main Multitrack device, and Windows may "
+             "now use System (RODECaster) as its default output." if mode == 4 else "")
+    if res["state"] == "confirmed":
+        return {"ok": True,
+                "message": (f"This computer now receives {label}. The unit reconnected as "
+                            f"PID 0x{res['pid']:04X} and reports the change.{after}")}
+    return {"ok": False, "pending": True,
+            "message": (f"Sent, not confirmed yet: the unit is disconnecting and reconnecting on "
+                        f"USB and was not back within "
+                        f"{int(layout_routing.USBMODE_RECONNECT_S)} seconds. Open this page again "
+                        f"once it is back to see what it reports.")}
+
+
 def _bypass_sentence(where: str, on: bool) -> str:
     """Said as what you GET, not as the state of a flag: "bypass is on" needs translating in your
     head every time, and both of these are read aloud."""
@@ -7664,8 +8120,9 @@ def action_set_processing_bypass(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
-        rcp_transfer.set_recording_processing_bypass(on)
+    refused = _checked_write(rcp_transfer.set_recording_processing_bypass, on)
+    if refused:
+        return refused
     return {"ok": True, "message": _bypass_sentence("Recordings on the card or drive", on)}
 
 
@@ -7674,8 +8131,9 @@ def action_set_usb_bypass(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
-        rcp_transfer.set_usb_multitrack_bypass(on)
+    refused = _checked_write(rcp_transfer.set_usb_multitrack_bypass, on)
+    if refused:
+        return refused
     return {"ok": True, "message": _bypass_sentence("The tracks sent to this computer", on)}
 
 
@@ -7755,8 +8213,13 @@ def action_set_headphone_type(value: int, output: int = 0) -> dict:
     """Set a headphone output's amp type. `output` is an INDEX into the active device's headphone
     outputs (0 = Headphone 1, 1 = Headphone 2), `value` an amp-type code from that device's
     HeadphoneTypeSpec (0=NTH-100, 1=High sensitivity, 2=Low sensitivity). The server resolves the
-    real selector from the spec so the client never passes an unmapped selector."""
-    gate = _output_write_gate()
+    real selector from the spec so the client never passes an unmapped selector.
+
+    A LAYOUT desk (cap "headphone_write") writes its own HEADPHONE block through
+    layout_routing.set_headphone_type, checked before and confirmed after; nothing else of the
+    master output block opens with it."""
+    layout = _layout_cap("headphone_write")
+    gate = _headphone_gate()
     if gate is not None:
         return gate
     spec = _active_headphones()
@@ -7765,6 +8228,12 @@ def action_set_headphone_type(value: int, output: int = 0) -> dict:
     selector, out_label = spec.outputs[output]
     if value not in spec.value_codes:
         return {"ok": False, "message": "That headphone type is not a valid value for this device."}
+    if layout:
+        refused, _n = _layout_routing_call(layout_routing.set_headphone_type, output, value,
+                                           what="the headphone type")
+        if refused is not None:
+            return refused
+        return {"ok": True, "message": f"{out_label} type set to {spec.value_label[value]}."}
     with _hid_lock:
         rcp_transfer.set_headphone_type(value, selector)
     return {"ok": True, "message": f"{out_label} type set to {spec.value_label[value]}."}
@@ -7775,8 +8244,9 @@ def action_set_master_compellor(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
-        rcp_transfer.set_master_compellor(on)
+    refused = _checked_write(rcp_transfer.set_master_compellor, on)
+    if refused:
+        return refused
     return {"ok": True, "message": f"Master Compellor turned {'on' if on else 'off'}."}
 
 
@@ -7788,8 +8258,9 @@ def action_set_compellor_param(param: str, value01: float) -> dict:
     if param not in rcp_transfer.MASTER_COMPELLOR_PARAM:
         return {"ok": False, "message": f"Unknown Compellor parameter {param!r}."}
     v = max(0.0, min(1.0, float(value01)))
-    with _hid_lock:
-        rcp_transfer.set_master_compellor_param(param, v)
+    refused = _checked_write(rcp_transfer.set_master_compellor_param, param, v)
+    if refused:
+        return refused
     return {"ok": True, "message": f"Master Compellor {param} set to {round(v * 100)} percent."}
 
 
@@ -7799,8 +8270,9 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
     if gate is not None:
         return gate
     seconds = None if ms is None else max(0.0, min(2.0, float(ms) / 1000.0))
-    with _hid_lock:
-        rcp_transfer.set_output_delay(on, seconds)
+    refused = _checked_write(rcp_transfer.set_output_delay, on, seconds)
+    if refused:
+        return refused
     if not on:
         return {"ok": True, "message": "Output delay turned off."}
     if seconds is None:
@@ -7839,6 +8311,33 @@ def _matrix_write_gate():
                      f"matrix is read-only here.")
 
 
+def _layout_routing() -> bool:
+    """True on a LAYOUT desk that may have its output mixes changed (cap "routing_write"): every
+    write then goes through layout_routing, checked before and confirmed after."""
+    dev = devices.get_active_device()
+    return dev.layout_required and "routing_write" in dev.caps
+
+
+def _routing_write_gate():
+    """The gate for every output-mix write (mode, include/exclude, monitor level, reset one
+    output, mix presets, "reset all output mixes", auto gain's and the level check's Chat
+    isolation): the Pro II / Duo cap "matrix_write", exactly as before, or a layout desk's narrow
+    "routing_write" - where each of them is a composition of the proven routing record forms,
+    written through layout_routing (rcp_transfer and routing_schemes hand over to it there)."""
+    return None if _layout_routing() else _matrix_write_gate()
+
+
+def _layout_routing_call(fn, *args, what: str = "the output mix"):
+    """Run one layout_routing write under the HID lock; (None, n) or (refusal dict, None)."""
+    try:
+        with _hid_lock:
+            return None, fn(*args)
+    except (devices.WriteRefused, channels.WriteNotConfirmed, ValueError) as exc:
+        return {"ok": False, "message": str(exc)}, None
+    except Exception as exc:                 # HID or read failure: said, never claimed as done
+        return {"ok": False, "message": f"Could not change {what}: {exc}"}, None
+
+
 def _output_write_gate():
     """Master/global output writes: multitrack, monitor and BT auto-mute, headphone type, master
     Compellor, output delay. All are global named-property writes at fixed selectors
@@ -7858,10 +8357,14 @@ def _max_user_pads() -> int:
 def matrix_model() -> dict:
     """Static layout of the output mix matrix for the UI, for the CONNECTED device."""
     m = _active_matrix()
-    outputs = m.outputs or devices.PRO2.matrix.outputs
-    sources = (m.sources_for(channels.usb_expanded())
-               or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
-    read_only = _matrix_write_gate() is not None
+    if devices.get_active_device().layout_required:
+        # A desk whose geometry comes from its own tree is never labelled with Pro II outputs.
+        outputs, sources = m.outputs, m.sources_for(channels.usb_expanded())
+    else:
+        outputs = m.outputs or devices.PRO2.matrix.outputs
+        sources = (m.sources_for(channels.usb_expanded())
+                   or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
+    read_only = _routing_write_gate() is not None
     # This note IS rendered (app.js buildMatrix overwrites the static hint with it), so the
     # read-only variant actually reaches the Duo instead of the page promising writes it cannot do.
     # ONE LINE. Do not explain Main Mix, Mix Minus and Custom here, and do not claim the source list
@@ -7873,6 +8376,10 @@ def matrix_model() -> dict:
         note = ("This shows each output's live mix on this device. Changing the mix is not "
                 "enabled here yet, so these controls are read-only.")
     return {
+        # Set when "Reset all output mixes" is refused on this desk, with the sentence; the page
+        # disables that button with it. No desk refuses it today (the layout desk takes it since its
+        # outputs follow the Pro II order), so this is None; the key stays for the page.
+        "reset_refused": None,
         "outputs": [{"key": o["key"], "index": o["index"], "label": o["label"],
                      "modes": [[0, "Main Mix"]] + ([[1, "Mix Minus"]] if o["mixminus"] else [])
                               + [[2, "Custom"]]}
@@ -7884,7 +8391,7 @@ def matrix_model() -> dict:
 
 
 def action_set_output_mode(output_index: int, mode: int) -> dict:
-    gate = _matrix_write_gate()
+    gate = _routing_write_gate()
     if gate is not None:
         return gate
     out = _matrix_output(output_index)
@@ -7892,6 +8399,12 @@ def action_set_output_mode(output_index: int, mode: int) -> dict:
         return {"ok": False, "message": f"Output {output_index} is not valid."}
     if mode not in OUTPUT_MODE_LABEL:
         return {"ok": False, "message": f"Mode {mode} is not valid."}
+    if _layout_routing():
+        refused, _n = _layout_routing_call(layout_routing.set_output_mode, output_index, mode)
+        if refused:
+            return refused
+        return {"ok": True,
+                "message": f"{out['label']} output set to {OUTPUT_MODE_LABEL[mode]}."}
     with _hid_lock:
         rcp_transfer.set_output_routing(output_index, mode)
     return {"ok": True, "message": f"{out['label']} output set to {OUTPUT_MODE_LABEL[mode]}."}
@@ -7900,14 +8413,20 @@ def action_set_output_mode(output_index: int, mode: int) -> dict:
 def action_set_cross_point(output_index: int, source_index: int, excluded: bool) -> dict:
     """Exclude/include one source in one output's Custom mix. The output should be in
     Custom mode first (use the mode control)."""
-    gate = _matrix_write_gate()
+    gate = _routing_write_gate()
     if gate is not None:
         return gate
-    try:
-        with _hid_lock:
-            rcp_transfer.set_cross_point_excluded(output_index, source_index, excluded)
-    except ValueError as exc:
-        return {"ok": False, "message": str(exc)}
+    if _layout_routing():
+        refused, _n = _layout_routing_call(layout_routing.set_cross_point_excluded,
+                                           output_index, source_index, bool(excluded))
+        if refused:
+            return refused
+    else:
+        try:
+            with _hid_lock:
+                rcp_transfer.set_cross_point_excluded(output_index, source_index, excluded)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
     out = _matrix_output(output_index)
     src = _matrix_source(source_index)
     out_lab = out["label"] if out else "output"
@@ -7950,7 +8469,10 @@ def read_matrix_live() -> dict:
 def _apply_scheme(scheme: dict, label: str) -> dict:
     """Gate, lock, write, and say what happened in one sentence. Shared by every entry point: the
     dropdown, the built-ins and the "Reset all output mixes" button."""
-    gate = _matrix_write_gate()
+    # "matrix_write" on the Pro II and the Duo, exactly as before; a layout desk's "routing_write",
+    # where routing_schemes.apply writes each output through layout_routing.apply_output (the
+    # proven record forms, checked as a batch per output and confirmed after).
+    gate = _routing_write_gate()
     if gate is not None:
         return gate
     try:
@@ -7977,6 +8499,8 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
     if res["failed"]:
         msg += (f" {wording.count(res['failed'], 'write')} failed, so check the mix before you go "
                 f"on air.")
+        if res.get("errors"):                   # a layout desk says which output and why
+            msg += " " + " ".join(res["errors"][:3])
     return {"ok": res["ok"], "message": msg, "outputs": outs, "skipped": res["skipped"],
             "failed": res["failed"]}
 
@@ -7988,7 +8512,7 @@ def read_routing_schemes() -> dict:
     applied, without a second round trip. A saved scheme's description is worked out from the file
     (routing_schemes.describe) rather than stored in it, so it can never describe a desk it no
     longer matches."""
-    read_only = _matrix_write_gate() is not None
+    read_only = _routing_write_gate() is not None
     # Read once for the whole list: the source count in every description is against the rows the
     # grid is showing right now, and the mode cannot change mid-loop in any way that matters.
     expanded = channels.usb_expanded()
@@ -8591,6 +9115,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
 
     An export is taken before the reset as the undo, for the reason action_show_reset gives.
     """
+    active = devices.get_active_device()
     loaded = profiles.load(name)
     if not loaded.get("ok"):
         return loaded
@@ -8599,9 +9124,15 @@ def restore_profile(name: str, clean: bool = False) -> dict:
     # on; its fader vector, matrix shape and channel set are device-specific, so applying a Pro II
     # profile to a Duo (or vice versa) would mis-write. Older profiles carry no product id (all saved
     # on the Pro II historically) - those are allowed, with the per-write guards still protecting.
+    # A LAYOUT desk takes only a profile saved from a layout desk (0x0092 and 0x0094 are the same
+    # unit in two USB modes), never an id-less one: a Pro II profile would be read as this desk's.
     saved_pid = prof.get("product_id")
-    active = devices.get_active_device()
-    if saved_pid is not None and saved_pid != active.product_id:
+    if active.layout_required:
+        if saved_pid not in devices.LAYOUT_PIDS:
+            return {"ok": False,
+                    "message": (f"This profile was not saved from the {active.name}, so it is not "
+                                f"restored onto it. Profiles are device-specific.")}
+    elif saved_pid is not None and saved_pid != active.product_id:
         saved_name = prof.get("device_name") or devices.resolve_device(saved_pid).name
         return {"ok": False,
                 "message": (f"This profile was saved from a {saved_name}, but a {active.name} is "
@@ -8654,7 +9185,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 try:
                     blob0 = rcp_read.read_model()
                     vec_before = _read_fader_vector(blob0, spec)
-                    levels_before = rcp_read.values(blob0, "faderLevel")
+                    levels_before = rcp_read.physical_values(blob0, "FADER", "faderLevel")
                 except Exception:
                     vec_before = levels_before = None
             res = profiles.apply(prof, fader_count=_active_faders().vector_length,
@@ -8677,7 +9208,13 @@ def restore_profile(name: str, clean: bool = False) -> dict:
             mx_res = _apply_matrix(prof.get("routing") or {})
         pad_res = None
         pad_tidy = None
-        if pad_list:
+        pads_note = ""
+        if pad_list and active.layout_required:
+            # SMART pads are not written on a layout desk: a pad restore needs transfer mode and the
+            # pad grid's stream positions, neither measured there (soundpad "pad_write" is absent).
+            pads_note = (f" The profile's {len(pad_list)} SMART pads were not restored: changing "
+                         f"pads is not enabled on the {active.name} yet.")
+        elif pad_list:
             job.step("Restoring SMART pads...")
             with _hid_lock:
                 # ONE TRANSFER SESSION FOR THE WHOLE PAD RESTORE. Without it each create enters
@@ -8723,9 +9260,10 @@ def restore_profile(name: str, clean: bool = False) -> dict:
             msg += " " + pad_tidy["message"]
         if healed and healed.get("message"):
             msg += " " + healed["message"]
+        msg += pads_note
         return {"ok": True, "message": msg}
 
-    return _restore_job.start(_work, total=len(pad_list),
+    return _restore_job.start(_work, total=0 if active.layout_required else len(pad_list),
                               message=("Backing the desk up before resetting it..." if clean
                                        else "Applying settings, please wait."),
                               started="Restoring the profile.")
@@ -9223,7 +9761,7 @@ def _restore_silence_warnings(prof, blob) -> list:
         want = routing.get("faders")
         want_levels = routing.get("fader_levels")
         now_vec = _read_fader_vector(blob, spec)
-        now_levels = rcp_read.values(blob, "faderLevel")
+        now_levels = rcp_read.physical_values(blob, "FADER", "faderLevel")
 
         def level_of(i, table):
             return table[i] if table and i < len(table) and isinstance(table[i], int) else None
@@ -10156,7 +10694,7 @@ def _hk_mics() -> str:
             with _hid_lock:
                 blob = rcp_read.read_model_stable()
             muted_now = {i: bool(v) for i, v
-                         in enumerate(v for v in rcp_read.values(blob, "channelOutputMute"))}
+                         in enumerate(v for v in channels.strip_values(blob, "channelOutputMute"))}
         except Exception as exc:
             return f"Could not read the mics: {exc}"
     open_mics = [c for c in mics

@@ -211,10 +211,51 @@ def build_channel_prop_bool(name: str, on: bool, chan_sel: int,
     return build_path_prop_bool(name, on, [(chan_sel & 0xFF) | ((trailer & 0xFF) << 8)])
 
 
+# ---- ONE HELPER, TWO KINDS OF DESK -----------------------------------------------------------
+# Every settings helper below names its block TWICE: the Pro II selector constant it has always
+# used, and the block's NAME. On the Pro II and the Duo `_block_sel` returns the constant and
+# `_send_setting` is send_record, so their bytes are exactly what they always were. On a LAYOUT desk
+# (PID 0x0092 / 0x0094) the selector is that block's root index read off the desk's own dump
+# (devices.layout_block_selector), and the record goes through layout_tree.write_records: the
+# generalised gate, the property already on that block in a fresh dump, confirmed after.
+
+def _layout_desk() -> bool:
+    return devices.get_active_device().layout_required
+
+
+def _block_sel(pro2_sel: int, block: str, instance: int = 0) -> int:
+    """`pro2_sel` on the Pro II and the Duo; this desk's own `block` root index on a layout desk."""
+    dev = devices.get_active_device()
+    if not dev.layout_required:
+        return pro2_sel
+    if dev.layout is None:
+        import rcp_read                # local: read one dump (read only) so the layout is known
+        dev = rcp_read.device_for_read()
+    return devices.layout_block_selector(dev, block, instance)
+
+
+def _send_setting(*recs: bytes) -> int:
+    """send_record for each record on the Pro II and the Duo (unchanged); on a layout desk the
+    whole set checked, sent and confirmed as one (layout_tree.write_records)."""
+    if _layout_desk():
+        import layout_tree             # local: layout_tree imports this module at its top
+        return layout_tree.write_records(list(recs))
+    n = 0
+    for rec in recs:
+        n += send_record(rec)
+    return n
+
+
 def set_midi_control(on: bool) -> int:
     """Enable/disable bi-directional MIDI control (the RODE app's Device Config > System > MIDI).
-    A direct global property; no Transfer Mode needed."""
-    return send_record(build_global_prop_bool("systemMidiControl", on))
+    A direct global property; no Transfer Mode needed.
+
+    On a layout desk it goes to that desk's SYSTEM block through the generalised gate. NOTE: the
+    PID 0x0092 dump carries systemMidiControl as an INT, not the compact bool this record is, so
+    the gate refuses it there until the form the desk takes is measured.
+    """
+    return _send_setting(build_global_prop_bool("systemMidiControl", on,
+                                                _block_sel(SEL_SYSTEM, "SYSTEM")))
 
 
 # ----------------------------------------------------------------------------
@@ -235,7 +276,14 @@ RECORDING_FORMATS = {0: "WAV", 1: "MP3"}
 
 
 def set_output_routing(output_index: int, mode: int) -> int:
-    """outputMixMinus for one output: 0=Main Mix, 1=Mix-Minus, 2=Custom."""
+    """outputMixMinus for one output: 0=Main Mix, 1=Mix-Minus, 2=Custom.
+
+    A LAYOUT desk writes its own MIXMINUSES run through layout_routing.set_output_mode (checked,
+    confirmed), so every caller - mix presets, auto gain's Chat isolation, a profile - works there."""
+    if _layout_desk():
+        import layout_routing          # local: layout_routing imports this module at its top
+        return layout_routing.set_output_mode(int(output_index), int(mode))
+    devices.require_writable(what="Output mix mode")
     return send_record(build_global_prop_int(
         "outputMixMinus", SEL_OUTPUT_MIXMINUS_BASE + output_index, mode))
 
@@ -279,7 +327,14 @@ def cross_point_selector(output_index: int, source_index: int) -> int:
     IT IS AN INDEX, NOT A BYTE: Virtual A (source 14) lands at 258 and Virtual B at 271, and
     `build_address` encodes those as a two-byte index exactly as the desk does on the push side.
     The ceiling here is the address format's own (an index wider than two bytes is not a MIX node,
-    it is a bad sum); WHICH indices the connected desk exposes is `_check_cross_point`'s job."""
+    it is a bad sum); WHICH indices the connected desk exposes is `_check_cross_point`'s job.
+
+    PRO II / DUO ONLY. On a layout desk (PID 0x0092) CROSS_POINT_BASE names ANOTHER CELL of the same
+    MIX run (0x4C is cell 21 there), which the send layer would accept as a cross-point - so it
+    refuses there; that desk's cells come from layout_routing.cell_path."""
+    if devices.get_active_device().layout_required:
+        raise devices.WriteRefused("The Pro II cross-point address is not this desk's: its output "
+                                   "mixes are written through their own checked path.")
     sel = (CROSS_POINT_BASE
            + CROSS_POINT_SOURCE_STRIDE * source_index
            + CROSS_POINT_OUTPUT_STRIDE * output_index)
@@ -297,8 +352,11 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
     THE EXPANDED FOUR COUNT AS EXPOSED IN BOTH MODES, because the grid carries all 30 source rows
     on the wire whichever mode the desk is in: rows 12 to 15 are ordinary MIX nodes that the read
     path already walks and gets values from. Whether to OFFER them is a UI question, answered by
-    `MatrixSpec.sources_for`; this guard is about whether the node exists."""
-    dev = devices.get_active_device()
+    `MatrixSpec.sources_for`; this guard is about whether the node exists.
+
+    It also refuses outright (devices.WriteRefused) on a desk that may not be written to: the
+    selector is built on the Pro II's CROSS_POINT_BASE, which is a different node there."""
+    dev = devices.require_writable(what="Routing")
     valid_outputs = {o["index"] for o in dev.matrix.outputs}
     valid_sources = set(dev.matrix.all_source_indices)
     if output_index not in valid_outputs:
@@ -336,7 +394,14 @@ def set_cross_point_excluded(output_index: int, source_index: int, excluded: boo
 
     The output must already be in Custom mode (set_output_routing(o, 2)). Sends the matching
     link/unlink request then mixDisabled, both on the cross-point selector. Returns total bytes
-    written; read mixDisabled back to confirm."""
+    written; read mixDisabled back to confirm.
+
+    A LAYOUT desk: layout_routing.set_cross_point_excluded, the same two records at its own main
+    MIX run, checked before and confirmed after."""
+    if _layout_desk():
+        import layout_routing          # local: see set_output_routing
+        return layout_routing.set_cross_point_excluded(int(output_index), int(source_index),
+                                                       bool(excluded))
     _check_cross_point(output_index, source_index, allow_inferred)
     sel = cross_point_selector(output_index, source_index)
     n = send_record(build_mix_link_request(sel, link=not excluded))
@@ -366,7 +431,14 @@ def set_cross_point_level(output_index: int, source_index: int, level: float,
                           allow_inferred: bool = False) -> int:
     """Set one cross-point's level (0..1). The output must be in Custom mode and the cross-point
     UNLINKED (a linked one follows the channel fader); set_cross_point_excluded(..., False) leaves
-    it linked, so call set_cross_point_linked(..., False) first."""
+    it linked, so call set_cross_point_linked(..., False) first.
+
+    A LAYOUT desk: layout_routing.set_cross_point_level, which puts the output on Custom and sends
+    the unlink request itself, then confirms the level."""
+    if _layout_desk():
+        import layout_routing          # local: see set_output_routing
+        return layout_routing.set_cross_point_level(int(output_index), int(source_index),
+                                                    float(level))
     _check_cross_point(output_index, source_index, allow_inferred)
     sel = cross_point_selector(output_index, source_index)
     return send_record(build_cross_point_level(sel, level))
@@ -387,9 +459,22 @@ def set_fader_source(fader_index: int, source_code: int) -> int:
     The bound is the connected device's fader VECTOR LENGTH (Pro II 9, Duo 10), NOT its exposed
     fader `count`. The two differ only on the Duo, which exposes 9 faders but whose factory default
     layout occupies all ten slots, so the fader reset and a profile restore both walk index 9.
-    Writing slot 9 is proven safe on hardware (set, vacate and restore, byte-clean)."""
+    Writing slot 9 is proven safe on hardware (set, vacate and restore, byte-clean).
+
+    Refuses (devices.WriteRefused) on a desk that may not be written to, before anything else:
+    FADER_SELECTOR_BASE is the Pro II's CHANNEL base.
+
+    A LAYOUT desk (PID 0x0092) never uses that base: its strips are its own CHANNEL run, and the
+    write goes through channels.set_layout_faders, which checks the strip and code, confirms the
+    whole vector afterwards and treats `fader_index` as the fader the user chose.
+    """
+    if devices.get_active_device().layout_required:
+        import channels                # local: channels imports this module at its top
+        return channels.set_layout_faders({int(fader_index): int(source_code)},
+                                          chosen=int(fader_index))
+    dev = devices.require_writable(what="Fader assignment")
     try:
-        count = devices.get_active_device().fader.vector_length
+        count = dev.fader.vector_length
     except Exception:
         count = FADER_COUNT
     if not 0 <= fader_index < count:
@@ -399,9 +484,9 @@ def set_fader_source(fader_index: int, source_code: int) -> int:
 
 
 def set_multitrack_mode(mode: int) -> int:
-    """recordingMultitrackMode: 0=Off, 1=Pre-Fader, 2=Post-Fader."""
-    return send_record(build_global_prop_int(
-        "recordingMultitrackMode", SEL_OUTPUT_GLOBAL, mode))
+    """recordingMultitrackMode: 0=Off, 1=Pre-Fader, 2=Post-Fader. OUTPUT block (see _block_sel)."""
+    return _send_setting(build_global_prop_int(
+        "recordingMultitrackMode", _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT"), mode))
 
 
 def set_recording_format(value: int) -> int:
@@ -413,8 +498,8 @@ def set_recording_format(value: int) -> int:
     """
     if value not in RECORDING_FORMATS:
         raise ValueError(f"recording format must be 0 (WAV) or 1 (MP3), got {value}")
-    return send_record(build_global_prop_int(
-        "recordingCompressionQuality", SEL_OUTPUT_GLOBAL, int(value)))
+    return _send_setting(build_global_prop_int(
+        "recordingCompressionQuality", _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT"), int(value)))
 
 
 def set_recording_processing_bypass(on: bool) -> int:
@@ -422,7 +507,8 @@ def set_recording_processing_bypass(on: bool) -> int:
 
     It applies to MULTITRACK ONLY, and the mixed track always carries the processing (RODE's guide
     says both), so with multitrack Off this setting changes nothing you can hear."""
-    return send_record(build_global_prop_bool("recordingProcessingBypass", on, SEL_OUTPUT_GLOBAL))
+    return _send_setting(build_global_prop_bool("recordingProcessingBypass", on,
+                                                _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT")))
 
 
 def set_usb_multitrack_mode(mode: int) -> int:
@@ -452,15 +538,18 @@ def set_usb_multitrack_bypass(on: bool) -> int:
     """outputMultiBypass: the USB stream's half of the processing bypass, exactly as
     `set_recording_processing_bypass` is the recorder's. Separate tracks only; the mix pair the
     desk sends on channels 1 and 2 keeps its processing either way."""
-    return send_record(build_global_prop_bool("outputMultiBypass", on, SEL_OUTPUT_GLOBAL))
+    return _send_setting(build_global_prop_bool("outputMultiBypass", on,
+                                                _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT")))
 
 
 def set_monitor_auto_mute(on: bool) -> int:
-    return send_record(build_global_prop_bool("outputMonAutoMute", on, SEL_OUTPUT_GLOBAL))
+    return _send_setting(build_global_prop_bool("outputMonAutoMute", on,
+                                                _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT")))
 
 
 def set_bt_auto_mute(on: bool) -> int:
-    return send_record(build_global_prop_bool("outputBTAutoMute", on, SEL_OUTPUT_GLOBAL))
+    return _send_setting(build_global_prop_bool("outputBTAutoMute", on,
+                                                _block_sel(SEL_OUTPUT_GLOBAL, "OUTPUT")))
 
 
 SEL_MASTER_PROC = 0x0E              # master output-processing block (the Compellor, output delay)
@@ -469,7 +558,8 @@ SEL_MASTER_PROC = 0x0E              # master output-processing block (the Compel
 def set_master_compellor(on: bool) -> int:
     """Toggle the master output Compellor (the output compressor / leveler). Speech that pumps up
     and down is the pad AUTODUCK, not this."""
-    return send_record(build_global_prop_bool("masterCompellorOn", on, SEL_MASTER_PROC))
+    return _send_setting(build_global_prop_bool("masterCompellorOn", on,
+                                                _block_sel(SEL_MASTER_PROC, "MASTERCHANNEL")))
 
 
 # Master Compellor PARAMS - NORMALISED 0..1 floats on the master block 0x0E (the UI shows dB/ms but
@@ -486,17 +576,20 @@ def set_master_compellor_param(param: str, value01: float) -> int:
     prop = MASTER_COMPELLOR_PARAM.get(param)
     if prop is None:
         raise ValueError(f"unknown compellor param {param!r}; known: {list(MASTER_COMPELLOR_PARAM)}")
-    return send_record(build_global_prop_float(prop, SEL_MASTER_PROC, max(0.0, min(1.0, float(value01)))))
+    return _send_setting(build_global_prop_float(prop, _block_sel(SEL_MASTER_PROC, "MASTERCHANNEL"),
+                                                 max(0.0, min(1.0, float(value01)))))
 
 
 def set_output_delay(on: bool, seconds: float | None = None) -> int:
     """Output Delay (A/V sync for livestreaming): masterDelayOn, then masterDelaySeconds (float
-    SECONDS, 0..2.0) if `seconds` is given, both on the master block 0x0E."""
-    n = send_record(build_global_prop_bool("masterDelayOn", on, SEL_MASTER_PROC))
+    SECONDS, 0..2.0) if `seconds` is given, both on the master block 0x0E.
+    On a layout desk both go to its MASTERCHANNEL block as one checked, confirmed pair."""
+    sel = _block_sel(SEL_MASTER_PROC, "MASTERCHANNEL")
+    recs = [build_global_prop_bool("masterDelayOn", on, sel)]
     if seconds is not None:
-        n += send_record(build_global_prop_float("masterDelaySeconds", SEL_MASTER_PROC,
-                                                 max(0.0, min(2.0, float(seconds)))))
-    return n
+        recs.append(build_global_prop_float("masterDelaySeconds", sel,
+                                            max(0.0, min(2.0, float(seconds)))))
+    return _send_setting(*recs)
 
 
 # ----------------------------------------------------------------------------
@@ -531,15 +624,18 @@ def set_monitor_level(level01: float) -> int:
     """Set the monitor speaker level, 0.0..1.0 (outputMonLevel), the property the desk's own
     encoder writes."""
     v = max(0.0, min(1.0, float(level01)))
-    return send_record(build_global_prop_float("outputMonLevel", SEL_MONITOR_LEVEL, v))
+    return _send_setting(build_global_prop_float("outputMonLevel",
+                                                 _block_sel(SEL_MONITOR_LEVEL, "OUTPUT"), v))
 
 
 def set_headphone_type(value: int, selector: int = SEL_HEADPHONE_TYPE) -> int:
     """headphoneType amp profile: 0=NTH-100, 1=High Sensitivity (louder), 2=Low Sensitivity.
     `selector` picks the headphone output: 0x09=Headphone 1 (default), 0x0A=Headphone 2. The server
     resolves the selector from the active device's HeadphoneTypeSpec, so callers never pass an
-    unmapped selector here."""
-    return send_record(build_global_prop_int("headphoneType", selector, value))
+    unmapped selector here. On a layout desk that spec already holds the desk's own HEADPHONE run
+    (0x07..0x0A on PID 0x0092), and the write is checked and confirmed (narrow cap
+    "headphone_write")."""
+    return _send_setting(build_global_prop_int("headphoneType", selector, value))
 
 
 # ----------------------------------------------------------------------------
@@ -607,12 +703,19 @@ def set_unit_setting(prop: str, value) -> int:
     if entry is None:
         raise ValueError(f"unknown unit setting {prop!r}; known: {sorted(UNIT_SETTING_SEL)}")
     selector, kind = entry
+    # A layout desk: the same block BY NAME in its own dump (GUI 0x05, OUTPUT 0x0B, SYSTEM 0x0D on
+    # PID 0x0092), through the generalised gate.
+    selector = _block_sel(selector, _UNIT_SETTING_BLOCK[selector])
     if kind == "bool":
-        return send_record(build_global_prop_bool(prop, bool(value), selector))
+        return _send_setting(build_global_prop_bool(prop, bool(value), selector))
     if kind == "float":
-        return send_record(build_global_prop_float(
+        return _send_setting(build_global_prop_float(
             prop, selector, max(0.0, min(1.0, float(value)))))
-    return send_record(build_global_prop_int(prop, selector, int(value)))
+    return _send_setting(build_global_prop_int(prop, selector, int(value)))
+
+
+# The block each unit-setting selector names (the Pro II constant -> the block's name).
+_UNIT_SETTING_BLOCK = {SEL_OUTPUT_GLOBAL: "OUTPUT", SEL_GUI: "GUI", SEL_SYSTEM: "SYSTEM"}
 
 
 # ---- THE SEND LAYER --------------------------------------------------------
@@ -624,6 +727,15 @@ def _write_records(records, purpose: str, delay: float = 0.0) -> int:
     iface = find_control_interface()
     if iface is None:
         raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
+    # THE LAST LINE OF DEFENCE, every record checked before the handle opens: a desk whose product
+    # id is not one of the static desks in devices.DEVICES is refused (devices.WriteRefused)
+    # whatever the caller computed, because every address in this file is a Pro II / Duo root
+    # index and means a different node on any other tree. The one exception is a layout desk's
+    # narrow write sets and generalised gate (devices.layout_write_ok), each judged from the record
+    # itself: its address, name, type and value.
+    records = list(records)
+    for r in records or [None]:
+        devices.refuse_unproven_pid(iface.product_id, r)
     dev = rcp_hid.open_handle(iface, purpose)
     n = 0
     try:
@@ -874,7 +986,19 @@ def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0)
 
 
 def _selftest() -> None:
-    """Prove the builders reproduce the RODE app's captured bytes, no hardware."""
+    """Prove the builders reproduce the RODE app's captured bytes, no hardware.
+
+    The captures are a Pro II's, so the builders are asked as of a Pro II whatever is plugged in:
+    on a layout desk (PID 0x0092) cross_point_selector refuses, because it is not that desk's
+    address."""
+    prev = devices.force_device(devices.PRO2)
+    try:
+        _selftest_pro2()
+    finally:
+        devices.force_device(prev)
+
+
+def _selftest_pro2() -> None:
     # padFilePath assignment, sound4.pcap frame 167 (pad 2 -> sound.wav).
     expected = bytes.fromhex(
         "033f000000010102029a02010170616446696c6550617468000129052f4170706c"

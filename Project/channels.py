@@ -38,8 +38,13 @@ def _mic_path(channel: int) -> list:
     Raises a clear error if this desk's input-mic writes are not enabled, so the app disables the
     control rather than writing to an address nothing has confirmed.
     """
+    return _mic_target(channel)[1]
+
+
+def _mic_target(channel: int):
+    """(device, tree path) for a 1-based mic channel, resolving the device ONCE. See _mic_path."""
     dev = devices.get_active_device()
-    if "input_mic_write" not in dev.caps:
+    if "input_mic_write" not in dev.caps and "input_write" not in dev.caps:
         raise RuntimeError(
             f"Input-mic controls (gain/phantom/type/polarity) are not supported on the "
             f"{dev.name} yet - its write format has not been decoded.")
@@ -47,7 +52,7 @@ def _mic_path(channel: int) -> list:
                if c.get("kind") == "mic" and int(c["source_code"]) + 1 == channel), None)
     if ch is None:
         raise ValueError(f"mic channel {channel} out of range for the {dev.name}")
-    return dev.input_path(ch)
+    return dev, dev.input_path(ch)
 
 
 # Mic input type / voicing: inputMicrophoneType (int), at the same address as the gain. All 11
@@ -99,7 +104,10 @@ CHANNEL_PROP = {
 def set_mic_gain(channel: int, db: int) -> int:
     """Set a mic channel's input gain in dB (app: Audio Setup > channel gear > Level). channel 1-4
     (Pro II) / 1-2 (Duo). Decoded property 'inputMicrophoneGain'. Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_int("inputMicrophoneGain", db, _mic_path(channel)))
+    dev, path = _mic_target(channel)
+    if dev.layout_required:
+        return _layout_input_write(dev, path, "inputMicrophoneGain", int(db))
+    return _t.send_record(_t.build_path_prop_int("inputMicrophoneGain", db, path))
 
 
 def mic_gain(blob: bytes, channel: int):
@@ -120,13 +128,19 @@ def mic_gain(blob: bytes, channel: int):
 def set_phantom(channel: int, on: bool) -> int:
     """Enable/disable 48V phantom power (P48) on a mic channel. Property 'inputPower'
     (int 1=on, 0=off). Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_int("inputPower", 1 if on else 0, _mic_path(channel)))
+    dev, path = _mic_target(channel)
+    if dev.layout_required:
+        return _layout_input_write(dev, path, "inputPower", 1 if on else 0)
+    return _t.send_record(_t.build_path_prop_int("inputPower", 1 if on else 0, path))
 
 
 def set_polarity(channel: int, invert: bool) -> int:
     """Invert (flip) a mic channel's polarity/phase. Property 'inputPhaseFlip' (compact bool).
     Uses the INPUT selector like gain/P48 - WRITE-VERIFIED via read-back. Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_bool("inputPhaseFlip", invert, _mic_path(channel)))
+    dev, path = _mic_target(channel)
+    if dev.layout_required:
+        return _layout_input_write(dev, path, "inputPhaseFlip", bool(invert))
+    return _t.send_record(_t.build_path_prop_bool("inputPhaseFlip", invert, path))
 
 
 def set_mic_type(channel: int, type_value: int) -> int:
@@ -142,12 +156,24 @@ def set_mic_type(channel: int, type_value: int) -> int:
 
     Line-in and Instrument are the two that leave the gain alone - they are not microphone voicings.
     Instrument instead sets inputInstrumentGain to 20 and leaves it there when you move off it."""
-    return _t.send_record(_t.build_path_prop_int("inputMicrophoneType", type_value, _mic_path(channel)))
+    dev, path = _mic_target(channel)
+    if dev.layout_required:
+        # Checked and confirmed like every layout input write. Only the TYPE is confirmed: the gain
+        # and chain the desk applies with a voicing are the desk's own doing, read back by the caller.
+        return _layout_input_write(dev, path, "inputMicrophoneType", int(type_value))
+    return _t.send_record(_t.build_path_prop_int("inputMicrophoneType", type_value, path))
 
 
 def set_instrument_gain(channel: int, value: int) -> int:
-    """Instrument-input gain on a mic/combo channel (property 'inputInstrumentGain')."""
-    return _t.send_record(_t.build_path_prop_int("inputInstrumentGain", int(value), _mic_path(channel)))
+    """Instrument-input gain on a mic/combo channel (property 'inputInstrumentGain').
+
+    A layout desk: its own INPUTSOURCE node for that mic, through the generalised gate (the name
+    must already sit there as an int in its dump), checked before and confirmed after."""
+    dev, path = _mic_target(channel)
+    if dev.layout_required:
+        return _layout_write(dev, path, "inputInstrumentGain", int(value), "int", "INPUTSOURCE",
+                             devices.layout_write_ok)
+    return _t.send_record(_t.build_path_prop_int("inputInstrumentGain", int(value), path))
 
 
 # ============================================================================
@@ -265,12 +291,32 @@ def invalidate_strip_vector() -> None:
     _strip_vec["at"] = 0.0
 
 
+def strip_values(blob: bytes, prop: str, kind: str | None = None, dev=None) -> list:
+    """`prop` per fader STRIP, index = strip: THE per-strip read (channelInputSource, the mutes, the
+    solos, the processing arrays).
+
+    On the Pro II and the Duo this is exactly `rcp_read.values` - every occurrence in dump order,
+    which on those desks is strip order. On a desk whose geometry comes from its own tree
+    (DeviceModel.layout_required) it is an ADDRESSED read of the main CHANNEL run, one entry per
+    strip, because that tree carries a later CHANNEL block that a positional read would append.
+    A property that is not on the CHANNEL blocks (the echo/reverb effects) reads None there, since
+    which effects block belongs to which strip is not known on such a desk. [] when the desk's
+    layout is not known at all."""
+    dev = dev or devices.get_active_device()
+    if not dev.layout_required:
+        return _r.values(blob, prop, kind)
+    run = dev.layout.run("CHANNEL") if dev.layout is not None else None
+    if run is None:
+        return []
+    return _r.run_values(blob, run.base, run.count, prop, kind, block="CHANNEL")
+
+
 def strip_vector() -> list:
     """The live channelInputSource vector (position = strip/fader, value = source code)."""
     vec = _strip_vec["vec"]
     if vec is not None and (_time.time() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
         return vec
-    vec = [v for v in _r.values(_r.read_model(), "channelInputSource")]
+    vec = [v for v in strip_values(_r.read_model(), "channelInputSource")]
     publish_strip_vector(vec)
     return vec
 
@@ -301,12 +347,12 @@ def _strip_index(entry) -> int:
             f"processing/effects cannot be addressed - assign it to a fader first.")
 
 
-def _channel_strip(channel) -> int:
+def _channel_strip(channel, dev=None) -> int:
     """Resolve any channel identifier to its device strip index.
 
     A channel the connected desk does not carry REFUSES. There is no fixed fallback strip: Mic 3 in
     a Pro II profile restored onto a Duo would otherwise land on Duo strip 2, which holds Bluetooth."""
-    dev = devices.get_active_device()
+    dev = dev or devices.get_active_device()
     entry = _ui_entry_for(dev, channel)
     if entry is None:
         raise ValueError(f"the {dev.name} has no channel {channel!r} right now")
@@ -319,14 +365,21 @@ def proc_selector(channel) -> int:
     `channel` may be a device ui-channel name ("Mic1", "Bluetooth", "Headset", ...), a 1-based
     PROC_CHANNEL_ORDER index, or a 1-based mic number. The strip is the channel's LIVE fader
     position, matching the read path.
+
+    A WRITE ADDRESS, so it refuses (devices.WriteRefused) on a desk that may not be written to:
+    SEL_CHANNEL_PROC is the Pro II's CHANNEL base, and on a desk whose strips sit elsewhere it names
+    a different node.
     """
-    return SEL_CHANNEL_PROC + _channel_strip(channel)
+    dev = devices.require_writable(what="Channel settings")
+    return SEL_CHANNEL_PROC + _channel_strip(channel, dev)
 
 
 def fx_selector(channel) -> int:
     """Effects selector (SEL_CHANNEL_FX + strip index), using the SAME strip resolution as
-    proc_selector so effects and processing always agree. Confirmed on the Duo: Mic2 -> 0x27."""
-    return SEL_CHANNEL_FX + _channel_strip(channel)
+    proc_selector so effects and processing always agree. Confirmed on the Duo: Mic2 -> 0x27.
+    Refuses like proc_selector on a desk that may not be written to."""
+    dev = devices.require_writable(what="Channel effects")
+    return SEL_CHANNEL_FX + _channel_strip(channel, dev)
 
 
 # Whitelist of processing parameters we have decoded (all float64, normalised 0..1). Only names the RODE
@@ -380,6 +433,8 @@ def set_channel_processing(channel: int, prop: str, value: float) -> int:
     Bluetooth/USB1/Chat/USB2/CallMe1). prop: a name in PRESET_FLOAT_PROPS. value: NORMALISED
     0.0..1.0 (the unit maps it to the real dB/Hz/ms). Each channel has its OWN selector via
     proc_selector; the property name picks the parameter."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, prop, max(0.0, min(1.0, float(value))))
     _require_processing()
     if prop not in PRESET_FLOAT_PROPS:
         raise ValueError(f"unknown/unsupported processing property: {prop}")
@@ -410,7 +465,13 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     land and cannot re-derive them from the VoxLab knobs; then the modules, so a parameter never
     lands on a module that is about to be switched; then the floats; then the preset-name marker
     LAST, because the device blanks it to -1 the moment any parameter is written.
-    Returns total bytes written."""
+    Returns total bytes written.
+
+    A LAYOUT desk: the same records in the same order at the channel's own CHANNEL strip (resolved
+    from the dump, as every layout strip write is), checked as a batch before the first goes out
+    and confirmed in one pass after (layout_tree.write_records)."""
+    if devices.get_active_device().layout_required:
+        return _layout_preset(channel, props, delay)
     _require_processing()
     sel = proc_selector(channel)
     mode, modules, floats, marker = [], [], [], []
@@ -427,6 +488,50 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
         else:
             raise ValueError(f"unsupported preset property: {name}")
     return _t.send_records_paced(mode + modules + floats + marker, delay=delay)
+
+
+def _preset_records(sel: int, props: dict) -> list:
+    """The preset's records in the order apply_processing_preset sends them, at selector `sel`."""
+    mode, modules, floats, marker = [], [], [], []
+    for name, val in props.items():
+        if name == CHAIN_PRESET_MARKER_PROP:
+            marker.append(_t.build_global_prop_int(name, sel, int(val)))
+        elif name == CHAIN_ADVANCED_PROP:
+            mode.append(_t.build_global_prop_bool(name, bool(val), sel))
+        elif name in PROCESSING_MODULE_BOOLS:
+            modules.append(_t.build_global_prop_bool(name, bool(val), sel))
+        elif name in PRESET_FLOAT_PROPS:
+            floats.append(_t.build_global_prop_float(name, sel, max(0.0, min(1.0, float(val)))))
+        else:
+            raise ValueError(f"unsupported preset property: {name}")
+    return mode + modules + floats + marker
+
+
+def _layout_preset(channel, props: dict, delay: float) -> int:
+    """apply_processing_preset on a layout desk (see there)."""
+    import layout_tree                       # local: layout_tree imports channels lazily too
+    dev = devices.get_active_device()
+    entry = _ui_entry_for(dev, channel)
+    if entry is None:
+        raise devices.WriteRefused(f"{channel!r} is not a channel on the {dev.name}.")
+    vec = strip_values(_r.read_model(), "channelInputSource", dev=dev)
+    try:
+        strip = vec.index(entry["source_code"])
+    except ValueError:
+        raise devices.WriteRefused(f"{entry['label']} is not on a fader, so it has no channel "
+                                   f"strip to change.")
+    if dev.proc_sel_base is None or not 0 <= strip < devices.layout_strip_count(dev):
+        raise devices.WriteRefused(f"The {dev.name}'s fader strips are not known yet.")
+    # WHAT IS READ BACK: the mode, the module switches and the three VoxLab knobs always; the other
+    # parameters only for an ADVANCED preset (in simple mode the desk derives them from the knobs,
+    # so a mismatch there is the desk's doing, not a lost write). The name marker is never read
+    # back: the desk blanks it whenever a parameter changes, and it is a label, not sound.
+    confirm = {CHAIN_ADVANCED_PROP, "channelDepth", "channelSparkle", "channelPunch",
+               *PROCESSING_MODULE_BOOLS}
+    if props.get(CHAIN_ADVANCED_PROP):
+        confirm |= {p for p in props if p in PRESET_FLOAT_PROPS}
+    return layout_tree.write_records(_preset_records(dev.proc_sel_base + strip, props), pace=delay,
+                                     confirm_only=confirm)
 
 
 # Per-channel PROCESSING module on/off toggles (compact BOOL on the channel's processing selector).
@@ -457,6 +562,8 @@ def set_channel_advanced(channel: int, on: bool) -> int:
     as any module toggle. Verified on hardware: writing this flips the mode and changes NO
     parameter (the RODE app's "disabling Advanced will reset all parameters" warning is the APP
     clearing them itself, not the firmware)."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, CHAIN_ADVANCED_PROP, bool(on))
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool(CHAIN_ADVANCED_PROP, bool(on),
                                                    proc_selector(channel)))
@@ -464,7 +571,10 @@ def set_channel_advanced(channel: int, on: bool) -> int:
 
 def set_channel_preset_marker(channel: int, index: int) -> int:
     """Set which preset NAME a strip displays (channelCurrentFxPreset; -1 = custom). Write this LAST,
-    after every parameter, or the device will blank it again."""
+    after every parameter, or the device will blank it again. A layout desk: its own CHANNEL strip,
+    through the generalised gate, confirmed."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, CHAIN_PRESET_MARKER_PROP, int(index))
     _require_processing()
     return _t.send_record(_t.build_global_prop_int(CHAIN_PRESET_MARKER_PROP, proc_selector(channel),
                                                   int(index)))
@@ -475,14 +585,16 @@ def set_processing_module(channel: int, module: str, on: bool) -> int:
     Chat/USB2/CallMe1; see proc_selector). `module` is a key in PROCESSING_MODULE_ON (hpf / eq /
     compressor / noiseGate / deesser / aphex / pan / eqHigh / eqMid / eqLow), or the raw <module>On
     property name. Compact bool on the channel's processing selector."""
-    _require_processing()
-    sel = proc_selector(channel)
     prop = PROCESSING_MODULE_ON.get(module)
     if prop is None:
         if module in PROCESSING_MODULE_ON.values():
             prop = module
         else:
             raise ValueError(f"unknown processing module {module!r}; known: {list(PROCESSING_MODULE_ON)}")
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, prop, bool(on))
+    _require_processing()
+    sel = proc_selector(channel)
     return _t.send_record(_t.build_global_prop_bool(prop, on, sel))
 
 
@@ -491,6 +603,8 @@ def set_processing_enabled(channel: int, on: bool) -> int:
     INVERTED: channelBypassProcessing (compact bool) on the channel's processing selector - True =
     bypassed/OFF. So processing ON => channelBypassProcessing False. Do NOT name it
     set_channel_processing: that collides with the float param setter."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, "channelBypassProcessing", not on)
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool("channelBypassProcessing", not on, proc_selector(channel)))
 
@@ -517,6 +631,8 @@ def set_channel_mute(channel, on: bool) -> int:
     follows the channel to whichever fader STRIP it is currently on, exactly as processing does.
     Muting here is the same mute as the desk's button: it silences that channel in every mix, not
     just the monitor."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, MUTE_PROP, bool(on))
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool(MUTE_PROP, bool(on), proc_selector(channel)))
 
@@ -544,6 +660,8 @@ def set_channel_solo(channel, on: bool) -> int:
     STRIP it is currently on. This only changes what you HEAR in the headphones - the mixes, the
     recording and anything being streamed are untouched - which is the opposite of the mute above and
     is worth saying plainly wherever it is offered."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, CUE_PROP, bool(on))
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool(CUE_PROP, bool(on), proc_selector(channel)))
 
@@ -552,7 +670,7 @@ def read_solos(blob: bytes | None = None) -> list:
     """The live solo state of every strip, indexed by STRIP (same indexing as the mute vector)."""
     if blob is None:
         blob = _r.read_model_stable()
-    return _r.values(blob, CUE_PROP)
+    return strip_values(blob, CUE_PROP)
 
 
 def clear_all_solos(blob: bytes | None = None) -> int:
@@ -566,9 +684,20 @@ def clear_all_solos(blob: bytes | None = None) -> int:
     cleared = 0
     for strip, on in enumerate(read_solos(blob)):
         if on:
-            _t.send_record(_t.build_global_prop_bool(CUE_PROP, False, proc_selector_for_strip(strip)))
+            set_strip_toggle(strip, CUE_PROP, False)
             cleared += 1
     return cleared
+
+
+def set_strip_toggle(strip: int, prop: str, on: bool) -> int:
+    """Mute (MUTE_PROP) or solo (CUE_PROP) whatever is on one fader STRIP, addressed by strip.
+
+    The Pro II and the Duo: the one compact bool at SEL_CHANNEL_PROC + strip, byte-for-byte what the
+    by-fader actions have always sent. A layout desk: CHANNEL[strip] of its own main run, checked and
+    confirmed (_layout_strip_write)."""
+    if devices.get_active_device().layout_required:
+        return _layout_strip_write(int(strip), prop, bool(on))
+    return _t.send_record(_t.build_global_prop_bool(prop, bool(on), proc_selector_for_strip(int(strip))))
 
 
 # WIRELESS MIC MUTE. `channelWirelessMute` mutes a RODE wireless transmitter paired to the channel,
@@ -594,7 +723,11 @@ def set_channel_wireless_mute(channel, on: bool) -> int:
     """Mute or unmute a RODE wireless mic paired to a channel, from software.
 
     `channel` is anything proc_selector accepts, so the write follows the channel to whichever fader
-    STRIP it is currently on, exactly as the mute and the solo do."""
+    STRIP it is currently on, exactly as the mute and the solo do. A layout desk: its own CHANNEL
+    strip, through the generalised gate, confirmed (the desk stores it; whether a transmitter obeys
+    is, as on every desk, not something this app can hear)."""
+    if devices.get_active_device().layout_required:
+        return _layout_channel_write(channel, WIRELESS_MUTE_PROP, bool(on))
     _require_processing()
     return _t.send_record(_t.build_global_prop_bool(WIRELESS_MUTE_PROP, bool(on),
                                                     proc_selector(channel)))
@@ -618,6 +751,11 @@ def set_channel_effect(channel: int, effect: str, on: bool) -> int:
     """Enable/disable a per-channel always-on EFFECT (echo / reverb), channel 1-4. Compact bool on the
     channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's LIVE strip index
     (device-aware), so a mic moved off its default fader still hits the right strip."""
+    if devices.get_active_device().layout_required:
+        prop = CHANNEL_FX_ON.get(effect)
+        if prop is None:
+            raise ValueError(f"unknown channel effect {effect!r}; known: {list(CHANNEL_FX_ON)}")
+        return _layout_fx_write(channel, prop, bool(on))
     _require_processing()
     if not 1 <= channel <= 4:
         raise ValueError(f"channel must be 1-4, got {channel}")
@@ -641,6 +779,10 @@ def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
     """Set one channel-effect PARAM (echo*/reverb*) on a mic channel 1-4, value normalised 0..1.
     Global float64 on the channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's
     LIVE strip index (device-aware); byte-for-byte the app's own write."""
+    if devices.get_active_device().layout_required:
+        if param not in _CHANNEL_FX_PARAM_SET:
+            raise ValueError(f"unknown channel-effect param {param!r}")
+        return _layout_fx_write(channel, param, max(0.0, min(1.0, float(value01))))
     _require_processing()
     if not 1 <= channel <= 4:
         raise ValueError(f"channel must be 1-4, got {channel}")
@@ -667,7 +809,7 @@ def set_channel_level(channel_name: str, db: int) -> int:
     """Set a non-mic channel's Level (inputDigitalGain, signed dB int): Bluetooth/USB1/Chat/USB2,
     plus Headset on the Duo. Mic channels use set_mic_gain instead."""
     dev = devices.get_active_device()
-    if "input_mic_write" not in dev.caps:
+    if "input_mic_write" not in dev.caps and "input_write" not in dev.caps:
         raise RuntimeError(
             f"Channel Level (inputDigitalGain) is not supported on the {dev.name} yet - "
             f"its write format has not been decoded.")
@@ -676,7 +818,251 @@ def set_channel_level(channel_name: str, db: int) -> int:
     if ch is None:
         raise ValueError(
             f"set_channel_level only for {line_level_channels(dev)}; got {channel_name!r}")
+    if dev.layout_required:
+        return _layout_input_write(dev, dev.input_path(ch), "inputDigitalGain", int(db))
     return _t.send_record(_t.build_path_prop_int("inputDigitalGain", int(db), dev.input_path(ch)))
+
+
+# ---- INPUT WRITES ON A LAYOUT DESK (PID 0x0092): checked before, confirmed after ---------------
+# The one write family enabled on a desk whose geometry comes from its own tree
+# (devices.LAYOUT_INPUT_WRITES). Three things the Pro II path does not do, because there every
+# address is proven and here it is the first write the unit has had from this app:
+#   * BEFORE: the property must already sit on that INPUTSOURCE node with that type in a current
+#     dump, and phantom must read 0 or 1 there (-1 marks an input with no phantom to switch), so a
+#     write can only ever change an existing value and never append a property;
+#   * the send layer re-checks the finished record (devices.refuse_unproven_pid);
+#   * AFTER: a fresh dump must show the value; if it does not, WriteNotConfirmed says what the
+#     unit reports instead, and the caller tells the user rather than claiming success.
+CONFIRM_TRIES = 4          # fresh dumps to look for the written value in (about 0.4 s each)
+CONFIRM_GAP_S = 0.15
+
+
+class WriteNotConfirmed(RuntimeError):
+    """The record was sent but the unit does not report the value. The message says what it does."""
+
+
+def _confirm_reader():
+    """A fresh dump, for the after-write check. Replaced by the offline tests."""
+    return _r.read_model(fresh=True)
+
+
+def _layout_input_write(dev, path, prop: str, value) -> int:
+    """One INPUTSOURCE write on a layout desk (devices.LAYOUT_INPUT_WRITES), checked and confirmed."""
+    kind = devices.LAYOUT_INPUT_WRITES.get(prop, ("?",))[0]
+    return _layout_write(dev, path, prop, value, kind, "INPUTSOURCE",
+                         devices.layout_input_write_ok)
+
+
+def _layout_write(dev, path, prop: str, value, kind: str, block: str, allowed,
+                  blob=None, extra=None) -> int:
+    """The shape of every write on a layout desk: allow-list, exists-before, confirmed-after.
+
+    `allowed` is the devices check for this family; `block` the node name the address must hold in
+    a current dump; `extra(node, current)` may refuse further (phantom on a line input). `blob` is a
+    dump the caller already read, else the cached one is used."""
+    why = allowed(dev, path, prop, value, kind)
+    if why:
+        raise devices.WriteRefused(why)
+    node = _r.node_at(blob if blob is not None else _r.read_model(), path)
+    found = next(((v, k) for p, v, k in (node.props if node is not None else ()) if p == prop),
+                 None)
+    if node is None or node.name != block or found is None or found[1] != kind:
+        raise devices.WriteRefused(
+            f"The {dev.name} does not show {prop} there, so it is not written.")
+    if extra is not None:
+        extra(node, found[0])
+    if prop == "inputPower" and found[0] not in (0, 1):
+        raise devices.WriteRefused("That input has no phantom power to switch.")
+    if kind == "float":
+        rec = _t.build_global_prop_float(prop, int(path[0]), float(value))
+    elif kind == "bool":
+        rec = _t.build_path_prop_bool(prop, bool(value), path)
+    else:
+        rec = _t.build_path_prop_int(prop, int(value), path)
+    n = _t.send_record(rec)
+    got = None
+    for attempt in range(CONFIRM_TRIES):
+        got = _r.path_value(_confirm_reader(), path, prop, None)
+        if kind == "float":
+            # The desk stores float32: 0.37 reads back as 0.3700000047. Same tolerance the chain
+            # copy uses for "the device's own rounding, not a real change".
+            if isinstance(got, float) and abs(got - float(value)) <= CHAIN_FLOAT_EPS:
+                return n
+        elif got == value and type(got) is type(value):
+            return n
+        if attempt + 1 < CONFIRM_TRIES:
+            _time.sleep(CONFIRM_GAP_S)
+    raise WriteNotConfirmed(
+        f"The {dev.name} did not confirm the change: it still reports "
+        f"{'nothing' if got is None else got} for that setting.")
+
+
+def _layout_fx_write(channel: int, prop: str, value) -> int:
+    """One echo/reverb write on a layout desk (devices.LAYOUT_FX_WRITES): EFFECTS_PARAMETERS at the
+    run base + the channel's CURRENT fader strip, resolved from the same dump the check reads, so a
+    stale strip cache can never aim it at another channel's effects. The block's own effectsIdx
+    must equal that strip. The strip-to-block rule is PROVEN on PID 0x0092 for strip 0 (Mic 1,
+    0x23, heard live); the other strips follow the same rule, unheard."""
+    dev = devices.get_active_device()
+    entry = _ui_entry_for(dev, channel)
+    if entry is None or entry.get("kind") != "mic":
+        raise ValueError(f"Effects are for mic channels; {channel!r} is not one on the {dev.name}.")
+    blob = _r.read_model()
+    vec = strip_values(blob, "channelInputSource", dev=dev)
+    try:
+        strip = vec.index(entry["source_code"])
+    except ValueError:
+        raise devices.WriteRefused(f"{entry['label']} is not on a fader, so it has no effects "
+                                   f"block to write.")
+    kind = devices.LAYOUT_FX_WRITES.get(prop, ("?",))[0]
+
+    def same_strip(node, _current):
+        idx = next((v for p, v, _k in node.props if p == "effectsIdx"), None)
+        if idx != strip:
+            raise devices.WriteRefused(f"The effects block there reads effectsIdx {idx}, not strip "
+                                       f"{strip}, so it is not written.")
+
+    return _layout_write(dev, [dev.fx_sel_base + strip], prop, value, kind, "EFFECTS_PARAMETERS",
+                         devices.layout_fx_write_ok, blob=blob, extra=same_strip)
+
+
+def _value_kind(value) -> str:
+    """The record kind a Python value is written as: bool, int or float."""
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    return "float"
+
+
+def _layout_strip_write(strip: int, prop: str, value, blob=None) -> int:
+    """One per-strip CHANNEL write on a layout desk: CHANNEL[strip] of the main run, the property
+    already there with that type in a current dump, confirmed after. A name in
+    devices.LAYOUT_STRIP_WRITES is judged by that narrow family; any other CHANNEL setting (the
+    preset name marker, the Aphex tunes, the wireless mute) by the generalised gate
+    (devices.layout_write_ok dispatches)."""
+    dev = devices.get_active_device()
+    if dev.proc_sel_base is None:
+        raise devices.WriteRefused(f"The {dev.name}'s fader strips are not known yet.")
+    spec = devices.LAYOUT_STRIP_WRITES.get(prop)
+    kind = spec[0] if spec else _value_kind(value)
+    if prop not in devices.LAYOUT_STRIP_WRITES \
+            and not 0 <= int(strip) < devices.layout_strip_count(dev):
+        raise devices.WriteRefused(f"Fader {int(strip) + 1} is not a strip the {dev.name} may "
+                                   f"write.")
+    return _layout_write(dev, [dev.proc_sel_base + int(strip)], prop, value, kind, "CHANNEL",
+                         devices.layout_write_ok, blob=blob)
+
+
+def _layout_channel_write(channel, prop: str, value) -> int:
+    """A per-strip write for a CHANNEL (name or 1-based number) on a layout desk: its strip is
+    resolved from the same dump the check reads, never from a cached layout, so a fader moved on
+    the desk a moment ago cannot aim a mute or an EQ change at the channel now on that fader."""
+    dev = devices.get_active_device()
+    entry = _ui_entry_for(dev, channel)
+    if entry is None:
+        raise devices.WriteRefused(f"{channel!r} is not a channel on the {dev.name}.")
+    blob = _r.read_model()
+    vec = strip_values(blob, "channelInputSource", dev=dev)
+    try:
+        strip = vec.index(entry["source_code"])
+    except ValueError:
+        raise devices.WriteRefused(f"{entry['label']} is not on a fader, so it has no channel "
+                                   f"strip to change.")
+    return _layout_strip_write(strip, prop, value, blob=blob)
+
+
+def fx_values(blob: bytes, prop: str, kind: str | None = None, dev=None) -> list:
+    """An echo/reverb property per fader STRIP, index = strip. `values()` on the Pro II and the Duo,
+    as always. On a layout desk the EFFECTS_PARAMETERS run by address, one block per strip
+    (devices.layout_fx_strip_count) - the same strip-to-block rule the writes use."""
+    dev = dev or devices.get_active_device()
+    if not dev.layout_required:
+        return _r.values(blob, prop, kind)
+    n = devices.layout_fx_strip_count(dev)
+    if not n or dev.fx_sel_base is None:
+        return []
+    return _r.run_values(blob, dev.fx_sel_base, n, prop, kind, block="EFFECTS_PARAMETERS")
+
+
+# ---- FADER LAYOUT WRITES ON A LAYOUT DESK (PID 0x0092): checked before, confirmed after ----------
+# Which source sits on which fader, the second write family on such a desk (devices.
+# layout_fader_write_ok). Same three layers as the input writes, applied to the WHOLE vector:
+#   * BEFORE: every strip written must be a CHANNEL node of the main run that already carries
+#     channelInputSource as an int in a fresh dump, and the layout the caller planned from must still
+#     be what the desk reports (it can change on the desk at any time, and the desk does not push
+#     back a change made by the host);
+#   * the send layer re-checks each finished record (devices.refuse_unproven_pid);
+#   * AFTER: a fresh dump must show EXACTLY the planned vector on every strip - the strips written
+#     AND every strip not written - or WriteNotConfirmed says what the desk reports instead.
+# A swap is two writes, in strip order, exactly as the Pro II path sends it (server.action_set_fader),
+# and only the final vector is confirmed: in between, the desk briefly holds the moved channel twice.
+# THE MIC 3 + 4 PAIR (devices.LAYOUT_PINNED_CODE) only ever leaves a strip that is `chosen`, the
+# fader the user picked; nothing moves it as a side effect.
+
+def set_layout_faders(changes: dict, chosen: int, planned_from=None) -> int:
+    """Write {strip: source code} on a layout desk, checked and confirmed. Returns bytes sent.
+
+    `chosen` is the strip the user asked for; `planned_from` the vector the change was computed from,
+    refused if the desk no longer reports it. Raises devices.WriteRefused before anything is sent,
+    or WriteNotConfirmed if the desk does not show the planned vector afterwards."""
+    dev = devices.get_active_device()
+    if not dev.layout_required or dev.layout is None or "fader_write" not in dev.caps:
+        raise devices.WriteRefused(f"Changing the fader layout is not enabled on the {dev.name}.")
+    base = dev.layout.base("CHANNEL")
+    changes = {int(s): int(c) for s, c in dict(changes).items()}
+    if not changes:
+        raise devices.WriteRefused("Nothing to change on the faders.")
+    # Static checks first, so a refused request never even reads the desk.
+    for strip, code in sorted(changes.items()):
+        why = devices.layout_fader_write_ok(dev, [base + strip], devices.LAYOUT_FADER_PROP,
+                                            code, "int")
+        if why:
+            raise devices.WriteRefused(why)
+    blob = _r.read_model(fresh=True)
+    for strip in changes:
+        node = _r.node_at(blob, [base + strip])
+        found = next((k for p, _v, k in (node.props if node is not None else ())
+                      if p == devices.LAYOUT_FADER_PROP), None)
+        if node is None or node.name != "CHANNEL" or found != "int":
+            raise devices.WriteRefused(
+                f"The {dev.name} does not show a channel source on fader {strip + 1}, so it is "
+                f"not written.")
+    before = strip_values(blob, devices.LAYOUT_FADER_PROP, dev=dev)
+    if planned_from is not None and list(planned_from) != before[:len(planned_from)]:
+        raise devices.WriteRefused(
+            f"The fader layout on the {dev.name} changed while this was being worked out. "
+            f"Nothing was sent; read the layout again and choose once more.")
+    for strip, code in changes.items():
+        if before[strip] == devices.LAYOUT_PINNED_CODE and code != before[strip] \
+                and strip != int(chosen):
+            raise devices.WriteRefused(
+                f"That would move Mic 3 + 4 off fader {strip + 1}, which only happens when you "
+                f"choose that fader yourself. Nothing was sent.")
+    want = list(before)
+    for strip, code in changes.items():
+        want[strip] = code
+    n = 0
+    for strip, code in sorted(changes.items()):        # strip order, as the Pro II path sends
+        n += _t.send_record(_t.build_global_prop_int(devices.LAYOUT_FADER_PROP, base + strip,
+                                                     code))
+    got = None
+    for attempt in range(CONFIRM_TRIES):
+        got = strip_values(_confirm_reader(), devices.LAYOUT_FADER_PROP, dev=dev)
+        if got == want:
+            return n
+        if attempt + 1 < CONFIRM_TRIES:
+            _time.sleep(CONFIRM_GAP_S)
+    labels = dev.fader.all_labels
+
+    def name(c):
+        return "empty" if c is None or c == -1 else labels.get(c, f"channel code {c}")
+
+    diff = [f"fader {i + 1} {name(g)} instead of {name(w)}"
+            for i, (g, w) in enumerate(zip(got or [], want)) if g != w]
+    raise WriteNotConfirmed(
+        f"The {dev.name} did not confirm the fader layout: it reports "
+        f"{', '.join(diff) if diff else 'no layout at all'}.")
 
 
 # ============================================================================
@@ -763,7 +1149,7 @@ def read_mixer() -> dict:
     Mic 1/Mic 2, never mislabels its Headset slot as "Mic 3", and never reports one mic's gain as
     another's. Gated by the device's "channel_read" cap so a desk whose input layout is not
     verified refuses rather than guess."""
-    dev = devices.get_active_device()
+    dev = _r.device_for_read()
     if "channel_read" not in dev.caps:
         raise RuntimeError(f"Live mixer reads are not verified on the {dev.name}.")
     blob = _r.read_model()
@@ -829,12 +1215,16 @@ def _float_write_order(props) -> list:
 
 
 def proc_selector_for_strip(strip_idx: int) -> int:
-    """Processing selector for a STRIP index (0-based), not a channel."""
+    """Processing selector for a STRIP index (0-based), not a channel. A write address: refuses on
+    a desk that may not be written to (see proc_selector)."""
+    devices.require_writable(what="Channel settings")
     return SEL_CHANNEL_PROC + int(strip_idx)
 
 
 def fx_selector_for_strip(strip_idx: int) -> int:
-    """Effects selector for a STRIP index (0-based), not a channel."""
+    """Effects selector for a STRIP index (0-based), not a channel. Refuses like
+    proc_selector_for_strip."""
+    devices.require_writable(what="Channel effects")
     return SEL_CHANNEL_FX + int(strip_idx)
 
 
@@ -845,14 +1235,15 @@ def read_chains(blob: bytes | None = None, strips: int | None = None) -> list:
     Read-only. Values are exactly what the device reports, so two chains can be diffed directly."""
     if blob is None:
         blob = _r.read_model_stable()
+    dev = devices.get_active_device()
 
     def vec(prop, kind=None):
-        return _r.values(blob, prop, kind)
+        return strip_values(blob, prop, kind, dev)
 
     bools = {p: vec(p) for p in CHAIN_BOOL_PROPS}
     floats = {p: vec(p, "float") for p in CHAIN_FLOAT_PROPS}
-    fx_bools = {p: vec(p) for p in CHAIN_FX_BOOL_PROPS}
-    fx_floats = {p: vec(p, "float") for p in CHAIN_FX_FLOAT_PROPS}
+    fx_bools = {p: fx_values(blob, p, None, dev) for p in CHAIN_FX_BOOL_PROPS}
+    fx_floats = {p: fx_values(blob, p, "float", dev) for p in CHAIN_FX_FLOAT_PROPS}
     markers = vec(CHAIN_PRESET_MARKER_PROP, "int")
     if strips is None:
         # The strip count is whatever the per-strip arrays actually carry (10 on both desks).
@@ -1017,14 +1408,14 @@ def read_channels(blob: bytes | None = None) -> list:
 
     Gated by the device's "channel_read" cap: a device whose per-channel read map is not verified
     refuses here rather than returning Pro II-shaped, mislabelled values."""
-    dev = devices.get_active_device()
+    dev = _r.device_for_read(blob)
     if "channel_read" not in dev.caps:
         raise RuntimeError(f"Per-channel reads are not verified on the {dev.name}.")
     if blob is None:
         blob = _r.read_model_stable()
 
     def vec(prop, kind=None):
-        return _r.values(blob, prop, kind)
+        return strip_values(blob, prop, kind, dev)
 
     bypass = vec("channelBypassProcessing")
     # MUTE is live state rather than a stored setting, but it belongs on the channel panel: it is
@@ -1038,13 +1429,14 @@ def read_channels(blob: bytes | None = None) -> list:
     wireless = vec(WIRELESS_MUTE_PROP)
     modules = {m: vec(m) for m in PROCESSING_MODULE_BOOLS}
     params = {p: vec(p, "float") for p in PROCESSING_READ_PROPS}
-    echo = vec("echoOn")
-    reverb = vec("reverbOn")
+    # Echo/reverb sit on the EFFECTS blocks, not CHANNEL: per strip, through fx_values.
+    echo = fx_values(blob, "echoOn", None, dev)
+    reverb = fx_values(blob, "reverbOn", None, dev)
     # The rest of the chain (see CHAIN_ADVANCED_PROP): the processing MODE and the preset-name marker
     # are per strip and travel with a channel, so profiles and the fader swap need them too.
     advanced = vec(CHAIN_ADVANCED_PROP)
     preset_marker = vec(CHAIN_PRESET_MARKER_PROP)
-    fx_params = {p: vec(p, "float") for p in _CHANNEL_FX_PARAM_SET}
+    fx_params = {p: fx_values(blob, p, "float", dev) for p in _CHANNEL_FX_PARAM_SET}
     src_vec = vec("channelInputSource")   # for dynamic proc-index resolution (both desks)
     publish_strip_vector(src_vec)         # refresh the strip map for free off this dump
 

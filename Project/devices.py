@@ -8,14 +8,16 @@ desk. A third desk is one more table entry.
 
 This is the DEVICE model, unrelated to profiles.py, which stores user settings snapshots.
 
-This module imports only rcp_hid, so rcp_read / rcp_transfer / channels can import it without a
-cycle.
+This module imports only rcp_hid and layout (which imports nothing of ours at module level), so
+rcp_read / rcp_transfer / channels can import it without a cycle.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
+import layout as _layout     # block geometry of a desk read off its own dump (pure, no imports)
 import rcp_hid
 
 # Known RODECaster USB product ids on the vendor control interface (MI_09).
@@ -52,6 +54,16 @@ class MatrixSpec:
     source_indices: tuple
     row_stride: int
     block: str = "MIX"
+    # ADDRESSED GRID, for a desk whose geometry comes from its own tree (see layout_model). `base` is
+    # the root index of cell 0 of the MAIN MIX run and `modes_base` that of the main MIXMINUSES run;
+    # rcp_read._read_matrix then reads exactly those runs by address. None (the Pro II and the Duo)
+    # keeps the block-name read those two desks were verified with.
+    base: Optional[int] = None
+    modes_base: Optional[int] = None
+    # LATER MODE RUNS, read only: ((root index, count), ...) that continue the output-mode list
+    # after the main MIXMINUSES run, in output order. On PID 0x0092 the main run holds 10 modes and
+    # a later MIXMINUSES run at 0xFC holds the last 3 of the 13 (layout_model). Never written.
+    modes_extra: tuple = ()
     # UI LABEL MAPS (device-specific). The read code above only needs the numbers; these carry
     # the human-readable names so the routing screen labels the Duo's real sources/outputs
     # (e.g. source code 2 = "Headset" on the Duo, not "Mic 3" as on the Pro II) instead of the
@@ -722,6 +734,16 @@ class DeviceModel:
     fader: FaderSpec = PRO2_FADERS
     input_strips: InputStripSpec = PRO2_INPUT_STRIPS
     headphones: HeadphoneTypeSpec = HEADPHONE_TYPES
+    # GEOMETRY FROM THE DESK'S OWN TREE. False on the Pro II and the Duo, whose bases above are
+    # measured constants. True on a desk resolved through layout_model: its bases come from
+    # `layout` (a layout.Layout, or None while no dump of it has been parsed), and per-strip reads
+    # go by address through that layout rather than by position in a values() list.
+    layout_required: bool = False
+    layout: object = None
+    # WHY THIS DESK MUST NOT BE WRITTEN TO, or None if it may be. A sentence for the user. Checked by
+    # require_writable, which every write helper calls before it builds an address, and by the send
+    # layer in rcp_transfer, which refuses any product id outside DEVICES.
+    write_block: Optional[str] = None
 
     # --- Where a channel's INPUT values live -------------------------------------------------
     # ONE ADDRESS, ON EVERY DESK: INPUTSOURCE[source_code]. Read there, written there.
@@ -734,14 +756,26 @@ class DeviceModel:
     # test_input_read.py asserts them against the derivation.
 
     def input_path(self, ch: dict) -> list:
-        """THE tree path of a channel's input values: INPUTSOURCE[source_code]. Read and write."""
-        return [self.input_table_base + int(ch["source_code"])]
+        """THE tree path of a channel's input values: INPUTSOURCE[source_code]. Read and write.
+
+        Raises when this desk's input table is not known (a layout desk with no parsed dump yet),
+        rather than addressing another desk's table."""
+        if self.input_table_base is None:
+            raise RuntimeError(f"The input table of the {self.name} is not known yet: no model "
+                               f"dump of it has been read.")
+        code = int(ch["source_code"])
+        lay = self.layout
+        if self.layout_required and lay is not None and not 0 <= code < lay.count("INPUTSOURCE"):
+            raise ValueError(f"source {code} is outside the {self.name}'s input table")
+        return [self.input_table_base + code]
 
     def channel_for_input_path(self, path) -> Optional[dict]:
         """The UI channel a pushed input address belongs to, or None. The reverse of input_path.
 
         The announcer needs this: when the DESK moves a gain it pushes the change at the address it
         owns, and the spoken line has to name the channel it belongs to."""
+        if self.input_table_base is None:
+            return None
         try:
             code = int(list(path)[0]) - self.input_table_base
         except Exception:
@@ -987,16 +1021,809 @@ for _dev in DEVICES.values():
         f"{_dev.name}: a headphone output selector is not a known headphoneType selector (0x09/0x0A)")
 del _dev, _m, _hp
 
-# The default when no device is connected / product id is unknown: Pro II, so all
-# existing Pro II behaviour is unchanged for offline code paths and unit tests.
+# The default when NO device is connected (product id None): Pro II, so all existing Pro II
+# behaviour is unchanged for offline code paths and unit tests. A CONNECTED desk with a product id
+# outside DEVICES never gets this - see resolve_device.
 DEFAULT = PRO2
 
 
+# --- DESKS WHOSE GEOMETRY COMES FROM THEIR OWN TREE ----------------------------------------------
+# PID 0x0092 is a RODECaster Pro II on firmware 1.7.6 (VID 0x19F7, control interface MI_09, usage
+# page 0xFF00 usage 1) whose root children sit at DIFFERENT indexes from the Pro II this app was
+# built on: CHANNEL at 0x1A (not 0x1C), MIX at 0x37 (not 0x4C), INPUTSOURCE at 0xDF (not 0x26E), and
+# OUTPUT/SYSTEM/NETWORK two lower. So every Pro II selector constant addresses a DIFFERENT node
+# there, and writing one appends a stray. Its geometry is read off its own dump instead (layout.py).
+# write_block still makes every Pro II selector-building helper refuse there (require_writable);
+# what it DOES take goes through the narrow caps and the generalised gate below (layout_write_ok),
+# each judged from the finished record against that desk's own dump.
+#
+# WHAT IS MEASURED ON THAT UNIT, and nothing else is assumed:
+#   * the main runs: CHANNEL x9 at 0x1A, EFFECTS_PARAMETERS x10 at 0x23, MIXMINUSES x10 at 0x2D,
+#     MIX x156 at 0x37 (= 12 x 13), INPUTSOURCE x12 at 0xDF;
+#   * fader 1's movement pushes mixLevelWithAnchor on 0x37..0x43, its mute pushes channelOutputMute
+#     on 0x1A and mixMute on 0x37..0x43, its cue button channelCueEnable on 0x1A;
+#   * the fader layout reads [0, 1, 6, 7, 9, 8, -1, 11, 10], and its owner confirmed faders 1-6 as
+#     Mic 1, Mic 2, the Mic 3 + 4 pair (set to line input), USB 1, USB 2 and Chat. So the Pro II
+#     SOURCE CODES 0, 1, 6, 7, 8 and 9 mean the same on this unit; INPUTSOURCE inputType 2 = line was
+#     confirmed on the Mic 3 + 4 source.
+PID_LAYOUT_0092 = 0x0092
+# THE SAME UNIT IN "EXPANDED" MODE (Output > Multitrack > USB 1 Input > Expanded, for the RODE
+# Virtual Device Driver): the desk re-enumerates on USB as 0x0094. Measured 7th October 2026 by a
+# dump before and after the switch: the tree is identical except OUTPUT outputMultiMode 1 -> 4, so
+# every group sits at the same root index and the layout read off the dump applies unchanged. It
+# keeps the 0x0092 name so profiles and baselines stay one desk across the two modes.
+PID_LAYOUT_0094 = 0x0094
+# THE NAME IS SHORT AND PLAIN ON PURPOSE: it ends up in a profile name ("As found <date> <desk>"),
+# which takes letters, digits, spaces and dashes only and 40 characters in all (profiles.safe_name),
+# so brackets or a longer name silently drop the desk from the baseline's name.
+LAYOUT_PIDS = {PID_LAYOUT_0092: "RODECaster Pro2 0092", PID_LAYOUT_0094: "RODECaster Pro2 0092"}
+
+# (code, label) per Pro II source code this unit may hold, reusing the Pro II wording so the two
+# desks say the same thing. CONFIRMED on the unit: 0, 1, 7, 8, 9 (and pair code 6, below).
+# UNCONFIRMED there, labelled from the Pro II only: 2 and 3 (Mic 3 / Mic 4 - implied by the 3 + 4
+# pair, never seen on a fader of their own), 10 (Bluetooth) and 11 (SMART pads), which sit on
+# faders 9 and 8, the two virtual faders nobody has checked. CallMe 1 (16) is left out: it lies
+# outside the main INPUTSOURCE run of 12 on this unit.
+_LAYOUT_SOURCES = (
+    (0, "Mic 1"), (1, "Mic 2"),
+    (2, "Mic 3"), (3, "Mic 4"),                            # unconfirmed on PID 0x0092
+    (7, "USB 1 (Main Stereo)"), (8, "Chat"), (9, "USB 2 (Secondary)"),
+    (10, "Bluetooth"), (11, "SMART pads"),                 # unconfirmed on PID 0x0092
+)
+# Stereo pairs, for NAMING a fader that holds one (FaderSpec.all_labels). Code 6 = Mic 3 + 4 is
+# confirmed on the unit (fader 3); 4 and 5 are the Pro II codes, unconfirmed there. Never written:
+# the "stereo_link" cap is absent.
+_LAYOUT_PAIRS = ((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4"))
+_LAYOUT_UI = {c["source_code"]: c for c in PRO2_UI_CHANNELS}
+# THE ROUTING ROWS (matrix sources): all 12 rows of the main MIX run, one per INPUTSOURCE code.
+# Confirmed on the unit: 0 (fader 1's pushes land on row 0), and 1, 6, 7, 8, 9 by the fader layout
+# its owner confirmed. Every other name is the Pro II's or the pair table's and is said to be
+# unconfirmed IN THE LABEL, so the page never states a guess as a fact.
+_LAYOUT_ROW_UNCONFIRMED = {2: ("Mic3", "Mic 3"), 3: ("Mic4", "Mic 4"), 4: ("Mic1+2", "Mic 1 + 2"),
+                           5: ("Mic2+3", "Mic 2 + 3"), 10: ("Bluetooth", "Bluetooth"),
+                           11: ("SMARTpads", "SMART pads")}
+# THE OUTPUTS ARE THE PRO II ORDER (RODECASTER_PROTOCOL.txt 5.2), with its keys, names and default
+# modes. What stands behind that on this unit, and nothing more:
+#   * output 0 = Headphone 1 is MEASURED: on 7th October 2026 its owner set output 0 to Custom and
+#     took Mic 1 and Mic 2 out of it, and the sound on the headphones in jack 1 changed accordingly
+#     (read back: MIXMINUSES 0x2D outputMixMinus 0 -> 2);
+#   * the unit's 13 mode values read [0,0,0,0,0,0,1,0,1,1,1,1,1], which is EXACTLY the Pro II's
+#     default per output (headphones, monitor, recording and USB 1 on Main Mix; Bluetooth, Chat,
+#     USB 2 and the CallMe outputs on Mix Minus);
+#   * the owner ACCEPTED the Pro II order for all 13 outputs on that basis (7th October 2026).
+# Outputs 1..12 have NOT each been measured by ear. The names are shown plainly (no "unconfirmed"),
+# by the owner's decision; this comment is where the difference is kept.
+# Outputs 11 and 12 (CallMe 2 / 3) exist on this unit's grid and have no Pro II entry, so they are
+# named here in the same pattern, Mix Minus by default like CallMe 1 (and as the unit reads them).
+_LAYOUT_OUTPUTS = tuple(dict(o, mixminus=True) for o in PRO2_MATRIX_OUTPUTS) + (
+    {"index": 11, "key": "CallMe2", "label": "CallMe 2", "mixminus": True, "default_mode": 1},
+    {"index": 12, "key": "CallMe3", "label": "CallMe 3", "mixminus": True, "default_mode": 1},
+)
+
+
+def _layout_mode_runs(lay, stride: int) -> tuple:
+    """The LATER MIXMINUSES runs that complete the main run to one mode per output (`stride`), as
+    ((base, count), ...), or () if they do not add up to exactly that. Read only."""
+    main = lay.run("MIXMINUSES")
+    if main is None or main.count >= stride:
+        return ()
+    extra, total = [], main.count
+    for r in lay.all_runs:
+        if r.name != "MIXMINUSES" or r.base <= main.base:
+            continue
+        extra.append((r.base, r.count))
+        total += r.count
+        if total >= stride:
+            break
+    return tuple(extra) if total == stride else ()
+
+_WRITE_BLOCK_LAYOUT = ("That setting cannot be changed on the {name} from here: its blocks sit at "
+                       "other addresses than on the RODECaster Pro II, so AccessCaster only writes "
+                       "a setting there through the unit's own layout, where the setting already "
+                       "exists on that block, and confirms it by reading it back.")
+_WRITE_BLOCK_UNKNOWN = ("The {name} is not a desk this app knows, so AccessCaster will not read its "
+                        "layout or change any of its settings.")
+
+
+def layout_headphone_outputs(lay) -> tuple:
+    """((root index, "Headphone N"), ...) for a layout desk's HEADPHONE run, or () unless that run
+    is exactly LAYOUT_HEADPHONE_COUNT blocks long. Measured on PID 0x0092 (7th October 2026): four
+    consecutive HEADPHONE blocks at 0x07..0x0A, right after APP (0x06) and before OUTPUT (0x0B);
+    RODE's app changing headphone 1 moved 0x07 only. 0x08..0x0A are headphones 2..4 by run order."""
+    run = lay.run("HEADPHONE") if lay is not None else None
+    if run is None or run.count != LAYOUT_HEADPHONE_COUNT:
+        return ()
+    return tuple((run.base + i, f"Headphone {i + 1}") for i in range(run.count))
+
+
+def _geometry_unknown_model(pid: int, name: str, write_block: str) -> DeviceModel:
+    """A connected desk whose geometry is NOT known: no channels, no matrix, no faders, no caps,
+    no bases. Every read that needs an address reports nothing and every write refuses."""
+    return DeviceModel(
+        product_id=pid, name=name,
+        matrix=MatrixSpec(cell_count=0, output_count=0, source_indices=(), row_stride=13),
+        caps=frozenset(), proc_sel_base=None, fx_sel_base=None, input_table_base=None,
+        ui_channels=(), fader=FaderSpec(count=0, physical=0), input_strips=InputStripSpec(),
+        headphones=HeadphoneTypeSpec(), layout_required=True, layout=None,
+        write_block=write_block.format(name=name))
+
+
+def layout_model(pid: int, lay) -> DeviceModel:
+    """The DeviceModel of a LAYOUT desk (LAYOUT_PIDS), its geometry taken from `lay`.
+
+    Every number comes from the layout's MAIN runs: the matrix is MIX (base, cells) with
+    rows = INPUTSOURCE run and outputs = MIXMINUSES run, the input table is INPUTSOURCE, the strips
+    are CHANNEL and their count is the fader count. Without a valid layout the desk is
+    geometry-unknown (_geometry_unknown_model) rather than borrowing another desk's numbers.
+    """
+    name = LAYOUT_PIDS.get(pid) or f"RODECaster PID {int(pid):04X}"
+    if lay is None or not getattr(lay, "valid", False):
+        return _geometry_unknown_model(pid, name, _WRITE_BLOCK_LAYOUT)
+    n_src = lay.count("INPUTSOURCE")
+    sources = tuple((c, lab) for c, lab in _LAYOUT_SOURCES if c < n_src)
+    pairs = tuple(p for p in _LAYOUT_PAIRS if p[0] < n_src)
+    # Matrix rows: every row of the main MIX run (= every INPUTSOURCE code of the main run), each
+    # named, the unconfirmed ones saying so (_LAYOUT_ROW_UNCONFIRMED). The Mic 3 + 4 pair (code 6)
+    # is a routing row of its own because this unit's fader 3 holds it.
+    keys = {c: _LAYOUT_UI[c]["name"] for c, _ in sources if c in _LAYOUT_UI}
+    labels = dict(sources)
+    if 6 < n_src:
+        keys[6], labels[6] = "Mic3+4", "Mic 3 + 4"
+    for c, (k, lab) in _LAYOUT_ROW_UNCONFIRMED.items():
+        if c < n_src:
+            keys[c], labels[c] = k, f"{lab} (unconfirmed)"
+    rows = tuple(sorted(keys))
+    n_strips = lay.count("CHANNEL")
+    stride = lay.count("MIX") // n_src
+    # Outputs: one per cell of a row. The main MIXMINUSES run carries the first modes (10 here) and
+    # a later run the rest (3 at 0xFC); only when they add up to exactly one mode per output is the
+    # later run used, else the outputs stop at the main run.
+    modes_extra = _layout_mode_runs(lay, stride)
+    n_out = lay.count("MIXMINUSES") + sum(c for _b, c in modes_extra)
+    return DeviceModel(
+        product_id=pid,
+        name=name,
+        matrix=MatrixSpec(
+            cell_count=lay.count("MIX"),
+            # An output is a MIXMINUSES block; a source row is 13 cells (layout.ROW_STRIDE).
+            output_count=n_out,
+            # Every row of the main MIX run, the unconfirmed ones labelled so.
+            source_indices=rows,
+            row_stride=stride,
+            base=lay.base("MIX"),
+            modes_base=lay.base("MIXMINUSES"),
+            modes_extra=modes_extra,
+            sources=tuple({"index": c, "key": keys[c], "label": labels[c]} for c in rows),
+            # The Pro II order, keys, names and default modes (_LAYOUT_OUTPUTS: output 0 measured,
+            # the rest accepted by the owner on the matching default modes). Mix Minus is offered
+            # for every one because the mode READ can return it anywhere. An output past that
+            # table would be named by position with no default, which keeps "reset all" off.
+            outputs=tuple(dict(_LAYOUT_OUTPUTS[o]) if o < len(_LAYOUT_OUTPUTS) else
+                          {"index": o, "key": f"Output{o + 1}", "label": f"Output {o + 1}",
+                           "mixminus": True, "default_mode": None}
+                          for o in range(n_out))),
+        # READ caps, plus four narrow write caps and nothing else: "input_write" (the INPUTSOURCE
+        # set in LAYOUT_INPUT_WRITES), "fx_write" (echo/reverb on a strip's EFFECTS_PARAMETERS
+        # block, LAYOUT_FX_WRITES), "fader_write" (channelInputSource on the main CHANNEL run,
+        # codes LAYOUT_FADER_CODES only, see layout_fader_write_ok), "strip_write" (processing, mute
+        # and solo on the main CHANNEL run, LAYOUT_STRIP_WRITES - NOT the "processing" cap, which
+        # stands for the Pro II selector path and its presets) and "routing_write" (the
+        # cross-points of the main MIX run and the modes of the main MIXMINUSES run,
+        # LAYOUT_ROUTING_CELL_WRITES, see layout_routing_write_ok). NOT "matrix_write": that cap
+        # opens the Pro II routing paths (mix presets, reset all, auto gain's Chat isolation), which
+        # stay refused here. Every other write family stays refused (write_block) until proven
+        # here. NOT "chain_follow", "level_write" or "stereo_link": a fader move here moves the
+        # source only. Two more narrow caps for the master output block, NOT "output_write" (which
+        # opens every Pro II global at its 0x0D / 0x0E / 0x09 selectors): "headphone_write"
+        # (headphoneType 0/1/2 on the four HEADPHONE blocks, layout_headphone_write_ok) and
+        # "usbmode_write" (outputMultiMode 1 or 4 on OUTPUT, layout_usbmode_write_ok).
+        # And "tree_write", the GENERALISED gate (layout_tree_write_ok): any other setting the Pro
+        # II code writes, at this desk's own block for it (found by NAME in its dump), when the
+        # property already sits on that very block with that kind and is not a command
+        # (LAYOUT_TREE_DENY). It stands in for the Pro II caps "output_write" and "unit_settings"
+        # (has_write_cap); everything it lets through is also checked before and confirmed after
+        # (layout_tree.write_records). The narrow caps above keep their own, stricter checks.
+        caps=frozenset({"matrix_read", "channel_read", "input_write", "fx_write", "fader_write",
+                        "strip_write", "routing_write", "headphone_write", "usbmode_write",
+                        "tree_write"}),
+        proc_sel_base=lay.base("CHANNEL"),
+        # EFFECTS_PARAMETERS[strip] for strips 0..8 (see LAYOUT_FX_WRITES): the Pro II / Duo rule,
+        # effects block k belongs to fader strip k. PROVEN for strip 0 (Mic 1, 0x23, heard live). The run is 10 long against
+        # 9 strips; the tenth block is never read or written.
+        fx_sel_base=lay.base("EFFECTS_PARAMETERS"),
+        input_table_base=lay.base("INPUTSOURCE"),
+        ui_channels=tuple(_LAYOUT_UI[c] for c, _ in sources if c in _LAYOUT_UI),
+        # Pad grid NOT measured on this unit; the Pro II shape is kept for READING only (pad reads
+        # window on padName and need no address), and "pad_write" is absent.
+        pad=PadSpec(pads_per_bank=8),
+        fader=FaderSpec(
+            count=n_strips,
+            # Physical/virtual split unconfirmed on this unit, so nothing is labelled virtual.
+            physical=n_strips,
+            assignable=sources,
+            stereo_pairs=pairs,
+            default_vector=None),          # not known: 'reset faders' refuses
+        input_strips=InputStripSpec(),
+        # The HEADPHONE run read off the dump (0x07..0x0A on PID 0x0092, not the Pro II's 0x09/0x0A),
+        # listed only when it is exactly the four outputs (layout_headphone_outputs).
+        headphones=HeadphoneTypeSpec(outputs=layout_headphone_outputs(lay),
+                                     values=HEADPHONE_TYPES.values)
+        if layout_headphone_outputs(lay) else HeadphoneTypeSpec(),
+        layout_required=True,
+        layout=lay,
+        write_block=_WRITE_BLOCK_LAYOUT.format(name=name),
+    )
+
+
+_model_cache: dict = {}
+
+
 def resolve_device(product_id: Optional[int]) -> DeviceModel:
-    """Map a USB product id to its DeviceModel; DEFAULT (Pro II) if unknown/None."""
+    """Map a USB product id to its DeviceModel.
+
+    None (nothing connected, or an offline caller) -> DEFAULT (Pro II), as it always has been.
+    A KNOWN static desk -> its table entry. A LAYOUT desk (LAYOUT_PIDS) -> layout_model built on the
+    last layout recorded for it. ANY OTHER connected product id -> a geometry-unknown model that
+    reads nothing by address and writes nothing: it is NEVER silently treated as a Pro II.
+    """
     if product_id is None:
         return DEFAULT
-    return DEVICES.get(product_id, DEFAULT)
+    if product_id in DEVICES:
+        return DEVICES[product_id]
+    if product_id in LAYOUT_PIDS:
+        lay = _layout.current(product_id)
+        key = (product_id, id(lay))
+        cached = _model_cache.get(key)
+        if cached is None or cached.layout is not lay:
+            cached = layout_model(product_id, lay)
+            _model_cache.clear()
+            _model_cache[key] = cached
+        return cached
+    return _geometry_unknown_model(product_id, f"RODECaster PID {int(product_id):04X}",
+                                   _WRITE_BLOCK_UNKNOWN)
+
+
+class WriteRefused(RuntimeError):
+    """A write was asked of a desk whose write addresses are not confirmed. Nothing was sent."""
+
+
+def require_writable(dev: Optional[DeviceModel] = None, what: str = "") -> DeviceModel:
+    """Raise WriteRefused if the desk may not be written to; returns the device otherwise.
+
+    Call it BEFORE building an address: on a desk whose blocks sit elsewhere, the Pro II selector a
+    helper would compute names a different node, and sending it appends a stray only a factory
+    reset clears."""
+    dev = dev or get_active_device()
+    if dev.write_block:
+        raise WriteRefused(dev.write_block if not what else f"{what}: {dev.write_block}")
+    return dev
+
+
+# THE ONLY WRITES A LAYOUT DESK TAKES: {property: (kind, min, max)}, on INPUTSOURCE[source] of the
+# MAIN run, one-level address - the form the desk itself pushes these in (measured 7th October 2026
+# on PID 0x0092: a gain turned on the desk arrives at INPUTSOURCE[0xDF + source], one level).
+# Exactly what the Channels page writes for a mic or line input on the Pro II, minus two:
+#   * inputType - the app never writes it on any desk: it is derived from the mic type.
+#   * inputInstrumentGain - only a profile RESTORE writes it, which stays refused, and no range for
+#     it has been measured.
+# Ranges are the Pro II UI's (server.GAIN_MIN_DB/MAX, LEVEL_MIN_DB/MAX); the unit's dump sits well
+# inside them (mic gains 27-51, line levels -12 and 0, phantom 0/1).
+# inputMicrophoneType uses the Pro II voicing list (channels.MIC_TYPE, 0..10), PROVEN to be this
+# unit's numbering on 7th October 2026: Mic 1 reads 9 and is an Electro-Voice RE20 (9 = "RE20"),
+# Mic 2 reads 5 and is a RODE Broadcaster (5 = "Broadcaster"), and the line pair reads 0
+# ("Line-in"). Mics only (sources 0..3, LAYOUT_INPUT_SOURCE_LIMIT). Choosing a voicing also makes
+# the desk apply that voicing's gain and chain; the write confirms the TYPE only.
+LAYOUT_INPUT_WRITES = {
+    "inputMicrophoneGain": ("int", 0, 76),
+    "inputPower": ("int", 0, 1),
+    "inputPhaseFlip": ("bool", None, None),
+    "inputDigitalGain": ("int", -60, 12),
+    "inputMicrophoneType": ("int", 0, 10),
+}
+# Sources the input writes may address on a layout desk: the main INPUTSOURCE run, codes 0..11.
+LAYOUT_INPUT_MAX_SOURCE = 11
+# A narrower source limit for a property: the voicing belongs to the four mic inputs only.
+LAYOUT_INPUT_SOURCE_LIMIT = {"inputMicrophoneType": 3}
+
+
+def layout_input_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one input write is allowed on a layout desk, else the reason it is not."""
+    if "input_write" not in dev.caps or dev.layout is None or dev.input_table_base is None:
+        return f"Input writes are not enabled on the {dev.name}."
+    spec = LAYOUT_INPUT_WRITES.get(name)
+    if spec is None:
+        return f"{name} is not one of the input settings enabled on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one INPUTSOURCE block on the {dev.name}."
+    code = int(path[0]) - dev.input_table_base
+    top = min(LAYOUT_INPUT_MAX_SOURCE, LAYOUT_INPUT_SOURCE_LIMIT.get(name, LAYOUT_INPUT_MAX_SOURCE))
+    if not 0 <= code < min(dev.layout.count("INPUTSOURCE"), top + 1):
+        return f"Root index 0x{int(path[0]):02X} is not an input source the {dev.name} may write."
+    want_kind, lo, hi = spec
+    if kind != want_kind or (want_kind == "int" and isinstance(value, bool)):
+        return f"{name} must be written as {want_kind} on the {dev.name}."
+    if lo is not None and not lo <= int(value) <= hi:
+        return f"{name} {value} is outside {lo} to {hi}."
+    return None
+
+
+# THE EFFECTS WRITES A LAYOUT DESK TAKES (cap "fx_write"): exactly what the Pro II Effects tab writes
+# (channels.CHANNEL_FX_ON + CHANNEL_FX_PARAMS): echo and reverb on/off, and their params as floats
+# normalised 0..1 - the range comes from the Pro II code (server.action_set_channel_effect_param and
+# channels.set_channel_effect_param clamp to 0..1), and every one of these reads 0..1 in the 0x0092
+# dump. NOT pitch shift, distortion, robot or voice disguise: the block carries them, but no screen
+# of this app writes them on any desk, and pitchShiftSemitones reads 7.0, i.e. is not a 0..1 value.
+#
+# THE ADDRESS: EFFECTS_PARAMETERS[strip] at its run base + the fader STRIP index, which is how the
+# Pro II and the Duo are proven (0x26 + strip right after their CHANNEL run). On PID 0x0092 the run
+# is 0x23..0x2C with effectsIdx 0..9 (10 blocks for 9 strips), so strips 0..8 -> 0x23..0x2B.
+# PROVEN for strip 0: echo and reverb on Mic 1 written at 0x23 were heard live by the unit's owner
+# on 7th October 2026. Strips 1..8 follow the same rule and have not been heard yet.
+LAYOUT_FX_WRITES = {
+    "echoOn": ("bool", None, None), "reverbOn": ("bool", None, None),
+    **{p: ("float", 0.0, 1.0) for p in ("echoMix", "echoLowCut", "echoHighCut", "echoDelay",
+                                        "echoDecay", "reverbMix", "reverbModel", "reverbLowCut",
+                                        "reverbHighCut")},
+}
+
+
+def layout_fx_strip_count(dev: DeviceModel) -> int:
+    """How many EFFECTS_PARAMETERS blocks a layout desk may write: one per CHANNEL strip, and never
+    more than the run holds."""
+    lay = dev.layout
+    return 0 if lay is None else min(lay.count("CHANNEL"), lay.count("EFFECTS_PARAMETERS"))
+
+
+def layout_fx_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one effects write is allowed on a layout desk, else the reason it is not."""
+    if "fx_write" not in dev.caps or dev.layout is None or dev.fx_sel_base is None:
+        return f"Effects writes are not enabled on the {dev.name}."
+    spec = LAYOUT_FX_WRITES.get(name)
+    if spec is None:
+        return f"{name} is not one of the effects settings enabled on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one EFFECTS_PARAMETERS block on the {dev.name}."
+    strip = int(path[0]) - dev.fx_sel_base
+    if not 0 <= strip < layout_fx_strip_count(dev):
+        return f"Root index 0x{int(path[0]):02X} is not a strip's effects block on the {dev.name}."
+    want_kind, lo, hi = spec
+    if kind != want_kind:
+        return f"{name} must be written as {want_kind} on the {dev.name}."
+    if lo is not None and not (isinstance(value, float) and lo <= value <= hi):
+        return f"{name} {value} is outside {lo} to {hi}."
+    return None
+
+
+# THE FADER LAYOUT WRITE A LAYOUT DESK TAKES: channelInputSource (int) on CHANNEL[strip] of the MAIN
+# run, one-level address 01 01 01 01 <CHANNEL base + strip> - the form the Pro II's own fader writes
+# have (rcp_transfer.set_fader_source), with this desk's CHANNEL base (0x1A on PID 0x0092, strips
+# 0x1A..0x22). The value may only be a code this unit has shown to mean what the Pro II means by it
+# (0 Mic 1, 1 Mic 2, 6 the Mic 3 + 4 pair, 7 USB 1, 8 Chat, 9 USB 2, confirmed by the unit's owner
+# against its read layout [0, 1, 6, 7, 9, 8, -1, 11, 10] on 7th October 2026), -1 for an empty
+# strip, or 10 / 11, which are NOT confirmed as Bluetooth / SMART pads but are the values the unit
+# itself holds on faders 9 and 8, so writing them only ever puts back what was there. Mic 3 and
+# Mic 4 on their own (2, 3), the other pair codes (4, 5) and every source past the first run stay
+# refused.
+LAYOUT_FADER_PROP = "channelInputSource"
+LAYOUT_FADER_CODES = frozenset({-1, 0, 1, 6, 7, 8, 9, 10, 11})
+# Strips the fader write may address: the main CHANNEL run, at most nine.
+LAYOUT_FADER_MAX_STRIPS = 9
+# The Mic 3 + 4 pair. On PID 0x0092 it carries a line input with live audio, so it is never
+# moved off its fader by anything but the user choosing that fader: no reset, no tidy, no gap-fill.
+LAYOUT_PINNED_CODE = 6
+
+
+def layout_fader_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one fader-source write is allowed on a layout desk, else the reason it is not."""
+    if "fader_write" not in dev.caps or dev.layout is None or dev.proc_sel_base is None:
+        return f"Changing the fader layout is not enabled on the {dev.name}."
+    if name != LAYOUT_FADER_PROP:
+        return f"{name} is not the fader layout setting on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one CHANNEL block on the {dev.name}."
+    strip = int(path[0]) - dev.layout.base("CHANNEL")
+    if not 0 <= strip < min(dev.layout.count("CHANNEL"), LAYOUT_FADER_MAX_STRIPS):
+        return f"Root index 0x{int(path[0]):02X} is not a fader the {dev.name} may write."
+    if kind != "int" or isinstance(value, bool):
+        return f"{name} must be written as int on the {dev.name}."
+    if int(value) not in LAYOUT_FADER_CODES:
+        return (f"Channel code {value} has not been confirmed on the {dev.name}, so it is not "
+                f"put on a fader there.")
+    return None
+
+
+# THE PER-STRIP CHANNEL WRITES A LAYOUT DESK TAKES (cap "strip_write"): what the Processing,
+# Equaliser, Dynamics, Tone and pan tabs, and the mute / solo switches, write on the Pro II - on
+# CHANNEL[strip] of the MAIN run, one-level address 01 01 01 01 <CHANNEL base + strip> (0x1A..0x22 on
+# PID 0x0092), the same shape the Pro II sends at SEL_CHANNEL_PROC + strip. The address family is
+# proven on this unit by its own pushes: fader 1's mute arrives as channelOutputMute on 0x1A and its
+# cue as channelCueEnable on 0x1A (7th October 2026), and its fader-source writes land on the same
+# nodes. Floats are exactly the controls the Channels page offers (server.PROCESSING_CONTROLS), all
+# normalised 0..1 as the Pro II code clamps them; bools are the module switches
+# (channels.PROCESSING_MODULE_ON), processing on/off (channelBypassProcessing), simple/advanced
+# (channelAdvancedProcessing), mute and solo.
+# NOT: channelCurrentFxPreset (the preset NAME marker - presets stay refused), aphexBBTune /
+# aphexAETune (only a preset writes them), channelWirelessMute (no transmitter to confirm it), and
+# every other CHANNEL property (listen source, talkback, the HPF slope flags).
+# channelPanL / channelPanR came with 2.62's stereo pan (two leg sliders on a stereo channel). Both
+# sit as floats 0..1 on every main-run CHANNEL block of PID 0x0092 (read off its dump: 0.0 and 1.0,
+# hard left and hard right), so they take the same checked, confirmed path as channelPan.
+LAYOUT_STRIP_FLOATS = frozenset({
+    "aphexAEMix", "aphexBBDrive", "channelDepth", "channelPan", "channelPanL", "channelPanR",
+    "channelPunch", "channelSparkle",
+    "compressorAttack", "compressorGain", "compressorRatio", "compressorRelease",
+    "compressorThreshold", "deesserAttack", "deesserFrequency", "deesserGain", "deesserRatio",
+    "deesserRelease", "deesserThreshold", "eqHighBell", "eqHighGain", "eqHighQ", "eqLowGain",
+    "eqLowQ", "eqLowShelf", "eqMidBell", "eqMidGain", "eqMidQ", "hpfFrequency", "hpfSlope",
+    "noiseGateAttack", "noiseGateHold", "noiseGateHysteresis", "noiseGateRange",
+    "noiseGateRelease", "noiseGateThreshold",
+})
+LAYOUT_STRIP_BOOLS = frozenset({
+    "hpfOn", "eqOn", "compressorOn", "noiseGateOn", "deesserOn", "aphexOn", "channelPanOn",
+    "eqHighOn", "eqMidOn", "eqLowOn",
+    "channelBypassProcessing", "channelAdvancedProcessing", "channelOutputMute", "channelCueEnable",
+})
+LAYOUT_STRIP_WRITES = {**{p: ("float", 0.0, 1.0) for p in LAYOUT_STRIP_FLOATS},
+                       **{p: ("bool", None, None) for p in LAYOUT_STRIP_BOOLS}}
+
+
+def layout_strip_count(dev: DeviceModel) -> int:
+    """How many CHANNEL strips a layout desk may write: the main run, at most nine."""
+    lay = dev.layout
+    return 0 if lay is None else min(lay.count("CHANNEL"), LAYOUT_FADER_MAX_STRIPS)
+
+
+def layout_strip_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one per-strip channel write is allowed on a layout desk, else why not."""
+    if "strip_write" not in dev.caps or dev.layout is None or dev.proc_sel_base is None:
+        return f"Channel processing, mute and solo are not enabled on the {dev.name}."
+    spec = LAYOUT_STRIP_WRITES.get(name)
+    if spec is None:
+        return f"{name} is not one of the channel settings enabled on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one CHANNEL block on the {dev.name}."
+    strip = int(path[0]) - dev.layout.base("CHANNEL")
+    if not 0 <= strip < layout_strip_count(dev):
+        return f"Root index 0x{int(path[0]):02X} is not a fader strip the {dev.name} may write."
+    want_kind, lo, hi = spec
+    if kind != want_kind:
+        return f"{name} must be written as {want_kind} on the {dev.name}."
+    if lo is not None and not (isinstance(value, float) and lo <= value <= hi):
+        return f"{name} {value} is outside {lo} to {hi}."
+    return None
+
+
+# THE ROUTING WRITES A LAYOUT DESK TAKES (cap "routing_write"): exactly the record forms the Pro II
+# routing code sends (rcp_transfer.set_cross_point_excluded / set_cross_point_level /
+# build_mix_link_request / set_output_routing), each on one node of a MAIN run, one-level address:
+#   * on a cross-point, MIX[13 * source + output] of the main run (0x37..0xD2 on PID 0x0092, 12 rows
+#     of 13; fader 1's own pushes land on 0x37..0x43): mixDisabled and mixMute (bool), the level
+#     mixLevelWithAnchor as the Pro II writes it ("<level>|0", level 0..1 in its minimal-decimal
+#     form) and mixLinkRequest / mixUnlinkRequest with the constant composite (two True bools);
+#   * on an output, outputMixMinus (int 0 Main Mix, 1 Mix Minus, 2 Custom) on the main MIXMINUSES
+#     run only (0x2D..0x36: outputs 0..9). The three later modes (0xFC run) are read, never written.
+# THAT THESE FORMS DO ON THIS UNIT WHAT THEY DO ON A PRO II IS A HYPOTHESIS until heard: they are the
+# Pro II's, and every write is confirmed by a fresh read (layout_routing), so one that the desk does
+# not take is reported as not done. The later MIX runs (0xFF, 0x17D), mix presets and "reset all
+# output mixes" stay refused. mixMute is in the set because the cell carries it as a plain bool next
+# to mixDisabled, but no page writes it; the desk itself sets it when a channel is muted.
+LAYOUT_ROUTING_CELL_WRITES = {
+    "mixDisabled": "bool",
+    "mixMute": "bool",
+    "mixLevelWithAnchor": "str",
+    "mixLinkRequest": "pair",
+    "mixUnlinkRequest": "pair",
+}
+LAYOUT_ROUTING_MODE_PROP = "outputMixMinus"
+LAYOUT_ROUTING_MODES = frozenset({0, 1, 2})
+# The request payload as the parser reads the constant composite 01 07 08 01 01 02 01 01 02.
+LAYOUT_ROUTING_REQUEST_VALUE = [(True, "bool"), (True, "bool")]
+
+
+def layout_level_text(level: float) -> str:
+    """The Pro II's minimal-decimal form of a 0..1 cross-point level ('0', '0.5', '0.89', '1'),
+    the one form a layout desk's level write may carry (rcp_transfer._level_str)."""
+    s = f"{max(0.0, min(1.0, float(level))):.2f}".rstrip("0").rstrip(".")
+    return s if s else "0"
+
+
+def layout_routing_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one routing write is allowed on a layout desk, else the reason it is not."""
+    lay = dev.layout
+    if "routing_write" not in dev.caps or lay is None or dev.matrix.base is None:
+        return f"Changing output mixes is not enabled on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one block on the {dev.name}."
+    if name == LAYOUT_ROUTING_MODE_PROP:
+        out = lay.run("MIXMINUSES").index_of(path[0]) if lay.run("MIXMINUSES") else None
+        if out is None:
+            return (f"Root index 0x{int(path[0]):02X} is not an output mode the {dev.name} may "
+                    f"write.")
+        if kind != "int" or isinstance(value, bool) or int(value) not in LAYOUT_ROUTING_MODES:
+            return f"{name} must be 0, 1 or 2, written as int, on the {dev.name}."
+        return None
+    want = LAYOUT_ROUTING_CELL_WRITES.get(name)
+    if want is None:
+        return f"{name} is not one of the routing settings enabled on the {dev.name}."
+    mix = lay.run("MIX")
+    if mix is None or mix.index_of(path[0]) is None:
+        return f"Root index 0x{int(path[0]):02X} is not a cross-point the {dev.name} may write."
+    if kind != want:
+        return f"{name} must be written as {want} on the {dev.name}."
+    if want == "pair" and value != LAYOUT_ROUTING_REQUEST_VALUE:
+        return f"{name} carries only the constant request on the {dev.name}."
+    if want == "str":
+        level, sep, anchor = str(value).partition("|")
+        try:
+            ok = sep == "|" and anchor == "0" and layout_level_text(float(level)) == level \
+                and 0.0 <= float(level) <= 1.0
+        except ValueError:
+            ok = False
+        if not ok:
+            return f"{name} {value!r} is not a level from 0 to 1 in the form the {dev.name} takes."
+    return None
+
+
+# THE HEADPHONE TYPE A LAYOUT DESK TAKES (cap "headphone_write"): headphoneType (int) on one block of
+# the MAIN HEADPHONE run, one-level address 01 01 01 01 <index> - the Pro II record form
+# (rcp_transfer.set_headphone_type) at this desk's own blocks (0x07..0x0A on PID 0x0092, headphones
+# 1..4). The values are the Pro II's amp types, ALL MEASURED on PID 0x0092 on 7th October 2026 by a
+# dump before and after a change in RODE's own app on headphone 1 (0x07): "RODE NTH-100" = 0
+# (the factory value on all four), "Low Sensitivity" 0 -> 2, "High Sensitivity" 2 -> 1. Nothing
+# else in the tree moved but knob positions. headphoneColour, the block's other property, is never
+# written.
+LAYOUT_HEADPHONE_PROP = "headphoneType"
+LAYOUT_HEADPHONE_TYPES = frozenset({0, 1, 2})
+LAYOUT_HEADPHONE_COUNT = 4
+# WHICH CHANGES MAKE A HEADPHONE LOUDER on this desk, by ear (the unit's owner, 7th October 2026):
+# 1 "High sensitivity" is clearly the SOFTEST; 0 NTH-100 and 2 Low sensitivity are about equally
+# loud. RODE's app asks before 1 -> 2 ("this will increase the headphone output", turn them down
+# first) and not before 0 -> 2. So (from, to) pairs leaving 1 are warned about before writing.
+LAYOUT_HEADPHONE_LOUDER = frozenset({(1, 0), (1, 2)})
+LAYOUT_HEADPHONE_LOUDER_WARNING = ("This makes {output} louder. Turn your headphones down first, "
+                                   "then apply.")
+LAYOUT_HEADPHONE_NOTE = ("On this unit High sensitivity is the quietest setting; NTH-100 and Low "
+                         "sensitivity are about equally loud, and louder than it. Moving away from "
+                         "High sensitivity asks first, so you can turn your headphones down.")
+
+# WHAT THIS COMPUTER RECEIVES OVER USB ON A LAYOUT DESK (cap "usbmode_write"): outputMultiMode (int)
+# on the OUTPUT block (0x0B on PID 0x0092), one-level address. ONLY the two values measured there on
+# 7th October 2026, each with the USB product id the desk comes back under: RODE's "USB 1 Input:
+# Standard" (USB 1 Output Pre-Fader) = 1 -> PID 0x0092, "Expanded" = 4 -> PID 0x0094. The Pro II
+# helper's 0 (Off) and 2 (Post-Fader) are NOT measured on this desk and stay refused, as does
+# everything else. Switching RE-ENUMERATES THE WHOLE DESK on USB, HID included, and Expanded hands
+# the "Main Multitrack" playback endpoint to the RODE Virtual Device Driver (other apps get 'device
+# in use', 0x8889000A) and makes Windows pick "System (RODECaster)" as its default output - every
+# path that offers it must say so first (LAYOUT_USBMODE_WARNING).
+LAYOUT_USBMODE_PROP = "outputMultiMode"
+LAYOUT_USBMODE_PIDS = {1: PID_LAYOUT_0092, 4: PID_LAYOUT_0094}
+LAYOUT_USBMODE_LABEL = {
+    1: "Standard: every channel, pre-fader",
+    4: "Expanded: for the RODE Virtual Device Driver",
+}
+LAYOUT_USBMODE_WARNING = (
+    "Expanded hands the unit's Main Multitrack playback device to the RODE Virtual Device Driver: "
+    "other programs can no longer play to it (Windows reports it as in use), and Windows makes "
+    "System (RODECaster) its default output. Either way the unit disconnects from USB and comes "
+    "back under another product id, so every RODECaster sound device drops out while it does.")
+
+
+def layout_headphone_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one headphone-type write is allowed on a layout desk, else the reason it is not."""
+    lay = dev.layout
+    if "headphone_write" not in dev.caps or lay is None:
+        return f"Changing the headphone type is not enabled on the {dev.name}."
+    if name != LAYOUT_HEADPHONE_PROP:
+        return f"{name} is not the headphone type setting on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1:
+        return f"{name} must address one HEADPHONE block on the {dev.name}."
+    if int(path[0]) not in {sel for sel, _lab in layout_headphone_outputs(lay)}:
+        return f"Root index 0x{int(path[0]):02X} is not a headphone output the {dev.name} may write."
+    if kind != "int" or isinstance(value, bool) or int(value) not in LAYOUT_HEADPHONE_TYPES:
+        return f"{name} must be 0, 1 or 2, written as int, on the {dev.name}."
+    return None
+
+
+def layout_usbmode_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one USB-mode write is allowed on a layout desk, else the reason it is not."""
+    lay = dev.layout
+    if "usbmode_write" not in dev.caps or lay is None or lay.single("OUTPUT") is None:
+        return f"Changing what this computer receives over USB is not enabled on the {dev.name}."
+    if name != LAYOUT_USBMODE_PROP:
+        return f"{name} is not the USB mode setting on the {dev.name}."
+    path = list(path or ())
+    if len(path) != 1 or int(path[0]) != lay.single("OUTPUT"):
+        return f"{name} must address the OUTPUT block on the {dev.name}."
+    if kind != "int" or isinstance(value, bool) or int(value) not in LAYOUT_USBMODE_PIDS:
+        return (f"{name} {value!r} has not been measured on the {dev.name}: only 1 (Standard) and "
+                f"4 (Expanded), written as int, are sent there.")
+    return None
+
+
+# ---- THE GENERALISED GATE (cap "tree_write") -----------------------------------------------------
+# Every property name in this desk's tree is the SAME name the Pro II uses, in the same record
+# format; only the root index of each block differs, and the layout reads that off the desk's own
+# dump. So a write is safe exactly when:
+#   (a) the property NAME already sits on that very block in the most recent dump of this desk (the
+#       real danger is a name the desk does not publish there: writing it appends a stray that only
+#       a factory reset clears),
+#   (b) the value's kind (bool / int / float / str) is the kind the dump has for it there, and
+#   (c) the address is a block the layout located BY NAME: one of LAYOUT_TREE_BLOCKS, in the FIRST
+#       run of that name (never a later duplicate such as CHANNEL 0xFA or MIX 0xFF), one level deep.
+# On top of that, the writers check the same thing against a FRESH dump before sending and read the
+# value back after (layout_tree.write_records). Names in a narrow family above (input, effects,
+# fader source, strip, routing, headphone type, USB mode) are judged by that family only.
+#
+# THE BLOCKS: those the Pro II UI writes settings to. NOT: NETWORK (wifi, Bluetooth pairing: commands
+# and credentials), RECORDER / PLAYER / SHOWCONTROL / RECORDINGS (transport and show commands),
+# SOUNDPADS and its effects (the pad create/edit choreography needs transfer mode and a pad grid not
+# measured here), PHYSICALINTERFACE (fader levels: which faders are virtual is not measured here),
+# AUDIO (engine parameters - sample rate, buffer - no page writes them), SIP / RC Sync / StreamerX.
+LAYOUT_TREE_BLOCKS = frozenset({"GUI", "HEADPHONE", "OUTPUT", "MASTERCHANNEL", "SYSTEM", "CHANNEL",
+                                "EFFECTS_PARAMETERS", "MIXMINUSES", "MIX", "INPUTSOURCE"})
+# THE DENY LIST: commands rather than settings, status the desk reports, identities, and settings
+# with unmeasured hardware side effects. Matched against the WORDS of the camelCase name
+# ("updateResetDeviceRequested" -> update, reset, device, requested), never as raw substrings, so a
+# setting that merely contains the letters is not caught ("channelSparkle" is not "channels",
+# "channelCurrentFxPreset" is not "reset"). Refused whatever the dump says.
+LAYOUT_TREE_DENY = frozenset({
+    # commands / triggers
+    "request", "requested", "requests", "initiate", "reset", "erase", "format", "formatted",
+    "delete", "update", "reboot", "factory", "power", "remount", "transfer", "eject", "cancel",
+    "download", "downloaded", "do", "edit", "clear", "import", "export", "extend", "disconnect",
+    # network, Bluetooth pairing, calls, cloud, radio
+    "wifi", "bt", "sip", "call", "calling", "scan", "pair", "paired", "unpair", "connect",
+    "connected", "icecast", "radio", "cell", "oauth",
+    # the recorder, shows, storage, the emergency mute, the pad recorder
+    "show", "record", "state", "storage", "emergency", "volume",
+    # status and identity the desk reports
+    "selected", "serial", "sn", "id", "uid", "firmware", "name", "version", "progress", "available",
+    "complete", "internet", "touched", "pressed", "detected", "signal", "rcv", "board", "last",
+    # engine and modes with effects nobody has measured
+    "rc", "engine", "beta", "host", "unify", "presenter", "share", "latency", "rate", "buffer",
+    "channels",
+})
+# Shapes the words cannot say: status flags that END in "Active" (outputMonAutoMuteActive reports
+# whether the auto-mute is engaged right now; "activeButtonsBrightness" is a setting and passes),
+# and binding indexes that end in "Idx" (effectsIdx, padIdx tie a block to a strip or a pad).
+_LAYOUT_TREE_DENY_RE = re.compile(r"Active$|Idx$|SN$")
+# Whole names refused: inputType is DERIVED by the desk from the mic type (channels.CHANNEL_PROP),
+# and writing it alone makes a state the desk's own screen cannot make; systemMainMode switches the
+# desk's whole operating mode, which nothing here has measured.
+LAYOUT_TREE_DENY_NAMES = frozenset({"inputType", "systemMainMode"})
+_WORDS = re.compile(r"[a-z]+|[A-Z][a-z]*|[0-9]+")
+# The Pro II caps the generalised gate stands in for on a layout desk (has_write_cap).
+LAYOUT_TREE_CAPS = frozenset({"output_write", "unit_settings"})
+
+
+def layout_tree_denied(name: str) -> bool:
+    """True when `name` is a command or an unmeasured side effect (LAYOUT_TREE_DENY)."""
+    name = str(name)
+    words = {w.lower() for w in _WORDS.findall(name)}
+    return (name in LAYOUT_TREE_DENY_NAMES or bool(words & LAYOUT_TREE_DENY)
+            or bool(_LAYOUT_TREE_DENY_RE.search(name)))
+
+
+def layout_tree_block(dev: DeviceModel, path) -> Optional[tuple]:
+    """(block name, {property: kind}) for a path the generalised gate may address, or None: a
+    one-level path to a root child in the FIRST run of a LAYOUT_TREE_BLOCKS name."""
+    lay = dev.layout
+    path = list(path or ())
+    if lay is None or len(path) != 1:
+        return None
+    run = lay.main_run_of(path[0])
+    if run is None or run.name not in LAYOUT_TREE_BLOCKS:
+        return None
+    hit = lay.block_at(path)
+    return hit if hit is not None and hit[0] == run.name else None
+
+
+def layout_tree_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one write passes the generalised gate on a layout desk, else why not."""
+    if "tree_write" not in dev.caps or dev.layout is None:
+        return f"{name} cannot be changed on the {dev.name}."
+    if layout_tree_denied(name):
+        return (f"{name} is a command or a setting with effects nobody has measured on the "
+                f"{dev.name}, so AccessCaster does not send it there.")
+    path = list(path or ())
+    hit = layout_tree_block(dev, path)
+    if hit is None:
+        where = "/".join(f"0x{int(p):02X}" for p in path) or "nothing"
+        return (f"{name} at {where} is not one of the {dev.name}'s own setting blocks, so it is "
+                f"not written.")
+    block, props = hit
+    if name not in props:
+        return (f"The {dev.name} does not publish {name} on its {block} block, so it is not "
+                f"written (that would add a stray setting).")
+    if kind != props[name] or kind not in ("bool", "int", "float", "str"):
+        return (f"{name} is {props[name]} on the {dev.name}'s {block} block, not {kind}, so it is "
+                f"not written.")
+    return None
+
+
+def has_write_cap(dev: DeviceModel, cap: str) -> bool:
+    """True when the desk may take the writes `cap` names: it holds the cap itself, or it is a
+    layout desk whose generalised gate ("tree_write") stands in for it (LAYOUT_TREE_CAPS). On the
+    Pro II and the Duo this is exactly `cap in dev.caps`."""
+    return cap in dev.caps or (dev.layout_required and "tree_write" in dev.caps
+                               and cap in LAYOUT_TREE_CAPS)
+
+
+def layout_block_selector(dev: DeviceModel, block: str, instance: int = 0) -> int:
+    """The root index of block `block` (instance `instance` of its main run) on a layout desk, read
+    off its own dump: what replaces a Pro II selector constant there. Raises WriteRefused when the
+    desk has no such block."""
+    lay = dev.layout
+    run = None
+    if lay is not None:
+        run = lay.run(block) or next((r for r in lay.all_runs if r.name == block), None)
+    if run is None or not 0 <= int(instance) < run.count:
+        raise WriteRefused(f"The {dev.name} has no {block} block"
+                           f"{'' if not instance else f' {int(instance) + 1}'} in its layout, so "
+                           f"that setting is not written.")
+    return run.base + int(instance)
+
+
+def layout_write_ok(dev: DeviceModel, path, name: str, value, kind: str) -> Optional[str]:
+    """None if this one write is allowed on a layout desk: an input, effects, fader-source,
+    per-strip channel, routing, headphone-type or USB-mode write (each by its own narrow family -
+    the sets are disjoint), or any other name through the generalised gate (layout_tree_write_ok)."""
+    if name == LAYOUT_HEADPHONE_PROP:
+        return layout_headphone_write_ok(dev, path, name, value, kind)
+    if name == LAYOUT_USBMODE_PROP:
+        return layout_usbmode_write_ok(dev, path, name, value, kind)
+    if name == LAYOUT_FADER_PROP:
+        return layout_fader_write_ok(dev, path, name, value, kind)
+    if name in LAYOUT_ROUTING_CELL_WRITES or name == LAYOUT_ROUTING_MODE_PROP:
+        return layout_routing_write_ok(dev, path, name, value, kind)
+    if name in LAYOUT_FX_WRITES:
+        return layout_fx_write_ok(dev, path, name, value, kind)
+    if name in LAYOUT_STRIP_WRITES:
+        return layout_strip_write_ok(dev, path, name, value, kind)
+    if name in LAYOUT_INPUT_WRITES:
+        return layout_input_write_ok(dev, path, name, value, kind)
+    return layout_tree_write_ok(dev, path, name, value, kind)
+
+
+def refuse_unproven_pid(product_id, record: Optional[bytes] = None) -> None:
+    """The send layer's last check, given the WHOLE record about to go out.
+
+    The static desks in DEVICES take anything (their helpers carry their own gates). A layout desk
+    takes ONLY a record that parses as one of LAYOUT_INPUT_WRITES at an allowed INPUTSOURCE address
+    (layout_input_write_ok), one of LAYOUT_FX_WRITES at an allowed EFFECTS_PARAMETERS address
+    (layout_fx_write_ok), a channelInputSource write of an allowed code on a main-run CHANNEL
+    strip (layout_fader_write_ok), one of the Pro II routing record forms on a main-run MIX
+    cross-point or MIXMINUSES output (layout_routing_write_ok), a headphoneType 0..2 on a HEADPHONE
+    block (layout_headphone_write_ok), an outputMultiMode 1 or 4 on OUTPUT
+    (layout_usbmode_write_ok), or any other single property that passes the generalised gate
+    (layout_tree_write_ok: a setting block found by name, the name already on it in the dump, the
+    same kind, not a command). Everything else is refused before a handle is opened."""
+    if product_id in DEVICES:
+        return
+    dev = resolve_device(product_id)
+    reason = dev.write_block or f"Writing to PID 0x{int(product_id):04X} is refused."
+    if record is not None and product_id in LAYOUT_PIDS:
+        import model_tree             # local: devices keeps its module imports to rcp_hid and layout
+        try:
+            n = int.from_bytes(record[1:5], "little")
+            if record[:1] != b"\x03" or not 0 < n <= len(record) - 5 or any(record[5 + n:]):
+                raise ValueError("not one report-3 record")
+            path, name, value, kind, end = model_tree.parse_record(record[5:5 + n])
+            if end != n:
+                raise ValueError("trailing bytes in the record")
+        except (ValueError, IndexError):
+            raise WriteRefused(reason)
+        why = layout_write_ok(dev, path, name, value, kind)
+        if why is None:
+            return
+        reason = why
+    raise WriteRefused(reason)
 
 
 def device_from_system_name(system_name) -> Optional[DeviceModel]:
@@ -1080,15 +1907,21 @@ def get_active_device() -> DeviceModel:
     """The DeviceModel for the currently connected RODECaster control interface.
 
     Resolves from the vendor control interface's product id, then from what a dump has told us
-    about this SERIAL. Falls back to DEFAULT (Pro II) if nothing is connected or enumeration
+    about this SERIAL. Falls back to DEFAULT (Pro II) only if nothing is connected or enumeration
     fails, so callers never crash and Pro II-era behaviour is preserved when offline.
 
     **THE PRODUCT ID ALONE IS ONLY RIGHT IN THE DEFAULT AUDIO MODE.** It encodes the USB audio
     configuration, so a desk in any other `outputMultiMode` presents an id no table can hold, and
     would silently resolve to DEFAULT - which is a Pro II, so a Duo in Expanded would be handed a
-    Pro II's matrix shape and channel layout. The learned map fixes that: it is keyed by serial,
-    which does not change, and is filled in from the desk's own `systemName` the first time a dump
-    is read. A known id still wins, because it is definitive and needs no dump.
+    Pro II's matrix shape and channel layout. The learned map fixes that for a DUO: it is keyed by
+    serial, which does not change, and is filled in from the desk's own `systemName` the first time
+    a dump is read. A known id still wins, because it is definitive and needs no dump.
+
+    A LAYOUT desk (LAYOUT_PIDS) is resolved BEFORE the learned map, and a learned "Pro II" is NOT
+    believed for any other unknown id: the Pro II at PID 0x0092 / 0x0094 says "RODECaster Pro II" in
+    its own systemName, yet its root children sit at other indexes than the Pro II this app was
+    built on, so handing it the PRO2 table would point every selector at a different node. Such a
+    desk stays a layout desk or a geometry-unknown one (resolve_device), never a Pro II.
     """
     if _FORCED_DEVICE is not None:
         return _FORCED_DEVICE
@@ -1098,9 +1931,11 @@ def get_active_device() -> DeviceModel:
             known = DEVICES.get(iface.product_id)
             if known is not None:
                 return known
-            learned = _LEARNED.get(iface.serial_number)
-            if learned is not None:
-                return learned
+            if iface.product_id not in LAYOUT_PIDS:
+                learned = _LEARNED.get(iface.serial_number)
+                if learned is DUO:
+                    return learned
+            return resolve_device(iface.product_id)
     except Exception:
         pass
     return DEFAULT

@@ -88,7 +88,8 @@ section 7, are IDENTICAL on both units unless a per-device note says otherwise.
 
 Vendor ID: 0x19F7 (RODE).
 
-Product IDs:  Pro II = 0x0037,  Duo = 0x0050.
+Product IDs:  Pro II = 0x0037,  Duo = 0x0050.  A Pro II reporting 0x0092 has its
+              blocks at other root indexes - see 3.3.
 
 THE PRODUCT ID ENCODES THE USB AUDIO CONFIGURATION, SO IT IS NOT A DESK
 IDENTIFIER. Writing outputMultiMode re-enumerates the unit, and it returns under a
@@ -429,6 +430,60 @@ Outputs / headphones: 13 outputs internally; 4 headphoneType slots in the model
 SMART pads: 6 pads x 8 banks = 48 slots (42 user-assignable, banks 1-7; system /
     function pads Input1/SceneA/Auto/Input2/SceneB/Cut at padIdx 42-47 = bank 8).
 Named inputs: Mic1, Mic2, Headset, USB1, Chat, USB2, Bluetooth (source codes 5.3).
+
+3.3 PID 0x0092 (a Pro II on firmware 1.7.6, measured 7th October 2026)
+------------------------------------------------------------------------
+USB: VID 0x19F7, PID 0x0092, control interface MI_09, usage page 0xFF00 usage 1.
+Same framing, same dump trigger, same tree grammar; the dump opens with its 4-byte
+LE length, then 0x02, then the root "Rodecaster" (149430 bytes as read, 703 root
+children). THE ROOT CHILDREN SIT AT DIFFERENT INDEXES from the Pro II in 3.1, so
+every Pro II selector constant names a DIFFERENT node on this unit:
+    0x000 PHYSICALINTERFACE  0x001 RECBUTTON  0x002 RECORDER  0x003 PLAYER
+    0x004 ENCODER  0x005 GUI  0x006 APP  0x007 HEADPHONE x4  0x00B OUTPUT
+    0x00C MASTERCHANNEL  0x00D SYSTEM  0x00E NETWORK  0x00F AUDIO
+    0x010 STREAMERXMIXPRESET x10  0x01A CHANNEL x9  0x023 EFFECTS_PARAMETERS x10
+    0x02D MIXMINUSES x10  0x037 MIX x156 (= 12 x 13)  0x0D3 STREAMERXSTREAMMIX x12
+    0x0DF INPUTSOURCE x12  0x0F4 SOUNDPADS
+THE SAME BLOCK NAMES RECUR LATER: 0x0FA CHANNEL x1, 0x0FB EFFECTS_PARAMETERS,
+0x0FC MIXMINUSES x3, 0x0FF MIX x91, 0x161 INPUTSOURCE x7, 0x17D MIX x143,
+0x20C RCSYNCMIX x126, 0x295 INPUTSOURCE x11, 0x2A3 RCSYNCMIX x27. A read by block
+NAME therefore concatenates them; the app reads the FIRST contiguous run of each
+group by address (Project/layout.py).
+Pushes measured live: moving fader 1 (Mic 1) pushes mixLevelWithAnchor on
+0x37..0x43 (13 cells, stride 13); its mute pushes channelOutputMute on 0x1A and
+mixMute on 0x37..0x43; its cue button pushes channelCueEnable on 0x1A;
+outputMonAutoMuteActive arrives on 0x0B.
+Fader layout (channelInputSource on CHANNEL 0x1A..0x22): [0,1,6,7,9,8,-1,11,10].
+Faders 1-6 confirmed by the owner as Mic 1, Mic 2, the Mic 3 + 4 pair (on line
+input), USB 1, USB 2, Chat, so source codes 0,1,6,7,8,9 mean what they do on the
+Pro II. INPUTSOURCE inputType 2 = line, confirmed on the Mic 3 + 4 source (code 6).
+Faders 7-9 and codes 10/11 are UNCONFIRMED on this unit.
+STRAYS PRESENT IN THAT DUMP: outputMixMinus on MIX 0x039, and mixDisabled +
+mixLinkRequest + mixUnlinkRequest on STREAMERXSTREAMMIX 0x0D6 and on INPUTSOURCE
+0x0E3. Those are exactly the Pro II selectors for the Chat output (8): its mode
+0x31 + 8, and the cross-points 0x4C + 13 x 10 + 8 and 0x4C + 13 x 11 + 8. Where they
+came from is not recorded; strays persist until a factory reset (see below).
+A fourth: STREAMERXMIXPRESET[0] (0x010) carries `wifi` and `wifiScan`, the names
+the Pro II writes at its NETWORK selector 0x10.
+PHYSICALINTERFACE (0x000) has 105 children: POT x4 at 0..3, FADER x9 at 4..12,
+METER x22, PADBUTTON x8, SOLOMUTEBUTTON x6, PADBUTTON x56 - so the FADER nodes sit
+where the Pro II's do. Headphone knob 4 = POT 3 (owner-confirmed by turning it).
+The encoder IS the monitor-level knob on this unit (owner-confirmed); the dump has
+systemChannelSelected 2 and systemMixSelected 13 on SYSTEM 0x00D.
+The later INPUTSOURCE runs carry inputId 12..18 (0x161) and 19..29 (0x295), in
+order, and the three MIX runs are 12, 7 and 11 rows of 13 - together a 30 x 13 grid
+split in three. The 13 outputMixMinus values (10 + 3) read
+[0,0,0,0,0,0,1,0,1,1,1,1,1], the same sequence as a factory Pro II / Duo. The app
+reads only the first MIX run; that the later MIX runs extend the grid is not
+confirmed on this unit. It reads the 13 output modes as the main MIXMINUSES run
+(outputs 0..9) followed by the 0xFC run (10..12) - inferred from the counts and that
+sequence, not measured. Which output is which jack is NOT known: the dump names no
+output, and the Pro II order (5.2) is only a hypothesis here.
+Routing writes, where the app makes them, use the Pro II forms of 5.3 at this unit's
+addresses: cross-point (output o, source s) at 0x37 + 13 x s + o, mode at 0x2D + o
+(o 0..9 only). Unproven by ear on this unit.
+A fader at the bottom reads mixLevelWithAnchor "-3.00258e-06|0" and one at its first
+step "0.00787401|0.00787402": level and anchor are equal as numbers, not as text.
 
 STRAYS NOTE (Duo, historical): a global write with an UNMAPPED selector does NOT
 error - the device APPENDS a new named "stray" property. NEVER blind-scan selectors

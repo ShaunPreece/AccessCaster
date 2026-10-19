@@ -20,6 +20,7 @@ import diagnostics           # the app's own account of what it read and how lon
 import rcp_hid   # write-generation counter, so a write invalidates the cached dump below
 from rcp_hid import find_control_interface
 import devices   # device model table (matrix shape, channel order) keyed by product id
+import layout as _layout     # block geometry read off a dump, recorded per desk by _index
 
 BULK_LEN = 256
 # Verbatim trigger captured from the app (micmidi_reads.pcap frame 70043):
@@ -404,10 +405,21 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
                       bytes=len(buf), frames=frames, pushes_skipped=pushes,
                       took=f"{time.time() - started:.2f}s")
     blob = bytes(buf)
+    # A DESK WHOSE GEOMETRY COMES FROM ITS OWN TREE gets that tree parsed HERE, before any caller
+    # resolves the device, so devices.get_active_device() already describes this dump when the
+    # first read asks. The Pro II and the Duo carry constants and are left exactly as they were.
+    # A dump that does not parse records nothing here; the reader that asks for it raises.
+    if iface.product_id not in devices.DEVICES:
+        try:
+            _index(blob, pid=iface.product_id)
+        except ModelUnreadable:
+            pass
     # LEARN WHICH DESK THIS IS, from the desk's own word for it. Only when the product id names no
     # desk, which happens whenever `outputMultiMode` is not the default: the id encodes the audio
     # configuration, so it cannot be tabulated, while the serial it comes back under does not
     # change. One dict lookup per dump, and the string read at most once per desk per session.
+    # A layout desk (devices.LAYOUT_PIDS) is never resolved from what is learned here; see
+    # devices.get_active_device.
     if devices.unidentified(iface):
         try:
             devices.note_system_name(iface, first(blob, "systemName", "str"))
@@ -434,10 +446,11 @@ _INDEX_CACHE_MAX = 2
 class _Index:
     """A parsed dump: the tree, the properties in stream order, and name + path lookups."""
 
-    __slots__ = ("root", "flat", "by_name", "by_path")
+    __slots__ = ("root", "flat", "by_name", "by_path", "_layout")
 
     def __init__(self, root):
         self.root = root                  # None for an empty blob
+        self._layout = None
         self.flat = []                    # [(block, name, value, kind)] in dump order
         self.by_name: dict = {}
         # ADDRESS -> node. The tree path IS the write address (see model_tree.encode_path), so this
@@ -449,6 +462,13 @@ class _Index:
             for pname, val, kind in node.props:
                 self.flat.append((node.name, pname, val, kind))
                 self.by_name.setdefault(pname, []).append((val, kind))
+
+    @property
+    def layout(self):
+        """This dump's block geometry (layout.Layout), built once on first use."""
+        if self._layout is None:
+            self._layout = _layout.from_tree(self.root)
+        return self._layout
 
 
 class ModelUnreadable(ValueError):
@@ -463,27 +483,53 @@ def parses(blob) -> bool:
         return False
 
 
-def _index(blob: bytes):
+def _index(blob: bytes, pid: int | None = None):
     """The parsed index for a dump, parsed once and remembered.
 
     AN EMPTY BLOB IS AN EMPTY MODEL: it is what a desk that has stopped answering returns, and
     callers already test for that with is_model_dump. ANY OTHER BLOB THAT WILL NOT PARSE RAISES
     ModelUnreadable. There is no fallback reader: a guessed answer from a truncated dump reads as a
     real setting, and read_model_stable retries until it has a dump that parses.
+
+    `pid` is the USB product id of the desk the dump was READ FROM, and passing it records the
+    dump's block layout as that desk's current geometry (layout.note). Only read_model_raw knows
+    it; a blob from a file or a test is parsed without one and never touches the recorded layout.
+    An empty blob records nothing.
     """
-    for cached_blob, idx in _INDEX_CACHE:
-        if cached_blob is blob:
-            return idx
-    if not blob:
-        return _Index(None)
-    try:
-        root, _used, _tail = model_tree.parse(blob)
-    except Exception as exc:
-        raise ModelUnreadable(f"the model dump does not parse ({len(blob)} bytes): {exc}") from exc
-    idx = _Index(root)
-    _INDEX_CACHE.append((blob, idx))
-    del _INDEX_CACHE[:-_INDEX_CACHE_MAX]
+    idx = next((i for b, i in _INDEX_CACHE if b is blob), None)
+    if idx is None:
+        if not blob:
+            return _Index(None)
+        try:
+            root, _used, _tail = model_tree.parse(blob)
+        except Exception as exc:
+            raise ModelUnreadable(f"the model dump does not parse ({len(blob)} bytes): {exc}") from exc
+        idx = _Index(root)
+        _INDEX_CACHE.append((blob, idx))
+        del _INDEX_CACHE[:-_INDEX_CACHE_MAX]
+    if pid is not None:
+        _layout.note(pid, idx.layout)
     return idx
+
+
+def device_for_read(blob: bytes | None = None):
+    """devices.get_active_device(), with a LAYOUT desk's geometry known before it is used.
+
+    A desk resolved through devices.layout_model has no bases until one of its dumps has been
+    parsed, and a cap check made before that first dump would refuse a read that is fine. So when
+    the active desk is such a desk with no layout yet AND the caller has no dump in hand, read one
+    (which records it) and resolve again. A caller passing `blob` already holds a dump that
+    read_model recorded, so nothing is read here. Every other desk is returned exactly as
+    get_active_device gives it."""
+    dev = devices.get_active_device()
+    if (blob is None and dev.layout_required and dev.layout is None
+            and dev.product_id in devices.LAYOUT_PIDS):
+        try:
+            read_model()
+        except Exception:
+            return dev
+        dev = devices.get_active_device()
+    return dev
 
 
 def find_all(blob: bytes, name: str):
@@ -624,6 +670,50 @@ def path_value(blob: bytes, path, name: str, default=None):
     return default
 
 
+def run_values(blob: bytes, base: int, count: int, name: str, kind: str | None = None,
+               block: str | None = None) -> list:
+    """`name` on each of `count` CONSECUTIVE ROOT CHILDREN from root index `base`, one entry per
+    block - the ADDRESSED counterpart of block_values, for a group read as one run (layout.Run).
+
+    Positional by construction: entry i is block base + i, and it is None when that block is
+    missing, is not named `block`, does not carry `name`, or carries it as another `kind`. So the
+    list never shifts, and a later block of the same name elsewhere in the tree is never included.
+    [] when the dump will not parse: there is no honest positional fallback for an address.
+    """
+    idx = _index(blob)
+    if idx is None:
+        return []
+    out = []
+    for i in range(int(count)):
+        node = idx.by_path.get((int(base) + i,))
+        val = None
+        if node is not None and (block is None or node.name == block):
+            for pname, v, k in node.props:
+                if pname == name:
+                    if kind is None or k == kind:
+                        val = v
+                    break
+        out.append(val)
+    return out
+
+
+def physical_values(blob: bytes, node: str, name: str, dev=None) -> list:
+    """`name` on each PHYSICALINTERFACE child of kind `node` (FADER, POT), in node order.
+
+    The Pro II and the Duo: every occurrence of `name` in dump order, as always (faderLevel and
+    potLevel occur only on those nodes there). A layout desk (devices.layout_model): the first run
+    of `node` under PHYSICALINTERFACE, found BY NAME in its own tree and read by address, so the
+    list never depends on where that run starts or on the same name occurring elsewhere."""
+    dev = dev or devices.get_active_device()
+    if not dev.layout_required:
+        return values(blob, name)
+    lay = dev.layout
+    run = lay.physical(node) if lay is not None else None
+    if run is None:
+        return []
+    return [path_value(blob, lay.physical_path(node, i), name, None) for i in range(run.count)]
+
+
 def snapshot_properties(blob: bytes) -> dict:
     """{property name: [value, ...]} for EVERY property in a dump, values in stream order."""
     out: dict[str, list] = {}
@@ -753,6 +843,34 @@ def master_processing(blob: bytes) -> dict:
     }
 
 
+def matrix_cells(blob: bytes, m, prop: str) -> list:
+    """Every cross-point's `prop` for the matrix `m` (devices.MatrixSpec), in grid order.
+
+    The Pro II and the Duo read the block by NAME (block_values), as they were verified. A desk
+    whose geometry comes from its own tree (m.base set) reads the MAIN MIX RUN BY ADDRESS: that tree
+    carries later blocks also named MIX that are not this grid, so a read by name would concatenate
+    them. A missing cell there means the run is not what the layout said, and [] is returned so the
+    caller's shape guard refuses rather than index into a short list."""
+    if m.base is None:
+        return block_values(blob, m.block, prop)
+    raw = run_values(blob, m.base, m.cell_count, prop, block=m.block)
+    return raw if all(v is not None for v in raw) else []
+
+
+def output_modes(blob: bytes, m) -> list:
+    """Each output's outputMixMinus for the matrix `m`, index = output. read_output_modes on the Pro
+    II and the Duo; on a layout desk (m.modes_base set) the main MIXMINUSES run by address, then
+    each later run in m.modes_extra (PID 0x0092: 10 + 3), [] if any of it is missing."""
+    if m.base is None or m.modes_base is None:
+        return read_output_modes(blob) if m.base is None else []
+    extra = tuple(getattr(m, "modes_extra", ()) or ())
+    main = m.output_count - sum(c for _b, c in extra)
+    modes = run_values(blob, m.modes_base, main, "outputMixMinus", "int", block="MIXMINUSES")
+    for base, count in extra:
+        modes += run_values(blob, base, count, "outputMixMinus", "int", block="MIXMINUSES")
+    return modes if len(modes) == m.output_count and all(v is not None for v in modes) else []
+
+
 def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
     """The matrix grid read, and the ONE copy of it. Reads `prop` for every cross-point by the
     proven formula (read_index = row_stride * source + output) and passes each raw cell through
@@ -768,7 +886,7 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
     The count is taken from `m.block` alone. RCSYNCMIX carries the same cross-point names, so an
     unscoped read sums two grids and the guard then fires on RC Sync gaining a device.
     """
-    dev = devices.get_active_device()
+    dev = device_for_read(blob)
     m = dev.matrix
     empty = {"ok": False, key: {}, "modes": {}}
     if "matrix_read" not in dev.caps:
@@ -776,8 +894,8 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
                                    f"{dev.name}, so {cannot} cannot be shown reliably yet."))
     if blob is None:
         blob = read_model_stable()
-    raw = block_values(blob, m.block, prop)
-    modes_all = read_output_modes(blob)
+    raw = matrix_cells(blob, m, prop)
+    modes_all = output_modes(blob, m)
     if len(raw) != m.cell_count or len(modes_all) < m.output_count:
         return dict(empty, reason=("The matrix changed shape (a phone caller may be connected), "
                                    f"so the live {cannot} cannot be read reliably right now."))
@@ -807,14 +925,27 @@ def read_matrix_state(blob: bytes | None = None) -> dict:
 def _decode_level_cell(cell) -> dict:
     """One mixLevelWithAnchor cell: the ASCII string 'level|anchor' (0..1). level == anchor means
     the cross-point is LINKED (it follows the channel fader); they differ when it has been unlinked
-    at a manual level. Anything that will not parse comes back as two Nones rather than a guess."""
+    at a manual level. Anything that will not parse comes back as two Nones rather than a guess.
+
+    EQUAL WITHIN LINK_EPS, NOT AS TEXT: a fader at the bottom reads '-3.00258e-06|0' and one at its
+    first step '0.00787401|0.00787402' on PID 0x0092 (7th October 2026), on rows nobody unlinked."""
     if isinstance(cell, str) and "|" in cell:
         a, b = cell.split("|", 1)
         try:
-            return {"level": float(a), "linked": (a == b)}
+            level = float(a)
         except ValueError:
-            pass
+            return {"level": None, "linked": None}
+        try:
+            linked = a == b or abs(level - float(b)) <= LINK_EPS
+        except ValueError:
+            linked = False
+        return {"level": level, "linked": linked}
     return {"level": None, "linked": None}
+
+
+# How far a cell's level may sit from its anchor and still be the fader's own value (linked). The
+# readings that need it differ by 3e-06 and 1e-08; the coarsest level a page writes is 0.01.
+LINK_EPS = 1e-4
 
 
 def read_matrix_levels(blob: bytes | None = None) -> dict:

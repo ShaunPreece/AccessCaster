@@ -207,6 +207,11 @@ def builtins(device=None) -> list:
     dev = device or devices.get_active_device()
     m = dev.matrix
     out = []
+    # "NORMAL" NEEDS A KNOWN DEFAULT FOR EVERY OUTPUT. A desk whose outputs are not identified
+    # (devices.layout_model gives default_mode None) has no normal to go back to, so neither built-in
+    # that writes a default is offered there, rather than guessing Main Mix for each output.
+    if not m.outputs or any(o.get("default_mode") is None for o in m.outputs):
+        return out
 
     # 1. Everything normal. The whole desk back to its default modes with every source included and
     #    following the faders. This IS "Reset all output mixes" - the button and this entry run the
@@ -287,6 +292,8 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
     start: the echo-suppression window is short and a full-desk apply takes several seconds.
     """
     dev = device or devices.get_active_device()
+    if dev.layout_required:
+        return _apply_layout(scheme, dev, on_source_write)
     m = dev.matrix
     out_by_key = {o["key"]: o for o in m.outputs}
     src_by_key = {s["key"]: s for s in m.all_sources}
@@ -350,6 +357,54 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
 
     return {"ok": failed == 0 and bool(touched), "outputs": touched, "skipped": skipped,
             "applied": applied, "failed": failed}
+
+
+def _apply_layout(scheme: dict, dev, on_source_write=None) -> dict:
+    """`apply` on a LAYOUT desk (PID 0x0092): the same scheme, the same keys and the same order,
+    written one OUTPUT at a time through layout_routing.apply_output - each output checked as a
+    batch before anything is sent and confirmed in one pass after - rather than one cross-point at
+    a time, which would cost a fresh read and a confirm per cell. `applied` / `failed` count
+    OUTPUTS here; `errors` says why each failed one did."""
+    import layout_routing                    # local: layout_routing imports rcp_transfer and more
+    m = dev.matrix
+    out_by_key = {o["key"]: o for o in m.outputs}
+    src_by_key = {s["key"]: s for s in m.sources}
+    applied = failed = 0
+    touched, skipped, errors = [], [], []
+    for okey, ospec in (scheme.get("outputs") or {}).items():
+        out = out_by_key.get(okey)
+        if out is None:
+            skipped.append(okey)
+            continue
+        mode = ospec.get("mode")
+        if mode not in (0, 1, 2):
+            mode = None
+        if mode == 1 and not out.get("mixminus"):
+            mode = out.get("default_mode")
+        sources = {}
+        for skey, cell in (ospec.get("sources") or {}).items():
+            src = src_by_key.get(skey)
+            if src is None:
+                if skey not in skipped:
+                    skipped.append(skey)
+                continue
+            excluded = bool(cell.get("excluded"))
+            level = cell.get("level")
+            keep_level = (not excluded and mode == 2 and cell.get("linked") is False
+                          and level is not None)
+            sources[src["index"]] = (excluded, float(level) if keep_level else None)
+            if on_source_write:
+                on_source_write(src["index"])
+        try:
+            layout_routing.apply_output(out["index"], mode, sources)
+            applied += 1
+        except Exception as exc:
+            failed += 1
+            errors.append(f"{out['label']}: {exc}")
+        touched.append(out["label"])
+        time.sleep(WRITE_PACE)
+    return {"ok": failed == 0 and bool(touched), "outputs": touched, "skipped": skipped,
+            "applied": applied, "failed": failed, "errors": errors}
 
 
 # A scheme that names more outputs than this is SUMMARISED rather than listed. It is read aloud

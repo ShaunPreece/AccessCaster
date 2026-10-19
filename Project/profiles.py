@@ -238,7 +238,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     def first(n):
         return rcp_read.first(blob, n)
 
-    cis = rcp_read.values(blob, "channelInputSource")
+    cis = channels.strip_values(blob, "channelInputSource")
     midi = first("systemMidiControl")
 
     # The two levels the desk otherwise keeps to itself (writes proven on hardware): each fader's
@@ -249,7 +249,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # A value that fails to decode is kept as None rather than dropped: the list is POSITIONAL
     # (index = strip), and dropping one would shift every level after it onto the wrong fader.
     fader_levels = [int(v) if isinstance(v, (int, float)) else None
-                    for v in rcp_read.values(blob, "faderLevel")]
+                    for v in rcp_read.physical_values(blob, "FADER", "faderLevel")]
     mon_level = first("outputMonLevel")
     # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
     # positionally to the outputs the device addresses - the same read read_routing_live does, and
@@ -533,6 +533,9 @@ def apply(prof, *, fader_count, fader_code_set, input_strip_vec_index,
     THE CALLER MUST HOLD THE HID LOCK (this module does no locking). progress, if given, is called
     with a short human sentence at each section boundary, so a caller polling from a UI has
     something to say during the ~20 seconds of paced writes instead of one frozen message."""
+    # A LAYOUT desk (PID 0x0092) restores through the same helpers: each one writes at that desk's
+    # own blocks and is checked before and confirmed after there (layout_tree / layout_routing /
+    # channels._layout_write), and one it refuses is counted as not restored, with the reason.
     if "channels" in prof:                       # version 2 (full) profile
         return _apply_v2(prof, fader_count=fader_count, fader_code_set=fader_code_set,
                          mic_channels=mic_channels, progress=progress)
@@ -576,7 +579,12 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     # Gated on the device's "fader_write" cap: the Duo's fader vector carries empty strips
     # encoded as -1 and its write semantics are unconfirmed. On a device
     # without the cap we SKIP the fader restore (and tell the user) rather than write it.
-    if "fader_write" in devices.get_active_device().caps:
+    if "fader_write" in devices.get_active_device().caps \
+            and devices.get_active_device().layout_required:
+        step("Restoring the fader layout.")
+        failed += _restore_layout_faders(faders, fader_count, fader_code_set, w, errs)
+        channels.invalidate_strip_vector()
+    elif "fader_write" in devices.get_active_device().caps:
         step("Restoring the fader layout.")
         for i, code in enumerate(faders):
             if i < fader_count and code is not None and code in fader_code_set:
@@ -608,6 +616,17 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
                   rcp_transfer.set_fader_level(sel, int(v)))
         if mon_level is not None:
             w("monitor speaker level", lambda v=mon_level: rcp_transfer.set_monitor_level(float(v)))
+    elif dev.layout_required and devices.has_write_cap(dev, "output_write") \
+            and (saved_levels or mon_level is not None):
+        # A layout desk: the monitor speaker level is an OUTPUT-block setting (generalised gate);
+        # its fader levels are not written (which faders are virtual is not measured there).
+        step("Restoring the monitor level.")
+        if mon_level is not None:
+            w("monitor speaker level", lambda v=mon_level: rcp_transfer.set_monitor_level(float(v)))
+        if any(v is not None for v in saved_levels):
+            failed += 1
+            errs.append("fader levels: setting fader levels is not enabled on this device, "
+                        "not restored")
     elif saved_levels or mon_level is not None:
         failed += 1
         errs.append("fader and monitor levels: setting levels is not enabled on this device, "
@@ -749,7 +768,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
                         "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",
                         "headphone_type", "headphone_types", "compellor_on", "compellor_threshold",
                         "compellor_attack", "compellor_release", "compellor_gain", "delay_on")
-    if "output_write" in devices.get_active_device().caps:
+    if devices.has_write_cap(devices.get_active_device(), "output_write"):
         step("Restoring master output settings.")
         if r.get("multitrack") is not None and int(r["multitrack"]) in rcp_transfer.MULTITRACK_MODES:
             w("multitrack", lambda v=r["multitrack"]: rcp_transfer.set_multitrack_mode(int(v)))
@@ -771,6 +790,14 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
         # ONE WRITE FOR BOTH HALVES, because the desk keeps them in one property. Restoring them
         # separately would take two re-enumerations and let the second undo the first.
         if (r.get("usb_multitrack") is not None
+                and devices.get_active_device().layout_required):
+            # A layout desk re-enumerates under ANOTHER product id when this changes (0x0092 /
+            # 0x0094), which would cut the restore off mid-way: it is changed only from the Routing
+            # page, where the warning is said first.
+            failed += 1
+            errs.append("what this computer receives over USB: change it on the Routing page, "
+                        "not restored")
+        elif (r.get("usb_multitrack") is not None
                 and int(r["usb_multitrack"]) in rcp_transfer.MULTITRACK_MODES):
             step("Setting what the unit sends this computer. Its audio devices will drop out for "
                  "a couple of seconds.")
@@ -823,7 +850,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     # profile from a newer build carrying a setting THIS build does not know about is skipped rather
     # than written on a guessed selector. Gated on the device's "unit_settings" cap.
     unit = prof.get(UNIT_KEY) or {}
-    if unit and "unit_settings" in devices.get_active_device().caps:
+    if unit and devices.has_write_cap(devices.get_active_device(), "unit_settings"):
         step("Restoring the unit's own settings.")
         for prop, v in sorted(unit.items()):
             if prop not in rcp_transfer.UNIT_SETTING_SEL or not isinstance(v, (int, float)):
@@ -837,6 +864,38 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
                     "read-only on this device, not restored")
 
     return {"applied": applied, "failed": failed, "errs": errs}
+
+
+def _restore_layout_faders(faders, fader_count, fader_code_set, w, errs) -> int:
+    """A profile's fader layout on a LAYOUT desk: the faders that differ, sent as ONE checked unit
+    and confirmed as the whole vector (channels.set_layout_faders, the path the Faders tab uses).
+    THE MIC 3 + 4 PAIR (devices.LAYOUT_PINNED_CODE, the owner's line input) is never moved off its
+    fader by a restore - only by the user choosing that fader - so a change that would is left out
+    and said; and only codes the desk's fader write takes are sent. Returns how many parts were
+    NOT restored (0 or 1), for the caller's failed count; `w` counts the write itself."""
+    try:
+        vec = channels.strip_values(rcp_read.read_model(fresh=True), devices.LAYOUT_FADER_PROP)
+    except Exception as exc:
+        errs.append(f"fader layout: could not read it first ({exc}), not restored")
+        return 1
+    pinned = devices.LAYOUT_PINNED_CODE
+    changes, left = {}, []
+    for i, code in enumerate(faders):
+        if i >= min(fader_count, len(vec)) or code is None or code not in fader_code_set:
+            continue
+        if int(code) not in devices.LAYOUT_FADER_CODES or int(code) == vec[i]:
+            continue
+        if vec[i] == pinned:
+            left.append(i + 1)
+            continue
+        changes[i] = int(code)
+    if left:
+        errs.append(f"fader {', '.join(map(str, left))}: carries Mic 3 + 4, left where it is")
+    if changes:
+        w("fader layout", lambda: channels.set_layout_faders(changes, chosen=-1, planned_from=vec))
+        for i, code in changes.items():
+            channels.note_strip_source(i, code)
+    return 1 if left else 0
 
 
 def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channels) -> dict:
@@ -861,7 +920,7 @@ def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channe
     r = prof.get("routing") or {}
     # Same output_write gate as _apply_v2: skip the master/global output writes on a device whose
     # selectors are not yet verified (the Duo), so a legacy restore cannot append a stray.
-    if "output_write" in devices.get_active_device().caps:
+    if devices.has_write_cap(devices.get_active_device(), "output_write"):
         if r.get("multitrack") is not None:
             rcp_transfer.set_multitrack_mode(int(r["multitrack"])); applied += 1
         if r.get("monitor_auto_mute") is not None:

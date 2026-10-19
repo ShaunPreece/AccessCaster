@@ -368,6 +368,151 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   that fitted every fact then available and was FALSE - Q is directly writable and reads back
   exactly. The only thing that settles a write question is writing it and reading it back.
 
+- **A PRO II IS NOT ONE LAYOUT. Every selector constant in this code (CHANNEL 0x1C, MIX 0x4C,
+  INPUTSOURCE 0x26E, OUTPUT 0x0D, ...) is a ROOT INDEX measured on ONE tree, and a Pro II reporting
+  USB product id 0x0092 (firmware 1.7.6) has those blocks elsewhere: CHANNEL 0x1A, MIX 0x37,
+  INPUTSOURCE 0xDF, OUTPUT 0x0B.** Its geometry comes from its own dump (`layout.py`, recorded per
+  product id by `rcp_read._index` when `read_model_raw` parses a dump), and `devices.layout_model`
+  builds its DeviceModel from that. Three rules keep it safe:
+  * **A connected product id outside `devices.DEVICES` is NEVER resolved to the Pro II.** It is a
+    layout desk or a geometry-unknown one; only "nothing connected" (product id None) falls back to
+    the Pro II, for the offline paths.
+  * **Such a desk reads the FIRST contiguous run of each group BY ADDRESS** (`channels.strip_values`,
+    `rcp_read.run_values` / `matrix_cells` / `output_modes`, the announcer's `_ann_strip_of` /
+    `_ann_xpoint`). Its tree carries LATER blocks with the same names (another CHANNEL at 0xFA, MIX
+    runs at 0xFF and 0x17D), so `values()` or `block_values("MIX")` concatenate unrelated nodes.
+  * **It is never written to until each write is proven there.** `DeviceModel.write_block` makes
+    `devices.require_writable` refuse in every selector-building helper, and `rcp_transfer.send_record`
+    / `send_records_paced` refuse any product id outside DEVICES before a handle is opened. A Pro II
+    selector sent to it lands on a different node and appends a stray: its dump already carries
+    three, exactly at the Pro II Chat-output addresses (RODECASTER_PROTOCOL.txt 3.3).
+  * **THE ONE EXCEPTION IS JUDGED FROM THE RECORD, NOT FROM THE CALLER.** Cap `input_write` allows
+    exactly `devices.LAYOUT_INPUT_WRITES` (mic gain, phantom, polarity, line level) on INPUTSOURCE
+    sources 0..11 of the main run, one-level address, within the Pro II UI ranges.
+    `refuse_unproven_pid(pid, record)` parses every outgoing record and refuses anything else, so a
+    helper that forgets its own gate still cannot get a mute or a cross-point through. Each write
+    goes through `channels._layout_input_write`: the property must already exist on that node in a
+    current dump (so it can never append), and a fresh dump must show the value afterwards, or
+    `WriteNotConfirmed` tells the user it did NOT happen. Mic type is in the set for mics 0..3 since
+    the unit's numbering was proven to be the Pro II list (RE20 = 9 on Mic 1, Broadcaster = 5 on
+    Mic 2, Line-in = 0, 7th October 2026); the write confirms the TYPE only, not the gain and chain
+    the desk applies with it. inputType stays refused there (derived from the mic type; on the
+    generalised gate's deny list); the instrument gain and a profile restore go through the
+    generalised gate (`tree_write`, below).
+  * **Echo and reverb (cap `fx_write`, `devices.LAYOUT_FX_WRITES`) go the same way**, through
+    `channels._layout_fx_write`, at EFFECTS_PARAMETERS base + the channel's CURRENT strip, resolved
+    from the same dump the check reads, and the block's own `effectsIdx` must equal that strip.
+    That strip-to-block rule is the Pro II / Duo one; on PID 0x0092 it is PROVEN for strip 0 (Mic 1,
+    0x23: echo and reverb heard live on 7th October 2026), and strips 1..8 follow it unheard;
+    reads use the same rule (`channels.fx_values`), so a wrong rule shows up on the page too.
+    Pitch shift, distortion, robot and voice disguise are not written by any screen and stay refused.
+  * **THE FADER LAYOUT IS THE THIRD EXCEPTION, judged the same way.** Cap `fader_write` allows
+    exactly `channelInputSource` (int) on the main CHANNEL run (0x1A..0x22, one-level address) with
+    codes `devices.LAYOUT_FADER_CODES` (-1, 0, 1, 6, 7, 8, 9 proven on the unit; 10 and 11 only
+    because the unit itself holds them). Every write goes through `channels.set_layout_faders`,
+    which confirms the WHOLE vector afterwards, so a strip the desk changed on its own fails the
+    write as surely as one that did not take. On that desk `action_set_fader` SWAPS ONLY
+    (`_swap_fader_target`): no tidy and no gap-fill, because the Mic 3 + 4 pair on fader 3 carries
+    a line input and must never move unless the user picks fader 3 itself
+    (`devices.LAYOUT_PINNED_CODE`). Reset faders is refused there by name; stereo link, chain
+    follow and level follow stay off (no caps).
+  * **CHANNEL PROCESSING, MUTE AND SOLO ARE THE FOURTH (cap `strip_write`,
+    `devices.LAYOUT_STRIP_WRITES`)**: the 34 float controls the Channels page offers
+    (`server.PROCESSING_CONTROLS`, 0..1), the ten module switches, `channelBypassProcessing`,
+    `channelAdvancedProcessing`, `channelOutputMute` and `channelCueEnable`, on CHANNEL[strip] of the
+    main run (0x1A..0x22), the address family the unit's own mute and cue pushes use. By channel
+    name the strip comes from the same dump the check reads (`channels._layout_channel_write`); by
+    fader it is the strip itself (`channels.set_strip_toggle`, which keeps the Pro II bytes on the
+    Pro II). NOT the `processing` cap, which stays the Pro II selector path. Processing PRESETS, their
+    name marker `channelCurrentFxPreset`, the preset-only Aphex tunes and the wireless mic mute go
+    through the generalised gate (`tree_write`, below) at the same CHANNEL strip; a preset is checked
+    as one batch and confirmed in one pass (`channels._layout_preset`; the read-back covers the mode,
+    the modules and the VoxLab knobs always, the other parameters for an advanced preset only, never
+    the name marker). The chain copy (`write_chain`, chain follow) stays refused (no cap).
+  * **THE OUTPUT MIXES ARE THE FIFTH, cap `routing_write`, and NOT `matrix_write`.** `matrix_write`
+    opens the Pro II routing paths with Pro II cross-point selectors; here every one of them - mix
+    presets, "Reset all output mixes", auto gain's and the level check's Chat isolation - is a
+    composition of the proven record forms below, so `rcp_transfer.set_output_routing` /
+    `set_cross_point_excluded` / `set_cross_point_level` hand over to `layout_routing` on a layout
+    desk and `routing_schemes.apply` writes one OUTPUT at a time through
+    `layout_routing.apply_output` (mode first, then include/exclude, then levels; checked as a batch
+    against one fresh dump, sent on one handle, confirmed in one pass). A mode the output already
+    reads is not rewritten, so the three later-run outputs (0xFC) pass when they already have the
+    wanted mode and fail, before anything is sent, when they do not. `server._routing_write_gate` is
+    the gate for all of it. `devices.layout_routing_write_ok` allows only the Pro II record forms
+    (mixDisabled / mixMute bool, mixLevelWithAnchor "<level>|0" in its minimal-decimal form, the
+    constant link / unlink composite) on the MAIN MIX run (0x37..0xD2) and outputMixMinus 0..2 on the
+    MAIN MIXMINUSES run (0x2D..0x36). The later MIX runs and the three later modes at 0xFC are read,
+    never written. Every write goes through `layout_routing` (exists-before, confirmed-after; the
+    desk does not push back what the host wrote), and `rcp_transfer.cross_point_selector` REFUSES on
+    a layout desk: its Pro II base 0x4C is cell 21 of this desk's own grid, so a Pro II selector
+    would pass the send layer and land on the wrong cross-point. **THE OUTPUT NAMES, KEYS AND
+    DEFAULT MODES ARE THE PRO II ORDER** (`devices._LAYOUT_OUTPUTS`), shown plainly: output 0 =
+    Headphone 1 is MEASURED (7th October 2026: the owner set it to Custom with Mic 1 and Mic 2 out
+    and the headphones on jack 1 changed; read back MIXMINUSES 0x2D 0 -> 2); the unit's 13 modes
+    read [0,0,0,0,0,0,1,0,1,1,1,1,1], exactly the Pro II defaults (headphones, monitor, recording
+    and USB 1 on Main Mix; Bluetooth, Chat, USB 2 and CallMe on Mix Minus); on that evidence the
+    owner accepted the Pro II order for all 13. Outputs 1..12 are NOT individually measured by ear.
+    That these records do on this firmware what they do on a Pro II is otherwise a hypothesis the
+    confirm cannot settle: it proves the desk STORED the value.
+  * **HEADPHONE TYPE AND USB MODE ARE THE SIXTH AND SEVENTH, caps `headphone_write` and
+    `usbmode_write`** (they keep their own narrow checks even now that the rest of the master
+    output block is open through `tree_write`). Measured 7th October 2026 by dumps around changes in RODE's own app:
+    `headphoneType` lives on the HEADPHONE run 0x07..0x0A (found by name, one run of four between APP
+    and OUTPUT; headphone 1 = 0x07 moved, 2..4 follow by run order) with 0 = NTH-100, 1 = High
+    sensitivity, 2 = Low sensitivity, all three measured; by ear 1 is the QUIETEST and 0 / 2 are
+    about equally loud, so the page asks before leaving 1 (`devices.LAYOUT_HEADPHONE_LOUDER`, as
+    RODE's app does). `outputMultiMode` on OUTPUT 0x0B takes only 1 (Standard) and 4 (Expanded);
+    the Pro II's 0 and 2 are unmeasured here and refused (`devices.LAYOUT_USBMODE_PIDS`). Headphone
+    writes go through `layout_routing.set_headphone_type` (`channels._layout_write`: exists-before,
+    confirmed-after). **THE USB MODE RE-ENUMERATES THE WHOLE DESK**, HID included: 1 comes back as
+    PID 0x0092 and 4 as 0x0094. So `layout_routing.send_usb_mode` checks and sends under the HID
+    lock (nothing when the desk already reports that mode), and `confirm_usb_mode` waits WITHOUT
+    the lock (`USBMODE_RECONNECT_S`, 20 s) for the desk to come back under the product id that mode
+    belongs to, then reads OUTPUT from a fresh dump. Three answers: confirmed; not taken
+    (`WriteNotConfirmed`: back reading another value, or still the old id and the old value at the
+    deadline); or "sent, not confirmed yet" (`pending`) when it is not back in time - never a
+    success and never a failure it cannot know. Expanded hands the "Main Multitrack" playback
+    endpoint to the RODE Virtual Device Driver (other programs get 0x8889000A, device in use) and
+    Windows makes "System (RODECaster)" its default output: the page says so in the hint and in a
+    confirmation before it is applied (`devices.LAYOUT_USBMODE_WARNING`).
+  * **EVERYTHING ELSE GOES THROUGH THE GENERALISED GATE, cap `tree_write`
+    (`devices.layout_tree_write_ok`).** The key fact: every property NAME in this desk's tree is the
+    Pro II's own name in the same record format; only the root index of each block differs, and the
+    layout reads that from the dump. So a record passes when (a) it parses as ONE property on a
+    one-level address, (b) that address is a block the layout located BY NAME - one of
+    `devices.LAYOUT_TREE_BLOCKS` (GUI, HEADPHONE, OUTPUT, MASTERCHANNEL, SYSTEM, CHANNEL,
+    EFFECTS_PARAMETERS, MIXMINUSES, MIX, INPUTSOURCE), in the FIRST run of that name only, never a
+    later duplicate (CHANNEL 0xFA, MIX 0xFF, RC Sync, StreamerX, SIP), (c) the name already sits on
+    THAT block in the most recent dump (`Layout.block_props`, so no stray can be appended), (d) the
+    value's kind (bool / int / float / str) is the dump's kind for it there, and (e) the name is not
+    on the DENY list (`LAYOUT_TREE_DENY`, matched on the camelCase WORDS of the name: requests,
+    initiate, reset, erase, format, delete, update, reboot, factory, power, remount, transfer, eject,
+    wifi / bt / sip / call / pairing / scan / connect, show, record, state, storage, emergency,
+    selected, serial, firmware, name, progress and status words; names ending in `Active`, `Idx`
+    or `SN`; and `inputType`, `systemMainMode` by name). Names in a narrow family (input, effects,
+    fader source, strip, routing, headphone type, USB mode) are judged by that family only, so
+    `outputMultiMode` keeps its 1 / 4 rule and the routing requests their composite value. The Pro II
+    helpers keep their bytes on the Pro II and the Duo and, on a layout desk, take that desk's block
+    BY NAME (`rcp_transfer._block_sel`: OUTPUT 0x0B, MASTERCHANNEL 0x0C, SYSTEM 0x0D, GUI 0x05 on
+    PID 0x0092) and hand the record to `layout_tree.write_records` (gate, the property found on that
+    node in a FRESH dump, send, confirmed by read-back; `WriteNotConfirmed` otherwise).
+    `devices.has_write_cap` lets `tree_write` stand in for `output_write` and `unit_settings` and
+    nothing else, so the Routing page's master output block (auto-mutes, raw switches, Compellor,
+    delay), the Recording page's multitrack / format / raw switch, the Levels tab's monitor and
+    Bluetooth output level and mutes, the Device page's unit settings and a profile restore are all
+    open there. What the dump publishes in ANOTHER kind stays refused with the gate's sentence, per
+    control: `autoBrightness` (int there), `screenDimAfterSeconds` (bool there) and
+    `systemMidiControl` (int there, the Pro II writes a bool). STILL REFUSED on a layout desk, and
+    why: SMART pad writes (no `pad_write`: transfer mode is a denied command, and the pad grid's
+    stream positions are not measured), fader LEVELS (which faders are virtual is not measured),
+    reset faders and stereo link (no default layout; pair codes 4 / 5 unproven; the Mic 3 + 4 line
+    input), the recorder transport and deleting takes (commands), shows / backups / clean restore
+    (SHOWCONTROL carries the factory reset), network and Bluetooth (no `network_write`, NETWORK is
+    not a setting block here), the USB mode inside a profile restore (it re-enumerates the desk) and
+    the chain copy. A profile restore on a layout desk takes only a profile saved from 0x0092 /
+    0x0094, leaves its SMART pads alone (said in the reply), restores the fader layout as one
+    checked unit without ever moving the Mic 3 + 4 pair, and the monitor level but not fader levels.
 - **READ BACK every write.** The selector model predicts the BLOCK, not that a given field accepts a
   write. A write that lands nowhere can append a stray, and a stray clears only on a factory reset.
 - **A WRITE ADDRESS IS A TREE PATH, not a flat selector.** `01 01 <levels> [<len><index LE>]`, each
@@ -1229,6 +1374,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   inference says 114" looks damning until you look at the 221 the two disagree about, and every one
   of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
   source rows wide and a desk uses 13 of them.
+  **Compare level and anchor AS NUMBERS** (`rcp_read.LINK_EPS`), not as text: on PID 0x0092 a fader
+  at the bottom reads `-3.00258e-06|0` and one at its first step `0.00787401|0.00787402`, on rows
+  nobody unlinked, and a text compare called both unlinked.
 
 - **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
   (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names

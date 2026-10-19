@@ -1383,8 +1383,8 @@ const UNIT_SETTINGS_OFF = "Changing the unit's settings is not enabled on this d
 let _unitBuiltKey = null;
 
 function unitSpecKey(d) {
-  return (d.settings || []).map((s) => s.prop + ":" + s.kind).join(",")
-    + "|" + (d.writable !== false);
+  return (d.settings || []).map((s) => s.prop + ":" + s.kind + ":" + (s.write_refused ? 0 : 1))
+    .join(",") + "|" + (d.writable !== false);
 }
 
 async function loadUnitSettings() {
@@ -1451,7 +1451,10 @@ function applyUnitSettingValues(d) {
     // aria-disabled, NOT the attribute: a natively disabled control drops out of the tab order and
     // takes its description with it, so a Duo owner arrowing the Unit settings tab meets a silent
     // gap where the brightness should be instead of hearing why it cannot be changed.
-    setAvailable(el, unitSettingsWritable, UNIT_SETTINGS_OFF);
+    // A single setting the connected unit refuses (write_refused: the sentence why) stays
+    // unavailable on its own while the rest of the group is live.
+    setAvailable(el, unitSettingsWritable && !s.write_refused,
+      s.write_refused || UNIT_SETTINGS_OFF);
     const hint = document.getElementById("unit-" + s.prop + "-hint");
     if (hint) hint.textContent = unitSettingHint(s, known);
   });
@@ -1489,9 +1492,9 @@ function buildUnitSetting(s) {
   }
   const input = control.querySelector("input, select");
   if (input) {
-    // Added, not assigned: a dropdown already carries the Enter-to-apply description.
     addDescription(input, hintId);
-    setAvailable(input, unitSettingsWritable, UNIT_SETTINGS_OFF);
+    setAvailable(input, unitSettingsWritable && !s.write_refused,
+      s.write_refused || UNIT_SETTINGS_OFF);
   }
   wrap.appendChild(control);
 
@@ -5056,6 +5059,29 @@ function setStagedValue(sel, value, label) {
   markStaged(sel);
 }
 
+/* Ask before a staged choice is applied, in the true modal every other risky action uses. Returns
+   true to go ahead. THE CHOICE IS HELD while the dialog has focus: leaving a dropdown puts a
+   waiting choice back (enterToApply's blur), and a busy dropdown is left alone (revertStaged), so
+   the dropdown is marked busy for as long as the question is open. On Cancel it goes back to what
+   the unit has and `cancelled` is said. */
+async function confirmStaged(sel, title, desc, okLabel, cancelled) {
+  const wanted = sel.value;
+  sel.dataset.busy = "1";
+  let ok = false;
+  try {
+    ok = await confirmAction(title, desc, okLabel);
+  } finally {
+    delete sel.dataset.busy;
+  }
+  if (!ok) {
+    revertStaged(sel, false);
+    announce(cancelled);
+    return false;
+  }
+  sel.value = wanted;
+  return true;
+}
+
 function makeSwitchRow(id, labelText, onChange) {
   const row = document.createElement("p");
   row.className = "field";
@@ -5242,9 +5268,18 @@ async function loadRouting() {
     // server does it, as the unit's own screen does), and that layout does not come back by turning
     // it on again. A select rather than a switch because the two states need naming - "off" does
     // not say what you lose.
+    // A desk that sends usb_expanded_confirm (the 0x0092 desk) asks before Expanded goes on, in the
+    // true modal every other risky action uses, because Expanded takes a playback device away from
+    // other programs and moves Windows' default output. The Pro II and the Duo send none.
+    const expConfirm = data.usb_expanded_confirm || "";
     const exp = makeStagedSelect("routing-usb-expanded", "What this computer sends (USB 1 Input)",
       data.usb_expanded_labels || [], {
         onApply: async (sel) => {
+          if (expConfirm && sel.value === "true"
+              && !(await confirmStaged(sel, "Switch to Expanded?", expConfirm, "Switch",
+                     "Cancelled. What this computer sends was not changed."))) {
+            return;
+          }
           setUsbSwitching(true, sel);
           const res = await routingPost("/api/routing/usb-expanded",
                                         { on: sel.value === "true" }, sel);
@@ -5327,10 +5362,21 @@ async function loadRouting() {
   hpBox.innerHTML = "";
   routingCtl.headphones = [];
   const hpData = data.headphones || { outputs: [], values: [] };
+  // A desk that measured its loudness (the 0x0092 desk) sends its own note and the (from, to)
+  // changes that make an output LOUDER; those ask first, as RODE's own app does. The Pro II and the
+  // Duo send none, so their note and behaviour are as before.
+  if (hpData.note) setText("routing-hp-note", hpData.note);
+  const louder = new Set((hpData.louder || []).map((p) => p[0] + ">" + p[1]));
   hpData.outputs.forEach((out) => {
     const hp = makeStagedSelect("routing-hp-type-" + out.index, out.label + " type",
       hpData.values, {
         onApply: async (sel) => {
+          if (louder.has(sel.dataset.deviceValue + ">" + sel.value)
+              && !(await confirmStaged(sel, "Make " + out.label + " louder?",
+                     (hpData.louder_warning || "").replace("{output}", out.label),
+                     "Make it louder", "Cancelled. " + out.label + " was not changed."))) {
+            return;
+          }
           const res = await routingPost("/api/routing/headphone",
             { value: parseInt(sel.value, 10), output: out.index }, sel);
           if (res.ok) setStagedValue(sel, parseInt(sel.value, 10), null);
@@ -5379,21 +5425,36 @@ async function loadRouting() {
   // attribute - so a screen-reader user still meets every control where
   // they expect it and hears why it cannot be moved, instead of finding four sections that are
   // simply shorter than they are on the other desk. routingPost refuses the write itself.
+  //
+  // A LAYOUT desk opens two of these under caps of their own (usb_mode_read_only and
+  // headphones.read_only false): those controls stay live and their box says which part is not.
+  // A payload without the two flags (or the Pro II / Duo, where they equal output_write_read_only)
+  // is treated exactly as before.
   if (data.output_write_read_only) {
-    [routingCtl.monitorMute, routingCtl.btMute, routingCtl.usbMode, routingCtl.usbBypass,
+    const usbOpen = data.usb_mode_read_only === false;
+    const hpOpen = (data.headphones || {}).read_only === false;
+    const usbSel = usbOpen ? [] : [routingCtl.usbMode, routingCtl.usbExpanded];
+    const hpSels = hpOpen ? [] : (routingCtl.headphones || []);
+    [routingCtl.monitorMute, routingCtl.btMute, routingCtl.usbBypass,
      routingCtl.compellorOn, routingCtl.delayOn, routingCtl.delayMs]
-      .concat(routingCtl.headphones || [])
+      .concat(usbSel)
+      .concat(hpSels)
       .concat(Object.values(routingCtl.compellor || {}))
       .forEach((el) => setAvailable(el, false, OUTPUTS_READ_ONLY_OFF));
     const roMsg = "Changing this is not enabled on this device yet, so it is read-only here.";
-    ["routing-automute", "routing-master", "routing-headphones", "routing-usb"]
-      .forEach((id) => {
-        const box = document.getElementById(id);
-        if (!box) return;
-        const p = document.createElement("p");
-        p.className = "note"; p.setAttribute("role", "note"); p.textContent = roMsg;
-        box.insertBefore(p, box.firstChild);
-      });
+    const notes = { "routing-automute": roMsg, "routing-master": roMsg };
+    if (!hpOpen) notes["routing-headphones"] = roMsg;
+    notes["routing-usb"] = usbOpen
+      ? "What this computer receives can be changed on this device; the raw switch is read-only "
+        + "here."
+      : roMsg;
+    Object.keys(notes).forEach((id) => {
+      const box = document.getElementById(id);
+      if (!box) return;
+      const p = document.createElement("p");
+      p.className = "note"; p.setAttribute("role", "note"); p.textContent = notes[id];
+      box.insertBefore(p, box.firstChild);
+    });
   }
 
   buildMatrix(data.matrix);
@@ -5842,6 +5903,11 @@ function buildMatrix(matrix) {
     // order and say why when pressed.
     setAvailable(resetOutBtn, false, MATRIX_READ_ONLY_OFF);
     setStatus("reset-outputs-status", MATRIX_READ_ONLY_OFF);
+  } else if (matrix.reset_refused) {
+    // A desk that can change one output at a time but not sweep them all (PID 0x0092): the button
+    // keeps its place and says why.
+    setAvailable(resetOutBtn, false, matrix.reset_refused);
+    setStatus("reset-outputs-status", matrix.reset_refused);
   }
   wireSchemes();
 
@@ -5881,7 +5947,10 @@ function applyMatrixForOutput() {
   // EVERYTHING BELOW READS THE DEVICE VALUE, not the dropdown: while a change is staged the
   // dropdown shows what you have chosen, and the source switches must keep describing the mix the
   // output actually carries until Enter applies it.
-  const deviceMode = modeSel.dataset.deviceValue || modeSel.value;
+  // Only a mode the UNIT reported counts. Falling back to the dropdown's own value made an unread
+  // output look like it was on Main Mix (the first option), which is how the page once said
+  // "Main Mix" for an output that was really on Custom.
+  const deviceMode = modeSel.dataset.deviceValue || "";
   const isCustom = deviceMode === "2";
   const modeLabel = (o.modes.find((m) => String(m[0]) === deviceMode) || [, "this mode"])[1];
   const state = routingCtl.matrixState && routingCtl.matrixState[String(o.index)];
@@ -5914,7 +5983,7 @@ function applyMatrixForOutput() {
   const showSources = known && isCustom;
   document.getElementById("matrix-sources").hidden = !showSources;
   let summary;
-  if (!known) {
+  if (!known || deviceMode === "") {
     summary = routingCtl.matrixStateMsg || "Current state could not be read.";
   } else if (deviceMode === "1") {
     summary = modeLabel + ": every source except this output's own.";
@@ -5975,8 +6044,24 @@ function onMatrixOutputChange() {
 }
 
 async function onMatrixModeApply(modeSel) {
+  // NEVER DECIDE FROM WHAT THE PAGE LAST SAW. The mode can change on the unit, in RODE's app or from
+  // another page while this one sits open, and a stale "already Main Mix" here meant applying Main
+  // Mix sent nothing while the output was really on Custom. So the unit is read again first; only a
+  // FRESH read that shows the chosen mode skips the write, and a read that fails sends it anyway
+  // (the server checks and confirms every write itself).
+  const wanted = modeSel.value;
+  await loadMatrixState();
+  const fresh = (routingCtl.matrixModes && routingCtl.matrixModes[String(currentMatrixOutput().index)]);
+  if (modeSel.value !== wanted) {
+    modeSel.value = wanted;                 // the re-read painted the unit's mode; keep the choice
+    markStaged(modeSel);
+  }
+  if (fresh !== undefined && fresh !== null && String(fresh) === wanted) {
+    announce("The unit says this output already carries that mix, so nothing was sent.", true);
+    return;
+  }
   const o = currentMatrixOutput();
-  const mode = parseInt(modeSel.value, 10);
+  const mode = parseInt(wanted, 10);
   const res = await routingPost("/api/routing/outputmode",
     { output: o.index, mode: mode }, modeSel);
   setText("matrix-status", res.message || "");
