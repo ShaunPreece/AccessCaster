@@ -233,19 +233,19 @@ touchscreen uses, so it does not settle the tier. What would: the same test on a
 with CallMe Pro, or a touchscreen start captured as a model diff.
 
 
-LEAD 10: which USB product ids are 0x0079 and 0x0095, and does pre-fader Expanded get Faders?
---------------------------------------------------------------------------------------------
+LEAD 10: which USB product ids are 0x0079 and 0x0095?
+-----------------------------------------------------
 
 RODE's Virtual Device Driver service names four product ids in its string table:
-0x0078, 0x0079, 0x0094 and 0x0095. We measured 0x0078 (Expanded, mix only: System alone)
-and 0x0094 (Expanded, post-fader multitrack: nine Fader endpoints plus System). Pre-fader
-multitrack with Expanded (outputMultiMode 4) was never enumerated, and the Duo was never
-put into Expanded at all, so 0x0079 and 0x0095 are either the pre-fader pair or the Duo's
-pair, and nothing here says which.
+0x0078, 0x0079, 0x0094 and 0x0095. On a Pro 2, 0x0078 is Expanded with the mix only
+(System alone) and 0x0094 is Expanded with multitrack, pre-fader (outputMultiMode 4) and
+post-fader (5) alike: nine Fader endpoints plus System. So 0x0079 and 0x0095 are not the
+pre-fader pair. The Duo was never put into Expanded, which leaves its pair as the
+likeliest answer, and nothing here says so for certain.
 
-**What to run.** Write outputMultiMode 4 on a Pro 2, or 3 and 5 on a Duo, read the new
-product id off the bus, and see whether the service's tray icon reports connected and
-which endpoints appear in Windows' recording devices. Two minutes with either desk. The
+**What to run.** Write outputMultiMode 3 and 5 on a Duo, read the new product id off the
+bus, and see whether the service's tray icon reports connected and which endpoints
+appear in Windows' recording devices. Two minutes with the desk. The
 service binds on only some arrivals (PROJECT_GUIDE part 2 under Expanded), so an
 unbound result needs a second arrival before it counts.
 

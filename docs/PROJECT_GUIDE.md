@@ -637,7 +637,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   one, and this is read aloud on every encoder turn.
 - **THE DESK COMES BACK FROM A RE-ENUMERATION UNDER A DIFFERENT USB PRODUCT ID, because the id
   encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
-  0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path
+  0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`; the pre-fader
+  values share those ids, 1 giving `0x0092` and 4 giving `0x0094` (measured 7th October 2026 on a
+  second Pro II, where 4 also brings up the nine Fader endpoints, pre-fader). The HID path
   changes with it, so **NO LONG-LIVED READER MAY CACHE ITS `RodeInterface`** - resolve it again on
   every reopen, as `_announce_loop` and `recorder.Watcher` both do. Caching it is what made the
   announcer go silent for good after a USB setting was changed in the app itself: the read failed,
@@ -694,6 +696,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   string read once per desk per session. **Do not tabulate the other ids instead**: that is six
   entries per desk, unmeasured for the Duo, and wrong again the day RODE add a mode. The MI_09
   product string is no help either - it reads `HID Interface` on both desks.
+- **THE 20-CHANNEL MULTITRACK CAPTURE, TRACK BY TRACK.** Measured 11th October 2026 on a Pro II, fw
+  1.7.6, pre-fader multitrack in Standard (`outputMultiMode` 1), through WASAPI on
+  `Microphone (RODECaster Pro II Main Multitrack)` at 48 kHz: channels 1 and 2 are the main mix;
+  3 and 4 are Mic 1, the same mono signal on both, BEFORE its fader and WITH its processing (an EQ
+  cut on Mic 1 shows on the track); 5 and 6 are Mic 2. A null test of channel 3 against the main
+  mix, with only Mic 1 open, its fader at unity and the master Compellor off: correlation 1.00000,
+  residual -115.6 dB, and the main mix exactly 6.00 dB above the track. The computer's own USB 1
+  playback does not come back as a track of its own.
 - **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode`, AND A BIND THAT RODE'S SERVICE ONLY
   SOMETIMES MAKES.** Measured on a Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened.
   Post-fader multitrack AND Expanded (value 5, product id 0x0094) yields ten capture endpoints,
@@ -2291,6 +2301,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   ordinary level machinery, like a fader.
 - **Each pot publishes its own `potMin` and `potMax`** (0 and 127 on a Pro II). Read those before
   trusting the constant on a new device rather than assuming 127.
+- **READABLE IS NOT WRITABLE: writing `potLevel` changes nothing you can hear.** The write lands at
+  `[0, n]` and reads back, and the headphone stays at the level the physical knob sets (measured
+  7th October 2026 on a Pro II, fw 1.7.6). So a headphone level cannot be set from software, and a
+  read-back is no proof that it was.
 - **The HEADPHONE blocks carry no level at all** - only `headphoneType` and `headphoneColour`. The
   level is on the POT, which is a different node under a different parent; looking under HEADPHONE
   and concluding the knobs are unreadable is the obvious wrong turn.

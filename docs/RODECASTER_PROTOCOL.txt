@@ -95,14 +95,20 @@ IDENTIFIER. Writing outputMultiMode re-enumerates the unit, and it returns under
 different PID carrying the same serial. Measured on a Pro II, fw 1.7.6:
 
   outputMultiMode   0 -> 0x0037    (standard, no multitrack)
+                    1 -> 0x0092    (standard, pre-fader multitrack)
                     2 -> 0x0092    (standard, post-fader multitrack)
                     3 -> 0x0078    (expanded input, no multitrack)
+                    4 -> 0x0094    (expanded input, pre-fader multitrack)
                     5 -> 0x0094    (expanded input, post-fader multitrack)
+
+Values 1 and 4 were measured on a second Pro II on the same firmware: pre-fader
+shares its PID with post-fader in both input modes.
 
 RODE's Virtual Device Driver service binds to the desk by these PIDs: its string
 table names 0x0078, 0x0079, 0x0094 and 0x0095. It creates its nine Fader
-endpoints only under a multitrack PID (0x0094 measured); under 0x0078 it exposes
-System alone. 0x0079 and 0x0095 are unmeasured (see POSSIBLE_LEADS). The bind
+endpoints only under a multitrack PID (0x0094 measured, under both 4 and 5); under
+0x0078 it exposes System alone. 0x0079 and 0x0095 are not the pre-fader pair and
+remain unmeasured (see POSSIBLE_LEADS). The bind
 itself happens on some arrivals of the desk and not others, and never later, so a
 host that needs it must be ready to re-enumerate the desk again.
 
@@ -761,6 +767,9 @@ HEADPHONE TYPE, GLOBAL selectors 0x09 (HP1) and 0x0A (HP2):
   Pro II has 4 HP outputs (4 headphoneType slots); Duo has 2 HP jacks (HP1 0x09 /
   HP2 0x0A). CONFIRMED value 2 (Low Sensitivity) exists; some code writers only
   drive HP1 with 0/1 as an implementation limit, not a protocol one.
+  Loudness by ear on a Pro II, fw 1.7.6: 1 (High Sensitivity) is the QUIETEST;
+  0 and 2 are about equally loud and louder than it. So a change away from 1 makes
+  that output louder.
 
 
 --------------------------------------------------------------------------------
