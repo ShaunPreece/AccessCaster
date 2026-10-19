@@ -1229,6 +1229,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   inference says 114" looks damning until you look at the 221 the two disagree about, and every one
   of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
   source rows wide and a desk uses 13 of them.
+  **Compare level and anchor AS NUMBERS** (`rcp_read.LINK_EPS`), never as text. The desk formats
+  the two halves separately: a linked fader at the bottom reads `'-3.00258e-06|0'` and one at its
+  first step `'0.00787401|0.00787402'` (measured 7th October 2026 on a Pro II, fw 1.7.6). A text
+  compare calls both unlinked, a mix scheme then captures a manual level for them, and applying it
+  sends a real unlink: the source stops following its fader in that output.
 
 - **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
   (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names

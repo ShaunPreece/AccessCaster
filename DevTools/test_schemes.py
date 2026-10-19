@@ -112,6 +112,12 @@ def cell(o, s):
         return (s != MIC1_SRC), "1|1"
     if o == HP1_OUT and s == USB1_SRC:
         return False, "0.4|0"          # unlinked: level differs from the anchor
+    # LINKED, in the desk's own digits: the two halves are formatted separately and need not match
+    # as text. A fader at the bottom, and one at its first step.
+    if o == HP1_OUT and s == 1:
+        return False, "-3.00258e-06|0"
+    if o == HP1_OUT and s == 2:
+        return False, "0.00787401|0.00787402"
     return False, "0.75|0.75"          # linked: level == anchor
 
 
@@ -151,6 +157,10 @@ check("a linked cross-point records no level of its own",
 check("an UNLINKED one records its manual level",
       scheme["outputs"]["Headphone1"]["sources"]["USB1"], {"excluded": False, "linked": False,
                                                            "level": 0.4})
+check("a fader at the bottom ('-3.00258e-06|0') is linked, with no manual level to replay",
+      scheme["outputs"]["Headphone1"]["sources"]["Mic2"], {"excluded": False, "linked": True})
+check("and so is one at its first step ('0.00787401|0.00787402')",
+      scheme["outputs"]["Headphone1"]["sources"]["Mic3"], {"excluded": False, "linked": True})
 # RODE'S EXPANDED ROWS ARE IN THE SCHEME WHATEVER MODE THE DESK IS IN. The desk publishes their
 # cross-points either way, and a scheme whose shape followed the mode left a Virtual A cell behind
 # when one saved in Standard was applied in Expanded.

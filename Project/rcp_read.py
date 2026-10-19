@@ -807,14 +807,30 @@ def read_matrix_state(blob: bytes | None = None) -> dict:
 def _decode_level_cell(cell) -> dict:
     """One mixLevelWithAnchor cell: the ASCII string 'level|anchor' (0..1). level == anchor means
     the cross-point is LINKED (it follows the channel fader); they differ when it has been unlinked
-    at a manual level. Anything that will not parse comes back as two Nones rather than a guess."""
+    at a manual level. Anything that will not parse comes back as two Nones rather than a guess.
+
+    EQUAL WITHIN LINK_EPS, NOT AS TEXT. The desk writes the two halves with its own float
+    formatting, and a linked cross-point can differ in the last digits: a fader at the bottom reads
+    '-3.00258e-06|0' and one at its first step '0.00787401|0.00787402'. Compared as text both read
+    as unlinked, and a mix scheme captured then stores a manual level for them, which applying it
+    turns into a real unlink: that source stops following its fader in that output."""
     if isinstance(cell, str) and "|" in cell:
         a, b = cell.split("|", 1)
         try:
-            return {"level": float(a), "linked": (a == b)}
+            level = float(a)
         except ValueError:
-            pass
+            return {"level": None, "linked": None}
+        try:
+            linked = a == b or abs(level - float(b)) <= LINK_EPS
+        except ValueError:
+            linked = False
+        return {"level": level, "linked": linked}
     return {"level": None, "linked": None}
+
+
+# How far a cell's level may sit from its anchor and still be the fader's own value. The linked
+# readings above differ by 3e-06 and 1e-08; the finest level the app writes is 0.01.
+LINK_EPS = 1e-4
 
 
 def read_matrix_levels(blob: bytes | None = None) -> dict:
