@@ -694,6 +694,21 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   string read once per desk per session. **Do not tabulate the other ids instead**: that is six
   entries per desk, unmeasured for the Duo, and wrong again the day RODE add a mode. The MI_09
   product string is no help either - it reads `HID Interface` on both desks.
+- **A DESK CAN NAME ITSELF A PRO II AND NOT BE LAID OUT LIKE ONE, SO A DUMP IS CHECKED BEFORE ANY
+  WRITE.** A second Pro II on firmware 1.7.6, at product id 0x0092 in multitrack and 0x0094 in
+  Expanded (the same tree in both), publishes the same blocks in another order: CHANNEL from 0x1A,
+  INPUTSOURCE from 0xDF (12 entries, the other 18 later in the tree), OUTPUT at 0x0B with SYSTEM at
+  0x0D, GUI at 0x05 with the four HEADPHONE blocks at 0x07 to 0x0A, EFFECTS_PARAMETERS from 0x23,
+  SOUNDPADS at 0xF4, and the cross-point grid as three MIX runs of 156, 91 and 143 at 0x37, 0xFF
+  and 0x17D. Measured 7th October 2026 off that unit's own dumps and its own pushes (fader 1's mute
+  arrives as `channelOutputMute` on 0x1A, its level as `mixLevelWithAnchor` on 0x37 to 0x43). Its
+  `systemName` still reads Pro II, so the learned map hands it `PRO2` and every constant selector
+  names a different node: a display brightness write at GUI 0x07 lands on Headphone 1's block.
+  `devices.note_layout` checks every dump for CHANNEL and INPUTSOURCE STARTING where the desk's
+  table puts them (a shifted tree can still have a CHANNEL at 0x1C, the third of its run), and
+  `devices.refuse_misplaced_write` then stops the send layer and the pad writers before a handle
+  opens. What decides the order is not known, so a third layout is as likely as a second; reads go
+  on, most of them by name.
 - **VIRTUAL DEVICES NEED BOTH HALVES OF `outputMultiMode`, AND A BIND THAT RODE'S SERVICE ONLY
   SOMETIMES MAKES.** Measured on a Pro II, fw 1.7.6, driver 1.0.5, with RODE's app never opened.
   Post-fader multitrack AND Expanded (value 5, product id 0x0094) yields ten capture endpoints,

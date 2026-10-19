@@ -624,6 +624,7 @@ def _write_records(records, purpose: str, delay: float = 0.0) -> int:
     iface = find_control_interface()
     if iface is None:
         raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
+    devices.refuse_misplaced_write(iface)   # a tree with its blocks elsewhere takes no address here
     dev = rcp_hid.open_handle(iface, purpose)
     n = 0
     try:

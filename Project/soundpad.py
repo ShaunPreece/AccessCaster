@@ -89,9 +89,12 @@ def _pad_ro_message() -> str:
 
 
 def _require_pad_write() -> None:
-    """Raise PadWriteUnsupported if the active device is not verified for pad writes."""
+    """Raise PadWriteUnsupported if the active device is not verified for pad writes, and
+    devices.LayoutMismatch if a dump has shown this desk's blocks elsewhere: the pad writers open
+    their own handle, so the send layer's check does not reach them."""
     if not pad_writes_enabled():
         raise PadWriteUnsupported(_pad_ro_message())
+    devices.refuse_misplaced_write(t.find_control_interface())
 
 
 @contextlib.contextmanager

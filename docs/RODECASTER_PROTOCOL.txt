@@ -231,6 +231,16 @@ of SYSTEM, so it is `01 01 02 01 0f 01 <volume>`, and WIFISCANRESULT is a child 
 NETWORK. On this firmware the tree is only three levels deep: root, 671 children,
 179 grandchildren.
 
+A ROOT-CHILD POSITION IS A FACT ABOUT ONE UNIT'S TREE, NOT ABOUT THE MODEL. A second
+Pro II on the same firmware 1.7.6 (product id 0x0092) has 703 root children in another
+order: GUI 0x05, HEADPHONE 0x07-0x0A, OUTPUT 0x0B, MASTERCHANNEL 0x0C, SYSTEM 0x0D,
+CHANNEL[0] = 0x1A, EFFECTS_PARAMETERS[0] = 0x23, MIXMINUSES[0] = 0x2D, the
+cross-point grid as MIX runs at 0x37 (156), 0xFF (91) and 0x17D (143), INPUTSOURCE[0]
+= 0xDF (12, the rest later) and SOUNDPADS 0xF4. Its pushes carry those addresses
+(fader 1's mute on 0x1A, its cross-points on 0x37-0x43). The grammar and every value
+encoding are the same. See PROJECT_GUIDE part 2 for how a write is kept off such a
+tree.
+
 Address forms (the bytes BEFORE the property name), each now readable as a path:
 
   - Global property:

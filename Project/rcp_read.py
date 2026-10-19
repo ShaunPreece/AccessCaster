@@ -413,6 +413,12 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
             devices.note_system_name(iface, first(blob, "systemName", "str"))
         except Exception:
             pass                    # naming the desk is never worth failing a dump for
+    # WHETHER ITS BLOCKS ARE WHERE ITS TABLE SAYS, off the same dump (devices.note_layout). After the
+    # naming above, so the check is against the table this desk is about to be handed.
+    try:
+        devices.note_layout(iface, _index(blob).root)
+    except Exception:
+        pass                        # an unreadable dump proves nothing either way
     return blob
 
 

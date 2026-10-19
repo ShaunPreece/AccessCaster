@@ -1057,6 +1057,77 @@ def note_system_name(iface, system_name) -> Optional[DeviceModel]:
     return model
 
 
+# ---- A TREE WITH ITS BLOCKS ELSEWHERE --------------------------------------------------------
+# Every write address here is a ROOT-CHILD POSITION read off one Pro II and one Duo, and a desk can
+# publish the same blocks in another order on the same firmware. Measured on a second Pro II on
+# 1.7.6, at product id 0x0092 (and 0x0094 in Expanded, same tree): CHANNEL starts at 0x1A, not
+# 0x1C; INPUTSOURCE at 0xDF, not 0x26E; OUTPUT is 0x0B and 0x0D is SYSTEM; GUI is 0x05 and 0x07
+# is HEADPHONE 1; the cross-point grid is three MIX runs (0x37 x 156, 0xFF x 91, 0x17D x 143).
+# Its systemName still says Pro II, so the learned map hands it PRO2 and every write lands on
+# another node, where it can append a stray.
+#
+# So a dump is checked against the table on the two positions the protocol spec states for both
+# desks, CHANNEL[0] at proc_sel_base and INPUTSOURCE[0] at input_table_base, each required to be
+# the FIRST block of its run (a shifted tree can still have a CHANNEL at 0x1C, the third of its
+# run). A desk that fails is refused by the send layer and by the pad writers, before a handle
+# opens. Reads are left alone: most go by name, and refusing them would hide the desk entirely.
+class LayoutMismatch(RuntimeError):
+    """The connected desk's tree does not have its blocks where its DeviceModel puts them."""
+
+
+# desk key (serial, else product id) -> the refusal sentence, or None when the tree matched.
+_LAYOUT_VERDICT: dict = {}
+
+
+def _desk_key(iface) -> str:
+    return iface.serial_number or f"pid {int(iface.product_id):#06x}"
+
+
+def _run_starts_at(root, index: int, name: str) -> bool:
+    """Whether root child `index` is a `name` block and the first of its run."""
+    kids = root.kids
+    return (index is not None and 0 <= index < len(kids) and kids[index].name == name
+            and (index == 0 or kids[index - 1].name != name))
+
+
+def layout_mismatch(dev: DeviceModel, root) -> Optional[str]:
+    """None when the parsed tree `root` starts CHANNEL and INPUTSOURCE where `dev` says, else a
+    short account of where they are. None for an empty dump, which shows nothing either way."""
+    if root is None or not root.kids:
+        return None
+    wrong = []
+    for name, base in (("CHANNEL", dev.proc_sel_base), ("INPUTSOURCE", dev.input_table_base)):
+        if not _run_starts_at(root, base, name):
+            found = next((i for i, k in enumerate(root.kids) if k.name == name), None)
+            wrong.append(f"{name} starts at {found:#x}, not {base:#x}" if found is not None
+                         else f"it has no {name} block")
+    return "; ".join(wrong) or None
+
+
+def note_layout(iface, root) -> None:
+    """Record whether this desk's tree matches its table, off a dump just read from it.
+
+    Not while a device is pinned: that is an offline test, and its synthetic dump says nothing about
+    the desk on the USB port."""
+    if iface is None or root is None or _FORCED_DEVICE is not None:
+        return
+    dev = get_active_device()
+    why = layout_mismatch(dev, root)
+    _LAYOUT_VERDICT[_desk_key(iface)] = None if why is None else (
+        f"This {dev.name} has its settings laid out differently from the one AccessCaster's "
+        f"addresses were measured on ({why}), so AccessCaster will not change anything on it: "
+        f"every change would land on a different setting. Nothing was sent.")
+
+
+def refuse_misplaced_write(iface) -> None:
+    """Raise LayoutMismatch when a dump of this desk has shown its blocks elsewhere."""
+    if iface is None:
+        return
+    why = _LAYOUT_VERDICT.get(_desk_key(iface))
+    if why:
+        raise LayoutMismatch(why)
+
+
 _FORCED_DEVICE: Optional[DeviceModel] = None
 
 
