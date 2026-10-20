@@ -2814,6 +2814,12 @@ shared one; a new copy is how they drifted apart the first time.
 - **`ui_probe.py` takes a free port per run.** It used to hardcode 8771 with `allow_reuse_address`,
   and two servers bind that port CLEANLY on Windows (measured), so concurrent suites silently swapped
   traffic and one reported "the page never reported back".
+- **`ui_probe.py` HOLDS ITS BROWSER IN A KILL-ON-CLOSE JOB OBJECT (`BrowserJob`).** Terminating
+  the one `msedge.exe` it starts leaves the rest of Chromium's process tree running, and a probe
+  killed by its caller's timeout never reaches cleanup at all. Survivors run until shutdown, then
+  Windows' "restart apps after sign-in" relaunches them: hundreds had piled up by 17th October 2026.
+  Do not go back to `subprocess.Popen` plus `terminate()`. Profiles a killed run leaves are swept
+  after a day.
 - **`ui_probe.py`'s default 90 s timeout is not enough.** Pads needs `--timeout 600` (about nine
   minutes), device 240. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,

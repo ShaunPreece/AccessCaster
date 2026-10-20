@@ -32,12 +32,16 @@ import argparse
 import http.client
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import win32job
+import win32process
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _bootstrap  # noqa: E402,F401  (puts Project/ on sys.path)
@@ -289,6 +293,69 @@ def find_browser():
     return None
 
 
+PROFILE_PREFIX = "ui_probe_"
+PROFILE_MAX_AGE_S = 24 * 3600   # far longer than any run, so a concurrent suite's profile is safe
+
+
+def sweep_old_profiles():
+    """Delete profiles left by runs that were killed before their own cleanup ran."""
+    root = tempfile.gettempdir()
+    cutoff = time.time() - PROFILE_MAX_AGE_S
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        try:
+            if (name.startswith(PROFILE_PREFIX) and os.path.isdir(path)
+                    and os.path.getmtime(path) < cutoff):
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass
+
+
+class BrowserJob:
+    """The headless browser and every process it spawns, held in one Windows job object.
+
+    Chromium is a tree of processes, so terminating the one this script starts leaves the rest
+    running. A survivor runs until shutdown, and Windows' "restart apps after sign-in" then
+    relaunches it at the next sign-in. The job is created with KILL_ON_JOB_CLOSE, so Windows ends
+    the whole tree when the job's last handle closes, which happens when this script exits however
+    it exits, including being killed by its caller's timeout before any cleanup code runs.
+
+    The browser starts suspended and is resumed only once it is in the job, so no child process
+    can be spawned outside it.
+    """
+
+    def __init__(self, cmd: list[str]):
+        self.job = win32job.CreateJobObject(None, "")
+        info = win32job.QueryInformationJobObject(
+            self.job, win32job.JobObjectExtendedLimitInformation)
+        info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(
+            self.job, win32job.JobObjectExtendedLimitInformation, info)
+        process, thread, _pid, _tid = win32process.CreateProcess(
+            None, subprocess.list2cmdline(cmd), None, None, False,
+            win32process.CREATE_SUSPENDED, None, None, win32process.STARTUPINFO())
+        try:
+            win32job.AssignProcessToJobObject(self.job, process)
+        except Exception:
+            win32process.TerminateProcess(process, 1)
+            raise
+        win32process.ResumeThread(thread)
+        thread.Close()
+        process.Close()
+
+    def close(self, wait_s: float = 10.0):
+        """End every process in the job and wait for them to go, so the profile can be deleted."""
+        win32job.TerminateJobObject(self.job, 0)
+        deadline = time.time() + wait_s
+        while time.time() < deadline:
+            accounting = win32job.QueryInformationJobObject(
+                self.job, win32job.JobObjectBasicAccountingInformation)
+            if not accounting["ActiveProcesses"]:
+                break
+            time.sleep(0.1)
+        self.job.Close()
+
+
 # The default answer given for /api/baseline/status: "already asked, nothing to offer". Same shape
 # as the real endpoint, so the Profiles page's as-found panel still renders rather than erroring.
 BASELINE_QUIET = {"ok": True, "offer": False, "connected": True, "baseline": None,
@@ -347,17 +414,18 @@ def main():
     url = "http://127.0.0.1:%d/" % port + (("#/" + args.route) if args.route else "")
     print("probe serving on %s (api reads proxied to %d, writes stubbed)" % (url, args.upstream))
 
-    profile = tempfile.mkdtemp(prefix="ui_probe_")
+    sweep_old_profiles()
+    profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
     cmd = [browser, "--headless=new", "--disable-gpu", "--no-first-run",
            "--no-default-browser-check", "--user-data-dir=" + profile,
            "--window-size=1280,900", url]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    ok = probe.finished.wait(args.timeout)
+    browser_job = BrowserJob(cmd)
     try:
-        proc.terminate()
-    except Exception:
-        pass
-    server.shutdown()
+        ok = probe.finished.wait(args.timeout)
+    finally:
+        browser_job.close()
+        server.shutdown()
+        shutil.rmtree(profile, ignore_errors=True)
 
     if not ok:
         print("FAIL: the page never reported back within %ds." % args.timeout)
