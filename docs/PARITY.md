@@ -25,9 +25,10 @@ description of how it works.
 `SOUNDPADS.md`; every property the desk exposes in the generated `PROPERTY_LIST_<DESK>.md`.
 
 **NOT EVERY SCREEN OF THE RODE APP HAS BEEN ENUMERATED.** The app sweep covered the mixer and
-device-settings screens; the recordings area was never reached, because Transfer Recordings is
-greyed out with no card in. So a claim about an app screen that is not below has no source behind
-it and must be checked against the app before it is believed.
+device-settings screens. Transfer Recordings is greyed out with no card in; with a card it puts the
+desk in Transfer Mode and lists the recordings off the mounted card, with export options (format,
+sample rate, bit depth, loudness) that were not enumerated. So a claim about an app screen that is
+not below has no source behind it and must be checked against the app before it is believed.
 
 ## Channels / mixer
 
@@ -124,6 +125,7 @@ it and must be checked against the app before it is believed.
 - REC button mode (Pause vs Stop)
 - Markers
 - Recordings list, and deleting one
+- Transfer Recordings: the memory card on the computer as a drive
 - Platform/custom export presets
 - Erasing (formatting) the card or drive, and ejecting it safely
 - Playing a recording back on the desk, and trimming or fading it there

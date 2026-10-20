@@ -664,6 +664,9 @@ def _recorder_payload(blob: bytes) -> dict:
                           _recorder_refusal(dev.name, "delete a recording"))
 
     out["storage_writable"] = "storage_write" in dev.caps
+    # The card on this computer: whether it can be handed over here, whether it is, and as
+    # which drive. See action_card_to_computer.
+    out["card_share"] = _card_share_status(blob)
     out["announcer"] = _announcer_into_desk()
     return out
 
@@ -741,6 +744,10 @@ def _recorder_sentence(state, elapsed: str = "") -> str:
                           f"about {low['free_mb']} megabytes.")
         return f"Ready to record{where}.{room_left}"
     if state == recorder.NO_DESTINATION:
+        if _card_state.get("open"):
+            drive = _card_state.get("drive")
+            return (f"The memory card is open on this computer{f' as drive {drive}' if drive else ''}"
+                    f". The unit cannot record until you give it back.")
         return ("The unit has nowhere to record to. Put a memory card in, or a USB drive in the "
                 "second USB port, and this will say Ready.")
     return "The unit did not report a recording state."
@@ -916,6 +923,159 @@ def action_delete_recording(uid: int) -> dict:
             "message": (f"Deleted {target['name']}, {target['duration']}. "
                         f"{wording.count(len(info.get('recordings') or []), 'recording')} left "
                         f"on the unit.")}
+
+
+# ----------------------------------------------------------------------------
+# THE CARD ON THIS COMPUTER (recorder.set_card_transfer). The page offers it while a card is in;
+# opening waits for Windows to show the drive and puts the user in its RODECaster folder, giving it
+# back flushes the drive first and reads the recordings back. The unit cannot record while the card
+# is out, and a pad session (rcp_transfer.transfer_session) owns transfer mode while it runs.
+_CARD_WAIT_S = 30.0
+_card_state = {"open": False, "drive": None}
+
+
+def _removable_drives() -> dict:
+    """{letter: total bytes} for every removable drive Windows has media in."""
+    import ctypes
+    import string
+    k32 = ctypes.windll.kernel32
+    out = {}
+    for letter in string.ascii_uppercase:
+        root = f"{letter}:\\"
+        if k32.GetDriveTypeW(root) != 2:                    # DRIVE_REMOVABLE
+            continue
+        total = ctypes.c_ulonglong()
+        if k32.GetDiskFreeSpaceExW(root, None, ctypes.byref(total), None):
+            out[letter] = total.value
+    return out
+
+
+def _card_volume(blob):
+    """The memory card's entry in recorder.read_volumes (slot 0), or None."""
+    return next((v for v in recorder.read_volumes(blob) if v.get("index") == 0), None)
+
+
+def _card_drive(card) -> str | None:
+    """The drive letter the card shows up under: a removable drive the size the desk gives for its
+    card, within 1 percent, or None."""
+    size = int((card or {}).get("capacity_mb") or 0) * 1024 * 1024
+    if not size:
+        return None
+    return next((d for d, total in sorted(_removable_drives().items())
+                 if abs(total - size) <= size // 100), None)
+
+
+def _card_share_status(blob) -> dict:
+    """What the Recording page needs: whether the card can be handed over here, whether it is, and
+    as which drive. Keeps _card_state current for the state sentence."""
+    dev = devices.get_active_device()
+    if "recorder" not in dev.caps:
+        _card_state.update(open=False, drive=None)
+        return {"available": False, "open": False, "drive": None}
+    is_open = recorder.transfer_mode(blob) == recorder.CARD_TRANSFER
+    drive = _card_state.get("drive") if is_open else None
+    if drive is not None and drive not in _removable_drives():
+        drive = None
+    card = _card_volume(blob)
+    _card_state.update(open=is_open, drive=drive)
+    return {"available": bool(is_open or (card and card.get("inserted"))), "open": is_open,
+            "drive": drive}
+
+
+def action_card_to_computer(on: bool) -> dict:
+    """Hand the memory card to this computer as a drive (True), or give it back to the unit (False).
+
+    Opening refuses while a recording runs, with no card in, or while a pad session or the pad
+    storage holds transfer mode; it waits for Windows to show the drive and opens its RODECaster
+    folder in File Explorer with the focus in it. Giving it back flushes the drive, waits for it to
+    go and reads the recordings list back."""
+    gate = _recorder_gate("hand the card to this computer")
+    if gate is not None:
+        return gate
+    try:
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+    mode = recorder.transfer_mode(blob)
+    card = _card_volume(blob)
+
+    if on:
+        if mode == recorder.CARD_TRANSFER:
+            drive = _card_state.get("drive") or _card_drive(card)
+            return {"ok": True, "drive": drive,
+                    "message": (f"The card is already open on this computer"
+                                f"{f' as drive {drive}' if drive else ''}.")}
+        if mode not in (0, None) or rcp_transfer._transfer_hold > 0:
+            return {"ok": False, "message": "The unit is in Transfer Mode for its SMART pad sounds. "
+                                            "Try again when that has finished."}
+        if recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
+            return {"ok": False, "message": "Stop the recording first. The card cannot leave the "
+                                            "unit while it is recording."}
+        if not card or not card.get("inserted"):
+            return {"ok": False, "message": "There is no memory card in the unit."}
+        before = set(_removable_drives())
+        _ann_mark_self_write(("record",))
+        try:
+            with _hid_lock:
+                recorder.set_card_transfer(True)
+        except Exception as exc:
+            return {"ok": False, "message": f"Could not hand the card to this computer: {exc}"}
+        drive, t0 = None, time.time()
+        while drive is None and time.time() - t0 < _CARD_WAIT_S:
+            time.sleep(0.5)
+            drive = (next((d for d in sorted(_removable_drives()) if d not in before), None)
+                     or _card_drive(card))
+        _card_state.update(open=True, drive=drive)
+        if drive is None:
+            return {"ok": False, "message": (f"The unit let go of the card, but Windows did not show "
+                                             f"it within {int(_CARD_WAIT_S)} seconds. Give it back "
+                                             f"to the unit and try again.")}
+        folder = f"{drive}:\\RODECaster"
+        opened = ""
+        try:
+            _open_folder_focused(folder if os.path.isdir(folder) else f"{drive}:\\")
+            opened = " File Explorer is open on its RODECaster folder: one folder per recording."
+        except Exception:
+            pass
+        return {"ok": True, "drive": drive,
+                "message": (f"The memory card is open on this computer as drive {drive}.{opened} "
+                            f"The unit cannot record until you give the card back.")}
+
+    if mode != recorder.CARD_TRANSFER:
+        _card_state.update(open=False, drive=None)
+        return {"ok": True, "message": "The card is already in the unit."}
+    drive = _card_state.get("drive") or _card_drive(card)
+    if drive:
+        try:
+            rcp_transfer.flush_volume(f"{drive}:\\")
+        except Exception:
+            pass
+    _ann_mark_self_write(("record",))
+    try:
+        with _hid_lock:
+            recorder.set_card_transfer(False)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not give the card back to the unit: {exc}"}
+    t0 = time.time()
+    while drive and drive in _removable_drives() and time.time() - t0 < _CARD_WAIT_S:
+        time.sleep(0.5)
+    time.sleep(1.0)
+    try:
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Sent, but the unit could not be read back: {exc}"}
+    _card_state.update(open=False, drive=None)
+    info = _recorder_payload(blob)
+    _note_recorder_context(info)
+    if recorder.transfer_mode(blob) == recorder.CARD_TRANSFER:
+        return {"ok": False, "recorder": info,
+                "message": "The unit still reports the card as open on this computer."}
+    n = len(info.get("recordings") or [])
+    return {"ok": True, "recorder": info,
+            "message": (f"The card is back in the unit. {wording.count(n, 'recording')} on it. "
+                        f"{_recorder_sentence(info)}")}
 
 
 # ----------------------------------------------------------------------------
@@ -11303,6 +11463,7 @@ POST_ROUTES = {
                                  [(str, "name", ""), (str, "code", ""), (str, "was", "")]),
     "/api/callme/contact/delete": (action_callme_contact_delete, [(str, "code", "")]),
     "/api/recorder/marker": (action_drop_marker, []),
+    "/api/recorder/card": (action_card_to_computer, [(bool, "on", None)]),
     "/api/recorder/delete": (action_delete_recording, [(int, "uid", -1)]),
     "/api/storage/eject": (action_storage_eject, [(int, "index", -1), (bool, "on", True)]),
     "/api/storage/erase": (action_storage_erase, [(int, "index", -1)]),

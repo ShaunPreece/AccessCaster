@@ -213,8 +213,6 @@ Say these plainly, because each one cost real hardware time to settle:
   their values there; they hold unpopulated defaults. The official app shows moving meters, so the
   data goes somewhere else and finding it is a capture job. We read the desk's USB audio streams
   through Windows instead, which is close but is not the desk's own meter.
-- **The recordings drive.** The desk only ever binds its pad image or its update image to the USB
-  gadget, never the recordings partition, so no transfer mode makes recordings appear.
 - **A static IP.** `staticIpSet` accepts a write, but `ipAddress`, `subnetMask` and `gateway` are
   read-only REPORTS of what the interface currently has, so there is nothing to express the address
   you want with. A flag with no operands.
@@ -2802,9 +2800,18 @@ shared one; a new copy is how they drifted apart the first time.
   traffic and one reported "the page never reported back".
 - **`ui_probe.py`'s default 90 s timeout is not enough.** Pads needs `--timeout 600` (about nine
   minutes), device 240. A timeout reports as "never reported back", which reads like a fault.
-- **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
-  a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026
-  (`DevTools/transfer_volumes.py`), so do not reach for transfer mode to get at recordings.
+- **`transferModeType` = 2 MOUNTS PAD STORAGE; 1 MOUNTS THE MEMORY CARD, WHEN ONE IS IN.** 2 gives
+  F:, 5033 MB, a `\pads` folder, and never the card or the USB drive (measured 29th August 2026,
+  `DevTools/transfer_volumes.py`). 1 mounted nothing in that session because no card was in the
+  desk. With a card in, 1 is exactly what RODE's app sends for Transfer Recordings, and nothing
+  else: measured 20th October 2026 on a Pro II, fw 1.7.6, by reading the desk before, during and
+  after the app's transfer. The desk lets go of the card (`recordState` 3, the recordings list
+  empties, `storageVolumeState` for slot 0 reads `0|0|1|0|0`), about 4 s later Windows shows the
+  whole card as an exFAT drive, and 0 takes it back in about 3 s with the recordings list as it was.
+  The same records sent by this app do the same (`recorder.set_card_transfer`). The recordings sit
+  in `\RODECaster\<n> - <date>\`: `Stereo Mix.wav`, one `Track<n>-<source>.wav` per track and a
+  `Meta.xml`. Only the card was tried; whether 1 also hands over a USB drive in the second port is
+  open.
 - **THE DESK NEVER PUSHES A `STORAGEVOLUME` RECORD.** Neither a record start/stop nor an unplug and
   replug of the drive produces one; you get `recordState` (0x03) and `lastRecordingID` (0x0F) and
   nothing else. So `selector_from_push.py` cannot learn that block's address, however long it listens.

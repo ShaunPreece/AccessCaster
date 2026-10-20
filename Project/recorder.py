@@ -502,6 +502,34 @@ def delete_recording(uid: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# THE CARD ON THE COMPUTER: what RODE's app calls Transfer Recordings. `transferModeType` = 1 on the
+# SYSTEM block, WITH A CARD IN, hands the whole memory card to the host as a USB drive; 0 takes it
+# back. Measured with RODE's app on a Pro II, fw 1.7.6: "Transfer Recordings" writes that one
+# property and nothing else, the desk lets go of the card (`recordState` 3, its recordings list
+# empties) and about 4 s later Windows shows the card as an exFAT drive, the desk's own recordings
+# in \RODECaster, one folder per take holding Stereo Mix.wav, one WAV per track and Meta.xml. Writing
+# 0 takes it back in about 3 s and the recordings list returns as it was. With no card in, 1 mounts
+# nothing, which is why it once looked dead. 2 is the pad storage (rcp_transfer.set_transfer_mode).
+CARD_TRANSFER = 1
+
+
+def build_card_transfer(on: bool) -> bytes:
+    """The record that hands the card to the host (True) or takes it back (False)."""
+    return rcp_transfer.build_global_prop_int(
+        "transferModeType", rcp_transfer.SEL_TRANSFER_MODE, CARD_TRANSFER if on else 0)
+
+
+def set_card_transfer(on: bool) -> None:
+    """Send it. VERIFIES NOTHING: the caller watches for the drive and reads the desk back."""
+    rcp_transfer.send_record(build_card_transfer(on))
+
+
+def transfer_mode(blob: bytes):
+    """`transferModeType` on the SYSTEM block, or None if the dump does not carry it there."""
+    return rcp_read.path_value(blob, [rcp_transfer.SEL_TRANSFER_MODE], "transferModeType")
+
+
+# ---------------------------------------------------------------------------
 # The Watcher: what the unit is doing, live, for free.
 
 class Watcher(threading.Thread):

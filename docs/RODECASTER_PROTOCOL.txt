@@ -1011,7 +1011,11 @@ padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-F
 
 7.3 TRANSFER-MODE CONTROL (global ints / bools, selector 0x0f)
 --------------------------------------------------------------
-  - transferModeType = 2 to enter, 0 to exit. (It is 2, NOT 1.)
+  - transferModeType = 2 to enter, 0 to exit. (It is 2, NOT 1, for the pad storage.)
+  - transferModeType = 1, with a memory card in, hands the whole card to the host as
+    a USB drive (exFAT; recordings in \RODECaster\<n> - <date>\), and 0 takes it
+    back. It is the one record RODE's app sends for Transfer Recordings. While it
+    is 1 the desk cannot record (recordState 3). See PROJECT_GUIDE part 2.
   - remountPadStorage: replay verbatim. Non-standard bool value block:
         03 1a000000 010101010f 72656d6f756e7450616453746f72616765 00 01 01 02 00
     Makes the FAT volume appear / reappear.

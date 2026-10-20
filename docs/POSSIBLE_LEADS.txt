@@ -105,20 +105,6 @@ Expect roughly 1 in 5, so three clean runs prove nothing: ten leaves about an 11
 of seeing nothing by luck alone.
 
 
-LEAD 4: can anything make the desk expose its recordings over USB?
-------------------------------------------------------------------
-
-The recordings drive does not mount over the desk's USB cable. `storageVolumeTransfer`
-mounts nothing at any `transferModeType` from 0 to 8.
-
-The firmware names the mechanism: storage is exposed by binding a FILE to a USB gadget
-LUN (`.../mass_storage.usb0/lun.0/file`), and the engine only ever binds the pad image or
-the update image - never the recordings partition. So the question is no longer "which
-transfer mode" but "can anything we send make it bind a different file".
-
-"You have to unplug the drive" is an acceptable answer. We just have not proved it.
-
-
 LEAD 5: wireless mic telemetry has never seen a real transmitter
 -----------------------------------------------------------------
 

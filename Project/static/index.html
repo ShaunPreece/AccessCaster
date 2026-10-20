@@ -1540,6 +1540,23 @@
              deleting included, is spoken there. -->
       </div>
 
+      <!-- THE CARD ON THIS COMPUTER. What RODE's app calls Transfer Recordings: the unit hands its
+           memory card to this computer as a drive, and File Explorer opens on its RODECaster
+           folder. One button whose label follows the state, like the record button; on a unit
+           where it is not available it stays in place and says why when pressed. -->
+      <h2 id="rec-h-computer" tabindex="-1">Copy to this computer</h2>
+      <div>
+        <p class="hint" id="rec-computer-hint">
+          Opens the memory card on this computer as a drive, with File Explorer on its RODECaster
+          folder: one folder per recording, holding the mix and every track as WAV files. The unit
+          cannot record while the card is open here, so give it back when copying has finished.
+        </p>
+        <p>
+          <button type="button" class="secondary" id="rec-computer-btn"
+                  aria-describedby="rec-computer-hint">Open the card on this computer</button>
+        </p>
+      </div>
+
       <!-- The card slot and the USB drive only: the unit's internal storage holds the pad sounds
            and is never offered. Eject's label follows the chosen one, Eject or Reconnect, the same
            pattern as the record button. -->

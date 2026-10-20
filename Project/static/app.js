@@ -7632,6 +7632,53 @@ function loadRecordingFrom(d) {
   fillRecordingList(d);
   applyTransport(d.state);
   applyAnnouncerWarning(d);
+  applyCardShare(d);
+}
+
+/* THE CARD ON THIS COMPUTER (server.action_card_to_computer). The label follows the state, like
+   the record button: Open the card on this computer, then Give the card back to the unit. */
+function applyCardShare(d) {
+  const btn = document.getElementById("rec-computer-btn");
+  if (!btn) return;
+  const cs = (d && d.card_share) || {};
+  btn.textContent = cs.open ? "Give the card back to the unit" : "Open the card on this computer";
+  btn.dataset.open = cs.open ? "1" : "";
+  setAvailable(btn, !!cs.available,
+    "There is no memory card in the unit, or this unit cannot hand it to the computer.");
+  if (cs.available) {
+    setText("rec-list-hint", "Newest first. To copy them, open the card on this computer, "
+      + "under Copy to this computer.");
+  }
+}
+
+/* Read the page again without speaking: a command's own reply is what gets said. */
+async function refreshRecordingQuietly() {
+  try {
+    const resp = await fetch("/api/recorder");
+    const d = await resp.json();
+    if (d.ok) loadRecordingFrom(d);
+  } catch (e) { /* the reply already said what happened */ }
+}
+
+async function onCardShare(btn) {
+  if (isBusy(btn)) return;
+  const why = unavailableReason(btn);
+  if (why !== null) { setRecState(why); return; }
+  const giveBack = btn.dataset.open === "1";
+  setBusy(btn, true);
+  setRecState(giveBack ? "Giving the card back to the unit, please wait."
+                       : "Opening the card on this computer, please wait.");
+  let res;
+  try {
+    res = await postJSON("/api/recorder/card", { on: !giveBack });
+  } catch (e) {
+    setBusy(btn, false);
+    setRecState("Could not reach the AccessCaster service.");
+    return;
+  }
+  setBusy(btn, false);
+  await refreshRecordingQuietly();
+  setRecState(res.message || "Done.");
 }
 
 /* The record button's label follows the state, the way a transport control normally does:
@@ -8236,6 +8283,8 @@ function wireRecording() {
   if (volEject) volEject.addEventListener("click", () => onStorageEject(volEject));
   const volErase = document.getElementById("rec-vol-erase");
   if (volErase) volErase.addEventListener("click", () => onStorageErase(volErase));
+  const card = document.getElementById("rec-computer-btn");
+  if (card) card.addEventListener("click", () => onCardShare(card));
 }
 
 /* ---- Help & About page -----------------------------------------------

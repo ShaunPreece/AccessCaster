@@ -225,6 +225,28 @@ check_in("and the mixed track is called out", "mixed track", recorder.BYPASS_HIN
 check_in("with multitrack off, it says nothing happens yet",
          "does nothing", recorder.BYPASS_NEEDS_MULTITRACK)
 
+print("\nTHE CARD ON THE COMPUTER: transferModeType 1 on the SYSTEM block, 0 to take it back")
+import fake_model                                    # noqa: E402
+import rcp_transfer                                  # noqa: E402
+check("handing the card over is transferModeType 1 at the SYSTEM block",
+      recorder.build_card_transfer(True),
+      rcp_transfer.build_global_prop_int("transferModeType", rcp_transfer.SEL_TRANSFER_MODE, 1))
+check("taking it back is 0, at the same block",
+      recorder.build_card_transfer(False),
+      rcp_transfer.build_global_prop_int("transferModeType", rcp_transfer.SEL_TRANSFER_MODE, 0))
+check("never 2, which is the pad storage", recorder.CARD_TRANSFER, 1)
+
+
+def tree_with_system(mode):
+    """A dump whose root child at SEL_TRANSFER_MODE is a SYSTEM block carrying `mode`."""
+    kids = [fake_model.node("OTHER", {"x": 0}) for _ in range(rcp_transfer.SEL_TRANSFER_MODE)]
+    kids.append(fake_model.node("SYSTEM", {"transferModeType": mode}))
+    return fake_model.node("Rodecaster", (), kids)
+
+
+check("the mode is read off the SYSTEM block", recorder.transfer_mode(tree_with_system(1)), 1)
+check("and reads 0 when the card is in the unit", recorder.transfer_mode(tree_with_system(0)), 0)
+
 print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
 for f in FAILS:
     print("  " + f)
