@@ -41,7 +41,6 @@ rather than guessing, because a missing endpoint looks exactly like perfect supp
 from __future__ import annotations
 import json
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request

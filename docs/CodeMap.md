@@ -151,11 +151,11 @@ after a session that moved code.
   `_ann_speak_pump` (2882, the one feeder of `say_worker.ps1`), `_ann_say_and_wait` (2863, speak
   and block until the worker answers `DONE`, read by `_ann_worker_replies`; the app's resume uses it).
 - Auto gain: `_autogain_run` (4713), `_ChatIsolation` (4817), `_autogain_restore_processing` (4912).
-- Per-channel level check: `action_channel_level_check` (6616), `_chan_check_stop` (6556),
-  `_level_check_summary` (6485).
+- Per-channel level check: `action_channel_level_check` (6617), `_chan_check_stop` (6557),
+  `_level_check_summary` (6486).
 - Meters and the Windows level: `read_meters` (6219), `action_set_input_level` (6322),
-  `action_meter_watch` (6451).
-- Faders and chains: `action_set_fader` (5941), `action_reset_faders` (6767),
+  `action_meter_watch` (6452).
+- Faders and chains: `action_set_fader` (5941), `action_reset_faders` (6768),
   `_follow_chains` (5457), `_read_fader_vector` (5649), `_tidy_fader_target` (5896).
 - Per-fader mute and solo (the Levels tab's rows): `action_set_fader_mute`, `action_set_fader_solo`,
   read from `fader_levels_live`; browser half is `onFaderMute` / `onFaderSolo` / `onClearFaderSolos`.
@@ -164,13 +164,13 @@ after a session that moved code.
   `_carry_mute` (which puts back the mute the desk clears when it rearranges a layout). The pair
   table is `devices.FaderSpec.stereo_pairs` and `rcp_transfer.STEREO_LINK_PAIRS`; the browser half is
   `buildStereoLinks` / `onStereoLink` / `applyStereoValues` in `app.js`.
-- Routing: `routing_model` (7024), `action_set_cross_point` (7900), `action_reset_all_outputs`
-  (6314, a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6955, which
+- Routing: `routing_model` (7025), `action_set_cross_point` (7901), `action_reset_all_outputs`
+  (6314, a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (6956, which
   applies a profile's `routing.mix_scheme` through `routing_schemes.apply` and keeps the old
   index-keyed branch only for profiles saved before 29th August 2026).
-- Mix schemes: `_apply_scheme` (7950, the ONE apply path: gate, lock, write, wording),
-  `read_routing_schemes` (7984), `action_apply_routing_scheme` (8020),
-  `action_save_routing_scheme` (8034), `action_delete_routing_scheme` (8063). The format and the
+- Mix schemes: `_apply_scheme` (7951, the ONE apply path: gate, lock, write, wording),
+  `read_routing_schemes` (7985), `action_apply_routing_scheme` (8021),
+  `action_save_routing_scheme` (8035), `action_delete_routing_scheme` (8064). The format and the
   writes are in `routing_schemes.py`.
 - **Background jobs, all four on ONE class: `_BackgroundJob` (`start` / `status` / `busy` /
   `step` / `tick`).** The instances are `_profile_job`, `_restore_job`, `_show_job` and
@@ -183,9 +183,9 @@ after a session that moved code.
   mic preamp and leaves the channel ~55 dB down while the model reads perfect. Nothing can detect
   it by reading; see `PROJECT_GUIDE.md` part 2 before touching this.
 - ONE backup, both mechanisms underneath: `action_backup_now`, `action_restore_backup` (**always the profile since 21st September 2026**: the show import crashes the desk about 1 in 6, see its docstring), `backup_restore_plan` (what the confirmation dialog says, including `warnings` - what the backup will leave you unable to hear, via `_restore_silence_warnings`), `_removable_volume_ready`, `_backup_wording`.
-- Profiles and the as-found baseline: `snapshot_profile` (8423), `restore_profile` (8572, and it
-  takes `clean`: reset the desk first, then restore on top), `baseline_status` (8494),
-  `action_baseline_save` (8526).
+- Profiles and the as-found baseline: `snapshot_profile` (8424), `restore_profile` (8573, and it
+  takes `clean`: reset the desk first, then restore on top), `baseline_status` (8495),
+  `action_baseline_save` (8527).
 - The desk's own Shows (all after `restore_profile`): `read_show_state` (the page payload, and the
   ONE place the two option labels are built), `show_job_status`, `_run_show_job` (one job state for
   all four, since they are mutually exclusive), `_shows_write_gate`, `_export_and_wait`,
@@ -206,7 +206,7 @@ after a session that moved code.
 - Capability gates, one per risky write family, and all but one now a one-liner over **`_cap_gate`**
   (which holds the shared reasoning: a selector proven on a Pro II is NOT proven on a Duo, and a
   wrong one can append a stray only a factory reset clears). `_fader_write_gate` (5568),
-  `_matrix_write_gate` (7834), `_output_write_gate` (7842), `_network_write_gate`,
+  `_matrix_write_gate` (7835), `_output_write_gate` (7843), `_network_write_gate`,
   `_shows_write_gate`, `_recorder_gate` (with `_recorder_refusal`, the sentence the Recording
   page's delete note shares). **`_level_write_gate` (6028) keeps its own body** because it has a SECOND
   condition beyond the cap: the device must also carry confirmed faderLevel selectors. Each keeps
@@ -306,7 +306,7 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (155 files; the ones worth knowing)
+## DevTools/ (153 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing

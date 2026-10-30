@@ -151,7 +151,7 @@ def _client_watchdog():
 
 # Channel / pad layout of the RODECaster Pro II SMART pads.
 MIC_CHANNELS = (1, 2, 3, 4)
-# Pad grid geometry is now DEVICE-AWARE (devices.PadSpec): the Pro II is 8 pads/bank, the Duo 6.
+# Pad grid geometry is DEVICE-AWARE (devices.PadSpec): the Pro II is 8 pads/bank, the Duo 6.
 # These module constants are the Pro II DEFAULTS, kept only as the floor for the dynamic bank
 # growth (PAD_MIN_BANKS) and the offline fallback in soundpad_model(). The per-device pads/bank,
 # user-bank count and the per-action range limit come from the active device: read_pads_live()
@@ -391,8 +391,8 @@ def read_device_state() -> dict:
     mon = val("outputMonLevel", "float")
     out["monitor"] = {"level_pct": (round(mon[0] * 100) if mon else None), "writable": True}
 
-    # ---- wireless mics. Still in the payload, but the Hardware tab no longer SHOWS them: they read
-    # out on Wireless connections now, beside wifi and Bluetooth (see _wireless_mics).
+    # ---- wireless mics. In the payload, but the Hardware tab does not SHOW them: they are read out
+    # on Wireless connections, beside wifi and Bluetooth (see _wireless_mics).
     out["wireless"] = _wireless_mics(blob)
 
     # ---- firmware and the wired network. Neither is a connection you can make or change, so they
@@ -2147,8 +2147,8 @@ def read_network_status() -> dict:
         # The third radio on the Wireless connections tab. Same helper as the Hardware state read,
         # so the two readings cannot drift apart.
         "wireless_mics": _wireless_mics(blob),
-        # Still returned, though the page now shows both of these on the Hardware tab: they are read
-        # from the same dump for free, and callers other than that tab may want them.
+        # Returned here as well as on the Hardware tab, where the page shows it: it comes free
+        # with this dump, and callers other than that tab may want it.
         "wired_connected": bool(wired) if wired is not None else None,
         # WHAT CAN BE CHANGED HERE. Three things on this block are proven and writable; everything
         # else on this page is read-only, and the page says WHICH is which rather than leaving a
@@ -3086,8 +3086,8 @@ _ann_startup_summary = bool(load_settings().get("announcer_startup_summary", Tru
 def _load_ann_remember() -> bool:
     """Whether announcements start the way they were left. OFF BY DEFAULT, so the app opens talking:
     a start-up in silence is indistinguishable from the app or the desk being broken. With no saved
-    answer, a saved `announcer` of False counts as ticked, because before this option the tray kept
-    that preference on its own and somebody who switched announcements off there keeps it."""
+    answer, a saved `announcer` of False counts as ticked: a settings file that predates this option
+    holds the tray's own on/off, and somebody who switched announcements off there keeps them off."""
     s = load_settings()
     if "announcer_remember" in s:
         return bool(s["announcer_remember"])
@@ -3100,7 +3100,7 @@ _ann_remember = _load_ann_remember()
 def announcer_starts_on() -> bool:
     """Whether the announcer comes up on at start-up: always, unless it is remembered as off."""
     return not (_ann_remember and load_settings().get("announcer") is False)
-_ANN_SETTLE_S = 0.12       # only a safety net now: guarantees the closing value is spoken
+_ANN_SETTLE_S = 0.12       # a safety net: guarantees the closing value is spoken
 _ANN_LEVEL_GAP_S = 0.10    # minimum spacing between spoken level updates while moving
 _ANN_RUN_S = 1.5           # within this of the last update on the same target, say just the number
 # WHAT THE ENCODER PRESS SELECTS, tracked by us because the desk never says.
@@ -3874,7 +3874,7 @@ def _ann_usb_mode_change(was, now) -> str:
     """
     if was is None or now is None or was == now:
         return ""
-    was_mode, was_exp = recorder.split_usb_multitrack(was)
+    _, was_exp = recorder.split_usb_multitrack(was)
     now_mode, now_exp = recorder.split_usb_multitrack(now)
     if was_exp != now_exp:
         # Leaving it, the faders are tidied and spoken about separately (_tidy_after_standard),
@@ -6330,8 +6330,9 @@ def action_set_input_level(db: float) -> dict:
     because 50 percent is -1.08 dB on this endpoint and unity is about 55 percent, a percentage
     nobody can reason about.
 
-    THE APP NEVER MOVES IT ON ITS OWN. The meter reads it and adapts its clipping threshold; only
-    this action, from a control the user operated, writes it.
+    IT IS WRITTEN ONLY FROM A CONTROL THE USER OPERATED: this action, and auto gain and the channel
+    level check, which set the Chat device to no change (0 dB) before they measure. The meter only
+    reads it, and adapts its clipping threshold to it.
 
     The value is READ BACK before anything is reported, because a driver can refuse SILENTLY: an
     endpoint can sit at -1.08 dB and refuse to move by dB or by scalar with no error at all, and
@@ -8438,7 +8439,7 @@ def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = Fal
 # was: the moment anything is written, "how it came" is gone, and the touchscreen wizard that would
 # otherwise rebuild it is not reachable by a blind operator.
 #
-# IT IS NOT THE ONLY UNDO ANY MORE, and it is still the better one. `action_show_reset` puts the
+# IT IS NOT THE ONLY UNDO, and it is the better one. `action_show_reset` puts the
 # desk back to the factory, but it takes everything with it and it is the command implicated in the
 # USB dropout; restoring this baseline puts back what the user actually had, needs no reset, and
 # works on a desk with no card or drive in it.
@@ -11210,9 +11211,8 @@ GET_ROUTES = {
     "/api/device/state": read_device_state,
     "/api/device/settings": read_unit_settings,
     "/api/faders/levels": fader_levels_live,
-    # The pad-restore progress channel. Named for a restore that no longer exists;
-    # the factory-effects restore is its only user and the path is kept because the
-    # page and the browser checks both address it by name.
+    # The progress channel of the factory voice-effects restore, its only user. The path does not
+    # name that restore, but the page and the browser checks both address it by this path.
     "/api/pads/restore-defaults/status": pad_restore_status,
     "/api/soundpads": soundpad_model,
     "/api/network": read_network_status,

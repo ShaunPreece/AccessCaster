@@ -31,7 +31,6 @@ import _bootstrap  # noqa: F401
 
 import channels
 import rcp_read
-import rcp_transfer as _t
 
 Q_PROPS = ("eqLowQ", "eqMidQ", "eqHighQ")
 GAIN_PROPS = ("eqLowGain", "eqMidGain", "eqHighGain")

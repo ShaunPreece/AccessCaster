@@ -30,7 +30,6 @@ what stops the audit going stale:
 from __future__ import annotations
 import inspect
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -42,7 +41,6 @@ import channels
 import profiles
 import rcp_read
 import rcp_transfer
-import soundpad
 
 REPO = Path(__file__).resolve().parent.parent
 

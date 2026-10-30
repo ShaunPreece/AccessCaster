@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
-import sys
 from collections import Counter, defaultdict
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)

@@ -6,7 +6,6 @@ everything and confirming the pad table + region-B pool return byte-clean to the
 (7 objects). Fully reversible.
 """
 import json
-import struct
 import urllib.request
 
 import _bootstrap

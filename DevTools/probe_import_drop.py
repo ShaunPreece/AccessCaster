@@ -63,7 +63,6 @@ import urllib.error
 import urllib.request
 
 import diagnostics
-import paths
 
 BASE = "http://127.0.0.1:8770"
 SETTLE_S = 6.0          # between trials, so one import is not still landing when the next starts
