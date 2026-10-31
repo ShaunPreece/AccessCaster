@@ -26,9 +26,9 @@ ACCESSIBILITY RULES, and they are the reason for the validation in `parse_bindin
     program on the machine, screen reader included, so a bare key or a Shift+key is refused rather
     than allowed to break someone's typing.
   - THE DEFAULT COMBINATION IS CTRL+ALT+SHIFT, and it is the ONLY one the app ships on (see
-    DEFAULT_MODS for why it is not Ctrl+Alt+Windows). It stays clear of
-    NVDA's Insert and Caps Lock layers, JAWS' Insert layer and Narrator's Caps Lock layer, so the
-    shortcuts do not have to be re-learnt per screen reader.
+    DEFAULT_MODS for why it is not Ctrl+Alt+Windows). It stays clear of NVDA's Insert and Caps Lock
+    layers, JAWS' Insert layer and Narrator's Caps Lock layer, so the shortcuts do not have to be
+    re-learnt per screen reader.
   - MOD_NOREPEAT is always set. Without it, holding a key fires the action over and over.
   - EVERY ACTION SPEAKS ITS RESULT, UNLESS THAT SHORTCUT IS SET TO STAY QUIET. When a hotkey fires,
     focus is in another application, so the web UI cannot report anything: the spoken reply is

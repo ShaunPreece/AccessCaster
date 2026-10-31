@@ -90,7 +90,7 @@ class TrayApp:
 
     def _load_icon(self):
         """The app icon, from the bundled assets/icon.ico; falls back to the stock application
-        icon if the file is missing (e.g. running from source before the icon is generated)."""
+        icon if the file is missing or will not load."""
         path = resource_path("assets", "icon.ico")
         flags = win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE
         try:

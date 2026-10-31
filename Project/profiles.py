@@ -2,9 +2,8 @@
 
 A profile is a JSON snapshot of EVERY setting the app can read AND write, so it round-trips the
 whole desk: MIDI; for every channel the device exposes (Mic 1-4, Bluetooth, USB1, Chat, USB2, and
-the SMART pads bus, which has a chain but no level) the level, plus for
-mics phantom/polarity/mic type and the always-on echo+reverb effects, and for every channel the
-full processing chain (master on/off, each module's on/off, all 33 params); and routing (the full
+the SMART pads bus, which has a chain but no level) the level, plus for mics phantom/polarity/mic
+type and the always-on echo+reverb effects, and for every channel the full processing chain (master on/off, each module's on/off, all 33 params); and routing (the full
 nine-fader layout, the virtual fader levels and the monitor speaker level, multitrack mode, the two
 auto-mutes, each headphone output's amp type, the Master Compellor on/off + its four params, and
 output delay); and the unit's own settings (screen and button brightness, auto-brightness, screen
@@ -57,9 +56,9 @@ _MIC_NAME_TO_INT = {"Mic1": 1, "Mic2": 2, "Mic3": 3, "Mic4": 4}
 # curated keys drive restore - so an undecoded property can never be blind-written from here.
 #
 # REDACTION. The dump carries secrets in plain text: the wifi PSK and the SIP/CallMe account
-# password among them. Profiles live in %LOCALAPPDATA% but people do share them (two of our users
-# are on a friend's machine), so anything password-shaped is replaced with None and named in the
-# profile's "redacted" list. SSIDs and usernames are kept: they identify the setup, not access it.
+# password among them. Profiles live in %LOCALAPPDATA% but people do share them, so anything
+# password-shaped is replaced with None and named in the profile's "redacted" list. SSIDs and
+# usernames are kept: they identify the setup, not access it.
 _REDACT = re.compile(r"psk|password|passwd|secret|token|rodecode", re.I)
 SNAPSHOT_KEY = "device_snapshot"
 
@@ -275,8 +274,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     mix = routing_schemes.capture(safe, blob)
     mix_scheme = mix["scheme"] if mix.get("ok") else None
     matrix_note = "" if mix.get("ok") else mix.get("message", "matrix not readable")
-    # LEGACY KEYS, still written so a profile saved by this build still restores on the INSTALLED
-    # v2.00, which knows only these three. They are derived from the same read; nothing here is a
+    # LEGACY KEYS, still written so a profile saved by this build still restores on v2.00, which
+    # knows only these three. They are derived from the same read; nothing here is a
     # second device access. Restore prefers "mix_scheme" and falls back to these (server._apply_matrix).
     ms = rcp_read.read_matrix_state(blob)
     ml = rcp_read.read_matrix_levels(blob)
@@ -284,7 +283,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     matrix_excluded = []
     monitor_unlinked = []
     # THE LEGACY KEYS KEEP THE NARROW SOURCE SET, which `mix_scheme` deliberately does not. The
-    # grid read covers RODE's four Expanded rows now, but v2.00 masks a cross-point selector to one
+    # grid read covers RODE's four Expanded rows, but v2.00 masks a cross-point selector to one
     # byte and cannot address source 14 or 15 at all, so handing it those rows would be a restore
     # that reports failures for cells it was never able to write.
     legacy_sources = {s["index"] for s in devices.get_active_device().matrix.sources}
@@ -663,9 +662,8 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
                 continue
             # THE MIC TYPE GOES FIRST, before the gain, for the same reason the fader layout goes
             # before the processing: CHOOSING A VOICING SETS THAT VOICING'S OWN DEFAULT GAIN.
-            # Measured on Mic 3: Dynamic 45,
-            # Condenser 25, PodMic 50, Broadcaster 27, Procaster 50, NT1 30, NT1-A 31, RE20 51,
-            # SM7B 55. Only Line-in and Instrument leave the gain alone.
+            # Measured on Mic 3: Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
+            # NT1 30, NT1-A 31, RE20 51, SM7B 55. Only Line-in and Instrument leave the gain alone.
             # Write the gain AFTER the type. The other way round, any restore that actually
             # CHANGES the voicing throws the restored gain away and leaves the desk on the new
             # voicing's default. It is invisible to the obvious test, because a restore onto the

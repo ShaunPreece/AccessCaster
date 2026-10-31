@@ -1,6 +1,6 @@
 @echo off
 rem AccessCaster - starts the local server HIDDEN (no console window stays open) and lets it
-rem open the accessible web UI itself. The server now behaves like an app: it stops by itself
+rem open the accessible web UI itself. The server behaves like an app: it stops by itself
 rem when you close that web page, and launching it again replaces any previous instance.
 cd /d "%~dp0"
 

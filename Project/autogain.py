@@ -25,8 +25,8 @@ HOW IT MEASURES, and each of these is the answer to a way it would otherwise be 
     and gain set from it would leave you 10 dB too quiet for the whole session. The loudest single
     sample is reported as well, because the difference between the two is itself worth knowing.
 
-The target is peaks around -9 dBFS, which leaves normal speech in the -12 to -6 range that this
-project has been quoting all along, with headroom for the moments a percentile deliberately ignores.
+The target is peaks around -9 dBFS, which leaves normal speech in the -12 to -6 range, with headroom
+for the moments a percentile deliberately ignores.
 """
 from __future__ import annotations
 

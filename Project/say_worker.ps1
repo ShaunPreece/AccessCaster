@@ -18,7 +18,7 @@
 # restart the worker (and never has to pay the first-phrase startup cost again) just to get quieter.
 #
 # -Device picks WHICH Windows output the speech goes to, by substring match on the device name.
-# That matters on this desk: the default output is the RODECaster itself, so anything spoken through
+# That matters when the default output is the RODECaster itself, because anything spoken through
 # it disappears the moment you SOLO another channel or mute USB 1 - the cue bus replaces the
 # headphone feed, and our speech is arriving on USB 1. Pointing announcements at a different device
 # (e.g. "Realtek") makes them survive solo. Default is the system default output, unchanged.

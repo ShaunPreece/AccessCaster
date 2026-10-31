@@ -127,9 +127,9 @@ def verify_signature(msi_path: str) -> str:
     hand-rolled WinVerifyTrust wrapper nobody can audit.
     """
     # THE PATH GOES BY ENVIRONMENT VARIABLE, NOT AS AN ARGUMENT. `powershell -Command "..." -args
-    # <path>` does not populate `$args` the way it looks as though it should: the check then ran
-    # against an empty path, reported its status as "-args", and REFUSED RODE's genuine signed
-    # MSI. An env var cannot be mis-parsed and cannot be injected into the command either.
+    # <path>` does not populate `$args` the way it looks as though it should: the check runs
+    # against an empty path, reports its status as "-args", and refuses RODE's genuine signed MSI.
+    # An env var cannot be mis-parsed and cannot be injected into the command either.
     env = dict(os.environ, ACCESSCASTER_MSI=msi_path)
     try:
         out = subprocess.run(

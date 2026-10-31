@@ -2,8 +2,8 @@
 
 WHY IT EXISTS. Anything the app offers elsewhere should be bindable to a key, and a hand-written
 list cannot keep up with that. So this is not a list but a CATALOGUE GENERATED FROM THE SPEC TABLES
-THE APP ALREADY HAS - the channel list, the fader layout, the pad
-grid, the saved mix schemes, the mic presets. Add a channel, a pad or a scheme and it appears here
+THE APP ALREADY HAS - the channel list, the fader layout, the pad grid, the saved mix schemes, the
+mic presets. Add a channel, a pad or a scheme and it appears here
 without anyone editing this file; that is the whole point, and it is why the catalogue is rebuilt on
 demand rather than stored.
 
@@ -87,7 +87,7 @@ def catalogue(include_device: bool = True) -> list:
 
 
 def label_for(command_id: str) -> str:
-    """The label a stored id should show, WITHOUT rebuilding the whole catalogue where possible.
+    """The label a stored id should show. Builds the whole catalogue, device commands included.
 
     A shortcut bound to something that no longer exists (a deleted mix scheme, a cleared pad) keeps
     its place in the list and SAYS so, rather than vanishing and leaving a key mysteriously taken."""

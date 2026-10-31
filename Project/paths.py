@@ -12,9 +12,6 @@ install folder may not be a good place to WRITE user data. This module draws the
     profiles, custom presets, the tray's settings). Always under %LOCALAPPDATA%\\AccessCaster so
     it is writable regardless of where the app is installed, and so it survives reinstall and
     uninstall.
-
-Running from source behaves exactly as before for read-only assets (same source dir); only the
-writable data moves to %LOCALAPPDATA%, which is created on first use.
 """
 
 from __future__ import annotations

@@ -26,10 +26,6 @@ full reset-and-restore cycles were driven from this module alone, with nobody at
     metadata or the drive's free space - and all 16 SMART pads matched to the leaf value, FX stacks,
     envelopes and audio files included.
 
-One deviation, and it is NOT the round trip: Mic 3's row of 13 mix cross-points creeps on its own
-across sessions (0, then 1/127, then 9/127, then 23/127) and holds steady through a cycle.
-Unexplained, harmless, and nothing to do with shows.
-
 BEWARE A PROOF THAT EXPORTS AT THE TOUCHSCREEN and reads the tree afterwards: it proves the traps
 below and nothing at all about our own writes. The loop above is driven entirely from this module.
 
@@ -100,8 +96,8 @@ BLOCK_SHOW = "SHOW"
 # `showControlLastError` codes. CODE 1's CAUSE IS NOT KNOWN, and it is NOT "the uuid matches the
 # loaded show", which is disproven: an import of a backup carrying the loaded uuid succeeds
 # (trap 3). So its wording says the unit refused it and claims no cause. Anything with no entry here
-# is reported by NUMBER rather than guessed at, because
-# inventing wording for an unknown error is how a user chases the wrong problem.
+# is reported by NUMBER rather than guessed at, because inventing wording for an unknown error is
+# how a user chases the wrong problem.
 ERROR_REFUSED = 1
 
 # CODE 8 IS "NOWHERE TO PUT IT", provoked on purpose: an export asked of a Duo with no card and no

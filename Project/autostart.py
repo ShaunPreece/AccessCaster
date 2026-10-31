@@ -3,8 +3,7 @@ writes, readable and writable from inside the app.
 
 WHY IT IS A SWITCH IN THE APP AT ALL. The installer offers it once, on a screen somebody is trying
 to get past, and missing it leaves no way back short of running Setup again. It is one HKCU value,
-so the
-app can own it with no admin rights and no elevation prompt.
+so the app can own it with no admin rights and no elevation prompt.
 
 THE VALUE IS THE INSTALLER'S, NOT OURS, AND THAT IS DELIBERATE. Same key, same NAME:
 
@@ -109,9 +108,9 @@ def _delete_value(name: str) -> None:
 def state() -> dict:
     """{enabled, supported, value, message} for the UI.
 
-    `supported` False means the switch must refuse rather than write: either this is not the
-    installed exe, or the registry is unreadable. The message says which, because "it did not work"
-    with no reason is the failure a blind user cannot investigate.
+    `supported` False means the switch must refuse rather than write, because this is not the
+    installed exe. The message says so, because "it did not work" with no reason is the failure a
+    blind user cannot investigate.
 
     A value that exists but names a DIFFERENT command is reported as enabled with a message saying
     so, never silently corrected. It usually means another copy of the app is set to start - a

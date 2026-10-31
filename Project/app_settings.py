@@ -2,9 +2,8 @@
 
 WHY THIS EXISTS. A profile is a backup of the DESK: channels, processing, routing, faders, the
 unit's settings, optionally the pads. Your keyboard shortcuts are not a property of the desk - they
-are yours, and they live only in `%LOCALAPPDATA%\\AccessCaster\\settings.json`. So until now they
-are backed up NOWHERE: reinstall, or move to another computer, and every shortcut is gone with no
-way back.
+are yours, and they live only in `%LOCALAPPDATA%\\AccessCaster\\settings.json`. No profile backs
+them up, so without this export a reinstall, or a move to another computer, loses every shortcut.
 
 IT IS DELIBERATELY NOT PART OF A PROFILE. A profile gets restored onto a desk, often someone else's
 work, and quietly replacing that person's key bindings as a side effect of restoring a mixer would
@@ -103,8 +102,7 @@ def count_shortcuts(hotkeys) -> int:
 
     The stored shape is {"enabled": bool, "shortcuts": [...]}, NOT a mapping of shortcuts, and
     getting that wrong is not a harmless miscount: `len()` on it returns 2 forever, whether the user
-    has one shortcut or fifty. Measured against a real settings.json, after this
-    reported "2 keyboard shortcuts" for a machine that had six.
+    has one shortcut or fifty.
     """
     if isinstance(hotkeys, dict):
         rows = hotkeys.get("shortcuts")
@@ -116,9 +114,9 @@ def count_shortcuts(hotkeys) -> int:
 def describe_export(payload: dict) -> str:
     """What an export caught, as a NOUN PHRASE for dropping into a sentence ("Saved <this> to ...").
 
-    A noun phrase and not a sentence, which is a real bug this had: returning "There were no app
-    settings to save yet." produced "Saved There were no app settings to save yet. to <file>".
-    Empty returns "", and the CALLER decides what to say about nothing - see is_empty.
+    A noun phrase and not a sentence: a sentence such as "There were no app settings to save yet."
+    would read "Saved There were no app settings to save yet. to <file>". Empty returns "", and the
+    CALLER decides what to say about nothing - see is_empty.
     """
     got = payload.get("settings") or {}
     if not got:

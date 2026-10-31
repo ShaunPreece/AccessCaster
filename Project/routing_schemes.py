@@ -16,8 +16,8 @@ by its matrix index, for two reasons:
   - the Duo exposes a DIFFERENT set of outputs (no Headphone 3/4) at the same index space, so a
     Pro II scheme applied by index would write Headphone 3's mix onto some other output. By key, an
     output the connected desk does not have is simply skipped and named in the reply.
-  - the matrix row IS the source code, so a key is stable across a fader
-    reorder. Nothing about a scheme changes when you move a channel to another fader.
+  - the matrix row IS the source code, so a key is stable across a fader reorder. Nothing about a
+    scheme changes when you move a channel to another fader.
 
 AND THE SAME SHAPE IN EITHER USB MODE. Capture and apply walk `MatrixSpec.all_sources`, which
 includes RODE's four Expanded rows whether the desk is in Expanded or not, because the desk
@@ -104,15 +104,15 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
 
     `only` is an output KEY, and it is what makes a one-output preset: the scheme then names that
     output alone, and `apply` therefore writes that output alone: the shape of the built-in Chat
-    presets, saved from the desk instead of derived. A one-output preset is the only kind that is safe to fire mid-show, because it cannot touch a mix
-    you are currently listening to.
+    presets, saved from the desk instead of derived. A one-output preset is the only kind that is
+    safe to fire mid-show, because it cannot touch a mix you are currently listening to.
 
     Both reads REFUSE when the matrix has changed shape (a live phone caller adds cross-points), so
     a scheme is never saved from a grid we cannot index reliably - a half-read matrix written back
     later would silently move somebody's mix.
 
-    LEVELS AND LINK STATE ARE PART OF THE SCHEME. Saving only the include/exclude flags would restore a mix whose balance is wrong, which sounds like a
-    working recall until you listen. A level is recorded only where the cross-point is UNLINKED: a
+    LEVELS AND LINK STATE ARE PART OF THE SCHEME. Saving only the include/exclude flags would
+    restore a mix whose balance is wrong, which sounds like a working recall until you listen. A level is recorded only where the cross-point is UNLINKED: a
     linked one has no level of its own, it follows the channel fader, and writing a number there
     would quietly unlink it.
 
@@ -362,9 +362,9 @@ def scope_text(scheme: dict, device=None) -> str:
 
     WHY THE LABEL AND NOT THE DESCRIPTION: the description hangs off the Apply button, so it is
     heard after the choice is made rather than while it is being made, and whether a preset leaves
-    every other output alone is exactly what the choice turns on. A suffix on the option is read as you arrow
-    past it, and it cannot be put on the dropdown as a description without a screen reader
-    re-announcing it over the option name (see index.html, the deliberate omission there).
+    every other output alone is exactly what the choice turns on. A suffix on the option is read as
+    you arrow past it, and it cannot be put on the dropdown as a description without a screen
+    reader re-announcing it over the option name (see index.html, the deliberate omission there).
 
     DERIVED, NEVER STORED. A preset saved on a Pro 2 and read on a Duo names outputs that desk does
     not have, and a stored phrase would then be a lie."""

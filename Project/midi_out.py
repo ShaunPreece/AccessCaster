@@ -19,8 +19,8 @@ is the TOOL shape, which puts the setting back afterwards.
 THE PORT IS OPENED ONCE AND KEPT. `midiOutOpen` is not free and a pad shortcut has to be instant, so
 this module owns one process-wide handle behind a lock, opens it lazily on the first send and
 REOPENS it once if a send fails - which is what a replug looks like from here. Nothing about it is
-exclusive (two `midiOutOpen` calls on this port both succeed, measured), so
-holding it open cannot lock another program out.
+exclusive (two `midiOutOpen` calls on this port both succeed, measured), so holding it open cannot
+lock another program out.
 
 BANK SELECT IS NOT A MIDI PROBLEM. MIDI reaches only the bank the desk is on, and the bank is an
 ordinary HID write - `soundpad.select_bank`. Do not go looking for the CC 0 / CC 1 bank select in

@@ -15,8 +15,8 @@
 # -Voice and -Device take the same names as say_worker.ps1 and are matched the same way (exact
 # first, then case-insensitive substring). They are here because this script is the FALLBACK the
 # server drops to when the persistent worker cannot start: without them, a fallback phrase would
-# come out in the wrong voice and, worse, through the system default output, which on this machine
-# is the RODECaster itself - so announcements would leak into the mix and the recording.
+# come out in the wrong voice and, worse, through the system default output, which is often the
+# RODECaster itself - so announcements would leak into the mix and the recording.
 param(
   [Parameter(Mandatory=$true)][string]$Text,
   # A WAV to play INSTEAD of speaking $Text, for the announcer's mute cues. Same SpVoice, so it
