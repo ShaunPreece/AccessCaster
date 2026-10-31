@@ -883,11 +883,9 @@ PRO2 = DeviceModel(
     # "recorder": start, pause and stop, through requestRecordState on RECORDER 0x03, a selector the
     # desk pushes while its REC button is pressed.
     # "network_write": wifi on/off, joining a network and Bluetooth discoverability, on NETWORK
-    # 0x10. Proven by a phone pairing and playing audio, and by a network joined with the
-    # touchscreen untouched.
+    # 0x10.
     # "shows": the desk's own backup - export, import, software factory reset and delete, on
-    # SHOWCONTROL 0x28E. Two full reset-and-restore cycles from our own writes, the second leaving
-    # zero real differences against a snapshot taken just before.
+    # SHOWCONTROL 0x28E.
     # "callme": hosting and answering a CallMe call, on the SIPCALLING node found by walking the
     # tree. Heard both ways with a browser guest.
     # "storage_write": ejecting and erasing the card or drive, on the STORAGEVOLUME nodes.
@@ -905,8 +903,8 @@ PRO2 = DeviceModel(
 )
 
 # --- Duo ----------------------------------------------------------------------------------------
-# Every Pro II cap except storage_write, which waits for a Duo with a card or drive in it. Most were
-# proven by the TREE, then the ENGINE: the property resolves to a node of the right block on a live
+# Every Pro II cap except storage_write, which waits for a Duo with a card or drive in it. A cap
+# needs the TREE, then the ENGINE: the property resolves to a node of the right block on a live
 # Duo, then a write makes the desk do something we did not send. AN ENGINE ANSWERING PROVES AN
 # ADDRESS IS LIVE, NEVER THAT A FEATURE EXISTS ON THIS DESK: the engine's model is device-agnostic
 # and answers for Mic 4, hardware a Duo does not have, exactly as for Mic 2 (PROJECT_GUIDE part 2).

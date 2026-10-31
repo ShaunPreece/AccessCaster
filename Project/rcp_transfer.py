@@ -546,11 +546,10 @@ def set_headphone_type(value: int, selector: int = SEL_HEADPHONE_TYPE) -> int:
 # blocks cover them all: 0x07 GUI (the display), 0x0D OUTPUT and 0x0F SYSTEM. RODECASTER_PROTOCOL.txt
 # section 11.1 has the detail.
 #
-# Every entry was written from our code and read back on hardware. The captured ones come from the
-# RODE app; the DERIVED ones come from the block rule (DevTools/selector_map.py) and were proven by
-# writing, reading back and restoring with the model unchanged in length and occurrence counts
-# (DevTools/probe_derived_write.py). Several have no control in the RODE app at all: "no app
-# control" means no capture route, not unwritable.
+# Every entry is a confirmed write. Most are the RODE app's own selectors; the DERIVED ones come from
+# the block rule (DevTools/selector_map.py), and DevTools/probe_derived_write.py confirms a new one:
+# write, read back and restore, with the model unchanged in length and occurrence counts. Several
+# have no control in the RODE app at all, which never makes a setting unwritable.
 SEL_GUI = 0x07                   # GUI block: the display and button brightness settings
 
 # prop -> (selector, kind). `kind` picks the record builder. Values are NOT range-checked here; the
@@ -570,7 +569,7 @@ UNIT_SETTING_SEL = {
     # SYSTEM block (0x0F) - captured
     "systemHapticSetting": (SEL_SYSTEM, "int"),             # 0 none / 1 on hold / 2 always
     "systemRecButtonSetting": (SEL_SYSTEM, "int"),          # 0 press to pause / 1 press to stop
-    # ---- DERIVED from the block rule, each proven by write, read-back and restore.
+    # ---- DERIVED from the block rule.
     # OUTPUT block (0x0D)
     "outputMonMute": (SEL_OUTPUT_GLOBAL, "bool"),           # mute the monitor SPEAKERS
     "outputBTMute": (SEL_OUTPUT_GLOBAL, "bool"),            # mute what a paired phone hears

@@ -6108,9 +6108,8 @@ def action_set_fader(fader_index: int, code: int) -> dict:
                                         spec.code_order_for(channels.usb_expanded()))
             # THE CHAIN FOLLOWS THE CHANNEL. Processing and effects are per fader STRIP, so moving a
             # channel without moving its chain leaves it being processed by whatever voicing sits on
-            # the strip it lands on. The RODE app does exactly this on its own drag (proven by
-            # diffing it). Snapshot BEFORE the layout write, off the dump we already
-            # have, so a failure can be reported precisely.
+            # the strip it lands on. The RODE app does the same on its own drag. Snapshot BEFORE the
+            # layout write, off the dump we already have, so a failure can be reported precisely.
             chains_before = channels.read_chains(blob) if _chain_follow_on() else None
             # THE LEVEL FOLLOWS THE CHANNEL TOO, and for the same reason the chain does. Snapshot
             # before the write, off the dump we already have; see _follow_levels for the silence
@@ -6838,7 +6837,7 @@ def channel_level_check_status() -> dict:
 def action_set_output_mute(which: str, on: bool) -> dict:
     """Mute or unmute a whole OUTPUT: the monitor speakers, or the Bluetooth send.
 
-    Both selectors come from the block rule and are proven by a read-back-verified write. The
+    Both selectors are derived from the block rule and confirmed. The
     accessibility case is the channel mute's, only stronger: killing the speakers is what you reach
     for when somebody walks in, and the only other way to do it is a control on the unit you have to
     find by touch.
