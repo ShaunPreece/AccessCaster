@@ -26,6 +26,53 @@ async function pick(name) {
   return sel.value;
 }
 
+/* No transmitter connected: it says so, a press is refused aloud, and nothing is sent. */
+async function checkUnavailable() {
+  const w = wireless("Mic1");
+  check("[none paired] it is marked unavailable", !!w && w.getAttribute("aria-disabled") === "true");
+  check("[none paired] and says why", /no wireless mics detected/i.test(describedText(w)),
+    describedText(w));
+  await probeClear();
+  const was = w.checked;
+  w.click();
+  await sleep(900);
+  check("[none paired] pressing it sends nothing", pagePosts(await probeLog()).length === 0,
+    pagePosts(await probeLog()).map((p) => p.path).join(","));
+  check("[none paired] and the switch does not move", w.checked === was);
+}
+
+/* A transmitter connected: it works, and cannot be mistaken for the channel mute. */
+async function checkAvailable() {
+  const w = wireless("Mic1");
+  check("[paired] it is available", !!w && w.getAttribute("aria-disabled") !== "true");
+
+  const chanMute = el("mute-Mic1");
+  check("[paired] the channel mute is still there beside it", !!chanMute);
+  const wSaid = accessibleName(w) + " " + describedText(w);
+  const mSaid = accessibleName(chanMute) + " " + describedText(chanMute);
+  check("[paired] the two mutes do not read out the same", wSaid !== mSaid, wSaid + " || " + mSaid);
+  check("[paired] the wireless one names the wireless mic", /wireless/i.test(wSaid), wSaid);
+  check("[paired] and its description says it is not the channel mute",
+    /not the channel/i.test(wSaid), wSaid);
+  check("[paired] the channel mute still says it silences everything",
+    /everywhere|every mix/i.test(mSaid), mSaid);
+
+  // It writes to its OWN endpoint, with the channel it is on.
+  await probeClear();
+  w.click();
+  await sleep(900);
+  const posts = pagePosts(await probeLog());
+  const paths = posts.map((p) => p.path);
+  check("[paired] pressing it posts to the wireless-mute endpoint",
+    paths.indexOf("/api/channels/wireless-mute") >= 0, paths.join(","));
+  check("[paired] and NOT to the channel mute", paths.indexOf("/api/channels/mute") < 0,
+    paths.join(","));
+  const body = (posts.find((p) => p.path === "/api/channels/wireless-mute") || {}).body;
+  const sent = body ? (typeof body === "string" ? JSON.parse(body) : body) : {};
+  check("[paired] it names the channel it is on", sent.name === "Mic1", JSON.stringify(sent));
+  check("[paired] and sends a boolean", typeof sent.on === "boolean", JSON.stringify(sent));
+}
+
 async function run() {
   await waitFor(() => !el("sec-channels").hidden && el("channel-select"), 20000);
   await sleep(1200);
@@ -34,37 +81,26 @@ async function run() {
 
   // ---- It is there on a mic, and it is a real switch --------------------------------------
   check("selected Mic 1", (await pick("Mic1")) === "Mic1");
-  const w = wireless("Mic1");
-  check("a mic offers the wireless mic mute", !!w);
-  check("it is a switch, not a button", !!w && w.type === "checkbox", w && w.type);
-  check("it is reachable and not natively disabled", !!w && !w.disabled
-    && w.getAttribute("aria-disabled") !== "true");
+  check("a mic offers the wireless mic mute", !!wireless("Mic1"));
+  check("it is a switch, not a button", !!wireless("Mic1") && wireless("Mic1").type === "checkbox",
+    wireless("Mic1") && wireless("Mic1").type);
+  check("it stays in the tab order: never natively disabled", !!wireless("Mic1")
+    && !wireless("Mic1").disabled && !wireless("Mic1").hasAttribute("disabled"));
 
-  // ---- And it cannot be mistaken for the channel mute -------------------------------------
-  const chanMute = el("mute-Mic1");
-  check("the channel mute is still there beside it", !!chanMute);
-  const wSaid = accessibleName(w) + " " + describedText(w);
-  const mSaid = accessibleName(chanMute) + " " + describedText(chanMute);
-  check("the two mutes do not read out the same", wSaid !== mSaid, wSaid + " || " + mSaid);
-  check("the wireless one names the wireless mic", /wireless/i.test(wSaid), wSaid);
-  check("and its description says it is not the channel mute",
-    /wireless/i.test(wSaid) && /not the channel/i.test(wSaid), wSaid);
-  check("the channel mute still says it silences everything",
-    /everywhere|every mix/i.test(mSaid), mSaid);
-
-  // ---- It writes to its OWN endpoint, with the channel it is on ---------------------------
-  await probeClear();
-  w.click();
-  await sleep(900);
-  const posts = pagePosts(await probeLog());
-  const paths = posts.map((p) => p.path);
-  check("pressing it posts to the wireless-mute endpoint",
-    paths.indexOf("/api/channels/wireless-mute") >= 0, paths.join(","));
-  check("and NOT to the channel mute", paths.indexOf("/api/channels/mute") < 0, paths.join(","));
-  const body = (posts.find((p) => p.path === "/api/channels/wireless-mute") || {}).body;
-  const sent = body ? (typeof body === "string" ? JSON.parse(body) : body) : {};
-  check("it names the channel it is on", sent.name === "Mic1", JSON.stringify(sent));
-  check("and sends a boolean", typeof sent.on === "boolean", JSON.stringify(sent));
+  // ---- Both states, whatever this desk has paired -----------------------------------------
+  // The switch is unavailable while the unit reports transmitter slots and none connected. The
+  // desk's own state is checked first, then channelsData is flipped and Mic 1 rebuilt, so one run
+  // covers both whether or not a transmitter is paired. No POST is forwarded either way.
+  const wm = channelsData && channelsData.wireless_mics;
+  const deskSaysNone = !!(wm && wm.present && !wm.any_connected);
+  for (const none of [deskSaysNone, !deskSaysNone]) {
+    channelsData.wireless_mics = Object.assign({}, wm || {}, { present: true, any_connected: !none });
+    await pick(names.find((n) => n !== "Mic1"));
+    await pick("Mic1");
+    if (none) await checkUnavailable();
+    else await checkAvailable();
+  }
+  channelsData.wireless_mics = wm;
 
   // ---- It is absent everywhere a transmitter cannot be paired -----------------------------
   // DERIVED, not a written-out list. A Pro II has Mic 3 and Mic 4, which DO get the switch, so

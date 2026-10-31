@@ -57,7 +57,7 @@ async function run() {
   check("and an explanation attached with aria-describedby", !!described,
     picker && picker.getAttribute("aria-describedby"));
   check("which warns that an unavailable device is left alone",
-    /not got|left alone/i.test(flatText(described)), flatText(described));
+    /lacks is skipped/i.test(flatText(described)), flatText(described));
 
   // ---- The result line is READ, and announce() is the one voice ---------------------------
   // A live region here as well as announce() would speak every result twice (index.html says why).

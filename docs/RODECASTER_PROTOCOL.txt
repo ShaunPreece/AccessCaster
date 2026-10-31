@@ -663,6 +663,13 @@ SOURCE INDICES (channelInputSource source codes, NOT fader display order):
                         01 08 05 30 2e 38 39 7c 30 00.
                         Only writable when the cross-point is unlinked. On read,
                         level == anchor means LINKED (the cell follows the fader).
+                        A source the desk does not fill reads "-1|0", a placeholder.
+                        A stereo-pair code's 13 cells (sources 4-6) stay "-1|0"
+                        until the pair is first linked; the desk then fills them
+                        and keeps them after the unlink. Writing "-1|0" back does
+                        not restore a placeholder: the desk stores the level
+                        relative to the anchor ("-0.149606|0.850394"). Measured on
+                        the Pro II, fw 1.7.6, 31st October 2026.
 
 TO EXCLUDE a source from an output:  mixUnlinkRequest(sel), then
                                      mixDisabled(sel) = 0x02.

@@ -106,7 +106,7 @@ def diff(a, b, ignore=()):
 
 
 def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore=(),
-          restore_extra=None, after_write=None):
+          restore_extra=None, after_write=None, one_way=()):
     """Write, diff the whole tree, restore, diff again.
 
     `expect_at` is the (path, block, property) we expect to move, or None to just report.
@@ -117,6 +117,8 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
     along with: writing the value back restores the value, not the drag. It is given the baseline
     snapshot and is expected to put the rest back by name.
     `after_write(after)` ASSERTS THE ENGINE'S OWN RESPONSE, given the settled post-write snapshot.
+    `one_way` is a set of snapshot KEYS the desk changes for good and no write can put back. They
+    are left out of the restore check and listed as a note, never hidden.
 
     THAT LAST HOOK IS THE STRONG CHECK. Everything else here asks "did the value land at its own
     address", which a dead address answers just as happily as a live one: a write to a node the
@@ -144,6 +146,13 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
         return
     b2, back = settled()
     a2, r2, c2 = diff(before, back, ignore)
+    kept = [k for k in c2 if k in one_way]
+    if kept:
+        c2 = [k for k in c2 if k not in one_way]
+        NOTES.append(f"{label}: {len(kept)} property(ies) changed for good, as expected")
+        print(f"  note {len(kept)} property(ies) the desk changes for good, as expected:")
+        for k in kept:
+            print(f"         {_fmt(k)}: {before[k]!r} -> {back[k]!r}")
     if not (a2 or r2 or c2):
         print(f"  ok   restored, tree identical ({len(b2)} bytes)")
     elif not c2 and not r2:
@@ -208,7 +217,21 @@ print(f"model: {len(blob0)} bytes")
 
 mics = [e for e in dev.ui_channels if e.get("kind") == "mic"]
 lines = [e for e in dev.ui_channels if e.get("kind") == "line"]
-mic = mics[-1]                      # the highest-numbered mic
+
+
+def on_a_strip(entry) -> bool:
+    try:
+        c._strip_index(entry)
+        return True
+    except RuntimeError:
+        return False
+
+
+# The highest-numbered mic on a fader: processing is addressed by strip, so a mic on no fader has
+# none. Mic 1 is never written by a test.
+mic = next((e for e in reversed(mics) if on_a_strip(e) and c.mic_channel_number(e) != 1), None)
+if mic is None:
+    raise SystemExit("No mic other than Mic 1 is on a fader, so there is nothing safe to test.")
 line = lines[0]
 mic_n = c.mic_channel_number(mic)
 mic_path = tuple(dev.input_path(mic))
@@ -365,8 +388,12 @@ if "fader_write" in dev.caps:
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- stereo_link -------------------------------------------------------------------------------
-if "stereo_link" in dev.caps and dev.fader.stereo_pairs:
-    code, lower, upper, label = dev.fader.stereo_pairs[0]
+# Never a pair holding Mic 1 (source 0), which a test never writes. The Duo's only pair is Mic 1 + 2.
+pair = next((p for p in dev.fader.stereo_pairs if 0 not in p[1:3]), None)
+if "stereo_link" in dev.caps and pair is None:
+    print("\n=== stereo_link: skipped, every pair on this desk holds Mic 1 ===")
+elif "stereo_link" in dev.caps:
+    code, lower, upper, label = pair
     vec = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
     print(f"\n=== stereo_link: {label} ===\n  layout now: {vec}")
     if code in vec:
@@ -398,8 +425,30 @@ if "stereo_link" in dev.caps and dev.fader.stereo_pairs:
         # layout back byte-clean, which is what a user's undo depends on. It does NOT prove the two
         # mics are actually summed: the engine's model is device-agnostic (a Duo will just as
         # happily seat source 3, which is a Mic 4 it does not have), so only an ear can close that.
+        # A mic re-seated on its fader comes back unmuted, so its mute is put back by strip.
+        def restore_mutes(before):
+            for strip in (seat, up_at):
+                if strip is None:
+                    continue
+                sel = rcp_transfer.SEL_CHANNEL + strip
+                was = before.get(((sel,), "CHANNEL", c.MUTE_PROP))
+                if was is not None:
+                    rcp_transfer.send_record(
+                        rcp_transfer.build_global_prop_bool(c.MUTE_PROP, bool(was), sel))
+                    time.sleep(0.25)
+
+        # The pair code's own cross-points are '-1|0' placeholders until it is first linked; the
+        # desk then fills them and keeps them. Writing '-1|0' back does not restore a placeholder:
+        # the desk reads the level relative to the anchor and stores -0.149606.
+        _b, snap_now = snapshot()
+        pair_cells = {rcp_transfer.cross_point_selector(o, code)
+                      for o in range(rcp_transfer.CROSS_POINT_SOURCE_STRIDE)}
+        placeholders = {k for k, v in snap_now.items()
+                        if k[1] == "MIX" and k[2] == "mixLevelWithAnchor"
+                        and len(k[0]) == 1 and k[0][0] in pair_cells and v == "-1|0"}
         probe(f"stereo_link: link and unlink {label}",
-              None, link, True, False, ignore={"sipSlotCallDisconnect"})
+              None, link, True, False, ignore={"sipSlotCallDisconnect"},
+              restore_extra=restore_mutes, one_way=placeholders)
         after = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
@@ -421,23 +470,27 @@ if "level_write" in dev.caps:
         cur = _snap.get((node, "FADER", "faderLevel"))
         target = 40 if cur != 40 else 60
         # THE ENGINE IS THE WITNESS, not the read-back. A fader's level IS its source's cross-point
-        # level, so the desk recomputes all 13 cells of that source's routing row by itself, to
+        # anchor, so the desk recomputes every cell of that source's routing row by itself, to
         # value/127 exactly. That is the difference between "the byte landed" and "the audio moved".
         want = f"{target / rcp_transfer.FADER_LEVEL_MAX:.6f}"
+        # Every cell of the row, not only the outputs the desk exposes: the anchor moves on all 13.
         row = [rcp_transfer.cross_point_selector(out, source)
-               for out in range(dev.matrix.output_count)]
+               for out in range(rcp_transfer.CROSS_POINT_SOURCE_STRIDE)]
 
+        # The ANCHOR (after the '|') is the fader position, so it moves on every cell. The level
+        # before it follows only on a linked cell; an unlinked one keeps its manual level.
         def check_row(after):
             bad = [p for p in row
-                   if not str(after.get(((p,), "MIX", "mixLevelWithAnchor"), "")).startswith(want)]
-            check_true(f"the ENGINE moved all {len(row)} of source {source}'s cross-points to "
-                       f"{want} ({target}/127) on its own", not bad,
+                   if not str(after.get(((p,), "MIX", "mixLevelWithAnchor"), "")).partition("|")[2]
+                   .startswith(want)]
+            check_true(f"the ENGINE moved the anchor of all {len(row)} of source {source}'s "
+                       f"cross-points to {want} ({target}/127) on its own", not bad,
                        f"it moved only {len(row) - len(bad)}")
 
         probe(f"level_write: virtual fader {idx} (source {source}) at [0,0x{sel:02x}]",
               (node, "FADER", "faderLevel"),
               lambda v: rcp_transfer.set_fader_level(sel, v), target, cur,
-              expect_extra=dev.matrix.output_count, after_write=check_row)
+              expect_extra=len(row), after_write=check_row)
 
     mon = [v for v in rr.values(rr.read_model_stable(fresh=True), "outputMonLevel")
            if isinstance(v, float)]

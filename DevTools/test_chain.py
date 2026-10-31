@@ -267,6 +267,9 @@ check("the preset marker is written LAST", order[-1], c.CHAIN_PRESET_MARKER_PROP
 last_module = max(i for i, n in enumerate(order) if n in c.PROCESSING_MODULE_BOOLS)
 first_float = min(i for i, n in enumerate(order) if n in c.PRESET_FLOAT_PROPS)
 check("modules are written BEFORE the parameters", last_module < first_float, True)
+last_knob = max(i for i, n in enumerate(order) if n in c.VOXLAB_KNOB_PROPS)
+first_derived = min(i for i, n in enumerate(order) if n in c.DERIVED_FLOAT_PROPS)
+check("the VoxLab knobs are written BEFORE the values they derive", last_knob < first_derived, True)
 
 print("\nAN OLDER SAVED PRESET (no module keys) STILL APPLIES")
 legacy = {k: v for k, v in factory["Neutral"].items() if k not in c.PROCESSING_MODULE_BOOLS}

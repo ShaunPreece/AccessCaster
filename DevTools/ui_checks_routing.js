@@ -324,7 +324,9 @@ async function run() {
   await waitForApi(["/api/routing/live"]);   // the tab it ENDED on
   await quiet();
   log = await probeLog();
-  const apiCalls = (await apiLog()).map((e) => e.method + " " + e.path);
+  // The driver line's own timer poll reads Windows, not the desk, and is no tab's read.
+  const apiCalls = (await apiLog()).filter((e) => e.path.indexOf("/api/routing/driver") !== 0)
+    .map((e) => e.method + " " + e.path);
   check("arrowing across the strip fires ONE tab read, not one per tab",
     apiCalls.length === 1 && apiCalls[0].indexOf("/api/routing/live") >= 0,
     apiCalls.join(" "));

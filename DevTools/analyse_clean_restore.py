@@ -15,6 +15,7 @@ Differences that are BY DESIGN are counted and named, never silently dropped:
     deliberately excludes them and the reset clears them.
   * `PAD*` - only when the profile was saved without pads, in which case the reset's factory pads
     stay. Pass --pads-restored when they were included.
+  * the SMART pads bus strip's chain, which never reaches the audio and a profile does not carry.
   * the self-clearing mix link/unlink request flags, and the shows list, which an export renumbers.
 
     python DevTools/analyse_clean_restore.py                       # the dumps in DevTools/captures
@@ -29,6 +30,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import channels
+import devices
 
 CAP = Path(__file__).resolve().parent / "captures"
 
@@ -37,11 +40,21 @@ NOISY = ("Meter", "meter", "Progress", "CurrentPosition", "elapsed", "Elapsed", 
          "systemDate", "recordTime", "recordElapsed", "Rms", "Peak", "batteryLevel", "freeSpace",
          "FreeSpace", "remaining", "Remaining", "uuid", "Uuid", "UUID", "showLastModification",
          "showName", "showUID", "snapshot", "Snapshot", "usbConnected", "screenTouched",
-         "storageVolumeState", "mixLinkRequest", "mixUnlinkRequest")
+         "storageVolumeState", "mixLinkRequest", "mixUnlinkRequest",
+         # The desk sets the encoder colour from its own state, and a call-slot disconnect is a
+         # write-only trigger it leaves set.
+         "encoderColour", "sipSlotCallDisconnect")
 
 # Differences a correct clean restore is EXPECTED to produce. Named, counted, and reported as a
 # total rather than hidden: each one is a decision written down elsewhere.
 BY_DESIGN = ("channelOutputMute", "mixMute", "channelCueEnable", "outputMonMute", "outputBTMute")
+
+# The SMART pads bus publishes a full chain that never reaches the audio, so a profile does not
+# carry it (channels.read_channels) and whatever the reset leaves there stays.
+_BUS_CODES = {e["source_code"] for d in devices.DEVICES.values() for e in d.ui_channels
+              if e.get("kind") == "bus"}
+_CHAIN_PROPS = set(channels.CHAIN_BOOL_PROPS + channels.CHAIN_FLOAT_PROPS
+                   + (channels.CHAIN_PRESET_MARKER_PROP,))
 
 
 def noisy(prop: str) -> bool:
@@ -62,6 +75,13 @@ def _is_pad(key) -> bool:
     depth tells them apart without hardcoding a node index."""
     path, block, _prop = key
     return block == "PAD" or (block == "EFFECTS_PARAMETERS" and len(path) == 2)
+
+
+def _bus_chain(key, before: dict) -> bool:
+    """True for a chain property on the strip the SMART pads bus is on."""
+    path, block, prop = key
+    return (block == "CHANNEL" and prop in _CHAIN_PROPS
+            and before.get((path, "CHANNEL", "channelInputSource")) in _BUS_CODES)
 
 
 def _cross_point_is_not_ours(key, before: dict) -> bool:
@@ -99,7 +119,7 @@ def compare(before: dict, after: dict, factory: dict | None = None,
             continue
         fac = (factory or {}).get(key, "<no factory dump>")
         row = (key, was, now, fac)
-        if prop in BY_DESIGN or _cross_point_is_not_ours(key, before):
+        if prop in BY_DESIGN or _cross_point_is_not_ours(key, before) or _bus_chain(key, before):
             res["by_design"].append(row)
         elif _is_pad(key) and not pads_restored:
             res["pads"].append(row)
@@ -122,7 +142,7 @@ def show(res: dict, factory: bool) -> int:
         tail = f" (factory {fac!r})" if factory and fac is not None else ""
         return f"  {block}{list(path)}.{prop}: {was!r} -> {now!r}{tail}"
 
-    print(f"BY DESIGN (mutes and solo, never restored): {len(res['by_design'])}")
+    print(f"BY DESIGN (mutes, solo and the pads bus chain, never restored): {len(res['by_design'])}")
     print(f"PADS (the profile carried none, so the reset's factory pads stayed): {len(res['pads'])}")
     if res["gone"]:
         print(f"PRESENT BEFORE, ABSENT AFTER: {len(res['gone'])}")

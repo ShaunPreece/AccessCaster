@@ -406,12 +406,13 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     ORDER MATTERS, hardware-established (see CHAIN_ADVANCED_PROP): the processing MODE first, so
     the strip is in the right mode before its values
     land and cannot re-derive them from the VoxLab knobs; then the modules, so a parameter never
-    lands on a module that is about to be switched; then the floats; then the preset-name marker
-    LAST, because the device blanks it to -1 the moment any parameter is written.
+    lands on a module that is about to be switched; then the floats, knobs first and derived values
+    last (see VOXLAB_KNOB_PROPS); then the preset-name marker LAST, because the device blanks it to
+    -1 the moment any parameter is written.
     Returns total bytes written."""
     _require_processing()
     sel = proc_selector(channel)
-    mode, modules, floats, marker = [], [], [], []
+    mode, modules, marker, float_vals = [], [], [], {}
     for name, val in props.items():
         if name == CHAIN_PRESET_MARKER_PROP:
             marker.append(_t.build_global_prop_int(name, sel, int(val)))
@@ -420,10 +421,11 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
         elif name in PROCESSING_MODULE_BOOLS:
             modules.append(_t.build_global_prop_bool(name, bool(val), sel))
         elif name in PRESET_FLOAT_PROPS:
-            v = max(0.0, min(1.0, float(val)))
-            floats.append(_t.build_global_prop_float(name, sel, v))
+            float_vals[name] = max(0.0, min(1.0, float(val)))
         else:
             raise ValueError(f"unsupported preset property: {name}")
+    floats = [_t.build_global_prop_float(name, sel, float_vals[name])
+              for name in _float_write_order(list(float_vals))]
     return _t.send_records_paced(mode + modules + floats + marker, delay=delay)
 
 

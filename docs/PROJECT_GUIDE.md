@@ -959,7 +959,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 - **Chain write order is load-bearing: mode, VoxLab knobs, neutral params, derived family, preset
   marker LAST.** In simple mode the desk re-derives the chain from the knobs; the first live attempt
-  lost 4 values to exactly that.
+  lost 4 values to exactly that. `channels.apply_processing_preset` orders its floats with
+  `_float_write_order` itself, so every caller gets this order whatever order its dict is in (a
+  preset's keys put the knobs after the derived family).
 - **Derivation fires on the MACRO WRITE, not on entering simple mode.** A strip can sit in simple
   mode holding a chain its own macros would not produce.
 - **The preset marker is a NAME only.** Any parameter write blanks it to -1, and there is no HTTP
