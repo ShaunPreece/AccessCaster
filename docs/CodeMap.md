@@ -308,7 +308,7 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (158 files; the ones worth knowing)
+## DevTools/ (157 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (proxies GETs to the live server, stubs POSTs) and its
 `HARNESS`, which gives every suite its helpers so none keeps a copy: `check`, `checkEqual` (actual,
