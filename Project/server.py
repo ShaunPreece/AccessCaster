@@ -254,10 +254,10 @@ _PROCESSING_SPOKEN = {c["prop"]: (c["label"] if g["group"] in ("Pan", "Tone shap
                       for g in PROCESSING_CONTROLS for c in g["controls"]}
 _PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
 
-# Current known state of the mixer. We CAN read these live from the device now
-# (rcp_read), and every value we set is sent to the device, so this dict holds
-# the unit's real state. "_read_at" is when we last did a full live read; None
-# until the first read/set, so the UI can say "unknown" honestly before then.
+# Current known state of the mixer. These are read live from the device (rcp_read),
+# and every value we set is sent to the device, so this dict holds the unit's real
+# state. "read_at" is when we last did a full live read; None until the first
+# read/set, so the UI can say "unknown" honestly before then.
 _session_state_lock = threading.Lock()
 _session_state = {
     "midi": None,                                  # bool or None (unknown)
@@ -1587,9 +1587,9 @@ def callme_status_sentence() -> str:
 # ----------------------------------------------------------------------------
 # UNIT SETTINGS - the desk's own display, buttons and listen behaviour.
 #
-# These ten are readable from any dump; what makes them WRITABLE is the write SELECTOR, captured and
-# read-back verified on hardware (see rcp_transfer.UNIT_SETTING_SEL for the provenance of each one,
-# including the single derived-selector entry). Without them the whole group is reachable ONLY from
+# All of these are readable from any dump; what makes them WRITABLE is the write SELECTOR, read-back
+# verified on hardware (rcp_transfer.UNIT_SETTING_SEL says which were captured from the RODE app
+# and which derived from the block rule). Without them the whole group is reachable ONLY from
 # the touchscreen, which is exactly the class of setting this project exists to replace.
 #
 # ONE SPEC DRIVES FOUR THINGS: the read, the write's value validation, the control the browser
@@ -1693,7 +1693,7 @@ def _unit_setting_values(blob: bytes) -> dict:
     """{prop: value} for every unit setting, read from an ALREADY-READ dump.
 
     Reads through rcp_read.snapshot_properties, which gets EVERY property in one pass: this wants
-    forty-odd names at once, so one walk beats forty lookups.
+    every UNIT_SETTINGS name at once, so one walk beats a lookup per name.
 
     Bools are normalised to 0/1 so a "choice" control can compare them numerically; a property the
     dump does not carry comes back None and the UI says it could not be read rather than showing a
@@ -1713,8 +1713,8 @@ def read_unit_settings() -> dict:
     """The Device page's "Unit settings" group: one dump, every setting, and whether this desk can
     write them.
 
-    `writable` is the device's "unit_settings" cap. All ten selectors were captured on the Pro II
-    and none has ever been seen on a Duo, so the Duo reads them and refuses to write - the same
+    `writable` is the device's "unit_settings" cap. Every selector was proven on the Pro II and
+    none has ever been seen on a Duo, so the Duo reads them and refuses to write - the same
     capture-wider-than-write rule the fader levels use, and the refusal that keeps a wrong selector
     (the stray-append hazard) off an unproven desk."""
     dev = devices.get_active_device()
@@ -2687,8 +2687,8 @@ _ann_sync_waiters = {}
 _ann_sync_lock = threading.Lock()
 _ann_sync_next = 0
 # Which Windows output device announcements go to (a name from _ann_audio_outputs(), matched by the
-# worker); "" = the system default. This desk's default output IS the RODECaster, so speech arrives
-# on USB 1 and is inaudible while another channel is SOLOed (the cue bus replaces the headphone feed)
+# worker); "" = the system default. When the default output is the RODECaster, speech arrives on
+# USB 1 and is inaudible while another channel is SOLOed (the cue bus replaces the headphone feed)
 # or while USB 1 is muted. Pointing announcements at another device makes them survive both.
 # IT IS OUR SPEECH OBJECT'S OWN OUTPUT (SAPI SpVoice.AudioOutput), NOT a Windows setting: it does not
 # move the system default device, and it does not touch the screen reader, which has its own.
@@ -2860,9 +2860,10 @@ def _ann_tone(name: str) -> bool:
 
 
 def _ann_say_oneshot(text: str) -> None:
-    """The original one-process-per-phrase path. Fallback only (see _ann_say). Carries the same
-    volume, VOICE and OUTPUT DEVICE as the worker, so degrading to this path does not suddenly get
-    loud again, change voice, or (worst of the three) start speaking into the desk."""
+    """One process per phrase, used only when the worker cannot take it (see _ann_speak_pump).
+    Carries the same volume, VOICE and OUTPUT DEVICE as the worker, so degrading to this path does
+    not suddenly get loud again, change voice, or (worst of the three) start speaking into the
+    desk."""
     sync_id = None
     if text.startswith(_ANN_SYNC_PREFIX):
         sync_id, _, text = text[len(_ANN_SYNC_PREFIX):].partition(" ")
@@ -3115,7 +3116,7 @@ _ann_mixer_quiet_until = 0.0
 #     both measurements.
 _ANN_ENC_HOLD_S = 0.9
 # How long to wait for the STATE push after a press edge before falling back to the generic word.
-# Measured gap on this desk is ~70 ms; this is deliberately generous. The fallback keeps the
+# The measured gap is about 70 ms; this is deliberately generous. The fallback keeps the
 # announcer device-agnostic: a desk that pushes no state still says "Mute" / "Solo".
 _ANN_PENDING_S = 0.5
 
@@ -4269,8 +4270,8 @@ def action_set_announce_voice(voice: str) -> dict:
 def action_set_announce_output(output: str) -> dict:
     """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it sets the audio
     output on our own SAPI voice, so it does not move the system default device, and it does not
-    touch the screen reader or any other program. It exists because this desk's default output is
-    the RODECaster itself, so announcements vanish the moment another channel is soloed."""
+    touch the screen reader or any other program. It exists because the default output is often
+    the RODECaster itself, and then announcements vanish the moment another channel is soloed."""
     return _ann_choose("output", output)
 
 
@@ -5593,7 +5594,7 @@ def _chain_follow_on() -> bool:
     Gated behind its own cap rather than riding on "fader_write", because the Duo has swap cases the
     Pro II does not: its default layout contains an EMPTY strip (-1) and a DUPLICATED source (USB 2
     twice), and index() on a duplicate finds only the first. Until the same read-back test has been
-    run on a Duo, it keeps the old behaviour (layout moves, chain stays) rather than an untested one."""
+    run on a Duo, the layout moves there and the chain stays on its strip."""
     return "chain_follow" in devices.get_active_device().caps
 
 
@@ -7792,7 +7793,7 @@ def _bypass_sentence(where: str, on: bool) -> str:
 def action_set_processing_bypass(on: bool) -> dict:
     """The RECORDER's raw switch: what the unit writes to its card or drive.
 
-    Two actions rather than one with a `which`, because the two destinations now live on different
+    Two actions rather than one with a `which`, because the two destinations live on different
     pages and each endpoint belongs to the page that calls it. They share the sentence, not the
     route."""
     gate = _output_write_gate()
@@ -8205,7 +8206,7 @@ def action_delete_routing_scheme(name: str) -> dict:
 # and pass the server's validation constants in. See profiles.py for the format + field detail.
 # ----------------------------------------------------------------------------
 
-# Measured on this desk, and the ONLY honest basis for the waiting-time the page quotes. A pad
+# Measured, and the ONLY honest basis for the waiting-time the page quotes. A pad
 # restore is dominated by moving its audio over transfer mode, and it is per pad, so the total grows
 # with the pad count without limit - the page must work it out, not guess a phrase.
 PAD_RESTORE_SECONDS = 15
@@ -8598,8 +8599,8 @@ _BASELINE_ASKED_KEY = "baseline_asked"
 #
 # SO THE HONEST SHAPE IS THROUGHPUT, NOT A PER-PAD CONSTANT. This grid's biggest pad is 12 MB; a
 # ten-minute bed at 100 MB would take five seconds on its own. One second per pad is right for pads
-# this size and is rounded up; if somebody's grid is all long beds it will under-quote, which is the
-# safe direction now that the number is small.
+# this size and is rounded up; if somebody's grid is all long beds it will under-quote, which costs
+# little at a second a pad.
 PAD_BACKUP_SECONDS = 1
 
 
@@ -8696,8 +8697,9 @@ def action_baseline_add_pads() -> dict:
                               failed="Could not back up the pads")
 
 
-# Profile restore runs in a background thread (settings ~13s + an optional pad rebuild ~a minute),
-# so the page is not blocked and can poll progress for live-region announcements.
+# Profile restore runs in a background thread (the settings, then an optional pad rebuild at about
+# PAD_RESTORE_SECONDS a pad), so the page is not blocked and can poll progress for live-region
+# announcements.
 _restore_job = _BackgroundJob("A profile restore is already running.",
                               "Could not restore the profile")
 
@@ -9445,10 +9447,10 @@ def read_backups() -> dict:
     The user types one name, presses one button and never learns there are two mechanisms; this is
     the read that lets the page keep that promise. Three kinds come out of it, and the kind is the
     page's business, not the user's:
-      * a PAIRED backup - a profile on this computer plus the unit's own show on the drive. Restores
-        in seconds while the drive is in, and still restores from the profile when it is not.
+      * a PAIRED backup - a profile on this computer plus the unit's own show on the drive. It is
+        restored from the profile like any other (action_restore_backup); the show is a spare copy.
       * a PROFILE-ONLY backup - either there was no storage when it was taken, or the show has since
-        been deleted or the drive erased. Slower and misses what a profile cannot write.
+        been deleted or the drive erased.
       * a UNIT-MADE show with no profile beside it, which is one taken at the touchscreen or by
         RODE's own software. Named by the desk, not by anyone here, so it cannot be renamed.
 
