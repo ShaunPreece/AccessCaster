@@ -21,7 +21,7 @@ import model_tree
 import rcp_hid
 import rcp_read
 import rcp_transfer
-from wording import describe_duration
+from wording import describe_duration, spoken_date
 
 GUEST_LINK = "https://callme.rode.com/s?c="
 # CallMe 1's source code: what a fader carries when CallMe is on it.
@@ -70,9 +70,7 @@ def renewal_date(text: str, year: bool = True) -> str:
         d = datetime.datetime.strptime((text or "").strip(), "%B %d, %Y")
     except ValueError:
         return text or ""
-    n = d.day
-    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix} {d.strftime('%B')}" + (f" {d.year}" if year else "")
+    return spoken_date(d, year)
 
 
 def utf8(text) -> str:

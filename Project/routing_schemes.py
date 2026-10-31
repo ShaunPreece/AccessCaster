@@ -39,7 +39,7 @@ import time
 import devices
 import rcp_read
 import rcp_transfer
-from paths import data_path
+from paths import data_path, write_json
 from wording import count, plural
 
 # Saved schemes are user data, beside the profiles in %LOCALAPPDATA%\AccessCaster, so they survive
@@ -170,8 +170,7 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
 def save(safe: str, scheme: dict) -> dict:
     try:
         os.makedirs(SCHEMES_DIR, exist_ok=True)
-        with open(_path(safe), "w", encoding="utf-8") as f:
-            json.dump(scheme, f, indent=1)
+        write_json(_path(safe), scheme, indent=1)
     except OSError as exc:
         return {"ok": False, "message": f"Could not save the mix scheme: {exc}"}
     return {"ok": True, "name": safe}

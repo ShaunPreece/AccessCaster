@@ -34,7 +34,7 @@
 body {
   margin: 0;
   font-family: system-ui, "Segoe UI", Arial, sans-serif;
-  font-size: 18px;
+  font-size: 1.125rem;   /* 18px at the browser default; rem follows a larger default, px does not */
   line-height: 1.55;
   background: var(--bg);
   color: var(--text);
@@ -168,17 +168,14 @@ input[type="file"] { font-size: 1rem; color: var(--text); padding: 0.3rem 0; }
 .status-ok { color: var(--ok); font-weight: 700; }
 .status-err { color: var(--err); font-weight: 700; }
 
-/* ---- Card fieldsets: a mic channel, a keyboard shortcut, a custom voice-FX effect ---- */
-fieldset.channel, fieldset.hotkey, fieldset.fx-eff {
+/* ---- Card fieldsets: a custom voice-FX effect ---- */
+fieldset.fx-eff {
   border: 1px solid var(--border); border-radius: 8px;
   padding: 0.5rem 1rem 0.9rem; margin: 0 0 1rem; background: var(--surface);
 }
-fieldset.channel legend, fieldset.hotkey legend, fieldset.fx-eff legend {
+fieldset.fx-eff legend {
   font-weight: 700; padding: 0 0.4rem;
 }
-/* The four modifiers read as one row of choices rather than four separate settings. */
-.hotkey-mods { display: flex; gap: 1rem; flex-wrap: wrap; }
-.hotkey-mods .field { margin: 0.2rem 0; }
 
 /* ---- Keyboard shortcuts: the list view and its context menu ---- */
 .field-label { font-weight: 600; margin: 1rem 0 0.3rem; }
@@ -280,7 +277,6 @@ fieldset.channel legend, fieldset.hotkey legend, fieldset.fx-eff legend {
 .cat-panel > .cat-tab > .field:first-child { margin-top: 0; }
 
 /* ---- Misc ---- */
-details summary { cursor: pointer; padding: 0.3rem 0; }
 ul { padding-left: 1.25rem; }
 .help-list dt { font-weight: 700; margin-top: 0.7rem; }
 .help-list dd { margin: 0.2rem 0 0; }

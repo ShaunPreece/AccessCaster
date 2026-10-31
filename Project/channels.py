@@ -14,6 +14,7 @@ INPUTSOURCE node (DeviceModel.input_path), keyed by source code. The CHAIN lives
 the channel currently sits on, keyed by its position in the live fader vector.
 """
 
+import contextlib as _contextlib
 import json as _json        # the off-fader chain store only
 import time as _time        # strip-vector cache expiry only
 import paths as _paths      # writable data dir for the off-fader chain store
@@ -971,11 +972,9 @@ def _orphan_load() -> dict:
 
 
 def _orphan_save(store: dict) -> None:
-    try:
-        with open(_paths.data_path(_ORPHAN_FILE), "w", encoding="utf-8") as fh:
-            _json.dump(store, fh)
-    except Exception:
-        pass          # never fail a fader move because the parking file could not be written
+    # Never fail a fader move because the parking file could not be written.
+    with _contextlib.suppress(Exception):
+        _paths.write_json(_paths.data_path(_ORPHAN_FILE), store, indent=None)
 
 
 def park_chain(device_id: str, code: int, chain: dict) -> None:

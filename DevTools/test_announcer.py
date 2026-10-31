@@ -193,13 +193,13 @@ check("edge alone says nothing yet", said, [])
 SPOKEN.clear()
 server._ann_flush_pending(st)
 check("not flushed before the window", SPOKEN, [])
-st["at"] = time.time() - (server._ANN_PENDING_S + 0.05)
+st["at"] = time.monotonic() - (server._ANN_PENDING_S + 0.05)
 server._ann_flush_pending(st)
 check("flushed to the generic word after it", SPOKEN, ["Mute"])
 check("pending cleared after flush", st["pending"], None)
 
 said, st = run([press_packet("soloPressed", button=3)], cold_cache=False)
-st["at"] = time.time() - (server._ANN_PENDING_S + 0.05)
+st["at"] = time.monotonic() - (server._ANN_PENDING_S + 0.05)
 SPOKEN.clear()
 server._ann_flush_pending(st)
 check("solo fallback", SPOKEN, ["Solo"])
@@ -263,7 +263,7 @@ for out in range(1, 13):
 check("the same position on the other 12 cross-points adds nothing", SPOKEN, [])
 
 SPOKEN.clear()
-st["said_at"][("fader", 0)] = time.time() - (server._ANN_LEVEL_GAP_S + 0.01)
+st["said_at"][("fader", 0)] = time.monotonic() - (server._ANN_LEVEL_GAP_S + 0.01)
 server._ann_handle_report(xpoint_packet(0, 0, 0.42), st)
 # Mid-sweep the number leads and "percent" is dropped: the unit is obvious once you are moving, and
 # the spare syllables would only eat into the name before the next update interrupts it.
@@ -271,8 +271,8 @@ check("a continuing sweep leads with the bare number", SPOKEN, ["42, Mic 1"])
 
 # After a pause, the full phrase comes back, so you always know what you are holding.
 SPOKEN.clear()
-st["run_at"] = time.time() - (server._ANN_RUN_S + 0.1)
-st["said_at"][("fader", 0)] = time.time() - (server._ANN_LEVEL_GAP_S + 0.01)
+st["run_at"] = time.monotonic() - (server._ANN_RUN_S + 0.1)
+st["said_at"][("fader", 0)] = time.monotonic() - (server._ANN_LEVEL_GAP_S + 0.01)
 server._ann_handle_report(xpoint_packet(0, 0, 0.50), st)
 check("after a pause it names the channel again", SPOKEN, ["50 percent, Mic 1"])
 
@@ -280,7 +280,7 @@ SPOKEN.clear()
 for lvl in (0.44, 0.46, 0.48):
     server._ann_handle_report(xpoint_packet(0, 0, lvl), st)
 check("updates inside the spacing window are held", SPOKEN, [])
-st["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.01)
+st["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.01)
 server._ann_flush_pending(st)
 check("the closing value names the channel as confirmation", SPOKEN, ["48 percent, Mic 1"])
 SPOKEN.clear()
@@ -336,7 +336,7 @@ server._ann_handle_report(xpoint_packet(8, 0, 0.72), st)     # source 8 = Chat, 
 check("first click names it immediately, no waiting", SPOKEN, ["72 percent, Chat"])
 check("and nothing is left pending for the settle", st["levels"], {})
 SPOKEN.clear()
-st["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.05)
+st["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.05)
 server._ann_flush_pending(st)
 check("the settle does not repeat it", SPOKEN, [])
 
@@ -345,7 +345,7 @@ SPOKEN.clear()
 for lvl in (0.75, 0.80, 0.85):
     server._ann_handle_report(xpoint_packet(8, 0, lvl), st)
 check("still silent mid-sweep", SPOKEN, [])
-st["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.05)
+st["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.05)
 server._ann_flush_pending(st)
 check("closing position spoken once", SPOKEN, ["85 percent, Chat"])
 
@@ -373,7 +373,7 @@ st = fresh_st()
 st["enc_pos"] = 0
 SPOKEN.clear()
 server._ann_handle_report(enc_press, st)
-st["enc_down_at"] = time.time() - (server._ANN_ENC_HOLD_S + 0.05)
+st["enc_down_at"] = time.monotonic() - (server._ANN_ENC_HOLD_S + 0.05)
 server._ann_handle_report(enc_release, st)
 check("a long hold with no state pushed is still not a ring step", SPOKEN, [])
 check("ring unmoved by the backstop", st["enc_pos"], 0)
@@ -405,7 +405,7 @@ st2 = fresh_st()
 server._ann_handle_report(xpoint_packet(0, 0, 0.4), st2)
 check("a plain fader move is spoken at once too", SPOKEN, ["40 percent, Mic 1"])
 SPOKEN.clear()
-st2["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.05)
+st2["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.05)
 server._ann_flush_pending(st2)
 check("and the settle adds nothing to repeat", SPOKEN, [])
 
@@ -444,12 +444,12 @@ for _ in range(6):
 check("the rotation itself is not announced", SPOKEN, [])
 server._ann_flush_pending(st)
 check("and nothing is said inside the wait", SPOKEN, [])
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 server._ann_flush_pending(st)
 check("a turn that moved nothing says so", SPOKEN, ["Encoder not linked to anything"])
 
 SPOKEN.clear()
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 server._ann_flush_pending(st)
 check("not repeated within the quiet gap", SPOKEN, [])
 
@@ -460,7 +460,7 @@ check("not repeated within the quiet gap", SPOKEN, [])
 st = fresh_st()
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 st["chan_sel"] = 5                     # strip 5 = SMART pads
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 SPOKEN.clear()
 server._ann_flush_pending(st)
 check("it names the channel holding the encoder", SPOKEN[0].startswith("SMART pads selected"), True)
@@ -474,7 +474,7 @@ check("and names the way out, which is the channel button",
 st = fresh_st()
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 st["chan_sel"] = 0                     # strip 0 = Mic 1
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 SPOKEN.clear()
 server._ann_flush_pending(st)
 check("a selected MIC is described by its gain", SPOKEN[0].startswith("Mic 1 selected"), True)
@@ -523,7 +523,7 @@ st = fresh_st()
 SPOKEN.clear()
 server._ann_levels_on = False
 server._ann_handle_report(encsig_packet(1), st)
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 server._ann_flush_pending(st)
 check("silent when levels are off", SPOKEN, [])
 server._ann_levels_on = True
@@ -599,7 +599,7 @@ st["known"][("fader", 6)] = 0.0
 SPOKEN.clear()
 server._ann_handle_report(encsig_packet(-1), st)
 check("a downward turn at 0 is not treated as a dead turn", st.get("enc_turn_at"), None)
-st["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.05)
+st["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.05)
 server._ann_flush_pending(st)
 check("so nothing says 'not linked'", SPOKEN, [])
 
@@ -607,7 +607,7 @@ check("so nothing says 'not linked'", SPOKEN, [])
 SPOKEN.clear()
 server._ann_handle_report(encsig_packet(1), st)
 check("an upward turn at 0 is still watched", st.get("enc_turn_at") is not None, True)
-st["enc_turn_at"] = time.time() - (server._ANN_ENC_DEAD_S + 0.05)
+st["enc_turn_at"] = time.monotonic() - (server._ANN_ENC_DEAD_S + 0.05)
 server._ann_flush_pending(st)
 check("and reported when nothing moves", SPOKEN, ["Encoder not linked to anything"])
 
@@ -891,7 +891,7 @@ try:
     SPOKEN.clear()
     server._ann_handle_report(xpoint_packet(9, 0, 0.60), st)
     check("a level set from the app is not spoken back at us", SPOKEN, [])
-    st["levels_at"] = time.time() - (server._ANN_SETTLE_S + 0.01)
+    st["levels_at"] = time.monotonic() - (server._ANN_SETTLE_S + 0.01)
     server._ann_flush_pending(st)
     check("and the settle flush does not say it a moment later either", SPOKEN, [])
 
@@ -900,8 +900,8 @@ try:
     check("a DIFFERENT channel moving on the desk still speaks at once",
           SPOKEN, ["45 percent, Mic 2"])
 
-    server._ann_self_writes[("fader", 9)] = time.time() - (server._ANN_SELF_ECHO_S + 0.1)
-    st["said_at"][("fader", 9)] = time.time() - (server._ANN_LEVEL_GAP_S + 0.01)
+    server._ann_self_writes[("fader", 9)] = time.monotonic() - (server._ANN_SELF_ECHO_S + 0.1)
+    st["said_at"][("fader", 9)] = time.monotonic() - (server._ANN_LEVEL_GAP_S + 0.01)
     SPOKEN.clear()
     server._ann_handle_report(xpoint_packet(9, 0, 0.70), st)
     check("and a hand on that same fader is audible again once the window passes",
@@ -913,7 +913,7 @@ try:
     server._ann_handle_report(state_packet("channelOutputMute", 6, True), st)
     check("the echo of a mute we set is silent too", SPOKEN, [])
     check("but the cache still follows it, so the ring quotes the truth", st["muted"], {6: True})
-    server._ann_self_writes[("mute", 6)] = time.time() - (server._ANN_SELF_ECHO_S + 0.1)
+    server._ann_self_writes[("mute", 6)] = time.monotonic() - (server._ANN_SELF_ECHO_S + 0.1)
     server._ann_handle_report(state_packet("channelOutputMute", 6, False), st)
     check("a mute pressed ON THE DESK still speaks", SPOKEN, ["Mic 2 unmuted"])
 
@@ -922,7 +922,7 @@ try:
     SPOKEN.clear()
     server._ann_handle_report(chan_gain_packet(b"inputMicrophoneGain", 0x6E, 44), st)
     check("a gain set from the app is not spoken back", SPOKEN, [])
-    server._ann_self_writes[("gain", "Mic 1 gain")] = time.time() - (server._ANN_SELF_ECHO_S + 0.1)
+    server._ann_self_writes[("gain", "Mic 1 gain")] = time.monotonic() - (server._ANN_SELF_ECHO_S + 0.1)
     server._ann_handle_report(chan_gain_packet(b"inputMicrophoneGain", 0x6E, 45), st)
     check("but the encoder moving that gain does", SPOKEN, ["45 d B, Mic 1 gain"])
     server._ann_live_state = None

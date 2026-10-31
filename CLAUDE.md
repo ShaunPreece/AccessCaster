@@ -57,6 +57,9 @@ the code cold would otherwise be puzzled.
 
 Run `python DevTools/check_notes.py --check` before you finish; it catches what a script can.
 
+The app runs on Python 3.12. Its dependencies are pinned in `requirements.txt`, and the build's
+in `ProjectBuilds/requirements-build.txt`.
+
 ## Working on the desk
 
 Reads are free. A write to the desk must be reversible and read back, and restored to baseline

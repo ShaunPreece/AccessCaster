@@ -21,6 +21,8 @@ at http://<this-pc-ip>:8770, though the USB control happens on this PC).
 
 from __future__ import annotations
 
+import contextlib
+import datetime
 import json
 import os
 import queue
@@ -62,12 +64,26 @@ import commands                 # ...and the CATALOGUE of what a shortcut can do
                                 # the app's own spec tables
 import page                     # assembles index.html from static/index.html + static/help.html
 import wording                  # plurals, spoken lists and durations
-from paths import resource_path, data_path   # frozen-build-safe asset/data locations
+from paths import resource_path, data_path, write_json   # frozen-build-safe asset/data locations
 from version import __version__ as APP_VERSION   # single source of truth (Project/version.py)
 
 HTTP_HOST = "0.0.0.0"     # bind all interfaces so a phone on the LAN can view the UI
 HTTP_PORT = 8770
-STATIC_DIR = resource_path("static")
+STATIC_DIR = os.path.realpath(resource_path("static"))
+
+
+def _static_file(name: str) -> str | None:
+    """The file in static/ a /static/<name> request names, or None when it resolves outside.
+
+    Resolved and then contained, rather than screened for "..": os.path.join drops STATIC_DIR
+    entirely when `name` is absolute, so "C:/Windows/win.ini" would otherwise be served as is.
+    commonpath raises ValueError for a path on another drive."""
+    full = os.path.realpath(os.path.join(STATIC_DIR, name))
+    try:
+        inside = os.path.commonpath([full, STATIC_DIR]) == STATIC_DIR
+    except ValueError:
+        return None
+    return full if inside and full != STATIC_DIR else None
 
 # One lock around ALL device access. ThreadingHTTPServer serves requests on
 # separate threads and the unit must never be opened twice at once; this also
@@ -80,7 +96,7 @@ _hid_lock = threading.Lock()
 # behaves like an app (open = running, close = stopped). DISABLED in headless mode
 # (ACCESS_CASTER_NO_UI) so our background/tooling runs are not auto-killed.
 _httpd = None                      # set in main(); the running ThreadingHTTPServer
-_last_ping = time.time()           # updated by every /api/ping
+_last_ping = time.monotonic()           # updated by every /api/ping
 # Which run of the server this is. The ping reply carries it with the version, so an open page can
 # tell that the server it was loaded from has gone and a different one answers in its place.
 _INSTANCE_ID = secrets.token_hex(8)
@@ -134,14 +150,14 @@ def _lifecycle_stop_reason(now, start, client_seen, last_ping, quit_at, job_runn
 
 def _client_watchdog():
     """Background: stop the server once every webpage has closed. See _lifecycle_stop_reason."""
-    start = time.time()
+    start = time.monotonic()
     while True:
         time.sleep(1.0)
         if _httpd is None:
             continue
         # Both job states, because either can be the one holding the desk.
         busy = _profile_job.busy() or _show_job.busy()
-        reason = _lifecycle_stop_reason(time.time(), start, _client_seen, _last_ping, _quit_at,
+        reason = _lifecycle_stop_reason(time.monotonic(), start, _client_seen, _last_ping, _quit_at,
                                         job_running=busy)
         if reason:
             diagnostics.event("app.watchdog_stop", reason)
@@ -398,13 +414,7 @@ def read_device_state() -> dict:
     # ---- firmware and the wired network. Neither is a connection you can make or change, so they
     # sit with the other facts the unit reports about itself rather than on a tab of wireless
     # controls.
-    with _session_state_lock:
-        fw = _session_state.get("firmware")
-    if not fw:
-        # As in read_network_status: systemFirmwareVersion sits near the tail of a dump whose length
-        # varies, so the value the startup read already captured is the reliable one.
-        fw = next((v for v in val("systemFirmwareVersion") if v not in (None, "")), None)
-    out["firmware"] = fw
+    out["firmware"] = _firmware_version(blob)
     out["firmware_update"] = _firmware_update(blob)
     wired = next((v for v in val("wiredConnected") if v is not None), None)
     out["wired_connected"] = bool(wired) if wired is not None else None
@@ -423,6 +433,15 @@ def read_device_state() -> dict:
 _UPDATE_CHECK_WAIT_S = 20.0
 _UPDATE_HOW = ("Install it on the unit's screen under Settings, System, Information, or with "
                "RODE's own app.")
+
+
+def _firmware_version(blob: bytes):
+    """The desk's firmware version, or None. The value the startup read captured comes first:
+    systemFirmwareVersion sits near the tail of a dump whose length varies, so a later dump can
+    end before it."""
+    with _session_state_lock:
+        fw = _session_state.get("firmware")
+    return fw or rcp_read.first(blob, "systemFirmwareVersion")
 
 
 def _firmware_update(blob: bytes) -> dict:
@@ -459,8 +478,9 @@ def action_check_firmware() -> dict:
             try:
                 listener.start()
                 listening = True
-            except Exception:
-                pass
+            except Exception as exc:
+                diagnostics.event("device.listener_failed", "reading instead of listening",
+                                  error=str(exc))
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
         if listening:
@@ -475,9 +495,7 @@ def action_check_firmware() -> dict:
         if listening:
             listener.stop()
     upd = _firmware_update(blob)
-    with _session_state_lock:
-        fw = _session_state.get("firmware")
-    fw = fw or rcp_read.block_value(blob, "SYSTEM", "systemFirmwareVersion") or "unknown"
+    fw = _firmware_version(blob) or "unknown"
     msg = (_firmware_update_sentence(upd)
            or f"Your unit is up to date. Firmware {fw} is the latest.")
     return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
@@ -577,7 +595,9 @@ def _recorder_watcher():
             w = recorder.Watcher(on_change=_recorder_state_changed)
             w.start()
             _recorder_watch = w
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("recorder.watcher_failed", "the recorder listener did not start",
+                              error=str(exc))
             return None
     return _recorder_watch
 
@@ -1011,8 +1031,9 @@ def action_storage_erase(index: int) -> dict:
             try:
                 listener.start()
                 listening = True
-            except Exception:
-                pass
+            except Exception as exc:
+                diagnostics.event("device.listener_failed", "reading instead of listening",
+                                  error=str(exc))
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("storageVolumeErase", True, path))
         if listening:
@@ -1056,7 +1077,9 @@ def _callme_watcher():
                                on_expiring=_callme_on_expiring, on_ring=_callme_on_ring)
             w.start()
             _callme_watch = w
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("callme.watcher_failed", "the CallMe listener did not start",
+                              error=str(exc))
             return None
     return _callme_watch
 
@@ -1208,13 +1231,13 @@ def action_callme_hosting(on: bool) -> dict:
         with _hid_lock:
             rcp_transfer.send_record(callme.build_hosting(on, path))
             # The code comes from RODE's service over the network, about a second after the switch.
-            deadline = time.time() + (6.0 if on else 2.0)
+            deadline = time.monotonic() + (6.0 if on else 2.0)
             while True:
                 time.sleep(1.0)
                 blob = rcp_read.read_model_stable(fresh=True)
                 d = callme.read(blob)
                 settled = d.get("hosting") == on and (not on or d.get("code"))
-                if settled or time.time() > deadline:
+                if settled or time.monotonic() > deadline:
                     break
         _callme_note_dump(blob)
     except Exception as exc:
@@ -1272,24 +1295,36 @@ def _callme_respond(answer: bool) -> dict:
     # WAIT FOR THE CALL TO GO ACTIVE, which is the only honest confirmation: a write the unit
     # stores and ignores looks exactly like one that worked, and so does a call whose audio never
     # opens until it fails a minute later.
-    deadline = time.time() + _CALLME_ANSWER_WAIT_S
-    state = None
-    while time.time() < deadline and w is not None:
-        time.sleep(0.25)
-        snap = w.snapshot() or {}
-        state = next((s.get("state") for s in snap.get("slots", [])
-                      if s.get("slot") == slot + 1), None)
-        if state == "Active":
-            msg = f"Connected to {call['name']}."
-            if snap.get("on_fader") is False:
-                msg += " No fader carries CallMe 1, so you will not hear them until one does."
-            return {"ok": True, "message": msg}
+    state, snap = _callme_wait_for(w, slot + 1, "Active") if w is not None else (None, {})
+    if state == "Active":
+        msg = f"Connected to {call['name']}."
+        if snap.get("on_fader") is False:
+            msg += " No fader carries CallMe 1, so you will not hear them until one does."
+        return {"ok": True, "message": msg}
     if w is not None:
         w.quiet_connect(slot, False)
     if state == "Connecting":
         return {"ok": True, "message": f"Answered {call['name']}. Still connecting."}
     return {"ok": False, "message": (f"Sent the answer for {call['name']}'s call, but the unit has "
                                      f"not started it.")}
+
+
+def _callme_wait_for(w, slot_number: int, want: str) -> tuple:
+    """Poll the Watcher until call `slot_number` (1 to 3) reaches the state `want`, for up to
+    _CALLME_ANSWER_WAIT_S. Returns the last state seen and the snapshot it came from.
+
+    Waiting for the state is the only honest confirmation: a write the unit stores and ignores
+    looks exactly like one that worked."""
+    deadline = time.monotonic() + _CALLME_ANSWER_WAIT_S
+    state, snap = None, {}
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        snap = w.snapshot() or {}
+        state = next((s.get("state") for s in snap.get("slots", [])
+                      if s.get("slot") == slot_number), None)
+        if state == want:
+            break
+    return state, snap
 
 
 def action_callme_hangup(slot: int = 0) -> dict:
@@ -1323,14 +1358,8 @@ def action_callme_hangup(slot: int = 0) -> dict:
     except Exception as exc:
         w.quiet_end(i, False)
         return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
-    deadline = time.time() + _CALLME_ANSWER_WAIT_S
-    while time.time() < deadline:
-        time.sleep(0.25)
-        snap = w.snapshot() or {}
-        state = next((s.get("state") for s in snap.get("slots", [])
-                      if s.get("slot") == target["slot"]), None)
-        if state == "Idle":
-            return {"ok": True, "message": f"Hung up on {who}."}
+    if _callme_wait_for(w, target["slot"], "Idle")[0] == "Idle":
+        return {"ok": True, "message": f"Hung up on {who}."}
     w.quiet_end(i, False)
     return {"ok": False, "message": f"Sent the hang-up, but the call with {who} is still up."}
 
@@ -1369,6 +1398,11 @@ def action_callme_dial(code: str) -> dict:
     i = slot["slot"] - 1
     who = callme.peer_name(callme.RODE_PREFIX + code)
     w = _callme_watcher()
+    if w is None:
+        # The listener is what tells a call that rang from one that failed, so without it a dial
+        # would go out with nothing to follow it.
+        return {"ok": False, "message": "The CallMe listener could not be started, so a call "
+                                        "cannot be made. Restart AccessCaster and try again."}
     # A failure inside the wait is said by this reply, so the Watcher is kept from saying it too.
     w.quiet_end(i, True)
     try:
@@ -1380,8 +1414,8 @@ def action_callme_dial(code: str) -> dict:
         w.quiet_end(i, False)
         return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
     ended_before = slot.get("ended", 0)
-    started = time.time()
-    while time.time() - started < _CALLME_DIAL_WAIT_S:
+    started = time.monotonic()
+    while time.monotonic() - started < _CALLME_DIAL_WAIT_S:
         time.sleep(0.1)
         s = next((x for x in (w.snapshot() or {}).get("slots", [])
                   if x.get("slot") == slot["slot"]), {})
@@ -1393,7 +1427,7 @@ def action_callme_dial(code: str) -> dict:
             return {"ok": False, "message": msg}
         # An unknown code goes through Connecting before it fails, so Connecting only counts as
         # ringing once it has lasted a second.
-        if s.get("state") in callme.UP and time.time() - started >= 1.0:
+        if s.get("state") in callme.UP and time.monotonic() - started >= 1.0:
             w.quiet_end(i, False)
             return {"ok": True, "message": f"Calling {who}."}
     w.quiet_end(i, False)
@@ -1503,15 +1537,9 @@ def action_callme_extend(auto: bool = False) -> dict:
     except Exception as exc:
         w.quiet_connect(i, False)
         return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
-    deadline = time.time() + _CALLME_ANSWER_WAIT_S
-    while time.time() < deadline:
-        time.sleep(0.25)
-        snap = w.snapshot() or {}
-        state = next((s.get("state") for s in snap.get("slots", [])
-                      if s.get("slot") == target["slot"]), None)
-        if state == "Active":
-            return {"ok": True, "message": (f"Extended the call with {who}"
-                                            + (" automatically." if auto else "."))}
+    if _callme_wait_for(w, target["slot"], "Active")[0] == "Active":
+        return {"ok": True, "message": (f"Extended the call with {who}"
+                                        + (" automatically." if auto else "."))}
     w.quiet_connect(i, False)
     return {"ok": False, "message": (f"Sent Extend, but the call with {who} is still about to "
                                      f"end in five minutes.")}
@@ -2104,12 +2132,7 @@ def read_network_status() -> dict:
     midi = first("systemMidiControl")
     bt_visible = net("btVisible")
     bt_paired = slots("btPairedNumber", 5)
-    # systemFirmwareVersion sits near the tail of the dump (whose length varies),
-    # so prefer the value the startup/mixer read already captured into session state.
-    with _session_state_lock:
-        fw = _session_state.get("firmware")
-    if not fw:
-        fw = first("systemFirmwareVersion")
+    fw = _firmware_version(blob)
     wired = first("wiredConnected")
     return {
         "ok": True,
@@ -2326,9 +2349,9 @@ def _wait_for_wifi_address():
     """Poll until the unit has a wifi address or reports a wrong password, for up to
     WIFI_JOIN_TIMEOUT_S. Polls rather than sleeping the whole timeout so a quick join answers
     quickly. Returns the last state read, or None if no read succeeded."""
-    deadline = time.time() + WIFI_JOIN_TIMEOUT_S
+    deadline = time.monotonic() + WIFI_JOIN_TIMEOUT_S
     state = None
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         time.sleep(2.5)
         try:
             with _hid_lock:
@@ -2621,6 +2644,11 @@ def action_set_midi(on: bool) -> dict:
 # writes, and comes back under a different USB product id and path.
 _announce_on = threading.Event()
 _announce_thread = None
+# Each loop is started with the next generation and leaves as soon as it is no longer the newest.
+# Off and on within one read or one reconnect sleep would otherwise leave the first loop running
+# beside the second: two handles, and every report and reconnect handled twice.
+_ann_loop_gen = 0
+_ann_start_lock = threading.Lock()   # the check-and-start below runs on request threads
 
 # Reconnect pacing. Quick at first, so a momentarily busy handle costs nothing audible and a
 # re-enumeration (about 2.5 s) is picked up as soon as the desk is back; slow after that, because
@@ -2690,26 +2718,53 @@ _SETTINGS_FILE = data_path("settings.json")
 _settings_lock = threading.Lock()
 
 
-def load_settings() -> dict:
+def _read_settings() -> tuple[dict | None, str]:
+    """The settings file's contents and how the read went: "ok" (including no file yet, which is
+    {}), "corrupt" (it exists but is not a JSON object) or "unreadable" (it could not be opened,
+    which may be passing, such as a scanner holding it). The contents are None unless "ok"."""
     try:
         with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    except FileNotFoundError:
+        return {}, "ok"
+    except OSError:
+        return None, "unreadable"
+    except ValueError:
+        return None, "corrupt"
+    return (data, "ok") if isinstance(data, dict) else (None, "corrupt")
+
+
+def load_settings() -> dict:
+    data, _ = _read_settings()
+    return data if data is not None else {}
 
 
 def update_settings(**changes) -> None:
     """Merge changes into the settings file. Best-effort: a preference that cannot be written is
-    not worth failing an action over, it just will not survive a restart."""
+    not worth failing an action over, it just will not survive a restart.
+
+    A file that will not parse is kept as settings.json.bad before a fresh one is started, so the
+    shortcuts, contacts and access token in it can still be recovered by hand. A file that cannot
+    be opened at all is left alone and this change is dropped: writing would replace every other
+    key with nothing."""
     with _settings_lock:
-        data = load_settings()
-        data.update(changes)
+        data, status = _read_settings()
+        if status == "unreadable":
+            diagnostics.event("settings.unreadable", "settings.json could not be opened",
+                              dropped=",".join(changes))
+            return
+        if status == "corrupt":
+            try:
+                os.replace(_SETTINGS_FILE, _SETTINGS_FILE + ".bad")
+                diagnostics.event("settings.corrupt", "settings.json did not parse; kept as .bad")
+            except OSError as exc:
+                diagnostics.event("settings.corrupt", "settings.json did not parse",
+                                  error=str(exc))
+                return
         try:
-            with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError:
-            pass
+            write_json(_SETTINGS_FILE, {**(data or {}), **changes})
+        except OSError as exc:
+            diagnostics.event("settings.write_failed", "settings.json not written", error=str(exc))
 
 
 def _clamp_volume(value) -> int:
@@ -2907,7 +2962,7 @@ def _ann_speak_pump() -> None:
             _ann_release(text)
             text = newer
         # Pace the hand-off, preferring anything that arrives while we wait.
-        gap = _ANN_PACE_S - (time.time() - last_sent)
+        gap = _ANN_PACE_S - (time.monotonic() - last_sent)
         while gap > 0:
             try:
                 newer = _ann_speak_q.get(timeout=gap)
@@ -2917,8 +2972,8 @@ def _ann_speak_pump() -> None:
                 return
             _ann_release(text)
             text = newer
-            gap = _ANN_PACE_S - (time.time() - last_sent)
-        last_sent = time.time()
+            gap = _ANN_PACE_S - (time.monotonic() - last_sent)
+        last_sent = time.monotonic()
         if proc is not None and proc.poll() is not None:    # worker died; drop it and respawn
             proc = None
         gen = _ann_worker_gen                               # read once, with the values below
@@ -3241,7 +3296,7 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
             # BOTH EDGES. A momentary pad restores every channel it moved when it is released, and
             # that burst says no more than the one on the way in.
             if path[-1] in _hk_mixer_pos:
-                _ann_mixer_quiet_until = time.time() + _ANN_MIXER_QUIET_S
+                _ann_mixer_quiet_until = time.monotonic() + _ANN_MIXER_QUIET_S
         return
     if name == "mixLevelWithAnchor":
         # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
@@ -3265,7 +3320,7 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
         # of the range: turning down at 0, or up at maximum, legitimately changes nothing.
         if _ann_levels_on:
             delta = val[0][0] if kind == "pair" and val and val[0][1] == "int" else 0
-            st["enc_turn_at"] = None if _ann_at_limit(st, delta) else time.time()
+            st["enc_turn_at"] = None if _ann_at_limit(st, delta) else time.monotonic()
         return
     if name == "systemChannelSelected":
         # -1 = nothing selected, and the encoder is back on the levels ring. Anything else is a STRIP
@@ -3352,7 +3407,7 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
             return
         # A mixer pad is mid-action, so this mute or cue is the pad doing its job. After the cache
         # above, which must stay true whether or not anything is said.
-        if time.time() < _ann_mixer_quiet_until:
+        if time.monotonic() < _ann_mixer_quiet_until:
             return
         if what == "mute":
             if st.get("enc_down_at"):
@@ -3369,23 +3424,23 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
     # Press EDGES. Do not speak yet: hold the generic word for _ANN_PENDING_S in case the state
     # property follows (it names the channel, which is strictly better).
     if name == "mutePressed" and bval is True:
-        st["pending"], st["at"] = "Mute", time.time()
+        st["pending"], st["at"] = "Mute", time.monotonic()
         return
     if name == "soloPressed" and bval is True:
-        st["pending"], st["at"] = "Solo", time.time()
+        st["pending"], st["at"] = "Solo", time.monotonic()
         return
     if name == "encoderPressed" and bval is True:
         # Say NOTHING yet. A short press advances the ring; a hold mutes instead and leaves the
         # selection alone (see _ANN_ENC_HOLD_S), and at the press edge we cannot yet tell which this
         # is. The cost is announcing on release, about 400 ms later on a measured press, which is
         # far cheaper than naming the wrong channel and desyncing the ring.
-        st["enc_at"], st["enc_named"] = time.time(), False
-        st["enc_down_at"], st["enc_hold"] = time.time(), False
+        st["enc_at"], st["enc_named"] = time.monotonic(), False
+        st["enc_down_at"], st["enc_hold"] = time.monotonic(), False
         return
     if name == "encoderPressed" and bval is False:
         down_at = st.get("enc_down_at")
         held = bool(st.get("enc_hold")) or (
-            down_at is not None and (time.time() - down_at) >= _ANN_ENC_HOLD_S)
+            down_at is not None and (time.monotonic() - down_at) >= _ANN_ENC_HOLD_S)
         st["enc_down_at"], st["enc_hold"] = None, False
         if held:
             return          # the desk muted; that announcement already named the channel
@@ -3472,8 +3527,9 @@ def _ann_seed_layout(st: dict) -> None:
         # any push is sent into the gap. Comparing across the reconnect is the only way to see it.
         st["usb_mode"] = rcp_read.first(blob, "outputMultiMode", "int")
         channels.publish_usb_expanded(recorder.split_usb_multitrack(st["usb_mode"])[1])
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("announcer.seed_failed", "the announcer could not read the layout",
+                          error=str(exc))
     st["known"] = known
     # WHAT COUNTS AS ALREADY SPOKEN, seeded on the same contract: `_ann_flush_pending` speaks a
     # level unless it matches st["said"], so an empty one opens every connect and reconnect with
@@ -3659,7 +3715,7 @@ def _ann_note_level(st: dict, kind: str, source: int, level: float) -> None:
     settle to find out what is being held. Later movements in the same gesture still wait for the
     settle, so a full sweep is one closing phrase rather than a torrent."""
     key = (kind, source)
-    now = time.time()
+    now = time.monotonic()
     st.setdefault("levels", {})[key] = level
     st["levels_at"] = now
     st["enc_turn_at"] = None        # something moved, so that turn was not against nothing
@@ -3710,15 +3766,15 @@ def _ann_note_level(st: dict, kind: str, source: int, level: float) -> None:
 def _ann_flush_pending(st: dict) -> None:
     """Speak anything being held: a press edge with no STATE behind it (_ANN_PENDING_S), and the
     settled position of a fader or the monitor encoder (_ANN_SETTLE_S)."""
-    if st.get("pending") and (time.time() - st.get("at", 0.0)) > _ANN_PENDING_S:
+    if st.get("pending") and (time.monotonic() - st.get("at", 0.0)) > _ANN_PENDING_S:
         _ann_say(st["pending"])
         st["pending"] = None
     # A turn that moved nothing: tell the operator, once per burst.
     turn_at = st.get("enc_turn_at") if _ann_levels_on else None
-    if turn_at and (time.time() - turn_at) > _ANN_ENC_DEAD_S:
+    if turn_at and (time.monotonic() - turn_at) > _ANN_ENC_DEAD_S:
         st["enc_turn_at"] = None
-        if (time.time() - st.get("enc_dead_said", 0.0)) > _ANN_ENC_DEAD_GAP_S:
-            st["enc_dead_said"] = time.time()
+        if (time.monotonic() - st.get("enc_dead_said", 0.0)) > _ANN_ENC_DEAD_GAP_S:
+            st["enc_dead_said"] = time.monotonic()
             # Name what is holding the encoder, saying what the channel HAS (_ann_selected_phrase):
             # this fires on ANY turn the ring does not see, including a mic gain that is moving
             # perfectly well, so a flat "nothing to adjust" would be wrong.
@@ -3732,13 +3788,13 @@ def _ann_flush_pending(st: dict) -> None:
             else:
                 _ann_say("Encoder not linked to anything")
     levels = st.get("levels")
-    if levels and (time.time() - st.get("levels_at", 0.0)) > _ANN_SETTLE_S:
+    if levels and (time.monotonic() - st.get("levels_at", 0.0)) > _ANN_SETTLE_S:
         said = st.setdefault("said", {})
         for key, lvl in list(levels.items()):
             if _ann_pct(said.get(key)) == _ann_pct(lvl):
                 continue                       # this position was already spoken while moving
             said[key] = lvl
-            st.setdefault("said_at", {})[key] = time.time()
+            st.setdefault("said_at", {})[key] = time.monotonic()
             st["run_key"] = None            # the gesture is over; name it again next time
             _ann_say(_ann_moved_phrase(key[0], key[1], lvl))
         levels.clear()
@@ -3775,14 +3831,14 @@ def _ann_mark_self_write(key) -> None:
     Keys are in the space the PUSH arrives in, not the space the writer thinks in: a fader is keyed
     by its SOURCE CODE (what the cross-point selector carries), not its fader index. Marked whether
     or not the announcer is running, since it costs nothing and the two can be toggled apart."""
-    _ann_self_writes[key] = time.time()
+    _ann_self_writes[key] = time.monotonic()
 
 
 def _ann_is_self_echo(key) -> bool:
     """Is this push the echo of our own write to the same target, close enough behind it to be that
     write rather than a fresh change on the desk?"""
     at = _ann_self_writes.get(key)
-    return at is not None and (time.time() - at) < _ANN_SELF_ECHO_S
+    return at is not None and (time.monotonic() - at) < _ANN_SELF_ECHO_S
 
 
 def _ann_mark_self_gain(key, is_mic: bool) -> None:
@@ -3887,8 +3943,16 @@ def _ann_usb_mode_change(was, now) -> str:
             "The unit's USB audio mode has changed.")
 
 
-def _announce_loop() -> None:
+def _announce_loop(gen: int | None = None) -> None:
     global _ann_live_state
+    if gen is None:
+        gen = _ann_loop_gen
+
+    def current() -> bool:
+        return _announce_on.is_set() and gen == _ann_loop_gen
+
+    if not current():
+        return                        # superseded before it started; the newer loop greets
     iface = rcp_transfer.find_control_interface()
     if iface is None:
         _ann_say("The control announcer could not open the device.")
@@ -3906,7 +3970,7 @@ def _announce_loop() -> None:
     announced_on = False
     _ann_seed_layout(st)
     _ann_live_state = st              # publish it so our own writes can keep the caches current
-    while _announce_on.is_set():
+    while current():
         if dev is None:
             if iface is None:
                 iface = rcp_transfer.find_control_interface(fresh=True)
@@ -3935,7 +3999,7 @@ def _announce_loop() -> None:
                     _ann_say("Control announcer is on.")
                 _ann_quiet_start.clear()
                 announced_on = True
-            elif time.time() - lost_at >= _ANN_RECONNECT_SPEAK_AFTER_S:
+            elif time.monotonic() - lost_at >= _ANN_RECONNECT_SPEAK_AFTER_S:
                 # Back after a real gap. Re-seed first: mutes, levels and the fader layout can all
                 # have moved while we were deaf, and Expanded mode reassigns sources as it goes.
                 was_usb = st.get("usb_mode")
@@ -3966,9 +4030,11 @@ def _announce_loop() -> None:
             rcp_hid.forget_interfaces()
             rcp_hid.close_handle(dev, "announcer")
             dev = None                                     # reopen on the next pass
-            lost_at = time.time()
+            lost_at = time.monotonic()
             time.sleep(0.3)
             continue
+        if not current():
+            break
         try:
             if rep:
                 _ann_handle_report(bytes(rep), st)
@@ -3982,6 +4048,10 @@ def _announce_loop() -> None:
             pass
     if dev is not None:
         rcp_hid.close_handle(dev, "announcer")
+    if gen != _ann_loop_gen:
+        # Superseded: the newer loop owns the published state and does its own greeting.
+        _ann_quiet_stop.clear()
+        return
     _ann_live_state = None            # stale state must not outlive the announcer
     # A SUSPEND MUST NOT SPEAK. The sign-off is right when the user switched announcements off; it
     # is exactly wrong when the recorder switched them off, because that phrase would be the first
@@ -4059,17 +4129,20 @@ def action_set_announce(on: bool, chosen: bool = True) -> dict:
     """Switch announcements on or off. `chosen` is a person's decision (the page, the tray, the
     shortcut), which is saved when they have asked for it to be remembered; the app switching them
     back on at start-up or after a take is not."""
-    global _announce_thread, _ann_suspended_for_record
+    global _announce_thread, _ann_suspended_for_record, _ann_loop_gen
     # A DELIBERATE toggle cancels our claim on it either way, so a recording stopping later never
     # overrides what the user has since chosen.
     _ann_suspended_for_record = False
     if chosen and _ann_remember:
         update_settings(announcer=bool(on))
     if on:
-        if not _announce_on.is_set():
-            _announce_on.set()
-            _announce_thread = threading.Thread(target=_announce_loop, daemon=True)
-            _announce_thread.start()
+        with _ann_start_lock:
+            if not _announce_on.is_set():
+                _ann_loop_gen += 1
+                _announce_on.set()
+                _announce_thread = threading.Thread(target=_announce_loop, args=(_ann_loop_gen,),
+                                                    daemon=True)
+                _announce_thread.start()
         return {"ok": True, "announce": True,
                 "message": "Button-press announcements are on."}
     _announce_on.clear()
@@ -4190,19 +4263,7 @@ def _ann_pick(value: str, offered: list) -> str:
 def action_set_announce_voice(voice: str) -> dict:
     """Which voice speaks announcements. The confirmation is spoken IN THE NEW VOICE, which is the
     point: the worker is restarted with it and the sample is the first thing it says."""
-    global _ann_voice, _ann_worker_gen
-    offered = _sapi_lists()["voices"]
-    picked = _ann_pick(voice, offered)
-    if picked is None:
-        return {"ok": False, "voice": _ann_voice,
-                "message": f"This computer has no speech voice called {voice}."}
-    _ann_voice = picked
-    _ann_worker_gen += 1
-    update_settings(announcer_voice=_ann_voice)
-    msg = (f"Announcements will now be spoken by {picked}." if picked
-           else "Announcements will now use the computer's default voice.")
-    _ann_say(msg)
-    return {"ok": True, "voice": _ann_voice, "message": msg}
+    return _ann_choose("voice", voice)
 
 
 def action_set_announce_output(output: str) -> dict:
@@ -4210,19 +4271,32 @@ def action_set_announce_output(output: str) -> dict:
     output on our own SAPI voice, so it does not move the system default device, and it does not
     touch the screen reader or any other program. It exists because this desk's default output is
     the RODECaster itself, so announcements vanish the moment another channel is soloed."""
-    global _ann_say_device, _ann_worker_gen
-    offered = _sapi_lists()["outputs"]
-    picked = _ann_pick(output, offered)
+    return _ann_choose("output", output)
+
+
+def _ann_choose(kind: str, wanted: str) -> dict:
+    """Set the announcer's "voice" or "output" to one this computer offers, restart the speech
+    worker with it, save it, and confirm through the restarted worker. "" is the default."""
+    global _ann_voice, _ann_say_device, _ann_worker_gen
+    voice = kind == "voice"
+    picked = _ann_pick(wanted, _sapi_lists()["voices" if voice else "outputs"])
     if picked is None:
-        return {"ok": False, "output": _ann_say_device,
-                "message": f"This computer has no audio output called {output}."}
-    _ann_say_device = picked
+        return {"ok": False, kind: _ann_voice if voice else _ann_say_device,
+                "message": (f"This computer has no speech voice called {wanted}." if voice else
+                            f"This computer has no audio output called {wanted}.")}
+    if voice:
+        _ann_voice = picked
+        update_settings(announcer_voice=picked)
+        msg = (f"Announcements will now be spoken by {picked}." if picked
+               else "Announcements will now use the computer's default voice.")
+    else:
+        _ann_say_device = picked
+        update_settings(announcer_output=picked)
+        msg = (f"Announcements will now play through {picked}." if picked
+               else "Announcements will now play through the computer's default output.")
     _ann_worker_gen += 1
-    update_settings(announcer_output=_ann_say_device)
-    msg = (f"Announcements will now play through {picked}." if picked
-           else "Announcements will now play through the computer's default output.")
     _ann_say(msg)
-    return {"ok": True, "output": _ann_say_device, "message": msg}
+    return {"ok": True, kind: picked, "message": msg}
 
 
 def action_refresh_speech_devices() -> dict:
@@ -4277,7 +4351,8 @@ def _mic_processing_snapshot(channel: int) -> dict:
     can never disagree with what the user is looking at."""
     try:
         recs = channels.read_channels()
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("device.read_failed", "processing snapshot", error=str(exc))
         return {}
     entry = next((c for c in channels.active_ui_channels()
                   if c.get("kind") == "mic" and channels.mic_channel_number(c) == channel), None)
@@ -4710,9 +4785,28 @@ def _read_gain_and_processing(mic: int):
     return gain, on
 
 
+def _chat_endpoint_to_unity(endpoint_id: str) -> str:
+    """Unmute the Chat capture endpoint and set its Windows level to 0 dB, and return the sentence
+    saying what changed, which is "" when nothing did. Its level scales every reading and its mute
+    makes a working microphone read as silence."""
+    said = ""
+    try:
+        now = meters.endpoint_volume(endpoint_id)
+        if now.get("muted") and meters.set_endpoint_mute(endpoint_id, False).get("ok"):
+            said = "Cleared the Windows mute on the Chat device. "
+        db = now.get("db")
+        if ((db is None or abs(db) >= 0.2)
+                and meters.set_endpoint_volume_db(endpoint_id, 0.0).get("ok")):
+            said += "Windows level on the Chat device set to no change. "
+    except Exception as exc:
+        diagnostics.event("meters.chat_endpoint", "could not set the Chat endpoint", error=str(exc))
+    return said
+
+
 def _autogain_run(name: str, mic: int, seconds: float) -> None:
     """The whole job: prepare, listen in silence, decide, apply, restore, report."""
     restore_processing = False
+    iso = None
     try:
         _autogain_set(phase="preparing", message="Getting ready. Do not talk yet.")
         with _hid_lock:
@@ -4736,63 +4830,52 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         # Windows out of the way on the endpoint measured, and on no other: its level scales the
         # reading and its mute would make the microphone look dead. The meter's chosen stream may
         # be a different endpoint, which is left as the user set it.
-        win = ""
-        try:
-            now = meters.endpoint_volume(endpoint["id"])
-            if now.get("muted") and meters.set_endpoint_mute(endpoint["id"], False).get("ok"):
-                win = "Cleared the Windows mute on the Chat device. "
-            db = now.get("db")
-            if ((db is None or abs(db) >= 0.2)
-                    and meters.set_endpoint_volume_db(endpoint["id"], 0.0).get("ok")):
-                win += "Windows level on the Chat device set to no change. "
-        except Exception:
-            pass
+        win = _chat_endpoint_to_unity(endpoint["id"])
         check = None
-        with _hid_lock:
-            with _ChatIsolation(mic - 1) as iso:
-                # THE CUE COMES FIRST, AND IT FINISHES FIRST - not because it would otherwise be
-                # measured (it plays out on USB 1, and the isolated mix excludes everything except
-                # the microphone, so it cannot reach the measurement) but because the person should
-                # not start talking over their own start signal. Only an acoustic path through
-                # monitor speakers could put it in the take.
-                meters.cue("start")
-                _autogain_set(phase="listening", seconds=seconds, started=time.time(),
-                              message="Speak now.")
-                result = autogain.measure_endpoint(
-                    endpoint["id"], seconds,
-                    should_stop=lambda: _autogain_state().get("cancel"))
-                meters.cue("stop")
-                # POST-FADER, corrected: the cross-point carries the channel at its own level, so
-                # the gain we derive must not move with the fader.
-                result = autogain.correct_for_level(result, iso.level)
+        # The lock is taken first. `as` binds only once __enter__ succeeds, and a failed __enter__
+        # restores for itself.
+        with _hid_lock, _ChatIsolation(mic - 1) as iso:
+            # THE CUE COMES FIRST, AND IT FINISHES FIRST - not because it would otherwise be
+            # measured (it plays out on USB 1, and the isolated mix excludes everything except
+            # the microphone, so it cannot reach the measurement) but because the person should
+            # not start talking over their own start signal. Only an acoustic path through
+            # monitor speakers could put it in the take.
+            meters.cue("start")
+            _autogain_set(phase="listening", seconds=seconds, started=time.monotonic(),
+                          message="Speak now.")
+            result = autogain.measure_endpoint(
+                endpoint["id"], seconds,
+                should_stop=lambda: _autogain_state().get("cancel"))
+            meters.cue("stop")
+            # POST-FADER, corrected: the cross-point carries the channel at its own level, so
+            # the gain we derive must not move with the fader.
+            result = autogain.correct_for_level(result, iso.level)
 
-                decision = autogain.verdict(result)
-                target = gain_before
-                if decision["ok"]:
-                    target = max(GAIN_MIN_DB, min(GAIN_MAX_DB,
-                                                  int(round(gain_before + decision["delta_db"]))))
-                    if target != gain_before:
-                        channels.set_mic_gain(mic, target)
-                        _ann_mark_self_gain(mic, True)
-                        with _session_state_lock:
-                            _session_state["channels"][mic]["gain_db"] = target
-                        time.sleep(0.4)
-                    # CHECK ITS OWN WORK: set the gain from the results, then measure again.
-                    # Without the second take the result is a PREDICTION rather than a measurement,
-                    # and nothing tells the user whether it landed. The isolation is still open, so
-                    # it costs nothing but the ten seconds.
-                    meters.cue("start")
-                    _autogain_set(phase="verifying", seconds=_AUTOGAIN_VERIFY_S,
-                                  started=time.time(),
-                                  message="Speak again, to check.")
-                    check = autogain.correct_for_level(
-                        autogain.measure_endpoint(
-                            endpoint["id"], _AUTOGAIN_VERIFY_S,
-                            should_stop=lambda: _autogain_state().get("cancel")),
-                        iso.level)
-                    meters.cue("stop")
-            if not iso.restored:
-                iso.restore()
+            decision = autogain.verdict(result)
+            target = gain_before
+            if decision["ok"]:
+                target = max(GAIN_MIN_DB, min(GAIN_MAX_DB,
+                                              int(round(gain_before + decision["delta_db"]))))
+                if target != gain_before:
+                    channels.set_mic_gain(mic, target)
+                    _ann_mark_self_gain(mic, True)
+                    with _session_state_lock:
+                        _session_state["channels"][mic]["gain_db"] = target
+                    time.sleep(0.4)
+                # CHECK ITS OWN WORK: set the gain from the results, then measure again.
+                # Without the second take the result is a PREDICTION rather than a measurement,
+                # and nothing tells the user whether it landed. The isolation is still open, so
+                # it costs nothing but the ten seconds.
+                meters.cue("start")
+                _autogain_set(phase="verifying", seconds=_AUTOGAIN_VERIFY_S,
+                              started=time.monotonic(),
+                              message="Speak again, to check.")
+                check = autogain.correct_for_level(
+                    autogain.measure_endpoint(
+                        endpoint["id"], _AUTOGAIN_VERIFY_S,
+                        should_stop=lambda: _autogain_state().get("cancel")),
+                    iso.level)
+                meters.cue("stop")
         _autogain_set(phase="working", message="Working it out.")
 
         if not decision["ok"]:
@@ -4803,15 +4886,25 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
     except Exception as exc:
         _autogain_set(phase="failed", done=True, message=f"Auto gain stopped: {exc}")
     finally:
-        # THE PROCESSING IS ALWAYS PUT BACK, whatever went wrong, and the restore is VERIFIED: a
-        # silent failure leaves the operator sounding different with no sign of why. So it reads
-        # back, retries, and if it still cannot be put back it says so LOUDLY in the result.
+        # THE CHAT MIX AND THE PROCESSING ARE ALWAYS PUT BACK, whatever went wrong, and both
+        # restores are VERIFIED: a silent failure leaves the operator sounding different with no
+        # sign of why. The isolation's own exit has already tried once, so this is the retry, and
+        # if it still cannot be put back it says so LOUDLY in the result.
+        if iso is not None and not iso.restored:
+            with _hid_lock:
+                if not iso.restore():
+                    _autogain_warn(CHAT_NOT_RESTORED)
         if restore_processing and not _autogain_restore_processing(mic):
-            st = _autogain_state()
-            _autogain_set(phase="failed", done=True,
-                          message=((st.get("message") or "") + " WARNING: processing could not be "
-                                   "switched back on for that microphone. Switch it on yourself on "
-                                   "this page, or that channel will sound unprocessed.").strip())
+            _autogain_warn("WARNING: processing could not be switched back on for that "
+                           "microphone. Switch it on yourself on this page, or that channel will "
+                           "sound unprocessed.")
+
+
+def _autogain_warn(warning: str) -> None:
+    """End the run as failed, with `warning` added to whatever the result already says."""
+    st = _autogain_state()
+    _autogain_set(phase="failed", done=True,
+                  message=((st.get("message") or "") + " " + warning).strip())
 
 
 class _ChatIsolation:
@@ -4865,14 +4958,21 @@ class _ChatIsolation:
         if self.level < _AUTOGAIN_MIN_CROSSPOINT:
             raise RuntimeError("that channel is not reaching the Chat mix - its fader is down, or "
                                "it is excluded there - so nothing could be measured through it")
-        if self.mode_before != 2:
-            rcp_transfer.set_output_routing(self.chat, 2)      # Custom
-            time.sleep(0.3)
-        for src in self.sources:
-            want = (src != self.keep)
-            if self.excluded_before.get(src) != want:
-                rcp_transfer.set_cross_point_excluded(self.chat, src, want)
-                time.sleep(0.05)
+        # A with block does not call __exit__ when __enter__ raises, so a write that fails part way
+        # puts back what the earlier ones changed here, and says so if that fails too.
+        try:
+            if self.mode_before != 2:
+                rcp_transfer.set_output_routing(self.chat, 2)      # Custom
+                time.sleep(0.3)
+            for src in self.sources:
+                want = (src != self.keep)
+                if self.excluded_before.get(src) != want:
+                    rcp_transfer.set_cross_point_excluded(self.chat, src, want)
+                    time.sleep(0.05)
+        except Exception as exc:
+            if not self.restore():
+                raise RuntimeError(f"{exc}. {CHAT_NOT_RESTORED}") from exc
+            raise
         time.sleep(0.6)                # let the mix settle before anything is measured
         return self
 
@@ -4904,6 +5004,9 @@ class _ChatIsolation:
             return False
 
 
+CHAT_NOT_RESTORED = ("WARNING: the Chat mix could not be put back. It may still be carrying one "
+                     "channel only. Check Routing, Output mixes, Chat.")
+
 # A cross-point quieter than this cannot be measured through: correcting for it would multiply the
 # noise floor up rather than the voice.
 _AUTOGAIN_MIN_CROSSPOINT = 0.05
@@ -4924,8 +5027,9 @@ def _autogain_restore_processing(mic: int) -> bool:
                 _gain, on = _read_gain_and_processing(mic)
             if on:
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            diagnostics.event("autogain.restore_failed", "processing restore attempt",
+                              mic=mic, attempt=attempt, error=str(exc))
         time.sleep(0.5 * (attempt + 1))
     return False
 
@@ -4975,8 +5079,8 @@ def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
         _autogain = {"phase": "starting", "channel": name, "done": False, "cancel": False,
                      "message": "Starting."}
     secs = float(seconds) if seconds and seconds > 0 else _AUTOGAIN_SECONDS
-    threading.Thread(target=_autogain_run, args=(name, mic, max(5.0, min(120.0, secs))),
-                     daemon=True).start()
+    secs = max(5.0, min(120.0, secs))
+    threading.Thread(target=_autogain_run, args=(name, mic, secs), daemon=True).start()
     return {"ok": True, "message": "Auto gain started.", "seconds": secs}
 
 
@@ -4985,7 +5089,7 @@ def autogain_status() -> dict:
     st["ok"] = True
     started, secs = st.get("started"), st.get("seconds")
     if st.get("phase") == "listening" and started and secs:
-        st["seconds_left"] = max(0, int(round(secs - (time.time() - started))))
+        st["seconds_left"] = max(0, int(round(secs - (time.monotonic() - started))))
     return st
 
 
@@ -5140,8 +5244,7 @@ def _load_user_presets() -> dict:
 
 
 def _save_user_presets(d: dict) -> None:
-    with open(_USER_PRESET_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2)
+    write_json(_USER_PRESET_FILE, d)
 
 
 # The property set a preset stores = the keys of a factory preset (floats + the index).
@@ -6550,7 +6653,7 @@ def _chan_check_state() -> dict:
         live = w is not None or iso is not None
         return {"running": live,
                 "channel": _chan_check_label if live else "",
-                "seconds_left": (max(0.0, round(_chan_check_ends - time.time(), 1))
+                "seconds_left": (max(0.0, round(_chan_check_ends - time.monotonic(), 1))
                                  if live else 0.0)}
 
 
@@ -6580,11 +6683,9 @@ def _chan_check_stop(speak: bool = True, run_id: int = None) -> str:
         try:
             with _hid_lock:
                 if not iso.restore():
-                    trouble = ("WARNING: the Chat mix could not be put back. It may still be "
-                               "carrying one channel only. Check Routing, Output mixes, Chat. ")
+                    trouble = CHAT_NOT_RESTORED + " "
         except Exception as exc:
-            trouble = (f"WARNING: the Chat mix could not be put back ({exc}). It may still be "
-                       "carrying one channel only. Check Routing, Output mixes, Chat. ")
+            trouble = f"{CHAT_NOT_RESTORED} ({exc}) "
     # A WATCHER THAT FELL OVER MID-RUN MUST NOT BE SUMMARISED AS A QUIET CHANNEL. It reports its own
     # failure (meters.Watcher._run), and that answer replaces the measurement rather than
     # decorating it: the peak it reached before it broke is not what the channel did.
@@ -6642,14 +6743,7 @@ def action_channel_level_check(name: str = "", seconds: float = 0.0) -> dict:
                            "there is no way to listen to one channel on its own."}
     # Windows out of the way on the endpoint actually being metered: its level scales every reading
     # and its mute would make a working microphone read as silence. Said in the reply, not silently.
-    win = ""
-    try:
-        if meters.endpoint_volume(endpoint["id"]).get("muted"):
-            meters.set_endpoint_mute(endpoint["id"], False)
-            win = "Cleared the Windows mute on the Chat device. "
-        meters.set_endpoint_volume_db(endpoint["id"], 0.0)
-    except Exception:
-        pass
+    win = _chat_endpoint_to_unity(endpoint["id"])
 
     prefs = _meter_prefs()
     secs = float(seconds) if seconds and seconds > 0 else prefs["check_seconds"]
@@ -6688,7 +6782,7 @@ def action_channel_level_check(name: str = "", seconds: float = 0.0) -> dict:
         _chan_check_id += 1
         run_id = _chan_check_id
         _chan_check, _chan_check_iso = w, iso
-        _chan_check_label, _chan_check_ends = src["label"], time.time() + secs
+        _chan_check_label, _chan_check_ends = src["label"], time.monotonic() + secs
     # The timer carries the run's number, so a timer left over from a run that has already been
     # stopped cannot end the one running now.
     threading.Timer(secs, _chan_check_stop, kwargs={"run_id": run_id}).start()
@@ -7025,10 +7119,8 @@ def _apply_matrix(routing: dict) -> dict:
 def routing_model() -> dict:
     """Static layout of the routing controls the UI renders."""
     return {
-        # Still sent, but no page reads it any more: the multitrack control moved to the Recording
-        # page, which builds its own list from recorder.MULTITRACK_LABEL. Kept because the routing
-        # payload is also what the profile-coverage tooling reads.
-        "multitrack_modes": [[k, v] for k, v in sorted(recorder.MULTITRACK_LABEL.items())],
+        # Which desk this layout is for, so the page rebuilds when it changes (app.js loadRouting).
+        "device": devices.get_active_device().name,
         # USB audio's option list. The STRUCTURE endpoint carries it because loadRouting builds the
         # controls once from this payload; the VALUES arrive with /api/routing/live.
         "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
@@ -7492,7 +7584,8 @@ def _desk_usb_mode():
     try:
         with _hid_lock:
             return rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("device.read_failed", "USB mode", error=str(exc))
         return None
 
 
@@ -8197,14 +8290,14 @@ class _BackgroundJob:
             # for happens AFTER a job reports success: the interesting question is what the app did
             # in the minute following the end line, and that can only be asked once the end line
             # has a timestamp of its own.
-            at = time.time()
+            at = time.monotonic()
             diagnostics.event("job.start", label)
             try:
                 res = work(self) or {}
             except Exception as exc:
                 res = {"ok": False, "message": f"{crashed}: {exc}"}
             diagnostics.event("job.end", label, ok=bool(res.get("ok")),
-                              took=f"{time.time() - at:.2f}s",
+                              took=f"{time.monotonic() - at:.2f}s",
                               said=res.get("message") or "Done.")
             with self._lock:
                 self._state.update({"running": False, "done": True,
@@ -8487,9 +8580,12 @@ def _baseline_name() -> str:
 
     Deliberately not "app install": a year from now that says nothing about which unit or when.
     Kept inside profiles.safe_name's character set (letters, digits, spaces, dashes) and its 40
-    character limit, which is why the date is numeric and there are no brackets."""
-    name = f"As found {time.strftime('%Y-%m-%d')} {devices.get_active_device().name}"
-    return profiles.safe_name(name[:40]) or f"As found {time.strftime('%Y-%m-%d')}"
+    character limit, which is why there are no brackets and the desk is named without the
+    "RODECaster" every desk shares: the longest date, "30th September 2026", leaves room for no
+    more. The date is spoken rather than numeric because a profile name is heard."""
+    when = f"As found {wording.spoken_date(datetime.date.today())}"
+    desk = devices.get_active_device().name.removeprefix("RODECaster ").strip()
+    return profiles.safe_name(f"{when} {desk}"[:40]) or when
 
 
 def baseline_status() -> dict:
@@ -8941,8 +9037,9 @@ def _reset_and_wait(step) -> dict:
             try:
                 listener.start()
                 listening = True
-            except Exception:
-                pass
+            except Exception as exc:
+                diagnostics.event("device.listener_failed", "reading instead of listening",
+                                  error=str(exc))
             shows.send_new_from_default()
         # NEVER LONGER THAN THE SHOW-COMMAND TIMEOUT ITSELF. Two independent waits for one command is
         # one too many: `shows.COMMAND_TIMEOUT_S` is the ceiling for "how long we give the desk", so
@@ -9466,9 +9563,6 @@ def action_restore_backup(name: str, clean: bool = False) -> dict:
     # RESTORE_USES_THE_PROFILE, never the paired show, however available the show is; the docstring
     # holds the measurement behind that. The pairing is still made and still exported, so backing up
     # is unaffected and a paired backup is not stranded - only which half is read back.
-    plan = backup_restore_plan(name)
-    if not plan.get("ok"):
-        return plan
     res = restore_profile(name)
     res["via"] = "profile"
     return res
@@ -9851,17 +9945,31 @@ def action_restore_factory_fx() -> dict:
         failed="Could not restore the factory voice effects")
 
 
-def pad_export_dir() -> str:
-    """Where an exported pad sound goes: Documents\\AccessCaster\\Pad exports.
+def _documents_folder(name: str) -> str:
+    """Documents\\AccessCaster\\<name>, created if need be: where the app's exports go.
 
-    Documents rather than the app's own data folder (%LOCALAPPDATA%), and that is the whole point of
-    the feature: an export you cannot find is not an export. There is no folder picker because the
+    Documents rather than the app's own data folder (%LOCALAPPDATA%): an export you cannot find is
+    not an export, and a reinstall wipes the data folder. There is no folder picker because the
     page is a browser page and a native picker is not something a screen reader user should have to
     fight for a fixed destination anyway - the reply says the full path, and Open folder takes you
     there."""
-    base = os.path.join(os.path.expanduser("~"), "Documents", "AccessCaster", "Pad exports")
+    base = os.path.join(os.path.expanduser("~"), "Documents", "AccessCaster", name)
     os.makedirs(base, exist_ok=True)
     return base
+
+
+def _open_folder_reply(folder: str, what: str) -> dict:
+    """Open `folder` in Explorer and say so. `what` names it in a failure: "The folder"."""
+    try:
+        _open_folder_focused(folder)
+    except Exception as exc:
+        return {"ok": False, "message": f"{what} is {folder}, but it could not be opened: {exc}"}
+    return {"ok": True, "message": f"Opened {folder}."}
+
+
+def pad_export_dir() -> str:
+    """Where an exported pad sound goes."""
+    return _documents_folder("Pad exports")
 
 
 def action_export_pad(pad: int) -> dict:
@@ -9949,13 +10057,7 @@ def _open_folder_focused(folder: str) -> None:
 
 def action_open_pad_exports() -> dict:
     """Open the exports folder in Explorer, so the file can actually be used once it is copied."""
-    folder = pad_export_dir()
-    try:
-        _open_folder_focused(folder)
-    except Exception as exc:
-        return {"ok": False, "message": f"The exports folder is {folder}, but it could not be "
-                                        f"opened: {exc}"}
-    return {"ok": True, "message": f"Opened {folder}."}
+    return _open_folder_reply(pad_export_dir(), "The exports folder")
 
 
 def action_tidy_pad_audio() -> dict:
@@ -10291,7 +10393,7 @@ def _hk_refresh_pads() -> dict:
         _hk_fx_missing = frozenset()    # a health read that fails must never break a press
     with _hk_pad_lock:
         _hk_pad_map = fresh
-    _hk_pads_at = time.time()
+    _hk_pads_at = time.monotonic()
     _hk_note_bank(soundpad.current_bank(blob))
     return fresh
 
@@ -10352,7 +10454,7 @@ def _hk_pads_stale() -> None:
 
 def _hk_maybe_refresh_pads() -> None:
     """Read the pad pool again in the background IF it is stale, and never twice at once."""
-    if time.time() - _hk_pads_at < _HK_PAD_CACHE_S or _hk_refreshing.is_set():
+    if time.monotonic() - _hk_pads_at < _HK_PAD_CACHE_S or _hk_refreshing.is_set():
         return
 
     def run():
@@ -10397,11 +10499,34 @@ def _hk_rearm_midi() -> None:
     _hk_midi_armed = False
 
 
+# HOW LONG A PAD SHORTCUT WAITS FOR THE HID LOCK. A pad press writes to the desk, and a write sent
+# while a profile restore has the desk in transfer mode lands inside the transfer. Ordinary holders
+# are model reads of 1.5 to 3 s; a restore or a sound upload holds it for far longer, and a press
+# that waited for one of those would fire long after it was meant to.
+_HK_DESK_WAIT_S = 3.5
+
+
+class _DeskBusy(Exception):
+    """A pad shortcut could not have the HID lock within _HK_DESK_WAIT_S. The message is spoken."""
+
+
+@contextlib.contextmanager
+def _hk_desk():
+    if not _hid_lock.acquire(timeout=_HK_DESK_WAIT_S):
+        raise _DeskBusy("The desk is busy with another job, such as a restore, so nothing was "
+                        "pressed. Try again when it has finished.")
+    try:
+        yield
+    finally:
+        _hid_lock.release()
+
+
 def _hk_arm_midi() -> None:
     global _hk_midi_armed
     if _hk_midi_armed:
         return
-    rcp_transfer.set_midi_control(True)
+    with _hk_desk():
+        rcp_transfer.set_midi_control(True)
     _hk_midi_armed = True
     _ann_say("MIDI control switched on, so the desk will play sound pads.")
 
@@ -10431,7 +10556,7 @@ def _hk_note_pad_progress(position: int, progress: float) -> None:
     """One `padProgress` push. Keeps the FIRST sample as well as the latest, because time remaining
     is worked out from the RATE between two samples: progress is a 0-1 fraction and the desk
     publishes no duration anywhere, so a single sample says how far through but never how long."""
-    now = time.time()
+    now = time.monotonic()
     with _hk_play_lock:
         seen = _hk_playing.get(position)
         if seen is None or progress < seen["last"] or now - seen["last_at"] > _HK_PLAY_STALE_S:
@@ -10447,15 +10572,15 @@ def _hk_note_pad_active(position: int, on: bool) -> None:
     """One `padActive` push. Off means the sound has finished or been stopped."""
     with _hk_play_lock:
         if on:
-            _hk_playing.setdefault(position, {"first": 0.0, "first_at": time.time(),
-                                              "last": 0.0, "last_at": time.time()})
+            _hk_playing.setdefault(position, {"first": 0.0, "first_at": time.monotonic(),
+                                              "last": 0.0, "last_at": time.monotonic()})
         else:
             _hk_playing.pop(position, None)
 
 
 def _hk_play_snapshot() -> dict:
     """position -> (progress, seconds remaining or None), for pads pushing progress RIGHT NOW."""
-    now, out = time.time(), {}
+    now, out = time.monotonic(), {}
     with _hk_play_lock:
         for position, seen in list(_hk_playing.items()):
             if now - seen["last_at"] > _HK_PLAY_STALE_S:
@@ -10473,12 +10598,14 @@ def _hk_pad_verify(pad_idx: int, want_on: bool) -> None:
     """After a press, re-read and confirm the RIGHT pad reacted. Runs on its own thread."""
     try:
         fresh = _hk_refresh_pads()
-        latched = {pi for _pos, pi, _nm in soundpad.latched_pads()}
+        with _hid_lock:
+            latched = {pi for _pos, pi, _nm in soundpad.latched_pads()}
         if want_on and pad_idx not in latched and latched:
             wrong = sorted(latched)[0]
             entry = fresh.get(wrong)
             if entry:
-                soundpad.unlatch_pad(entry[0])
+                with _hid_lock:
+                    soundpad.unlatch_pad(entry[0])
                 _ann_say(f"That fired the wrong pad, {entry[1]}, and it has been switched off "
                          f"again. The pad list was out of date and has been read again.")
     except Exception:
@@ -10525,7 +10652,8 @@ def _hk_pad_play(pad_idx: int, position: int, name: str, play_mode) -> str:
         _hk_arm_midi()
         if _hk_current_bank() != bank:
             _hk_release_held_pads()
-            soundpad.select_bank(bank)
+            with _hk_desk():
+                soundpad.select_bank(bank)
             _hk_note_bank(bank)
             time.sleep(_HK_BANK_SETTLE_S)
         # HOLD MODE PLAYS ONLY WHILE THE PAD IS HELD, and a hotkey has no release event to hang a
@@ -10542,6 +10670,8 @@ def _hk_pad_play(pad_idx: int, position: int, name: str, play_mode) -> str:
             return f"{name} playing. It is set to Hold, so press again to stop it."
         was_playing = position in _hk_play_snapshot()
         midi_out.play_pad(slot)
+    except _DeskBusy as exc:
+        return str(exc)
     except Exception as exc:
         _hk_pads_held.discard(pad_idx)
         return f"{name} would not play: {exc}"
@@ -10574,12 +10704,17 @@ def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
     if on and pad_idx in _hk_fx_missing:
         return _HK_FX_EMPTY.format(name=name)
     try:
+        with _hk_desk():
+            if on:
+                soundpad.engage_pad(position)
+            else:
+                soundpad.unlatch_pad(position)
         if on:
-            soundpad.engage_pad(position)
             _hk_pads_on.add(pad_idx)
         else:
-            soundpad.unlatch_pad(position)
             _hk_pads_on.discard(pad_idx)
+    except _DeskBusy as exc:
+        return str(exc)            # nothing was written, so the pad is as it was
     except Exception as exc:
         _hk_pads_on.discard(pad_idx)
         return f"{name} would not respond: {exc}"
@@ -10668,7 +10803,10 @@ def _hk_bank_step(target: str) -> str:
                 f"{'first' if step < 0 else 'last'} bank.")
     _hk_release_held_pads()
     try:
-        soundpad.select_bank(want)
+        with _hk_desk():
+            soundpad.select_bank(want)
+    except _DeskBusy as exc:
+        return str(exc)
     except Exception as exc:
         return f"The bank would not change: {exc}"
     _hk_note_bank(want)
@@ -10919,14 +11057,8 @@ def hotkey_commands() -> dict:
 
 
 def app_settings_dir() -> str:
-    """Where an app-settings export goes: Documents\\AccessCaster\\App settings.
-
-    Documents rather than %LOCALAPPDATA%, for the reason pad_export_dir gives: an export you cannot
-    find is not an export, and the whole point of this one is to survive a reinstall - which wipes
-    the app's own data folder."""
-    base = os.path.join(os.path.expanduser("~"), "Documents", "AccessCaster", "App settings")
-    os.makedirs(base, exist_ok=True)
-    return base
+    """Where an app-settings export goes. The point of this one is to survive a reinstall."""
+    return _documents_folder("App settings")
 
 
 def _app_settings_available() -> dict:
@@ -10969,13 +11101,8 @@ def action_export_app_settings() -> dict:
                 "message": "There is nothing to save yet: no keyboard shortcuts are set up and no "
                            "announcement or level-warning preference has been changed from its "
                            "default."}
-    # Day, month NAME, year - never all digits. "02-09" is read aloud as the wrong date in half the
-    # world, and this is a filename somebody will hear rather than see.
-    now = time.localtime()
-    day = now.tm_mday
-    suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
-    stamp = f"{day}{suffix} {time.strftime('%B %Y', now)}"
-    name = f"AccessCaster settings {stamp}.json"
+    # A filename somebody will hear rather than see, so the date is spoken, not numeric.
+    name = f"AccessCaster settings {wording.spoken_date(datetime.date.today())}.json"
     path = os.path.join(app_settings_dir(), name)
     try:
         with open(path, "w", encoding="utf-8") as fh:
@@ -11066,13 +11193,7 @@ def action_set_autostart(on: bool) -> dict:
 
 def action_open_app_settings_folder() -> dict:
     """Open the folder the export went to, so the file can actually be copied somewhere safe."""
-    folder = app_settings_dir()
-    try:
-        _open_folder_focused(folder)
-    except Exception as exc:
-        return {"ok": False, "message": f"The folder is {folder}, but it could not be "
-                                        f"opened: {exc}"}
-    return {"ok": True, "message": f"Opened {folder}."}
+    return _open_folder_reply(app_settings_dir(), "The folder")
 
 
 def action_set_hotkey(id: str, key: str, enabled: bool, speak: bool = True) -> dict:
@@ -11534,13 +11655,27 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length > 0 else b""
 
     def _read_json(self) -> dict:
+        """The request body as a JSON object; an empty body is {}. Anything else raises
+        ValueError, which do_POST answers with a 400, so a malformed request never runs an action
+        with its defaults (an unreadable /api/announce would otherwise switch announcements off)."""
         raw = self._read_body()
         if not raw:
             return {}
         try:
-            return json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            return {}
+            data = json.loads(raw.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("the body is not UTF-8") from exc
+        if not isinstance(data, dict):
+            raise ValueError("the body is not a JSON object")
+        return data
+
+    def _server_error(self, exc: Exception) -> None:
+        """Log an unexpected exception in a route and answer 500. Under pythonw stderr goes
+        nowhere, so the diagnostics log is the only record of it."""
+        diagnostics.event("http.error", f"{self.command} {self.path}",
+                          error=f"{type(exc).__name__}: {exc}")
+        with contextlib.suppress(OSError):          # the client has gone
+            self._send_json({"ok": False, "message": f"Server error: {exc}"}, status=500)
 
     # --- routing -----------------------------------------------------------
     def do_GET(self):
@@ -11550,6 +11685,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._refuse()
             return
+        try:
+            self._route_get()
+        except Exception as exc:
+            self._server_error(exc)
+
+    def _route_get(self):
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/index.html"):
             # THE COOKIE IS SET HERE AND NOWHERE ELSE. It is what lets every fetch in app.js stay
@@ -11580,11 +11721,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/static/"):
             name = path[len("/static/"):]
-            safe = os.path.normpath(name).replace("\\", "/")  # block traversal
-            if safe.startswith("..") or safe.startswith("/"):
+            full = _static_file(name)
+            if full is None:
                 self.send_error(403)
                 return
-            full = os.path.join(STATIC_DIR, safe)
             ctype = (
                 "text/css; charset=utf-8" if name.endswith(".css")
                 else "application/javascript; charset=utf-8" if name.endswith(".js")
@@ -11607,14 +11747,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/ping":
                 # App-lifecycle heartbeat from the open webpage. Cheap, no device access.
                 # A ping also CANCELS a pending quit, so a page reload does not stop the server.
-                _last_ping = time.time()
+                _last_ping = time.monotonic()
                 _client_seen = True
                 _quit_at = None
                 self._send_json({"ok": True, "instance": _INSTANCE_ID, "version": APP_VERSION})
             elif self.path == "/api/quit":
                 # The webpage is closing (sendBeacon on pagehide). Schedule shutdown after a
                 # short grace; a reloaded page's ping arrives first and cancels it.
-                _quit_at = time.time() + _QUIT_GRACE
+                _quit_at = time.monotonic() + _QUIT_GRACE
                 diagnostics.event("app.quit_beacon", "the webpage says it is closing")
                 self._send_json({"ok": True})
             elif self.path == "/api/focus":
@@ -11689,7 +11829,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as exc:
             self._send_json({"ok": False, "message": f"Bad request: {exc}"}, status=400)
         except Exception as exc:
-            self._send_json({"ok": False, "message": f"Server error: {exc}"}, status=500)
+            self._server_error(exc)
 
 
 def _browser_exe():
@@ -12030,7 +12170,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announcer=True, shortcuts
         return None
     global _httpd, _last_ping
     _httpd = server
-    _last_ping = time.time()
+    _last_ping = time.monotonic()
     diagnostics.event("app.serving", url)
     print(f"AccessCaster serving on {url}")
     print(f"(LAN: http://<this-pc-ip>:{HTTP_PORT}/ - USB control runs on this PC)")

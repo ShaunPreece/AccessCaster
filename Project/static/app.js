@@ -102,6 +102,28 @@ function isBusy(el) {
   return !!(el && el.dataset && el.dataset.busy);
 }
 
+/* A repeating poll that a page starts on entry and stops on leaving. start() restarts it, so a
+   second entry never leaves two intervals running. */
+function makePoller(tick, ms) {
+  let timer = null;
+  const stop = () => {
+    if (timer !== null) {
+      window.clearInterval(timer);
+      timer = null;
+    }
+  };
+  return { start() { stop(); timer = window.setInterval(tick, ms); }, stop };
+}
+
+/* Refuse a press on a button whose last job is still running, aloud, and return true. For the
+   buttons whose job confirms first or runs for seconds: a second press would open a second
+   confirmation, and confirming it would do the job twice. */
+function stillWorking(btn) {
+  if (!isBusy(btn)) return false;
+  announce("Still working on the last one.", true);
+  return true;
+}
+
 /* ---- Tab strips: the layout every page uses --------------------------------
    THERE ARE NO COLLAPSIBLE GROUPS, and nothing should reintroduce them: every page uses one of the
    two helpers below. `dropRetiredGroupState()` near init() deletes the old `accesscaster.groups`
@@ -805,14 +827,9 @@ async function sendToggle(url, body, input, on) {
   }
 }
 
-/* ---- System: MIDI control ------------------------------------------- */
-
-function onMidiToggle(ev) {
-  return sendToggle("/api/midi", { on: ev.target.checked }, ev.target, ev.target.checked);
-}
-
-function onAnnounceToggle(ev) {
-  return sendToggle("/api/announce", { on: ev.target.checked }, ev.target, ev.target.checked);
+/* A change handler for a page switch whose whole write is `{ on }` to `url`. */
+function toggleTo(url) {
+  return (ev) => sendToggle(url, { on: ev.target.checked }, ev.target, ev.target.checked);
 }
 
 /* Device page: the "current state" overview, the first thing on the page and the reason it exists.
@@ -1196,8 +1213,8 @@ function buildInputLevel(d) {
     // WINDOWS' MUTE, which is invisible everywhere else: a muted input reads exactly like a dead
     // microphone, and the fix is in a Windows dialog rather than anywhere on the desk. Both of a
     // unit's inputs can be muted there with nothing anywhere saying so.
-    box.appendChild(buildSwitch("meter-input-muted", "Muted in Windows", false,
-      (on, sw) => sendToggle("/api/meters/input-mute", { on }, sw, on)));
+    box.appendChild(makeSwitchRow("meter-input-muted", "Muted in Windows", false,
+      (on, sw) => sendToggle("/api/meters/input-mute", { on }, sw, on)).row);
     const note = document.createElement("p");
     note.id = "meter-input-note";
     note.className = "hint";
@@ -1262,16 +1279,16 @@ function buildMeterWatchControls(d) {
   if (!host) return;
   const s = d.settings || {};
   rebuildIfChanged(host, "meter-watch-v1", () => {
-    host.appendChild(buildSwitch("meter-watch-on", "Watch this stream and warn me", false,
-      (on, input) => sendToggle("/api/meters/watch", { on }, input, on)));
-    host.appendChild(buildSwitch("meter-warn-clip", "Say when it is clipping", true,
+    host.appendChild(makeSwitchRow("meter-watch-on", "Watch this stream and warn me", false,
+      (on, input) => sendToggle("/api/meters/watch", { on }, input, on)).row);
+    host.appendChild(makeSwitchRow("meter-warn-clip", "Say when it is clipping", true,
       (on, input) => sendToggle("/api/meters/option",
-        { name: "warn_clip", value: on ? 1 : 0 }, input, on)));
+        { name: "warn_clip", value: on ? 1 : 0 }, input, on)).row);
     // A SOUND as well as the words. Clipping is the one thing here you react to rather than think
     // about, and a spoken sentence arrives a word at a time.
-    host.appendChild(buildSwitch("meter-clip-sound", "Play a sound when it clips", true,
+    host.appendChild(makeSwitchRow("meter-clip-sound", "Play a sound when it clips", true,
       (on, input) => sendToggle("/api/meters/option",
-        { name: "clip_sound", value: on ? 1 : 0 }, input, on)));
+        { name: "clip_sound", value: on ? 1 : 0 }, input, on)).row);
     // WHERE the warning fires. True full scale is genuinely hard to reach on this desk, whose own
     // compressor and limiter hold a shouted mic well below it, so a warning there arrives only
     // once the damage is done. Minus 1 warns while there is still something you can do.
@@ -1279,10 +1296,10 @@ function buildMeterWatchControls(d) {
       "Warn me at, dB", -20, 0,
       "Zero is where sound is actually damaged. The unit's own limiter holds processed speech just "
       + "under that, so a lower setting will fire on every sentence."));
-    host.appendChild(buildSwitch("meter-warn-silence",
+    host.appendChild(makeSwitchRow("meter-warn-silence",
       "Say when it goes silent, and when it comes back", true,
       (on, input) => sendToggle("/api/meters/option",
-        { name: "warn_silence", value: on ? 1 : 0 }, input, on)));
+        { name: "warn_silence", value: on ? 1 : 0 }, input, on)).row);
     host.appendChild(buildMeterNumber("meter-silence-after", "silence_after",
       "Seconds of silence before it says so", 1, 60,
       "Five is long enough to ignore a pause for breath."));
@@ -1474,12 +1491,12 @@ function buildUnitSetting(s) {
 
   let control;
   if (s.kind === "bool") {
-    control = buildSwitch(id, s.label, s.value === 1,
+    control = makeSwitchRow(id, s.label, s.value === 1,
       (on, input) => {
         // The switch goes BACK on a refusal, or it claims a setting the unit does not have.
         if (refuseChange(input) !== null) { input.checked = !on; return; }
         sendToggle("/api/device/setting", { prop: s.prop, value: on ? 1 : 0 }, input, on);
-      });
+      }).row;
   } else if (s.kind === "choice") {
     control = buildUnitChoice(s, id, known);
   } else {
@@ -1651,26 +1668,6 @@ async function readDevice() {
   await readDeviceTab(key);
 }
 
-function onAnnounceRememberToggle(ev) {
-  return sendToggle("/api/announce/remember", { on: ev.target.checked }, ev.target,
-                    ev.target.checked);
-}
-
-function onAnnounceStartupSummaryToggle(ev) {
-  return sendToggle("/api/announce/startup-summary", { on: ev.target.checked }, ev.target,
-                    ev.target.checked);
-}
-
-function onAnnounceMuteTonesToggle(ev) {
-  return sendToggle("/api/announce/mute-tones", { on: ev.target.checked }, ev.target,
-                    ev.target.checked);
-}
-
-function onAnnounceLevelsToggle(ev) {
-  return sendToggle("/api/announce/levels", { on: ev.target.checked }, ev.target,
-                    ev.target.checked);
-}
-
 async function loadAnnounceState() {
   try {
     const resp = await fetch("/api/announce");
@@ -1724,30 +1721,19 @@ function fillSpeechChoices(data) {
 /* Both of these restart the speech worker on the server, and the confirmation is spoken THROUGH the
    new voice and the new output, which is the real test: if you cannot hear it, that output is not
    the one you are listening to. The written status says the same thing for the record. */
-async function onAnnounceVoiceChange(ev) {
-  const sel = ev.target;
-  setBusy(sel, true);
-  try {
-    const res = await postJSON("/api/announce/voice", { voice: sel.value });
-    setStatus("announce-speech-status", res.message || "Could not change the voice.");
-  } catch {
-    setStatus("announce-speech-status", "Could not reach the app service.");
-  } finally {
-    setBusy(sel, false);
-  }
-}
-
-async function onAnnounceOutputChange(ev) {
-  const sel = ev.target;
-  setBusy(sel, true);
-  try {
-    const res = await postJSON("/api/announce/output", { output: sel.value });
-    setStatus("announce-speech-status", res.message || "Could not change the output.");
-  } catch {
-    setStatus("announce-speech-status", "Could not reach the app service.");
-  } finally {
-    setBusy(sel, false);
-  }
+function onAnnounceSpeechChange(kind) {
+  return async (ev) => {
+    const sel = ev.target;
+    setBusy(sel, true);
+    try {
+      const res = await postJSON("/api/announce/" + kind, { [kind]: sel.value });
+      setStatus("announce-speech-status", res.message || `Could not change the ${kind}.`);
+    } catch {
+      setStatus("announce-speech-status", "Could not reach the app service.");
+    } finally {
+      setBusy(sel, false);
+    }
+  };
 }
 
 async function onAnnounceDevicesRefresh(ev) {
@@ -1816,7 +1802,7 @@ async function commitAnnounceVolume() {
    menu (Edit, Turn off or on, Speak when pressed, Delete). A click opens the menu rather than
    Edit because a touch screen has no Applications key. */
 let hotkeyData = null;
-let hotkeyCommands = null;      // the catalogue, read once when the Add dialog is first opened
+let hotkeyCommands = null;      // the catalogue, read each time the Add dialog is opened
 let hotkeySelectedId = null;
 let _hotkeyReturnFocus = null;
 
@@ -2151,8 +2137,10 @@ function onHotkeysEnabledToggle(ev) {
 
 /* ---- Adding a shortcut: category, then command ------------------------
    The catalogue is a separate, slower read (it looks at the pads and the presets on the unit), so
-   it is fetched when the dialog is first opened rather than on every visit to the tab, and kept for
-   the session. Opening the dialog with nothing loaded says so rather than showing an empty list. */
+   it is fetched when the dialog is opened rather than on every visit to the tab. Fetched on EVERY
+   open, never kept: pads and presets are renamed and added between opens, and a catalogue read
+   while the unit was unplugged lacks them altogether. Opening the dialog with nothing loaded says
+   so rather than showing an empty list. */
 async function onHotkeyAddOpen() {
   _hotkeyReturnFocus = document.getElementById("hotkey-add-btn");
   const dlg = document.getElementById("hotkey-add-dialog");
@@ -2164,14 +2152,13 @@ async function onHotkeyAddOpen() {
   // Focus the first thing there is to DO. Focusing the heading instead means the whole dialog is
   // read out and then its title again before you reach anything.
   document.getElementById("hotkey-add-category").focus();
-  if (!hotkeyCommands) {
-    try {
-      const resp = await fetch("/api/hotkeys/commands");
-      hotkeyCommands = await resp.json();
-    } catch {
-      setText("hotkey-add-status", "Could not reach the app service.");
-      return;
-    }
+  try {
+    const resp = await fetch("/api/hotkeys/commands");
+    hotkeyCommands = await resp.json();
+  } catch {
+    hotkeyCommands = null;
+    setText("hotkey-add-status", "Could not reach the app service.");
+    return;
   }
   const groups = (hotkeyCommands && hotkeyCommands.groups) || [];
   if (!groups.length) {
@@ -2578,27 +2565,27 @@ function fillChannelSettings(body, ch) {
   if (ch.name !== "Chat") body.appendChild(buildLevelCheckButton(ch));
   if (!isMic) return;
   const idx = MIC_NAME_TO_INDEX[ch.name];
-  body.appendChild(buildSwitch("p48-" + ch.name, "48V phantom power", ch.phantom === true,
-    (on, input) => sendMicToggle("/api/channel/phantom", idx, on, input)));
-  body.appendChild(buildSwitch("pol-" + ch.name, "Invert polarity (phase)", ch.polarity === true,
-    (on, input) => sendMicToggle("/api/channel/polarity", idx, on, input)));
+  body.appendChild(makeSwitchRow("p48-" + ch.name, "48V phantom power", ch.phantom === true,
+    (on, input) => sendMicToggle("/api/channel/phantom", idx, on, input)).row);
+  body.appendChild(makeSwitchRow("pol-" + ch.name, "Invert polarity (phase)", ch.polarity === true,
+    (on, input) => sendMicToggle("/api/channel/polarity", idx, on, input)).row);
   if (channelsData.mic_types && channelsData.mic_types.length) {
     body.appendChild(buildMicTypeField(ch, idx));
   }
 }
 
 function fillChannelProcessing(body, ch) {
-  body.appendChild(buildSwitch("proc-on-" + ch.name, "Processing on",
+  body.appendChild(makeSwitchRow("proc-on-" + ch.name, "Processing on",
     ch.processing_on === true,
-    (on, input) => sendToggle("/api/channels/processing-onoff", { name: ch.name, on }, input, on)));
+    (on, input) => sendToggle("/api/channels/processing-onoff", { name: ch.name, on }, input, on)).row);
   // ADVANCED vs SIMPLE (channelAdvancedProcessing). In simple mode the unit works the chain out
   // from Depth/Sparkle/Punch, so the sliders on the other tabs may be recomputed from those three -
   // say so rather than leaving a screen-reader user wondering why a value moved on its own.
   if (ch.advanced !== null && ch.advanced !== undefined) {
     const hintId = "adv-hint-" + ch.name;
-    const sw = buildSwitch("adv-" + ch.name, "Advanced processing (use the modules below)",
+    const sw = makeSwitchRow("adv-" + ch.name, "Advanced processing (use the modules below)",
       ch.advanced === true,
-      (on, input) => sendToggle("/api/channels/advanced", { name: ch.name, on }, input, on));
+      (on, input) => sendToggle("/api/channels/advanced", { name: ch.name, on }, input, on)).row;
     const inp = sw.querySelector("input");
     if (inp) inp.setAttribute("aria-describedby", hintId);
     body.appendChild(sw);
@@ -2611,8 +2598,8 @@ function fillChannelProcessing(body, ch) {
   }
   (channelsData.modules || []).forEach((m) => {
     const onNow = ch.modules ? ch.modules[m.key + "On"] === true : false;
-    body.appendChild(buildSwitch("mod-" + m.key + "-" + ch.name, m.label, onNow,
-      (on, input) => sendToggle("/api/channels/module", { name: ch.name, module: m.key, on }, input, on)));
+    body.appendChild(makeSwitchRow("mod-" + m.key + "-" + ch.name, m.label, onNow,
+      (on, input) => sendToggle("/api/channels/module", { name: ch.name, module: m.key, on }, input, on)).row);
   });
 }
 
@@ -2684,7 +2671,7 @@ function fillStereoPan(host, ch, legs) {
     ? ch.params[prop] : null);
   const links = stereoPanLinks();
   const switchId = "panlink-" + ch.name;
-  host.appendChild(buildSwitch(switchId, "Link both sides into one pan control", !!links[ch.name],
+  host.appendChild(makeSwitchRow(switchId, "Link both sides into one pan control", !!links[ch.name],
     (on) => {
       const st = stereoPanLinks();
       if (on) st[ch.name] = { base: [leg(lCtrl.prop), leg(rCtrl.prop)], offset: 0 };
@@ -2693,7 +2680,7 @@ function fillStereoPan(host, ch, legs) {
       fillStereoPan(host, ch, legs);
       const again = document.getElementById(switchId);
       if (again) again.focus();
-    }));
+    }).row);
 
   const entry = links[ch.name];
   const l = leg(lCtrl.prop), r = leg(rCtrl.prop);
@@ -2774,11 +2761,11 @@ function buildChannelMute(ch) {
   wrap.className = "field-block";
   const id = "mute-" + ch.name;
   const hintId = id + "-hint";
-  const sw = buildSwitch(id, "Mute " + ch.label, ch.muted === true,
+  const sw = makeSwitchRow(id, "Mute " + ch.label, ch.muted === true,
     (on, input) => {
       ch.muted = on;
       return sendToggle("/api/channels/mute", { name: ch.name, on }, input, on);
-    });
+    }).row;
   const input = sw.querySelector("input");
   if (input) input.setAttribute("aria-describedby", hintId);
   wrap.appendChild(sw);
@@ -2813,11 +2800,11 @@ function buildChannelSolo(ch) {
   wrap.className = "field-block";
   const id = "solo-" + ch.name;
   const hintId = id + "-hint";
-  const sw = buildSwitch(id, "Listen (solo) " + ch.label, ch.solo === true,
+  const sw = makeSwitchRow(id, "Listen (solo) " + ch.label, ch.solo === true,
     (on, input) => {
       ch.solo = on;
       return sendToggle("/api/channels/solo", { name: ch.name, on }, input, on);
-    });
+    }).row;
   const input = sw.querySelector("input");
   if (input) input.setAttribute("aria-describedby", hintId);
   wrap.appendChild(sw);
@@ -2888,7 +2875,7 @@ function buildWirelessMute(ch) {
   const hintId = id + "-hint";
   const wireless = (channelsData && channelsData.wireless_mics) || null;
   const noneConnected = !!(wireless && wireless.present && !wireless.any_connected);
-  const sw = buildSwitch(id, "Mute the wireless mic on " + ch.label, ch.wireless_muted === true,
+  const sw = makeSwitchRow(id, "Mute the wireless mic on " + ch.label, ch.wireless_muted === true,
     (on, input) => {
       // setAvailable only marks it; the HANDLER has to refuse, or the switch writes anyway and then
       // reports a state the unit is not in. Same shape as onMatrixSourceToggle.
@@ -2896,7 +2883,7 @@ function buildWirelessMute(ch) {
       if (no !== null) { input.checked = !input.checked; announce(no, true); return; }
       ch.wireless_muted = on;
       return sendToggle("/api/channels/wireless-mute", { name: ch.name, on }, input, on);
-    });
+    }).row;
   const input = sw.querySelector("input");
   if (input) {
     input.setAttribute("aria-describedby", hintId);
@@ -2961,24 +2948,6 @@ function buildLevelField(ch, min, max) {
 }
 
 /* A checkbox switch. onChange(checked, inputEl) does the work and may revert on failure. */
-function buildSwitch(id, labelText, checked, onChange) {
-  const p = document.createElement("p");
-  p.className = "field";
-  const label = document.createElement("label");
-  label.className = "switch";
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.id = id;
-  input.checked = !!checked;
-  input.addEventListener("change", () => onChange(input.checked, input));
-  const span = document.createElement("span");
-  span.textContent = labelText;
-  label.appendChild(input);
-  label.appendChild(span);
-  p.appendChild(label);
-  return p;
-}
-
 function sendMicToggle(url, channel, on, input) {
   return sendToggle(url, { channel, on }, input, on);
 }
@@ -3052,8 +3021,8 @@ function buildFxParamSlider(ch, effect, param, value01) {
 /* One effect's on/off switch plus its parameter sliders, into a tab section. */
 function fillEffectControls(body, ch, effect, title) {
   const fx = ch.effects || {};
-  body.appendChild(buildSwitch("fx-" + effect + "-" + ch.name, title, fx[effect] === true,
-    (on, input) => sendToggle("/api/channels/effect", { name: ch.name, effect, on }, input, on)));
+  body.appendChild(makeSwitchRow("fx-" + effect + "-" + ch.name, title, fx[effect] === true,
+    (on, input) => sendToggle("/api/channels/effect", { name: ch.name, effect, on }, input, on)).row);
   // Param sliders for this effect (Level, cuts, etc.), prefilled from the live read.
   const params = fx[effect + "_params"] || {};
   FX_PARAMS_BY_EFFECT[effect].forEach((param) => {
@@ -3742,6 +3711,7 @@ function resolvePadConfirm(value) {
 /* ---- Apply a type change (create / replace pad content) -------------- */
 
 async function onPadApply() {
+  if (stillWorking(document.getElementById("pad-ed-apply-btn"))) return;
   const pad = currentPad();
   if (!pad) return;
   const key = document.getElementById("pad-ed-type").value;
@@ -3884,11 +3854,19 @@ async function padEditPost(url, body) {
 // editor does not lag or re-announce after every keystroke. Apply/Clear (which change the
 // pad's content) still do a full reload.
 async function onPadRename() {
+  const btn = document.getElementById("pad-ed-name-btn");
+  if (stillWorking(btn)) return;
   const pad = currentPad();
   const nameEl = document.getElementById("pad-ed-name");
   if (!pad || !pad.present) { announce("Pick a pad with content first.", true); return; }
   if (!nameEl.value.trim()) { announce("Enter a name for the pad.", true); nameEl.focus(); return; }
-  const res = await padEditPost("/api/pad/name", { pad: pad.grid, name: nameEl.value.trim() });
+  setBusy(btn, true);
+  let res;
+  try {
+    res = await padEditPost("/api/pad/name", { pad: pad.grid, name: nameEl.value.trim() });
+  } finally {
+    setBusy(btn, false);
+  }
   if (res.ok) {
     pad.name = nameEl.value.trim();
     // The pad chooser reads out the pad's content, so a rename has to reach it. Re-filling it here
@@ -4321,6 +4299,7 @@ async function onMixerTrigger() {
 }
 
 async function onPadClear() {
+  if (stillWorking(document.getElementById("pad-ed-clear-btn"))) return;
   const pad = currentPad();
   if (!pad) return;
   if (!pad.present) { announce("This pad is already empty."); return; }
@@ -4353,6 +4332,7 @@ async function onPadClear() {
 }
 
 async function onClearAllPads() {
+  if (stillWorking(document.getElementById("clear-all-btn"))) return;
   const ok = await confirmAction(
     "Clear all pads?",
     "This empties every soundpad, voice-effect, mixer and MIDI pad on the grid. The built-in " +
@@ -4374,6 +4354,7 @@ async function onClearAllPads() {
 }
 
 async function onTidyPadAudio() {
+  if (stillWorking(document.getElementById("tidy-audio-btn"))) return;
   const ok = await confirmAction(
     "Delete unused pad audio?",
     "This removes sound files from the unit that no pad plays any more, freeing up space. " +
@@ -4397,6 +4378,7 @@ async function onTidyPadAudio() {
 /* Restore just the six factory VOICE EFFECTS, with Censor and Ducking. Progress comes from the
    pad-restore job, through pollPadRestore. */
 async function onRestoreFactoryFx() {
+  if (stillWorking(document.getElementById("restore-fx-btn"))) return;
   const ok = await confirmAction(
     "Restore the factory voice effects, Censor and Ducking?",
     "This puts the six factory voice effects back on their own pads, and the Censor and Ducking " +
@@ -4429,6 +4411,7 @@ async function onRestoreFactoryFx() {
    the same pad every other tab acts on - so the reply names it, and the pad number, to make that
    unambiguous without having to go back and check. */
 async function onExportPad() {
+  if (stillWorking(document.getElementById("export-pad-btn"))) return;
   const sel = document.getElementById("pad-ed-select");
   const grid = sel ? parseInt(sel.value, 10) : NaN;
   if (!grid) { announce("Choose a pad first.", true); return; }
@@ -4456,27 +4439,12 @@ async function onOpenPadExports() {
 
 // Poll the pad-restore status until done, saying each new step on `line`, the status line of the
 // control that started it. That line is a live region and the only voice (see setStatus).
-function pollPadRestore(line) {
-  return new Promise((resolve) => {
-    let lastStep = 0;
-    const iv = setInterval(async () => {
-      let s;
-      try {
-        s = await (await fetch("/api/pads/restore-defaults/status")).json();
-      } catch {
-        return;   // transient; try again on the next tick
-      }
-      if (!s.done && s.step && s.step !== lastStep) {
-        lastStep = s.step;
-        setStatus(line, `${s.label}, ${s.step} of ${s.total}.`);
-      }
-      if (s.done) {
-        clearInterval(iv);
-        setStatus(line, s.message || "Done.");
-        resolve();
-      }
-    }, 1200);
+async function pollPadRestore(line) {
+  const s = await pollJob("/api/pads/restore-defaults/status", line, {
+    show: (st) => setStatus(line, st.step ? `${st.label}, ${st.step} of ${st.total}.` : st.message),
+    reopen: "Open the SMART pads page again to check.",
   });
+  setStatus(line, s.message || "Done.");
 }
 
 /* ---- Custom voice-FX creator -------------------------------------------
@@ -4736,6 +4704,7 @@ function renderCustomFxList(names) {
 }
 
 async function onFxCreateSave() {
+  if (stillWorking(document.getElementById("fx-create-save"))) return;
   const nameEl = document.getElementById("fx-create-name");
   const name = nameEl.value.trim();
   if (!name) { announce("Give the effect a name first.", true); nameEl.focus(); return; }
@@ -5052,7 +5021,9 @@ function setStagedValue(sel, value, label) {
   markStaged(sel);
 }
 
-function makeSwitchRow(id, labelText, onChange) {
+/* A labelled checkbox switch. `onChange(on, input)` runs on every change; `span` is the label text,
+   for callers that retarget it. */
+function makeSwitchRow(id, labelText, checked, onChange) {
   const row = document.createElement("p");
   row.className = "field";
   const label = document.createElement("label");
@@ -5060,7 +5031,8 @@ function makeSwitchRow(id, labelText, onChange) {
   const input = document.createElement("input");
   input.type = "checkbox";
   input.id = id;
-  input.addEventListener("change", () => onChange(input));
+  input.checked = !!checked;
+  input.addEventListener("change", () => onChange(input.checked, input));
   const span = document.createElement("span");
   span.textContent = labelText;
   label.appendChild(input);
@@ -5122,16 +5094,21 @@ async function routingPost(url, body, control) {
 
 /* Build the routing page's controls. STRUCTURE ONLY plus the values this one model carries: the
    per-tab live reads (the levels, the monitor mix, the output-mix matrix) are fired by the tab that
-   needs them, so nothing is read for a tab nobody has opened. See readRouting. */
+   needs them, so nothing is read for a tab nobody has opened. See readRouting.
+
+   The structure is the attached desk's (a Pro II's when none is), and `device` names it. The
+   controls are rebuilt only when that differs from the desk they were built for, so a window kept
+   open across a change of desk follows it, and an unchanged desk keeps its nodes. */
 async function loadRouting() {
   let data;
   try {
     const resp = await fetch("/api/routing");
     data = await resp.json();
   } catch {
-    setText("routing-note", "Could not load the routing controls.");
+    if (!routingModel) setText("routing-note", "Could not load the routing controls.");
     return;
   }
+  if (routingModel && routingModel.device === data.device) return;
   routingModel = data;
   setText("routing-note", data.note || "");
 
@@ -5187,10 +5164,10 @@ async function loadRouting() {
     if (res && typeof res.on === "boolean") input.checked = res.on;
     else if (!res || res.ok === false) input.checked = !input.checked;
   };
-  const mon = makeSwitchRow("routing-mon-mute", "Monitor auto-mute",
-    (i) => autoMute("monitor", i));
-  const bt = makeSwitchRow("routing-bt-mute", "Bluetooth auto-mute",
-    (i) => autoMute("bt", i));
+  const mon = makeSwitchRow("routing-mon-mute", "Monitor auto-mute", false,
+    (_on, i) => autoMute("monitor", i));
+  const bt = makeSwitchRow("routing-bt-mute", "Bluetooth auto-mute", false,
+    (_on, i) => autoMute("bt", i));
   routingCtl.monitorMute = mon.input;
   routingCtl.btMute = bt.input;
   amBox.appendChild(mon.row);
@@ -5290,8 +5267,12 @@ async function loadRouting() {
     page.textContent = "Open RODE's software page";
     page.setAttribute("aria-describedby", "routing-driver-hint");
     page.addEventListener("click", async () => {
-      const res = await postJSON("/api/driver/page", {});
-      announce(res.message || "", !res.ok);
+      try {
+        const res = await postJSON("/api/driver/page", {});
+        announce(res.message || "", !res.ok);
+      } catch {
+        announce("Could not reach the device service.", true);
+      }
     });
     const dhint = document.createElement("span");
     dhint.className = "hint";
@@ -5304,9 +5285,8 @@ async function loadRouting() {
     routingCtl.driverHint = dhint;
     usbBox.appendChild(getBox);
 
-    const ub = makeSwitchRow("routing-usb-bypass", "Send the separate tracks raw", (input) => {
-      sendBypass("/api/routing/usb-bypass", input, (msg) => announce(msg, false));
-    });
+    const ub = makeSwitchRow("routing-usb-bypass", "Send the separate tracks raw", false,
+      (_on, input) => sendBypass("/api/routing/usb-bypass", input, (msg) => announce(msg, false)));
     const ubHint = document.createElement("span");
     ubHint.className = "hint";
     ubHint.id = "routing-usb-bypass-hint";
@@ -5339,8 +5319,8 @@ async function loadRouting() {
   // Master output processing: Compellor (on/off + 4 params) and Output delay (on/off + ms).
   const masterBox = document.getElementById("routing-master");
   masterBox.innerHTML = "";
-  const comp = makeSwitchRow("routing-compellor-on", "Master Compellor",
-    (i) => routingPost("/api/routing/compellor", { on: i.checked }, i));
+  const comp = makeSwitchRow("routing-compellor-on", "Master Compellor", false,
+    (_on, i) => routingPost("/api/routing/compellor", { on: i.checked }, i));
   routingCtl.compellorOn = comp.input;
   masterBox.appendChild(comp.row);
 
@@ -5355,8 +5335,8 @@ async function loadRouting() {
     masterBox.appendChild(made.row);
   });
 
-  const dly = makeSwitchRow("routing-delay-on", "Output delay",
-    (i) => routingPost("/api/routing/delay",
+  const dly = makeSwitchRow("routing-delay-on", "Output delay", false,
+    (_on, i) => routingPost("/api/routing/delay",
       { on: i.checked, ms: routingCtl.delayMs ? clampNum(routingCtl.delayMs.value, 0, 2000) : 0 }, i));
   routingCtl.delayOn = dly.input;
   masterBox.appendChild(dly.row);
@@ -5399,7 +5379,6 @@ async function loadRouting() {
 /* ---- Monitor mix levels (per-output source levels) ------------------- */
 
 let _monmixModel = null;
-const _monmixDebounce = {};
 
 function buildMonitorMix(model) {
   if (!model) return;
@@ -5408,14 +5387,7 @@ function buildMonitorMix(model) {
   // No writes on a read-only device, but the button stays where it is and says so when pressed:
   // a button that vanishes from the tab order is indistinguishable from one that was never there.
   setAvailable(document.getElementById("monmix-reset-btn"), !model.read_only, MONMIX_READ_ONLY_OFF);
-  const sel = document.getElementById("monmix-output");
-  if (sel && !sel.options.length) {
-    (model.outputs || []).forEach((o) => {
-      const opt = document.createElement("option");
-      opt.value = String(o.index); opt.textContent = o.label;
-      sel.appendChild(opt);
-    });
-  }
+  fillOptions("monmix-output", (model.outputs || []).map((o) => ({ value: o.index, label: o.label })));
   // The sliders themselves are NOT rendered here: they are a live device read, and the Levels tab
   // fires it when it is opened (readRoutingTab), so the values are never the stale ones from
   // whenever this page happened to be built.
@@ -5454,7 +5426,13 @@ async function loadMonmixOutput() {
   const key = JSON.stringify([oi, !!(_monmixModel && _monmixModel.read_only),
     sources.map((s) => [s.index, s.label])]);
   rebuildIfChanged(host, key, () => {
-    sources.forEach((src) => { host.appendChild(buildMonmixSlider(oi, src)); });
+    sources.forEach((src) => {
+      host.appendChild(buildLevelSlider("monmix-" + oi + "-" + src.index, src.label + " level",
+        _monmixModel.read_only,
+        (pct) => postJSON("/api/monitormix/set",
+                          { output: parseInt(oi, 10), source: src.index, value: pct / 100 }),
+        "monmix-status"));
+    });
   });
   sources.forEach((src) => {
     const cell = (out.sources || {})[String(src.index)] || {};
@@ -5497,15 +5475,15 @@ async function loadFaderLevels(announceResult) {
         // made the strip the one thing you could not operate from one place. (Its LEVEL is a
         // different case: the encoder cycles onto these, so that half does have hardware.) Named
         // with the channel, because a virtual fader only means whatever is on it right now.
-        const mute = makeSwitchRow("fader-mute-" + f.index, "Mute " + labelOf(f),
-                                   (input) => onFaderMute(f.index, input));
+        const mute = makeSwitchRow("fader-mute-" + f.index, "Mute " + labelOf(f), false,
+                                   (_on, input) => onFaderSwitch("mute", f.index, input));
         host.appendChild(mute.row);
         // Solo belongs here for the same reason, and it is the control that most needs to sit next
         // to the level: isolating a channel is how you set its level by ear. The danger a solo
         // carries (headphones on one channel, rest of the desk apparently dead) is answered by the
         // reply naming everything soloed and by the Clear all solos button below.
-        const solo = makeSwitchRow("fader-solo-" + f.index, "Solo " + labelOf(f),
-                                   (input) => onFaderSolo(f.index, input));
+        const solo = makeSwitchRow("fader-solo-" + f.index, "Solo " + labelOf(f), false,
+                                   (_on, input) => onFaderSwitch("solo", f.index, input));
         host.appendChild(solo.row);
       });
       host.appendChild(buildLevelSlider("monitor-level", "Monitor speaker", d.read_only,
@@ -5552,46 +5530,28 @@ async function loadFaderLevels(announceResult) {
   }
 }
 
-/* THE SWITCH FOLLOWS THE DESK, not the click: on a refusal it goes back to what the unit really
-   has, the same rule the auto-mute and stereo-link switches follow. The server answers with the
-   mute state it ended up with, so there is one authority. */
-async function onFaderMute(index, input) {
+/* A fader's mute or solo switch. THE SWITCH FOLLOWS THE DESK, not the click: on a refusal it goes
+   back to what the unit really has, the same rule the auto-mute and stereo-link switches follow.
+   The server answers with the state it ended up with ("muted" or "soloed"), so there is one
+   authority. A solo's message names everything the headphones now carry, which is the difference
+   between a solo you can undo and one you cannot find. */
+const FADER_SWITCH = { mute: ["/api/faders/mute", "muted"], solo: ["/api/faders/solo", "soloed"] };
+async function onFaderSwitch(kind, index, input) {
   const no = unavailableReason(input);
   if (no !== null) {
     input.checked = !input.checked;
     setStatus("fader-levels-status", no);
     return;
   }
+  const [url, key] = FADER_SWITCH[kind];
   const wanted = input.checked;
   let res;
   try {
-    res = await postJSON("/api/faders/mute", { fader: index, on: wanted });
+    res = await postJSON(url, { fader: index, on: wanted });
   } catch {
     res = { ok: false, message: "Could not reach the device service." };
   }
-  if (typeof res.muted === "boolean") input.checked = res.muted;
-  else if (!res.ok) input.checked = !wanted;
-  setStatus("fader-levels-status", res.message || "Done.");
-}
-
-/* Same contract as onFaderMute. The message is longer on purpose: it names everything the
-   headphones now carry, which is the difference between a solo you can undo and one you cannot
-   find. */
-async function onFaderSolo(index, input) {
-  const no = unavailableReason(input);
-  if (no !== null) {
-    input.checked = !input.checked;
-    setStatus("fader-levels-status", no);
-    return;
-  }
-  const wanted = input.checked;
-  let res;
-  try {
-    res = await postJSON("/api/faders/solo", { fader: index, on: wanted });
-  } catch {
-    res = { ok: false, message: "Could not reach the device service." };
-  }
-  if (typeof res.soloed === "boolean") input.checked = res.soloed;
+  if (typeof res[key] === "boolean") input.checked = res[key];
   else if (!res.ok) input.checked = !wanted;
   setStatus("fader-levels-status", res.message || "Done.");
 }
@@ -5622,10 +5582,10 @@ function fillOutputMutes(d) {
   const host = document.getElementById("routing-outmutes");
   if (!host) return;
   rebuildIfChanged(host, JSON.stringify(["outmutes", !!d.read_only]), () => {
-    host.appendChild(buildSwitch("out-mute-monitor", "Mute the monitor speakers", false,
-      (on, input) => sendToggle("/api/output/mute", { which: "monitor", on }, input, on)));
-    host.appendChild(buildSwitch("out-mute-bluetooth", "Mute the Bluetooth output", false,
-      (on, input) => sendToggle("/api/output/mute", { which: "bluetooth", on }, input, on)));
+    host.appendChild(makeSwitchRow("out-mute-monitor", "Mute the monitor speakers", false,
+      (on, input) => sendToggle("/api/output/mute", { which: "monitor", on }, input, on)).row);
+    host.appendChild(makeSwitchRow("out-mute-bluetooth", "Mute the Bluetooth output", false,
+      (on, input) => sendToggle("/api/output/mute", { which: "bluetooth", on }, input, on)).row);
     host.appendChild(buildLevelSlider("bt-out-level", "Bluetooth output level", d.read_only,
       (pct) => postJSON("/api/output/bt-level", { percent: pct })));
   });
@@ -5677,10 +5637,10 @@ function setLevelValue(id, percent) {
   showLevelValue(input);
 }
 
-/* One labelled 0-100 slider that writes on change, debounced. `send` returns the POST promise.
-   Built with no value: the value arrives through setLevelValue, so a re-read updates the slider
-   instead of replacing it. */
-function buildLevelSlider(id, labelText, readOnly, send) {
+/* One labelled 0-100 slider that writes on change, debounced. `send` returns the POST promise, and
+   its reply is said on the status line `statusId`. Built with no value: the value arrives through
+   setLevelValue, so a re-read updates the slider instead of replacing it. */
+function buildLevelSlider(id, labelText, readOnly, send, statusId = "fader-levels-status") {
   const row = document.createElement("div");
   row.className = "field fx-ctl";
   const label = document.createElement("label");
@@ -5714,9 +5674,9 @@ function buildLevelSlider(id, labelText, readOnly, send) {
       _levelDebounce[id] = setTimeout(async () => {
         try {
           const res = await send(parseInt(input.value, 10));
-          setStatus("fader-levels-status", res.message || "Done.");
+          setStatus(statusId, res.message || "Done.");
         } catch {
-          setStatus("fader-levels-status", "Could not reach the device service.");
+          setStatus(statusId, "Could not reach the device service.");
         }
       }, WRITE_DEBOUNCE_MS);
     });
@@ -5724,48 +5684,6 @@ function buildLevelSlider(id, labelText, readOnly, send) {
   row.appendChild(label);
   row.appendChild(input);
   row.appendChild(out);
-  showLevelValue(input);
-  return row;
-}
-
-function buildMonmixSlider(outputIndex, src) {
-  const row = document.createElement("div");
-  row.className = "field fx-ctl";
-  const id = "monmix-" + outputIndex + "-" + src.index;
-  const label = document.createElement("label");
-  label.setAttribute("for", id);
-  label.textContent = src.label + " level";
-  const input = document.createElement("input");
-  input.type = "range"; input.id = id; input.min = "0"; input.max = "100"; input.step = "1";
-  input.value = "70";
-  const out = document.createElement("span");
-  out.className = "fx-ctl-value"; out.setAttribute("aria-hidden", "true");
-  const readOnly = _monmixModel && _monmixModel.read_only;
-  if (readOnly) {
-    // Read-only device: show the live level, and keep the slider readable and in the tab order
-    // rather than dropping it out with the attribute. Moving it goes straight back and says why.
-    setAvailable(input, false, MONMIX_READ_ONLY_OFF);
-    input.addEventListener("input", () => {
-      if (refuseChange(input) === null) return;
-      if (input.dataset.deviceValue !== undefined) input.value = input.dataset.deviceValue;
-      showLevelValue(input);
-    });
-    row.appendChild(label); row.appendChild(input); row.appendChild(out);
-    showLevelValue(input);
-    return row;
-  }
-  input.addEventListener("input", () => {
-    input.dataset.touched = "1"; showLevelValue(input);
-    clearTimeout(_monmixDebounce[id]);
-    _monmixDebounce[id] = setTimeout(async () => {
-      try {
-        const res = await postJSON("/api/monitormix/set",
-          { output: parseInt(outputIndex, 10), source: src.index, value: parseInt(input.value, 10) / 100 });
-        setStatus("monmix-status", res.message || "Could not set the level.");
-      } catch { setStatus("monmix-status", "Could not reach the device service."); }
-    }, WRITE_DEBOUNCE_MS);
-  });
-  row.appendChild(label); row.appendChild(input); row.appendChild(out);
   showLevelValue(input);
   return row;
 }
@@ -5789,8 +5707,11 @@ async function onMonmixReset() {
 
 /* ---- Output mix matrix (Routing > Custom cross-points) --------------- */
 
+/* Called by loadRouting whenever it builds, so the matrix follows a change of desk too. The
+   listeners on the page's own elements are added on the first build only. */
 function buildMatrix(matrix) {
-  if (!matrix || routingCtl.matrixBuilt) return;
+  if (!matrix) return;
+  const firstBuild = !routingCtl.matrixBuilt;
   routingCtl.matrix = matrix;
   // A desk without the matrix write cap reads the matrix but cannot write it: the switches, the
   // mode dropdown and the presets are then marked unavailable, so no control is a silent no-op.
@@ -5799,7 +5720,10 @@ function buildMatrix(matrix) {
   // matrix, and on a read-only desk it would otherwise still invite you to "include or exclude
   // each source" while every switch is unavailable.
   const mxNote = document.getElementById("routing-matrix-note");
-  if (mxNote && matrix.note) mxNote.textContent = matrix.note;
+  if (mxNote) {
+    if (mxNote.dataset.markup === undefined) mxNote.dataset.markup = mxNote.textContent;
+    mxNote.textContent = matrix.note || mxNote.dataset.markup;
+  }
   routingCtl.matrixSources = {};
   routingCtl.matrixSourceSpans = {}; // label span per source key, so we can retarget its text
   routingCtl.matrixSourceLabels = {}; // base source label per key (e.g. "Mic 1")
@@ -5813,18 +5737,20 @@ function buildMatrix(matrix) {
     opt.textContent = o.label;
     outSel.appendChild(opt);
   });
-  outSel.addEventListener("change", onMatrixOutputChange);
-  // The mode dropdown applies on Enter. "Output to configure" beside it acts at once, because it
-  // only changes which output you are looking at.
-  enterToApply(document.getElementById("matrix-mode"), onMatrixModeApply);
+  if (firstBuild) {
+    outSel.addEventListener("change", onMatrixOutputChange);
+    // The mode dropdown applies on Enter. "Output to configure" beside it acts at once, because it
+    // only changes which output you are looking at.
+    enterToApply(document.getElementById("matrix-mode"), onMatrixModeApply);
+  }
 
   const list = document.getElementById("matrix-sources-list");
   list.innerHTML = "";
   matrix.sources.forEach((s) => {
     // Placeholder text only; onMatrixOutputChange names the output in it. See there for why the
     // source comes first.
-    const made = makeSwitchRow("matrix-src-" + s.key, s.label,
-      (i) => onMatrixSourceToggle(s, i));
+    const made = makeSwitchRow("matrix-src-" + s.key, s.label, false,
+      (_on, i) => onMatrixSourceToggle(s, i));
     routingCtl.matrixSources[s.key] = made.input;
     routingCtl.matrixSourceSpans[s.key] = made.span;
     routingCtl.matrixSourceLabels[s.key] = s.label;
@@ -5832,13 +5758,12 @@ function buildMatrix(matrix) {
   });
 
   const resetOutBtn = document.getElementById("reset-outputs-btn");
-  resetOutBtn.addEventListener("click", onResetAllOutputs);
-  if (routingCtl.matrixReadOnly) {
-    // Both carry the reason rather than the raw attribute, so they keep their place in the tab
-    // order and say why when pressed.
-    setAvailable(resetOutBtn, false, MATRIX_READ_ONLY_OFF);
-    setStatus("reset-outputs-status", MATRIX_READ_ONLY_OFF);
-  }
+  if (firstBuild) resetOutBtn.addEventListener("click", onResetAllOutputs);
+  // Both carry the reason rather than the raw attribute, so they keep their place in the tab
+  // order and say why when pressed.
+  setAvailable(resetOutBtn, !routingCtl.matrixReadOnly, MATRIX_READ_ONLY_OFF);
+  if (routingCtl.matrixReadOnly) setStatus("reset-outputs-status", MATRIX_READ_ONLY_OFF);
+  else if (!firstBuild) setStatus("reset-outputs-status", "");
   wireSchemes();
 
   onMatrixOutputChange();
@@ -6275,8 +6200,8 @@ function buildStereoLinks(fm) {
   if (note) note.hidden = !show;
   if (!show) return;
   pairs.forEach((p) => {
-    const made = makeSwitchRow("stereo-link-" + p.code, "Link " + p.label,
-                               (input) => onStereoLink(p, input));
+    const made = makeSwitchRow("stereo-link-" + p.code, "Link " + p.label, false,
+                               (_on, input) => onStereoLink(p, input));
     routingCtl.stereo[p.code] = made.input;
     box.appendChild(made.row);
   });
@@ -6416,19 +6341,7 @@ function applyUsbDriver(drv) {
    can leave Expanded from its own screen. The endpoint reads Windows and the driver's shared
    status, never the desk, so the poll costs no device access. */
 const ROUTING_DRIVER_POLL_MS = 3000;
-let routingDriverPoll = null;
-
-function startRoutingDriverPoll() {
-  stopRoutingDriverPoll();
-  routingDriverPoll = window.setInterval(pollRoutingDriver, ROUTING_DRIVER_POLL_MS);
-}
-
-function stopRoutingDriverPoll() {
-  if (routingDriverPoll !== null) {
-    window.clearInterval(routingDriverPoll);
-    routingDriverPoll = null;
-  }
-}
+const routingDriverPoller = makePoller(pollRoutingDriver, ROUTING_DRIVER_POLL_MS);
 
 async function pollRoutingDriver() {
   if (document.hidden || !routingCtl.usbDriver) return;
@@ -6576,14 +6489,14 @@ async function refreshRoutingLive() {
   }
 }
 
-/* Page entry: build the controls once, take the single live read that covers three of the five tabs
-   (and doubles as the page's "is the device there" check), then read whatever the tab you arrived on
-   needs on top of that. */
+/* Page entry: build the controls for the desk attached now (loadRouting keeps them when it has not
+   changed), take the single live read that covers three of the five tabs (and doubles as the page's
+   "is the device there" check), then read whatever the tab you arrived on needs on top of that. */
 async function readRouting() {
   clearTimeout(_routingTabReadTimer);          // a pending tab read from the last visit is stale
-  if (!routingModel) await loadRouting();
+  await loadRouting();
   if (!(await refreshRoutingLive())) return;
-  startRoutingDriverPoll();
+  routingDriverPoller.start();
   const key = routingTabs ? routingTabs.current() : "mixes";
   if (ROUTING_TABS_ON_LIVE.indexOf(key) < 0) await readRoutingTab(key);
 }
@@ -6758,11 +6671,12 @@ function describeRestoreTime(info) {
        + `dialog reports each pad as it goes.`;
 }
 
-/* Poll a background profile job until it reports done. Only a CHANGED message is written, so the
-   live region does not re-announce the same step every tick.
+/* Poll a background job until it reports done. Only a CHANGED step is written, so the live region
+   does not re-announce the same step every tick. `show` writes a step (by default its message into
+   statusId); `reopen` is the sentence saying where to check once the poll has given up.
 
-   TWO FAILSAFES, because this dialog deliberately has no dismiss path while a job runs and a
-   silent server would otherwise trap you in it with nothing to press:
+   TWO FAILSAFES, because the progress dialog deliberately has no dismiss path while a job runs and
+   a silent server would otherwise trap you in it with nothing to press:
      - the service stops answering at all (it died, or the port went away), or
      - it answers but reports no new step for minutes on end (a device read wedged holding the
        HID lock, which no amount of waiting in the browser will clear).
@@ -6772,7 +6686,9 @@ const POLL_TICK_MS = 1200;
 const POLL_MAX_DEAD_TICKS = 8;      // ~10s of unanswered polls
 const POLL_MAX_QUIET_TICKS = 125;   // ~2.5 min with no new step
 
-function pollProfileJob(url, statusId) {
+function pollJob(url, statusId, opts = {}) {
+  const show = opts.show || ((s) => setText(statusId, s.message));
+  const reopen = opts.reopen || "Close this, then reopen the Backups page to check.";
   return new Promise((resolve) => {
     let last = "";
     let dead = 0;
@@ -6787,14 +6703,14 @@ function pollProfileJob(url, statusId) {
         clearInterval(iv);
         resolve({ done: true, ok: false,
                   message: "Lost contact with the device service, so this can no longer be "
-                         + "followed. The job may still be running. Close this, then reopen the "
-                         + "Backups page to check." });
+                         + `followed. The job may still be running. ${reopen}` });
         return;
       }
-      if (!s.done && s.message && s.message !== last) {
-        last = s.message;
+      const step = `${s.message || ""}|${s.step || 0}`;
+      if (!s.done && s.message && step !== last) {
+        last = step;
         quiet = 0;
-        setText(statusId, s.message);
+        show(s);
       } else if (!s.done) {
         quiet++;
       }
@@ -6808,8 +6724,7 @@ function pollProfileJob(url, statusId) {
         resolve({ done: true, ok: false,
                   message: "The unit has not reported a new step for over two minutes, so this "
                          + "has stopped waiting. The job may still be running, or the unit may "
-                         + "need unplugging and plugging back in. Close this, then reopen the "
-                         + "Backups page to check." });
+                         + `need unplugging and plugging back in. ${reopen}` });
       }
     }, POLL_TICK_MS);
   });
@@ -6849,7 +6764,7 @@ async function onProfileSave(ev) {
       finishProgressDialog("Backup failed", start.message || "Could not start the backup.");
       return;
     }
-    const s = await pollProfileJob("/api/profiles/save/status", "progress-dialog-step");
+    const s = await pollJob("/api/profiles/save/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "Backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles(name);            // leave the backup just made selected on the page
   } catch {
@@ -6959,7 +6874,7 @@ async function doRestore() {
     // and the server says which one it started; guessing would mean watching a finished restore in
     // silence.
     const statusUrl = start.via === "show" ? "/api/shows/status" : "/api/profiles/restore/status";
-    const s = await pollProfileJob(statusUrl, "progress-dialog-step");
+    const s = await pollJob(statusUrl, "progress-dialog-step");
     finishProgressDialog(s.ok ? "Backup restored" : "Restore failed", s.message || "Done.");
     await loadProfiles(selectedProfile());
   } catch {
@@ -7082,20 +6997,23 @@ async function doShowConfirmed() {
    how many shortcuts travelled, where the file went, and above all what was NOT applied. A setting
    silently dropped for naming an audio device this computer has not got is precisely the kind of
    thing somebody would otherwise spend an evening hunting. */
-async function onAppSettingsExport() {
-  const btn = document.getElementById("appsettings-export-btn");
-  setBusy(btn, true);
-  let msg, bad = false;
-  try {
-    const res = await postJSON("/api/appsettings/export", {});
-    msg = res.message || "Done.";
-    bad = !res.ok;
-  } catch {
-    msg = "Could not reach the device service.";
-    bad = true;
-  } finally { setBusy(btn, false); }
-  setText("appsettings-state", msg);
-  announce(msg, bad);        // last, after setBusy: see the outcome-announced-last rule
+/* Export and Open folder: press, post, report. */
+function onAppSettingsPress(btnId, url) {
+  return async () => {
+    const btn = document.getElementById(btnId);
+    setBusy(btn, true);
+    let msg, bad = false;
+    try {
+      const res = await postJSON(url, {});
+      msg = res.message || "Done.";
+      bad = !res.ok;
+    } catch {
+      msg = "Could not reach the device service.";
+      bad = true;
+    } finally { setBusy(btn, false); }
+    setText("appsettings-state", msg);
+    announce(msg, bad);        // last, after setBusy: see the outcome-announced-last rule
+  };
 }
 
 /* START AT SIGN-IN. The switch reflects the HKCU Run value autostart.py owns, which is the same one
@@ -7134,22 +7052,6 @@ async function onAutostartToggle(on, input) {
     input.checked = !input.checked;
   }
   setText("autostart-hint", msg);
-  announce(msg, bad);
-}
-
-async function onAppSettingsOpenFolder() {
-  const btn = document.getElementById("appsettings-open-btn");
-  setBusy(btn, true);
-  let msg, bad = false;
-  try {
-    const res = await postJSON("/api/appsettings/open", {});
-    msg = res.message || "Done.";
-    bad = !res.ok;
-  } catch {
-    msg = "Could not reach the device service.";
-    bad = true;
-  } finally { setBusy(btn, false); }
-  setText("appsettings-state", msg);
   announce(msg, bad);
 }
 
@@ -7254,16 +7156,16 @@ async function installDriver() {
       finishProgressDialog("Driver not installed", start.message || "Could not start.");
       return;
     }
-    const s = await pollProfileJob("/api/driver/status", "progress-dialog-step");
+    const s = await pollJob("/api/driver/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "RODE's installer is running" : "Driver not installed",
                          s.message || "Done.");
   } catch {
     finishProgressDialog("Driver not installed", "Could not reach the device service.");
   }
-  // The driver's own line, and the buttons, come off the next read of this page rather than being
-  // guessed at here: the install is RODE's from the moment it is handed over, and it may need a
-  // restart before Windows reports it at all.
-  await loadRouting();
+  // The driver's own line, and the buttons, come off the live read rather than being guessed at
+  // here: the install is RODE's from the moment it is handed over, and it may need a restart before
+  // Windows reports it at all.
+  await refreshRoutingLive();
 }
 
 /* Start a show job, follow it in the progress dialog, then re-read what the reset needs to know
@@ -7278,7 +7180,7 @@ async function runShowJob(closeDialogId, spec) {
       await loadShows();
       return;
     }
-    const s = await pollProfileJob("/api/shows/status", "progress-dialog-step");
+    const s = await pollJob("/api/shows/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? spec.okTitle : spec.failTitle, s.message || "Done.");
   } catch {
     finishProgressDialog(spec.failTitle, "Could not reach the device service.");
@@ -7384,7 +7286,7 @@ async function onProfileDelete() {
       // than from this reply, which only says the job started.
       _profileJobRunning = true;
       openProgressDialog("delete-dialog", "Deleting backup", "Deleting the backup.");
-      const s = await pollProfileJob("/api/shows/status", "progress-dialog-step");
+      const s = await pollJob("/api/shows/status", "progress-dialog-step");
       finishProgressDialog(s.ok ? "Backup deleted" : "Delete failed", s.message || "Done.");
       await loadProfiles();
       return;
@@ -7457,7 +7359,7 @@ async function onBaselineSave() {
       finishProgressDialog("Backup failed", start.message || "Could not start the backup.");
       return;
     }
-    const s = await pollProfileJob("/api/profiles/save/status", "progress-dialog-step");
+    const s = await pollJob("/api/profiles/save/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "Unit backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles();
   } catch {
@@ -7486,7 +7388,7 @@ async function onBaselineAddPads() {
       finishProgressDialog("Could not add the pads", start.message || "Nothing was changed.");
       return;
     }
-    const s = await pollProfileJob("/api/profiles/save/status", "progress-dialog-step");
+    const s = await pollJob("/api/profiles/save/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "Pads added to the backup" : "Could not add the pads",
                          s.message || "Done.");
     await loadProfiles();
@@ -7587,7 +7489,7 @@ function closeProfileDialog(id) {
 
 const REC_POLL_MS = 2000;
 let recordingModel = null;
-let recordingPoll = null;
+const recordingPoller = makePoller(pollRecording, REC_POLL_MS);
 let recordingSeenState = null;
 const recordingCtl = { multitrack: null, bypass: null, bypassHint: null,
                        usbMultitrack: null, usbBypass: null, usbBypassHint: null };
@@ -7615,7 +7517,7 @@ async function loadRecording() {
   }
   loadRecordingFrom(d);
   setRecState(d.message || "");
-  startRecordingPoll();
+  recordingPoller.start();
 }
 
 /* Draw the whole page from one payload: the page read's, or a command's reply, which carries the
@@ -7785,9 +7687,8 @@ function fillRecordingSettings(d) {
 
     // THE RAW SWITCH, instant and last. It only ever means anything alongside a multitrack choice,
     // and reading them one after the other is how the decision is actually made.
-    const bp = makeSwitchRow("rec-bypass", "Record the separate tracks raw", (input) => {
-      sendBypass("/api/recorder/processing-bypass", input, setRecState);
-    });
+    const bp = makeSwitchRow("rec-bypass", "Record the separate tracks raw", false,
+      (_on, input) => sendBypass("/api/recorder/processing-bypass", input, setRecState));
     const bpHint = document.createElement("span");
     bpHint.className = "hint";
     bpHint.id = "rec-bypass-hint";
@@ -7897,8 +7798,20 @@ async function sendBypass(path, input, say) {
     say(why);
     return;
   }
-  const res = await postJSON(path, { on: input.checked });
-  say(res.message || "Setting sent.");
+  // A refused or unsent write puts the switch back, as sendToggle does, so it never shows a state
+  // the unit is not in.
+  const on = input.checked;
+  setBusy(input, true);
+  try {
+    const res = await postJSON(path, { on });
+    say(res.message || "Setting sent.");
+    if (!res.ok) input.checked = !on;
+  } catch {
+    say("Could not reach the device service.");
+    input.checked = !on;
+  } finally {
+    setBusy(input, false);
+  }
 }
 
 function fillRecordingList(d) {
@@ -8104,17 +8017,6 @@ function applyTransport(state) {
   applyRecordingWritable(recordingModel || {});
 }
 
-function startRecordingPoll() {
-  stopRecordingPoll();
-  recordingPoll = window.setInterval(pollRecording, REC_POLL_MS);
-}
-
-function stopRecordingPoll() {
-  if (recordingPoll !== null) {
-    window.clearInterval(recordingPoll);
-    recordingPoll = null;
-  }
-}
 
 async function pollRecording() {
   let live;
@@ -8567,7 +8469,7 @@ function wireAutoGain() {
    The poll redraws only when the server's `version` moves, which during a call is once a second
    (the call quality), so nothing here is a live region except the status line. */
 const CALLME_POLL_MS = 1000;
-let callmePoll = null;
+const callmePoller = makePoller(pollCallme, CALLME_POLL_MS);
 let callmeSeen = { version: null, incoming: null };
 
 async function loadCallme() {
@@ -8588,7 +8490,7 @@ async function loadCallme() {
   // EMPTY ON ARRIVAL: the Current call section says what is happening, the code is on the Incoming calls tab and
   // an offline unit gets the Not ready section, so a summary here would only repeat them.
   setText("callme-state", "");
-  startCallmePoll();
+  callmePoller.start();
 }
 
 function applyCallme(d) {
@@ -8860,17 +8762,6 @@ function fillCallmeList(id, texts) {
   }));
 }
 
-function startCallmePoll() {
-  stopCallmePoll();
-  callmePoll = window.setInterval(pollCallme, CALLME_POLL_MS);
-}
-
-function stopCallmePoll() {
-  if (callmePoll !== null) {
-    window.clearInterval(callmePoll);
-    callmePoll = null;
-  }
-}
 
 async function pollCallme() {
   let d;
@@ -9069,9 +8960,9 @@ function render(route, focusTo = "heading") {
   if (activeSection !== "sec-pads" && previewState.active) stopPreview(true);
   // The recording-state poll belongs to its page. It costs no device read, but a timer that
   // outlives the page it updates is how a stale value gets announced from somewhere else.
-  if (activeSection !== "sec-recording") stopRecordingPoll();
-  if (activeSection !== "sec-callme") stopCallmePoll();
-  if (activeSection !== "sec-routing") stopRoutingDriverPoll();
+  if (activeSection !== "sec-recording") recordingPoller.stop();
+  if (activeSection !== "sec-callme") callmePoller.stop();
+  if (activeSection !== "sec-routing") routingDriverPoller.stop();
   new Set(Object.values(ROUTES).map((r) => r.section)).forEach((id) => {
     const sec = document.getElementById(id);
     if (sec) sec.hidden = (id !== activeSection);
@@ -9509,19 +9400,18 @@ async function init() {
   wireRoutingTabs();    // the Routing page's tab strip, built over its static panes
   wireRecording();      // the Recording page: three transport buttons and a check
   wireAutoGain();       // Channels: set a mic's gain by measuring it
-  document.getElementById("midi-toggle").addEventListener("change", onMidiToggle);
-  document.getElementById("announce-toggle").addEventListener("change", onAnnounceToggle);
-  document.getElementById("announce-levels-toggle")
-          .addEventListener("change", onAnnounceLevelsToggle);
-  document.getElementById("announce-mute-tones-toggle")
-          .addEventListener("change", onAnnounceMuteTonesToggle);
-  document.getElementById("announce-startup-summary-toggle")
-          .addEventListener("change", onAnnounceStartupSummaryToggle);
-  document.getElementById("announce-remember-toggle")
-          .addEventListener("change", onAnnounceRememberToggle);
+  [["midi-toggle", "/api/midi"],
+   ["announce-toggle", "/api/announce"],
+   ["announce-levels-toggle", "/api/announce/levels"],
+   ["announce-mute-tones-toggle", "/api/announce/mute-tones"],
+   ["announce-startup-summary-toggle", "/api/announce/startup-summary"],
+   ["announce-remember-toggle", "/api/announce/remember"]]
+    .forEach(([id, url]) => document.getElementById(id).addEventListener("change", toggleTo(url)));
   document.getElementById("announce-volume").addEventListener("input", onAnnounceVolumeInput);
-  document.getElementById("announce-voice").addEventListener("change", onAnnounceVoiceChange);
-  document.getElementById("announce-output").addEventListener("change", onAnnounceOutputChange);
+  document.getElementById("announce-voice")
+    .addEventListener("change", onAnnounceSpeechChange("voice"));
+  document.getElementById("announce-output")
+    .addEventListener("change", onAnnounceSpeechChange("output"));
   document.getElementById("announce-devices-refresh")
           .addEventListener("click", onAnnounceDevicesRefresh);
   wireAccess();         // the remote-access link on Device > Hardware
@@ -9626,12 +9516,12 @@ async function init() {
 
   // This app's own settings, on the Backups page because this is where backup lives.
   document.getElementById("appsettings-export-btn")
-    .addEventListener("click", onAppSettingsExport);
+    .addEventListener("click", onAppSettingsPress("appsettings-export-btn", "/api/appsettings/export"));
   document.getElementById("autostart-switch")
           .addEventListener("change", (ev) =>
             onAutostartToggle(ev.currentTarget.checked, ev.currentTarget));
   document.getElementById("appsettings-open-btn")
-    .addEventListener("click", onAppSettingsOpenFolder);
+    .addEventListener("click", onAppSettingsPress("appsettings-open-btn", "/api/appsettings/open"));
   document.getElementById("appsettings-import-btn")
     .addEventListener("click", onAppSettingsImport);
 

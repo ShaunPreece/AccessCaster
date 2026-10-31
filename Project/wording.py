@@ -6,6 +6,8 @@ Chat", never "Mic 1 + Mic 2 + Chat".
 """
 from __future__ import annotations
 
+import datetime
+
 
 def plural(n: int, word: str, many: str | None = None) -> str:
     """`word` or its plural for a count of `n`, without the number: plural(2, "pad") is "pads".
@@ -44,3 +46,11 @@ def describe_duration(seconds) -> str:
         return count(mins, "minute") + (f" {count(secs, 'second')}" if secs else "")
     hours, mins = divmod(mins, 60)
     return count(hours, "hour") + (f" {count(mins, 'minute')}" if mins else "")
+
+
+def spoken_date(d: datetime.date, year: bool = True) -> str:
+    """A date as a person says it: "3rd October 2026", or "3rd October" without the year. Never
+    all digits, which a screen reader reads aloud as the wrong date in half the world."""
+    n = d.day
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix} {d.strftime('%B')}" + (f" {d.year}" if year else "")

@@ -33,7 +33,7 @@ def check(name, got, want):
 
 server.load_settings = lambda: dict(STORE)
 server.update_settings = lambda **kw: STORE.update(kw)
-server._announce_loop = lambda: None
+server._announce_loop = lambda *_: None
 
 
 def fresh(saved: dict):

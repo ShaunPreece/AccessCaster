@@ -9,7 +9,7 @@
 #
 # BUILD PREREQUISITES (install once per machine; NOT tracked in the repo):
 #   - Python 3.12 on PATH.
-#   - pip packages:  pyinstaller, pillow   (python -m pip install pyinstaller pillow)
+#   - pip packages:  python -m pip install -r ProjectBuildsequirements-build.txt
 #   - Inno Setup 6   (winget install --id JRSoftware.InnoSetup -e), at
 #                    %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
 # Missing any of these FAILS LOUDLY below: PowerShell silently ignores a native tool returning

@@ -19,8 +19,11 @@ writable data moves to %LOCALAPPDATA%, which is created on first use.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import sys
+import tempfile
 
 # Directory that holds the read-only assets. PyInstaller sets sys._MEIPASS to the unpacked
 # bundle dir (onedir: the _internal folder; onefile: a temp dir). From source it is this file's
@@ -72,3 +75,23 @@ def data_path(*parts: str) -> str:
     """Absolute path to a writable user-data file/dir, creating the data dir on first use."""
     os.makedirs(DATA_DIR, exist_ok=True)
     return os.path.join(DATA_DIR, *parts)
+
+
+def write_json(path: str, data, indent: int | None = 2) -> None:
+    """Write `data` as JSON so that `path` only ever holds the old file or the whole new one.
+
+    The JSON goes to a temporary file in the same folder, which os.replace then swaps in. The swap
+    is atomic on one volume, so a kill or a power cut mid-write leaves the previous file intact,
+    where writing in place would leave half a file that no longer parses. Raises OSError, or
+    TypeError for data JSON cannot hold, with the temporary file removed."""
+    fd, tmp = tempfile.mkstemp(prefix=".", suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise

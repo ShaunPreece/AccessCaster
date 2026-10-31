@@ -35,7 +35,7 @@ import rcp_read
 import rcp_transfer
 import recorder
 import routing_schemes
-from paths import data_path
+from paths import data_path, write_json
 from wording import count
 
 # Saved profiles are user data, kept in the writable %LOCALAPPDATA%\AccessCaster\profiles so they
@@ -370,8 +370,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
 
     try:
         os.makedirs(os.path.join(PROFILES_DIR, safe), exist_ok=True)
-        with open(os.path.join(PROFILES_DIR, safe, "profile.json"), "w", encoding="utf-8") as f:
-            json.dump(profile, f, indent=1)
+        write_json(os.path.join(PROFILES_DIR, safe, "profile.json"), profile, indent=1)
     except OSError as exc:
         return {"ok": False, "message": f"Could not save the profile: {exc}"}
     snap = profile[SNAPSHOT_KEY]
@@ -435,8 +434,7 @@ def attach_pads(name: str, pads: list) -> dict:
         return {"ok": False, "message": "That profile name is not one this app can write to."}
     try:
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "profile.json"), "w", encoding="utf-8") as f:
-            json.dump(prof, f, indent=1)
+        write_json(os.path.join(folder, "profile.json"), prof, indent=1)
     except OSError as exc:
         return {"ok": False, "message": f"Could not update the profile: {exc}"}
     return {"ok": True, "name": safe,

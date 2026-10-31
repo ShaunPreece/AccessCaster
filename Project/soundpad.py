@@ -53,7 +53,7 @@ import rcp_read as rr
 import rcp_transfer as t
 import pad_records as pr
 import devices
-from paths import resource_path, data_path
+from paths import resource_path, data_path, write_json
 from wording import count, plural
 
 
@@ -141,8 +141,7 @@ def load_user_fx_presets() -> dict:
 
 
 def _save_user_fx_presets(d: dict) -> None:
-    with open(FX_USER_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2)
+    write_json(FX_USER_FILE, d)
 
 
 def all_recipes() -> dict:

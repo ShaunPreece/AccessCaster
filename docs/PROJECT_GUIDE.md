@@ -1594,6 +1594,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   fails over RDP, so the voice list comes back empty there; refusing to restore a voice on that
   basis would silently drop the setting. `merge_import` only rejects a name when it has a real list
   to check it against.
+- **EVERY USER-DATA JSON FILE IS WRITTEN WITH `paths.write_json`, NEVER `open(..., "w")`.** It
+  writes a temporary file beside the target and swaps it in, so a kill or power cut mid-write leaves
+  the old file whole; written in place, a half file parses as nothing and the next
+  `update_settings` writes a file holding only its own key. `update_settings` keeps a file that
+  will not parse as `settings.json.bad`, and drops the change when the file cannot be opened at all,
+  because writing then would replace every other key with nothing.
 
 ## Web UI and screen reader
 
@@ -1609,6 +1615,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   computer sends"` shipped like that and Expanded could not be turned off from the page.
   `ui_checks_staged.js` now FAILS a staged select with one option rather than skipping it; the skip
   was reported as a pass, which is how the dead control stayed green.
+- **ANYTHING BUILT ONCE PER WINDOW FROM A DESK READ KEYS ITSELF ON THE DESK IT DESCRIBES.** The
+  server builds `/api/routing` for whichever desk is attached, and for a Pro II when none is, so it
+  names that desk in `device`, and `loadRouting` rebuilds the page, the output-mix matrix included,
+  whenever that differs from the desk it was built for. A window opened before the desk was plugged
+  in otherwise shows the other desk's faders and outputs, and every write to them is refused. The
+  Add a shortcut catalogue is fetched on every open for the same reason.
+- **A POST FROM THE PAGE IS ALWAYS INSIDE A `try`.** `postJSON` rejects when the service cannot be
+  reached, and an uncaught rejection says nothing and leaves the control as pressed. A switch puts
+  itself back when the write fails or is refused (`sendToggle`, `sendBypass`).
 
 - **`_ann_say` IS WHERE THE ANNOUNCER SWITCH IS ENFORCED, because it is the only place every phrase
   passes through.** `_announce_on` gates the read loop, and roughly half this app's speech comes
@@ -1967,6 +1982,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Metering and Windows audio
 
+- **`_ChatIsolation.__enter__` PUTS BACK WHAT IT CHANGED WHEN IT FAILS PART WAY**, because a
+  `with` block does not call `__exit__` when `__enter__` raises. A restore that fails is reported
+  with `CHAT_NOT_RESTORED`, by auto gain and the level check alike.
 - **Level meters read Windows audio endpoints, so metering cannot work or be tested over Remote
   Desktop.** Run `query session` first; that is the whole precondition.
 - **Default to a CAPTURE endpoint.** With no stream chosen the meter defaulted to the PLAYBACK
@@ -2340,6 +2358,19 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## The server's lifecycle, and why it cannot be reasoned about from outside
 
+- **`/static/` RESOLVES AND CONTAINS; IT NEVER SCREENS THE NAME FOR "..".** `os.path.join` drops
+  `STATIC_DIR` altogether when the name is absolute, so `/static/C:/Windows/win.ini` passes any
+  check on the name. `_static_file` resolves with `realpath` and serves only what `commonpath` puts
+  inside `STATIC_DIR`. `test_server_safety.py` pins it.
+- **A REQUEST BODY THAT IS NOT A JSON OBJECT IS A 400, NEVER `{}`.** Read as `{}`, the action runs
+  with its defaults: a malformed POST to `/api/announce` switches announcements off.
+- **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change of more than `_CLIENT_TIMEOUT`
+  on wall-clock arithmetic stops the server while the page is open. `time.time()` is only for a
+  time shown to a person (`read_at`).
+- **EACH ANNOUNCER LOOP CARRIES A GENERATION (`_ann_loop_gen`)** and leaves as soon as it is not the
+  newest, without touching `_ann_live_state`. Off and on within one read or one reconnect sleep
+  otherwise leaves two loops running, with two handles and every report handled twice.
+
 - **AN OPEN PAGE OUTLIVES ITS SERVER, so the page watches it** (`noteServer` in app.js). A window
   left open across an upgrade otherwise runs the OLD page against the NEW server, and anything the
   new version added is missing with no error. The `/api/ping` reply carries `_INSTANCE_ID` and the
@@ -2490,6 +2521,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   encoder. Done that way, turning the encoder on a channel correctly announces that channel.
 
 ## Global keyboard shortcuts
+
+- **A PAD SHORTCUT WRITES TO THE DESK UNDER `_hid_lock`, THROUGH `_hk_desk`**, which gives up after
+  `_HK_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
+  restore has the desk in transfer mode lands inside the transfer.
 
 - **THE WINDOW SHORTCUT MUST RUN ON THE PUMP THREAD, AND THAT IS THE WHOLE FIX. DO NOT ADD A
   WORKAROUND TO THE RAISE.** Windows grants a process the right to set the foreground while it is

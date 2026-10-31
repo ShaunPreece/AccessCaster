@@ -146,8 +146,8 @@ You do not need to build it to use it (just download the installer), but if you 
 modify the code:
 
 ```
-# install the runtime dependencies
-pip install hidapi pywin32
+# install the runtime dependencies (Python 3.12)
+python -m pip install -r requirements.txt
 
 # run the app from source
 python Project/tray.py
@@ -156,7 +156,7 @@ python Project/tray.py
 To build the installer yourself you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php) and:
 
 ```
-pip install pyinstaller pillow
+python -m pip install -r ProjectBuilds/requirements-build.txt
 powershell -ExecutionPolicy Bypass -File ProjectBuilds\build_installer.ps1
 ```
 

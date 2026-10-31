@@ -13,6 +13,7 @@ deletes any other profile.
 Run: python DevTools/test_baseline.py
 """
 from __future__ import annotations
+import datetime
 import os
 import shutil
 import sys
@@ -22,6 +23,7 @@ import time
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import profiles
 import server
+import wording
 
 FAILED = 0
 
@@ -66,7 +68,9 @@ try:
     s = server.baseline_status()
     check("offered on a store with no baseline", s["offer"], True)
     check("and it suggests a name that says what, when and which desk",
-          s["suggested_name"], f"As found {time.strftime('%Y-%m-%d')} {s['device_name']}")
+          s["suggested_name"],
+          f"As found {wording.spoken_date(datetime.date.today())} "
+          f"{s['device_name'].removeprefix('RODECaster ')}")
     check_true("which is a legal profile name", profiles.safe_name(s["suggested_name"]))
 
     print("\nDECLINING IS REMEMBERED, SO IT IS ASKED ONCE AND NEVER NAGS")
