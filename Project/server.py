@@ -12235,8 +12235,8 @@ def stop_server():
 def main():
     headless = bool(os.environ.get("ACCESS_CASTER_NO_UI"))
     # In headless mode (ACCESS_CASTER_NO_UI, our tooling/background runs) the UI, watchdog and
-    # announcer are all off. Otherwise this is the classic foreground launcher (the .bat /
-    # python server.py): watchdog ON, so closing the page stops the server.
+    # announcer are all off. Otherwise this is the foreground launcher (python server.py): watchdog
+    # ON, so closing the page stops the server.
     server = _bring_up_server(open_browser=not headless,
                               watchdog=not headless,
                               announcer=not headless,
