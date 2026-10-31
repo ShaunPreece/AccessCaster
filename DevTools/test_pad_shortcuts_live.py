@@ -5,10 +5,10 @@ that can go wrong is not "does MIDI work" but "did the right branch run and did 
 words". Every check here is on the SPOKEN RESULT, because that sentence is the entire feedback a
 shortcut gives: the window is not in front of you when you press one.
 
-IT MAKES A NOISE, on purpose. A sound pad that returns "Airhorn playing" without playing is exactly
-the bug this replaces (`padActive` over HID did that for two months), so the tracked progress state
-is checked as well as the sentence - the desk pushing progress twenty times a second is the closest
-thing to an ear this can have.
+IT MAKES A NOISE, on purpose. A sound pad that returns "Airhorn playing" without playing is the
+failure this guards against (a `padActive` write over HID gives exactly that), so the tracked
+progress state is checked as well as the sentence - the desk pushing progress twenty times a second
+is the closest thing to an ear this can have.
 
 Runs its own announcer, because the pushed stream is the announcer's read handle and the tracking
 under test lives there. Restores the bank and leaves nothing engaged or held.

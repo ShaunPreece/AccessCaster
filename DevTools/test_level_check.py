@@ -26,8 +26,8 @@ import meters
 import server
 
 # PIN THE DESK. This suite asserts Pro II channel LABELS ("USB 2 (Secondary)"), so with a Duo
-# attached it failed on the Duo's shorter names and looked like a regression. Offline tests must not
-# depend on what happens to be plugged into the machine running them.
+# attached the Duo's shorter names would read as a regression. Offline tests must not depend on
+# what happens to be plugged into the machine running them.
 devices.force_device(devices.PRO2)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,8 +44,8 @@ def check(name, got, want):
 def check_in(name, needle, haystack):
     ok = needle.lower() in (haystack or "").lower()
     if not ok:
-        # TRUNCATED: one of these haystacks is the whole of server.py, and a failure printed
-        # 366 KB of it, which buries the failure it is reporting.
+        # TRUNCATED: one of these haystacks is the whole of server.py, and printing all of it
+        # buries the failure it is reporting.
         FAILS.append(f"{name}: {needle!r} not in {(haystack or '')[:160]!r}...")
     print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
@@ -144,10 +144,9 @@ check_not_in("nor any markup for one", 'id="meter-check-btn"', index_html)
 check_in("the stream chooser survives, for the watch", 'id="meter-stream"', index_html)
 check_in("and the tab points at where the check went", "Channels page", index_html)
 
-print("\nTHE TWO FAULTS A LIVE RUN FOUND ON")
-# Both came out of one real sequence: a run's watcher thread died mid-run, and the next press of the
-# button started a SECOND run instead of stopping the first - which dropped the first run's Chat
-# isolation with nobody left holding a reference to put it back.
+print("\nA RUN WHOSE WATCHER HAS DIED, AND A STALE TIMER")
+# When a run's watcher thread dies mid-run, the next press must stop that run rather than start a
+# second one, or the first run's Chat isolation is dropped with nothing left to put it back.
 spoken = []
 meters.cue = lambda *_a, **_k: None            # no beeps in an offline run
 server._ann_say = lambda text, *a, **k: spoken.append(text)
@@ -190,10 +189,8 @@ check_not_in("no peak is quoted from a run that broke", "peaked at", msg)
 check("and it was SPOKEN, not just returned", spoken[-1], msg)
 
 print("\nTHE REFUSAL A USER WILL ACTUALLY HIT")
-# Measured on the desk: with Chat carrying Mic 1 only, Mic 1, USB 1 and USB 2 ran, while
-# Mic 3 and Bluetooth refused - both with their faders down, so neither reaches the Chat mix at all.
-# That makes this the common path rather than an edge case, and it has to say what to DO instead of
-# describing the mixer.
+# A channel whose fader is down does not reach the Chat mix at all, so this refusal is the common
+# path rather than an edge case, and it has to say what to DO instead of describing the mixer.
 server_src = (ROOT / "Project" / "server.py").read_text(encoding="utf-8")
 check_in("the start path recognises the cross-point refusal",
          "not reaching the Chat mix", server_src)

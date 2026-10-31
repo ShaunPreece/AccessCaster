@@ -35,7 +35,7 @@ import sys
 import threading
 import time
 
-import _bootstrap  # noqa: F401
+import _bootstrap
 import hid
 import model_tree
 import rcp_hid

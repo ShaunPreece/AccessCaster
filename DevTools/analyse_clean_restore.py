@@ -7,8 +7,8 @@ difference either explained or a defect.
 THE ONE QUESTION THAT SPLITS THE CAUSES, when a FACTORY dump is given as well:
   * came back as the FACTORY value -> the write never landed, or was overwritten by the reset;
   * came back as SOMETHING ELSE -> we wrote it, and wrote it wrong.
-That split is what retires a "the desk is still applying the factory show" theory: a difference that
-is neither the saved value nor the factory one cannot have come from either.
+That split rules out "the desk is still applying the factory show": a difference that is neither
+the saved value nor the factory one cannot have come from either.
 
 Differences that are BY DESIGN are counted and named, never silently dropped:
   * `channelOutputMute` / `mixMute` - a restore must not silence a desk mid-session, so profiles.py
@@ -78,7 +78,7 @@ def _cross_point_is_not_ours(key, before: dict) -> bool:
         whatever the fader read when it was unlinked, so the number is inert and recording it makes
         a restore fail its own read-back.
       * LINKED (`mixLink`): a linked cross-point has no level of its own, it follows the channel
-        fader. Shaun's desk carries a -1.04e-07 float residue on two of them, which is zero."""
+        fader. A float residue such as -1.04e-07 on one of them is zero."""
     block, path, prop = key
     if block != "MIX" or prop != "mixLevelWithAnchor":
         return False

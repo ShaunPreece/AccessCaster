@@ -420,7 +420,7 @@ exact tree). A fixture the parser cannot read now raises, so a hand-rolled byte 
 did not move, restores. Safe with a mic connected - it writes gain only, never phantom.
 **`test_restore_mic_order_live.py` now asserts the CHAIN as well as the gain** survives a restore
 that changes the voicing.
-**`test_duo_caps_live.py` exercises EVERY capability the attached desk has ON** (the Duo plan's A5):
+**`test_duo_caps_live.py` exercises EVERY capability the attached desk has ON**:
 mic gain / polarity / line level / mic type, a processing module and a float param, channel mute, a
 fader source swap, a stereo link and unlink, a matrix cross-point and its level, a soundpad create
 and clear, monitor mute, and the whole Device settings page. Each writes, diffs the WHOLE tree,

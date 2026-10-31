@@ -1,21 +1,19 @@
 """
 AccessCaster - USB capture analyzer.
 
-Purpose: once we capture RODE Central talking to the RODECaster (with Wireshark
-+ USBPcap on Windows), this tool pulls the raw USB HID reports back out of the
-.pcapng, sorts host->device commands from device->host responses, and diffs two
-captures so we can isolate the exact command that, for example, assigns a sound
-to a SMART pad.
+Pulls the raw USB HID reports out of a USBPcap capture of the RODE app talking
+to the RODECaster, sorts host->device commands from device->host responses, and
+diffs two captures to isolate the command behind one action, such as assigning
+a sound to a SMART pad.
 
-It reads .pcapng files directly in pure Python (no tshark needed) for the
-USBPcap link-layer type. If you prefer, it can also read a tshark JSON export.
+It reads .pcap and .pcapng files directly in pure Python (no tshark needed) for
+the USBPcap link-layer type, and can also read a tshark JSON export.
 
-The RODECaster control protocol (see rcp_hid.py) puts the report id in the
-first data byte:
-    0x01  host -> device  command       (e.g. 'VER', mute, pad assign command)
+The report id is the first data byte (RODECASTER_PROTOCOL.txt section 2):
+    0x01  host -> device  simple command  ('VER', info, ping)
     0x02  device -> host  response/ACK
-    0x03  host -> device  bulk data      (audio upload to a pad, most likely)
-    0x04  device -> host  bulk response
+    0x03  host -> device  property record (every write, and the model-read trigger)
+    0x04  device -> host  property record (the model dump, and pushes)
 
 Typical workflow:
 
@@ -421,7 +419,7 @@ def cmd_props(path: str) -> None:
 
 
 def cmd_bulk(path: str) -> None:
-    """Summarize bulk (report id 3) host->device traffic, i.e. likely audio upload."""
+    """Summarize the report-id-3 property records the host sent."""
     pkts = load_capture(path)
     bulk = [p for p in pkts if not p.from_device and p.report_id == 0x03]
     total = sum(len(p.data) for p in bulk)
@@ -549,12 +547,13 @@ USAGE = """AccessCaster USB capture analyzer
 Commands:
   summary  <capture>            counts of OUT/IN reports by report id
   commands <capture>            distinct report-id-1 commands the host sent
-  bulk     <capture>            summary of report-id-3 bulk (audio) traffic
+  bulk     <capture>            summary of the report-id-3 property records sent
   rode     <capture>            does this capture contain RODECaster traffic?
+  props    <capture>            distinct ASCII property names, with the bytes around them
   diff     <captureA> <captureB>  commands unique to each + byte diff
   selftest                      verify the pcapng parser on synthetic data
 
-<capture> may be a USBPcap .pcapng or a tshark -T json export (.json).
+<capture> may be a USBPcap .pcap or .pcapng, or a tshark -T json export (.json).
 """
 
 

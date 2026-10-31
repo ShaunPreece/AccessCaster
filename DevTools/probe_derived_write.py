@@ -6,10 +6,9 @@ This file closes that gap the only honest way: write it, read it back off the de
 check the model came back the same shape it started (a write that lands nowhere can append a stray
 property, and a stray is factory-reset-only - see the STRAYS incident).
 
-It exists because the alternative had a false floor. For a year, properties with no control in the
-RODE app were filed BLOCKED, on the reasoning that there was no capture to copy. That reasoning has
-now been wrong five times running (`outputMonLevel`, `activeButtonsBrightness`, `channelOutputMute`,
-`channelCueEnable`, `eq*Q`). No app control means no CAPTURE ROUTE. It never meant unwritable.
+A property with no control in the RODE app has no CAPTURE ROUTE, which does not make it
+unwritable: `outputMonLevel`, `activeButtonsBrightness`, `channelOutputMute`, `channelCueEnable` and
+`eq*Q` have no app control, and all of them take a write.
 
 SAFETY, and it is not decoration:
   * Only properties in a block with a CONFIRMED anchor are allowed. An unknown block is refused,
@@ -47,7 +46,7 @@ SETTLE = 0.9
 # point is that we could not UNDO it from this side, which is the line the project's own rules draw.
 DENY = {
     "powerOffRequest": "would power the desk off, and nothing on this side can power it back on. "
-                       "Shaun has to be at the desk for that one.",
+                       "The owner has to be at the desk for that one.",
     "updateRebootRequested": "reboots the unit mid-session.",
     "updateInitiateRequested": "starts a firmware update.",
     "updateResetDeviceRequested": "a device reset; the post-reset flow is touchscreen-only.",
@@ -87,7 +86,8 @@ def read_one(prop: str):
 
 
 def derive(prop: str, blob: bytes):
-    """(selector, header) for a property, or (None, header) when the block is not anchored."""
+    """(selector, header, refusal) for a property. The selector is None, and the refusal says why,
+    when the property occurs more than once or its block has no confirmed selector."""
     where, count = selector_map.sections(blob)
     header = where.get(prop)
     if count.get(prop, 0) != 1:

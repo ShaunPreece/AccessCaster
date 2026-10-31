@@ -1,15 +1,15 @@
-"""LIVE exercise of every capability the attached desk already has ON (Duo plan A5).
+"""LIVE exercise of every capability the attached desk already has ON.
 
 Each check writes ONE value, diffs the WHOLE tree to see everything that moved, restores, and diffs
 again. Nothing is inferred: if a write touches something we did not expect, the diff says so.
 
-CONFIRMED SELECTORS ONLY, where CONFIRMED now includes "the desk's own tree says so". A write to an
+CONFIRMED SELECTORS ONLY, where CONFIRMED includes "the desk's own tree says so". A write to an
 unmapped selector can append a stray that only a factory reset clears, so every address here either
 came from a capture or resolves, in this dump, to a node of the right block carrying the property.
-That second route is what let the unit-settings block be enabled on a Duo with no capture behind it.
+The second route is what makes the unit-settings block safe on a Duo, which has no capture of it.
 
 WHY "OCCURRENCE COUNTS UNCHANGED" IS NOT THE TEST: on a Duo the first write to an input property
-CREATES it, and writing the old value back does not remove it (measured). So an ADDED property at
+CREATES it, and writing the old value back does not remove it. So an ADDED property at
 the address we just wrote is correct behaviour.
 An added property anywhere ELSE, or a changed value we did not ask for, is not.
 
@@ -123,11 +123,10 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
     snapshot and is expected to put the rest back by name.
     `after_write(after)` ASSERTS THE ENGINE'S OWN RESPONSE, given the settled post-write snapshot.
 
-    THAT LAST HOOK IS THE POINT OF THIS FILE NOW. Everything else here asks "did the value land at
-    its own address", which a dead address answers just as happily as a live one - that is exactly
-    how a Duo's mic gain passed this suite for two months while changing no audio. Where the desk
-    DERIVES something from a write, assert the derived thing: it is the only part a wrong address
-    cannot fake.
+    THAT LAST HOOK IS THE STRONG CHECK. Everything else here asks "did the value land at its own
+    address", which a dead address answers just as happily as a live one: a write to a node the
+    audio engine never reads passes it while changing no audio. Where the desk DERIVES something
+    from a write, assert the derived thing: it is the only part a wrong address cannot fake.
     """
     global FAILED
     if ONLY and ONLY not in label:
@@ -253,8 +252,8 @@ if "processing" in dev.caps:
     # THE WIRELESS MIC'S OWN MUTE. Same CHANNEL node as the two above, so what is worth asserting is
     # the DIFFERENCE: the channel mute drags thirteen matrix cross-points with it, and this one must
     # drag NOTHING (expect_extra stays 0). A write that moved the matrix would mean we had reached
-    # the channel mute by another name. It cannot be ear-proven here - nobody on the project owns a
-    # wireless mic - so this proves the address and the absence of side effects, and no more.
+    # the channel mute by another name. With no wireless mic paired, this proves the address and the
+    # absence of side effects, and no more.
     cur = snap.get((proc_path, "CHANNEL", c.WIRELESS_MUTE_PROP))
     probe(f"processing: {mic['label']} WIRELESS mic mute (strip {strip}, must move nothing else)",
           (proc_path, "CHANNEL", c.WIRELESS_MUTE_PROP),
@@ -296,9 +295,9 @@ if "processing" in dev.caps:
     # THE MIC TYPE MOVES THE GAIN **AND THE WHOLE PROCESSING CHAIN**, firmware-side. Each voicing
     # carries its own chain, so selecting one overwrites the strip's params, and WRITING THE OLD TYPE
     # BACK DOES NOT UNDO IT - the desk applies a voicing on the way in and leaves the params alone on
-    # the way out. Measured on a Pro II: PodMic -> Dynamic moved 13 params (Depth,
-    # Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, the three EQ
-    # gains, both Aphex) and every one was still at the Dynamic value after the type went back.
+    # the way out. On a Pro II, PodMic -> Dynamic moves 13 params (Depth, Sparkle, Punch,
+    # compressor threshold + gain, de-esser, gate threshold + range, the three EQ gains, both
+    # Aphex) and every one stays at the Dynamic value after the type goes back.
     # THE DUO DRAGS THE SAME THINGS THE PRO II DOES, so the gain and the chain both have to go back
     # BY NAME - that is what `restore_extra` is for. A weaker claim here ("a Duo mic moves the gain
     # only") passes for the worst possible reason: a write aimed at a node the audio engine never
@@ -348,10 +347,10 @@ if "fader_write" in dev.caps:
             t.set_fader_source(b_i, hi)
 
         # sipSlotCallDisconnect DOES NOT COME BACK INSIDE THE RUN, and it is the desk, not us.
-        # Measured on a Pro II over four runs: a fader-source write flips the second
+        # On a Pro II a fader-source write flips the second
         # element of the composite on all three SIPCALLSLOTS nodes (0x293/0x294/0x295), and it is back
         # at its resting value ([T,F], [T,T], [T,T]) by the start of the next run, so it is TRANSIENT -
-        # the settle window is seconds and the revert takes longer than that. Ruled out as a
+        # the settle window is seconds and the revert takes longer than that. It is not a
         # mis-addressed write of ours: the selector we write is 0x1c + fader, a CHANNEL block, the
         # layout reads back exact, no property is added anywhere, and a mic-gain write leaves all three
         # alone. It is a disconnect REQUEST composite and nothing in the app reads it. Exempted BY
@@ -421,8 +420,7 @@ if "level_write" in dev.caps:
     vec = rr.values(blob, "channelInputSource")
 
     # A VIRTUAL fader, and one that actually has a source on it - an empty strip (-1) moves no
-    # cross-points, so it would prove only that the byte landed, which is the evidence this whole
-    # suite is now suspicious of.
+    # cross-points, so it would prove only that the byte landed, which a dead address proves too.
     idx = next((i for i in sorted(dev.fader.level_selectors)
                 if i < len(vec) and vec[i] >= 0), None)
     if idx is None:
@@ -435,8 +433,7 @@ if "level_write" in dev.caps:
         target = 40 if cur != 40 else 60
         # THE ENGINE IS THE WITNESS, not the read-back. A fader's level IS its source's cross-point
         # level, so the desk recomputes all 13 cells of that source's routing row by itself, to
-        # value/127 exactly. That is the difference between "the byte landed" and "the audio moved",
-        # and it is what proved these addresses on the Duo in the first place.
+        # value/127 exactly. That is the difference between "the byte landed" and "the audio moved".
         want = f"{target / t.FADER_LEVEL_MAX:.6f}"
         row = [t.cross_point_selector(out, source) for out in range(dev.matrix.output_count)]
 
@@ -632,8 +629,8 @@ if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
     else:
         print(f"  ok   all {len(t.UNIT_SETTING_SEL)} resolve to a node that carries them")
 
-    # outputMonFixed UNMUTES THE MONITOR SPEAKERS, and writing it back does not re-mute. Measured on
-    # a Pro II. It is the audible half of what the DERIVED note already says about
+    # outputMonFixed UNMUTES THE MONITOR SPEAKERS, and writing it back does not re-mute, on a Pro
+    # II. It is the audible half of what the DERIVED note already says about
     # this property taking the encoder's job away, and it matters to a user, not just to this suite:
     # switching the monitor output to fixed level opens the speakers up. Put the mute back by name.
     def restore_mon_mute(before):

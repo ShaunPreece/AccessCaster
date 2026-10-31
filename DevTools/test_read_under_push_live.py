@@ -13,11 +13,11 @@ WHAT IT PROVES, each of these a fault the read path is capable of:
   4. The read is bounded by the dump's DECLARED LENGTH, not by silence (`_last_read`).
   5. The filter recognises REAL pushes off the wire, not just dump content it must leave alone. A
      filter is two claims and this is the other one.
-  6. THE OLD LOOP COULD NOT HAVE ESCAPED. After the burst ends, frames go on arriving for as long
-     as the pad plays, so "stop when the line goes quiet" had nothing to stop on. Measured directly
-     instead of inferred, and it is why the length bound is the fix rather than a bigger timeout.
+  6. A QUIET-DETECTION LOOP CANNOT ESCAPE. After the burst ends, frames go on arriving for as long
+     as the pad plays, so "stop when the line goes quiet" has nothing to stop on. This is why the
+     read is bounded by length rather than by a bigger timeout.
 
-WHY A HEALTHY READ NOW SKIPS ZERO PUSHES, which looks like the test missing its target and is not:
+WHY A HEALTHY READ SKIPS ZERO PUSHES, which looks like the test missing its target and is not:
 the dump burst is atomic and the length bound closes the handle the moment the last dump byte
 lands, so the pushes queueing up behind it are never even read. Checks 5 and 6 are what exercise
 the filter; a nonzero skip count in the runs is a bonus, not the proof.
@@ -48,7 +48,7 @@ import model_tree
 import rcp_read
 from rcp_hid import find_control_interface
 
-SLOW_S = 3.0        # a healthy dump is well under a second; anything near a minute is the old bug
+SLOW_S = 3.0        # a healthy dump is well under a second; one run to its ceiling takes minutes
 TAIL_S = 2.0        # how long to watch the line AFTER the burst, for check 6
 
 
@@ -67,8 +67,8 @@ def drain(dev) -> None:
     """Read the handle empty.
 
     LOAD-BEARING BEFORE EVERY PRESS. Windows queues the pushes that arrived while nobody was
-    reading, so a press that STOPPED a latched pad was immediately "confirmed playing" off frames
-    from before it - which put the pre-fix demonstration on a silent desk and made it pass.
+    reading, so without it a press that STOPS a latched pad is "confirmed playing" off frames from
+    before it, and the demonstration below runs on a silent desk and passes.
     """
     while dev.read(rcp_read.BULK_LEN, timeout_ms=1):
         pass
@@ -100,10 +100,9 @@ PLAYING_MIN = 5     # ~16 expected in 0.8 s at 20 pushes a second; a stop emits 
 def start_playing(dev, midi, pad: int, tries: int = 3) -> bool:
     """Get the pad actually PLAYING, confirmed off the push stream, and say so if it will not.
 
-    PAD 1 ON THIS DUO LATCHES: one press starts it, the NEXT STOPS IT. So "press it and assume"
-    tested a quiet desk half the time, which is how the pre-fix demonstration below first came back
-    passing. Press, then require a sustained push RATE; too few means that press was a stop, so
-    press again.
+    A LATCHING PAD starts on one press and STOPS on the next, so "press it and assume" tests a
+    quiet desk half the time. Press, then require a sustained push RATE; too few means that press
+    was a stop, so press again.
     """
     for _ in range(tries):
         drain(dev)
@@ -213,9 +212,9 @@ def main() -> int:
 def tail_checks(pad: int) -> bool:
     """Checks 5 and 6, on one raw handle held open across the whole burst and past its end.
 
-    Holding the handle is the point: `read_model_raw` now closes as soon as the declared length is
-    in, so it never sees the tail. This is where the pushes are, and where the old quiet-detection
-    loop lived until its 4000-read ceiling.
+    Holding the handle is the point: `read_model_raw` closes as soon as the declared length is in,
+    so it never sees the tail. The tail is where the pushes are, and where a quiet-detection loop
+    runs on to its 4000-read ceiling.
     """
     ok = True
     dev = open_watcher()
@@ -259,12 +258,13 @@ OLD_LOOP_CEILING = 700     # the real ceiling is 4000 reads / 240 s; 700 shows t
 
 
 def old_loop_check(pad: int, healthy_bytes: int) -> bool:
-    """Run the loop AS IT WAS and show it does not stop and does not come back clean.
+    """Run a quiet-detection loop with no push filter, and show it does not stop and does not come
+    back clean.
 
     This is here so the two faults stay demonstrated rather than remembered. Without it, a later
     session sees a filter with no visible reason and a length bound that "just works", and the
     cheapest-looking simplification is to take one of them out. The ceiling is cut from 4000 reads
-    to 700 so the demonstration costs seconds instead of the 172 s that was measured on this desk.
+    to 700 so the demonstration costs seconds instead of the 172 s a full run takes.
 
     Read-only: the same trigger the app sends, and one MIDI note. Nothing is written to the model.
     """
