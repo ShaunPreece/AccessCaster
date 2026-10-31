@@ -807,8 +807,9 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
 
 def clear_pad(position: int, debug: bool = False) -> str:
     """Clear the pad at 0-based stream `position`. The ENTIRE clear is: padActive ON ->
-    padActive OFF -> select-begin, then exit transfer mode, and NOTHING else. It sends NO remountPadStorage (writes no files),
-    so it does NOT mount drive F and produces NO Windows "drive has a problem" toast.
+    padActive OFF -> select-begin, then exit transfer mode, and NOTHING else. It sends NO
+    remountPadStorage (writes no files), so it does NOT mount drive F and produces NO Windows
+    "drive has a problem" toast.
 
     Re-read positions first - they shift when a record drops.
 

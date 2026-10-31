@@ -649,10 +649,11 @@ async function loadNetwork() {
   }
 }
 
-/* The wireless mic readout, in sentences rather than a table. THREE OUTCOMES, not two, and the difference matters: slots that all read off really do mean
-   no transmitter is on, but a dump carrying NO slots at all means the unit told us nothing, and
-   reading that out as "none connected" would be inventing an answer. Nothing has ever been paired
-   on this desk, so the connected wording is unproven in practice (server._wireless_mics). */
+/* The wireless mic readout, in sentences rather than a table. THREE OUTCOMES, not two, and the
+   difference matters: slots that all read off really do mean no transmitter is on, but a dump
+   carrying NO slots at all means the unit told us nothing, and reading that out as "none
+   connected" would be inventing an answer. The connected wording is untested with a paired
+   transmitter (server._wireless_mics marks it `unproven`). */
 function paintWirelessMics(mics) {
   const out = document.getElementById("net-mics");
   if (!out) return;
@@ -1263,8 +1264,8 @@ async function sendInputLevel(db, el) {
     return;
   }
   setBusy(el, false);
-  // The value comes back from a READ-BACK, not from what was asked for: a driver can refuse
-  // silently, and this desk's Chat input has done exactly that.
+  // The value comes back from a READ-BACK, not from what was asked for: a driver can refuse a
+  // level silently, and RODE's Chat input is one that does.
   const input = document.getElementById("meter-input-db");
   if (input && res.level && typeof res.level.db === "number") {
     input.value = res.level.db.toFixed(1);
@@ -1289,7 +1290,7 @@ function buildMeterWatchControls(d) {
     host.appendChild(makeSwitchRow("meter-clip-sound", "Play a sound when it clips", true,
       (on, input) => sendToggle("/api/meters/option",
         { name: "clip_sound", value: on ? 1 : 0 }, input, on)).row);
-    // WHERE the warning fires. True full scale is genuinely hard to reach on this desk, whose own
+    // WHERE the warning fires. True full scale is genuinely hard to reach on a RODECaster, whose own
     // compressor and limiter hold a shouted mic well below it, so a warning there arrives only
     // once the damage is done. Minus 1 warns while there is still something you can do.
     host.appendChild(buildMeterNumber("meter-clip-db", "clip_db",
@@ -1369,8 +1370,8 @@ function buildMeterNumber(id, option, label, min, max, hint) {
 /* ---- Device page: the unit's OWN settings ----------------------------------
    Screen and button brightness, auto-brightness, dim time, meter style, haptics, what the record
    button does, listen mode, and the monitor's fixed output level. Every one of these is otherwise
-   reachable ONLY from the unit's touchscreen; their write addresses are captured and read-back
-   verified.
+   reachable ONLY from the unit's touchscreen, and every one of their write addresses is a
+   confirmed one.
 
    The server sends the SPEC as well as the values (label, kind, choices/range, and a plain-English
    detail line), so the controls are built from one definition rather than hand-written twice. A
@@ -2485,8 +2486,8 @@ function renderChannelPanel(name) {
 
   // A BUS HAS NO PROCESSING AT ALL, so it gets ONE tab and no strip worth arrowing along.
   // The SMART pads strip publishes a full chain and accepts every write to it, so a read-back
-  // suggests it is processable. It is not: tested BY EAR on both desks, none of it reaches the
-  // audio, and RODE's own guide agrees ("You can add processing to any audio channel except the
+  // suggests it is processable. It is not: on both desks none of it reaches the audio, and
+  // RODE's own guide agrees ("You can add processing to any audio channel except the
   // SMART pads"). Do not offer an equaliser here on the strength of the read-back. A control that
   // is read out, focused, operated and does nothing is worse than one that is not there.
   const isBus = ch.kind === "bus";
@@ -2753,9 +2754,10 @@ function fillChannelEffects(body, ch) {
 /* MUTE for one channel (channelOutputMute, writable).
    Two things the wording has to get right, because a mute you misunderstand is worse than no mute.
    It is the unit's OWN mute, so pressing the button on the desk changes this checkbox's real state
-   (and, with the announcer on, is spoken); and it silences the channel in every mix that follows the
-   fader, not just what you are monitoring; the server's reply names any output it does not reach. The state shown is read live from the unit, so a channel muted on the desk
-   already reads as muted when the panel opens. */
+   (and, with the announcer on, is spoken); and it silences the channel in every mix that follows
+   the fader, not just what you are monitoring; the server's reply names any output it does not
+   reach. The state shown is read live from the unit, so a channel muted on the desk already reads
+   as muted when the panel opens. */
 function buildChannelMute(ch) {
   const wrap = document.createElement("div");
   wrap.className = "field-block";
@@ -2855,18 +2857,18 @@ function buildChannelSolo(ch) {
    an open microphone in the room feeding the desk, and muting the transmitter is what you actually
    want when somebody walks off still wearing it.
 
-   NOBODY HERE HAS A WIRELESS MIC TO TEST IT WITH, so the app never claims the mic went quiet - it
-   says the mute was SENT. The switch still shows the desk's own state, which is real either way.
+   IT IS UNTESTED WITH A WIRELESS MIC, so the app never claims the mic went quiet - it says the
+   mute was SENT. The switch still shows the desk's own state, which is real either way.
 
    UNAVAILABLE WHEN THE UNIT REPORTS NO TRANSMITTER, AND NEVER HIDDEN. Hidden fails silently: the
-   signal it would hide on, `txConnected`, has never seen a real transmitter (server._wireless_mics
-   stamps `unproven`), so if it means something other than we assume, a user who DOES have wireless
-   mics loses the control with no way to discover it existed. Unavailable keeps it in the tab order
+   signal it would hide on, `txConnected`, is unconfirmed with a real transmitter
+   (server._wireless_mics marks it `unproven`), so if it means something other than assumed, a user
+   who DOES have wireless mics loses the control with no way to discover it existed. Unavailable keeps it in the tab order
    and says why, the same call the matrix source switches make.
 
    GATED ON THE WHOLE DESK, NOT THIS CHANNEL, and that is a limit rather than a preference:
-   `txConnected` is a flat list of transmitter slots and which slot belongs to which mic has never
-   been established, so a per-channel gate would need a mapping we do not have. An EMPTY slot list
+   `txConnected` is a flat list of transmitter slots and which slot belongs to which mic is
+   unknown, so a per-channel gate would need a mapping we do not have. An EMPTY slot list
    leaves the switch available on purpose: "could not read it" is not "there is not one". */
 function buildWirelessMute(ch) {
   const wrap = document.createElement("div");
@@ -2947,7 +2949,7 @@ function buildLevelField(ch, min, max) {
   return row;
 }
 
-/* A checkbox switch. onChange(checked, inputEl) does the work and may revert on failure. */
+/* A mic-only switch's write: `{ channel, on }` to `url`, through sendToggle. */
 function sendMicToggle(url, channel, on, input) {
   return sendToggle(url, { channel, on }, input, on);
 }
@@ -3961,7 +3963,7 @@ function buildBackChannelList(sources) {
    All three groups are built from the server's spec (soundpad.ENV_EDIT / FADE_EDIT, in the payload
    as extra_edit), same as the trigger fields.
 
-   THE ENVELOPE IS FOUR POSITIONS through the sound, ear-proven, and the editor works in
+   THE ENVELOPE IS FOUR POSITIONS through the sound (soundpad.ENV_FIELD), and the editor works in
    PERCENT because the desk never reports a file's duration, so seconds could not be shown honestly.
    Sliders here rather than number boxes, the opposite choice to the MIDI numbers: a trim point is a
    value you feel your way to, 0 to 100 arrows one percent at a time, and there is no exact number a
@@ -4472,7 +4474,7 @@ const FX_BUILD_SPEC = [
   { engine: "distortion", label: "Megaphone",
     controls: [ { param: "distortionIntensity", label: "Intensity", def: 70 } ] },
   // robotMix is the audible control (factory Large vs Small Robot differ on it; robotLevel is 0
-  // in both and was inaudible in testing), so it is the simple slider; robotLevel sits in Advanced.
+  // in both and makes no audible difference), so it is the simple slider; robotLevel sits in Advanced.
   { engine: "robot", label: "Robot",
     controls: [
       { param: "robotMix", label: "Amount", def: 67 },
@@ -5350,8 +5352,8 @@ async function loadRouting() {
   masterBox.appendChild(dms.row);
 
   // Master/global output writes (multitrack, auto-mute, headphone type, Compellor, delay) are
-  // gated per-device: verified on the Pro II, but read-only on a desk whose selectors are not
-  // captured. When read-only they are marked unavailable IN PLACE - aria-disabled, never the
+  // gated per device: writable where their selectors are confirmed, read-only elsewhere. When
+  // read-only they are marked unavailable IN PLACE - aria-disabled, never the
   // attribute - so a screen-reader user still meets every control where
   // they expect it and hears why it cannot be moved, instead of finding four sections that are
   // simply shorter than they are on the other desk. routingPost refuses the write itself.
@@ -5442,9 +5444,9 @@ async function loadMonmixOutput() {
 
 /* ---- Virtual fader levels + monitor speaker level -------------------------
    The two levels the desk otherwise keeps to itself. The virtual faders (7-9) have no physical
-   fader, and the monitor level has no control in RODE's own app, so both were reachable only from
-   the unit - encoder or touchscreen - and the encoder cannot be used without sight (its target is
-   chosen by touch and it silently unbinds). Writes are proven on hardware; see
+   fader, and the monitor level has no control in RODE's own app, so otherwise both are reachable
+   only from the unit - encoder or touchscreen - and the encoder cannot be used without sight (its
+   target is chosen by touch and it silently unbinds). Both are confirmed writes; see
    RODECASTER_PROTOCOL.txt 6.1. */
 const _levelDebounce = {};
 
@@ -5573,7 +5575,7 @@ async function onClearFaderSolos() {
 }
 
 /* The two output MUTES and the Bluetooth OUTPUT level, filled from the same read as the sliders
-   above (outputMonMute / outputBTMute / outputBTLevel, all proven writable).
+   above (outputMonMute / outputBTMute / outputBTLevel, all confirmed writes).
 
    Same rule as everything else on this tab: the tab RE-READS the device every time it is opened,
    so this must never rebuild controls a screen reader may be sitting in. Structure once, keyed on
@@ -5826,8 +5828,8 @@ function applyMatrixForOutput() {
   });
   // THE SOURCE LIST IS HIDDEN ON ANYTHING BUT CUSTOM, because on Main Mix or Mix Minus it does not
   // describe what the output carries - it shows the cross-points the desk has STORED, which the
-  // engine ignores in those modes. Measured on Headphone 4: set it to Custom, exclude Mic 1, set it
-  // back to Main Mix, and the switch still reads Mic 1 excluded while every source is audible, so
+  // engine ignores in those modes. Set an output to Custom, exclude Mic 1, set it back to Main
+  // Mix, and the switch still reads Mic 1 excluded while every source is audible, so
   // the list tells a blind operator that a mic is out of a mix it is in. Hiding it here is NOT the
   // vanishing-switches mistake elsewhere on this page: that is a control with something true to say
   // being taken out of the tab order, this is one with nothing true to say at all. The line above
@@ -6087,7 +6089,7 @@ async function onSchemeApply() {
   // Announce it earlier and the focused button's aria-disabled coming back off, plus the read that
   // follows, land on top of the live region: the outcome goes unspoken and all you hear is the
   // button's own label again.
-  let msg, bad = false;
+  let msg, bad;
   try {
     const res = await postJSON("/api/routing/schemes/apply",
       { name: s.name, builtin: s.builtin });
@@ -6130,7 +6132,7 @@ async function onSchemeSave(oneOutput) {
                     : "Reading the unit's output mixes, please wait.";
   setText("scheme-status", doing);
   announce(doing);
-  let msg, bad = false;
+  let msg, bad;
   try {
     const res = await postJSON("/api/routing/schemes/save",
                                { name: name, output: out ? out.key : "" });
@@ -6163,7 +6165,7 @@ async function onSchemeDelete() {
     "Delete preset");
   if (!ok) { announce("Cancelled. The preset was not deleted."); return; }
   setBusy(btn, true);
-  let msg, bad = false;
+  let msg, bad;
   try {
     const res = await postJSON("/api/routing/schemes/delete", { name: s.name });
     msg = res.message || "Done.";
@@ -6183,8 +6185,8 @@ async function onSchemeDelete() {
 
    A switch, written at once, unlike the fader dropdowns above. Those apply on Enter because
    arrowing a closed SELECT fires change on every option. A checkbox has no such reading mode: you
-   land on it, hear its state, and it only changes when you deliberately activate it. So immediate is safe here, and it matches the auto-mute
-   switches on the same page. */
+   land on it, hear its state, and it only changes when you deliberately activate it. So immediate
+   is safe here, and it matches the auto-mute switches on the same page. */
 function buildStereoLinks(fm) {
   const box = document.getElementById("stereo-links");
   if (!box) return;
@@ -7002,7 +7004,7 @@ function onAppSettingsPress(btnId, url) {
   return async () => {
     const btn = document.getElementById(btnId);
     setBusy(btn, true);
-    let msg, bad = false;
+    let msg, bad;
     try {
       const res = await postJSON(url, {});
       msg = res.message || "Done.";
@@ -7040,7 +7042,7 @@ async function loadAutostart() {
 async function onAutostartToggle(on, input) {
   const no = unavailableReason(input);
   if (no !== null) { input.checked = !input.checked; announce(no, true); return; }
-  let msg, bad = false;
+  let msg, bad;
   try {
     const res = await postJSON("/api/appsettings/autostart", { on: on });
     msg = res.message || "Done.";
@@ -7078,7 +7080,7 @@ async function onAppSettingsImport() {
   if (!ok) { announce("Cancelled. Your settings were not changed."); return; }
 
   setBusy(btn, true);
-  let msg, bad = false;
+  let msg, bad;
   try {
     const text = await file.text();
     let payload;
@@ -8176,8 +8178,8 @@ function wireAboutTabs() {
 /* ---- A talking level check, on ONE channel -------------------------------
    Not to be confused with the Device > Levels check, which meters a Windows STREAM: every stream
    this desk offers is a mix, so that one answers "something is reaching the computer" and never
-   "Mic 2 is right", which is the question you have while setting up. The server isolates the channel on a
-   temporary Chat mix and corrects for the fader, so the number is about the channel
+   "Mic 2 is right", which is the question you have while setting up. The server isolates the
+   channel on a temporary Chat mix and corrects for the fader, so the number is about the channel
    (server.action_channel_level_check).
 
    NOTHING GOES IN THE PAGE'S LIVE REGION WHILE IT RUNS. The check speaks the level itself every
@@ -8487,8 +8489,9 @@ async function loadCallme() {
   }
   callmeSeen = { version: null, incoming: d.incoming ? d.incoming.id : null };
   applyCallme(d);
-  // EMPTY ON ARRIVAL: the Current call section says what is happening, the code is on the Incoming calls tab and
-  // an offline unit gets the Not ready section, so a summary here would only repeat them.
+  // EMPTY ON ARRIVAL: the Current call section says what is happening, the code is on the
+  // Incoming calls tab and an offline unit gets the Not ready section, so a summary here would
+  // only repeat them.
   setText("callme-state", "");
   callmePoller.start();
 }
@@ -9228,12 +9231,12 @@ function initThemeToggle() {
                      : "Dark mode currently off. Press to turn on.";
   }
   let stored = null;
-  try { stored = localStorage.getItem("theme"); } catch {}
+  try { stored = localStorage.getItem("theme"); } catch { /* storage blocked: dark stands */ }
   apply(stored || "dark");
   toggle.addEventListener("click", () => {
     const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     apply(next);
-    try { localStorage.setItem("theme", next); } catch {}
+    try { localStorage.setItem("theme", next); } catch { /* storage blocked: lasts this visit */ }
     status.textContent = "";
     window.setTimeout(() => {
       status.textContent = "Dark mode is now " + (next === "dark" ? "on" : "off") + ".";
@@ -9285,7 +9288,7 @@ function initSingleInstanceGuard() {
     }
   };
 
-  window.addEventListener("pagehide", () => { try { ch.close(); } catch {} });
+  window.addEventListener("pagehide", () => { try { ch.close(); } catch { /* already closed */ } });
 
   ch.postMessage({ type: "hello", id: myId });
   setTimeout(() => { if (active === null) becomeActive(); }, 400);
@@ -9354,7 +9357,7 @@ function initAppLifecycle() {
   // (sendBeacon on pagehide) tells it to stop. A reload also fires pagehide, but the reloaded
   // page's first ping cancels the pending shutdown server-side, so refreshing is safe.
   const ping = async () => {
-    let reply = null;
+    let reply;
     try {
       const resp = await fetch("/api/ping", { method: "POST", keepalive: true });
       // ANY answer means the server is up, including a refusal: a remote page with a stale token
@@ -9378,7 +9381,8 @@ function initAppLifecycle() {
   // Only quit on a REAL page close. pagehide with persisted === true means the page entered the
   // back/forward cache (e.g. backgrounded) and may be restored, so we must NOT stop the server
   // then. beforeunload is intentionally not wired to quit, as it can fire without a real close.
-  const quit = () => { try { navigator.sendBeacon("/api/quit"); } catch {} };
+  // A beacon that cannot be sent is covered by the server's own watchdog once the pings stop.
+  const quit = () => { try { navigator.sendBeacon("/api/quit"); } catch { /* see above */ } };
   window.addEventListener("pagehide", (e) => { if (!e.persisted) quit(); });
 }
 
