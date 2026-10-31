@@ -21,7 +21,7 @@
   const waitFor = async (fn, ms) => {
     const end = Date.now() + (ms || 5000);
     while (Date.now() < end) {
-      try { if (fn()) return true; } catch (e) { /* not built yet */ }
+      try { if (fn()) return true; } catch { /* not built yet */ }
       await sleep(80);
     }
     return false;

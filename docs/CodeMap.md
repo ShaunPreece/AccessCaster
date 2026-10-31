@@ -234,10 +234,10 @@ inline, because what the browser receives is unchanged.
 
 - Tabs: **`wireTabStrip` is the ONE tab strip** - the roving tabindex, the arrow/Home/End keys, the
   remembered tab, the "focus the tab before you hide the pane focus is in" rule, and the panel's own
-  tab stop. `buildTabs` (305, JS-built pages) and `buildStaticTabs` (358, pages written in
+  tab stop. `buildTabs` (303, JS-built pages) and `buildStaticTabs` (356, pages written in
   index.html) are thin adapters over it and differ only in where the panes come from: built, or
-  found in the document. Also `tabSection` (336, sub-headings inside a merged tab),
-  `setPanelTabStop` (164).
+  found in the document. Also `tabSection` (334, sub-headings inside a merged tab),
+  `setPanelTabStop` (162).
 - **Dropdowns that change the desk apply on Enter: `enterToApply` (the rule), `makeStagedSelect`
   (a labelled row built on it), `setStagedValue` (the ONLY place a device value is recorded),
   `revertStaged`, `markStaged` (the on-page waiting line), `addDescription` (adds a hint after the
@@ -246,9 +246,9 @@ inline, because what the browser receives is unchanged.
   mic processing preset, the
   Unit settings choices, the pad Settings dropdowns and the MIDI trigger choices. A dropdown that
   only changes what you are looking at acts at once; the metered stream waits `SELECT_COMMIT_MS`.
-- Rebuild guards: `fillOptions` (3422), `rebuildIfChanged` (3450), `setLevelValue` (5673),
-  `markLevelsUnread` (5651), `applyUnitSettingValues` (1436).
-- Live region: `announce` (18). It REPLACES, it does not queue.
+- Rebuild guards: `fillOptions` (3420), `rebuildIfChanged` (3448), `setLevelValue` (5669),
+  `markLevelsUnread` (5647), `applyUnitSettingValues` (1434).
+- Live region: `announce` (16). It REPLACES, it does not queue.
 - Confirm modal: **`confirmAction`** (every confirm in the app: pads, mix schemes, deleting a
   recording or a custom effect, and the access link). Its DOM ids are `pad-confirm-*`. A mic
   preset is deleted through its own dialog instead (`openPresetDelete`, `preset-delete-dialog`).
@@ -261,24 +261,24 @@ inline, because what the browser receives is unchanged.
 - App shell: `summariseOverview` + `speakStartupSummary` (the spoken startup state, by exception; `networkLine` is the overview's network sentence),
   and `loadVersionBeforeRender`, which the first render awaits so the app heading carries the version
   before focus lands on it. Pinned by `DevTools/ui_checks_shell.js`.
-- Keyboard: `bindPageBoundary` (9318, the end-of-page hard stop).
-- Router: `render` (9069). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
+- Keyboard: `bindPageBoundary` (9312, the end-of-page hard stop).
+- Router: `render` (9063). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
   so an opening window starts on the current page's nav link, and a route change takes the default
   and focuses the section's h1.
-- Page loaders: `loadVersion` (475, `/api/version`, called from init so the Help & About version is
-  there without visiting Device), `loadStatus` (502), `loadOverview` (829), `loadChannels` (2372),
-  `renderChannelPanel` (2484), `loadPads` (3516), `loadMonmixOutput` (5428),
-  `loadFaderLevels` (5477), `buildMatrix` (5796), `onMatrixOutputChange` (5933, which also words each
+- Page loaders: `loadVersion` (473, `/api/version`, called from init so the Help & About version is
+  there without visiting Device), `loadStatus` (500), `loadOverview` (827), `loadChannels` (2370),
+  `renderChannelPanel` (2482), `loadPads` (3514), `loadMonmixOutput` (5424),
+  `loadFaderLevels` (5473), `buildMatrix` (5792), `onMatrixOutputChange` (5929, which also words each
   source switch, including the source that matches the output).
-- Mix schemes: `wireSchemes` (6046), `loadSchemes` (6062, fills the dropdown; option values are
-  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (6147).
-- Recording: `fillRecordingList` (7909), `fillRecordingDeleteChoices` (8038),
-  `onDeleteRecording` (8068). Everything on that page speaks through `setRecState`, the page's
+- Mix schemes: `wireSchemes` (6042), `loadSchemes` (6058, fills the dropdown; option values are
+  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (6143).
+- Recording: `fillRecordingList` (7904), `fillRecordingDeleteChoices` (8033),
+  `onDeleteRecording` (8063). Everything on that page speaks through `setRecState`, the page's
   ONE live region.
-- Builders: `buildLevelSlider` (5687), `buildScaleFields` (3995), `buildTriggerFields` (4159),
-  `buildBackChannelList` (3960), `renderCustomFxList` (4708), `fillSpeechChoices` (1699).
-- Specs: `REC_TRANSPORT` (7646). Never delete a `label:` key from one.
-- Progress dialogs: `pollProfileJob` (6780).
+- Builders: `buildLevelSlider` (5683), `buildScaleFields` (3991), `buildTriggerFields` (4155),
+  `buildBackChannelList` (3956), `renderCustomFxList` (4704), `fillSpeechChoices` (1697).
+- Specs: `REC_TRANSPORT` (7641). Never delete a `label:` key from one.
+- Progress dialogs: `pollProfileJob` (6775).
 - The factory reset (after `doRestore`): `loadShows` (can it be reset, can it back itself up),
   `openShowConfirm`, `onShowBackupFirstChange`, `doShowConfirmed`, `runShowJob`. Export, restore and
   delete of the unit's own shows go through the one Backups list.
@@ -293,7 +293,7 @@ inline, because what the browser receives is unchanged.
   (`onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm`), Delete
   (`onHotkeyDeleteOpen` / `onHotkeyDeleteConfirm`), Restore (`onHotkeyRestoreOpen` /
   `onHotkeyRestoreConfirm`), all closed through `closeHotkeyDialog`.
-- `dropRetiredGroupState` (9506) drops the whole retired `accesscaster.groups` key.
+- `dropRetiredGroupState` (9500) drops the whole retired `accesscaster.groups` key.
 
 Page shortcuts (`bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,
 Alt+4 Recording, Alt+5 CallMe, Alt+6 Backups (route `profiles`, section `sec-profiles`), Alt+7

@@ -23,7 +23,7 @@ const posts = async () => (await apiLog()).filter((e) => e.method === "POST");
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 20000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready */ }
+    try { if (fn()) return true; } catch { /* not ready */ }
     await sleep(100);
   }
   return false;

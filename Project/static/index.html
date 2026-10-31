@@ -12,9 +12,9 @@
   <div class="app-header">
     <!-- THE APP'S OWN HEADING, AND WHERE FOCUS LANDS WHEN THE WINDOW OPENS. Never `aria-hidden`
          decoration: it is the first thing you hear, and it answers
-         "which app, and which build" in the one place everybody passes through. That question is
-         not idle here: the installed build serves its own bundled copy of these files, so "am I
-         looking at today's code" has been asked more than once.
+         "which app, and which build" in the one place everybody passes through. The installed
+         build serves its own bundled copy of these files, so the number is how you tell which
+         code is running.
 
          TWO LEVEL-1 HEADINGS PER PAGE IS DELIBERATE. Each section keeps its own h1, so pressing 1
          cycles the app then the page. The tidy alternative - app as h1, pages as h2 - pushes every
@@ -72,8 +72,7 @@
         Checking for the RODECaster...
       </p>
 
-      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs in
-           app.js). One div.cat-tab per tab, carrying the tab's key
+      <!-- TAB PANES (see buildStaticTabs in app.js). One div.cat-tab per tab, carrying the tab's key
            and its title for the strip; app.js builds the strip above this panel and shows exactly one
            pane at a time. The panes stay IN the document (hidden, so no screen reader, no tab order,
            no heading navigation) rather than being built and destroyed, because every control here is
@@ -380,7 +379,7 @@
                here could say "something is reaching the computer" and never "Mic 2 is right" -
                which is the question you actually have. On Channels the server isolates the one
                channel on a temporary Chat mix and takes the fader out of the reading, so the number
-               means something. Nothing was lost: it is the same check, on a smaller thing. -->
+               means something. -->
           <h3 id="meter-h-stream">Which stream to watch</h3>
           <div>
             <div class="field">
@@ -611,8 +610,7 @@
       <p id="routing-note" class="note" role="note">Loading...</p>
       <p id="routing-status"></p>
 
-      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs in
-           app.js). One div.cat-tab per tab, carrying the tab's key
+      <!-- TAB PANES (see buildStaticTabs in app.js). One div.cat-tab per tab, carrying the tab's key
            and its title for the strip; app.js builds the strip above this panel and shows exactly one
            pane at a time. The panes stay IN the document (hidden, so no screen reader, no tab order,
            no heading navigation) rather than being built and destroyed, because every control here is
@@ -1437,10 +1435,6 @@
       </p>
       <p id="rec-state" role="status" aria-live="polite" aria-atomic="true">Reading the unit...</p>
 
-      <!-- Everything below is hidden when the unit has nowhere to record, so the page is one
-           message rather than three sections of nothing. The state line above says what to do
-           about it. Shown and hidden only when a card or drive is physically put in or taken out,
-           never while somebody is reading. -->
       <!-- What happens to spoken audio during a take. Our own announcements are switched off
            automatically; the screen reader is the part we cannot switch off, and the note says so
            only when the computer's default output really is the unit. A plain note, not a live
@@ -1448,10 +1442,11 @@
            fault this page was built to avoid. -->
       <p id="rec-announcer-warn" class="note" role="note" hidden></p>
 
-      <!-- NOTHING ON THIS PAGE IS EVER HIDDEN. An earlier version hid everything when the unit had
-           nowhere to record, which left the page with no focusable content at all, so Tab from the
-           heading went straight out of it and it read as broken. A unit with no drive in still has
-           settings worth changing; the transport says why it cannot be used instead. -->
+      <!-- THE PAGE IS NEVER EMPTIED when the unit has nowhere to record. Hiding everything would
+           leave no focusable content, so Tab from the heading would leave the page and it would
+           read as broken. A unit with no drive in still has settings worth changing, and the
+           transport stays and says why it cannot be used (app.js applyRecordingUsable). Only the
+           delete and the card-and-drive blocks hide, each when it has nothing to act on. -->
       <div id="rec-usable">
 
       <!-- WHAT TO RECORD COMES FIRST, before the transport. It is the decision
@@ -1720,7 +1715,7 @@
     <p>AccessCaster - accessible control for the RODECaster Pro 2 and Duo.</p>
     <!-- A REAL LINK, not the bare text. A URL written as plain text is read out character group by
          character group and cannot be followed; as an anchor it is one item in the links list and
-         one press to open. The visible text is the address itself, which is what was asked for. -->
+         one press to open. The visible text is the address itself. -->
     <p>Developed by Shaun Preece.
       <a href="https://www.slightperception.com">www.slightperception.com</a></p>
   </footer>
@@ -1756,8 +1751,8 @@
        exactly once per unit, and the answer stops being available the moment something is changed.
        Opened from app.js when /api/baseline/status says to offer.
 
-       The pad checkbox defaults ON here and OFF on an ordinary save, because this is the only copy
-       that will ever exist of the pads as they shipped: worth the wait once, not every time. -->
+       The pad checkbox defaults ON, because this is the only copy that will ever exist of the pads
+       as they shipped. An ordinary backup has no checkbox and always carries the pads. -->
   <dialog id="baseline-dialog" role="alertdialog" aria-labelledby="baseline-dialog-title"
           aria-describedby="baseline-dialog-desc">
     <h2 id="baseline-dialog-title" tabindex="-1">Back up this unit as you found it</h2>
@@ -1849,9 +1844,6 @@
     </div>
   </dialog>
 
-  <!-- Rename profile: one pane, since renaming a folder is instant and there is no progress to
-       report. A failure (name taken, bad characters) keeps the dialog OPEN and puts the reason on
-       the field itself, rather than closing and leaving the user to guess what happened. -->
   <!-- ADD A SHORTCUT. Two dropdowns, not one: the catalogue runs to well over a hundred entries on
        a full desk (every channel's mute and solo, every fader up and down, every pad, every saved
        mix), and one flat list of that is unusable by ear. Category first, then what is in it.
@@ -1884,7 +1876,7 @@
   </dialog>
 
   <!-- Editing a shortcut. Nothing is registered until Save, so browsing the key list is free.
-       Focus opens on the first modifier. A refused Save keeps the dialog open and says why. -->
+       Focus opens on the key list. A refused Save keeps the dialog open and says why. -->
   <dialog id="hotkey-edit-dialog" aria-labelledby="hotkey-edit-title">
     <h2 id="hotkey-edit-title">Edit shortcut</h2>
     <div class="field">
@@ -1984,6 +1976,9 @@
     </form>
   </dialog>
 
+  <!-- Rename profile: one pane, since renaming a folder is instant and there is no progress to
+       report. A failure (name taken, bad characters) keeps the dialog OPEN and puts the reason on
+       the field itself, rather than closing and leaving the user to guess what happened. -->
   <dialog id="rename-dialog" aria-labelledby="rename-dialog-title">
     <h2 id="rename-dialog-title" tabindex="-1">Rename profile</h2>
     <form id="profile-rename-form">
@@ -2034,7 +2029,8 @@
     </div>
   </dialog>
 
-  <!-- Confirmation modal for a destructive pad change (replacing or clearing content). -->
+  <!-- The confirmation every destructive action in the app uses (app.js confirmAction), not only
+       the pad ones, despite the pad- prefix on its ids. -->
   <dialog id="pad-confirm-dialog" role="alertdialog"
           aria-labelledby="pad-confirm-title" aria-describedby="pad-confirm-desc">
     <h2 id="pad-confirm-title">Replace this pad?</h2>

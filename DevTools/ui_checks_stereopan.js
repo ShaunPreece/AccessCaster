@@ -15,7 +15,7 @@ const posts = (log) => log.filter((r) => r.method === "POST" && r.path.startsWit
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 8000);
   while (Date.now() < until) {
-    try { if (await fn()) return true; } catch (e) { /* not ready yet */ }
+    try { if (await fn()) return true; } catch { /* not ready yet */ }
     await sleep(80);
   }
   return false;

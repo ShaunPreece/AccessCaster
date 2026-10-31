@@ -33,7 +33,7 @@ const sec = () => el("sec-recording");
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 8000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready yet */ }
+    try { if (fn()) return true; } catch { /* not ready yet */ }
     await sleep(80);
   }
   return false;
@@ -89,13 +89,13 @@ async function liveState() {
     try {
       const body = await (await fetch("/api/recorder/live")).json();
       if (typeof body.state === "number") return body.state;
-    } catch (e) { /* not up yet */ }
+    } catch { /* not up yet */ }
     await sleep(400);
   }
   try {
     const body = await (await fetch("/api/recorder")).json();
     return typeof body.state === "number" ? body.state : null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

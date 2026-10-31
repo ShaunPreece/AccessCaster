@@ -23,7 +23,7 @@ const alertText = () => (el("alert-region") || {}).textContent || "";
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 10000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready yet */ }
+    try { if (fn()) return true; } catch { /* not ready yet */ }
     await sleep(80);
   }
   return false;

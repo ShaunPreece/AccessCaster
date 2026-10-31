@@ -38,7 +38,7 @@ const key = (ev, target) => target.dispatchEvent(
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 8000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready */ }
+    try { if (fn()) return true; } catch { /* not ready */ }
     await sleep(80);
   }
   return false;
@@ -233,7 +233,7 @@ async function run() {
   // Deliberately the tab we are NOT on: the run ends on Help, so switching to Can is a real change.
   openTab("can");
   let stored = null;
-  try { stored = JSON.parse(window.localStorage.getItem("accesscaster.tabs") || "{}"); } catch (e) {}
+  try { stored = JSON.parse(window.localStorage.getItem("accesscaster.tabs") || "{}"); } catch {}
   check("the selected tab is remembered per page, by key",
     stored && stored.about === "can", stored && stored.about);
 

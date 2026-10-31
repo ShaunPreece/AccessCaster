@@ -1,9 +1,7 @@
 /* AccessCaster front end.
-   Keeps the UI honest: it reflects exactly what the backend can do today. The
-   unit's current settings CAN be read back over USB (Read from device), and any
-   value you change is sent to the unit immediately. Every result is announced
-   through an ARIA live region so a screen-reader user hears it without hunting
-   around the page. */
+   Each page reads the unit's current settings when it is opened, and any value you change is sent
+   to the unit immediately. Every result is announced through an ARIA live region so a
+   screen-reader user hears it without hunting around the page. */
 
 "use strict";
 
@@ -74,7 +72,7 @@ async function keepingFocus(rebuild) {
   if (!lost) return result;                     // focus is somewhere real; do not move it
   const again = document.getElementById(id);
   if (again && !again.disabled) {
-    try { again.focus(); } catch (e) { /* element cannot take focus; leave it */ }
+    try { again.focus(); } catch { /* element cannot take focus; leave it */ }
   }
   return result;
 }
@@ -133,14 +131,14 @@ let _tabState = null;
 function tabState() {
   if (_tabState) return _tabState;
   try { _tabState = JSON.parse(window.localStorage.getItem(TAB_STATE_KEY)) || {}; }
-  catch (e) { _tabState = {}; }   // storage blocked: fall back to per-session memory
+  catch { _tabState = {}; }   // storage blocked: fall back to per-session memory
   return _tabState;
 }
 
 function rememberTab(pageKey, key) {
   const st = tabState();
   st[pageKey] = key;
-  try { window.localStorage.setItem(TAB_STATE_KEY, JSON.stringify(st)); } catch (e) { /* ignore */ }
+  try { window.localStorage.setItem(TAB_STATE_KEY, JSON.stringify(st)); } catch { /* ignore */ }
 }
 
 /* Does this pane hold anything the Tab key can reach?
@@ -178,7 +176,7 @@ function setPanelTabStop(panel, pane) {
    A hidden pane is out of the accessibility tree, out of the tab order and out of heading navigation,
    so a screen reader still sees exactly one category at a time. The cost is building a mic's seven
    panes instead of one when the CHANNEL changes, a few milliseconds of DOM per change. */
-/* NO LANDMARK ROUND THE TAB STRIP, AND IT HAS BEEN TRIED. Wrapping the strip in a <nav> gives a
+/* NO LANDMARK ROUND THE TAB STRIP. Wrapping the strip in a <nav> gives a
    jump target, but focus then lands there WITHOUT entering browse mode, so the arrow keys do
    nothing until the user switches mode by hand: more confusing than helpful. The page's own section
    headings are already landmarks and are enough. Do not re-add it. */
@@ -273,7 +271,7 @@ function wireTabStrip(pageKey, panelId, panel, panes, keys, titles, onSelect) {
 
   function focusSelected() {
     const b = buttons[index];
-    if (b) { try { b.focus(); } catch (e) { /* not focusable yet; leave it */ } }
+    if (b) { try { b.focus(); } catch { /* not focusable yet; leave it */ } }
   }
 
   paint();
@@ -379,7 +377,7 @@ function focusFirst(ids) {
   for (const id of ids) {
     const el = document.getElementById(id);
     if (el && !el.disabled && !el.hidden) {
-      try { el.focus(); return el; } catch (e) { /* try the next one */ }
+      try { el.focus(); return el; } catch { /* try the next one */ }
     }
   }
   return null;
@@ -418,7 +416,7 @@ async function loadAccess() {
     box.value = data.url || "";
     setText("dev-access-note", data.note || "");
     setText("dev-access-warning", data.warning || "");
-  } catch (err) {
+  } catch {
     setText("dev-access-note", "Could not read the access link.");
   }
 }
@@ -439,7 +437,7 @@ function wireAccess() {
     try {
       await navigator.clipboard.writeText(box.value);
       setStatus("dev-access-status", "The access link is on the clipboard.");
-    } catch (err) {
+    } catch {
       setStatus("dev-access-status",
         "Could not copy automatically. The link is selected, so press Control C to copy it.");
     }
@@ -458,7 +456,7 @@ function wireAccess() {
         document.getElementById("dev-access-url").value = res.access.url;
       }
       setStatus("dev-access-status", res.message || "Done.");
-    } catch (err) {
+    } catch {
       announce("Could not reach the device service.", true);
     } finally {
       setBusy(make, false);
@@ -485,7 +483,7 @@ async function loadVersion() {
       // "volt".
       setText("app-title", "AccessCaster version " + data.app_version);
     }
-  } catch (err) { /* the placeholder in the markup stands */ }
+  } catch { /* the placeholder in the markup stands */ }
 }
 
 /* THE FIRST RENDER WAITS FOR THE VERSION, BUT NEVER FOR LONG. It is our own server serving this
@@ -505,7 +503,7 @@ async function loadStatus(announceResult) {
   try {
     const resp = await fetch("/api/status");
     data = await resp.json();
-  } catch (err) {
+  } catch {
     setText("status-line", "Could not reach the AccessCaster service.");
     setText("status-connection", "Service unreachable");
     setText("app-device", "AccessCaster service unreachable");
@@ -621,7 +619,7 @@ async function loadNetwork() {
     if (ssidBox && !ssidBox.value && w.ssid) ssidBox.value = w.ssid;
     paintWirelessMics(data.wireless_mics);
     setText("net-status", "");
-  } catch (err) {
+  } catch {
     setText("net-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
   } finally {
@@ -683,7 +681,7 @@ async function netPost(url, body, el, working) {
   let res;
   try {
     res = await postJSON(url, body);
-  } catch (e) {
+  } catch {
     setBusy(el, false);
     setStatus("net-write-status", "Could not reach the AccessCaster service.");
     return null;
@@ -799,7 +797,7 @@ async function sendToggle(url, body, input, on) {
     const res = await postJSON(url, body);
     announce(res.message || "Done.", !res.ok);
     if (!res.ok) input.checked = !on;  // revert the visual on failure
-  } catch (err) {
+  } catch {
     announce("Could not reach the device service.", true);
     input.checked = !on;
   } finally {
@@ -907,7 +905,7 @@ async function loadOverview() {
       if (d.bank !== null && d.bank !== undefined)
         lines.push(`Currently selected SMART pad bank: ${d.bank}.`);
     }
-  } catch (err) {
+  } catch {
     lines.push("Could not reach the app service.");
   }
   out.textContent = "";
@@ -1009,7 +1007,7 @@ async function speakStartupSummary() {
     const ov = await (await fetch("/api/device/overview")).json();
     const text = summariseOverview(ov);
     if (text) announce(text);
-  } catch (err) { /* nothing to say is better than an error nobody asked for */ }
+  } catch { /* nothing to say is better than an error nobody asked for */ }
 }
 
 /* The firmware version, with any waiting update after it. */
@@ -1028,7 +1026,7 @@ async function onFirmwareCheck(btn) {
   let res;
   try {
     res = await postJSON("/api/device/firmware-check", {});
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the AccessCaster service." };
   }
   setBusy(btn, false);
@@ -1093,7 +1091,7 @@ async function loadDeviceState() {
       p.textContent = l;
       out.appendChild(p);
     });
-  } catch (err) {
+  } catch {
     out.textContent = "Could not reach the app service.";
   } finally {
     if (btn) setBusy(btn, false);
@@ -1242,7 +1240,7 @@ async function sendInputLevel(db, el) {
   let res;
   try {
     res = await postJSON("/api/meters/input-level", { db });
-  } catch (e) {
+  } catch {
     setBusy(el, false);
     announce("Could not reach the app service.", true);
     return;
@@ -1338,7 +1336,7 @@ function buildMeterNumber(id, option, label, min, max, hint) {
     try {
       const res = await postJSON("/api/meters/option", { name: option, value: v });
       announce(res.message || "Done.", !res.ok);
-    } catch (e) {
+    } catch {
       announce("Could not reach the app service.", true);
     }
   });
@@ -1395,7 +1393,7 @@ async function loadUnitSettings() {
   try {
     const resp = await fetch("/api/device/settings");
     d = await resp.json();
-  } catch (err) {
+  } catch {
     setText("dev-unit-status", "Could not reach the app service.");
     return;
   }
@@ -1534,7 +1532,7 @@ function buildUnitChoice(s, id, known) {
       const res = await postJSON("/api/device/setting", { prop: s.prop, value: chosen });
       announce(res.message || "Done.", !res.ok);
       if (res.ok) setStagedValue(sel, chosen, null);
-    } catch (err) {
+    } catch {
       announce("Could not reach the device service.", true);
     } finally {
       setBusy(sel, false);
@@ -1592,7 +1590,7 @@ function buildUnitSlider(s, id, known) {
       try {
         const res = await postJSON("/api/device/setting", { prop: s.prop, value: v });
         if (res && !res.ok) announce(res.message || "Could not set it.", true);
-      } catch (err) { announce("Could not reach the device service.", true); }
+      } catch { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(input);
@@ -1638,7 +1636,7 @@ function wireDeviceTabs() {
 async function readDeviceTab(key) {
   const read = DEVICE_TAB_READ[key];
   if (!read) return;
-  try { await read(); } catch (e) { /* each loader reports its own failure */ }
+  try { await read(); } catch { /* each loader reports its own failure */ }
 }
 
 /* Page entry: the status read always happens (it is the connection line and the window title), then
@@ -1689,7 +1687,7 @@ async function loadAnnounceState() {
     if (rm) rm.checked = data.remember === true;
     if (typeof data.volume === "number") setAnnounceVolumeDisplay(data.volume);
     fillSpeechChoices(data);
-  } catch (err) { /* leave the controls as-is if the service is unreachable */ }
+  } catch { /* leave the controls as-is if the service is unreachable */ }
 }
 
 /* The voice and output lists come from SAPI itself, the same engine the announcer speaks through, so
@@ -1732,7 +1730,7 @@ async function onAnnounceVoiceChange(ev) {
   try {
     const res = await postJSON("/api/announce/voice", { voice: sel.value });
     setStatus("announce-speech-status", res.message || "Could not change the voice.");
-  } catch (e) {
+  } catch {
     setStatus("announce-speech-status", "Could not reach the app service.");
   } finally {
     setBusy(sel, false);
@@ -1745,7 +1743,7 @@ async function onAnnounceOutputChange(ev) {
   try {
     const res = await postJSON("/api/announce/output", { output: sel.value });
     setStatus("announce-speech-status", res.message || "Could not change the output.");
-  } catch (e) {
+  } catch {
     setStatus("announce-speech-status", "Could not reach the app service.");
   } finally {
     setBusy(sel, false);
@@ -1760,7 +1758,7 @@ async function onAnnounceDevicesRefresh(ev) {
     const res = await postJSON("/api/announce/devices", {});
     await loadAnnounceState();
     setStatus("announce-speech-status", res.message || "Done.");
-  } catch (e) {
+  } catch {
     announce("Could not reach the app service.", true);
   } finally {
     setBusy(btn, false);
@@ -1802,7 +1800,7 @@ async function commitAnnounceVolume() {
     // At 0 the server speaks nothing, so the only feedback is here; above 0 the spoken
     // confirmation arrives at the new level and saying it here as well would double it up.
     if (res.ok && percent === 0) announce("Announcements are silenced.");
-  } catch (e) {
+  } catch {
     announce("Could not set the announcement volume.", true);
   }
 }
@@ -1829,7 +1827,7 @@ async function loadHotkeys() {
   try {
     const resp = await fetch("/api/hotkeys");
     data = await resp.json();
-  } catch (err) {
+  } catch {
     setText("hotkeys-status", "Could not reach the app service, so the shortcuts cannot be read.");
     return;
   }
@@ -2035,7 +2033,7 @@ async function sendHotkey(s, changes, quiet) {
   let res;
   try {
     res = await postJSON("/api/hotkeys/set", body);
-  } catch (err) {
+  } catch {
     res = { ok: false, message: "Could not reach the app service." };
   }
   if (!quiet) announce(res.message || "Done.", !res.ok);
@@ -2127,7 +2125,7 @@ async function onHotkeyModsSave() {
     } else {
       setText("hotkey-mods-status", res.message || "Those keys cannot be used.");
     }
-  } catch (err) {
+  } catch {
     setText("hotkey-mods-status", "Could not reach the app service.");
   } finally {
     setBusy(btn, false);
@@ -2170,7 +2168,7 @@ async function onHotkeyAddOpen() {
     try {
       const resp = await fetch("/api/hotkeys/commands");
       hotkeyCommands = await resp.json();
-    } catch (err) {
+    } catch {
       setText("hotkey-add-status", "Could not reach the app service.");
       return;
     }
@@ -2202,7 +2200,7 @@ async function onHotkeyPadSetToggle(ev) {
     const res = await postJSON("/api/hotkeys/pad-set", { on: input.checked });
     announce(res.message || "Done.", !res.ok);
     if (res.state) applyHotkeyState(res.state);
-  } catch (err) {
+  } catch {
     announce("Could not reach the app service.", true);
     if (hotkeyData) applyHotkeyState(hotkeyData);
   } finally {
@@ -2217,7 +2215,7 @@ function closeHotkeyDialog(id) {
   _hotkeyReturnFocus = null;
   // The opener may be an option that a delete has just removed; the selection is then on its
   // neighbour, which is where focus belongs.
-  if (back && back.isConnected) { try { back.focus(); } catch (e) { /* gone */ } }
+  if (back && back.isConnected) { try { back.focus(); } catch { /* gone */ } }
   else focusSelectedHotkey();
 }
 
@@ -2235,7 +2233,7 @@ async function onHotkeyAddConfirm() {
     _hotkeyReturnFocus = null;
     closeHotkeyDialog("hotkey-add-dialog");
     announceAfterFocus(res.message || "Done.");
-  } catch (err) {
+  } catch {
     setText("hotkey-add-status", "Could not reach the app service.");
   }
 }
@@ -2263,7 +2261,7 @@ async function onHotkeyRestoreConfirm() {
     bad = !res.ok;
     hotkeySelectedId = null;          // the old selection is gone; land on the first shortcut
     if (res.state) applyHotkeyState(res.state);
-  } catch (err) { /* said above */ }
+  } catch { /* said above */ }
   closeHotkeyDialog("hotkey-restore-dialog");
   announceAfterFocus(said, bad);
 }
@@ -2295,7 +2293,7 @@ async function onHotkeyDeleteConfirm() {
       hotkeySelectedId = next ? next.id : null;
     }
     if (res.state) applyHotkeyState(res.state);
-  } catch (err) { /* said above */ }
+  } catch { /* said above */ }
   closeHotkeyDialog("hotkey-delete-dialog");
   // A delete that worked says nothing more: it was confirmed in the dialog, and focus landing on
   // the next shortcut shows it is gone. Only a failure is spoken.
@@ -2375,7 +2373,7 @@ async function loadChannels(focusProcessing) {
   try {
     const resp = await fetch("/api/channels");
     data = await resp.json();
-  } catch (err) {
+  } catch {
     setText("mixer-note", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
     return;
@@ -2547,7 +2545,7 @@ async function syncLevelCheckButton() {
     document.querySelectorAll("[id^='levelcheck-']").forEach((btn) => {
       btn.textContent = st.running ? "Stop checking" : "Check this channel's level";
     });
-  } catch (e) { /* the label stays as built, which is the safe way round */ }
+  } catch { /* the label stays as built, which is the safe way round */ }
 }
 
 function fillChannelSettings(body, ch) {
@@ -2666,12 +2664,12 @@ const STEREO_PAN_LINK_KEY = "accesscaster.stereoPanLink";
 
 function stereoPanLinks() {
   try { return JSON.parse(window.localStorage.getItem(STEREO_PAN_LINK_KEY)) || {}; }
-  catch (e) { return {}; }
+  catch { return {}; }
 }
 
 function saveStereoPanLinks(st) {
   try { window.localStorage.setItem(STEREO_PAN_LINK_KEY, JSON.stringify(st)); }
-  catch (e) { /* storage blocked: the link lasts until the panel is rebuilt */ }
+  catch { /* storage blocked: the link lasts until the panel is rebuilt */ }
 }
 
 const clampPct = (v) => Math.max(0, Math.min(100, v));
@@ -2749,7 +2747,7 @@ function fillStereoPan(host, ch, legs) {
         if (st[ch.name]) { st[ch.name].offset = off; saveStereoPanLinks(st); }
         entry.offset = off;
         announce(`${ch.label} pan ${panOffsetWords(off)}.`);
-      } catch (err) { announce("Could not reach the device service.", true); }
+      } catch { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label);
@@ -2849,7 +2847,7 @@ function buildChannelSolo(ch) {
         ch.solo = false;
         if (input) input.checked = false;
       }
-    } catch (err) {
+    } catch {
       announce("Could not reach the device service.", true);
     } finally {
       setBusy(clear, false);
@@ -2955,7 +2953,7 @@ function buildLevelField(ch, min, max) {
       try {
         const res = await postJSON("/api/channels/level", { name: ch.name, db });
         announce(res.message || "Done.", !res.ok);
-      } catch (err) { announce("Could not reach the device service.", true); }
+      } catch { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(out);
@@ -3044,7 +3042,7 @@ function buildFxParamSlider(ch, effect, param, value01) {
         const res = await postJSON("/api/channels/effect-param",
           { name: ch.name, param, value: parseInt(input.value, 10) / 100 });
         if (!res.ok) announce(res.message || "Could not set the effect.", true);
-      } catch (e) { announce("Could not reach the device service.", true); }
+      } catch { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label); row.appendChild(input); row.appendChild(out);
@@ -3100,7 +3098,7 @@ function buildParamSlider(ch, ctrl, percent) {
         const res = await postJSON("/api/channels/param",
           { name: ch.name, prop: ctrl.prop, value: pct / 100 });
         announce(res.message || "Done.", !res.ok);
-      } catch (err) { announce("Could not reach the device service.", true); }
+      } catch { announce("Could not reach the device service.", true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(input);
@@ -3169,7 +3167,7 @@ function fillPresetControls(wrap, ch) {
       // Re-read so the sliders show the applied voicing. That rebuilds the panel, which re-reads
       // the preset onto the dropdown as well.
       if (res.ok) { await keepingFocus(loadChannels); return; }
-    } catch (err) { announce("Could not reach the device service.", true); }
+    } catch { announce("Could not reach the device service.", true); }
     finally { setBusy(sel, false); }
     revertStaged(sel, false);         // refused: the channel is as it was, and the dropdown says so
   });
@@ -3212,7 +3210,7 @@ function fillPresetControls(wrap, ch) {
       // Only the preset LIST changed, so refresh the dropdown in place. Rebuilding the panel here
       // destroys this button and throws focus to the top of the page.
       if (res.ok) { channelPresets = res.presets || channelPresets; nameInput.value = ""; fillPresetOptions(applySel); }
-    } catch (err) { announce("Could not reach the device service.", true); }
+    } catch { announce("Could not reach the device service.", true); }
     finally { setBusy(saveBtn, false); }
   });
   // DELETING HAS ITS OWN DIALOG AND LIST. The preset dropdown applies on Enter and goes back to the
@@ -3262,7 +3260,7 @@ async function onPresetDelete(ev) {
     document.querySelectorAll("select[id^='preset-apply-']").forEach((s) => fillPresetOptions(s));
     document.getElementById("preset-delete-dialog").close();
     announce(res.message || "Deleted.");
-  } catch (err) {
+  } catch {
     setText("preset-delete-error", "Could not reach the device service.");
   }
 }
@@ -3299,7 +3297,7 @@ async function setMicType(channel, sel, ch) {
     }
     // Refused, so the unit still holds the old type: put the dropdown back in step with the desk.
     setStagedValue(sel, ch && ch.mic_type, null);
-  } catch (err) {
+  } catch {
     announce("Could not reach the device service.", true);
     setStagedValue(sel, ch && ch.mic_type, null);
   } finally {
@@ -3518,7 +3516,7 @@ async function loadPads() {
   try {
     const resp = await fetch("/api/soundpads");
     data = await resp.json();
-  } catch (err) {
+  } catch {
     setText("pads-note", "Could not load the pad layout.");
     return;
   }
@@ -3532,7 +3530,7 @@ async function loadPads() {
   // this read for ever, and each turn of that loop is a 1.5 second device read.
   if (data.preview_grid != null && !previewState.active && !_padPreviewCleaned) {
     _padPreviewCleaned = true;
-    try { await postJSON("/api/fx/preview/stop", { grid: data.preview_grid }); } catch (e) { /* harmless */ }
+    try { await postJSON("/api/fx/preview/stop", { grid: data.preview_grid }); } catch { /* harmless */ }
     return loadPads();
   }
 
@@ -3711,9 +3709,7 @@ function fillPadSettings(pad) {
 }
 
 /* ---- Confirm modal (true alertdialog) for any destructive action ----------
-   NOT PAD-ONLY despite the ids: every confirm in the app uses it.
-   The DOM ids stay `pad-confirm-*` because they are load-bearing in index.html and in the pads
-   checks. */
+   NOT PAD-ONLY despite the `pad-confirm-*` ids: every confirm in the app uses it. */
 
 let _padConfirmResolve = null;
 let _padConfirmReturnFocus = null;
@@ -3738,7 +3734,7 @@ function resolvePadConfirm(value) {
   const r = _padConfirmResolve;
   _padConfirmResolve = null;
   if (_padConfirmReturnFocus && _padConfirmReturnFocus.focus) {
-    try { _padConfirmReturnFocus.focus(); } catch (e) { /* element gone */ }
+    try { _padConfirmReturnFocus.focus(); } catch { /* element gone */ }
   }
   if (r) r(!!value);
 }
@@ -3847,7 +3843,7 @@ async function applySound(pad, file) {
     if (fi) fi.value = "";
     await keepingFocus(loadPads);
     return res;
-  } catch (err) {
+  } catch {
     setText("pad-ed-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
     return null;
@@ -3862,7 +3858,7 @@ async function applyJsonAction(url, body, working) {
     setText("pad-ed-status", res.message || "Done.");
     await keepingFocus(loadPads);
     return res;
-  } catch (err) {
+  } catch {
     setText("pad-ed-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
     return null;
@@ -3877,7 +3873,7 @@ async function padEditPost(url, body) {
     setText("pad-ed-status", res.message || "Done.");
     announce(res.message || "Done.", !res.ok);
     return res;
-  } catch (err) {
+  } catch {
     setText("pad-ed-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
     return { ok: false };
@@ -4343,7 +4339,7 @@ async function onPadClear() {
     setText("pad-ed-status", res.message || "Done.");
     announce(res.message || "Done.", !res.ok);
     await loadPads();
-  } catch (err) {
+  } catch {
     setText("pad-ed-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
   } finally {
@@ -4370,7 +4366,7 @@ async function onClearAllPads() {
     const res = await postJSON("/api/pads/clear-all", {});
     setStatus("clear-all-status", res.message || "Done.");
     await keepingFocus(loadPads);
-  } catch (err) {
+  } catch {
     setStatus("clear-all-status", "Could not reach the device service.");
   } finally {
     setBusy(btn, false);
@@ -4391,7 +4387,7 @@ async function onTidyPadAudio() {
   try {
     const res = await postJSON("/api/pads/tidy-audio", {});
     setStatus("tidy-audio-status", res.message || "Done.");
-  } catch (err) {
+  } catch {
     setStatus("tidy-audio-status", "Could not reach the device service.");
   } finally {
     setBusy(btn, false);
@@ -4421,7 +4417,7 @@ async function onRestoreFactoryFx() {
     }
     await pollPadRestore("restore-fx-status");
     await keepingFocus(loadPads);
-  } catch (err) {
+  } catch {
     setStatus("restore-fx-status", "Could not reach the device service.");
   } finally {
     setBusy(btn, false);
@@ -4442,7 +4438,7 @@ async function onExportPad() {
   try {
     const res = await postJSON("/api/pad/export", { pad: grid });
     setStatus("export-pad-status", res.message || "Done.");
-  } catch (err) {
+  } catch {
     setStatus("export-pad-status", "Could not reach the device service.");
   } finally {
     setBusy(btn, false);
@@ -4453,7 +4449,7 @@ async function onOpenPadExports() {
   try {
     const res = await postJSON("/api/pads/exports/open", {});
     setStatus("export-pad-status", res.message || "Done.");
-  } catch (err) {
+  } catch {
     announce("Could not reach the device service.", true);
   }
 }
@@ -4467,7 +4463,7 @@ function pollPadRestore(line) {
       let s;
       try {
         s = await (await fetch("/api/pads/restore-defaults/status")).json();
-      } catch (e) {
+      } catch {
         return;   // transient; try again on the next tick
       }
       if (!s.done && s.step && s.step !== lastStep) {
@@ -4759,7 +4755,7 @@ async function onFxCreateSave() {
       if (previewState.active) await stopPreview(true);  // free the scratch pad
       refreshPreviewAvailability();
     }
-  } catch (err) {
+  } catch {
     setStatus("fx-create-status", "Could not save the effect.");
   } finally {
     setBusy(btn, false);
@@ -4779,7 +4775,7 @@ async function onFxDelete(name, index) {
       // (or the one before it, or the name field once the list is empty) so focus is never lost.
       focusFirst(["fx-del-" + index, "fx-del-" + Math.max(0, index - 1), "fx-create-name"]);
     }
-  } catch (err) {
+  } catch {
     announce("Could not delete the effect.", true);
   }
 }
@@ -4801,7 +4797,7 @@ function streamPreview(param, value) {
       const res = await postJSON("/api/fx/preview/update",
         { grid: previewState.grid, param, value });
       if (res && !res.ok && res.message) announce(res.message, true);
-    } catch (e) { /* transient; the next change will retry */ }
+    } catch { /* transient; the next change will retry */ }
   }, WRITE_DEBOUNCE_MS);
 }
 
@@ -4860,7 +4856,7 @@ async function startPreview() {
       toggle.checked = false;
       setStatus("fx-preview-status", res.message || "Could not start preview.");
     }
-  } catch (e) {
+  } catch {
     toggle.checked = false;
     setStatus("fx-preview-status", "Could not reach the device service.");
   } finally {
@@ -4884,7 +4880,7 @@ async function stopPreview(silent) {
     if (!silent) {
       setStatus("fx-preview-status", res.message || "Live preview stopped.");
     }
-  } catch (e) { /* best effort */ }
+  } catch { /* best effort */ }
   if (!silent) refreshPreviewAvailability();
 }
 
@@ -5116,7 +5112,7 @@ async function routingPost(url, body, control) {
     const res = await postJSON(url, body);
     announce(res.message || "Done.", !res.ok);
     return res;
-  } catch (err) {
+  } catch {
     announce("Could not reach the device service.", true);
     return { ok: false };
   } finally {
@@ -5132,7 +5128,7 @@ async function loadRouting() {
   try {
     const resp = await fetch("/api/routing");
     data = await resp.json();
-  } catch (err) {
+  } catch {
     setText("routing-note", "Could not load the routing controls.");
     return;
   }
@@ -5437,7 +5433,7 @@ async function loadMonmixOutput() {
   try {
     const resp = await fetch("/api/monitormix/live");
     data = await resp.json();
-  } catch (e) {
+  } catch {
     setText("monmix-mode", ""); setStatus("monmix-status", "Could not read the mix levels.");
     markLevelsUnread(host); return;
   }
@@ -5549,7 +5545,7 @@ async function loadFaderLevels(announceResult) {
     // than to announce(): two polite regions changing together means neither is heard properly.
     if (d.read_only && d.message) setStatus("fader-levels-status", d.message);
     else if (announceResult) setStatus("fader-levels-status", "Levels read from the device.");
-  } catch (err) {
+  } catch {
     setStatus("fader-levels-status", "Could not reach the app service.");
     markLevelsUnread(host);
     markLevelsUnread(document.getElementById("routing-outmutes"));
@@ -5570,7 +5566,7 @@ async function onFaderMute(index, input) {
   let res;
   try {
     res = await postJSON("/api/faders/mute", { fader: index, on: wanted });
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the device service." };
   }
   if (typeof res.muted === "boolean") input.checked = res.muted;
@@ -5592,7 +5588,7 @@ async function onFaderSolo(index, input) {
   let res;
   try {
     res = await postJSON("/api/faders/solo", { fader: index, on: wanted });
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the device service." };
   }
   if (typeof res.soloed === "boolean") input.checked = res.soloed;
@@ -5608,7 +5604,7 @@ async function onClearFaderSolos() {
   let res;
   try {
     res = await postJSON("/api/channels/solo/clear", {});
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the device service." };
   }
   setStatus("fader-levels-status", res.message || "Done.");
@@ -5719,7 +5715,7 @@ function buildLevelSlider(id, labelText, readOnly, send) {
         try {
           const res = await send(parseInt(input.value, 10));
           setStatus("fader-levels-status", res.message || "Done.");
-        } catch (e) {
+        } catch {
           setStatus("fader-levels-status", "Could not reach the device service.");
         }
       }, WRITE_DEBOUNCE_MS);
@@ -5766,7 +5762,7 @@ function buildMonmixSlider(outputIndex, src) {
         const res = await postJSON("/api/monitormix/set",
           { output: parseInt(outputIndex, 10), source: src.index, value: parseInt(input.value, 10) / 100 });
         setStatus("monmix-status", res.message || "Could not set the level.");
-      } catch (e) { setStatus("monmix-status", "Could not reach the device service."); }
+      } catch { setStatus("monmix-status", "Could not reach the device service."); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label); row.appendChild(input); row.appendChild(out);
@@ -5786,7 +5782,7 @@ async function onMonmixReset() {
     const res = await postJSON("/api/monitormix/reset", { output: parseInt(sel.value, 10) });
     setStatus("monmix-status", res.message || "Done.");
     await keepingFocus(loadMonmixOutput);
-  } catch (e) {
+  } catch {
     setStatus("monmix-status", "Could not reach the device service.");
   } finally { setBusy(btn, false); }
 }
@@ -5862,7 +5858,7 @@ async function loadMatrixState() {
     routingCtl.matrixState = data.ok ? data.excluded : null;
     routingCtl.matrixModes = data.ok ? data.modes : null;
     routingCtl.matrixStateMsg = data.ok ? "" : (data.message || "State unavailable.");
-  } catch (err) {
+  } catch {
     routingCtl.matrixState = null;
     routingCtl.matrixModes = null;
     routingCtl.matrixStateMsg = "Could not read the device.";
@@ -6026,7 +6022,7 @@ async function onResetAllOutputs() {
     const res = await postJSON("/api/routing/reset-outputs", {});
     setStatus("reset-outputs-status", res.message || "Done.");
     if (res.ok) await loadMatrixState();   // refresh the per-output panel to the new live state
-  } catch (err) {
+  } catch {
     setStatus("reset-outputs-status", "Could not reach the device service.");
   } finally {
     setBusy(btn, false);
@@ -6064,7 +6060,7 @@ async function loadSchemes() {
   try {
     const r = await fetch("/api/routing/schemes");
     data = await r.json();
-  } catch (err) {
+  } catch {
     setText("scheme-status", "Could not reach the device service.");
     return;
   }
@@ -6174,7 +6170,7 @@ async function onSchemeApply() {
     bad = !res.ok;
     setText("scheme-status", msg);
     if (res.ok) await loadMatrixState();   // the read-back: refresh the per-output panel
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
     setText("scheme-status", msg);
@@ -6222,7 +6218,7 @@ async function onSchemeSave(oneOutput) {
       const sel = document.getElementById("scheme-select");
       if (sel) { sel.value = "saved:" + res.name; onSchemeChange(); }
     }
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
     setText("scheme-status", msg);
@@ -6249,7 +6245,7 @@ async function onSchemeDelete() {
     bad = !res.ok;
     setText("scheme-status", msg);
     if (res.ok) await keepingFocus(loadSchemes);
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
     setText("scheme-status", msg);
@@ -6311,7 +6307,7 @@ async function onStereoLink(pair, input) {
   let res;
   try {
     res = await postJSON("/api/faders/stereo-link", { pair: pair.code, on: wanted });
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the device service." };
   }
   setStatus("stereo-status", res.message || "Done.");
@@ -6401,7 +6397,7 @@ async function onResetFaders() {
     setStatus("faders-reset-status", res.message || "Done.");
     if (res.ok && res.faders) applyFaderValues(res.faders, res.labels);
     if (res.stereo) applyStereoValues(res.stereo);   // the default layout carries no linked pair
-  } catch (e) {
+  } catch {
     setStatus("faders-reset-status", "Could not reach the device service.");
   } finally { setBusy(btn, false); }
 }
@@ -6447,7 +6443,7 @@ async function pollRoutingDriver() {
     const finished = routingCtl.usbWasSwitching && !data.switching;
     routingCtl.usbWasSwitching = !!data.switching;
     if (finished) await refreshRoutingLive();
-  } catch (e) { /* the page's own status line reports a lost service */ }
+  } catch { /* the page's own status line reports a lost service */ }
 }
 
 /* BOTH USB APPLY BUTTONS WAIT FOR A SWITCH TO FINISH, the bind and any retries included, which the
@@ -6556,7 +6552,7 @@ async function readRoutingTab(key) {
   if (!routingModel) return;                  // page not built yet; entry will do the read
   const read = ROUTING_TAB_READ[key];
   if (!read) return;
-  try { await read(); } catch (e) { /* each loader reports its own failure */ }
+  try { await read(); } catch { /* each loader reports its own failure */ }
 }
 
 /* The one live read that covers the faders, the master processing, the recording mode, the
@@ -6573,7 +6569,7 @@ async function refreshRoutingLive() {
     applyRoutingValues(data);
     setText("routing-status", "");
     return true;
-  } catch (err) {
+  } catch {
     setText("routing-status", "Could not reach the device service.");
     announce("Could not reach the device service.", true);
     return false;
@@ -6637,7 +6633,7 @@ async function loadProfiles(preferName) {
   try {
     const r = await fetch("/api/backups");
     data = await r.json();
-  } catch (e) {
+  } catch {
     return;
   }
   if (!data || !data.ok) return;
@@ -6746,9 +6742,8 @@ function finishProgressDialog(title, message) {
 }
 
 /* How long a restore of this profile should take, from the ONE thing that dominates it: the pad
-   count. Pads move their audio over transfer mode at roughly 15 seconds each (measured), so the
-   old "a minute or more" was badly wrong for a full grid. Numbers come from the server so there is
-   one source for them. */
+   count. Pads move their audio over transfer mode at roughly 15 seconds each (measured), so a full
+   grid takes several minutes. Numbers come from the server so there is one source for them. */
 function describeRestoreTime(info) {
   const perPad = info.seconds_per_pad || 15;
   const base = info.settings_seconds || 25;
@@ -6787,7 +6782,7 @@ function pollProfileJob(url, statusId) {
       try {
         s = await (await fetch(url)).json();
         dead = 0;
-      } catch (e) {
+      } catch {
         if (++dead < POLL_MAX_DEAD_TICKS) return;      // transient; retry next tick
         clearInterval(iv);
         resolve({ done: true, ok: false,
@@ -6857,7 +6852,7 @@ async function onProfileSave(ev) {
     const s = await pollProfileJob("/api/profiles/save/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "Backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles(name);            // leave the backup just made selected on the page
-  } catch (e) {
+  } catch {
     finishProgressDialog("Backup failed", "Could not reach the device service.");
   }
 }
@@ -6888,7 +6883,7 @@ async function openRestoreDialog() {
     const plan = await postJSON("/api/backup/plan", { name });
     viaShow = plan.ok && plan.via === "show";
     planWarnings = (plan && plan.warnings) || [];
-  } catch (e) { /* fall through to the profile wording, which is the cautious one */ }
+  } catch { /* fall through to the profile wording, which is the cautious one */ }
   // Leads with the word so it is unmistakable, and is part of the DOM before showModal: a screen
   // reader reads a dialog once, on open, so anything arriving later is heard by nobody.
   const warnText = planWarnings.length ? ("Warning. " + planWarnings.join(" ") + " ") : "";
@@ -6934,7 +6929,7 @@ async function openRestoreDialog() {
   try {
     const info = await postJSON("/api/profiles/info", { name });
     if (info.ok) estimate = describeRestoreTime(info);
-  } catch (e) { /* no estimate is better than a wrong one */ }
+  } catch { /* no estimate is better than a wrong one */ }
   setText("restore-time-estimate", estimate);
   document.getElementById("restore-dialog").showModal();
   // Focus Cancel, not Restore: this dialog exists to be read before an overwrite that cannot be
@@ -6967,7 +6962,7 @@ async function doRestore() {
     const s = await pollProfileJob(statusUrl, "progress-dialog-step");
     finishProgressDialog(s.ok ? "Backup restored" : "Restore failed", s.message || "Done.");
     await loadProfiles(selectedProfile());
-  } catch (e) {
+  } catch {
     finishProgressDialog("Restore failed", "Could not reach the device service.");
   }
 }
@@ -6992,7 +6987,7 @@ async function loadShows() {
   let data;
   try {
     data = await (await fetch("/api/shows")).json();
-  } catch (e) {
+  } catch {
     return;
   }
   _showsWritable = data.writable !== false;
@@ -7095,7 +7090,7 @@ async function onAppSettingsExport() {
     const res = await postJSON("/api/appsettings/export", {});
     msg = res.message || "Done.";
     bad = !res.ok;
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
   } finally { setBusy(btn, false); }
@@ -7119,7 +7114,7 @@ async function loadAutostart() {
     setAvailable(sw, !!d.supported, d.message || "This cannot be changed on this copy.");
     setText("autostart-hint", d.message
       || "It starts in the system tray, so your shortcuts work from the moment you sign in.");
-  } catch (err) {
+  } catch {
     setAvailable(sw, false, "Could not reach the device service.");
   }
 }
@@ -7133,7 +7128,7 @@ async function onAutostartToggle(on, input) {
     msg = res.message || "Done.";
     bad = !res.ok;
     if (!res.ok) input.checked = !!res.enabled;   // a refusal must not leave the switch lying
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
     input.checked = !input.checked;
@@ -7150,7 +7145,7 @@ async function onAppSettingsOpenFolder() {
     const res = await postJSON("/api/appsettings/open", {});
     msg = res.message || "Done.";
     bad = !res.ok;
-  } catch (err) {
+  } catch {
     msg = "Could not reach the device service.";
     bad = true;
   } finally { setBusy(btn, false); }
@@ -7187,7 +7182,7 @@ async function onAppSettingsImport() {
     let payload;
     try {
       payload = JSON.parse(text);
-    } catch (e) {
+    } catch {
       throw new Error("That file is not readable as settings. Choose the file AccessCaster saved.");
     }
     const res = await postJSON("/api/appsettings/import", payload);
@@ -7262,7 +7257,7 @@ async function installDriver() {
     const s = await pollProfileJob("/api/driver/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "RODE's installer is running" : "Driver not installed",
                          s.message || "Done.");
-  } catch (e) {
+  } catch {
     finishProgressDialog("Driver not installed", "Could not reach the device service.");
   }
   // The driver's own line, and the buttons, come off the next read of this page rather than being
@@ -7285,7 +7280,7 @@ async function runShowJob(closeDialogId, spec) {
     }
     const s = await pollProfileJob("/api/shows/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? spec.okTitle : spec.failTitle, s.message || "Done.");
-  } catch (e) {
+  } catch {
     finishProgressDialog(spec.failTitle, "Could not reach the device service.");
   }
   await loadShows();
@@ -7343,7 +7338,7 @@ async function onProfileRename(ev) {
     await loadProfiles(newName);              // keep the SAME profile selected under its new name
     closeProfileDialog("rename-dialog");
     announce(_profileLastResult);
-  } catch (e) {
+  } catch {
     fail("Could not reach the device service.");
   }
 }
@@ -7398,7 +7393,7 @@ async function onProfileDelete() {
     await loadProfiles();
     closeProfileDialog("delete-dialog");
     announce(_profileLastResult);
-  } catch (e) {
+  } catch {
     setText("delete-error", "Could not reach the device service.");
   }
 }
@@ -7413,7 +7408,7 @@ async function onProfileDelete() {
 async function getBaselineStatus() {
   try {
     return await (await fetch("/api/baseline/status")).json();
-  } catch (e) {
+  } catch {
     return null;                       // no service, no offer; nothing to report and nothing lost
   }
 }
@@ -7465,14 +7460,14 @@ async function onBaselineSave() {
     const s = await pollProfileJob("/api/profiles/save/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? "Unit backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles();
-  } catch (e) {
+  } catch {
     finishProgressDialog("Backup failed", "Could not reach the device service.");
   }
 }
 
 async function onBaselineSkip() {
   // Recorded server-side so it is asked ONCE and never becomes a nag at every launch.
-  try { await postJSON("/api/baseline/skip", {}); } catch (e) { /* nothing to undo */ }
+  try { await postJSON("/api/baseline/skip", {}); } catch { /* nothing to undo */ }
   closeProfileDialog("baseline-dialog");
   announce("No backup was taken. You can still take one from the Backups page, though it will "
            + "then record the unit as it is now rather than as you found it.");
@@ -7495,7 +7490,7 @@ async function onBaselineAddPads() {
     finishProgressDialog(s.ok ? "Pads added to the backup" : "Could not add the pads",
                          s.message || "Done.");
     await loadProfiles();
-  } catch (e) {
+  } catch {
     finishProgressDialog("Could not add the pads", "Could not reach the device service.");
   }
 }
@@ -7610,7 +7605,7 @@ async function loadRecording() {
   try {
     const resp = await fetch("/api/recorder");
     d = await resp.json();
-  } catch (e) {
+  } catch {
     setRecState("Could not reach the AccessCaster service.");
     return;
   }
@@ -7749,7 +7744,7 @@ async function onApplyRecordingSetting(sel) {
       setStagedValue(sel, value, null);
       if (spec.after) spec.after(value);
     }
-  } catch (err) {
+  } catch {
     setRecState("Could not reach the device service.");
   } finally {
     setBusy(sel, false);
@@ -8007,7 +8002,7 @@ async function onStorageEject(btn) {
     const res = await postJSON("/api/storage/eject", { index: v.index, on: on });
     setRecState(res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
-  } catch (e) {
+  } catch {
     setRecState("Could not reach the AccessCaster service.");
   } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
 }
@@ -8027,7 +8022,7 @@ async function onStorageErase(btn) {
     const res = await postJSON("/api/storage/erase", { index: v.index });
     setRecState(res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
-  } catch (e) {
+  } catch {
     setRecState("Could not reach the AccessCaster service.");
   } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
 }
@@ -8082,7 +8077,7 @@ async function onDeleteRecording() {
     const res = await postJSON("/api/recorder/delete", { uid: parseInt(sel.value, 10) });
     setRecState(res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; fillRecordingList(res.recorder); }
-  } catch (e) {
+  } catch {
     setRecState("Could not reach the AccessCaster service.");
   } finally { setBusy(btn, false); }
 }
@@ -8126,7 +8121,7 @@ async function pollRecording() {
   try {
     const resp = await fetch("/api/recorder/live");
     live = await resp.json();
-  } catch (e) {
+  } catch {
     return;                       // a dropped poll is not worth saying anything about
   }
   if (!live.ok || live.state === null || live.state === undefined) return;
@@ -8155,7 +8150,7 @@ async function onRecordCommand(cmd, btn) {
   let res;
   try {
     res = await postJSON("/api/recorder/command", { command: cmd });
-  } catch (e) {
+  } catch {
     setBusy(btn, false);
     setRecState("Could not reach the AccessCaster service.");
     return;
@@ -8180,7 +8175,7 @@ async function onRecordCheck(btn) {
   try {
     const resp = await fetch("/api/recorder/live");
     live = await resp.json();
-  } catch (e) { /* fall back to the last full read below */ }
+  } catch { /* fall back to the last full read below */ }
   setBusy(btn, false);
   // The cheap endpoint carries the whole sentence, elapsed time included, at no device cost. The
   // last full read is only the fallback for the moment before one has happened.
@@ -8202,7 +8197,7 @@ async function onDropMarker(btn) {
   let res;
   try {
     res = await postJSON("/api/recorder/marker", {});
-  } catch (e) {
+  } catch {
     setBusy(btn, false);
     setRecState("Could not reach the AccessCaster service.");
     return;
@@ -8246,7 +8241,6 @@ function wireRecording() {
    is the whole page.
    Because the panes hold no focusable content, setPanelTabStop() gives the PANEL tabindex="0" and
    Tab from the strip lands inside it rather than sailing past to the next thing in the document. */
-let aboutTabs = null;
 
 /* THE DONATION LINK. Set this to the real page and the Support tab wires itself up; leave it empty
    and the tab says, in as many words, that there is nowhere to send anything yet.
@@ -8272,7 +8266,7 @@ function wireSupport() {
 }
 
 function wireAboutTabs() {
-  aboutTabs = buildStaticTabs("about", "about-panel");
+  buildStaticTabs("about", "about-panel");
   wireSupport();
 }
 
@@ -8334,7 +8328,7 @@ async function onLevelCheck(ch) {
       // Stopped early, or refused. Either way it is no longer speaking, so this is safe to say.
       announce(res.message || "Done.", !res.ok);
     }
-  } catch (e) {
+  } catch {
     announce("Could not reach the app service.", true);
   } finally {
     setBusy(btn, false);
@@ -8416,7 +8410,7 @@ async function agStart() {
   let res;
   try {
     res = await postJSON("/api/channels/autogain", { name: agChannel });
-  } catch (e) {
+  } catch {
     agClose("ag-progress-dialog");
     announce("Could not reach the app service.", true);
     return;
@@ -8453,7 +8447,7 @@ async function agTick() {
   try {
     const resp = await fetch("/api/channels/autogain/status");
     st = await resp.json();
-  } catch (e) {
+  } catch {
     return;                       // a dropped poll is not worth saying anything about
   }
   // Two talking phases: the take that sets the gain, and the shorter one that checks it. Each
@@ -8507,14 +8501,14 @@ async function agTick() {
 async function agStopEarly() {
   try {
     await postJSON("/api/channels/autogain/stop", {});
-  } catch (e) { /* the run ends on its own anyway */ }
+  } catch { /* the run ends on its own anyway */ }
 }
 
 async function agUndo() {
   let res;
   try {
     res = await postJSON("/api/channels/autogain/undo", {});
-  } catch (e) {
+  } catch {
     announce("Could not reach the app service.", true);
     return;
   }
@@ -8537,7 +8531,7 @@ function agFinish() {
 function agReturnFocusNow() {
   const back = (agChannel && document.getElementById("autogain-" + agChannel)) || agReturnFocus;
   if (back) {
-    try { back.focus(); } catch (e) { /* it may have been rebuilt away */ }
+    try { back.focus(); } catch { /* it may have been rebuilt away */ }
   }
 }
 
@@ -8581,7 +8575,7 @@ async function loadCallme() {
   let d;
   try {
     d = await (await fetch("/api/callme")).json();
-  } catch (e) {
+  } catch {
     setStatus("callme-state", "Could not reach the AccessCaster service.");
     return;
   }
@@ -8644,7 +8638,7 @@ function applyCallme(d) {
    The swap can also come from the unit (CallMe 1 taken off its fader on the touchscreen), so focus
    inside the half being hidden is moved to the other half's heading first. */
 let callme1Code = null;
-let callmeTabs = null;
+let callmeTabs = null;            // read by DevTools/ui_checks_callme.js, which selects a tab
 
 function renderCallmeReady(d) {
   const problems = (d.ready || []).filter((r) => !r.ok);
@@ -8676,7 +8670,7 @@ async function fillCallmeFaders() {
   let d;
   try {
     d = await (await fetch("/api/faders/live")).json();
-  } catch (e) {
+  } catch {
     return;
   }
   if (!d.ok) return;
@@ -8696,7 +8690,7 @@ async function onCallmeFaderApply(sel) {
   let res;
   try {
     res = await postJSON("/api/faders/set", { fader: Number(sel.value), code: callme1Code });
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the AccessCaster service." };
   }
   setBusy(sel, false);
@@ -8844,7 +8838,7 @@ async function postCallmeContact(path, body) {
   let res;
   try {
     res = await postJSON(path, body);
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the AccessCaster service." };
   }
   setStatus("callme-state", res.message || "Done.");
@@ -8882,7 +8876,7 @@ async function pollCallme() {
   let d;
   try {
     d = await (await fetch("/api/callme/live")).json();
-  } catch (e) {
+  } catch {
     return;                       // a dropped poll is not worth saying anything about
   }
   if (!d.ok || d.version === callmeSeen.version) return;
@@ -8907,7 +8901,7 @@ async function onCallmeRespond(btn, path, body) {
   let res;
   try {
     res = await postJSON(path, body || {});
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the AccessCaster service." };
   }
   setBusy(btn, false);
@@ -8930,7 +8924,7 @@ async function onCallmeHosting(input) {
   let res;
   try {
     res = await postJSON("/api/callme/hosting", { on: wanted });
-  } catch (e) {
+  } catch {
     res = { ok: false, message: "Could not reach the AccessCaster service." };
   }
   if (res.slots) applyCallme(res);
@@ -8958,7 +8952,7 @@ function wireCallme() {
       let res;
       try {
         res = await postJSON("/api/callme/auto-extend", { on: auto.checked });
-      } catch (e) {
+      } catch {
         res = { ok: false, message: "Could not reach the AccessCaster service." };
       }
       if (!res.ok) auto.checked = !auto.checked;
@@ -8971,7 +8965,7 @@ function wireCallme() {
       let res;
       try {
         res = await postJSON("/api/callme/ringtone", { on: ring.checked });
-      } catch (e) {
+      } catch {
         res = { ok: false, message: "Could not reach the AccessCaster service." };
       }
       if (!res.ok) ring.checked = !ring.checked;
@@ -9020,7 +9014,7 @@ function wireCallme() {
       try {
         await navigator.clipboard.writeText(box.value);
         setStatus("callme-state", "The guest link is on the clipboard.");
-      } catch (err) {
+      } catch {
         setStatus("callme-state", "The link is selected. Press Control C to copy it.");
       }
     });
@@ -9104,7 +9098,7 @@ function render(route, focusTo = "heading") {
   // Read live from the device every time a section is entered, so what you see
   // is always the unit's current state (no manual "read" button).
   if (info.onShow) {
-    try { info.onShow(); } catch (e) { /* a failed load already announces itself */ }
+    try { info.onShow(); } catch { /* a failed load already announces itself */ }
   }
 }
 
@@ -9226,7 +9220,7 @@ function playBoundaryCue() {
     osc.connect(gain).connect(boundaryAudioCtx.destination);
     osc.start(t);
     osc.stop(t + 0.13);
-  } catch (_) { /* no audio available: the stop itself still works, which is the point */ }
+  } catch { /* no audio available: the stop itself still works, which is the point */ }
 }
 
 /* THE TOPMOST open dialog, which is not the same as the first one in the markup.
@@ -9343,12 +9337,12 @@ function initThemeToggle() {
                      : "Dark mode currently off. Press to turn on.";
   }
   let stored = null;
-  try { stored = localStorage.getItem("theme"); } catch (_) {}
+  try { stored = localStorage.getItem("theme"); } catch {}
   apply(stored || "dark");
   toggle.addEventListener("click", () => {
     const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     apply(next);
-    try { localStorage.setItem("theme", next); } catch (_) {}
+    try { localStorage.setItem("theme", next); } catch {}
     status.textContent = "";
     window.setTimeout(() => {
       status.textContent = "Dark mode is now " + (next === "dark" ? "on" : "off") + ".";
@@ -9379,7 +9373,7 @@ function initSingleInstanceGuard() {
     // works for a window the app opened; if the browser refuses (a hand-opened tab), leave a single
     // quiet spoken note rather than a trapping dialog.
     fetch("/api/focus", { method: "POST", keepalive: true }).catch(() => {});
-    try { window.close(); } catch (_) { /* ignore */ }
+    try { window.close(); } catch { /* ignore */ }
     setTimeout(() => {
       if (!window.closed) {
         announce("AccessCaster is already open in another window, which has been brought to the " +
@@ -9400,7 +9394,7 @@ function initSingleInstanceGuard() {
     }
   };
 
-  window.addEventListener("pagehide", () => { try { ch.close(); } catch (_) {} });
+  window.addEventListener("pagehide", () => { try { ch.close(); } catch {} });
 
   ch.postMessage({ type: "hello", id: myId });
   setTimeout(() => { if (active === null) becomeActive(); }, 400);
@@ -9474,8 +9468,8 @@ function initAppLifecycle() {
       const resp = await fetch("/api/ping", { method: "POST", keepalive: true });
       // ANY answer means the server is up, including a refusal: a remote page with a stale token
       // is not looking at a stopped server.
-      try { reply = await resp.json(); } catch (e) { reply = {}; }
-    } catch (e) {
+      try { reply = await resp.json(); } catch { reply = {}; }
+    } catch {
       reply = null;
     }
     noteServer(reply);
@@ -9493,7 +9487,7 @@ function initAppLifecycle() {
   // Only quit on a REAL page close. pagehide with persisted === true means the page entered the
   // back/forward cache (e.g. backgrounded) and may be restored, so we must NOT stop the server
   // then. beforeunload is intentionally not wired to quit, as it can fire without a real close.
-  const quit = () => { try { navigator.sendBeacon("/api/quit"); } catch (_) {} };
+  const quit = () => { try { navigator.sendBeacon("/api/quit"); } catch {} };
   window.addEventListener("pagehide", (e) => { if (!e.persisted) quit(); });
 }
 
@@ -9504,7 +9498,7 @@ function initAppLifecycle() {
 const RETIRED_GROUP_STATE_KEY = "accesscaster.groups";
 
 function dropRetiredGroupState() {
-  try { window.localStorage.removeItem(RETIRED_GROUP_STATE_KEY); } catch (e) { /* ignore */ }
+  try { window.localStorage.removeItem(RETIRED_GROUP_STATE_KEY); } catch { /* ignore */ }
 }
 
 async function init() {
@@ -9579,7 +9573,7 @@ async function init() {
         const res = await postJSON("/api/meters/stream", { stream: value });
         announce(res.message || "Done.", !res.ok);
         loadMeters();                 // the level and mute belong to the stream, so re-read them
-      } catch (e) {
+      } catch {
         announce("Could not reach the app service.", true);
       }
     }, SELECT_COMMIT_MS);
@@ -9597,7 +9591,7 @@ async function init() {
       try {
         navigator.sendBeacon("/api/fx/preview/stop",
           new Blob([JSON.stringify({ grid: previewState.grid })], { type: "application/json" }));
-      } catch (_) { /* best effort */ }
+      } catch { /* best effort */ }
     }
   });
   document.getElementById("pad-ed-volume").addEventListener("input", onPadVolumeInput);

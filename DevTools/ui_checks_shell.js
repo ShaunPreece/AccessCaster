@@ -19,7 +19,7 @@ const el = (id) => document.getElementById(id);
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 15000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready */ }
+    try { if (fn()) return true; } catch { /* not ready */ }
     await sleep(80);
   }
   return false;

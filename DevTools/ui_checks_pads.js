@@ -36,7 +36,7 @@ const hit = (log, needle) => paths(log).some((p) => p.indexOf(needle) >= 0);
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 8000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready */ }
+    try { if (fn()) return true; } catch { /* not ready */ }
     await sleep(80);
   }
   return false;
@@ -546,7 +546,7 @@ async function run() {
   // ---- remembered tab, and the retired group state ----------------------
   await openTab("fx");
   let stored = null;
-  try { stored = JSON.parse(window.localStorage.getItem("accesscaster.tabs") || "{}"); } catch (e) {}
+  try { stored = JSON.parse(window.localStorage.getItem("accesscaster.tabs") || "{}"); } catch {}
   check("the selected tab is remembered per page, by key",
     stored && stored.pads === "fx", stored && stored.pads);
   // Every page is on tabs now, so the WHOLE collapsible-group store goes rather than one prefix at

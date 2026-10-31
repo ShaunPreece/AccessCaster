@@ -26,7 +26,7 @@ const key = (target, opts) => {
 async function waitFor(fn, ms) {
   const until = Date.now() + (ms || 8000);
   while (Date.now() < until) {
-    try { if (fn()) return true; } catch (e) { /* not ready */ }
+    try { if (fn()) return true; } catch { /* not ready */ }
     await sleep(80);
   }
   return false;

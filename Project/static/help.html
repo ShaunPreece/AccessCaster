@@ -4,19 +4,17 @@
      INCLUDE marker sits, by page.render_index, which both server.py and DevTools/ui_probe.py serve
      through. Opening this file on its own shows a partial document, which is expected.
 
-     It lives apart from index.html because it is ~900 lines of prose with no controls in it: the
-     one part of the UI that is a document rather than markup. Editing it cannot disturb the app's
-     own structure, and index.html is that much shorter to work in.
+     It lives apart from index.html because it is prose with no controls in it: the one part of
+     the UI that is a document rather than markup. Editing it cannot disturb the app's own
+     structure, and index.html is that much shorter to work in.
 
-     THE TAB PANES BELOW ARE STILL BUILT BY buildStaticTabs IN app.js, exactly as when this was
-     inline. Nothing about the delivered DOM changes, so nothing about the focus order or the tab
-     strip does either. -->
+     THE TAB PANES BELOW ARE BUILT BY buildStaticTabs IN app.js. The delivered DOM is the same as
+     if this were written inline in index.html, so the focus order and the tab strip are too. -->
     <!-- About -------------------------------------------------------------- -->
     <section class="app-section" id="sec-about" hidden>
       <h1 id="h-about" tabindex="-1">Help &amp; About</h1>
       <!-- The version comes from Project/version.py, fetched once at startup by loadVersion() in
-           app.js. It used to arrive only with the Device page's status read, so this line said
-           "unknown" to anyone who came straight here. -->
+           app.js, so it is filled in whichever page is opened first. -->
       <p class="hint">Version <span id="app-version">unknown</span>. Developed by Shaun Preece.</p>
 
       <!-- THE AUTHOR'S OWN WORDS, kept in the first person on purpose: this is the one part of the
@@ -112,8 +110,7 @@
       </p>
 
 
-      <!-- TAB PANES, the layout that replaced this page's collapsible groups (see buildStaticTabs
-           in app.js). One div.cat-tab per tab, carrying the tab's
+      <!-- TAB PANES (see buildStaticTabs in app.js). One div.cat-tab per tab, carrying the tab's
            key and its title for the strip; app.js builds the strip above this panel and shows
            exactly one pane at a time. Panes after the first carry `hidden` in the markup, so a JS
            failure leaves the page showing something rather than nothing.
