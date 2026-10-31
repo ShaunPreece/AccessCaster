@@ -398,7 +398,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `staticIpSet` (a flag with no operands; the address fields are read-only reports),
   `systemDateTimezone` (applied by the touchscreen, not the engine).
 - **THE SIX "UNCLAIMED" READABLE PROPERTIES ARE PLAIN STORAGE, AND THE QUESTION IS CLOSED**
-  (`DevTools/probe_unclaimed_props.py`, 1st October 2026). `eqParamModeHigh` / `Mid` / `Low` are in
+  (1st October 2026). `eqParamModeHigh` / `Mid` / `Low` are in
   the GUI block beside `debugMode` and `metering`; `appOutputDevice`, `appMonitorMix` and
   `appRecording` are in an APP block nothing else addresses. All six took a write at their TREE
   address, read back exactly, restored, and left the node, property and name counts untouched. The
@@ -768,7 +768,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `svchost`, both session 0, and zero from the service. Every trace call is gated on a level
   global that nothing in the binary writes, and its registry key holds only `Version`, `Path`,
   `Enable` and `Latency`, so there is no flag to switch tracing on either.
-  `DevTools/vad_trace.py` is the listener, kept because it proves the negative in one run.
 - **WITH THE DEFAULT ALREADY ON `System (RØDECaster)`, NOTHING CONTESTS THE BIND.** Every arrival
   between two bound states binds, because whatever plays is on `System` and the desk's Main output
   is free: that is a "binding run", and it validates any change made during it. Only a test that
@@ -796,7 +795,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   desk stays on the bus, so the service has nothing to bind to. `_write_usb_mode` reports an
   arrival only when the product id changes, and only arrivals go into the bind history.
 - **THE DIAGNOSTIC TOOLS ARE NOT THE CAUSE, and it was worth asking.** Every failure of that
-  afternoon fell inside a window where `bind_timeline.py` or `vad_trace.py` was running, which
+  afternoon fell inside a window where `bind_timeline.py` or a DBWIN listener was running, which
   reads as an observer effect: the first enumerates five device-interface classes eight times a
   second, and the second throttles `audiodg` by making it wait on a Python reader for 330 debug
   lines a second. The test is to run the flips WITH the observer on purpose, and that gives 6
@@ -1526,8 +1525,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   effect the DESK performs, do it, and diff the whole tree. `inputMicrophoneType` is the standing
   example: the engine applies that voicing's own gain, its phantom setting and thirteen chain
   parameters. At the dead address it moved our byte and nothing else; at INPUTSOURCE it set gain 25,
-  switched `inputPower` on by itself and retuned the strip. `DevTools/duo_gain_probe.py` is that
-  differential, and the technique generalises to any property the desk derives something from.
+  switched `inputPower` on by itself and retuned the strip. That differential
+  generalises to any property the desk derives something from.
 - **BUT THE ENGINE'S MODEL IS DEVICE-AGNOSTIC, SO "THE ENGINE ANSWERED" PROVES AN ADDRESS IS LIVE AND
   NEVER THAT A FEATURE EXISTS ON THIS HARDWARE.** Both desks run ONE binary (`app.zip`, "rcp2") and
   publish the same 30-slot `INPUTSOURCE` table and the same 30 matrix rows, so the engine acts on a
@@ -1537,8 +1536,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `inputInstrumentGain` EXACTLY as the real Mic 2 does. What is device-specific lives at
   `SYSTEM.boardType` (`RcBoardConfig::HostType`, 1 on a Duo) and in the touchscreen, neither of which
   the property tree exposes. **So run the CONTROL**: make the same write to a slot the desk cannot
-  possibly have, and if it behaves the same, the test measured nothing. This retired two successive
-  verdicts of `DevTools/duo_stereo_probe.py` before the third stood up.
+  possibly have, and if it behaves the same, the test measured nothing. Without it, two successive
+  verdicts on the Duo's stereo pair codes were wrong before the third stood up.
 - **THE FIRMWARE IS THE AUTHORITY THE MODEL IS NOT, and it is public.** `update.rode.com/manifest.json`
   names `rcp2/<version>/app.zip`: 36 MB, the two Linux binaries, md5 published beside it and verified.
   `rc_audio_mixer` is the engine, `rc_gui_juce` the touchscreen. Its string table gives up the
@@ -2426,8 +2425,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   blind the cause is invisible and the obvious fix (mute the mic you are using) does not work.
 - **THE PORT IS THE SINGLE-INSTANCE LOCK, AND `_ExclusiveHTTPServer.allow_reuse_address` MUST STAY
   FALSE.** `HTTPServer` sets it to `1`, and on Windows that flag lets a second process bind a port
-  another process already holds - measured, not assumed, by `DevTools/check_exclusive_bind.py`,
-  which also proves a restart still binds straight after a clean stop. Put plain `ThreadingHTTPServer`
+  another process already holds (measured, not assumed). With it `0`, a restart still binds
+  straight after a clean stop with traffic behind it. Put plain `ThreadingHTTPServer`
   back and two servers can sit on 8770 at once, in different Windows sessions, both reaching for the
   one desk.
 - **ONLY THE PORT IS MACHINE-WIDE. THE REST OF THE APP BELONGS TO ONE WINDOWS SESSION**, so a second
@@ -2516,8 +2515,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`, `playerJumpToSample`,
   `sipSlotCallDisconnect`.
 
-- **THE CHANNEL BUTTON TOGGLES, AND THE ENCODER PRESS DOES NOT RELEASE IT.** Measured with
-  `DevTools/encoder_press_probe.py`, 4th September 2026: `systemChannelSelected` went to 0 on the
+- **THE CHANNEL BUTTON TOGGLES, AND THE ENCODER PRESS DOES NOT RELEASE IT.** Measured 4th September
+  2026: `systemChannelSelected` went to 0 on the
   press, stayed at 0 across two encoder presses, and returned to -1 only on a second press of the
   same channel button. So while a channel is selected the announcer must NOT advance its ring - doing
   so announced USB 1 and then Chat while the desk had never left Mic 1, and left `enc_pos` pointing
@@ -2796,10 +2795,8 @@ shared one; a new copy is how they drifted apart the first time.
   already used throws at PARSE time and no check runs, which reads as a timeout. `ui_checks_boundary.js`
   sat like that from 3rd September to the 16th. `node --check DevTools/ui_checks_*.js` catches it in
   a second and is worth running after editing one.
-- **`audit_code.py` runs against `Project/` from anywhere.** It used to glob `*.py` in the cwd while
-  telling you to run it from the repo root, which has none, so it reported a clean pass over ZERO
-  files and looked like it was working. Its reference sweep deliberately includes `DevTools/`: a
-  Project function called only by a probe or a live test is in use, not dead.
+- **A `Project/` function called only by a probe or a live test in `DevTools/` is in use, not dead.**
+  A dead-code sweep that searches `Project/` alone reports it as unused.
 - **THE GENERATED REFERENCES ARE ONE FILE PER DESK, and must stay that way:**
   `docs/PROPERTY_LIST_<DESK>.md`, plus the private per-desk coverage reports, where
   `<DESK>` is `devices.DeviceModel.slug` (`PRO2` / `DUO`). They shared ONE device-agnostic path until

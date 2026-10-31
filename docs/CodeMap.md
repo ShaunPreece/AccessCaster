@@ -308,7 +308,7 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (157 files; the ones worth knowing)
+## DevTools/ (148 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (proxies GETs to the live server, stubs POSTs) and its
 `HARNESS`, which gives every suite its helpers so none keeps a copy: `check`, `checkEqual` (actual,
@@ -372,7 +372,7 @@ arguments swept across every suite.
 validation rules, real registration with Windows, dispatch by posting WM_HOTKEY at the pump, our own
 clash detection, re-binding, the master switch, and what gets persisted). `test_hotkey_actions_live.py` (the ACTIONS
 against the desk; stop the service first, and `--record` to include the recording pair).
-`press_keys.py` presses REAL keys system-wide, for `gui_drive.py`, and uses `keybd_event` because
+`press_keys.py` presses REAL keys system-wide, to test a global shortcut by hand, and uses `keybd_event` because
 SendInput injects nothing from an RDP session here. A run killed mid-press leaves the modifier held
 in every application, so nothing that runs in a sweep may call it.
 `probe_free_chords.py` asks Windows which modifier chords will actually give up a key, by
@@ -584,10 +584,6 @@ SWALLOWED / STORED / SIDE EFFECT / STRAY, and restores it. **It skips `toneGener
 never writes a `pair` property, because guessing an operand layout is how a stray gets appended.
 This is what found `btDoScan` alive.
 
-**`probe_unclaimed_props.py`** writes, reads back and restores the six readable properties nothing
-in the app uses, addressing each at its TREE path rather than a guessed selector, and watches the
-push stream for any reaction. Counts the model's nodes, properties and names either side.
-
 **`probe_callme_live.py`** drives CallMe on a live desk: `state` reads every `sip*` property,
 `host on|off` switches hosting and prints the guest link, `watch` / `speak` log (and speak) every
 call push, and `answer [slot]` answers the next incoming call with the touchscreen's composite.
@@ -612,14 +608,12 @@ the status does not carry reads as None, so a wait returns at once and the read-
 the job is still going: that is what made `action_delete_backup` look as though it left the
 computer's copy behind when it had simply not finished.
 
-**`bind_timeline.py` and `vad_trace.py`** are the pair for RODE's virtual-device service, which
-binds to the desk on some arrivals and not others. The first samples, several times a second, which
+**`bind_timeline.py`** watches RODE's virtual-device service, which binds to the desk on some
+arrivals and not others. It samples, several times a second, which
 of the desk's device interfaces exist and which are ACTIVE, alongside the service's own connected
 flag, and prints every change with a millisecond offset; `--snapshot` reads the current state and
 exits. Read-only, no elevation, and it makes no arrival itself: use the app's USB mode control or
-the cable. The second holds the global `DBWIN` debug channel, which needs ELEVATION and needs
-DebugView closed, and exists to record a negative: the service carries a full trace string table
-and emits none of it. See `PROJECT_GUIDE.md` part 2 under Expanded for what both measured.
+the cable. See `PROJECT_GUIDE.md` part 2 under Expanded for what it measured.
 **`bind_history.py`** reads the per-attempt history the app itself records and compares bound
 attempts with missed ones field by field; `--last N` limits the table.
 
@@ -633,12 +627,6 @@ follow-up makes extra arrivals whenever it misses and each is another trial. `--
 same cycles changing nothing, and **any run without it is worthless**, because the rate swings with
 whatever is playing to the desk's Main output. Needs the server running; restores the default
 output it found.
-
-**`check_exclusive_bind.py`** settles the two TCP facts the single-instance lock rests on, on port
-8791 so it never disturbs a running app: that `allow_reuse_address = 1` really does let two servers
-share a port on Windows, and that `= 0` still rebinds straight after a clean stop with traffic
-behind it (the TIME_WAIT regression the change could have caused). Offline, no device. See
-`PROJECT_GUIDE.md` part 2 under the server's lifecycle.
 
 **`check_notes.py` enforces the private notes' own rules, the ones a script can settle**: an entry that is
 really a cleanup, a status column creeping back into `PARITY.md`, `Now / Next` past 250 lines, a
@@ -661,10 +649,6 @@ notes, and **`codemap_lines.py` -> the NUMBERS IN THIS FILE** (the
 `python DevTools/codemap_lines.py` after a session that moved code; never edit one of those numbers
 by hand. It touches no prose.
 
-**`audit_code.py`** is the stdlib code audit: syntax, unused imports, dead top-level functions
-across `Project/`, with the reference sweep widened to `DevTools/` so a function only a probe calls
-is not called dead. It runs from anywhere.
-
 `run_dev_server.py`, `say_gated.ps1` (speaks a status line through `Project/say.ps1` unless the
 Claude GUI has the focus; `-Force` speaks anyway), `wifi_join.py` (password on stdin; strips the BOM
 PowerShell adds on a pipe),
@@ -678,19 +662,13 @@ puts it back, `MidiOut().play_pad(n)` fires one. CC number is the FUNCTION, MIDI
 pad. Run it directly to list ports or fire a pad), `state_observatory.py`
 (`listen` takes no `--raw`), `gui_drive.py` +
 `ui_map.json` (drive the RODE app), `duo_probe.py` (read-only bring-up probe for any new desk),
-`announcer_echo_check.py`, `audit_code.py`, `watch_backchannel.py` (samples Mic 1 and USB 2's mute
+`announcer_echo_check.py`, `announcer_live_check.py` (prints what the announcer would say for
+each control moved at the desk, read-only; `--speak` says it aloud), `list_pads.py` (the pad table
+in stream order, with each pad's bank and number), `watch_backchannel.py` (samples Mic 1 and USB 2's mute
 and cue flags through the running service while a Back Channel pad is held, which is the only way
 to tell a pad that did nothing from one that did its job and tidied up).
 
-**Two cap-opening probes, and both are worth reading before writing another one.**
-`duo_stereo_probe.py` asks whether a stereo PAIR CODE is live on a Duo, and `--control CODE` is the
-half that matters: it runs the same write against a source the desk cannot have (3 = Mic 4), because
-the engine's model is device-agnostic and will answer either one identically. Two verdicts died
-before that control was added. `duo_network_probe.py` does structure-then-engine on the NETWORK
-block: it identifies root child 0x10, checks every property the app writes is on it, then cycles the
-radio and watches the DESK drop and regain its own IP address. `--skip-radio` leaves the radio alone.
-
-**Device writers, the small accidental-damage surface:** `bt_probe`, `gui_drive`, `inject_button`,
+**Device writers, the small accidental-damage surface:** `gui_drive`, `inject_button`,
 plus the live tests above.
 
 --------------------------------------------------------------------------------
