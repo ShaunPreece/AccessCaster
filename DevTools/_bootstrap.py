@@ -29,8 +29,7 @@ if PROJECT not in sys.path:
 # A TEST NEVER MAKES A NOISE EITHER. A suite that does not stub `_ann_say` leaves the real announcer
 # in place, so anything it exercises SPEAKS OR CHIMES through SAPI, onto the desk the user monitors
 # on, with nothing to say what is making the sound, possibly mid-recording. `test_shows_sim`
-# completes dozens of background jobs and fires the done/failed cue for every one; `test_hotkeys`
-# dispatches real shortcut actions and speaks their results.
+# completes dozens of background jobs and fires the done/failed cue for every one.
 #
 # AND A TEST NEVER WRITES TO THE DESK, which is the same rule a third time and the one that costs
 # most when it is missed. An offline suite that reaches a real write fires a pad, engages a voice
@@ -88,8 +87,8 @@ def notes_path(*parts: str) -> str:
     """An absolute path inside this project's notes, e.g. notes_path('ProjectMemory', 'CodeMap.md').
 
     FALLS BACK TO THE REPO when the notes are not beside it, which is what a fresh public clone
-    looks like. The generators (property_list, the coverage reports, codemap_lines) then write
-    their output into the clone instead of failing on a folder that is not there.
+    looks like. The coverage reports then write their output into the clone instead of failing
+    on a folder that is not there.
     """
     base = NOTES if os.path.isdir(NOTES) else REPO
     return os.path.join(base, *parts)

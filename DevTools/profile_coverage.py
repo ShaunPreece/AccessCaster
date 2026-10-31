@@ -8,12 +8,12 @@ Generates ProjectMemory/PROFILE_COVERAGE_<DESK>.md. NO DEVICE NEEDED, nothing wr
 WHY IT IS A SCRIPT AND NOT A HAND-WRITTEN LIST. A profile claims to be a full backup, and the way
 that claim rots is silent: someone adds a writable setting to the app and nobody remembers to add it
 to profiles.py, so the profile keeps saving cleanly and just quietly does not carry the new thing.
-That is exactly how the virtual fader levels and the per-output headphone type went missing. So the
-question is answered MECHANICALLY, from the code, three ways:
+So the question is answered MECHANICALLY, from the code, three ways:
 
   1. WHAT A PROFILE SAVES is read out of the save path itself - the property names in
-     profiles.save, channels.read_channels, the matrix readers and the pad readers, plus the
-     constant collections those functions iterate. Nothing is hand-listed, so it cannot drift.
+     profiles.save, channels.read_channels and the matrix readers, plus the constant collections
+     those functions iterate. The pad backup is the exception, listed by hand in PAD_SAVED
+     (the comment there says why).
   2. WHAT THE APP CAN WRITE is taken from DevTools/property_coverage.py's scan of our whole
      source tree (the same scan that produces the property-coverage report).
   3. THE GAP is (2) minus (1): a setting the app can change but a profile would not bring back.
@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _bootstrap  # puts Project/ on sys.path, and finds the notes
 import channels
 import profiles
 import property_coverage as pc
@@ -132,7 +132,7 @@ def saved_props(names: list[str]) -> dict[str, list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# 2. What a restore writes back (the one hand-written table)
+# 2. What a restore writes back
 # ---------------------------------------------------------------------------
 # {property: how it is restored}. "SAVE ONLY: <reason>" means deliberately not written back.
 RESTORED_BY = {
@@ -145,8 +145,8 @@ RESTORED_BY = {
     # --- per channel ----------------------------------------------------------------------
     "inputMicrophoneGain": ("profiles.apply -> channels.set_mic_gain, written AFTER the mic "
                             "type: selecting a voicing sets that voicing's own default gain (SM7B "
-                            "55, Condenser 25, ...), so the old gain-first order lost it on any "
-                            "restore that changed the voicing."),
+                            "55, Condenser 25, ...), so a gain written first is lost on any "
+                            "restore that changes the voicing."),
     "inputDigitalGain": "profiles.apply -> channels.set_channel_level (line channels).",
     "inputPower": "profiles.apply -> channels.set_phantom.",
     "inputPhaseFlip": "profiles.apply -> channels.set_polarity.",
@@ -224,16 +224,15 @@ RESTORED_BY = {
                       "mapping is custom, because latching versus momentary is proven to change what "
                       "the pad sends and we have not proven the custom flag gates it.",
     "inputInstrumentGain": "profiles.apply -> channels.set_instrument_gain.",
-    "inputType": "SAVE ONLY, and correctly so: it is DERIVED from inputMicrophoneType (proven "
-                 "on Mic 3 - Line-in gives 2, Instrument gives 1, any mic voicing gives "
+    "inputType": "SAVE ONLY, and correctly so: it is DERIVED from inputMicrophoneType "
+                 "(Line-in gives 2, Instrument gives 1, any mic voicing gives "
                  "0), so restoring the mic type brings the input path back on its own. Writing it "
                  "as well could only produce a combination the desk's own UI cannot make.",
-    "inputColour": "SAVE ONLY: the strip colour is a STRING of AARRGGBB hex (decoded) and "
-                   "there is no string channel-property writer yet, so it is read and backed up but "
-                   "cannot be put back. There is no string channel-property writer rather than "
-                   "int()-ing a colour.",
+    "inputColour": "SAVE ONLY: the strip colour is a STRING of AARRGGBB hex and there is no "
+                   "string channel-property writer, so it is read and backed up but cannot be put "
+                   "back. int()-ing a colour into the numeric writer is not an option.",
     "padEnvStart": "soundpad.restore_pads -> set_pad_properties, the whole envelope in one session. "
-                   "The four floats are POSITIONS through the sound, 0-1, ear-proven.",
+                   "The four floats are POSITIONS through the sound, 0-1.",
     "padEnvFadeIn": "soundpad.restore_pads (with the rest of the envelope).",
     "padEnvFadeOut": "soundpad.restore_pads (with the rest of the envelope).",
     "padEnvStop": "soundpad.restore_pads (with the rest of the envelope).",
@@ -360,7 +359,7 @@ NOT_SAVED = {
     "wifiPSK": ("ok", "THE WIFI PASSWORD, and the rule is absolute: it stays out of profiles, the "
                       "API, the browser and every log line. It is READABLE off the desk, which is "
                       "exactly why a profile must not carry it - a backup file on the PC would be "
-                      "a plaintext copy of Shaun's network key. wifiSSID is not saved either, "
+                      "a plaintext copy of the user's network key. wifiSSID is not saved either, "
                       "since an SSID with no key restores nothing usable."),
     # ---- SIP / CallMe: only meaningful during a call, and several hold credentials ---------
     "padSIPCallSlot": ("ok", "CallMe pad plumbing; set by the create path from the pad's type."),

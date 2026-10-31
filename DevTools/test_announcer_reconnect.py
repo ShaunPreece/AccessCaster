@@ -87,7 +87,7 @@ class Rig:
 
     def open(self, iface, purpose):
         if iface is not self.iface:
-            # Exactly the shipped bug: a remembered path outlives the device it named.
+            # A remembered path outlives the device it named.
             raise OSError("open failed")
         self.opened.append(iface)
         self.dev = FakeDev(iface)
@@ -205,7 +205,7 @@ check("and an unreadable mode never speaks a guess", server._ann_usb_mode_change
 rig = Rig(speak_after=0.05)
 rig.seeded_mode = 5                       # the desk was in Expanded when the announcer started
 with rig:
-    rig.seeded_mode = 2                   # ...and comes back out of it, as one did unprompted
+    rig.seeded_mode = 2                   # ...and comes back out of it unprompted
     rig.re_enumerate(EXPANDED, gap=0.3)
     time.sleep(0.5)
     check("the reconnect reports the change instead of just saying it is back",

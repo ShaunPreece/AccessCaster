@@ -1,7 +1,7 @@
 """Offline checks for CallMe: the answer record, the parsing, the wording and what the Watcher says.
 
-NO DEVICE NEEDED. Every fact pinned here came off a Pro II with a phone browser as the guest, and
-re-establishing one costs a real call and a minute of the plan. The live driving is
+NO DEVICE NEEDED. Every fact pinned here holds on a Pro II with a browser guest, and
+re-establishing one costs a real call and a minute of the CallMe plan. The live driving is
 DevTools/probe_callme_live.py.
 
     python DevTools/test_callme.py

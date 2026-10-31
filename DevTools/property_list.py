@@ -4,12 +4,8 @@
     python DevTools/property_list.py --check    compare and exit 1 if the NAME SET has changed
     python DevTools/property_list.py --blob X   use a saved .bin dump instead of the desk
 
-WHY IT EXISTS. This list is the raw material every feature is built out of, and it had become
-unreachable and unrebuildable at the same time. It lived as section 12 of `RODECASTER_PROTOCOL.txt`,
-492 lines buried at the bottom of a 1575-line spec, so nobody looking for "what can this desk even
-do" would find it. Worse, its own header named a generator and a source dump that had BOTH been
-deleted in a DevTools cull, so it was a frozen snapshot nothing could rebuild or check. It was also
-Duo-only, on a project where a Pro II has been attached the whole time.
+WHY IT EXISTS. This list is the raw material every feature is built out of, so it is generated
+from the desk, one file per desk, rather than kept by hand where nothing can rebuild or check it.
 
 NAMES AND TYPES ONLY, NEVER VALUES, and that is a hard rule rather than a tidiness choice. The dump
 carries the wifi PSK and the SIP account password in plain text. Emitting names alone means this
@@ -18,7 +14,7 @@ is there. Nothing here needs a value to be useful.
 
 READ-ONLY AND SAFE TO RUN ANY TIME. It sends the dump trigger and reads; it never writes, so it
 needs no confirmation and cannot leave a stray. It does not need exclusive access either - it runs
-happily alongside the app's own server (measured).
+happily alongside the app's own server.
 
 **`--check` COMPARES THE NAME SET, NOT THE COUNTS, and that is deliberate.** Occurrence counts move
 with ordinary use: create a pad and the PAD blocks go up, connect a caller and the matrix changes
@@ -33,7 +29,7 @@ import pathlib
 import re
 from collections import Counter, defaultdict
 
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _bootstrap  # puts Project/ on the path, and finds docs/; import FIRST
 import devices
 import model_tree
 import rcp_read
@@ -42,10 +38,10 @@ import rcp_read
 def out_path(dev) -> pathlib.Path:
     """DEVICE-SCOPED output: PROPERTY_LIST_PRO2.md / PROPERTY_LIST_DUO.md.
 
-    Never one shared list. The two desks publish the SAME 463 property names and differ
-    only in counts (PAD/PADBUTTON, following the physical shape), so a shared file regenerated on
-    the other desk overwrote it silently AND passed --check, which compares names only. One file
-    per desk means --check compares like with like and neither desk can clobber the other.
+    Never one shared list. The desks publish different name sets (the Duo's are a subset of the
+    Pro II's, and both move with firmware and attached storage) and different counts, following the
+    physical shape. One file per desk means --check compares like with like and neither desk can
+    clobber the other.
     """
     return pathlib.Path(_bootstrap.docs_path(f"PROPERTY_LIST_{dev.slug}.md"))
 
@@ -65,9 +61,8 @@ _DEAD_HEADING = "**PROVED INACTIVE:"
 def dead_properties():
     """{name: reason} from the guide's PROVED INACTIVE list, or None if the guide is not here.
 
-    None is NOT an error: a public clone has no notes beside it (see `_bootstrap.notes_path`), and
-    a property list that cannot find the guide is still worth generating. It simply says so rather
-    than silently shipping a list with no warnings on it.
+    None is NOT an error: a property list that cannot find the guide or its list is still worth
+    generating. It simply says so rather than silently shipping a list with no warnings on it.
     """
     guide = pathlib.Path(_bootstrap.docs_path("PROJECT_GUIDE.md"))
     if not guide.exists():
@@ -110,7 +105,7 @@ def collect(blob: bytes):
 def render(props: dict, blocks: Counter, device_name: str, firmware, dead=None) -> str:
     """The document. Names and types only - never a value (see the module docstring).
 
-    `dead` is the guide's PROVED INACTIVE map, or None when the guide is not beside the repo."""
+    `dead` is the guide's PROVED INACTIVE map, or None when the guide or its list is not found."""
     L = []
     a = L.append
     a("# Property list: everything the desk publishes")
@@ -138,8 +133,8 @@ def render(props: dict, blocks: Counter, device_name: str, firmware, dead=None) 
         a("shorter list is usually this desk's storage or its firmware, not a missing capability.")
         a("")
     elif dead is None:
-        a("(The PROVED INACTIVE markers are missing: `PROJECT_GUIDE.md` is not beside this repo, so")
-        a("nothing here warns you off a property already shown to be dead.)")
+        a("(The PROVED INACTIVE markers are missing: `PROJECT_GUIDE.md` or its list was not found,")
+        a("so nothing here warns you off a property already shown to be dead.)")
         a("")
     a("**NAMES AND TYPES ONLY, no values, deliberately.** The dump carries the wifi PSK and the SIP")
     a("password in plain text, so values are never written here and this file is safe to share.")

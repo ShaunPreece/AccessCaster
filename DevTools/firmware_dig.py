@@ -3,21 +3,18 @@
 WHY IT BEATS EVERY OTHER SOURCE. A model dump shows what the desk PUBLISHES; the RODE app's binary
 shows what the app KNOWS; the firmware shows what the desk actually DOES. That is the difference
 between "there is no clock property" and "the clock is set by settimeofday in the touchscreen GUI,
-and by `ntpdate pool.ntp.org` when there is a network" - which is the answer that turned a dead end
-into a route.
+and by `ntpdate pool.ntp.org` when there is a network".
 
 WHERE IT COMES FROM, and none of this is a secret: the RODE app fetches
 `http://update.rode.com/manifest.json`, which names `update.rode.com/rcp2/<version>/app.zip` (the
-two Linux binaries) and `os.tar.gz` (the whole OS, 169 MB). The zip's md5 is published beside it and
-this project verified it. The firmware is RODE's, so it lives OUTSIDE the repo, in a
-`rode-firmware` folder beside the repo or in your home folder, and is never committed.
+two Linux binaries) and `os.tar.gz` (the whole OS, 169 MB). The zip's md5 is published beside it.
+The firmware is RODE's, so it lives OUTSIDE the repo, in a `rode-firmware` folder beside the repo or
+in your home folder, and is never committed.
 
-    rode-firmware\\app-1.7.6\\usr\\bin\\rc_audio_mixer   the engine: owns the
-                                                        property tree and speaks
-                                                        report-3 to us
-    rode-firmware\\app-1.7.6\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE
-                                                                          app: every screen we
-                                                                          cannot reach lives here
+    rode-firmware\\app-1.7.6\\usr\\bin\\rc_audio_mixer   the engine: owns the property tree
+                                                        and speaks report-3 to us
+    rode-firmware\\app-1.7.6\\usr\\bin\\rc_gui_juce      the TOUCHSCREEN, a JUCE app: every
+                                                        screen we cannot reach lives here
 
 Keep the unpacked directory's version in the name and point ACCESSCASTER_FIRMWARE at an older one to
 compare releases: the diff between two images is what dates a feature to a firmware.
@@ -36,7 +33,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _bootstrap  # noqa: F401
+import _bootstrap
 import rcp_read
 from model_tree import parse, walk
 

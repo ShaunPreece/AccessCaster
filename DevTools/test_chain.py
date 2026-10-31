@@ -97,7 +97,7 @@ holey["floats"]["eqLowGain"] = None
 holey["bools"][c.CHAIN_ADVANCED_PROP] = None
 check("None values produce no write", c.chain_diff(holey, a), [])
 
-print("\nTHE CHAIN COVERS WHAT PHASE 2 PROVED MOVES")
+print("\nTHE CHAIN COVERS EVERY PROCESSING SETTING A STRIP HOLDS")
 check("advanced flag is in the chain", c.CHAIN_ADVANCED_PROP in c.CHAIN_BOOL_PROPS, True)
 check("bypass is in the chain", "channelBypassProcessing" in c.CHAIN_BOOL_PROPS, True)
 check("the FX block is in the chain",
@@ -107,9 +107,9 @@ check("both stereo pan legs are in the chain",
       {"channelPanL", "channelPanR"} <= set(c.CHAIN_FLOAT_PROPS), True)
 # Q IS AN INDEPENDENT, WRITABLE PARAMETER, so the chain has to carry it or moving a channel to
 # another fader quietly reshapes its EQ. The tempting inference the other way - the RODE app never
-# sends Q, yet Q moves in the model diffs, so the device must recompute it - is false. Measured on
-# hardware: writing a band's gain moves no Q, writing a band's frequency moves no Q, and writing Q
-# directly lands and reads back exactly.
+# sends Q, yet Q moves in the model diffs, so the device must recompute it - is false: writing a
+# band's gain moves no Q, writing a band's frequency moves no Q, and writing Q directly lands and
+# reads back exactly.
 check("all three Q values ARE in the chain, because Q is independent and writable",
       sorted(p for p in c.CHAIN_FLOAT_PROPS if p.endswith("Q")),
       ["eqHighQ", "eqLowQ", "eqMidQ"])
@@ -122,15 +122,14 @@ check("all three Q values ARE in the chain, because Q is independent and writabl
 # chain on its old strip and hands USB 1 a mic voicing with the gate on. No device: the layout read,
 # the chain read/write and the fader write are all stubbed.
 # ---------------------------------------------------------------------------------------------
-import devices  # noqa: E402
 import rcp_read  # noqa: E402
 import rcp_transfer  # noqa: E402
 import server  # noqa: E402
 
 PRO2_DEFAULT = list(devices.PRO2_FADERS.default_vector)   # (0,1,2,3,10,11,7,8,9)
-# The layout Shaun actually ran: USB 1 (code 7) pulled onto strip 1 so a real fader controls his PC
-# audio, which pushed Mic 2 (code 1) down to strip 6. Resetting from here is the exact move that
-# started his bed tails gating again: the default sends USB 1 to strip 6, where Mic 2's voicing was.
+# A layout in real use: USB 1 (code 7) pulled onto strip 1 so a real fader controls the PC audio,
+# which pushes Mic 2 (code 1) down to strip 6. A reset from here sends USB 1 to strip 6, where Mic
+# 2's voicing sits, so without the chains following, the PC audio comes up gated.
 SHAUN_VEC = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]
 GATED_STRIP = 6                                           # where Mic 2's voicing sits before the reset
 
@@ -201,7 +200,7 @@ with fake_desk(PRO2_DEFAULT) as desk:
     server.action_reset_faders()
 check("already on the default, so nothing moves", desk.chain_writes, [])
 
-print("\nTHE DUO CARRIES CHAINS TOO NOW (proven on hardware)")
+print("\nTHE DUO CARRIES CHAINS TOO")
 with fake_desk(SHAUN_VEC) as desk:
     devices.get_active_device = lambda: devices.DUO      # inside the block, so it is restored
     res_duo = server.action_reset_faders()
@@ -226,14 +225,14 @@ try:
     check("still exactly one empty fader", got.count(-1), 1)
     check("every source still appears exactly once",
           sorted(x for x in got if x >= 0), sorted(x for x in DUO_FACTORY if x >= 0))
-    check("an occupied-to-occupied swap is unchanged by the fix",
+    check("an occupied-to-occupied swap still swaps",
           server._tidy_fader_target(DUO_FACTORY, 6, 7, duo_order),
           [0, 1, 10, 11, 2, 8, 7, 9, -1])
 finally:
     devices.get_active_device = saved_dev
 
-# The Pro II has MORE sources than faders, so it has no empty strip and never met this. Pin it
-# anyway: the fix must not disturb the desk that was already working.
+# The Pro II has MORE sources than faders, so it has no empty strip. Pinned anyway, so the
+# empty-fader handling cannot disturb its swaps.
 print("\nAND THE PRO II IS UNCHANGED (more sources than faders, so no empty strip)")
 PRO2_FACTORY = [0, 1, 2, 3, 10, 11, 7, 8, 9]
 pro2_order = [code for code, _ in devices.PRO2.fader.assignable]

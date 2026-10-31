@@ -1,10 +1,9 @@
 """Offline checks: announcements go quiet for a recording, and come back afterwards.
 
 WHY IT WORKS THIS WAY. Announcements are spoken aloud, so during a take they end up in the
-recording. The first fix was to send our speech to the computer's own speakers instead of the desk,
-and Shaun killed it in one line: *"no, it just moves the announcements off mic and still picked up
-by mic anyway."* Anything audible in the room reaches the microphones. Silence is the only fix that
-works, so the recorder switches announcements off for the duration and back on at the end.
+recording. Sending the speech to the computer's own speakers instead of the desk does not help:
+anything audible in the room reaches the microphones. Silence is the only fix that works, so the
+recorder switches announcements off for the duration and back on at the end.
 
 THE RULES THIS PINS, each of which is a way it could go wrong and be very annoying:
   * a user who had announcements OFF must not find them ON after a recording;

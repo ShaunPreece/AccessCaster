@@ -3,16 +3,15 @@
 The per-input values (mic gain, phantom, polarity, mic type, line level, ...) are read and written at
 ONE address on every desk: INPUTSOURCE[source_code], derived by DeviceModel.input_path.
 
-Two earlier readings of this are what the tests pin. First, the values were read by POSITION out of a
-values() list, which reported one Duo mic's gain as another's. Then they were read at a per-device
-"override" address that fell back to the table - and on a Duo that override was a MIX node the audio
-engine never reads, so the app wrote a copy nothing listened to, read the same copy back, and
-reported success while changing nothing. Hence two groups of checks below that look like belt and
-braces and are not: every retired Pro II selector is asserted against the derivation, and a stale
-Duo MIX copy is asserted to be IGNORED.
+Two plausible readings are wrong, and the tests pin both out. A read by POSITION out of a values()
+list reports one Duo mic's gain as another's. A read at the Duo's MIX node (0x48 + source code)
+finds a copy the audio engine never reads, so a write there reads back as success while changing
+nothing. Hence two groups of checks below that look like belt and braces and are not: every Pro II
+selector is asserted against the derivation, and a stale Duo MIX copy is asserted to be IGNORED.
 
 These tests build synthetic model dumps rather than using a captured one: a real dump carries the
-wifi PSK, and a synthetic tree can put a value in exactly the awkward place that broke the old read.
+wifi PSK, and a synthetic tree can put a value in exactly the awkward place that breaks a positional
+read.
 
 Run: python DevTools/test_input_read.py
 """
@@ -25,6 +24,7 @@ import channels as c
 import devices
 import model_tree
 import rcp_read as rr
+from fake_model import node  # the model grammar's encoder, shared by the offline suites
 
 FAILED = 0
 
@@ -36,9 +36,6 @@ def check(label, got, want):
     else:
         FAILED += 1
         print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
-
-from fake_model import node  # the model grammar's encoder, shared by the offline suites
 
 
 def dump(children: dict, n_children: int) -> bytes:
@@ -99,16 +96,15 @@ for name, want in [("Mic1", 41), ("Mic2", 42), ("Mic3", 43), ("Mic4", 44)]:
 check("USB1 reads its own level", c.input_value(blob, ch_of(PRO2, "USB1"), "inputDigitalGain", PRO2), -7)
 check("Bluetooth reads its own level", c.input_value(blob, ch_of(PRO2, "Bluetooth"), "inputDigitalGain", PRO2), -10)
 print("\nTHE RETIRED PRO II SELECTORS, REPRODUCED EXACTLY BY THE DERIVATION")
-# THE SAFETY NET FOR SHAUN'S OWN DESK. Two hand-kept tables were deleted when the Duo's gain turned
-# out to be addressed wrongly; on the Pro II they were RIGHT, and their every value is asserted here
-# so the tidy-up provably cannot have moved a Pro II write by one byte.
+# THE PRO II'S CONFIRMED SELECTORS, every value asserted against the derivation, so it cannot move
+# a Pro II write by one byte.
 RETIRED_PRO2 = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,       # mic_channel_sel
                 "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}  # digital_gain_sel
 for name, sel in RETIRED_PRO2.items():
     check(f"Pro II {name} still addresses 0x{sel:02X} with the 0x02 high byte",
           PRO2.input_path(ch_of(PRO2, name)), [sel | (0x02 << 8)])
 
-print("\nDUO: THE SAME RULE, WHICH IS THE FIX")
+print("\nDUO: THE SAME RULE")
 # 0x48 + source_code with a 0x01 high byte is real and writable on a Duo, and DEAD: the audio
 # engine never reads it. Nothing may address it.
 for name, dead_sel in (("Mic1", 0x48), ("Mic2", 0x49), ("Headset", 0x4A),
@@ -137,7 +133,7 @@ print("\nDUO: THE REGRESSION. A STALE MIX COPY MUST NOT BE READ")
 # Every Duo that this app has ever written to carries these, and they cannot be removed without a
 # factory reset. They are an INERT copy: reading them back after a write reports the app's own last
 # write as the desk's setting, so the display goes stale the moment anyone touches the desk. That is
-# why the refusal is asserted rather than merely left undone. The numbers are read from a real Duo.
+# why the refusal is asserted rather than merely left undone.
 stale = dict(factory)
 stale[0x148] = ("MIX", {"mixMute": False, "inputMicrophoneGain": 20, "inputMicrophoneType": 4})
 stale[0x149] = ("MIX", {"mixMute": False, "inputMicrophoneGain": 33, "inputPhaseFlip": True})

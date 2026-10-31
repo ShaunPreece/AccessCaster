@@ -17,9 +17,9 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Project"))
 
-import ctypes  # noqa: E402
+import ctypes
 
-import hotkeys  # noqa: E402
+import hotkeys
 
 FAILURES = []
 

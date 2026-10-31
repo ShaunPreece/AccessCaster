@@ -1,9 +1,8 @@
 """The show commands driven against a SIMULATED desk, faults included.
 
-WHY THIS EXISTS. All four commands are hardware-proven now, but the FAULTS are
-not and never will be: a desk that takes a command and silently does nothing, a delete that does not
+WHY THIS EXISTS. All four commands are confirmed on a desk, but the FAULTS cannot be staged on one: a desk that takes a command and silently does nothing, a delete that does not
 delete, an error code nobody has seen. Those are the branches that decide whether the app tells the
-truth, and they cannot be staged on real hardware. This drives the REAL `server.action_*` functions
+truth. This drives the REAL `server.action_*` functions
 against a fake desk so the logic, the verification and above all the REFUSALS are exercised.
 
 The fake desk models ONE restorable value (a mic gain) as well as the show list, because the app's
@@ -15,12 +14,14 @@ never be cited as though it had. It proves the decisions.
 
 Run: python DevTools/test_shows_sim.py
 """
+import dataclasses
 import threading
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import devices
 import fake_model
+import profiles as profiles_mod
 import rcp_read
 import server
 import shows
@@ -225,10 +226,9 @@ check_in("and warns that each one costs space", "megabytes", res["message"])
 check("the new backup shares the others' uuid", len({b["uuid"] for b in DESK.backups}), 1)
 
 print("no storage: refuse BEFORE sending, do not ask the impossible")
-# THE BUG THIS BLOCK EXISTS FOR. `can_backup`
-# was computed for the PAGE only, so every non-UI route still sent an export to a desk with nowhere
-# to write, waited the full timeout for a file that could never appear, and only then refused. On a
-# Duo, which has no removable storage at all, that made every CLEAN profile restore do it.
+# EVERY ROUTE REFUSES BEFORE SENDING, not only the page. An export to a desk with nowhere to write
+# waits the full timeout for a file that cannot appear, and on a Duo, which has no removable storage
+# at all, every CLEAN profile restore would do it.
 reset_desk()
 DESK.storage = False
 res = run_job(server.action_show_export())
@@ -273,9 +273,8 @@ check("an unknown backup is refused", res["ok"], False)
 check_in("and says the list was refreshed", "no longer on the drive", res["message"])
 
 # THE CASE A UUID CHECK REFUSES WRONGLY. A backup sharing the loaded show's uuid is the ORDINARY
-# one, since a uuid only changes on a factory reset, and the unit restores it perfectly well: proven
-# on hardware (Mic 4 comes back 30 -> 50, then 42 -> 50, error 0). Refusing it in advance makes
-# shows useless for "change something, put it back".
+# one, since a uuid only changes on a factory reset, and the unit restores it perfectly well.
+# Refusing it in advance makes shows useless for "change something, put it back".
 reset_desk()
 DESK.gain = 99                                    # the desk has drifted since that backup
 res = run_job(server.action_show_import(2))       # snapshot 2 holds the loaded show
@@ -384,8 +383,8 @@ DESK.reset_does_nothing = True
 res = run_job(server.action_show_reset(backup_first=False))
 check("it is not reported as success", res["ok"], False)
 check_in("and it reassures rather than alarms", "nothing has been lost", res["message"])
-# A DESK THAT IS STILL TALKING MUST NOT BE TOLD TO REPLUG ITSELF. Those are two different failures
-# and one draft of _reset_and_wait gave both the same words.
+# A DESK THAT IS STILL TALKING MUST NOT BE TOLD TO REPLUG ITSELF: a reset that did nothing and a
+# desk that stopped answering are two different failures with different advice.
 check("and does NOT tell them to unplug anything",
       "unplug" in res["message"].lower(), False)
 
@@ -450,10 +449,6 @@ print("the write gate")
 # proved with a device that lacks the cap. Gating on a real device instead makes the whole block
 # fail on correct behaviour the day that desk turns the cap on.
 reset_desk()
-import dataclasses
-
-import devices
-
 CAPLESS = dataclasses.replace(devices.DUO, name="RODECaster Nocaps",
                               caps=devices.DUO.caps - {"shows"})
 check("the synthetic desk really lacks the cap", "shows" in CAPLESS.caps, False)
@@ -475,7 +470,6 @@ try:
     # model do a clean restore. Both earlier checks are right to come first, so the test supplies a
     # matching profile rather than the code being reordered to suit it. CAPLESS keeps the Duo's
     # product_id, so the "saved on this model" check passes and the CAP is what refuses.
-    import profiles as profiles_mod
     real_load = profiles_mod.load
     profiles_mod.load = lambda name: {"ok": True, "safe": "duo-profile",
                                       "prof": {"product_id": CAPLESS.product_id, "pads": []}}
@@ -500,8 +494,6 @@ finally:
 
 print("a CLEAN restore, end to end")
 reset_desk()
-import profiles as profiles_mod
-
 real_load = profiles_mod.load
 profiles_mod.load = lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}
 try:
@@ -570,5 +562,5 @@ playing.set()
 check("and the wait ended at its timeout", time.monotonic() - began < 1.0, True)
 
 print(f"\nALL {len(PASSED)} SIMULATED-DESK CHECKS PASSED")
-print("REMEMBER: this proves the decisions, not the bytes. All four commands are hardware-proven "
-      "; the FAULTS above are what only a fake desk can stage.")
+print("REMEMBER: this proves the decisions, not the bytes. All four commands are confirmed on a "
+      "desk; the FAULTS above are what only a fake desk can stage.")

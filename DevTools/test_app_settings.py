@@ -137,9 +137,8 @@ check("all three are reported as ignored", len(report3["ignored"]), 3)
 check("and the legitimate shortcuts still came through", "hotkeys" in changes3, True)
 
 print("\nTHE SHORTCUT COUNT IS THE REAL ONE, NOT THE NUMBER OF KEYS IN THE DICT")
-# The bug this pins: `len()` on the stored value returns 2 whatever the user has, because the two
-# keys are "enabled" and "shortcuts". Checked against a real settings.json,
-# where it reported two shortcuts for a machine that had six.
+# `len()` on the stored value returns 2 whatever the user has, because the two keys are "enabled"
+# and "shortcuts".
 check("three shortcuts are counted as three", a.count_shortcuts(REAL_HOTKEYS), 3)
 check("an empty list is none", a.count_shortcuts({"enabled": True, "shortcuts": []}), 0)
 check("a shape it does not recognise is none, not a crash", a.count_shortcuts("rubbish"), 0)
