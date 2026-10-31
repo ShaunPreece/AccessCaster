@@ -2832,6 +2832,10 @@ shared one; a new copy is how they drifted apart the first time.
 - **Loading the app's page in a HEADLESS BROWSER STOPS THE SERVER**: `pagehide` fires
   `sendBeacon("/api/quit")`. Use `ui_probe.py` (it stubs POSTs and serves its own copy) or start the
   server with `ACCESS_CASTER_NO_UI=1`.
+- **`ui_probe.py` PUTS ITSELF IN A KILL-ON-CLOSE JOB (`_take_browser_with_us`) BEFORE STARTING EDGE.**
+  Terminating Edge's main process leaves its helper processes running, and a probe that is itself
+  killed terminates nothing, so without the job every run leaves headless Edge behind. Keep any
+  new launch inside `main` after that call.
 - **`ui_probe.py` takes a free port per run.** It used to hardcode 8771 with `allow_reuse_address`,
   and two servers bind that port CLEANLY on Windows (measured), so concurrent suites silently swapped
   traffic and one reported "the page never reported back".
