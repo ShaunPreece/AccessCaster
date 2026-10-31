@@ -4,9 +4,8 @@ WHY THAT WARNING IS THE FIRST LINE. Windows gives every login session its own au
 Remote Desktop session gets exactly one, called "Remote Audio". The RODECaster's four USB audio
 streams belong to the CONSOLE session, so from a remote session they are not merely quiet - they do
 not exist. Every other feature in AccessCaster works identically over RDP, because everything else
-talks to the desk over USB HID, which is session-independent. Metering is the one exception, and it
-is the reason this tool exists as a tool rather than as a line in another test: the metering code
-was written in an RDP session and could not be exercised there.
+talks to the desk over USB HID, which is session-independent. Metering is the one exception, which
+is why this is a tool of its own rather than a line in another test.
 
 It reads only. Nothing is written to the desk, nothing is written to disk, and no setting changes.
 
@@ -127,15 +126,15 @@ def main() -> int:
     if note:
         print(f"  ABOUT THAT LEVEL:  {note}")
     if w.wake_failed:
-        print("\n  THE ENGINE WAKER FAILED on this input, so 0.0 means nothing either way. That is")
-        print(" the bug fixed on regressing: see meters._EngineWaker.")
+        print("\n  THE ENGINE WAKER FAILED on this input, so 0.0 means nothing either way: an input")
+        print("  nothing captures from reports no level. See meters._EngineWaker.")
         return 1
     if peak_seen <= meters.SILENCE:
         print("\n  NOTHING WAS HEARD. Either nothing was playing on that stream, or it is not the")
         print("  one carrying your audio. Try --stream chat, or --stream secondary.")
         print("  MIND WHICH SIDE OF THE PAIR YOU PICKED: 'Speakers (... Main Stereo)' is what this")
         print("  PC SENDS TO the desk (screen-reader speech lands there); the microphone comes back")
-        print("  on 'Microphone (... Main Stereo)'. Metering the wrong one hid a real bug once.")
+        print("  on 'Microphone (... Main Stereo)'.")
         return 1
     return 0
 

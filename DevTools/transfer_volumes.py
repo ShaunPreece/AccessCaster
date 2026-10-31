@@ -38,7 +38,7 @@ AUDIO = (".wav", ".mp3", ".flac", ".aiff", ".aif")
 
 
 def volumes() -> dict:
-    """{'D:\\': (label, total_bytes, fstype)} for every mounted letter above C."""
+    """{'D:\\': total_bytes} for every mounted letter above C, 0 where the size cannot be read."""
     out = {}
     for letter in string.ascii_uppercase[3:]:
         root = f"{letter}:\\"
@@ -55,7 +55,7 @@ def volumes() -> dict:
 def describe(root: str, total: int) -> None:
     print(f"\n  {root}  {total / 1048576:.0f} MB")
     if total == 0:
-        print("      size 0: a PHANTOM mount, not usable (see rcp_transfer.find_pad_volume)")
+        print("      size 0: a PHANTOM mount, not usable (see rcp_transfer._is_pad_volume)")
         return
     try:
         entries = sorted(os.listdir(root))

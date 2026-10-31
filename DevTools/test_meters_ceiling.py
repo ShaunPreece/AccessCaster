@@ -1,20 +1,17 @@
-"""Offline: the two meter bugs found on must not come back. No device, no microphone.
+"""Offline: two meter faults that code review cannot see. No device, no microphone.
 
-WHY THESE ARE WORTH PINNING. Both bugs were invisible to code review and to every existing test:
+  1. THE CAPTURE ENGINE WAKER. An input endpoint delivers no peak until a capture stream is open
+     on it, so without `meters._EngineWaker` an input's meter reads 0.0 however loud the
+     microphone is. Over Remote Desktop the desk's endpoints do not exist at all, so a meter
+     exercised only there cannot show the fault.
 
-  1. THE CAPTURE ENGINE WAKER. `meters.IAudioClient` was declared, the module docstring claimed an
-     `activate()` opened it, and nothing in the repo ever called it. So an input's meter read 0.0 no
-     matter how loud the microphone was, and nobody noticed because the feature had only ever been
-     exercised over Remote Desktop, where the desk's endpoints do not exist at all.
+  2. THE ENDPOINT CEILING. Windows' own capture level scales the meter. At a capture level of
+     -1.08 dB a signal at TRUE full scale reads 0.883 (measured twice, 8 dB apart, 88.3 percent
+     both times), so a fixed clip threshold of 0.99 is unreachable and the clipping warning, the
+     one thing a recording cannot recover from, is never spoken.
 
-  2. THE ENDPOINT CEILING. Windows' own capture level scales the meter. On Shaun's machine that level
-     is -1.08 dB, so a signal at TRUE full scale reads 0.883 - and the clip threshold of 0.99 was
-     therefore UNREACHABLE. The clipping warning, the one thing a recording cannot recover from,
-     could never be spoken. Measured twice at 8 dB apart, identical 88.3 percent both times.
-
-Neither is testable against hardware without shouting into a microphone with the processing bypassed,
-so the ARITHMETIC and the WORDING are pinned here instead, and the hardware runs are recorded in
-Measured.
+Neither is testable against hardware without shouting into a microphone with the processing
+bypassed, so the ARITHMETIC and the WORDING are pinned here instead.
 
 Usage: python DevTools/test_meters_ceiling.py
 """
@@ -41,7 +38,7 @@ def ceiling_for(db: float) -> float:
 
 print("THE CEILING ARITHMETIC")
 close("0 dB endpoint can reach full scale", ceiling_for(0.0), 1.0)
-close("-1.08 dB (Shaun's measured capture level) reaches 0.883", ceiling_for(-1.08), 0.8832)
+close("-1.08 dB (a measured capture level) reaches 0.883", ceiling_for(-1.08), 0.8832)
 close("-6 dB reaches about half", ceiling_for(-6.0), 0.5012)
 close("a BOOST is capped at 1.0, never above", ceiling_for(30.0), 1.0)
 close("a big attenuation still gives a usable floor", ceiling_for(-20.0), 0.1)

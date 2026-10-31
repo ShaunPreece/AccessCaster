@@ -1,11 +1,9 @@
 """The desk's INPUT SOURCE table, and what changed in it since last time.
 
-WHY THIS EXISTS. A fader's assignment is a SOURCE CODE, and the app holds a hand-written list of
-which codes mean what. That list was complete until Expanded mode arrived with four more inputs -
-Game, Music, A and B - whose codes nobody had read, so the app refused them ("Channel code 12 is
-not assignable") and could not name them. Guessing from the gaps was the obvious move and it was
-wrong twice over: 4, 5 and 6 are not spare, they are the three stereo-link PAIR codes, and the
-four that were wanted turned out to be 12 to 15, above everything the app knew.
+WHY THIS EXISTS. A fader's assignment is a SOURCE CODE, and a mode can switch on inputs whose
+codes appear nowhere in the app's tables. Guessing them from the gaps fails: 4, 5 and 6 are the
+three stereo-link PAIR codes, and Expanded's Game, Music, A and B are 12 to 15, above every other
+input.
 
 WHAT THE TABLE ACTUALLY TELLS YOU. Every desk publishes 30 INPUTSOURCE nodes whatever it has
 plugged in, so presence proves nothing. Two fields separate the real from the reserved:
@@ -35,9 +33,9 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import _bootstrap  # noqa: F401,E402  - puts Project/ on sys.path
-import model_tree  # noqa: E402
-import rcp_read  # noqa: E402
+import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import model_tree
+import rcp_read
 
 CAPTURES = pathlib.Path(__file__).resolve().parent / "captures"
 PLACEHOLDER_COLOUR = "ff000000"

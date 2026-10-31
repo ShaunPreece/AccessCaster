@@ -9,8 +9,8 @@ That is what reaches the blocks a flat selector cannot: STORAGEVOLUME is not "sl
 `SYSTEM[15] -> child 0..2`, so its address is `01 01 02 01 0f 01 <n>` - two levels, the same shape
 as a pad write.
 
-Same three outcomes, same per-property OCCURRENCE-COUNT check as its predecessor (never the
-model's byte length, which moves on its own whenever a string value changes):
+Three outcomes, judged by per-property OCCURRENCE COUNTS (never the model's byte length, which
+moves on its own whenever a string value changes):
 
   LANDED   the property changed value in the node you aimed at.
   STRAY    a new occurrence appeared - and it prints WHICH node, which is what a stray is for.

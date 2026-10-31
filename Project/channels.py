@@ -403,7 +403,7 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     is the operator's own control, not part of a voicing: a mic left bypassed on purpose, and a
     preset that un-bypassed it mid-session would be a nasty surprise.
 
-    ORDER MATTERS, hardware-established (see CHAIN_ADVANCED_PROP): the processing MODE first, so
+    ORDER MATTERS (see CHAIN_ADVANCED_PROP): the processing MODE first, so
     the strip is in the right mode before its values
     land and cannot re-derive them from the VoxLab knobs; then the modules, so a parameter never
     lands on a module that is about to be switched; then the floats, knobs first and derived values

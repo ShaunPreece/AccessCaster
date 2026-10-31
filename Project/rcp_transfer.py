@@ -101,7 +101,7 @@ INPUT_SOURCE_CODE = {
 #
 # A link is ONE property write per fader, nothing more. The RODE app also sends inputMicrophoneType
 # and inputColour on a nested path, but those are housekeeping: writing the pair code alone leaves
-# the desk in a state byte-identical to the app's own (verified by model diff).
+# the desk in a state byte-identical to the app's own.
 #
 # The LOWER mic's fader carries the pair; the other fader is vacated with -1. UNLINK IS ASYMMETRIC,
 # and that is the desk's behaviour, not ours: it returns only the lower mic, leaving the upper one
@@ -257,7 +257,7 @@ CROSS_POINT_BASE = 76          # 0x4c
 CROSS_POINT_OUTPUT_STRIDE = 1  # output is the fast axis
 CROSS_POINT_SOURCE_STRIDE = 13 # source is the slow axis (13 destinations)
 
-# Output index (the matrix column). 0-10 are confirmed by capture on a Pro II. 11/12 are INFERRED to
+# Output index (the matrix column). 0-10 are confirmed on a Pro II. 11/12 are INFERRED to
 # be the CallMe 2/3 outputs (the desk has 3 call slots; the app only shows CallMe 1 until more
 # callers connect, so they were never captured), which is why `_check_cross_point` refuses them
 # unless the caller opts in.
@@ -386,7 +386,7 @@ def set_fader_source(fader_index: int, source_code: int) -> int:
     The bound is the connected device's fader VECTOR LENGTH (Pro II 9, Duo 10), NOT its exposed
     fader `count`. The two differ only on the Duo, which exposes 9 faders but whose factory default
     layout occupies all ten slots, so the fader reset and a profile restore both walk index 9.
-    Writing slot 9 is proven safe on hardware (set, vacate and restore, byte-clean)."""
+    Writing slot 9 is safe: set, vacate and restore leave the model byte-clean."""
     count = devices.get_active_device().fader.vector_length
     if not 0 <= fader_index < count:
         raise ValueError(f"fader_index must be 0-{count - 1}, got {fader_index}")

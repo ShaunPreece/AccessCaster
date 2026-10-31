@@ -1,14 +1,13 @@
 """EAR TEST for the monitor output: does `outputMonLevel` actually change the speakers, and does
 `outputMonFixed` actually override it?
 
-ANSWER, PROVEN ON HARDWARE: BOTH WORK. See the two rules at the bottom of this
-docstring before changing anything here.
+Both work. See the two rules below before changing anything here.
 
-WHY IT NEEDED EARS. Both properties only show up as SOUND ON THE REAR LINE OUTS. Everything proved
-about them before this was a read-back, and a read-back only proves the desk STORED a value: this
-desk has a list of properties that accept a write, read back exactly as written, and do nothing
-whatever (`padRecordStateRequest`, `storageVolumeTransfer`, `toneGeneration`). So this needs
-something plugged into the monitor output and somebody listening to it.
+WHY IT NEEDS EARS. Both properties only show up as SOUND ON THE REAR LINE OUTS, and a read-back
+only proves the desk STORED a value: the desk has properties that accept a write, read back
+exactly as written, and do nothing whatever (`padRecordStateRequest`, `storageVolumeTransfer`,
+`toneGeneration`). So this needs something plugged into the monitor output and somebody
+listening to it.
 
     python DevTools/test_monitor_output_live.py --block off   # control: should fluctuate
     python DevTools/test_monitor_output_live.py --block on     # should stay flat

@@ -1,14 +1,14 @@
 """Offline test of the off-fader CHAIN STORE and `server._follow_chains`. NO DEVICE, no HID writes.
 
 WHY THIS EXISTS. Processing and effects live on a fader STRIP, never on a channel, so a channel with
-no fader has no processing anywhere on the desk. Until "the chain follows the
-channel" only handled channels present in BOTH layouts, which left two silent ways to lose a voicing:
+no fader has no processing anywhere on the desk. Following only the channels present in BOTH
+layouts leaves two silent ways to lose a voicing:
 
   * a channel LEAVES the layout, and the next occupant of its strip writes over the chain;
-  * a channel RETURNS to the layout, and inherits whatever the previous occupant left there.
+  * a channel RETURNS to the layout, and inherits whatever the previous occupant left there: Mic 2
+    brought back onto the strip USB 1 has just vacated comes back with USB 1's processing (gate
+    off, EQ flat, bypass on).
 
-Both were measured, not theorised: a fader move brought Mic 2 back from off-fader onto the strip USB
-1 had just vacated, and Mic 2 came back with USB 1's processing - gate off, EQ flat, bypass on.
 Stereo link makes it the ordinary path rather than an edge case, because linking a pair evicts the
 upper mic and only the unlink hands it back.
 
@@ -42,7 +42,7 @@ def chain(tag):
 # --- the store, on its own -----------------------------------------------------------------
 # Redirected to a scratch file so a test run never touches the user's real parked chains.
 _scratch = os.path.join(tempfile.mkdtemp(prefix="ac_chaintest_"), "off_fader_chains.json")
-channels._paths.data_path = lambda *parts: _scratch                        # noqa: SLF001
+channels._paths.data_path = lambda *parts: _scratch
 
 print("the off-fader chain store")
 check("nothing parked reads back as None", channels.take_chain("DESK-A", 1), None)
@@ -92,7 +92,7 @@ def install(before):
 
 
 print()
-print("_follow_chains: a channel that MOVES strip (the case that already worked)")
+print("_follow_chains: a channel that MOVES strip")
 before = [chain(0), chain(1), chain(2)]
 install(before)
 note = server._follow_chains([0, 1, 2], [1, 0, 2], before)

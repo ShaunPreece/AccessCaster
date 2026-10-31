@@ -7,15 +7,14 @@ and decode the property WRITES out of the capture - i.e. the write SELECTOR we a
   python DevTools/cap_probe.py <name> none                     # capture a window with no action
   python DevTools/cap_probe.py --decode <name>                 # re-decode an existing capture
 
-WHY THIS EXISTS. The app sweep identified WHICH property each control moves, by
-diffing model dumps around it. A dump diff can never reveal the selector, because the selector only
-exists in the bytes the app sends - so every one of those properties is readable but not writable by
-us. This closes that gap the only honest way: watch the wire while the app writes it. Never guess a
-selector; a wrong one appends a stray property that only a factory reset clears (CAPTURE_TODO.md).
+WHY THIS EXISTS. A diff of model dumps around a control names WHICH property it moves, but never
+the selector, which exists only in the bytes the app sends. Watching the wire while the app writes
+is the one way to learn it. Never guess a selector; a wrong one appends a stray property that only
+a factory reset clears.
 
-Pipeline per CAPTURE_TODO.md: the elevated cap_server task polls DevTools/cap_control/cmd.txt for
-START <name> / STOP and writes DevTools/cap_control/status.txt; the pcap lands in
-DevTools/captures/<name>.pcap. The control channel is interrupt EP 0x05 OUT / 0x85 IN, and a
+The pipeline: the elevated cap_server task (`setup_capture_task.ps1` registers it) polls
+DevTools/cap_control/cmd.txt for START <name> / STOP and writes DevTools/cap_control/status.txt;
+the pcap lands in DevTools/captures/<name>.pcap. The control channel is interrupt EP 0x05 OUT / 0x85 IN, and a
 property write decodes as 01 01 01 01 <selector> + name + value block.
 """
 from __future__ import annotations
