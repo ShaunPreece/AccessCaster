@@ -3,7 +3,7 @@
 WHY. A CLEAN profile restore left Mic 1's gain at 55 when the profile said 47, while the ordinary
 MERGE restore of the same profile was perfect. The dumps say why that is not a contradiction: on the
 merge the desk was ALREADY on the saved mic type, so the type write was a no-op; on the clean path
-the reset had put the type back to PodMic (4) and the restore wrote SM7B (10) - and `profiles._apply_v2`
+the reset had put the type back to PodMic (4) and the restore wrote SM7B (10) - and `profiles.apply`
 writes the GAIN FIRST and the TYPE FOURTH. If choosing a voicing carries its own default gain, the
 type write lands on top of the gain we just restored, every time.
 

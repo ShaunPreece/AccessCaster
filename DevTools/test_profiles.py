@@ -133,7 +133,6 @@ try:
     check("every fader level captured RAW (0..127)", r["fader_levels"], FADER_LEVEL_VALUES)
     check("monitor speaker level captured raw (0..1)", round(r["monitor_level"], 3), 0.03)
     check("one headphone type per output", r["headphone_types"], [1, 2])
-    check("legacy single headphone_type is still Headphone 1's", r["headphone_type"], 1)
 
     with as_device(devices.PRO2):
         profiles.save("test1hp", blob, [], "1.0.0", 10, headphone_output_count=1)
@@ -240,13 +239,6 @@ try:
                not (Path(tmp) / "moved").exists())
     check("deleting it again is refused rather than reported as done",
           profiles.delete("moved")["ok"], False)
-
-    # A legacy flat profiles/<name>.json has no folder, so both operations have to handle it.
-    (Path(tmp) / "old style.json").write_text('{"midi": true}', encoding="utf-8")
-    check_true("a legacy flat profile renames too", profiles.rename("old style", "new style")["ok"])
-    check_true("and still loads afterwards", profiles.load("new style")["ok"])
-    check_true("a legacy flat profile deletes too", profiles.delete("new style")["ok"])
-    check("leaving only the keeper", profiles._list_profile_names(), ["keeper"])
 finally:
     profiles.PROFILES_DIR = saved_dir
     shutil.rmtree(tmp, ignore_errors=True)
@@ -483,8 +475,8 @@ def profile(**routing):
 
 def apply_pro2(prof):
     with as_device(devices.PRO2), recorder() as calls:
-        res = profiles._apply_v2(prof, fader_count=9, fader_code_set=devices.PRO2.fader.code_set,
-                                 mic_channels=(1, 2, 3, 4))
+        res = profiles.apply(prof, fader_count=9, fader_code_set=devices.PRO2.fader.code_set,
+                             mic_channels=(1, 2, 3, 4))
         return list(calls), res
 
 
@@ -554,9 +546,6 @@ check_true("'Low sensitivity' (2) is applied, not silently dropped",
 calls_bad, _ = apply_pro2(profile(headphone_types=[0, 99]))
 check("a value the device does not offer is skipped, not written",
       args_of(calls_bad, "set_headphone_type"), [(0, 0x09)])
-calls_legacy, _ = apply_pro2(profile(headphone_types=None, headphone_type=2))
-check("an older profile's single value restores to Headphone 1",
-      args_of(calls_legacy, "set_headphone_type"), [(2, 0x09)])
 
 print("\nRESTORE: the multitrack pair, both destinations, mode AND bypass")
 # The point of these four: a profile that put the multitrack MODE back but not its processing
@@ -604,7 +593,7 @@ print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is delib
 # and not the transport. The cap came on and nothing here needed to change,
 # which is the point of keeping those two apart.
 with as_device(devices.DUO), recorder() as duo_mt:
-    profiles._apply_v2(profile(multitrack=2, processing_bypass=True, usb_multitrack=1,
+    profiles.apply(profile(multitrack=2, processing_bypass=True, usb_multitrack=1,
                                usb_processing_bypass=True),
                        fader_count=10, fader_code_set=devices.DUO.fader.code_set,
                        mic_channels=(1, 2))
@@ -628,7 +617,7 @@ print("\nRESTORE on the Duo: levels ARE written")
 # the five VIRTUAL faders, indices 4-8 -> 0x08..0x0c. The four physical ones are analog pots and
 # must get nothing.
 with as_device(devices.DUO), recorder() as duo_calls:
-    duo_res = profiles._apply_v2(profile(), fader_count=10,
+    duo_res = profiles.apply(profile(), fader_count=10,
                                  fader_code_set=devices.DUO.fader.code_set,
                                  mic_channels=(1, 2))
     duo_calls = list(duo_calls)
@@ -679,7 +668,7 @@ print("\nRESTORE on the Duo: the unit settings ARE written")
 # than skipping it. The mutes are held back, on both desks, because a restore must never silently
 # mute somebody.
 with as_device(devices.DUO), recorder() as duo_unit_calls:
-    duo_unit_res = profiles._apply_v2(dict(profile(), **{profiles.UNIT_KEY: UNIT}), fader_count=10,
+    duo_unit_res = profiles.apply(dict(profile(), **{profiles.UNIT_KEY: UNIT}), fader_count=10,
                                       fader_code_set=devices.DUO.fader.code_set,
                                       mic_channels=(1, 2))
     duo_unit_calls = list(duo_unit_calls)
@@ -696,14 +685,6 @@ try:
     check("it raised", False, True)
 except ValueError as exc:
     check_true("ValueError, naming the property", "definitelyNotAProperty" in str(exc))
-
-print("\nRESTORE of a LEGACY (flat) profile: the same headphone fix")
-with as_device(devices.PRO2), recorder() as calls_flat:
-    profiles._apply_legacy({"routing": {"headphone_type": 2}}, input_strip_vec_index={},
-                           valid_source_codes=set(), mic_channels=(1, 2, 3, 4))
-    calls_flat = list(calls_flat)
-check("'Low sensitivity' is no longer dropped from a legacy profile either",
-      args_of(calls_flat, "set_headphone_type"), [(2, 0x09)])
 
 print(f"\n{'ALL PASS' if not FAILED else str(FAILED) + ' FAILED'}")
 sys.exit(1 if FAILED else 0)

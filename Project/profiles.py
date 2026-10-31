@@ -11,9 +11,8 @@ dim time, meter style, haptics, what the record button does, listen mode and the
 output level). SMART pad SOUNDS are files, not settings: an optional pad backup copies them into
 the profile's own pads/ folder (pads_dir) and records their metadata under "pads".
 
-FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2). Legacy flat
-profiles/<name>.json (the old settings-subset) are still listed and still restore, so nothing
-already saved is lost.
+FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2), holding its pads/ audio
+beside it.
 
 LOCK BOUNDARY: this module never imports the server, so there is no circular import. save() and
 load() are pure (file ops + an already-read model blob). apply() performs the device WRITES and
@@ -123,28 +122,18 @@ def _unit_settings(props: dict) -> dict:
 # ---- naming + listing (pure file ops) ------------------------------------------------------
 
 def _list_profile_names() -> list:
-    """Every saved profile: new-format folders (containing profile.json) and legacy flat
-    <name>.json files, de-duplicated."""
-    names = set()
+    """Every saved profile: each folder holding a profile.json."""
     try:
-        for entry in os.listdir(PROFILES_DIR):
-            full = os.path.join(PROFILES_DIR, entry)
-            if entry.endswith(".json") and os.path.isfile(full):
-                names.add(entry[:-5])
-            elif os.path.isdir(full) and os.path.isfile(os.path.join(full, "profile.json")):
-                names.add(entry)
+        return sorted(entry for entry in os.listdir(PROFILES_DIR)
+                      if os.path.isfile(os.path.join(PROFILES_DIR, entry, "profile.json")))
     except FileNotFoundError:
         return []
-    return sorted(names)
 
 
 def _profile_read_path(safe: str):
-    """Path to load a profile from: prefer the new folder format, fall back to legacy flat."""
-    folder = os.path.join(PROFILES_DIR, safe, "profile.json")
-    if os.path.isfile(folder):
-        return folder
-    flat = os.path.join(PROFILES_DIR, safe + ".json")
-    return flat if os.path.isfile(flat) else None
+    """The profile's profile.json, or None if there is none."""
+    path = os.path.join(PROFILES_DIR, safe, "profile.json")
+    return path if os.path.isfile(path) else None
 
 
 def list_profiles() -> dict:
@@ -181,8 +170,7 @@ def _snapshot(blob: bytes, props: dict | None = None) -> dict:
 
 
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
-         product_id=None, device_name=None, monitor_output_indices=None,
-         headphone_output_count=None, baseline=False, show=None) -> dict:
+         product_id=None, device_name=None, headphone_output_count=None, baseline=False, show=None) -> dict:
     """Build the full profile from an ALREADY-READ model `blob` + channel read `chans`, and write
     it to profiles/<safe>/profile.json. No device access - the server did the read (and, for the
     optional `pads` backup, the pad read + file copy) under the lock. `pads` is the metadata list
@@ -192,13 +180,11 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     `fader_count` is the CAPTURE length (devices.FaderSpec.capture_length), which is deliberately
     allowed to exceed the number of slots restore will WRITE (FaderSpec.vector_length): both desks
     carry a 10-slot channelInputSource whose last slot is an unexposed spare mirroring USB 2, so we
-    record it for the round trip while `_apply_v2` writes only the first `fader_count` it is given.
+    record it for the round trip while `apply` writes only the first `fader_count` it is given.
 
     DEVICE-AWARENESS: `product_id`/`device_name` stamp the desk the profile was saved on so
     restore can REFUSE a cross-device restore (a Pro II profile's fader vector, matrix shape and
-    channel set do not map onto a Duo). `monitor_output_indices` is the list of monitor-mix output
-    indices the CONNECTED device exposes (Pro II = 0-4 Headphone 1-4 + Monitor; Duo = 0,1,4), so we
-    snapshot only that device's real monitor outputs. `headphone_output_count` is how many
+    channel set do not map onto a Duo). `headphone_output_count` is how many
     headphone outputs the connected device addresses (devices.HeadphoneTypeSpec.outputs), so we
     record ONE TYPE PER OUTPUT.
 
@@ -218,8 +204,6 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
                 f"{safe} is the as-found baseline of this unit, the only record of how it was "
                 f"before this app changed anything, so it cannot be replaced by an ordinary save. "
                 f"Choose another name."}
-    if monitor_output_indices is None:
-        monitor_output_indices = list(range(5))     # Pro II fallback (Headphone 1-4 + Monitor)
     # ONE walk of the dump, shared by the unit settings below and by the full snapshot. Read the
     # unit settings out of it FIRST: _snapshot redacts in place (none of these is password-shaped,
     # but relying on that would be a trap for whoever adds the next setting).
@@ -237,7 +221,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # faderLevel (0..127, per STRIP, only the VIRTUAL slots are ours to write) and the monitor
     # SPEAKER level (outputMonLevel, a 0..1 float). Both are recorded RAW, so a profile round-trips
     # them exactly. Like the fader vector, capture is deliberately wider than write: we store every
-    # slot's value and _apply_v2 writes only the slots this device has a confirmed level selector for.
+    # slot's value and apply writes only the slots this device has a confirmed level selector for.
     # A value that fails to decode is kept as None rather than dropped: the list is POSITIONAL
     # (index = strip), and dropping one would shift every level after it onto the wrong fader.
     fader_levels = [int(v) if isinstance(v, (int, float)) else None
@@ -245,8 +229,6 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     mon_level = first("outputMonLevel")
     # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
     # positionally to the outputs the device addresses - the same read read_routing_live does.
-    # The old single "headphone_type" key is still written (it
-    # is Headphone 1's value) so a profile saved now still restores on an older build.
     hp_all = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
     headphone_types = [hp_all[i] if i < len(hp_all) else None
                        for i in range(int(headphone_output_count))]
@@ -267,32 +249,6 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     mix = routing_schemes.capture(safe, blob)
     mix_scheme = mix["scheme"] if mix.get("ok") else None
     matrix_note = "" if mix.get("ok") else mix.get("message", "matrix not readable")
-    # LEGACY KEYS, still written so a profile saved by this build still restores on v2.00, which
-    # knows only these three. They are derived from the same read; nothing here is a
-    # second device access. Restore prefers "mix_scheme" and falls back to these (server._apply_matrix).
-    ms = rcp_read.read_matrix_state(blob)
-    ml = rcp_read.read_matrix_levels(blob)
-    output_modes = None
-    matrix_excluded = []
-    monitor_unlinked = []
-    # THE LEGACY KEYS KEEP THE NARROW SOURCE SET, which `mix_scheme` deliberately does not. The
-    # grid read covers RODE's four Expanded rows, but v2.00 masks a cross-point selector to one
-    # byte and cannot address source 14 or 15 at all, so handing it those rows would be a restore
-    # that reports failures for cells it was never able to write.
-    legacy_sources = {s["index"] for s in devices.get_active_device().matrix.sources}
-    if ms.get("ok"):
-        modes = ms["modes"]
-        output_modes = [int(modes[o]) for o in sorted(modes)]
-        for o, srcs in ms["excluded"].items():
-            for s, ex in srcs.items():
-                if ex and s in legacy_sources:
-                    matrix_excluded.append([int(o), int(s)])
-    if ml.get("ok"):
-        for o in monitor_output_indices:   # the monitor outputs THIS device exposes (device-aware)
-            for s, cell in ml["levels"].get(o, {}).items():
-                if (s in legacy_sources and cell.get("linked") is False
-                        and cell.get("level") is not None):
-                    monitor_unlinked.append({"o": int(o), "s": int(s), "level": float(cell["level"])})
 
     profile = {
         "version": PROFILE_VERSION,
@@ -332,17 +288,12 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             "usb_processing_bypass": first("outputMultiBypass"),
             "monitor_auto_mute": first("outputMonAutoMute"),
             "bt_auto_mute": first("outputBTAutoMute"),
-            "headphone_type": hp_all[0] if hp_all else None,   # Headphone 1, kept for old builds
             "headphone_types": headphone_types,                # one per addressable output
             # The master bus's Compellor and output delay, seven keys, built in rcp_read so the
             # page and the backup cannot drift apart.
             **rcp_read.master_processing(blob),
-            # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above). This is
-            # what restore applies; the three keys under it are the legacy form, kept for old builds.
+            # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above).
             "mix_scheme": mix_scheme,
-            "output_modes": output_modes,          # 11 per-output modes (0 Main / 1 MixMinus / 2 Custom)
-            "matrix_excluded": matrix_excluded,     # [[output, source], ...] excluded in Custom outputs
-            "monitor_unlinked": monitor_unlinked,   # [{o, s, level}, ...] manual monitor levels
             "matrix_note": matrix_note,             # set if the matrix could not be read (phone caller)
         },
         # The unit's own settings (display, button brightness, haptics, REC button, listen mode,
@@ -441,8 +392,8 @@ def _child_of_profiles(path: str) -> bool:
 
 
 def rename(name: str, new_name: str) -> dict:
-    """Rename a saved profile in place. Moves the whole folder, so the pads/ audio travels with it,
-    and handles a legacy flat <name>.json too. No device access."""
+    """Rename a saved profile in place. Moves the whole folder, so the pads/ audio travels with it.
+    No device access."""
     old = safe_name(name)
     new = safe_name(new_name)
     if not old:
@@ -457,25 +408,20 @@ def rename(name: str, new_name: str) -> dict:
                                         f"Pick another name."}
     old_folder = os.path.join(PROFILES_DIR, old)
     new_folder = os.path.join(PROFILES_DIR, new)
-    old_flat = os.path.join(PROFILES_DIR, old + ".json")
-    new_flat = os.path.join(PROFILES_DIR, new + ".json")
-    if not all(_child_of_profiles(p) for p in (old_folder, new_folder, old_flat, new_flat)):
+    if not all(_child_of_profiles(p) for p in (old_folder, new_folder)):
         return {"ok": False, "message": "That profile name is not one this app can rename."}
+    if not os.path.isdir(old_folder):
+        return {"ok": False, "message": f"Profile {old} not found."}
     try:
-        if os.path.isdir(old_folder):
-            os.rename(old_folder, new_folder)
-        elif os.path.isfile(old_flat):
-            os.rename(old_flat, new_flat)
-        else:
-            return {"ok": False, "message": f"Profile {old} not found."}
+        os.rename(old_folder, new_folder)
     except OSError as exc:
         return {"ok": False, "message": f"Could not rename the profile: {exc}"}
     return {"ok": True, "message": f"Renamed {old} to {new}."}
 
 
 def delete(name: str, force: bool = False) -> dict:
-    """Delete a saved profile from this computer: the new-format folder (profile.json plus its
-    pads/ audio) and any legacy flat <name>.json of the same name. No device access.
+    """Delete a saved profile from this computer: its folder, profile.json and pads/ audio
+    together. No device access.
 
     The name goes through safe_name first (so no separators, no dots, no traversal), and the
     resolved path is then checked to be a DIRECT child of PROFILES_DIR before anything is removed.
@@ -496,43 +442,27 @@ def delete(name: str, force: bool = False) -> dict:
                     f"AccessCaster changed anything. It cannot be captured again, and the unit has no "
                     f"software factory reset to fall back on. Confirm to delete it anyway."}
     folder = os.path.join(PROFILES_DIR, safe)
-    flat = os.path.join(PROFILES_DIR, safe + ".json")
-    if not _child_of_profiles(folder) or not _child_of_profiles(flat):
+    if not _child_of_profiles(folder):
         return {"ok": False, "message": "That profile name is not one this app can delete."}
-    removed = False
+    if not os.path.isdir(folder):
+        return {"ok": False, "message": f"Profile {safe} not found."}
     try:
-        if os.path.isdir(folder):
-            shutil.rmtree(folder)
-            removed = True
-        if os.path.isfile(flat):
-            os.remove(flat)
-            removed = True
+        shutil.rmtree(folder)
     except OSError as exc:
         return {"ok": False, "message": f"Could not delete the profile: {exc}"}
-    if not removed:
-        return {"ok": False, "message": f"Profile {safe} not found."}
     return {"ok": True, "message": f"Deleted the profile {safe} from this computer. "
                                    f"The unit's settings were not changed."}
 
 
 # ---- apply (device WRITES; THE CALLER MUST HOLD THE HID LOCK) -------------------------------
 
-def apply(prof, *, fader_count, fader_code_set, input_strip_vec_index,
-          valid_source_codes, mic_channels, progress=None) -> dict:
-    """Apply a loaded profile to the device, dispatching by format. Returns {applied, failed, errs}.
+def apply(prof, *, fader_count, fader_code_set, mic_channels, progress=None) -> dict:
+    """Apply a loaded profile to the device. Returns {applied, failed, errs}. Paces the writes and
+    keeps going past an individual failure, so one odd value cannot abort the whole restore.
+
     THE CALLER MUST HOLD THE HID LOCK (this module does no locking). progress, if given, is called
     with a short human sentence at each section boundary, so a caller polling from a UI has
     something to say during the ~20 seconds of paced writes instead of one frozen message."""
-    if "channels" in prof:                       # version 2 (full) profile
-        return _apply_v2(prof, fader_count=fader_count, fader_code_set=fader_code_set,
-                         mic_channels=mic_channels, progress=progress)
-    return _apply_legacy(prof, input_strip_vec_index=input_strip_vec_index,   # legacy subset
-                         valid_source_codes=valid_source_codes, mic_channels=mic_channels)
-
-
-def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None) -> dict:
-    """Apply a version-2 (full) profile. Paces the writes and keeps going past an individual
-    failure so one odd value cannot abort the whole restore."""
     applied = 0
     failed = 0
     errs = []
@@ -736,7 +666,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     _MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_multitrack",
                         "usb_expanded",
                         "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",
-                        "headphone_type", "headphone_types", "compellor_on", "compellor_threshold",
+                        "headphone_types", "compellor_on", "compellor_threshold",
                         "compellor_attack", "compellor_release", "compellor_gain", "delay_on")
     if "output_write" in devices.get_active_device().caps:
         step("Restoring master output settings.")
@@ -772,16 +702,11 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
             w("monitor auto-mute", lambda v=r["monitor_auto_mute"]: rcp_transfer.set_monitor_auto_mute(bool(v)))
         if r.get("bt_auto_mute") is not None:
             w("Bluetooth auto-mute", lambda v=r["bt_auto_mute"]: rcp_transfer.set_bt_auto_mute(bool(v)))
-        # Headphone amp type, ONE PER OUTPUT. New profiles carry "headphone_types" (a value
-        # per addressable output, positional); older ones carry only "headphone_type", which is
-        # Headphone 1's, so we treat it as a one-entry list. Values are validated against the
+        # Headphone amp type, ONE PER OUTPUT, positional. Values are validated against the
         # CONNECTED device's spec rather than a literal, so "Low sensitivity" (2) survives, and the
         # selector comes from the same spec, so an unmapped headphone output is never written.
         hp_spec = devices.get_active_device().headphones
-        hp_saved = r.get("headphone_types")
-        if hp_saved is None and r.get("headphone_type") is not None:
-            hp_saved = [r["headphone_type"]]
-        for out_i, hp_val in enumerate(hp_saved or []):
+        for out_i, hp_val in enumerate(r.get("headphone_types") or []):
             if out_i >= len(hp_spec.outputs) or hp_val is None:
                 continue
             if int(hp_val) not in hp_spec.value_codes:
@@ -826,47 +751,6 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
                     "read-only on this device, not restored")
 
     return {"applied": applied, "failed": failed, "errs": errs}
-
-
-def _apply_legacy(prof, *, input_strip_vec_index, valid_source_codes, mic_channels) -> dict:
-    """Apply an old settings-subset (flat) profile: MIDI, per-mic gain/phantom/polarity/processing,
-    and the routing subset. Kept so profiles saved before the full format still restore."""
-    applied = 0
-    if prof.get("midi") is not None:
-        rcp_transfer.set_midi_control(bool(prof["midi"])); applied += 1
-    for cs, mc in (prof.get("mics") or {}).items():
-        c = int(cs)
-        if c not in mic_channels:
-            continue
-        if mc.get("gain_db") is not None:
-            channels.set_mic_gain(c, int(mc["gain_db"])); applied += 1
-        if mc.get("phantom") is not None:
-            channels.set_phantom(c, bool(mc["phantom"])); applied += 1
-        if mc.get("polarity") is not None:
-            channels.set_polarity(c, bool(mc["polarity"])); applied += 1
-        for prop, val in (mc.get("processing") or {}).items():
-            if val is not None and prop in channels.PRESET_FLOAT_PROPS:
-                channels.set_channel_processing(c, prop, float(val)); applied += 1
-    r = prof.get("routing") or {}
-    # Same output_write gate as _apply_v2: skip the master/global output writes on a device whose
-    # selectors are not yet verified (the Duo), so a legacy restore cannot append a stray.
-    if "output_write" in devices.get_active_device().caps:
-        if r.get("multitrack") is not None:
-            rcp_transfer.set_multitrack_mode(int(r["multitrack"])); applied += 1
-        if r.get("monitor_auto_mute") is not None:
-            rcp_transfer.set_monitor_auto_mute(bool(r["monitor_auto_mute"])); applied += 1
-        if r.get("bt_auto_mute") is not None:
-            rcp_transfer.set_bt_auto_mute(bool(r["bt_auto_mute"])); applied += 1
-        # A legacy profile only ever carried Headphone 1's type. Validated against the connected
-        # device's spec, as in _apply_v2.
-        hp_spec = devices.get_active_device().headphones
-        if r.get("headphone_type") is not None and int(r["headphone_type"]) in hp_spec.value_codes:
-            rcp_transfer.set_headphone_type(int(r["headphone_type"]),
-                                            hp_spec.outputs[0][0]); applied += 1
-    for strip, code in (r.get("input_sources") or {}).items():
-        if code is not None and strip in input_strip_vec_index and code in valid_source_codes:
-            rcp_transfer.set_fader_source(input_strip_vec_index[strip], int(code)); applied += 1
-    return {"applied": applied, "failed": 0, "errs": []}
 
 
 def restore_result(safe, res) -> dict:

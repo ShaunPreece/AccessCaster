@@ -135,7 +135,7 @@ def set_mic_type(channel: int, type_value: int) -> int:
 
     THIS ALSO MOVES THE GAIN. The desk gives each voicing its own default preamp gain and applies it
     on selection, so a caller that has just set a gain has to write this FIRST or lose it (see
-    profiles._apply_v2, and server.action_set_mic_type which reads the gain back and says so).
+    profiles.apply, and server.action_set_mic_type which reads the gain back and says so).
     Measured on Mic 3:
 
         Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,

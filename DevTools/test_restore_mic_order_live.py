@@ -1,6 +1,6 @@
 """END-TO-END: does a real profile restore now keep the mic gain when it changes the voicing?
 
-This drives `profiles._apply_v2` itself - the actual restore code, not a stand-in - with a
+This drives `profiles.apply` itself - the actual restore code, not a stand-in - with a
 one-channel profile, from the state a factory reset leaves behind. It reproduces the clean-restore
 defect on ONE channel instead of the whole desk, so it costs a few seconds rather than a reset.
 
@@ -88,7 +88,7 @@ def main() -> int:
         start = read_input(slot)
         print(f"   gain {start['inputMicrophoneGain']}, type {start['inputMicrophoneType']}")
 
-        print("-- restoring a one-channel profile through profiles._apply_v2 --")
+        print("-- restoring a one-channel profile through profiles.apply --")
         prof = {"version": 2, "routing": {},
                 "channels": [{"name": f"Mic{ch}", "kind": "mic",
                               "level_db": WANT_GAIN, "mic_type": WANT_TYPE,
@@ -97,7 +97,7 @@ def main() -> int:
                               "instrument_gain": int(before["inputInstrumentGain"]),
                               "advanced": advanced_before,
                               "params": {CHAIN_PROP: WANT_CHAIN}}]}
-        res = profiles._apply_v2(prof, fader_count=devices.PRO2.fader.vector_length,
+        res = profiles.apply(prof, fader_count=devices.PRO2.fader.vector_length,
                                  fader_code_set=devices.PRO2.fader.code_set,
                                  mic_channels=(1, 2, 3, 4))
         print(f"   {res['applied']} writes, {res['failed']} failed {res['errs']}")

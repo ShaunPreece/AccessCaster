@@ -137,60 +137,60 @@ def saved_props(names: list[str]) -> dict[str, list[str]]:
 # {property: how it is restored}. "SAVE ONLY: <reason>" means deliberately not written back.
 RESTORED_BY = {
     # --- layout, levels -------------------------------------------------------------------
-    "channelInputSource": "profiles._apply_v2, first of all (the layout decides where every "
+    "channelInputSource": "profiles.apply, first of all (the layout decides where every "
                           "per-strip write lands). Gated on the fader_write cap.",
-    "faderLevel": "profiles._apply_v2, straight after the layout. Only the slots this device has a "
+    "faderLevel": "profiles.apply, straight after the layout. Only the slots this device has a "
                   "confirmed selector for (FaderSpec.level_selectors); gated on the level_write cap.",
-    "outputMonLevel": "profiles._apply_v2 (rcp_transfer.set_monitor_level), gated on level_write.",
+    "outputMonLevel": "profiles.apply (rcp_transfer.set_monitor_level), gated on level_write.",
     # --- per channel ----------------------------------------------------------------------
-    "inputMicrophoneGain": ("profiles._apply_v2 -> channels.set_mic_gain, written AFTER the mic "
+    "inputMicrophoneGain": ("profiles.apply -> channels.set_mic_gain, written AFTER the mic "
                             "type: selecting a voicing sets that voicing's own default gain (SM7B "
                             "55, Condenser 25, ...), so the old gain-first order lost it on any "
                             "restore that changed the voicing."),
-    "inputDigitalGain": "profiles._apply_v2 -> channels.set_channel_level (line channels).",
-    "inputPower": "profiles._apply_v2 -> channels.set_phantom.",
-    "inputPhaseFlip": "profiles._apply_v2 -> channels.set_polarity.",
-    "inputMicrophoneType": ("profiles._apply_v2 -> channels.set_mic_type, FIRST of the mic block "
+    "inputDigitalGain": "profiles.apply -> channels.set_channel_level (line channels).",
+    "inputPower": "profiles.apply -> channels.set_phantom.",
+    "inputPhaseFlip": "profiles.apply -> channels.set_polarity.",
+    "inputMicrophoneType": ("profiles.apply -> channels.set_mic_type, FIRST of the mic block "
                             "for the reason in the inputMicrophoneGain row."),
-    "channelBypassProcessing": "profiles._apply_v2 -> channels.set_processing_enabled.",
-    "channelAdvancedProcessing": "profiles._apply_v2 -> channels.set_channel_advanced, written "
+    "channelBypassProcessing": "profiles.apply -> channels.set_processing_enabled.",
+    "channelAdvancedProcessing": "profiles.apply -> channels.set_channel_advanced, written "
                                  "FIRST of the chain (simple mode re-derives the rest).",
-    "channelCurrentFxPreset": "profiles._apply_v2 -> channels.set_channel_preset_marker, written "
+    "channelCurrentFxPreset": "profiles.apply -> channels.set_channel_preset_marker, written "
                               "LAST (any parameter write blanks it to -1).",
-    "echoOn": "profiles._apply_v2 -> channels.set_channel_effect.",
-    "reverbOn": "profiles._apply_v2 -> channels.set_channel_effect.",
+    "echoOn": "profiles.apply -> channels.set_channel_effect.",
+    "reverbOn": "profiles.apply -> channels.set_channel_effect.",
     # --- master / output block ------------------------------------------------------------
-    "systemMidiControl": "profiles._apply_v2 -> rcp_transfer.set_midi_control.",
-    "recordingMultitrackMode": "profiles._apply_v2, gated on the output_write cap.",
+    "systemMidiControl": "profiles.apply -> rcp_transfer.set_midi_control.",
+    "recordingMultitrackMode": "profiles.apply, gated on the output_write cap.",
     # The rest of the "what do I end up with" set: both multitrack destinations and both raw
     # switches. Saving a mode without its bypass backs up half a decision, and a profile taken on
     # raw pre-fader tracks then comes back processed, which is not recoverable after the take.
-    "recordingProcessingBypass": "profiles._apply_v2, gated on output_write "
+    "recordingProcessingBypass": "profiles.apply, gated on output_write "
                                  "(rcp_transfer.set_recording_processing_bypass).",
     # WAV or MP3. MEMBERSHIP-CHECKED against rcp_transfer.RECORDING_FORMATS on the way back out,
     # unlike most of this list, because the desk stores out-of-range values for this one: a profile
     # captured from a desk left on a 3 must not write that 3 back.
-    "recordingCompressionQuality": "profiles._apply_v2, gated on output_write "
+    "recordingCompressionQuality": "profiles.apply, gated on output_write "
                                    "(rcp_transfer.set_recording_format), and only for a value in "
                                    "RECORDING_FORMATS.",
-    "outputMultiMode": "profiles._apply_v2, gated on output_write "
+    "outputMultiMode": "profiles.apply, gated on output_write "
                        "(rcp_transfer.set_usb_multitrack_mode). The USB destination's own "
                        "mode; it lives on Routing > USB audio, not the Recording page. Saved and "
                        "restored as the TWO settings it carries, usb_multitrack plus usb_expanded, "
                        "composed into one write.",
-    "outputMultiBypass": "profiles._apply_v2, gated on output_write "
+    "outputMultiBypass": "profiles.apply, gated on output_write "
                          "(rcp_transfer.set_usb_multitrack_bypass).",
-    "outputMonAutoMute": "profiles._apply_v2, gated on output_write.",
-    "outputBTAutoMute": "profiles._apply_v2, gated on output_write.",
-    "headphoneType": "profiles._apply_v2, one write per addressable output, value validated "
+    "outputMonAutoMute": "profiles.apply, gated on output_write.",
+    "outputBTAutoMute": "profiles.apply, gated on output_write.",
+    "headphoneType": "profiles.apply, one write per addressable output, value validated "
                      "against the device's HeadphoneTypeSpec. Gated on output_write.",
-    "masterCompellorOn": "profiles._apply_v2, gated on output_write.",
-    "masterCompellorThreshold": "profiles._apply_v2, gated on output_write.",
-    "masterCompellorAttack": "profiles._apply_v2, gated on output_write.",
-    "masterCompellorRelease": "profiles._apply_v2, gated on output_write.",
-    "masterCompellorGain": "profiles._apply_v2, gated on output_write.",
-    "masterDelayOn": "profiles._apply_v2, gated on output_write.",
-    "masterDelaySeconds": "profiles._apply_v2 (written with masterDelayOn).",
+    "masterCompellorOn": "profiles.apply, gated on output_write.",
+    "masterCompellorThreshold": "profiles.apply, gated on output_write.",
+    "masterCompellorAttack": "profiles.apply, gated on output_write.",
+    "masterCompellorRelease": "profiles.apply, gated on output_write.",
+    "masterCompellorGain": "profiles.apply, gated on output_write.",
+    "masterDelayOn": "profiles.apply, gated on output_write.",
+    "masterDelaySeconds": "profiles.apply (written with masterDelayOn).",
     # --- the routing matrix ---------------------------------------------------------------
     "outputMixMinus": "server._apply_matrix -> rcp_transfer.set_output_routing, per output.",
     "mixDisabled": "server._apply_matrix -> rcp_transfer.set_cross_point_excluded (the Custom "
@@ -223,7 +223,7 @@ RESTORED_BY = {
     "padTriggerMode": "soundpad.restore_pads -> set_trigger_mapping. Written whether or not the "
                       "mapping is custom, because latching versus momentary is proven to change what "
                       "the pad sends and we have not proven the custom flag gates it.",
-    "inputInstrumentGain": "profiles._apply_v2 -> channels.set_instrument_gain.",
+    "inputInstrumentGain": "profiles.apply -> channels.set_instrument_gain.",
     "inputType": "SAVE ONLY, and correctly so: it is DERIVED from inputMicrophoneType (proven "
                  "on Mic 3 - Line-in gives 2, Instrument gives 1, any mic voicing gives "
                  "0), so restoring the mic type brings the input path back on its own. Writing it "
@@ -270,14 +270,14 @@ RESTORED_BY = {
 # Collections restored as a group, so each member does not need its own line above.
 RESTORED_GROUPS = [
     (set(channels.PRESET_FLOAT_PROPS),
-     "profiles._apply_v2 -> channels.set_channel_processing, per channel. Written in chain order "
+     "profiles.apply -> channels.set_channel_processing, per channel. Written in chain order "
      "(VoxLab knobs before the values simple mode derives from them)."),
     (set(channels.PROCESSING_MODULE_BOOLS),
-     "profiles._apply_v2 -> channels.set_processing_module (it accepts the raw <module>On name)."),
+     "profiles.apply -> channels.set_processing_module (it accepts the raw <module>On name)."),
     (set(channels._CHANNEL_FX_PARAM_SET),
-     "profiles._apply_v2 -> channels.set_channel_effect_param (echo + reverb, mic channels)."),
+     "profiles.apply -> channels.set_channel_effect_param (echo + reverb, mic channels)."),
     (set(rcp_transfer.UNIT_SETTING_SEL),
-     "profiles._apply_v2 -> rcp_transfer.set_unit_setting, last of all (nothing else depends on "
+     "profiles.apply -> rcp_transfer.set_unit_setting, last of all (nothing else depends on "
      "them). Only names in the address table are written, so a profile from a newer build carrying "
      "a setting this build does not know is skipped. Gated on the unit_settings cap."),
 ]

@@ -969,7 +969,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   operator's control. Asserted both ways by a test. RODE's own app behaves the same.
 - **`faderLevel` is addressed per STRIP.** Written before the layout it lands on whatever channel was
   there before, so restore writes levels straight AFTER the layout.
-- **`profiles._apply_v2` restores THE FADER LAYOUT FIRST**, before channel processing. It used to be
+- **`profiles.apply` restores THE FADER LAYOUT FIRST**, before channel processing. It used to be
   last, so a profile saved with a reordered layout restored its voicings onto the wrong channels.
 - **CHOOSING A MIC VOICING ALSO REPLACES THE WHOLE PROCESSING CHAIN, and writing the old type back
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
@@ -980,13 +980,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   client re-reads the panel, because the alternative is a screen reader reading 13 stale numbers.
 - **A VOICING TAKES A SECOND OR TWO TO APPLY, AND A CHAIN WRITE LANDING INSIDE THAT WINDOW IS LOST.**
   Proven by writing `eqLowGain` 0.3125 exactly 0.12 s after a type change and reading back the
-  voicing's own 0.59375. `profiles._apply_v2` waits for the strip to settle after a type that
+  voicing's own 0.59375. `profiles.apply` waits for the strip to settle after a type that
   CHANGES. On a strip in SIMPLE mode it is worse than a straight overwrite: the desk derives EQ,
   compressor, gate and de-esser from the three VoxLab knobs, so values written mid-apply come back as
   neither voicing's - 8 of 13 did, at values belonging to nothing. **Restore a chain with
   `apply_processing_preset`, never a loop of per-param writes**: it puts the MODE on first, which is
   what stops the derivation regenerating everything behind you.
-- **CHOOSING A MIC VOICING SETS THAT VOICING'S OWN DEFAULT GAIN**, so `profiles._apply_v2` writes the
+- **CHOOSING A MIC VOICING SETS THAT VOICING'S OWN DEFAULT GAIN**, so `profiles.apply` writes the
   MIC TYPE BEFORE the gain (it used to be gain first, type fourth, and a restore that changed the
   voicing threw the saved gain away). Measured Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27,
   Procaster 50, NT1 30, NT1-A 31, RE20 51, SM7B 55; Line-in and Instrument leave it alone.
@@ -1108,12 +1108,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THERE IS ONE MATRIX CAPTURE AND ONE MATRIX APPLY, and they live in `routing_schemes.py`.** A
   profile stores the scheme verbatim (`routing.mix_scheme`) and `server._apply_matrix` hands it
   straight back. Do not grow a second copy in `profiles.py`: the one that used to be there covered
-  the monitor outputs only and recorded levels for excluded cells. `output_modes`,
-  `matrix_excluded` and `monitor_unlinked` are WRITE-FOR-OLD-BUILDS + read-for-old-profiles only;
-  nothing new should be added to them. **They also keep the NARROW source set while `mix_scheme`
-  does not**, because v2.00 masks a cross-point selector to one byte and cannot address source 14
-  or 15 at all: handing it those rows would be a restore reporting failures for cells it could
-  never write.
+  the monitor outputs only and recorded levels for excluded cells.
 
 ## Channel properties
 
@@ -2694,7 +2689,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   taken, so stop it before trusting a refusal.**
 - **`systemMidiControl` IS NOT ON BY DEFAULT and A PROFILE RESTORE CAN SWITCH IT OFF.** It read OFF
   on the Duo, both in an earlier probe and on the attached desk (2nd September 2026); unread on
-  a Pro II. And it is saved into a profile and re-applied by `profiles._apply_v2`, so restoring a
+  a Pro II. And it is saved into a profile and re-applied by `profiles.apply`, so restoring a
   profile taken while MIDI was off silently kills every pad shortcut. So anything depending on MIDI
   must ENABLE IT AT THE POINT OF USE rather than once at startup - the write is idempotent and
   measured at 0.004 s, so there is no reason to be clever about it. Do not read-then-write:

@@ -7085,16 +7085,14 @@ def action_reset_all_outputs() -> dict:
 
 
 def _apply_matrix(routing: dict) -> dict:
-    """Re-apply a v2 profile's output mix matrix. CALLER HOLDS THE HID LOCK. Returns
-    {applied, failed, skipped}. Skips cleanly for a legacy profile or one saved while the matrix
-    was unreadable (a phone caller).
+    """Re-apply a profile's output mix matrix. CALLER HOLDS THE HID LOCK. Returns
+    {applied, failed, skipped}. Skips cleanly for one saved while the matrix was unreadable (a
+    phone caller).
 
-    TWO SHAPES, because a profile saved by an older build has only the legacy keys:
-      - `mix_scheme`, what a current build saves: the WHOLE matrix, keyed by name, applied
-        through routing_schemes.apply - the same proven path the Mix schemes page uses. Every
-        output's cross-point levels come back, not just the monitor ones, and an output the
-        connected desk does not have is skipped by name rather than written by index.
-      - `output_modes` + `matrix_excluded` + `monitor_unlinked`: the old index-keyed form, below.
+    `mix_scheme` is the WHOLE matrix, keyed by name, applied through routing_schemes.apply - the
+    same proven path the Mix schemes page uses. Every output's cross-point levels come back, not
+    just the monitor ones, and an output the connected desk does not have is skipped by name rather
+    than written by index.
     """
     # The saved matrix is Pro II-shaped; a desk that cannot write the matrix (e.g. the Duo, cap off)
     # must not have Pro II cross-points written to it, so skip the matrix re-apply there.
@@ -7108,49 +7106,7 @@ def _apply_matrix(routing: dict) -> dict:
         res = routing_schemes.apply(
             scheme, on_source_write=lambda si: _ann_mark_self_write(("fader", int(si))))
         return {"applied": res["applied"], "failed": res["failed"], "skipped": False}
-    modes = routing.get("output_modes")
-    if not modes:
-        return {"applied": 0, "failed": 0, "skipped": True}
-    output_count = _active_matrix().output_count
-    applied = 0
-    failed = 0
-
-    def attempt(fn):
-        nonlocal applied, failed
-        try:
-            fn(); applied += 1
-        except Exception:
-            failed += 1
-        time.sleep(0.03)
-
-    # ---- LEGACY FORM ONLY, for profiles saved before the mix_scheme capture. -----------------
-    # 1. Per-output mode (0 Main / 1 Mix Minus / 2 Custom).
-    for o, mode in enumerate(modes):
-        if 0 <= o < output_count and mode in (0, 1, 2):
-            attempt(lambda o=o, mode=mode: rcp_transfer.set_output_routing(o, int(mode)))
-    # 2. Custom-mix excludes.
-    for pair in (routing.get("matrix_excluded") or []):
-        try:
-            o, s = int(pair[0]), int(pair[1])
-        except (TypeError, ValueError, IndexError):
-            continue
-        attempt(lambda o=o, s=s: rcp_transfer.set_cross_point_excluded(o, s, True))
-    # 3. Monitor mix: relink the exposed monitor cross-points (reset to faders), then re-apply any
-    #    saved manual (unlinked) levels so the restore is authoritative, not additive.
-    for oi, _l in _monitor_outputs():
-        for si, _sl in _monitor_sources():
-            attempt(lambda oi=oi, si=si: rcp_transfer.set_cross_point_linked(oi, si, True))
-    for cell in (routing.get("monitor_unlinked") or []):
-        try:
-            o, s, lvl = int(cell["o"]), int(cell["s"]), float(cell["level"])
-        except (TypeError, ValueError, KeyError):
-            continue
-
-        def _set(o=o, s=s, lvl=lvl):
-            rcp_transfer.set_cross_point_linked(o, s, False)
-            rcp_transfer.set_cross_point_level(o, s, lvl)
-        attempt(_set)
-    return {"applied": applied, "failed": failed, "skipped": False}
+    return {"applied": 0, "failed": 0, "skipped": True}
 
 
 def routing_model() -> dict:
@@ -8460,12 +8416,11 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
     # capture_length, not count: a profile must capture the WHOLE channelInputSource vector,
     # including any slot the desk does not expose as a fader (both known desks have a 10th, measured),
     # so the saved layout is the real one rather than a truncated view.
-    # Capture is deliberately WIDER than write: profiles._apply_v2 only writes the first
+    # Capture is deliberately WIDER than write: profiles.apply only writes the first
     # vector_length entries, so the extra slot round-trips into the JSON and is never written back.
     res = profiles.save(safe, blob, chans, firmware, _active_faders().capture_length,
                         pads=(pad_backup["pads"] if pad_backup else None),
                         product_id=dev.product_id, device_name=dev.name,
-                        monitor_output_indices=[i for i, _l in _monitor_outputs()],
                         headphone_output_count=len(_active_headphones().outputs),
                         baseline=baseline, show=show)
     if pad_backup and pad_backup.get("unrecognised"):
@@ -8792,8 +8747,6 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                     vec_before = levels_before = None
             res = profiles.apply(prof, fader_count=_active_faders().vector_length,
                                  fader_code_set=_active_faders().code_set,
-                                 input_strip_vec_index=_active_input_strips().strip_vec_index,
-                                 valid_source_codes=_active_input_strips().valid_source_codes,
                                  mic_channels=MIC_CHANNELS, progress=job.step)
             if levels_before is not None:
                 _follow_levels(vec_before, _read_fader_vector(spec=spec), levels_before, spec)
@@ -10979,38 +10932,7 @@ def _hotkey_defaults() -> list:
     ] + _pad_hotkey_scheme()
 
 
-# THE FIRST FORMAT, kept only to carry an existing settings file across. Version one bound a fixed
-# set of ten named actions; version two binds a user-built list to catalogue commands. Without this,
-# anyone who had already set their keys would silently get the defaults back.
-_HOTKEY_V1_COMMANDS = {"announcer": "app.announcer", "mics": "app.mics", "record": "rec.toggle",
-                       "state": "app.state", "window": "app.window"}
-
 _hotkeys = None
-
-
-def _hotkeys_migrate(saved: dict) -> dict:
-    """Turn a version-one `hotkeys` settings block into the current shape. Returns it unchanged if
-    it is already current, or if there is nothing to carry."""
-    if not isinstance(saved, dict) or "bindings" not in saved or "shortcuts" in saved:
-        return saved if isinstance(saved, dict) else {}
-    rows = []
-    for name, b in (saved.get("bindings") or {}).items():
-        if not isinstance(b, dict):
-            continue
-        command = _HOTKEY_V1_COMMANDS.get(name)
-        if command is None and name.startswith("pad"):
-            # A version-one pad SLOT carried its pad in `target`; an empty slot was a placeholder
-            # and there is nothing to carry.
-            target = str(b.get("target", "") or "")
-            command = f"pad.fire:{target}" if target else None
-        if command is None:
-            continue
-        rows.append({"id": f"sc{len(rows) + 1}", "command": command,
-                     "mods": list(b.get("mods") or hotkeys.DEFAULT_MODS),
-                     "key": str(b.get("key", "") or "A"),
-                     "enabled": bool(b.get("enabled", True)),
-                     "speak": bool(b.get("speak", True))})
-    return {"enabled": bool(saved.get("enabled", True)), "shortcuts": rows}
 
 
 def hotkey_manager():
@@ -11029,7 +10951,7 @@ def hotkey_manager():
         mgr = hotkeys.HotkeyManager(speak=_ann_say,
                                     runner=commands.run,
                                     labeller=_hotkey_label)
-        mgr.load(_hotkeys_migrate(load_settings().get("hotkeys") or {}),
+        mgr.load(load_settings().get("hotkeys") or {},
                  defaults=_hotkey_defaults())
         _hotkeys = mgr
     return _hotkeys
@@ -11191,7 +11113,7 @@ def action_import_app_settings(payload) -> dict:
         # not sit in the file pretending to work.
         try:
             mgr = hotkey_manager()
-            mgr.load(_hotkeys_migrate(changes["hotkeys"]), defaults=_hotkey_defaults())
+            mgr.load(changes["hotkeys"], defaults=_hotkey_defaults())
             update_settings(hotkeys=mgr.saveable())
         except Exception as exc:
             notes.append(f" The shortcuts were saved but could not all be registered: {exc}")

@@ -213,7 +213,7 @@ class FaderSpec:
     @property
     def capture_length(self) -> int:
         """How many channelInputSource slots a profile SAVE records (>= vector_length).
-        Read-only: profiles._apply_v2 writes only the first vector_length entries, so any extra
+        Read-only: profiles.apply writes only the first vector_length entries, so any extra
         captured slot round-trips into the JSON without ever being written back."""
         return self.capture_len if self.capture_len is not None else self.vector_length
 
@@ -304,10 +304,9 @@ class InputStripSpec:
 
     This is the older representation of fader assignment, consumed by server.py's
     routing_model / read_routing_live / action_set_input_source (the /api/routing/inputsource
-    endpoint) and by legacy-profile restore (profiles._apply_legacy). It exposes the
-    reassignable strips by a fixed NAME and offers a small source palette to drop onto them.
-    The device-aware fader_model (FaderSpec) is the primary, INDEX-based view; this by-name
-    view remains only for that endpoint and for restoring pre-full-format profiles.
+    endpoint). It exposes the reassignable strips by a fixed NAME and offers a small source palette
+    to drop onto them. The device-aware fader_model (FaderSpec) is the primary, INDEX-based view;
+    this by-name view remains only for that endpoint.
 
       strips  : (key, vec_index, label) per reassignable strip. `vec_index` is the strip's
                 position in the channelInputSource vector, written with set_fader_source.
@@ -315,7 +314,7 @@ class InputStripSpec:
 
     A device that uses ONLY the index-based fader_model leaves this EMPTY (the default). The Duo
     does, because its flexible strips sit at different vector positions. With an empty spec the
-    by-name endpoints report nothing and refuse, and legacy profiles skip the input_sources subset.
+    by-name endpoints report nothing and refuse.
     """
     strips: tuple = ()
     sources: tuple = ()
