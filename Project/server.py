@@ -4479,17 +4479,50 @@ def action_set_channel_level(name: str, db: int) -> dict:
     return {"ok": True, "message": f"{ch['label']} level set to {db} dB."}
 
 
+def _mute_reach_message(who: str, sources) -> str:
+    """What a mute of `who` (matrix source codes `sources`) actually silences. CALLER HOLDS THE HID
+    LOCK.
+
+    A mute reaches each mix only through the cross-points that follow the fader. A Custom output
+    with that source UNLINKED at a manual level keeps playing it, so the sentence names every such
+    output instead of claiming silence everywhere. A cached dump is enough: muting moves no link
+    and no level. If the grid cannot be read, the reply says so rather than guessing either way."""
+    try:
+        blob = rcp_read.read_model()
+        lv = rcp_read.read_matrix_levels(blob)
+        ex = rcp_read.read_matrix_state(blob)
+    except Exception:
+        lv = ex = {"ok": False}
+    if not (lv.get("ok") and ex.get("ok")):
+        return f"{who} muted. Could not check whether any output still hears it."
+    still = []
+    for oi, label in ((o["index"], o["label"]) for o in _active_matrix().outputs):
+        if lv["modes"].get(oi) != 2:
+            continue
+        for s in sources:
+            cell = lv["levels"].get(oi, {}).get(s) or {}
+            if (cell.get("linked") is False and (cell.get("level") or 0) > 0
+                    and not ex["excluded"].get(oi, {}).get(s)):
+                still.append(label)
+                break
+    if not still:
+        return f"{who} muted; it is silent in every mix."
+    verb = "hears" if len(still) == 1 else "hear"
+    return (f"{who} muted, but {wording.join_and(still)} still {verb} it: its level there is set "
+            f"by hand, and a mute only reaches levels that follow the fader.")
+
+
 def action_set_channel_mute(name: str, on: bool) -> dict:
     """Mute or unmute a channel from software (channelOutputMute, proven writable on hardware).
 
     The real accessibility win here is reach: this is the same mute as the button on the unit, so it
     can be pressed from a phone or another room instead of by finding the right button by touch.
 
-    Two details matter. It silences the channel in EVERY mix, not just the monitor (the firmware
-    propagates it into the mix matrix), so the message says so plainly rather than implying it is a
-    local monitor mute. And the announcer is told about the write: without _ann_publish_mute the
-    encoder ring would keep quoting a level for a channel that is now silent, and the desk's echo of
-    the mute would be spoken on top of the UI's own announcement."""
+    Two details matter. It silences the channel in every mix that follows the fader, not just the
+    monitor, and the message names any output it does NOT reach (_mute_reach_message). And the
+    announcer is told about the write: without _ann_publish_mute the encoder ring would keep quoting
+    a level for a channel that is now silent, and the desk's echo of the mute would be spoken on top
+    of the UI's own announcement."""
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
@@ -4500,9 +4533,11 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     _ann_publish_mute(strip, on)
-    return {"ok": True,
-            "message": (f"{ch['label']} muted; it is silent in every mix."
-                        if on else f"{ch['label']} unmuted.")}
+    if not on:
+        return {"ok": True, "message": f"{ch['label']} unmuted."}
+    with _hid_lock:
+        msg = _mute_reach_message(ch["label"], [int(ch["source_code"])])
+    return {"ok": True, "message": msg}
 
 
 def _strip_toggle_gate(what: str):
@@ -4553,8 +4588,13 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     _ann_publish_mute(int(fader), bool(on))
     who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
-    return {"ok": True, "muted": bool(on),
-            "message": (f"{who} muted; it is silent in every mix." if on else f"{who} unmuted.")}
+    if not on:
+        return {"ok": True, "muted": False, "message": f"{who} unmuted."}
+    # A stereo-linked pair is its own fader code but two matrix sources, its two mics.
+    sources = list(spec.pair_map.get(code, (code,)))
+    with _hid_lock:
+        msg = _mute_reach_message(who, sources)
+    return {"ok": True, "muted": True, "message": msg}
 
 
 def action_set_fader_solo(fader: int, on: bool) -> dict:
@@ -7029,9 +7069,9 @@ def action_reset_all_outputs() -> dict:
     """Reset EVERY output mix on the desk: re-include and re-link every source on every output,
     then put each output back to its default mode (devices.py, MatrixSpec.outputs default_mode).
 
-    A wider sweep than the per-output "Reset to faders". It exists because a Custom headphone mix
-    silently breaks channel Mute: mute takes a channel out of the MAIN mix, so a Custom output keeps
-    carrying it and you still hear a muted mic in your own cans.
+    A wider sweep than the per-output "Reset to faders". It exists because a hand-set level silently
+    breaks channel Mute: a mute only reaches cross-points that follow the fader, so an output with
+    that source unlinked keeps carrying it and you still hear a muted mic in your own cans.
 
     HONESTY: the default modes are a KNOWN-GOOD set taken from a saved profile, NOT a capture of a
     factory-reset unit (see the provenance comment on PRO2_MATRIX_OUTPUTS). So this is called
@@ -10811,10 +10851,11 @@ def _hk_bank_step(target: str) -> str:
         return f"The bank would not change: {exc}"
     _hk_note_bank(want)
     _hk_maybe_refresh_pads()
-    # The system bank is the desk's own function pads, not sounds anyone assigned, so say so: the
-    # number keys still work there and would otherwise fire "Scene A" with no warning.
+    # The system bank is the video switching pads for a paired RODECaster Video, not sounds anyone
+    # assigned, so say so: the number keys still work there and would otherwise fire "Scene A" with
+    # no warning.
     if want == banks - 1:
-        return f"Bank {want + 1}, the desk's own function pads."
+        return f"Bank {want + 1}, the video switching pads."
     return f"Bank {want + 1}."
 
 

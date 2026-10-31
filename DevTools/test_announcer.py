@@ -851,6 +851,17 @@ try:
     check_true("the write follows the channel to the strip it is on (fader 7 -> 0x22)",
                b"\x01\x01\x01\x01\x22" + b"channelOutputMute\x00" in (RECORDS[0] if RECORDS else b""))
 
+    # The reply reads the mix grid to say what the mute reaches. Every Mic 2 cross-point linked here,
+    # so it is silent everywhere; the hand-set case is checked after the cache block.
+    _real_mix_reads = (rcp_read.read_model, rcp_read.read_matrix_levels, rcp_read.read_matrix_state)
+    MIX_MODES = {o: 0 for o in range(11)}
+    MIX_LEVELS = {o: {1: {"level": 0.8, "linked": True}} for o in range(11)}
+    rcp_read.read_model = lambda *a, **k: b"stub-dump"
+    rcp_read.read_matrix_levels = lambda blob=None: {"ok": True, "modes": MIX_MODES,
+                                                     "levels": MIX_LEVELS}
+    rcp_read.read_matrix_state = lambda blob=None: {"ok": True, "modes": MIX_MODES,
+                                                    "excluded": {o: {1: False} for o in range(11)}}
+
     # Now the cache. A live announcer state, as _announce_loop publishes it.
     st = {"bank": None, "pending": None, "at": 0.0, "known": {("fader", 6): 0.9}, "muted": {}}
     server._ann_live_state = st
@@ -869,6 +880,21 @@ try:
     server._ann_live_state = None
     check_true("publishing with the announcer OFF is a safe no-op",
                server.action_set_channel_mute("Mic2", True).get("ok"))
+
+    # A mute does not reach a cross-point unlinked at a manual level, so the reply must name that
+    # output instead of claiming silence everywhere. Monitor (index 4) in Custom, Mic 2 hand-set.
+    MIX_MODES[4] = 2
+    MIX_LEVELS[4][1] = {"level": 0.5, "linked": False}
+    msg = server.action_set_channel_mute("Mic2", True).get("message", "")
+    check_true("a hand-set level is named as still hearing the muted channel",
+               "Monitor" in msg and "still hears" in msg and "every mix" not in msg)
+    MIX_LEVELS[4][1] = {"level": 0.0, "linked": False}
+    check_true("but a hand-set level of zero is silent anyway",
+               "every mix" in server.action_set_channel_mute("Mic2", True).get("message", ""))
+    rcp_read.read_matrix_levels = lambda blob=None: {"ok": False}
+    check_true("an unreadable grid says so rather than claiming either way",
+               "Could not check" in server.action_set_channel_mute("Mic2", True).get("message", ""))
+    rcp_read.read_model, rcp_read.read_matrix_levels, rcp_read.read_matrix_state = _real_mix_reads
 
     # ---- ECHO SUPPRESSION: our own writes are not read back at us ----
     # The checks above only prove the WRITE itself is silent. The desk then PUSHES the change back,

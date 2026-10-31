@@ -119,7 +119,8 @@ class PadSpec:
     padIdx = pads_per_bank*(bank-1) + pad, banks and pads both 1-based on screen.
       pads_per_bank : physical pads per bank (Pro II = 8, Duo = 6 - it has 2 fewer pads).
       user_banks    : count of user-assignable banks (banks 1..user_banks). Both desks = 7.
-      system_bank   : 1-based bank that holds the factory system/function pads (both = 8).
+      system_bank   : 1-based bank that holds the factory system pads, the video switching
+                      controls for a paired RODECaster Video (both = 8).
     All three are CONFIRMED read-only on the Duo: its 6 system pads sit at
     padIdx 42-47 = 7*6..8*6-1, i.e. bank 8 of a 6-per-bank grid,
     so the Duo is 6/bank x 8 banks = 48 slots (vs the Pro II's 8/bank x 8 = 64)."""

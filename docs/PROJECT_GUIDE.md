@@ -1230,6 +1230,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
   source rows wide and a desk uses 13 of them.
 
+- **A CHANNEL MUTE DOES NOT SILENCE AN UNLINKED CROSS-POINT.** `channelOutputMute` reaches each
+  mix through the cross-points that follow the fader; one unlinked at a manual level keeps playing.
+  Measured on the Pro II, 12th October 2026: USB 1 muted, Headphone 1 (USB 1 linked) went silent,
+  the monitor (USB 1 unlinked at 50%) kept playing. So "silent in every mix" is only true when
+  every one of that source's cross-points is linked, and a listener on the unlinked output hears
+  no mute at all.
+
 - **THE ROUTING MATRIX IS THE `MIX` BLOCK, 390 CELLS, AND A POSITIONAL READ MUST SAY SO**
   (`rcp_read.block_values`, never `values`). `RCSYNCMIX` reuses all six cross-point names
   (`mixDisabled`, `mixMute`, `mixLevelWithAnchor`, `mixLink`, `mixLinkRequest`, `mixUnlinkRequest`)
@@ -2385,6 +2392,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `python server.py` runs with the watchdog on. **Any theory of the form "the watchdog stopped it"
   is wrong for the installed app**, and it cost an hour on 21st September 2026 before anyone read
   the call site.
+- **THE TRAY ICON MUST OPEN ON `WM_LBUTTONUP`, NOT ONLY ON `NIN_SELECT`.** On Windows 11 an icon in
+  the hidden-icons overflow receives only `WM_LBUTTONDOWN`/`WM_LBUTTONUP` when pressed, by mouse,
+  Enter, a screen reader or UIA Invoke (measured 17th October 2026, `NOTIFYICON_VERSION_4`), so an
+  icon answering only `NIN_SELECT`/`NIN_KEYSELECT` does nothing there. One taskbar click can send
+  both, so `TrayApp._on_tray` drops repeat open events within `_OPEN_DEBOUNCE_S`; without that,
+  `_show_page` can open two app windows before the first exists.
 - **A RUNNING JOB OUTRANKS EVERY STOP TRIGGER** (added 21st September 2026, `_lifecycle_stop_reason`
   takes `job_running`). A backup is mid-read of the model and a restore is part way through writing
   settings and pads; a page closing must not abandon either. This is right on the
@@ -2703,7 +2716,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   0, MIDI pad 1 fired padIdx 0; after writing `selectedBank` 1, the identical MIDI message fired
   padIdx 6, which is bank 2's first pad on a Duo. Restored clean. **So the MIDI bank-select question
   (CC 0 or CC 1, marked "verify" in RODE's spec) never needs answering** - do not spend time on it.
-  Banks are 0-indexed here and bank 8 (index 7) is the system / function pads.
+  Banks are 0-indexed here and bank 8 (index 7) is the system pads, which are video switching
+  controls for a paired RODECaster Video.
 - **`inject_button.py`'s `cmutePressed` is `mutePressed` at path [0, 0x63].** The 'c' is the address
   byte, not part of the name, and 0x63 is child 99 of PHYSICALINTERFACE - the first SOLOMUTEBUTTON.
   PADBUTTON is children 35 to 98. Do not go looking for a property called `cmutePressed`.
@@ -2832,13 +2846,15 @@ shared one; a new copy is how they drifted apart the first time.
 - **Loading the app's page in a HEADLESS BROWSER STOPS THE SERVER**: `pagehide` fires
   `sendBeacon("/api/quit")`. Use `ui_probe.py` (it stubs POSTs and serves its own copy) or start the
   server with `ACCESS_CASTER_NO_UI=1`.
-- **`ui_probe.py` PUTS ITSELF IN A KILL-ON-CLOSE JOB (`_take_browser_with_us`) BEFORE STARTING EDGE.**
-  Terminating Edge's main process leaves its helper processes running, and a probe that is itself
-  killed terminates nothing, so without the job every run leaves headless Edge behind. Keep any
-  new launch inside `main` after that call.
 - **`ui_probe.py` takes a free port per run.** It used to hardcode 8771 with `allow_reuse_address`,
   and two servers bind that port CLEANLY on Windows (measured), so concurrent suites silently swapped
   traffic and one reported "the page never reported back".
+- **`ui_probe.py` HOLDS ITS BROWSER IN A KILL-ON-CLOSE JOB OBJECT (`BrowserJob`).** Terminating
+  the one `msedge.exe` it starts leaves the rest of Chromium's process tree running, and a probe
+  killed by its caller's timeout never reaches cleanup at all. Survivors run until shutdown, then
+  Windows' "restart apps after sign-in" relaunches them: hundreds had piled up by 17th October 2026.
+  Do not go back to `subprocess.Popen` plus `terminate()`. Profiles a killed run leaves are swept
+  after a day.
 - **`ui_probe.py`'s default 90 s timeout is not enough.** Pads needs `--timeout 600` (about nine
   minutes), device 240. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,

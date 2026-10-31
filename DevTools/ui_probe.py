@@ -40,6 +40,9 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import win32job
+import win32process
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _bootstrap  # noqa: E402,F401  (puts Project/ on sys.path)
 import page        # noqa: E402  - the same index.html assembly the real server uses
@@ -290,67 +293,73 @@ def find_browser():
     return None
 
 
+PROFILE_PREFIX = "ui_probe_"
+PROFILE_MAX_AGE_S = 24 * 3600   # far longer than any run, so a concurrent suite's profile is safe
+
+
+def sweep_old_profiles():
+    """Delete profiles left by runs that were killed before their own cleanup ran."""
+    root = tempfile.gettempdir()
+    cutoff = time.time() - PROFILE_MAX_AGE_S
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        try:
+            if (name.startswith(PROFILE_PREFIX) and os.path.isdir(path)
+                    and os.path.getmtime(path) < cutoff):
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass
+
+
+class BrowserJob:
+    """The headless browser and every process it spawns, held in one Windows job object.
+
+    Chromium is a tree of processes, so terminating the one this script starts leaves the rest
+    running. A survivor runs until shutdown, and Windows' "restart apps after sign-in" then
+    relaunches it at the next sign-in. The job is created with KILL_ON_JOB_CLOSE, so Windows ends
+    the whole tree when the job's last handle closes, which happens when this script exits however
+    it exits, including being killed by its caller's timeout before any cleanup code runs.
+
+    The browser starts suspended and is resumed only once it is in the job, so no child process
+    can be spawned outside it.
+    """
+
+    def __init__(self, cmd: list[str]):
+        self.job = win32job.CreateJobObject(None, "")
+        info = win32job.QueryInformationJobObject(
+            self.job, win32job.JobObjectExtendedLimitInformation)
+        info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(
+            self.job, win32job.JobObjectExtendedLimitInformation, info)
+        process, thread, _pid, _tid = win32process.CreateProcess(
+            None, subprocess.list2cmdline(cmd), None, None, False,
+            win32process.CREATE_SUSPENDED, None, None, win32process.STARTUPINFO())
+        try:
+            win32job.AssignProcessToJobObject(self.job, process)
+        except Exception:
+            win32process.TerminateProcess(process, 1)
+            raise
+        win32process.ResumeThread(thread)
+        thread.Close()
+        process.Close()
+
+    def close(self, wait_s: float = 10.0):
+        """End every process in the job and wait for them to go, so the profile can be deleted."""
+        win32job.TerminateJobObject(self.job, 0)
+        deadline = time.time() + wait_s
+        while time.time() < deadline:
+            accounting = win32job.QueryInformationJobObject(
+                self.job, win32job.JobObjectBasicAccountingInformation)
+            if not accounting["ActiveProcesses"]:
+                break
+            time.sleep(0.1)
+        self.job.Close()
+
+
 # The default answer given for /api/baseline/status: "already asked, nothing to offer". Same shape
 # as the real endpoint, so the Profiles page's as-found panel still renders rather than erroring.
 BASELINE_QUIET = {"ok": True, "offer": False, "connected": True, "baseline": None,
                   "suggested_name": "", "device_name": "RODECaster Pro 2", "seconds_per_pad": 15}
-
-
-# Held for the life of the process: closing the last handle is what ends the job.
-_JOB = None
-
-
-def _take_browser_with_us() -> None:
-    """Put this process in a job that kills every process in it when this one exits, however it
-    exits. Edge is started from here, so it and every helper it spawns are in the job too.
-
-    Terminating Edge's main process leaves its renderer, GPU and utility processes running on
-    Windows, and a probe that is itself killed terminates nothing, so without this every run left
-    headless Edge processes behind. No-op off Windows, or if the job cannot be made."""
-    global _JOB
-    if os.name != "nt":
-        return
-    import ctypes
-    from ctypes import wintypes
-
-    class BasicLimits(ctypes.Structure):
-        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
-                    ("PerJobUserTimeLimit", ctypes.c_int64),
-                    ("LimitFlags", wintypes.DWORD),
-                    ("MinimumWorkingSetSize", ctypes.c_size_t),
-                    ("MaximumWorkingSetSize", ctypes.c_size_t),
-                    ("ActiveProcessLimit", wintypes.DWORD),
-                    ("Affinity", ctypes.c_size_t),
-                    ("PriorityClass", wintypes.DWORD),
-                    ("SchedulingClass", wintypes.DWORD)]
-
-    class IoCounters(ctypes.Structure):
-        _fields_ = [(n, ctypes.c_uint64) for n in
-                    ("Read", "Write", "Other", "ReadBytes", "WriteBytes", "OtherBytes")]
-
-    class ExtendedLimits(ctypes.Structure):
-        _fields_ = [("BasicLimitInformation", BasicLimits),
-                    ("IoInfo", IoCounters),
-                    ("ProcessMemoryLimit", ctypes.c_size_t),
-                    ("JobMemoryLimit", ctypes.c_size_t),
-                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateJobObjectW.restype = wintypes.HANDLE
-    k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-    k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
-                                            wintypes.DWORD]
-    k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-    k32.GetCurrentProcess.restype = wintypes.HANDLE
-    job = k32.CreateJobObjectW(None, None)
-    if not job:
-        return
-    info = ExtendedLimits()
-    info.BasicLimitInformation.LimitFlags = 0x2000        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if (k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))  # Extended
-            and k32.AssignProcessToJobObject(job, k32.GetCurrentProcess())):
-        _JOB = job
 
 
 def main():
@@ -399,26 +408,22 @@ def main():
         print("No Edge or Chrome found; cannot run the UI probe.")
         return 1
 
-    _take_browser_with_us()
     probe = Probe(args.upstream, checks_js, stubs)
     server, port = pick_port(args.port, probe)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = "http://127.0.0.1:%d/" % port + (("#/" + args.route) if args.route else "")
     print("probe serving on %s (api reads proxied to %d, writes stubbed)" % (url, args.upstream))
 
-    profile = tempfile.mkdtemp(prefix="ui_probe_")
+    sweep_old_profiles()
+    profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
     cmd = [browser, "--headless=new", "--disable-gpu", "--no-first-run",
            "--no-default-browser-check", "--user-data-dir=" + profile,
            "--window-size=1280,900", url]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    browser_job = BrowserJob(cmd)
     try:
         ok = probe.finished.wait(args.timeout)
     finally:
-        try:
-            proc.terminate()
-            proc.wait(10)
-        except Exception:
-            pass
+        browser_job.close()
         server.shutdown()
         shutil.rmtree(profile, ignore_errors=True)
 
