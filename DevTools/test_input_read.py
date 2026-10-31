@@ -20,22 +20,13 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check
 import channels as c
 import devices
 import model_tree
 import rcp_read as rr
 from fake_model import node  # the model grammar's encoder, shared by the offline suites
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def dump(children: dict, n_children: int) -> bytes:
@@ -166,7 +157,4 @@ for dev in (PRO2, DUO):
           any("input_slot" in e for e in dev.ui_channels), False)
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

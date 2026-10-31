@@ -19,6 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import model_tree as mt
 import pad_records as pr
 import rcp_read as rr
@@ -26,14 +28,6 @@ import rcp_transfer as t
 import soundpad as sp
 
 SLOT = 16
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    ok = got == want
-    FAILED += not ok
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}: {got!r}" + ("" if ok else f", want {want!r}"))
 
 
 def tree_state():
@@ -77,8 +71,7 @@ def main() -> int:
     check("no partial object is left", res["health"]["partial"], [])
     check("the pool is clean", res["health"]["clean"], True)
     check("the whole tree is as it started", tree_state() == before, True)
-    print("\n" + ("ALL CHECKS PASSED" if not FAILED else f"{FAILED} FAILED"))
-    return 1 if FAILED else 0
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

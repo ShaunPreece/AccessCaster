@@ -25,25 +25,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check, check_true
 import meters
-
-fails = []
-
-
-def check(label, got, want):
-    ok = got == want
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}")
-    if not ok:
-        print(f"        got  {got!r}\n        want {want!r}")
-        fails.append(label)
 
 
 def close(label, got, want, tol=1e-3):
-    ok = abs(got - want) <= tol
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}  ({got:.4f})")
-    if not ok:
-        print(f"        wanted {want:.4f} +/- {tol}")
-        fails.append(label)
+    check_true(label, abs(got - want) <= tol, f"{got:.4f}, wanted {want:.4f} +/- {tol}")
 
 
 def ceiling_for(db: float) -> float:
@@ -164,5 +152,4 @@ try:
 finally:
     meters.Meter = real_meter
 
-print("\n" + ("ALL CHECKS PASSED" if not fails else f"{len(fails)} FAILURE(S): {fails}"))
-raise SystemExit(1 if fails else 0)
+sys.exit(_testkit.finish())

@@ -25,20 +25,13 @@ Offline: the device reads are replaced, so this needs no desk and asserts the DE
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check
 import devices
 import rcp_read
 import server
 
 devices.force_device(devices.PRO2)      # or the answer comes from whatever is on the USB port
-
-FAILS = []
-
-
-def check(label, got, want):
-    ok = got == want
-    print(f"  {'ok ' if ok else 'FAIL'} {label}: {got!r}")
-    if not ok:
-        FAILS.append(f"{label}\n    got  {got!r}\n    want {want!r}")
 
 
 def warnings_for(prof, vec, levels):
@@ -128,9 +121,4 @@ if got:
 new = {"routing": {"faders": SWAPPED, "fader_levels": ALL_UP}, "pads": []}
 check("a profile carrying its own levels does NOT", len(run_restore(new)), 0)
 
-if FAILS:
-    print("\nFAILURES:")
-    for f in FAILS:
-        print("  " + f)
-    sys.exit(1)
-print("\nALL RESTORE WARNING CHECKS PASSED")
+sys.exit(_testkit.finish())

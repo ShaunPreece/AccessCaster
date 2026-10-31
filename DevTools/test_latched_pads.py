@@ -21,19 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check, patched
 import server
 import soundpad
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def with_pads(positions, active_flags):
@@ -45,12 +36,8 @@ def with_pads(positions, active_flags):
     pads = [soundpad.Pad(pos, idx, typ, name,
                          {"padActive": active_flags[i]} if i < len(active_flags) else {})
             for i, (pos, idx, typ, name) in enumerate(positions)]
-    real_nodes = soundpad.pad_nodes
-    soundpad.pad_nodes = lambda blob=None: pads
-    try:
+    with patched((soundpad, {"pad_nodes": lambda blob=None: pads})):
         return soundpad.latched_pads(b""), server._pads_engaged(b"")
-    finally:
-        soundpad.pad_nodes = real_nodes
 
 
 PADS = [(8, 0, 1, "Music_Bed"), (18, 8, 2, "Voice Disguise"), (23, 14, 2, "Small Robot")]
@@ -116,10 +103,7 @@ def main() -> int:
     # and colour with no region-B object bound to it, so `padActive` latches and processes nothing.
     # A shortcut that wrote the flag and said "on" would be telling the operator their voice is
     # disguised when the mic is untouched - see soundpad.heal_fx_pool for how a desk gets there.
-    saved_missing, saved_on = server._hk_fx_missing, set(server._hk_pads_on)
-    try:
-        server._hk_fx_missing = frozenset({14})
-        server._hk_pads_on.clear()
+    with patched((server, {"_hk_fx_missing": frozenset({14}), "_hk_pads_on": set()})):
         said = server._hk_pad_toggle(14, 23, "Small Robot")
         check("it says the pad has nothing behind it",
               "no effect behind it" in said["message"], True)
@@ -140,24 +124,15 @@ def main() -> int:
         # segfaults (exit 139) after every check has already printed "ok". A suite that passes and
         # then crashes is worse than one that fails.
         released = []
-        real_unlatch, real_verify = soundpad.unlatch_pad, server._hk_pad_verify
-        soundpad.unlatch_pad = lambda pos: released.append(pos)
-        server._hk_pad_verify = lambda *a, **k: None
-        try:
+        with patched((soundpad, {"unlatch_pad": lambda pos: released.append(pos)}),
+                     (server, {"_hk_pad_verify": lambda *a, **k: None})):
             server._hk_pads_on.add(14)
             off = server._hk_pad_toggle(14, 23, "Small Robot")
-        finally:
-            soundpad.unlatch_pad, server._hk_pad_verify = real_unlatch, real_verify
         check("releasing one is not blocked by the same guard",
               "no effect behind it" in off["message"], False)
         check("and the release really was sent", released, [23])
-    finally:
-        server._hk_fx_missing = saved_missing
-        server._hk_pads_on.clear()
-        server._hk_pads_on.update(saved_on)
 
-    print("\n" + ("ALL CHECKS PASSED" if not FAILED else f"{FAILED} FAILED"))
-    return 1 if FAILED else 0
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

@@ -9,9 +9,12 @@ Run: python DevTools/test_chain.py
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import as_device, check, patched
 import channels as c
 import devices
 
@@ -21,17 +24,6 @@ import devices
 # file exists to pin. Offline tests must not depend on what happens to be plugged in.
 devices.force_device(devices.PRO2)
 c.publish_strip_vector(list(devices.PRO2.fader.default_vector))
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def chain(**over):
@@ -130,15 +122,16 @@ PRO2_DEFAULT = list(devices.PRO2_FADERS.default_vector)   # (0,1,2,3,10,11,7,8,9
 # A layout in real use: USB 1 (code 7) pulled onto strip 1 so a real fader controls the PC audio,
 # which pushes Mic 2 (code 1) down to strip 6. A reset from here sends USB 1 to strip 6, where Mic
 # 2's voicing sits, so without the chains following, the PC audio comes up gated.
-SHAUN_VEC = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]
+IN_USE_VEC = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]
 GATED_STRIP = 6                                           # where Mic 2's voicing sits before the reset
 
 
 class fake_desk:
     """Stand in for the desk: a layout plus one chain per strip, recording every write."""
 
-    def __init__(self, vec, gated_strip=GATED_STRIP):
+    def __init__(self, vec, gated_strip=GATED_STRIP, dev=devices.PRO2):
         self.vec = list(vec)
+        self.dev = dev
         # One strip carries a MIC voicing with the noise gate ON; the rest are neutral. If the
         # chains do NOT follow, whoever lands on that strip inherits the gate - the actual symptom.
         self.chains = [chain(bools={"noiseGateOn": True}) if i == gated_strip else chain()
@@ -147,25 +140,19 @@ class fake_desk:
         self.chain_writes = []
 
     def __enter__(self):
-        self.saved = {}
-
-        def save(mod, name, fn):
-            self.saved[(mod, name)] = getattr(mod, name)
-            setattr(mod, name, fn)
-
-        save(devices, "get_active_device", lambda: devices.PRO2)
-        save(rcp_read, "read_model", lambda *a, **k: b"")
-        save(server, "_read_fader_vector", lambda *a, **k: list(self.vec))
-        save(c, "read_chains", lambda *a, **k: [dict(ch) for ch in self.chains])
-        save(c, "invalidate_strip_vector", lambda *a, **k: None)
-        save(rcp_transfer, "set_fader_source", self._set_fader)
-        save(c, "write_chain", self._write_chain)
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(as_device(self.dev))
+        self._stack.enter_context(patched(
+            (rcp_read, {"read_model": lambda *a, **k: b""}),
+            (server, {"_read_fader_vector": lambda *a, **k: list(self.vec)}),
+            (c, {"read_chains": lambda *a, **k: [dict(ch) for ch in self.chains],
+                 "invalidate_strip_vector": lambda *a, **k: None,
+                 "write_chain": self._write_chain}),
+            (rcp_transfer, {"set_fader_source": self._set_fader})))
         return self
 
     def __exit__(self, *exc):
-        for (mod, name), fn in self.saved.items():
-            setattr(mod, name, fn)
-        return False
+        return self._stack.__exit__(*exc)
 
     def _set_fader(self, i, code):
         self.fader_writes.append((i, code))
@@ -184,7 +171,7 @@ def gate_on(desk, code):
 
 
 print("\nRESET FADERS CARRIES THE CHAIN")
-with fake_desk(SHAUN_VEC) as desk:
+with fake_desk(IN_USE_VEC) as desk:
     res = server.action_reset_faders()
 check("the reset succeeds", res.get("ok"), True)
 check("it wrote the default layout", [code for _i, code in desk.fader_writes], PRO2_DEFAULT)
@@ -201,9 +188,9 @@ with fake_desk(PRO2_DEFAULT) as desk:
 check("already on the default, so nothing moves", desk.chain_writes, [])
 
 print("\nTHE DUO CARRIES CHAINS TOO")
-with fake_desk(SHAUN_VEC) as desk:
-    devices.get_active_device = lambda: devices.DUO      # inside the block, so it is restored
+with fake_desk(IN_USE_VEC, dev=devices.DUO) as desk:
     res_duo = server.action_reset_faders()
+check("the reset succeeds on a Duo", res_duo.get("ok"), True)
 check("a reset moves the chains on a Duo as it does on a Pro II", bool(desk.chain_writes), True)
 
 # ---------------------------------------------------------------------------------------------
@@ -215,9 +202,7 @@ check("a reset moves the chains on a Duo as it does on a Pro II", bool(desk.chai
 print("\nA CHANNEL MOVES ONTO AN EMPTY FADER, AND VACATES THE ONE IT LEFT")
 DUO_FACTORY = [0, 1, 10, 11, 2, 7, 8, 9, -1]
 duo_order = [code for code, _ in devices.DUO.fader.assignable]
-saved_dev = devices.get_active_device
-devices.get_active_device = lambda: devices.DUO
-try:
+with as_device(devices.DUO):
     got = server._tidy_fader_target(DUO_FACTORY, 8, 2, duo_order)
     check("the Headset really lands on the empty fader", got[8], 2)
     check("and the fader it came from is now the empty one", got[4], -1)
@@ -228,8 +213,6 @@ try:
     check("an occupied-to-occupied swap still swaps",
           server._tidy_fader_target(DUO_FACTORY, 6, 7, duo_order),
           [0, 1, 10, 11, 2, 8, 7, 9, -1])
-finally:
-    devices.get_active_device = saved_dev
 
 # The Pro II has MORE sources than faders, so it has no empty strip. Pinned anyway, so the
 # empty-fader handling cannot disturb its swaps.
@@ -266,13 +249,9 @@ check("saving a preset still does NOT record the master on/off",
 def built_order(props):
     """The property names, in the order apply_processing_preset would put them on the wire."""
     sent = []
-    saved_send, saved_req = rcp_transfer.send_records_paced, c._require_processing
-    rcp_transfer.send_records_paced = lambda recs, delay=0: sent.extend(recs) or 0
-    c._require_processing = lambda: None
-    try:
+    with patched((rcp_transfer, {"send_records_paced": lambda recs, delay=0: sent.extend(recs) or 0}),
+                 (c, {"_require_processing": lambda: None})):
         c.apply_processing_preset(2, props)
-    finally:
-        rcp_transfer.send_records_paced, c._require_processing = saved_send, saved_req
     order = []
     for rec in sent:
         for name in list(props):
@@ -297,7 +276,4 @@ check("no module is invented for it",
       [n for n in legacy_order if n in c.PROCESSING_MODULE_BOOLS], [])
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

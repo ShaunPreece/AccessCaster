@@ -27,16 +27,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check, check_true
 import autostart
-
-FAILED = []
-
-
-def check(label, got, want=True):
-    ok = (got == want)
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + ("" if ok else f"  [got {got!r}, want {want!r}]"))
-    if not ok:
-        FAILED.append(label)
 
 
 ISS = Path(__file__).resolve().parent.parent / "ProjectBuilds" / "installer.iss"
@@ -45,17 +38,17 @@ iss = io.open(ISS, encoding="utf-8").read()
 print("THE INSTALLER AND THE APP MUST WRITE THE SAME THING")
 # The [Registry] line, joined across its Inno line continuations.
 block = re.search(r"Root: HKCU;.*?Tasks: startup", iss, re.S)
-check("the installer still has an autostart registry line", block is not None)
+check_true("the installer still has an autostart registry line", block is not None)
 line = " ".join(block.group(0).replace("\\\n", " ").split()) if block else ""
 
-check("same registry key", ("Subkey: \"" + autostart.RUN_KEY + "\"") in line)
-check("same value name", ("ValueName: \"" + autostart.VALUE_NAME + "\"") in line)
-check("the installer still deletes it on uninstall", "uninsdeletevalue" in line)
-check("the installer passes the startup flag", autostart.STARTUP_FLAG in line)
+check_true("same registry key", ("Subkey: \"" + autostart.RUN_KEY + "\"") in line)
+check_true("same value name", ("ValueName: \"" + autostart.VALUE_NAME + "\"") in line)
+check_true("the installer still deletes it on uninstall", "uninsdeletevalue" in line)
+check_true("the installer passes the startup flag", autostart.STARTUP_FLAG in line)
 
 # Inno writes ValueData: """{app}\{#AppExe}"" --startup"  -> a quoted path, then the flag.
 m = re.search(r'ValueData: "(.*?)";', line)
-check("the value data could be read", m is not None)
+check_true("the value data could be read", m is not None)
 if m:
     data = m.group(1)
     # Inno doubles a quote to escape it; undo that, then substitute its own constants.
@@ -84,5 +77,4 @@ st = autostart.state()
 check("state() reports it cannot be changed here", st["supported"], False)
 check("but still says whether an entry exists", isinstance(st["enabled"], bool), True)
 
-print("\n" + ("ALL AUTOSTART CHECKS PASSED" if not FAILED else f"{len(FAILED)} FAILED"))
-sys.exit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

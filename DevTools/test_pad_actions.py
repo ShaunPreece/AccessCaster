@@ -23,25 +23,10 @@ Run: python DevTools/test_pad_actions.py
 from __future__ import annotations
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check, check_in, check_true
 import server
 import soundpad
-
-FAILED = []
-
-
-def check(label, got, want=True, show=None):
-    ok = (got == want)
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  [{show if show is not None else got}]"
-                                                     if not ok or show is not None else ""))
-    if not ok:
-        FAILED.append(label)
-
-
-def check_in(label, needle, hay):
-    ok = needle.lower() in (hay or "").lower()
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + ("" if ok else f"  [{hay}]"))
-    if not ok:
-        FAILED.append(label)
 
 
 TOO_HIGH = server._max_user_pads() + 1
@@ -134,13 +119,8 @@ check("an unknown field is a refusal, not a quiet success",
       server.action_set_pad_trigger(1, "nonsense", 1)["ok"], False)
 
 print("\nand the range guard is device-aware, not a hardcoded 56")
-check("_max_user_pads comes from the active device's PadSpec",
+check_true("_max_user_pads comes from the active device's PadSpec",
       server._max_user_pads() > 0)
 
 print()
-if FAILED:
-    print(f"{len(FAILED)} FAILED:")
-    for f in FAILED:
-        print("  - " + f)
-    raise SystemExit(1)
-print("ALL PAD ACTION CHECKS PASSED")
+raise SystemExit(_testkit.finish())

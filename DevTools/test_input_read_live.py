@@ -16,21 +16,13 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check
 import channels as c
 import devices
 import rcp_read as rr
 
-FAILED = 0
 SETTLE_S = 0.6          # the desk needs a moment before the next dump shows the write
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def gains(dev, mics):
@@ -87,7 +79,4 @@ by_mixer = {m["name"]: c.read_mixer()["mics"][c.mic_channel_number(m)]["gain_db"
 check("read_mixer agrees with the addressed read", by_mixer, by_channels)
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

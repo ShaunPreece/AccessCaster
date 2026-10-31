@@ -19,6 +19,7 @@ no USB setting is touched.
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 import threading
 import time
@@ -26,18 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check, patched
 import rcp_hid
 import rcp_transfer
 import server
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 class FakeIface:
@@ -116,24 +110,16 @@ class Rig:
         self.iface = to_iface
 
     def __enter__(self):
-        self.saved = {
-            "find_t": rcp_transfer.find_control_interface,
-            "open": rcp_hid.open_handle, "close": rcp_hid.close_handle,
-            "say": server._ann_say, "seed": server._ann_seed_layout,
-            "retry": server._ANN_RETRY_S, "speak": server._ANN_RECONNECT_SPEAK_AFTER_S,
-            "tidy": server._tidy_after_standard, "follow": server._virtual_devices_follow,
-        }
-        rcp_transfer.find_control_interface = self.find
-        rcp_hid.open_handle = self.open
-        rcp_hid.close_handle = lambda dev, purpose="": None
-        server._ann_say = self.say
-        server._ann_seed_layout = self.seed
-        # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
-        # Windows' default audio device, which is the user's screen reader.
-        server._tidy_after_standard = self.tidy
-        server._virtual_devices_follow = self.follow
-        server._ANN_RETRY_S = 0.02             # the real 0.3 s only paces the retries
-        server._ANN_RECONNECT_SPEAK_AFTER_S = self.speak_after
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(patched(
+            (rcp_transfer, {"find_control_interface": self.find}),
+            (rcp_hid, {"open_handle": self.open, "close_handle": lambda dev, purpose="": None}),
+            # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
+            # Windows' default audio device, which is the user's screen reader.
+            (server, {"_ann_say": self.say, "_ann_seed_layout": self.seed,
+                      "_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow,
+                      "_ANN_RETRY_S": 0.02,    # the real 0.3 s only paces the retries
+                      "_ANN_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
         server._announce_on.set()
         self.thread = threading.Thread(target=server._announce_loop, daemon=True)
         self.thread.start()
@@ -143,15 +129,7 @@ class Rig:
     def __exit__(self, *exc):
         server._announce_on.clear()
         self.thread.join(timeout=3.0)
-        rcp_transfer.find_control_interface = self.saved["find_t"]
-        rcp_hid.open_handle = self.saved["open"]
-        rcp_hid.close_handle = self.saved["close"]
-        server._ann_say = self.saved["say"]
-        server._ann_seed_layout = self.saved["seed"]
-        server._tidy_after_standard = self.saved["tidy"]
-        server._virtual_devices_follow = self.saved["follow"]
-        server._ANN_RETRY_S = self.saved["retry"]
-        server._ANN_RECONNECT_SPEAK_AFTER_S = self.saved["speak"]
+        self._stack.close()
 
 
 print("\nTHE DESK RETURNS AS A DIFFERENT USB DEVICE")
@@ -237,7 +215,4 @@ check("a reconnect is only spoken after a real gap",
 check("retries back off, or an absent desk is re-enumerated forever at full speed",
       server._ANN_RETRY_SLOW_S > server._ANN_RETRY_S, True)
 
-print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
-for f in FAILS:
-    print("  " + f)
-raise SystemExit(1 if FAILS else 0)
+sys.exit(_testkit.finish())

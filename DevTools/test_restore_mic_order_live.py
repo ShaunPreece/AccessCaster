@@ -98,8 +98,7 @@ def main() -> int:
                               "advanced": advanced_before,
                               "params": {CHAIN_PROP: WANT_CHAIN}}]}
         res = profiles.apply(prof, fader_count=devices.PRO2.fader.vector_length,
-                                 fader_code_set=devices.PRO2.fader.code_set,
-                                 mic_channels=(1, 2, 3, 4))
+                                 fader_code_set=devices.PRO2.fader.code_set)
         print(f"   {res['applied']} writes, {res['failed']} failed {res['errs']}")
         time.sleep(SETTLE)
         after = read_input(slot)

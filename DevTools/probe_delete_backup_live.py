@@ -39,21 +39,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import profiles
 import rcp_read
 import recorder
 import server
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def names():
@@ -118,8 +109,7 @@ if args.profile:
     paired = next((b for b in server.read_backups()["backups"]
                    if b["name"] == args.profile), None)
     if paired is None:
-        FAILED += 1
-        print(f"   FAIL no backup called {args.profile!r}")
+        _testkit.check_true(f"a backup called {args.profile!r} exists", False)
     else:
         snap = paired.get("snapshot")
         print(f"   it is paired with snapshot {snap}")
@@ -149,5 +139,4 @@ if base:
     print(f"   it said: {r.get('message','')!r}")
     check("so it is still listed afterwards", base in names()[0], True)
 
-print(f"\nFAILURES: {FAILED}")
-raise SystemExit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

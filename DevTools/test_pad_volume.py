@@ -4,6 +4,8 @@ THE RULES THIS PINS:
   * a drive holding a `pads` folder before transfer mode is entered is never the pad volume, so a
     USB stick with a copy of the pad folder at E: loses to the desk's volume at F:;
   * the desk's own volume, still mounted from a session that has just ended, is accepted again;
+  * a desk already in transfer mode at the first entry is taken out of it, so its volume is not
+    noted as another drive;
   * inside a held transfer_session every find returns the root the first one found.
 
 No device and no drives: the drive scan, the volume check and the serial are stubbed.
@@ -17,16 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import rcp_transfer as t
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 mounted: set[str] = set()
@@ -35,11 +30,35 @@ t._drive_roots = lambda: ["E:\\", "F:\\", "G:\\"]
 t._is_pad_volume = lambda root: root in mounted
 t._volume_serial = lambda root: SERIALS.get(root)
 t.remount_pad_storage = lambda: 0
+desk_mode = [0]
+sent: list[bytes] = []
+t._desk_transfer_mode = lambda: desk_mode[0]
+
+
+def send(rec):
+    sent.append(rec)
+    desk_mode[0] = 0
+    mounted.discard("F:\\")             # exiting transfer mode takes the desk's volume away
+    return 0
+
+
+t.send_record = send
 
 
 def find():
     return t.find_pad_volume(timeout_s=0.6, reissue_remount_every=60)
 
+
+print("A DESK LEFT IN TRANSFER MODE IS TAKEN OUT OF IT FIRST")
+mounted.add("F:\\")                     # the desk's volume, left mounted by a run that stopped
+desk_mode[0] = 2
+t._note_volumes_before_entry()
+check("the stale transfer mode is exited", len(sent), 1)
+check("the desk's volume is not refused", "F:\\" in t._volumes_before_entry, False)
+mounted.add("F:\\")                     # the desk's volume, after the real entry
+check("the desk's volume is found", find(), "F:\\")
+mounted.clear()
+t._desk_volume_serial = None
 
 print("A DRIVE PRESENT BEFORE ENTRY IS NOT THE PAD VOLUME")
 mounted.add("E:\\")                     # the USB stick with a copy of the pad folder
@@ -68,9 +87,4 @@ finally:
     t._session_pad_root = None
 
 
-if FAILS:
-    print(f"\n{len(FAILS)} FAILED:")
-    for f in FAILS:
-        print("  " + f)
-    sys.exit(1)
-print("\nAll pad volume checks passed.")
+sys.exit(_testkit.finish())

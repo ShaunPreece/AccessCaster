@@ -27,25 +27,10 @@ import os
 import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check, check_in
 import channels
 import server
-
-FAILED = []
-
-
-def check(label, got, want=True, show=None):
-    ok = (got == want)
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  [{show if show is not None else got}]"
-                                                     if not ok or show is not None else ""))
-    if not ok:
-        FAILED.append(label)
-
-
-def check_in(label, needle, hay):
-    ok = needle.lower() in (hay or "").lower()
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + ("" if ok else f"  [{hay}]"))
-    if not ok:
-        FAILED.append(label)
 
 
 def chain(tag):
@@ -159,9 +144,4 @@ check("and the chain is parked again rather than dropped",
       channels.take_chain("DESK-TEST", 1), chain(1))
 
 print()
-if FAILED:
-    print(f"{len(FAILED)} CHECK(S) FAILED:")
-    for f in FAILED:
-        print("  -", f)
-    raise SystemExit(1)
-print("ALL FADER CHAIN CHECKS PASSED")
+raise SystemExit(_testkit.finish())

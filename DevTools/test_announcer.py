@@ -13,6 +13,8 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_true
 import channels
 import devices
 import model_tree
@@ -28,21 +30,6 @@ devices.force_device(devices.PRO2)
 
 SPOKEN: list[str] = []
 server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
-
-def check_true(label, got):
-    check(label, bool(got), True)
 
 
 def push(path, name: str, value_block: bytes) -> bytes:
@@ -1125,7 +1112,4 @@ finally:
 
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

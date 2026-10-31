@@ -19,6 +19,8 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_true, as_device
 import channels
 import devices
 import model_tree
@@ -29,39 +31,9 @@ import server
 SPOKEN: list[str] = []
 server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak
 
-FAILED = 0
 # The Duo's CONFIRMED factory layout (devices.DUO_FADERS.default_vector): 10 slots, source 2 =
 # Headset on strip 4, an empty strip at 8 (-1) and USB 2 mirrored into the spare slot 9.
 DUO_VEC = [0, 1, 10, 11, 2, 7, 8, 9, -1, 9]
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
-
-def check_true(label, got):
-    check(label, bool(got), True)
-
-
-class as_device:
-    """Force the ACTIVE device model, so device-aware code can be tested with no desk attached."""
-
-    def __init__(self, dev):
-        self.dev = dev
-
-    def __enter__(self):
-        self.saved = devices.get_active_device
-        devices.get_active_device = lambda: self.dev
-        return self.dev
-
-    def __exit__(self, *exc):
-        devices.get_active_device = self.saved
-        return False
 
 
 def push(path, name: str, value_block: bytes) -> bytes:
@@ -209,17 +181,13 @@ check("Duo default layout fills all 10 slots", len(devices.DUO.fader.default_vec
 # `count` broke RESET FADERS and PROFILE RESTORE on a Duo while fader_write was already on: both
 # walk all ten slots, and slot 9 met a bound of 9. Asserted by the REFUSAL at index 10, which
 # raises before anything is sent, so this stays an offline test.
-try:
-    import rcp_transfer as _rt
-    _prev = devices.force_device(devices.DUO)
+with as_device(devices.DUO):
     try:
-        _rt.set_fader_source(10, 0)
+        rcp_transfer.set_fader_source(10, 0)
         check("set_fader_source refuses fader index 10 on a Duo", "no error", "ValueError")
     except ValueError as e:
         check("set_fader_source bound is the Duo's 10 vector slots, not its 9 faders",
               "0-9" in str(e), True)
-finally:
-    devices.force_device(_prev)
 check("Duo pads are 6 per bank", devices.DUO.pad.pads_per_bank, 6)
 # 390 is the MIX BLOCK, which is the grid, and it is the same on both desks and both firmwares.
 # RCSYNCMIX reuses all six cross-point names and follows MIX in the stream, so an unscoped read
@@ -261,8 +229,6 @@ for dev in (devices.DUO, devices.PRO2):
               server.action_set_unit_setting("notASetting", 1)["ok"], False)
 check_true("every setting the page offers has an address in the table",
            all(s["prop"] in rcp_transfer.UNIT_SETTING_SEL for s in server.UNIT_SETTINGS))
-check_true("every exposed setting has a confirmed address",
-           all(s["prop"] in rcp_transfer.UNIT_SETTING_SEL for s in server.UNIT_SETTINGS))
 
 # A CHANNEL THE DESK DOES NOT CARRY REFUSES, with no fixed fallback strip. Mic 3 from a Pro II
 # profile would otherwise land on Duo strip 2, which holds Bluetooth. Raises before any dump.
@@ -275,7 +241,4 @@ with as_device(devices.DUO):
             check(f"Duo refuses a chain write to {ident!r}", "ValueError", "ValueError")
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

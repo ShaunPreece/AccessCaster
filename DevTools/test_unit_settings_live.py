@@ -17,7 +17,7 @@ visual or behavioural, but that one changes what the MONITOR OUTPUT sends, and S
 sits at a few percent - a fixed full-level output into speakers is not something to try unasked. It
 is READ and reported, and left alone.
 
-Run:  python DevTools/test_unit_settings.py
+Run:  python DevTools/test_unit_settings_live.py
 """
 
 import json
@@ -26,6 +26,10 @@ import shutil
 import sys
 import time
 import urllib.request
+
+import _bootstrap  # noqa: F401  (the test data dir, like every other test)
+import _testkit
+from _testkit import check
 
 BASE = "http://127.0.0.1:8770"
 CHAN = "Mic2"                    # nothing is connected to Mic 2 on this desk
@@ -46,17 +50,6 @@ TEST_VALUE = {
     "inactiveButtonsBrightness": None,
 }
 SKIP = {"outputMonFixed": "changes what the monitor output sends; not tried unasked"}
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def get(path):
@@ -224,7 +217,4 @@ delete_profile(POST)
 print("  info temporary profiles deleted")
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

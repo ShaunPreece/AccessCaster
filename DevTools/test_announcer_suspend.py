@@ -28,18 +28,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import recorder
 import server
 
-FAILS = []
 SAID = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 def fake_say(text):
@@ -71,7 +65,7 @@ def reset(announcing: bool):
     else:
         server._announce_on.clear()
     # Nothing is a self-echo unless a test says so.
-    server._ann_self_writes.clear() if hasattr(server, "_ann_self_writes") else None
+    server._ann_self_writes.clear()
 
 
 def mark_ours():
@@ -253,7 +247,4 @@ check("a sync phrase that is dropped releases its waiter", ev.is_set(), True)
 server._ann_say = fake_say
 server._ANN_SILENT = _silent
 
-print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
-for f in FAILS:
-    print("  " + f)
-raise SystemExit(1 if FAILS else 0)
+sys.exit(_testkit.finish())

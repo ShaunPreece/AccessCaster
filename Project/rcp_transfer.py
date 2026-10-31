@@ -35,6 +35,7 @@ import devices  # per-device matrix and fader shape
 import diagnostics  # the app's own account of every record it sends
 import model_tree  # the tree grammar, and with it the ONE address format
 import rcp_hid  # write-generation counter (invalidates cached model reads)
+import rcp_read
 import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
 
@@ -881,8 +882,39 @@ _desk_volume_serial: int | None = None
 _session_pad_root: str | None = None
 
 
+def _desk_transfer_mode() -> int:
+    """The desk's `transferModeType` from a fresh dump: 0 when it is out of transfer mode."""
+    return rcp_read.first(rcp_read.read_model(fresh=True), "transferModeType", default=0) or 0
+
+
+def _leave_stale_transfer_mode(timeout_s: float = 8.0) -> None:
+    """Take the desk out of a transfer mode it is already in, and wait for its volume to go.
+
+    A run that stops mid-transfer leaves the desk in transfer mode with its pad volume mounted.
+    Until a find has learned that volume's serial, it looks like any other drive holding a `pads`
+    folder, so noting the volumes before entry would refuse the desk's own.
+    """
+    try:
+        mode = _desk_transfer_mode()
+    except Exception as exc:
+        diagnostics.event("transfer.mode_unread", str(exc))
+        return
+    if not mode:
+        return
+    diagnostics.event("transfer.stale_exit", "the desk was already in transfer mode", mode=mode)
+    mounted = {root for root in _drive_roots() if _is_pad_volume(root)}
+    send_record(build_global_prop_int("transferModeType", SEL_SYSTEM, 0))
+    deadline = time.monotonic() + timeout_s
+    while mounted and time.monotonic() < deadline:
+        if any(not _is_pad_volume(root) for root in mounted):
+            return
+        time.sleep(0.5)
+
+
 def _note_volumes_before_entry() -> None:
     global _volumes_before_entry
+    if _desk_volume_serial is None:
+        _leave_stale_transfer_mode()
     _volumes_before_entry = {root for root in _drive_roots() if _is_pad_volume(root)
                              and (_desk_volume_serial is None
                                   or _volume_serial(root) != _desk_volume_serial)}

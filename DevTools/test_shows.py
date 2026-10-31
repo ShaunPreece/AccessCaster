@@ -4,16 +4,12 @@ parser. No device needed: everything here works on a synthetic model blob or a p
 Run: python DevTools/test_shows.py
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check
 import devices
 import fake_model
 import server
 import shows
-
-
-def check(label, got, want):
-    if got != want:
-        raise AssertionError(f"{label}: got {got!r}, wanted {want!r}")
-    print(f"  ok  {label}")
 
 
 def fake_blob(entries):
@@ -139,4 +135,4 @@ check("Pro II may write shows", "shows" in devices.PRO2.caps, True)
 # there with error 8. See the cap comment in devices.py.
 check("the Duo may too", "shows" in devices.DUO.caps, True)
 
-print("\nALL SHOW AND SCAN CHECKS PASSED")
+raise SystemExit(_testkit.finish())

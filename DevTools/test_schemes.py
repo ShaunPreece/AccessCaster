@@ -10,47 +10,18 @@ Run: python DevTools/test_schemes.py
 """
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_true, as_device
 import devices
 import fake_model
 import rcp_transfer
 import routing_schemes
 
-FAILED = 0
 routing_schemes.WRITE_PACE = 0        # nothing leaves the process, so nothing needs pacing
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
-
-def check_true(label, got):
-    check(label, bool(got), True)
-
-
-class as_device:
-    """Force the ACTIVE device model, so device-aware code can be tested with no desk attached."""
-
-    def __init__(self, dev):
-        self.dev = dev
-
-    def __enter__(self):
-        self.saved = devices.get_active_device
-        devices.get_active_device = lambda: self.dev
-        return self.dev
-
-    def __exit__(self, *exc):
-        devices.get_active_device = self.saved
-        return False
 
 
 class capture_writes:
@@ -104,7 +75,6 @@ MODES[HP1_OUT] = 2
 # mode-independent set (the nine plus RODE's four Expanded rows), and a fixture narrower than the
 # reader walks fabricates "included" for the rows it leaves out.
 PRO2_SOURCES = devices.PRO2.matrix.all_source_indices
-VIRTUAL_A_SRC = 14
 
 
 def cell(o, s):
@@ -132,8 +102,9 @@ blob = fake_model.encode(MODE_ROWS + parts)
 # --- capture --------------------------------------------------------------------------------------
 
 print("CAPTURE: what a scheme records")
-tmp = tempfile.mkdtemp(prefix="ac_schemes_test_")
-routing_schemes.SCHEMES_DIR = tmp
+# Held for the whole run: the folder is removed when this object goes, at exit however it ends.
+schemes_dir = tempfile.TemporaryDirectory(prefix="ac_schemes_test_", ignore_cleanup_errors=True)
+routing_schemes.SCHEMES_DIR = schemes_dir.name
 with as_device(devices.PRO2):
     cap = routing_schemes.capture("show", blob)
 check_true("capture reports ok", cap.get("ok"))
@@ -327,10 +298,5 @@ check("the store is empty again", routing_schemes.list_names(), [])
 check("deleting what is not there is an error, not a silent success",
       routing_schemes.delete("show").get("ok"), False)
 
-for f in os.listdir(tmp):
-    os.remove(os.path.join(tmp, f))
-os.rmdir(tmp)
-
 print()
-print("FAILURES:", FAILED)
-sys.exit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

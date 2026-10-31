@@ -23,43 +23,15 @@ import tempfile
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_true, as_device
 import channels
 import devices
 import fake_model
 import profiles
 import rcp_transfer
 
-FAILED = 0
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
-
-def check_true(label, got):
-    check(label, bool(got), True)
-
-
-class as_device:
-    """Force the ACTIVE device model, so device-aware code can be tested with no desk attached."""
-
-    def __init__(self, dev):
-        self.dev = dev
-
-    def __enter__(self):
-        self.saved = devices.get_active_device
-        devices.get_active_device = lambda: self.dev
-        return self.dev
-
-    def __exit__(self, *exc):
-        devices.get_active_device = self.saved
-        return False
 
 
 # --- a synthetic model blob, every property on the root node (see fake_model) -------------------
@@ -475,8 +447,7 @@ def profile(**routing):
 
 def apply_pro2(prof):
     with as_device(devices.PRO2), recorder() as calls:
-        res = profiles.apply(prof, fader_count=9, fader_code_set=devices.PRO2.fader.code_set,
-                             mic_channels=(1, 2, 3, 4))
+        res = profiles.apply(prof, fader_count=9, fader_code_set=devices.PRO2.fader.code_set)
         return list(calls), res
 
 
@@ -594,8 +565,7 @@ print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is delib
 with as_device(devices.DUO), recorder() as duo_mt:
     profiles.apply(profile(multitrack=2, processing_bypass=True, usb_multitrack=1,
                                usb_processing_bypass=True),
-                       fader_count=10, fader_code_set=devices.DUO.fader.code_set,
-                       mic_channels=(1, 2))
+                       fader_count=10, fader_code_set=devices.DUO.fader.code_set)
     duo_mt = list(duo_mt)
 check("all four land on the Duo too",
       args_of(duo_mt, "set_multitrack_mode") + args_of(duo_mt, "set_recording_processing_bypass")
@@ -617,8 +587,7 @@ print("\nRESTORE on the Duo: levels ARE written")
 # must get nothing.
 with as_device(devices.DUO), recorder() as duo_calls:
     duo_res = profiles.apply(profile(), fader_count=10,
-                                 fader_code_set=devices.DUO.fader.code_set,
-                                 mic_channels=(1, 2))
+                                 fader_code_set=devices.DUO.fader.code_set)
     duo_calls = list(duo_calls)
 check("the five VIRTUAL faders are written, and only those",
       sorted(a[0] for a in args_of(duo_calls, "set_fader_level")), [0x08, 0x09, 0x0A, 0x0B, 0x0C])
@@ -668,8 +637,7 @@ print("\nRESTORE on the Duo: the unit settings ARE written")
 # mute somebody.
 with as_device(devices.DUO), recorder() as duo_unit_calls:
     duo_unit_res = profiles.apply(dict(profile(), **{profiles.UNIT_KEY: UNIT}), fader_count=10,
-                                      fader_code_set=devices.DUO.fader.code_set,
-                                      mic_channels=(1, 2))
+                                      fader_code_set=devices.DUO.fader.code_set)
     duo_unit_calls = list(duo_unit_calls)
 duo_unit_written = dict(args_of(duo_unit_calls, "set_unit_setting"))
 check_true("the Duo now restores its unit settings", bool(duo_unit_written))
@@ -685,5 +653,4 @@ try:
 except ValueError as exc:
     check_true("ValueError, naming the property", "definitelyNotAProperty" in str(exc))
 
-print(f"\n{'ALL PASS' if not FAILED else str(FAILED) + ' FAILED'}")
-sys.exit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

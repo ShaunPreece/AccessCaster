@@ -11,45 +11,34 @@ Run: python DevTools/test_driver_install.py
 from __future__ import annotations
 
 import glob
-import io
 import os
 import re
 import tempfile
 import zipfile
 
 import _bootstrap  # puts Project/ on sys.path
+import _testkit
+from _testkit import check, check_true, patched
 import driver_install as di
 import server
 import virtual_devices
 
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
-
 
 def refuses(label, fn, must_say):
     """The call raises DriverInstallError AND its message tells the user what to do next."""
-    global FAILED
     try:
         fn()
     except di.DriverInstallError as exc:
         said = str(exc)
-        ok = must_say.lower() in said.lower() and "software page" in said.lower()
-        FAILED += 0 if ok else 1
-        print(f"  {'ok  ' if ok else 'FAIL'} {label}: {said[:96]}...")
+        check_true(label, must_say.lower() in said.lower() and "software page" in said.lower(),
+                   said[:96])
         return
-    FAILED += 1
-    print(f"  FAIL {label}: it did NOT refuse")
+    check_true(label, False, "it did NOT refuse")
 
 
-tmp = tempfile.mkdtemp(prefix="ac_driver_test_")
+# Held for the whole run: the folder is removed when this object goes, at exit however it ends.
+tmp_dir = tempfile.TemporaryDirectory(prefix="ac_driver_test_", ignore_cleanup_errors=True)
+tmp = tmp_dir.name
 
 
 def zip_with(names):
@@ -111,17 +100,17 @@ else:
     print("  SKIP no local copy in _driver/ to check against")
 
 print("\nTHE REFUSAL TO INSTALL OVER ONE THAT IS ALREADY THERE")
-_real = virtual_devices.read_status
-try:
-    class _St:
-        installed = True
-    virtual_devices.read_status = lambda: _St()
+
+
+class _St:
+    installed = True
+
+
+with patched((virtual_devices, {"read_status": lambda: _St()})):
     r = server.action_install_driver()
-    check("it refuses rather than downloading again", r.get("ok"), False)
-    check("and points at the manual route for a repair",
-          "software page" in (r.get("message") or "").lower(), True)
-finally:
-    virtual_devices.read_status = _real
+check("it refuses rather than downloading again", r.get("ok"), False)
+check("and points at the manual route for a repair",
+      "software page" in (r.get("message") or "").lower(), True)
 
 print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
 # The claim the README and Help both make, asserted rather than trusted: no other module reaches
@@ -130,16 +119,16 @@ print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
 proj = os.path.join(os.path.dirname(os.path.abspath(_bootstrap.__file__)), "..", "Project")
 callers = []
 for path in glob.glob(os.path.join(proj, "*.py")):
-    for line in io.open(path, encoding="utf-8"):
-        if not re.search(r"urlopen\s*\(|urlretrieve\s*\(", line):
-            continue
-        # LOCALHOST IS NOT OUTBOUND. `server.py` pings its own `/api/announce` to see whether
-        # another instance is already serving, which is the app talking to itself.
-        if re.search(r"localhost|127\.0\.0\.1", line):
-            continue
-        callers.append(os.path.basename(path))
+    with open(path, encoding="utf-8") as source:
+        for line in source:
+            if not re.search(r"urlopen\s*\(|urlretrieve\s*\(", line):
+                continue
+            # LOCALHOST IS NOT OUTBOUND. `server.py` pings its own `/api/announce` to see whether
+            # another instance is already serving, which is the app talking to itself.
+            if re.search(r"localhost|127\.0\.0\.1", line):
+                continue
+            callers.append(os.path.basename(path))
 check("exactly one module reaches anything beyond this computer",
       sorted(set(callers)), ["driver_install.py"])
 
-print(f"\n{'ALL CHECKS PASSED' if not FAILED else str(FAILED) + ' CHECK(S) FAILED'}")
-raise SystemExit(1 if FAILED else 0)
+raise SystemExit(_testkit.finish())

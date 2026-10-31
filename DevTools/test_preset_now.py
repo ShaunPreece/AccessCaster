@@ -17,19 +17,10 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check
 import channels
 import server
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 # A preset as the files store it: normalised floats, the module flags, the mode, and the marker.
@@ -130,5 +121,4 @@ check("channel 1 answers for itself", server._preset_now(1, live())["name"], "Po
 check("channel 3 for itself", server._preset_now(3, live())["name"], "Shaun voice")
 check("and a channel with no record still claims nothing", server._preset_now(2, live()), None)
 
-print("\nALL CHECKS PASSED" if not FAILED else f"\n{FAILED} CHECK(S) FAILED")
-sys.exit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

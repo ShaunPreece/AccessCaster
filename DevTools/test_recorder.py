@@ -16,24 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from datetime import datetime, timezone
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_in
 import recorder
 from wording import spoken_datetime
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
-
-
-def check_in(name, needle, haystack):
-    ok = needle in haystack
-    if not ok:
-        FAILS.append(f"{name}: {needle!r} not in {haystack!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 # A real recordingContent string, copied off the unit. The trailing six fields are unmapped.
@@ -225,7 +211,4 @@ check_in("and the mixed track is called out", "mixed track", recorder.BYPASS_HIN
 check_in("with multitrack off, it says nothing happens yet",
          "does nothing", recorder.BYPASS_NEEDS_MULTITRACK)
 
-print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
-for f in FAILS:
-    print("  " + f)
-raise SystemExit(1 if FAILS else 0)
+sys.exit(_testkit.finish())

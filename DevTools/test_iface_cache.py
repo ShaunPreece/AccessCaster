@@ -16,16 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import rcp_hid
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 def iface(pid, path):
@@ -101,7 +94,4 @@ finally:
     rcp_hid._IFACE_TTL_S = real_ttl
     rcp_hid.forget_interfaces()
 
-print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
-for f in FAILS:
-    print("  " + f)
-raise SystemExit(1 if FAILS else 0)
+sys.exit(_testkit.finish())

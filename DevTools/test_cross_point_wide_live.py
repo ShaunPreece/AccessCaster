@@ -37,25 +37,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import model_tree
 import rcp_read
 import rcp_transfer as t
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
-FAILED = 0
 
 # The properties on a cross-point that carry meaning and must come back exactly. The two request
 # triggers are deliberately absent: see the docstring.
 MEANINGFUL = ("mixDisabled", "mixLink", "mixMute", "mixLevelWithAnchor")
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def snapshot():
@@ -109,5 +101,4 @@ check("every meaningful value is back", after, before)
 check("no stray: the model's node, property and MIX counts are unchanged",
       counts_after, counts_before)
 
-print(f"\n{'ALL CHECKS PASSED' if not FAILED else str(FAILED) + ' CHECK(S) FAILED'}")
-raise SystemExit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

@@ -20,20 +20,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import rcp_read
 import server
 
-FAILED = 0
 GB = 1024 * 1024 * 1024
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def low_for(states):
@@ -91,8 +83,7 @@ def main() -> int:
     print("\nA FULL CARD is reported, not treated as a broken read")
     check("nothing free at all", [v["free_pct"] for v in low_for([state(64 * GB, 0)])], [0])
 
-    print("\n" + ("ALL CHECKS PASSED" if not FAILED else f"{FAILED} FAILED"))
-    return 1 if FAILED else 0
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

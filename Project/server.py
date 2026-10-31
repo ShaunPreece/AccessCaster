@@ -4911,7 +4911,9 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         _autogain_set(phase="working", message="Working it out.")
 
         if not decision["ok"]:
-            _autogain_set(phase="failed", done=True, result=result, message=decision["reason"])
+            # A take the person stopped is not evidence about their microphone.
+            message = "Stopped. The gain was not changed." if stopped else decision["reason"]
+            _autogain_set(phase="failed", done=True, result=result, message=message)
             return
         words = _autogain_words(name, gain_before, target, result, win, check)
         if stopped:
@@ -8746,8 +8748,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 except Exception:
                     vec_before = levels_before = None
             res = profiles.apply(prof, fader_count=_active_faders().vector_length,
-                                 fader_code_set=_active_faders().code_set,
-                                 mic_channels=MIC_CHANNELS, progress=job.step)
+                                 fader_code_set=_active_faders().code_set, progress=job.step)
             if levels_before is not None:
                 _follow_levels(vec_before, _read_fader_vector(spec=spec), levels_before, spec)
         # A PROFILE CARRIES `systemMidiControl`, so one taken while MIDI was off has just switched

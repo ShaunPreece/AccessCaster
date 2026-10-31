@@ -20,6 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, check_in, check_not_in
 import autogain
 import devices
 import meters
@@ -31,30 +33,6 @@ import server
 devices.force_device(devices.PRO2)
 
 ROOT = Path(__file__).resolve().parent.parent
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
-
-
-def check_in(name, needle, haystack):
-    ok = needle.lower() in (haystack or "").lower()
-    if not ok:
-        # TRUNCATED: one of these haystacks is the whole of server.py, and printing all of it
-        # buries the failure it is reporting.
-        FAILS.append(f"{name}: {needle!r} not in {(haystack or '')[:160]!r}...")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
-
-
-def check_not_in(name, needle, haystack):
-    ok = needle.lower() not in (haystack or "").lower()
-    if not ok:
-        FAILS.append(f"{name}: {needle!r} IS in {(haystack or '')[:160]!r}...")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 class FakeWatcher:
@@ -216,9 +194,4 @@ check_not_in("not a missing microphone", "plugged in", short["reason"])
 none = autogain.verdict({"loud_db": -60.0, "max_db": -60.0})
 check_in("nothing at all says to check the microphone", "plugged in", none["reason"])
 print("")
-if FAILS:
-    print("FAILURES (%d):" % len(FAILS))
-    for f in FAILS:
-        print("  " + f)
-    raise SystemExit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

@@ -12,22 +12,15 @@ import sys
 import types
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check
 import channels
 import commands
 import devices
 
 devices.force_device(devices.PRO2)
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
+# The factory layout, held as if read, so the channel lookups make no read of the desk.
+channels.publish_strip_vector(list(devices.PRO2_FADERS.default_vector))
 
 
 # A stub server: Mic 1 is muted, soloed, processed and on phantom, and the announcer's cache knows
@@ -55,5 +48,4 @@ commands.run("chan.mute:Mic1")
 check("mute with no announcer cache falls back to a read", writes, [("mute", False)])
 
 print()
-print("FAILURES:", FAILED)
-sys.exit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

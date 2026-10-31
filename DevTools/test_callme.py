@@ -13,17 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _testkit
+from _testkit import check, decode_record
 import callme
-import model_tree
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 CTL = [664]
@@ -49,26 +41,23 @@ DEFAULT_NAME = "RÃ\u0098DE-CallMe"      # "RØDE-CallMe" as the latin-1 decoder
 
 print("the answer record")
 rec = callme.build_answer(5, 0, CTL)
-n = int.from_bytes(rec[1:5], "little")
-path, name, value, kind, _end = model_tree.parse_record(rec[5:5 + n])
+path, name, value, kind, end = decode_record(rec)
 check("addressed at the control node", path, CTL)
 check("names the accept property", name, "sipIncomingCallAccept")
 # THE BOOL IS FALSE. With True the call sets up and its audio never opens.
 check("a composite of the JSON and a FALSE bool", value,
       [('{"id":5,"sip_slot":0}', "str"), (False, "bool")])
-check("byte form matches the spec", rec[5:5 + n].hex(),
+check("byte form matches the spec", rec[5:5 + end].hex(),
       "010101029802" + b"sipIncomingCallAccept\x00".hex()
       + "011d08011705" + b'{"id":5,"sip_slot":0}\x00'.hex() + "010103")
-_p, _n, value, _k, _e = model_tree.parse_record(
-    callme.build_answer(5, -1, CTL)[5:5 + n + 1])
+_p, _n, value, _k, _e = decode_record(callme.build_answer(5, -1, CTL))
 check("decline is slot -1", value[0][0], '{"id":5,"sip_slot":-1}')
 
 print("the hang-up records")
 recs = callme.build_hangup(SLOTS[0])
 vals = []
 for r in recs:
-    n = int.from_bytes(r[1:5], "little")
-    path, name, value, _k, _e = model_tree.parse_record(r[5:5 + n])
+    path, name, value, _k, _e = decode_record(r)
     vals.append((path, name, value))
 # AN EDGE: the first bool has to RISE, so a single (True, False) does nothing from rest.
 check("two writes, lowering then raising the first bool", [v[2] for v in vals],
@@ -79,8 +68,7 @@ check("both on the call's slot", {(tuple(v[0]), v[1]) for v in vals},
 print("dialling")
 dial = []
 for rec in callme.build_dial("AB12CD", 0, CTL):
-    n = int.from_bytes(rec[1:5], "little")
-    dial.append(model_tree.parse_record(rec[5:5 + n])[:3])
+    dial.append(decode_record(rec)[:3])
 check("both records go to the control node's outgoing property", {(tuple(d[0]), d[1]) for d in dial},
       {(tuple(CTL), "sipOutgoingCallDetails")})
 # THE DESK ACTS ONLY ON A CHANGE, so the property is cleared first or a redial does nothing.
@@ -207,8 +195,7 @@ check("an extension on the unit is spoken", said[-1], "Call with Shaun extended.
 w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 ext = []
 for r in callme.build_extend(SLOTS[0]):
-    n = int.from_bytes(r[1:5], "little")
-    path, name, value, _k, _e = model_tree.parse_record(r[5:5 + n])
+    path, name, value, _k, _e = decode_record(r)
     ext.append((tuple(path), name, value))
 check("extend lowers the pair, then raises both, as the touchscreen leaves it",
       [e[2] for e in ext],
@@ -225,7 +212,6 @@ check("auto-extend is asked with the slot", asked, [0])
 check("and the warning goes unsaid while it extends", auto_said, [])
 check("an expiring call is still connected", w.snapshot()["slots"][0]["state"] in callme.CONNECTED,
       True)
-check("and still up, so it can be hung up", callme.end_label({"incoming": None}), "Hang up")
 check("the call line says so",
       callme.call_now({"incoming": None, "slots": [{"slot": 1, "state": "Expiring",
                                                     "peer": "Shaun"}]}),
@@ -342,9 +328,4 @@ check("offline outranks hosting in the status line",
           "The unit is offline, so no call can connect."), True)
 
 print()
-if FAILS:
-    print(f"{len(FAILS)} FAILED:")
-    for f in FAILS:
-        print("  " + f)
-    raise SystemExit(1)
-print("all passed")
+sys.exit(_testkit.finish())

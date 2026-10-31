@@ -10,6 +10,7 @@ THE RULES THIS PINS:
   * the level watch, with no stream chosen, takes a capture stream rather than playback;
   * however the app stops, a Hold-mode pad a shortcut is holding is released;
   * a Chat isolation whose setup fails part way puts back what it had already changed;
+  * auto gain stopped before anything was said reports the stop, not a silent microphone;
   * an announcer loop that is no longer the newest leaves without touching the live state.
 
 No device and no speech: the desk calls are stubbed.
@@ -26,16 +27,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import as_device, check, patched
 import server
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 print("STATIC FILES")
@@ -68,7 +62,9 @@ check("a body that is not UTF-8 is refused", body_of(b"\xff\xfe"), "refused")
 
 
 print("\nSETTINGS FILE")
-folder = tempfile.mkdtemp(prefix="ac-settings-")
+# Held for the whole run: the folder is removed when this object goes, at exit however it ends.
+settings_dir = tempfile.TemporaryDirectory(prefix="ac-settings-", ignore_cleanup_errors=True)
+folder = settings_dir.name
 server._SETTINGS_FILE = os.path.join(folder, "settings.json")
 server.update_settings(a=1)
 server.update_settings(b=2)
@@ -96,14 +92,12 @@ check("a file holding a list reads as no presets", server._load_user_presets(), 
 
 
 print("\nFADER LEVEL")
-pinned = server.devices.force_device(server.devices.PRO2)
-real_fader = (server.rcp_read.read_model, server.rcp_transfer.set_fader_level,
-              server._ann_publish_level)
 reads = []
-server.rcp_read.read_model = lambda *a, **k: reads.append(server._hid_lock.locked()) or b""
-server.rcp_transfer.set_fader_level = lambda sel, value: None
-server._ann_publish_level = lambda *a: None
-try:
+with as_device(server.devices.PRO2), patched(
+        (server.rcp_read, {"read_model":
+                           lambda *a, **k: reads.append(server._hid_lock.locked()) or b""}),
+        (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
+        (server, {"_ann_publish_level": lambda *a: None})):
     server.channels.publish_strip_vector([0, 1, 2, 3, 4, 5, 6, 7, 8])
     res = server.action_set_fader_level(6, 50)
     check("the level is set", res.get("ok"), True)
@@ -112,15 +106,9 @@ try:
     server.channels._strip_vec_last["vec"] = None
     server.action_set_fader_level(6, 40)
     check("with none held, the read is made under the HID lock", reads, [True])
-finally:
-    (server.rcp_read.read_model, server.rcp_transfer.set_fader_level,
-     server._ann_publish_level) = real_fader
-    server.devices.force_device(pinned)
 
 
 print("\nLEVEL WATCH")
-real_meter = (server.meters.desk_streams, server.meters.default_recording_name,
-              server.meters.Watcher, server._meter_prefs)
 built = []
 
 
@@ -136,39 +124,31 @@ class _Watcher:
         self.running = False
 
 
-server.meters.desk_streams = lambda: {"ok": True, "streams": [
-    {"id": "out", "name": "Speakers (RODECaster Main Stereo)", "flow": "playback"},
-    {"id": "in", "name": "Microphone (RODECaster Main Stereo)", "flow": "recording"}]}
-server.meters.default_recording_name = lambda: ""
-server.meters.Watcher = _Watcher
-server._meter_prefs = lambda: {**real_meter[3](), "stream": ""}
-try:
+real_prefs = server._meter_prefs
+with patched(
+        (server.meters, {
+            "desk_streams": lambda: {"ok": True, "streams": [
+                {"id": "out", "name": "Speakers (RODECaster Main Stereo)", "flow": "playback"},
+                {"id": "in", "name": "Microphone (RODECaster Main Stereo)", "flow": "recording"}]},
+            "default_recording_name": lambda: "",
+            "Watcher": _Watcher}),
+        (server, {"_meter_prefs": lambda: {**real_prefs(), "stream": ""}})):
     server.action_meter_watch(True)
     check("with no stream chosen, the watch takes the capture stream", built, ["in"])
     server.action_meter_watch(False)
-finally:
-    (server.meters.desk_streams, server.meters.default_recording_name,
-     server.meters.Watcher, server._meter_prefs) = real_meter
 
 
 print("\nSHUTTING DOWN")
-real_midi = (server.midi_out.release_pad, server.midi_out.close)
 released = []
-server.midi_out.release_pad = released.append
-server.midi_out.close = lambda: None
-try:
+with patched((server.midi_out, {"release_pad": released.append, "close": lambda: None})):
     server._hk_pads_held.add(2)            # a Hold-mode pad a shortcut is holding: pad 3 of bank 1
     server._shut_down("test")
     check("a held pad is released however the app stops", released, [3])
     check("and is no longer held", server._hk_pads_held, set())
-finally:
-    server.midi_out.release_pad, server.midi_out.close = real_midi
 
 
 print("\nCHAT ISOLATION")
 writes = []
-real = (server.rcp_transfer.set_output_routing, server.rcp_transfer.set_cross_point_excluded,
-        server.time.sleep, server._active_matrix)
 
 
 class _Matrix:
@@ -181,11 +161,11 @@ def excluded(out, src, on):
         raise OSError("the unit stopped answering")
 
 
-server.rcp_transfer.set_output_routing = lambda out, mode: writes.append(("mode", mode))
-server.rcp_transfer.set_cross_point_excluded = excluded
-server.time.sleep = lambda s: None
-server._active_matrix = lambda: _Matrix()
-try:
+with patched(
+        (server.rcp_transfer, {"set_output_routing": lambda out, mode: writes.append(("mode", mode)),
+                               "set_cross_point_excluded": excluded}),
+        (server.time, {"sleep": lambda s: None}),
+        (server, {"_active_matrix": lambda: _Matrix()})):
     iso = server._ChatIsolation(0)
     before = {0: False, 1: False, 2: False, 3: False}
     iso._snapshot = lambda: (2, dict(before), {0: {"level": 1.0}})
@@ -199,33 +179,59 @@ try:
     check("and what had changed is put back",
           writes[3:], [(0, False), (1, False), (2, False), (3, False)])
     check("and the restore is confirmed", iso.restored, True)
-finally:
-    (server.rcp_transfer.set_output_routing, server.rcp_transfer.set_cross_point_excluded,
-     server.time.sleep, server._active_matrix) = real
+
+
+print("\nAUTO GAIN STOPPED BEFORE ANYTHING WAS SAID")
+
+
+class _Isolation:
+    level, restored = 1.0, True
+
+    def __init__(self, keep):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def stopped_silent_take(endpoint_id, seconds, should_stop=None):
+    server._autogain_set(cancel=True)          # Stop pressed during the take
+    return {"seconds": 0.0, "samples": 0, "loud": 0.0, "loud_db": -120.0, "max": 0.0,
+            "max_db": -120.0, "muted": False, "ceiling": 1.0}
+
+
+server._autogain = {"phase": "starting", "channel": "Mic1", "done": False, "cancel": False}
+with patched(
+        (server, {"_read_gain_and_processing": lambda mic: (30, False),
+                  "_chat_endpoint_to_unity": lambda endpoint_id: {},
+                  "_ChatIsolation": _Isolation}),
+        (server.autogain, {"chat_endpoint": lambda: {"id": "chat"},
+                           "measure_endpoint": stopped_silent_take}),
+        (server.meters, {"cue": lambda name: None})):
+    server._autogain_run("Mic1", 1, 5.0)
+gain_result = server._autogain_state()
+check("a take stopped before anything was said changes nothing", gain_result.get("phase"), "failed")
+check("and says it was stopped, not that the microphone may be faulty",
+      gain_result.get("message"), "Stopped. The gain was not changed.")
+server._autogain = None
 
 
 print("\nANNOUNCER LOOPS")
-opened = []
-real = (server.rcp_transfer.find_control_interface, server._ann_seed_layout)
-server.rcp_transfer.find_control_interface = lambda fresh=False: object()
-server._ann_seed_layout = lambda st: None
-try:
-    newest = {"bank": 1}
-    server._ann_live_state = newest
-    server._ann_loop_gen = 5
-    server._announce_on.set()
-    server._announce_loop(4)
-    check("a superseded loop leaves the newest loop's state alone",
-          server._ann_live_state is newest, True)
-finally:
-    server._announce_on.clear()
-    server._ann_live_state = None
-    server.rcp_transfer.find_control_interface, server._ann_seed_layout = real
+with patched((server.rcp_transfer, {"find_control_interface": lambda fresh=False: object()}),
+             (server, {"_ann_seed_layout": lambda st: None})):
+    try:
+        newest = {"bank": 1}
+        server._ann_live_state = newest
+        server._ann_loop_gen = 5
+        server._announce_on.set()
+        server._announce_loop(4)
+        check("a superseded loop leaves the newest loop's state alone",
+              server._ann_live_state is newest, True)
+    finally:
+        server._announce_on.clear()
+        server._ann_live_state = None
 
-print()
-if FAILS:
-    print(f"{len(FAILS)} FAILED")
-    for f in FAILS:
-        print("  " + f)
-    sys.exit(1)
-print("all passed")
+sys.exit(_testkit.finish())

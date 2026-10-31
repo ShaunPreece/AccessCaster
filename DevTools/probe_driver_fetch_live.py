@@ -23,18 +23,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import driver_install as di
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 folder = tempfile.mkdtemp(prefix="ac_driver_fetch_")
@@ -70,5 +61,4 @@ if local.is_file():
           f"({local.stat().st_size} bytes), so RODE have "
           f"{'not changed' if same else 'CHANGED'} the file since it was taken.")
 
-print(f"\nFAILURES: {FAILED}")
-raise SystemExit(1 if FAILED else 0)
+sys.exit(_testkit.finish())

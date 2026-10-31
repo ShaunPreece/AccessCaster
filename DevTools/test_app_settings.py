@@ -20,17 +20,9 @@ import re
 import sys
 
 import _bootstrap
+import _testkit
+from _testkit import check
 import app_settings as a
-
-FAILED = 0
-
-
-def check(name, got, want=None):
-    global FAILED
-    ok = (got == want) if want is not None else bool(got)
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}" + ("" if ok else f": got {got!r}, want {want!r}"))
-    if not ok:
-        FAILED += 1
 
 
 # Every key the app WRITES to settings.json, read off the source rather than listed by hand: a hand
@@ -150,7 +142,4 @@ check("an empty import says nothing was restored",
       "Nothing was restored" in a.describe_import(empty), True)
 
 print()
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

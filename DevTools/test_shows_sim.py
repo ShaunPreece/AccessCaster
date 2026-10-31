@@ -19,6 +19,8 @@ import threading
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import as_device, check, check_in, patched
 import devices
 import fake_model
 import profiles as profiles_mod
@@ -31,22 +33,6 @@ import shows
 # be plugged into the machine running them.
 devices.force_device(devices.PRO2)
 REAL_LISTENER = rcp_read.PushListener      # before the stub below replaces it
-
-PASSED = []
-
-
-def check(label, got, want):
-    if got != want:
-        raise AssertionError(f"{label}:\n  got  {got!r}\n  want {want!r}")
-    PASSED.append(label)
-    print(f"  ok  {label}")
-
-
-def check_in(label, needle, haystack):
-    if needle.lower() not in (haystack or "").lower():
-        raise AssertionError(f"{label}:\n  {needle!r} not in {haystack!r}")
-    PASSED.append(label)
-    print(f"  ok  {label}")
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +96,6 @@ class FakeDesk:
                  ("SHOWCONTROL", "currentShowUUID", self.current_uuid),
                  ("SHOWCONTROL", "showControlLastError", self.last_error)]
         return fake_model.encode(rows)
-
-    def uid_of(self, snapshot):
-        for n, b in enumerate(self.backups):
-            if b["snapshot"] == snapshot:
-                return n
-        return None
 
     # -- the four commands, as the unit would act on them --------------------
     def export(self):
@@ -196,13 +176,20 @@ def run_job(start_result):
     """Start a command and wait for the one job to finish, then return its final status."""
     if not start_result.get("ok"):
         return start_result                      # refused before the job ever started
-    deadline = time.time() + 20
-    while time.time() < deadline:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
         st = server.show_job_status()
         if st.get("done"):
             return st
         time.sleep(0.02)
     raise AssertionError("the job never finished")
+
+
+def wait_for_restore(timeout_s):
+    """Wait for the restore job to stop running, or for the timeout."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline and server._restore_job.busy():
+        time.sleep(0.05)
 
 
 def reset_desk():
@@ -439,8 +426,8 @@ busy = server.action_show_export()
 check("a second command is refused while one runs", busy["ok"], False)
 check_in("and says why", "already running", busy["message"])
 _held.set()
-_deadline = time.time() + 10
-while time.time() < _deadline and server._show_job.busy():
+_deadline = time.monotonic() + 10
+while time.monotonic() < _deadline and server._show_job.busy():
     time.sleep(0.02)
 check("and the held job releases it again", server._show_job.busy(), False)
 
@@ -452,9 +439,7 @@ reset_desk()
 CAPLESS = dataclasses.replace(devices.DUO, name="RODECaster Nocaps",
                               caps=devices.DUO.caps - {"shows"})
 check("the synthetic desk really lacks the cap", "shows" in CAPLESS.caps, False)
-real = devices.get_active_device
-devices.get_active_device = lambda: CAPLESS
-try:
+with as_device(CAPLESS):
     gate = server.action_show_export()
     check("a desk without the cap refuses to export", gate["ok"], False)
     check_in("naming the device", "Nocaps", gate["message"])
@@ -470,10 +455,9 @@ try:
     # model do a clean restore. Both earlier checks are right to come first, so the test supplies a
     # matching profile rather than the code being reordered to suit it. CAPLESS keeps the Duo's
     # product_id, so the "saved on this model" check passes and the CAP is what refuses.
-    real_load = profiles_mod.load
-    profiles_mod.load = lambda name: {"ok": True, "safe": "duo-profile",
-                                      "prof": {"product_id": CAPLESS.product_id, "pads": []}}
-    try:
+    with patched((profiles_mod, {"load": lambda name: {
+            "ok": True, "safe": "duo-profile",
+            "prof": {"product_id": CAPLESS.product_id, "pads": []}}})):
         clean = server.restore_profile("duo-profile", clean=True)
         check("a clean restore without the cap is refused, not downgraded", clean["ok"], False)
         check_in("and it offers the alternative", "restore without the reset", clean["message"])
@@ -483,25 +467,17 @@ try:
         # about the reset, not about restoring.
         merged = server.restore_profile("duo-profile", clean=False)
         check("but a merge restore is still allowed", merged.get("ok"), True)
-        deadline = time.time() + 20
-        while time.time() < deadline and server._restore_job.busy():
-            time.sleep(0.05)
+        wait_for_restore(20)
         check("and it ran to completion", server._restore_job.busy(), False)
-    finally:
-        profiles_mod.load = real_load
-finally:
-    devices.get_active_device = real
+
+ANY_PROFILE = (profiles_mod, {"load": lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}})
 
 print("a CLEAN restore, end to end")
 reset_desk()
-real_load = profiles_mod.load
-profiles_mod.load = lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}
-try:
+with patched(ANY_PROFILE):
     started = server.restore_profile("p", clean=True)
     check("it starts", started.get("ok"), True)
-    deadline = time.time() + 30
-    while time.time() < deadline and server._restore_job.busy():
-        time.sleep(0.05)
+    wait_for_restore(30)
     final = server._restore_job.status()
     check("it finishes", final["running"], False)
     # ORDER IS THE WHOLE POINT: back up, reset, THEN write the profile. A reset after the writes
@@ -512,31 +488,18 @@ try:
     check_in("and the result says the reset happened", "reset the desk to factory settings first",
              final["message"])
     check_in("naming the backup that undoes it", "after backing it up", final["message"])
-finally:
-    profiles_mod.load = real_load
 
 print("a clean restore whose backup fails changes NOTHING")
 reset_desk()
-profiles_mod.load = lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}
-try:
+DESK.export_does_nothing = True
+with patched(ANY_PROFILE):
     server.restore_profile("p", clean=True)
-    deadline = time.time() + 30
-    while time.time() < deadline and server._restore_job.busy():
-        time.sleep(0.05)
-    DESK.export_does_nothing = True
-    reset_desk()
-    DESK.export_does_nothing = True
-    server.restore_profile("p", clean=True)
-    deadline = time.time() + 30
-    while time.time() < deadline and server._restore_job.busy():
-        time.sleep(0.05)
+    wait_for_restore(30)
     final = server._restore_job.status()
     check("the restore is reported as failed", final["ok"], False)
     check("THE DESK WAS NOT RESET", DESK.current_uuid, "show-A")
     check("and no reset was sent", "reset" in DESK.calls, False)
     check_in("and it says nothing changed", "nothing on the desk has changed", final["message"])
-finally:
-    profiles_mod.load = real_load
 
 print("bad handles")
 reset_desk()
@@ -561,6 +524,6 @@ check("nothing matching arrived", listener.wait_for("showControlExport", 0.5), N
 playing.set()
 check("and the wait ended at its timeout", time.monotonic() - began < 1.0, True)
 
-print(f"\nALL {len(PASSED)} SIMULATED-DESK CHECKS PASSED")
 print("REMEMBER: this proves the decisions, not the bytes. All four commands are confirmed on a "
       "desk; the FAULTS above are what only a fake desk can stage.")
+raise SystemExit(_testkit.finish())

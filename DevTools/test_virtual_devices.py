@@ -4,6 +4,8 @@ reads it, and the spoken outcomes say the right thing. No desk, no driver, no CO
     python DevTools/test_virtual_devices.py
 """
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check_true, patched
 import virtual_devices as vd
 
 
@@ -21,62 +23,49 @@ CONNECTED = block(1, 1, "RØDECaster Pro II (GV0064612)",
 ABSENT = block(0, 1, "No RØDECaster Connected", "4612)\0\0\0irmware Version: 1.76\0\0App Version: 1.0.5.0")
 OFF = block(0, 0, "No RØDECaster Connected")
 
-checks = 0
-
-
-def check(cond, what):
-    global checks
-    checks += 1
-    if not cond:
-        raise SystemExit(f"FAIL at check {checks}: {what}")
 
 
 def parse(raw: bytes, installed=True) -> vd.DriverStatus:
-    saved = (vd._read_block, vd._installed)
-    vd._read_block, vd._installed = (lambda: raw), (lambda: installed)
-    try:
+    with patched((vd, {"_read_block": lambda: raw, "_installed": lambda: installed})):
         return vd.read_status()
-    finally:
-        vd._read_block, vd._installed = saved
 
 
 st = parse(CONNECTED)
-check(st.running and st.connected and st.enabled, "connected block reads connected")
-check(st.desk == "RØDECaster Pro II (GV0064612)", f"desk string: {st.desk!r}")
-check(st.firmware == "1.76" and st.driver_version == "1.0.5.0", "versions found by label")
-check(st.phrase().startswith("RODE's Virtual Devices driver is connected to the RØDECaster"), st.phrase())
+check_true("connected block reads connected", st.running and st.connected and st.enabled)
+check_true(f"desk string: {st.desk!r}", st.desk == "RØDECaster Pro II (GV0064612)")
+check_true("versions found by label", st.firmware == "1.76" and st.driver_version == "1.0.5.0")
+check_true(st.phrase(), st.phrase().startswith("RODE's Virtual Devices driver is connected to the RØDECaster"))
 
 st = parse(ABSENT)
-check(st.running and not st.connected and st.enabled, "absent block reads not connected")
-check(st.desk == "", "no desk string while disconnected")
-check(st.firmware == "1.76", "firmware survives the overwritten first letter")
-check("not connected" in st.phrase(), st.phrase())
+check_true("absent block reads not connected", st.running and not st.connected and st.enabled)
+check_true("no desk string while disconnected", st.desk == "")
+check_true("firmware survives the overwritten first letter", st.firmware == "1.76")
+check_true(st.phrase(), "not connected" in st.phrase())
 
 st = parse(OFF)
-check(not st.enabled and "switched off" in st.phrase(), st.phrase())
+check_true(st.phrase(), not st.enabled and "switched off" in st.phrase())
 
 # No block at all is the service not running; the registry key alone says installed.
 st = parse(None, installed=False)
-check(not st.installed and not st.running and "not installed" in st.phrase(), st.phrase())
+check_true(st.phrase(), not st.installed and not st.running and "not installed" in st.phrase())
 st = parse(None, installed=True)
-check(st.installed and not st.running and "service is not running" in st.phrase(), st.phrase())
+check_true(st.phrase(), st.installed and not st.running and "service is not running" in st.phrase())
 
 # Wording.
 # The bind and the release are RODE's notification to say, never ours.
 o = vd.Outcome(status=vd.DriverStatus(), enabled=["Fader1", "Fader2", "System"],
                faders_ready=9)
-check(o.sentence() == "", o.sentence())
+check_true(o.sentence(), o.sentence() == "")
 o = vd.Outcome(status=vd.DriverStatus(), disabled=["System"])
-check(o.sentence() == "", o.sentence())
+check_true(o.sentence(), o.sentence() == "")
 o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9,
                default_moved_to="System (RØDECaster)")
-check(o.sentence() == "Windows sound is on System.", o.sentence())
+check_true(o.sentence(), o.sentence() == "Windows sound is on System.")
 o = vd.Outcome(status=vd.DriverStatus(),
                default_moved_to="Speakers (RODECaster Pro II Main Stereo)")
-check(o.sentence() == "Windows sound is back on the unit.", o.sentence())
+check_true(o.sentence(), o.sentence() == "Windows sound is back on the unit.")
 o = vd.Outcome(status=vd.DriverStatus(), faders_missing=True)
-check(o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."),
-      o.sentence())
+check_true(o.sentence(), o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."))
 
 # WINDOWS FALLING BACK IS TOLD APART FROM THE USER CHOOSING. Endpoints and the default are faked.
 def ep(id_, state="active", desk=False, virtual=False):
@@ -84,23 +73,19 @@ def ep(id_, state="active", desk=False, virtual=False):
 
 
 def note(default, eps):
-    saved = (vd._default_id, vd._endpoints)
-    vd._default_id, vd._endpoints = (lambda enum, role: default), (lambda enum: eps)
-    try:
+    with patched((vd, {"_default_id": lambda enum, role: default, "_endpoints": lambda enum: eps})):
         vd._note_default(None)
-    finally:
-        vd._default_id, vd._endpoints = saved
 
 
 vd._last_default, vd._displaced = "", ""
 note("system", [ep("system", virtual=True), ep("speakers")])
-check(vd._displaced == "", "the first sample records nothing")
+check_true("the first sample records nothing", vd._displaced == "")
 note("speakers", [ep("system", state="not present", virtual=True), ep("speakers")])
-check(vd._displaced == "speakers", "System went away and Windows fell back: displaced")
+check_true("System went away and Windows fell back: displaced", vd._displaced == "speakers")
 note("main", [ep("speakers"), ep("main", desk=True)])
-check(vd._displaced == "", "moving on from a live device clears it")
+check_true("moving on from a live device clears it", vd._displaced == "")
 note("speakers", [ep("speakers"), ep("main", desk=True)])
-check(vd._displaced == "", "the user picking the speakers while the desk is live is a choice")
+check_true("the user picking the speakers while the desk is live is a choice", vd._displaced == "")
 vd._last_default, vd._displaced = "", ""
 
-print(f"virtual_devices: {checks} checks passed")
+raise SystemExit(_testkit.finish())

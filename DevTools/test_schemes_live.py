@@ -29,21 +29,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import devices
 import rcp_read
 import routing_schemes
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def read_matrix():
@@ -167,9 +159,7 @@ def main() -> int:
     check("and every one occurs exactly as many times as before",
           [n for n in n0 if n1.get(n) != n0[n]], [])
 
-    print()
-    print("FAILURES:", FAILED)
-    return 1 if FAILED else 0
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

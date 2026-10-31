@@ -35,19 +35,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import rcp_transfer as t
 import soundpad
-
-FAILED = 0
-
-
-def check(label, got, want):
-    global FAILED
-    if got == want:
-        print(f"  ok   {label}: {got!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
 def md5(path):
@@ -139,12 +130,10 @@ def main() -> int:
           soundpad.pool_health()["region_b_count"], before_pool["region_b_count"])
     shutil.rmtree(tmp, ignore_errors=True)
 
-    print()
-    print("FAILURES:", FAILED)
-    if FAILED:
+    if _testkit.failed():
         print("PUT THE POWERSHELL FLUSH BACK: rcp_transfer.flush_volume should call "
               "_flush_volume_powershell unconditionally until this passes.")
-    return 1 if FAILED else 0
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

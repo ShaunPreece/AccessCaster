@@ -456,7 +456,7 @@ def delete(name: str, force: bool = False) -> dict:
 
 # ---- apply (device WRITES; THE CALLER MUST HOLD THE HID LOCK) -------------------------------
 
-def apply(prof, *, fader_count, fader_code_set, mic_channels, progress=None) -> dict:
+def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     """Apply a loaded profile to the device. Returns {applied, failed, errs}. Paces the writes and
     keeps going past an individual failure, so one odd value cannot abort the whole restore.
 

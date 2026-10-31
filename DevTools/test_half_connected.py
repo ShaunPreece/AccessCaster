@@ -28,17 +28,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import rcp_hid
 import server
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 class FakeIface:
@@ -86,7 +79,4 @@ check("it still names the unit, so it is clearly not a 'device missing' error",
 check("and the interface it did find is still reported for troubleshooting",
       bool(d.get("control_interface")), True)
 
-print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAILURES'}")
-for f in FAILS:
-    print("  " + f)
-raise SystemExit(1 if FAILS else 0)
+sys.exit(_testkit.finish())

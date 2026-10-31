@@ -29,19 +29,14 @@ import shutil
 import tempfile
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import _testkit
+from _testkit import check_true
 import rcp_transfer
 import soundpad
 
 BACKUP_DIR = os.path.join(tempfile.gettempdir(), "accesscaster_clear_all_backup")
 VERIFY_DIR = BACKUP_DIR + "_verify"
 PADS_JSON = os.path.join(BACKUP_DIR, "pads.json")
-FAILED = 0
-
-
-def check(label, ok, detail=""):
-    global FAILED
-    FAILED += not ok
-    print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f": {detail}" if detail and not ok else ""))
 
 
 def file_hashes(root):
@@ -98,34 +93,33 @@ def main() -> int:
     left = [p["grid"] for p in soundpad.read_pads_live()["pads"]
             if p["present"] and p["type"] != soundpad.SYSTEM_PAD_TYPE]
     h = res["health"]
-    check("every user pad cleared", res["cleared"] == len(pads) and not left,
+    check_true("every user pad cleared", res["cleared"] == len(pads) and not left,
           f"cleared {res['cleared']} of {len(pads)}, left {left}")
-    check("pool clean", h["clean"], h)
-    check("no partial object left", h["partial"] == [], h["partial"])
-    check("region B is down to the special object", h["region_b_count"] == 1, h["region_b_count"])
+    check_true("pool clean", h["clean"], h)
+    check_true("no partial object left", h["partial"] == [], h["partial"])
+    check_true("region B is down to the special object", h["region_b_count"] == 1, h["region_b_count"])
 
     print("RESTORE")
     res = restore(pads)
-    check("restore reported ok", res["ok"], res.get("message", ""))
+    check_true("restore reported ok", res["ok"], res.get("message", ""))
 
     print("COMPARE")
     shutil.rmtree(VERIFY_DIR, ignore_errors=True)
     after = soundpad.backup_pads(VERIFY_DIR)["pads"]
     diffs = [(a.get("grid"), k, a.get(k), b.get(k)) for a, b in zip(pads, after)
              for k in a if a.get(k) != b.get(k)]
-    check("same pads back", len(after) == len(pads), f"{len(after)} of {len(pads)}")
-    check("every setting matches", not diffs, diffs)
-    check("every sound file matches", file_hashes(VERIFY_DIR) == hashes_before)
+    check_true("same pads back", len(after) == len(pads), f"{len(after)} of {len(pads)}")
+    check_true("every setting matches", not diffs, diffs)
+    check_true("every sound file matches", file_hashes(VERIFY_DIR) == hashes_before)
     pool_after = soundpad.pool_health()
-    check("pool as before", pool_after == pool_before, (pool_before, pool_after))
+    check_true("pool as before", pool_after == pool_before, (pool_before, pool_after))
     shutil.rmtree(VERIFY_DIR, ignore_errors=True)
 
-    if FAILED:
-        print(f"\n{FAILED} FAILED. Backup kept in {BACKUP_DIR}.")
-        return 1
-    shutil.rmtree(BACKUP_DIR, ignore_errors=True)
-    print("\nALL CHECKS PASSED")
-    return 0
+    if _testkit.failed():
+        print(f"\nBackup kept in {BACKUP_DIR}.")
+    else:
+        shutil.rmtree(BACKUP_DIR, ignore_errors=True)
+    return _testkit.finish()
 
 
 if __name__ == "__main__":

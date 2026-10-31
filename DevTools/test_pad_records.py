@@ -12,17 +12,9 @@ padTriggerControl and effectsIdx, and only a voice-FX create writes the 0x9d eff
 import hashlib
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _testkit
+from _testkit import check_true
 import pad_records as pr
-
-FAILED = []
-
-
-def check(label, ok, detail=""):
-    if ok:
-        print(f"  ok  {label}")
-    else:
-        FAILED.append(label)
-        print(f"  FAIL {label}\n       {detail}")
 
 
 def digest(recs):
@@ -47,10 +39,10 @@ captured_path = bytes.fromhex(
     "033f000000010102029a02010170616446696c6550617468000129052f4170706c"
     "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
     "7600").ljust(256, b"\x00")
-check("write_record reproduces the captured padFilePath record",
+check_true("write_record reproduces the captured padFilePath record",
       pr.write_record("padFilePath", "str", pr.PAD_FILE_PATH_FMT.format(n=2, name="sound.wav"),
                       1) == captured_path)
-check("the remount record is the captured one, framed to 256 bytes",
+check_true("the remount record is the captured one, framed to 256 bytes",
       len(pr.REMOUNT_PAD_STORAGE) == 256
       and pr.REMOUNT_PAD_STORAGE[10:27] == b"remountPadStorage")
 
@@ -73,38 +65,37 @@ for label, recs, want in (
         ("trigger create, custom mapping", sum(trig_custom, []), "5d80f2e01ad4feac"),
         ("voice-FX create (Monster)", sum(monster, []), "241364048c77bb19")):
     got = digest(recs)
-    check(f"{label} is unchanged", got == want, f"digest {got}, expected {want}")
+    check_true(f"{label} is unchanged", got == want, f"digest {got}, expected {want}")
 
 print("Structure")
-check("phase 1 is 45 records with its handoff, 66 with the effects block",
+check_true("phase 1 is 45 records with its handoff, 66 with the effects block",
       (len(pr.build_blank(3, 0x10)), len(pr.build_blank(3, 0x10, 0x04))) == (45, 66))
 phase1 = pr.build_phase1(12, 0x10)
-check("phase 1 stamps padTriggerControl and padIdx with the target",
+check_true("phase 1 stamps padTriggerControl and padIdx with the target",
       [int_after(r, n) for n in ("padTriggerControl", "padIdx")
        for r in phase1 if f"{n}\0".encode() in r] == [12, 12])
 effects = pr.build_effects(12, 0x04, {"reverbMix": 0.25})
-check("the effects block stamps effectsIdx with the target",
+check_true("the effects block stamps effectsIdx with the target",
       [int_after(r, "effectsIdx") for r in effects if b"effectsIdx" in r] == [12])
-check("a param override lands in the effects block",
+check_true("a param override lands in the effects block",
       any(b"reverbMix" in r and r.find(bytes([0x01, 0x09, 0x04])) > 0 for r in effects)
       and effects != pr.build_effects(12, 0x04))
 for label, parts in (("sound", sound), ("mixer", mixer), ("trigger", trig)):
-    check(f"a {label} create writes nothing to the effects node",
+    check_true(f"a {label} create writes nothing to the effects node",
           fx_records(sum(parts, [])) == [])
-check("a voice-FX create turns each engine on in post, on the sub-handle",
+check_true("a voice-FX create turns each engine on in post, on the sub-handle",
       [r[13:13 + r[13:].index(0)] for r in fx_records(monster[2])]
       == [b"reverbOn", b"pitchShiftOn"]
       and all(r[12] == 0x05 for r in fx_records(monster[2])))
 try:
     pr.build_fx_create_recipe(1, "x", 1, {"flanger": {}}, handle=1, fx_subhandle=1)
-    check("an unknown effect engine is refused", False, "no error raised")
+    check_true("an unknown effect engine is refused", False, "no error raised")
 except ValueError:
-    check("an unknown effect engine is refused", True)
-check("the custom trigger mapping writes the explicit control number",
+    check_true("an unknown effect engine is refused", True)
+check_true("the custom trigger mapping writes the explicit control number",
       [int_after(r, "padTriggerControl") for r in trig_custom[1] if b"padTriggerControl" in r]
       == [60])
-check("free_handle is the record count: the first free stream position",
+check_true("free_handle is the record count: the first free stream position",
       pr.free_handle(23) == 23)
 
-print(f"\n{'ALL CHECKS PASSED' if not FAILED else str(len(FAILED)) + ' CHECK(S) FAILED'}")
-raise SystemExit(1 if FAILED else 0)
+raise SystemExit(_testkit.finish())

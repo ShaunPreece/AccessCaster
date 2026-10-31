@@ -18,17 +18,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import server
 
-FAILS = []
 STORE = {}
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 server.load_settings = lambda: dict(STORE)
@@ -84,9 +78,4 @@ fresh({"announcer": True})
 check("an old 'on' leaves it unticked", server._ann_remember, False)
 
 print()
-if FAILS:
-    print("FAILURES:")
-    for f in FAILS:
-        print("  " + f)
-    sys.exit(1)
-print("All checks passed.")
+sys.exit(_testkit.finish())

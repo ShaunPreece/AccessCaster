@@ -24,17 +24,10 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _testkit
+from _testkit import check
 import profiles
 import server
-
-FAILS = []
-
-
-def check(name, got, want):
-    ok = got == want
-    if not ok:
-        FAILS.append(f"{name}: got {got!r}, wanted {want!r}")
-    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
 
 
 def page_name(entry: dict) -> str:
@@ -123,9 +116,4 @@ for m in CALL.finditer(source):
 check("the page's literal posts were found", calls > 30, True)
 
 
-if FAILS:
-    print(f"\n{len(FAILS)} FAILED:")
-    for f in FAILS:
-        print("  " + f)
-    sys.exit(1)
-print("\nAll backup and route checks passed.")
+sys.exit(_testkit.finish())
