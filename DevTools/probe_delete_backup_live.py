@@ -26,9 +26,9 @@ THE SERVER MUST BE STOPPED: a show delete drives Transfer Mode, which needs the 
 AND IT IS A `probe_`, NOT A `test_`, DELIBERATELY. `_bootstrap` hands anything named `test_*.py` a
 throwaway data dir so a test can never eat the user's real profiles - which is exactly right, and
 exactly wrong for this one: the both-halves branch pairs a REAL profile with a REAL show, so under
-the sandbox it saw an empty profile store, listed the unit's shows alone and reported that the
-backup it was asked to delete did not exist. The show branch passed regardless, because a show
-lives on the desk rather than in that folder, which is what made the failure look selective.
+the sandbox it sees an empty profile store, lists the unit's shows alone and reports that the
+backup it was asked to delete does not exist. The show branch would pass regardless, because a show
+lives on the desk rather than in that folder.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Phase 1 of the coverage audit: what does the desk TELL us while it is being used.
+"""What does the desk TELL us while it is being used.
 
 READ ONLY. This script never sends a write record; the only thing it transmits is the same
 full-model dump trigger our normal reads use (`listen` does not even do that). Safe to run with
@@ -7,24 +7,23 @@ server's announcer can hold a read handle while pad writes go through another (s
 
 Modes
   listen  <seconds> [--label L]   PASSIVE. Log the report-04 stream WITHOUT asking for anything.
-                                  Answers the phase-1 question "can we subscribe instead of poll":
-                                  if the desk pushes meters / fader moves / mutes unasked, live
-                                  feedback is nearly free. Nothing else in the project has ever
-                                  looked at what arrives unsolicited.
+                                  Answers "can we subscribe instead of poll": if the desk pushes
+                                  meters / fader moves / mutes unasked, live feedback is nearly
+                                  free.
   snap    <name>                  One full dump, parsed into every property, saved (redacted) as
                                   a JSON snapshot for later diffing.
   diff    <nameA> <nameB>         What changed between two snapshots, per property occurrence.
   watch   [--dumps N] [--gap S]   Repeated dumps, diffed against each other as they arrive: for
                                   watching something move (a fader, a meter) with no second call.
-  cost    [--n N]                 Time a dump, so phase 1 can say whether polling is viable.
+  cost    [--n N]                 Time a dump, to say whether polling is viable.
   step    <label> [--raw]         ONE action, and the capture closes when the operator creates
                                   STOP_FILE, not when a clock expires. Use this, not `guided`,
                                   whenever the prompt has to be RELAYED to whoever is at the desk:
-                                  see step()'s docstring for what timed windows cost us.
+                                  see step()'s docstring for what timed windows cost.
 
 Usage with a human at the desk (the intended flow):
     python DevTools/state_observatory.py snap before
-    ... Shaun does ONE thing ...
+    ... the operator does ONE thing ...
     python DevTools/state_observatory.py diff before after --take
 
 SECRETS: a model dump carries plaintext wifi PSK and SIP credentials, so every value written to
@@ -191,14 +190,13 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
     is nothing to press. Writing a file is the one gate both can reach. Same idiom as
     `cap_control/cmd.txt`.
 
-    Why not a timer: `guided` used timed windows and every one of them drifted, because relaying a
-    spoken prompt by voice to someone in another room costs seconds that the clock does not know
-    about. Measured on a Duo: the mute window caught a soundpad trigger and the
-    REC window caught a touchscreen tap, so two of the five answers we came for were missed. The
-    timeout here is a safety net for an abandoned capture, not the mechanism.
+    Why not a timer: `guided`'s timed windows drift, because relaying a spoken prompt by voice to
+    someone in another room costs seconds that the clock does not know about, so an action lands in
+    the next step's window. The timeout here is a safety net for an abandoned capture, not the
+    mechanism.
 
-    ONE action per capture is the other half of the fix: with a single action in the window there is
-    nothing to mis-attribute it to.
+    ONE action per capture is the other half: with a single action in the window there is nothing to
+    mis-attribute it to.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     STOP_FILE.unlink(missing_ok=True)  # a stale one would close the capture instantly
@@ -209,9 +207,8 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
     dev.open_path(iface.path)
 
     # DELIBERATELY SILENT by default. The operator relays the instruction by voice anyway, so
-    # speaking it here reaches nobody who needs it AND collides with the app's own announcer, which
-    # is talking about the very control under test - measured: a spoken prompt here talks straight
-    # over the announcer saying "encoder not linked", which is the answer the capture is for.
+    # speaking it here reaches nobody who needs it AND talks over the app's own announcer, which is
+    # speaking about the very control under test: its words are often the answer the capture is for.
     if speak:
         _say(label)
     print(f"CAPTURE OPEN: {label}", flush=True)
@@ -271,7 +268,7 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # Guided session: speak each step, listen throughout, tag events by step
 # ---------------------------------------------------------------------------
-# Phase 1 is done at the DESK, not at the keyboard, so the steps have to be spoken.
+# The steps are done at the DESK, not at the keyboard, so they have to be spoken.
 SAY = Path(__file__).resolve().parent.parent / "Project" / "say.ps1"
 
 # (spoken prompt, seconds to allow). Kept here so a re-run on the Duo uses the same script.

@@ -5,7 +5,7 @@ the web UI is announced twice - once by the screen reader reading the UI's live 
 announcer speaking the echo. server._ann_mark_self_write suppresses the second.
 
 Why the test is shaped like this: the marks live in the process that DECODES the stream, and the
-process holding port 8770 is the installed build, which does not have them. So this script does both
+process holding port 8770 may be an installed build that does not have them. So this script does both
 halves itself - it marks the write exactly as action_set_fader_level does (via _ann_publish_level,
 so the fader-index to source-code translation is exercised, not bypassed), drives the real write over
 the running app's HTTP API, and reads the real echo off its own HID handle.
@@ -14,8 +14,8 @@ Every path is tested in PAIRS, so a silent result cannot be mistaken for a broke
   MARKED   - expect NOTHING spoken (the suppression working)
   UNMARKED - the CONTROL. Whether it speaks is the measurement, not the assumption.
 
-Three paths, all three measured on real hardware:
-  LEVEL  a fader level, marked by _ann_publish_level   - the desk DOES echo. Suppression proven.
+Three paths:
+  LEVEL  a fader level, marked by _ann_publish_level   - the desk DOES echo it.
   MUTE   a channel mute, marked by _ann_publish_mute   - the desk does NOT echo it as
          channelOutputMute. What it pushes instead is twelve `mixMute` records, one per output mix
          (the firmware propagating the mute into the matrix), and the announcer speaks none of them.
@@ -58,7 +58,7 @@ import server
 BASE = "http://127.0.0.1:8770"
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
 MUTE_CHAN = "Mic3"  # nothing is plugged into Mic 3, and the standing rule keeps Mic 1 unwritten
-GAIN_CHAN = 3       # same reason: Mic 1 carries Shaun's SM7B and is never written by a test
+GAIN_CHAN = 3       # same reason: Mic 1 carries a live microphone and is never written by a test
 
 SAID: list[tuple[float, str]] = []
 _t0 = time.time()

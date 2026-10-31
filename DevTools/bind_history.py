@@ -11,9 +11,9 @@ block.
 
 The summary compares bound and missed attempts on each field. A field whose ranges do not overlap
 is a lead; one that overlaps says nothing either way. The handle count moves by about twenty
-between two reads a moment apart with nothing happening, so a gap that small is not a lead. A changed pid or start time means the service
-was restarted between two attempts, which matters because a restart followed by an arrival is the
-one recovery from a run of misses ever seen.
+between two reads a moment apart with nothing happening, so a gap that small is not a lead. A
+changed pid or start time means the service was restarted between two attempts, which matters
+because a restart followed by an arrival is the one recovery from a run of misses ever seen.
 
 Read-only.
 """

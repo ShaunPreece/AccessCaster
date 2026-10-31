@@ -126,8 +126,8 @@ def _both_addresses_carry(root) -> bool:
     """True only if BOTH addresses really hold the two properties on the attached desk.
 
     The whole differential rests on writing an address that already carries the name, because that
-    is what makes the write incapable of appending a stray. Checked live rather than assumed: the
-    MIX copy was present when this was written and is absent now."""
+    is what makes the write incapable of appending a stray. Checked live rather than assumed,
+    because current firmware publishes no MIX copy."""
     ok = True
     for prop in ("inputMicrophoneGain", "inputMicrophoneType"):
         blocks = {n.name for n, _v, _k in model_tree.find_property(root, prop)}

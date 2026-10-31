@@ -12,7 +12,7 @@ What it proves that the offline suite cannot:
   4. Nothing STRAYS: the model's length and its cross-point counts are unchanged at the end.
 
 The test drives the CHAT output only, and never a headphone or the monitor: Chat has no caller on it
-on this desk, so nothing about this is audible, and the mixes that feed Shaun's own ears are only
+on this desk, so nothing about this is audible, and the mixes that feed the operator's ears are only
 ever read. It refuses to run if a phone caller is connected (the matrix changes shape then, and
 every read here would be indexed wrong).
 
@@ -59,8 +59,8 @@ def on_faders(blob) -> set:
     A CROSS-POINT CANNOT BE OBSERVED AS LINKED UNLESS ITS CHANNEL IS ON A FADER, and that is the
     desk rather than a fault here. `linked` is inferred from level == anchor, and the level is
     republished by the FADER; relink a cross-point whose channel is off-fader and the two stay
-    apart for good, because nothing moves to republish it. Measured directly on the Pro II: unlink
-    Mic 3's Headphone 1 cell at 0.5, send mixLinkRequest, and it still reads '0.5|0'. So the
+    apart for good, because nothing moves to republish it. On the Pro II, Mic 3's Headphone 1 cell
+    unlinked at 0.5 still reads '0.5|0' after mixLinkRequest. So the
     link assertions below ask only about sources the desk can actually answer for.
     """
     dev = devices.get_active_device()
@@ -73,8 +73,7 @@ def counts(blob):
     This, not the model's byte length, is the stray test. A stray append shows up as a new name or
     an extra occurrence; the LENGTH moves on its own whenever a level changes, because
     mixLevelWithAnchor is an ASCII string and "1|1" is fourteen bytes shorter than
-    "0.551181|0.551181". Measured on the desk, after a length check called a clean
-    restore dirty."""
+    "0.551181|0.551181"."""
     return {n: len(v) for n, v in rcp_read.snapshot_properties(blob).items()}
 
 

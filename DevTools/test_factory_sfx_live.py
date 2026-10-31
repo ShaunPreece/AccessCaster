@@ -1,6 +1,6 @@
 """Are the FACTORY PAD SOUNDS on the desk itself, so the app need not ship them?
 
-THE QUESTION, and it is the one that let the app stop shipping RODE's audio. The pad RECORDS point
+THE QUESTION, and the answer is why the app ships none of RODE's audio. The pad RECORDS point
 at `/Application/emmc-data/pads/<n>/<Name>.wav` on the desk's own internal partition, in every
 capture including a post-factory-reset one - but a record is a pointer, and a pointer is not a file.
 This looks at the filesystem, which is the only thing that can tell them apart.
@@ -32,7 +32,7 @@ import rcp_transfer as t
 import soundpad
 
 # The eight factory sounds, by grid pad number. WRITTEN OUT HERE rather than imported, because the
-# app deliberately holds no table of them any more: it neither ships them nor restores them, so a
+# app deliberately holds no table of them: it neither ships them nor restores them, so a
 # list in `soundpad` would exist only to serve this check. This is a test EXPECTATION, which is the
 # one place the names still belong.
 EXPECTED = {

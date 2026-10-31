@@ -1,4 +1,4 @@
-"""END-TO-END: does a real profile restore now keep the mic gain when it changes the voicing?
+"""END-TO-END: does a real profile restore keep the mic gain when it changes the voicing?
 
 This drives `profiles.apply` itself - the actual restore code, not a stand-in - with a
 one-channel profile, from the state a factory reset leaves behind. It reproduces the clean-restore

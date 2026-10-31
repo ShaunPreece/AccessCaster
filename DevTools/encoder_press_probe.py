@@ -1,19 +1,17 @@
 """Probe the ROTARY ENCODER's press edges, to decide how to trigger a custom action.
 
 Question this answers: can we distinguish a PRESS-AND-HOLD from a quick
-DOUBLE-PRESS? Both would let us bind an extra, software-only action (Shaun's idea: speak
-solo / mute / routing / bank on demand). A hold is nicer if it works, because the desk
-advances its own encoder ring once per press, so a double-press costs one extra ring step.
+DOUBLE-PRESS? Both would let us bind an extra, software-only action (speak solo / mute /
+routing / bank on demand). A hold is nicer if it works, because the desk advances its own
+encoder ring once per press, so a double-press costs one extra ring step.
 
-That hinges on whether the desk pushes a RELEASE edge. The live-state work of
-records
-`encoderPressed` as "edge only" - but that was a passing note in a broader sweep, never a
-test. `screenTouched` demonstrably pushes True then False, so a release edge is plausible.
+That hinges on whether the desk pushes a RELEASE edge for `encoderPressed`, as `screenTouched`
+does (True, then False). This prints every edge it sees, so the answer is read off the output.
 
 Strictly READ-ONLY: opens its own HID handle and never writes, so it is safe to run with
-the server up (Windows gives each open handle its own input queue - server.py:514).
+the server up (Windows gives each open handle its own input queue).
 
-Usage: python encoder_press_probe.py [seconds]
+Usage: python DevTools/encoder_press_probe.py [seconds]
 """
 import sys
 import time

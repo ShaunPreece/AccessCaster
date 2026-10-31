@@ -53,21 +53,19 @@ r = recorder.parse_recording(4, CONTENT)
 check("name", r["name"], "Recording 4")
 check("seconds", r["seconds"], 10.8)
 check("duration in words", r["duration"], "11 seconds")
-# THE TIMESTAMP RULE, CORRECTED (this test asserted the OLD, WRONG rule). The
-# field is an ordinary UTC epoch - four takes made to order all matched this PC's UTC clock to the
-# second while local time was UTC+1 - so it is shown in THIS COMPUTER'S LOCAL time, which is the
-# wall clock the person remembers. Rendering it as UTC showed every recording an hour early all
-# summer. The expectation is computed rather than written out, because a literal would only pass in
-# one timezone.
+# THE TIMESTAMP RULE. The field is an ordinary UTC epoch, so it is shown in THIS COMPUTER'S LOCAL
+# time, which is the wall clock the person remembers; rendered as UTC, a recording reads an hour
+# early under UTC+1 (recorder.parse_recording). The expectation is computed rather than written
+# out, because a literal would only pass in one timezone.
 stamp_ms = 1787914947088
 local = datetime.fromtimestamp(stamp_ms / 1000.0)
 check("timestamp is shown in local time", r["when"], spoken_datetime(local))
 utc_render = spoken_datetime(datetime.fromtimestamp(stamp_ms / 1000.0, tz=timezone.utc))
 if utc_render != r["when"]:
-    check("and it is NOT the raw UTC rendering, which was the bug", r["when"] != utc_render, True)
+    check("and it is NOT the raw UTC rendering", r["when"] != utc_render, True)
 else:
-    print("  note this machine is on UTC, so local and UTC read the same; the direction of the "
-          "fix cannot be pinned here")
+    print("  note this machine is on UTC, so local and UTC read the same; which of the two is "
+          "shown cannot be pinned here")
 # Firmware 1.7.6 inserts an empty field after the path, which shifts the timestamp and duration.
 CONTENT_176 = ("Recording 27|c9f82780f0fb47e694b408e95ed52616|"
                "/Application/ssd-mount/RODECaster/27 - 4 Oct 2026/Stereo Mix.wav||"
@@ -209,8 +207,7 @@ check("nor is one that did not move", S(recorder.READY, recorder.READY), "")
 check("an unreadable state says nothing", S(recorder.READY, None), "")
 
 print("\nTWO MULTITRACKS, AND NEITHER LABEL MAY BE MISTAKEN FOR THE OTHER")
-# The whole reason these two were indistinguishable for months is that RODE calls both of them
-# "Multitrack". If our labels ever collide, that confusion is back in the app.
+# RODE calls both of them "Multitrack", so labels that collide make the two indistinguishable.
 check("the recorder offers three modes", sorted(recorder.MULTITRACK_LABEL), [0, 1, 2])
 check("so does the USB stream", sorted(recorder.USB_MULTITRACK_LABEL), [0, 1, 2])
 check("no label appears in both lists",

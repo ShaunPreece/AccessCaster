@@ -24,6 +24,8 @@ stack.
              commands back to back, not one, and ordering is a suspect in its own right. On a desk
              with no drive the export cannot succeed, but the COMMAND still goes out, which is the
              part under test.
+  exportonly an export command and NO reset: what the reset dialog's backup sends on a desk with no
+             drive, before the reset refuses. Proven by `showControlLastError`, not by a new uuid.
   app        THE WHOLE RUNNING SERVER, end to end over HTTP. THE CONTROL, and it must be run: if
              every layer above comes up clean and this still drops, a layer is missing and the list
              is wrong. Exclusive - it ignores the other layers, because the app brings its own.
@@ -44,17 +46,18 @@ IT STOPS DEAD ON THE FIRST DROP. Sending more resets at a desk that is off the b
 would queue commands to land at whatever moment somebody replugs it.
 
 A SHORT BLIP IS NOT MEASURED and is not the fault being chased. `Get-PnpDevice` takes about a second,
-so a one-to-two-second re-enumeration can fall between samples. Worth knowing, because the notes'
-recorded mechanism said a full-config write re-enumerates USB BY DESIGN: across 11 bare trials
-nothing was ever missing at t+3s, t+10s or t+20s.
+so a one-to-two-second re-enumeration can fall between samples. A full-config write is expected to
+re-enumerate USB by design, yet across 11 bare trials nothing was ever missing at t+3s, t+10s or
+t+20s.
 
 EXPENDABLE DESKS ONLY. Every trial is an UNBACKED factory reset: settings and pads go to factory with
 no undo. Right for the Duo test desk, wrong for a desk somebody works on. It also leaves mic channels
 possibly silent, because `server.wake_channels` is not called except in the `app` layer, which runs
 it itself.
 
-Run: python DevTools/test_usb_drop.py [--layers handles2,poll] [--trials N] [--quiet-seconds N]
-     python DevTools/test_usb_drop.py --layers app --trials 5
+Run: python DevTools/test_usb_drop_live.py --expendable-desk [--layers handles2,poll] [--trials N]
+         [--quiet-seconds N]
+     python DevTools/test_usb_drop_live.py --expendable-desk --layers app --trials 5
 """
 from __future__ import annotations
 
@@ -66,7 +69,7 @@ import time
 import urllib.error
 import urllib.request
 
-import _bootstrap  # noqa: F401
+import _bootstrap
 import hid
 import rcp_hid
 import rcp_read
@@ -157,10 +160,9 @@ class Load:
         # point is that a read is genuinely outstanding when the device goes, not that it spins.
         #
         # THE HANDLE IS CLOSED HERE, ON THE THREAD THAT READS IT, and that is not tidiness: closing
-        # it from `stop()` while this read is in flight SEGFAULTS the interpreter (measured, exit
-        # 139). hidapi does not defend a handle against a close from another thread. Both real
-        # readers already close on their own thread
-        # (recorder.py:603 and the announcer's loop), so this matches them as well as being safe.
+        # it from `stop()` while this read is in flight SEGFAULTS the interpreter (exit 139).
+        # hidapi does not defend a handle against a close from another thread. Both real readers
+        # (recorder.Watcher and the announcer's loop) close on their own thread too.
         try:
             while not self._stop.is_set():
                 try:
@@ -320,9 +322,8 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
 
 
 def main() -> int:
-    # THE GUARD, not the docstring, is what stops this reaching a desk somebody works on. See
-    # _bootstrap.require_expendable_desk for why it is a flag: this file already said "expendable
-    # desks only" in capitals when it was run over Shaun's Pro II by a sweep.
+    # THE GUARD, not the docstring, is what stops this reaching a desk somebody works on: a sweep
+    # that runs every script reads no docstrings (_bootstrap.require_expendable_desk).
     _bootstrap.require_expendable_desk(
         "FACTORY RESETS the desk, once per trial, with no backup and no undo")
     layers: set = set()

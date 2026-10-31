@@ -9,13 +9,12 @@ addresses that BLOCK; the property NAME picks the field inside it. So header -> 
 one property in a block has a known selector, every single-instance property under that header
 shares it.
 
-Checked against all 17 properties whose selector we already knew, captured or long-established:
-  GUI -> 0x07, OUTPUT -> 0x0D, MASTERCHANNEL -> 0x0E, SYSTEM -> 0x0F.
-Zero disagreements. Then CONFIRMED PREDICTIVELY on hardware: `activeButtonsBrightness` (GUI, never
-captured) was written on the derived 0x07, read back as written, and restored.
+The map is checked against ANCHORS, the properties whose selectors are confirmed independently,
+and agrees with every one. It also predicts: `activeButtonsBrightness` (GUI, never captured) takes
+a write on the derived 0x07 and reads back as written.
 
-WHY THIS MATTERS. Before this, every unwritable property needed its own USB capture of the RODE app
-writing it - and most of them have no app control at all, so they could never be captured. This
+WHY THIS MATTERS. Without it, every unwritable property needs its own USB capture of the RODE app
+writing it - and most of them have no app control at all, so they can never be captured. This
 turns those into a read-back test instead.
 
 STILL REQUIRED, per property, before trusting a write:
@@ -37,17 +36,17 @@ import rcp_read
 
 # Header -> selector, each anchored by at least one property whose selector is confirmed.
 HEADER_SELECTOR = {
-    "RECBUTTON": 0x02, # recButtonPressed (read off the wire)
-    "RECORDER": 0x03, # recordState / requestRecordState (off the wire)
-    "ENCODER": 0x06,        # encoderColour (device push, decoded by selector_from_push.py)
-    "GUI": 0x07, # screenBrightness / metering / screenDimAfterSeconds (captured)
+    "RECBUTTON": 0x02,      # recButtonPressed
+    "RECORDER": 0x03,       # recordState / requestRecordState
+    "ENCODER": 0x06,        # encoderColour (a device push; see selector_from_push.py)
+    "GUI": 0x07,            # screenBrightness / metering / screenDimAfterSeconds
     "OUTPUT": 0x0D,         # recordingMultitrackMode, outputMonLevel, outputPrefader
     "MASTERCHANNEL": 0x0E,  # masterCompellorOn + its params
     "SYSTEM": 0x0F,         # systemMidiControl, transferModeType, systemHapticSetting
     # NETWORK IS 0x10, NOT 0x13: btVisible written on 0x10 reads back in the NETWORK block (not the
     # SYSTEM duplicate), leaves no stray, and a phone then pairs and plays audio through the desk.
-    # A rejected flat-count model predicted 0x13, which is STREAMERXMIXPRESET[1]; the btDoScan
-    # stray there labels what that selector really addresses.
+    # 0x13 is STREAMERXMIXPRESET[1], as a btDoScan stray there shows; a flat count of blocks
+    # predicts 0x13 and is wrong.
     # TWO CAUTIONS specific to this block, neither of them about the address:
     #   * many of its fields are ACTIONS, not settings (btDoScan, btDoPair, btDoConnect, btDoUnPair,
     #     wifiScan). A read-back may show nothing changed even when the action ran, so judge those by

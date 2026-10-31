@@ -1,13 +1,12 @@
 """Offline test of the LATCHED PAD detection: does the app notice a pad left switched on?
 
-WHY THIS EXISTS, and it is not a hypothetical. On the new "Restore the factory voice
-effects" left the LAST of the six pads ENGAGED, because it called the low-level create whose default
-is active=True. Shaun came back to a robot voice on his mic.
+WHY THIS EXISTS. The low-level voice-effect create defaults to active=True, so a rebuild such as
+"Restore the factory voice effects" that does not pass active=False (soundpad.restore_one does)
+leaves the LAST pad it makes ENGAGED, and a robot voice on a live mic.
 
-The bug is fixed at source (restore_one now passes active=False). This file guards the SECOND
-failure, which is the one that let it reach him: **the after-check said everything was fine.** It
-compared the grid - name, type, colour, presence - and a latched pad changes none of those. The
-thing that changes is `padActive`, and nothing anywhere looked at it.
+A check that compares the grid - name, type, colour, presence - cannot see that: a latched pad
+changes none of those. The thing that changes is `padActive`, and this file pins the detection
+that reads it.
 
 So what is pinned here is the DETECTION, not the create. It cannot be exercised on the real desk
 without deliberately putting an effect on a live mic, which is the thing we are trying never to do
@@ -67,7 +66,7 @@ def main() -> int:
     check("nothing engaged is reported as nothing", latched, [])
     check("and the overview stays silent about it", engaged, [])
 
-    print("\nTHE FAULT THAT ACTUALLY HAPPENED: the LAST pad of a run left switched on")
+    print("\nTHE LAST pad of a run left switched on")
     latched, engaged = with_pads(PADS, [False, False, True])
     check("the latched pad is found", latched, [(23, 14, "Small Robot")])
     check("and it is named on the overview by GRID position, not by padIdx",
@@ -87,11 +86,10 @@ def main() -> int:
     check("and both reach the overview", len(engaged), 2)
 
     print("\nTHE DESK'S OWN BANK-8 PADS ARE NOT 'LEFT SWITCHED ON'")
-    # Their padActive is the desk showing which input and scene it has selected, so treating it as a
-    # latched pad made unlatch_all switch off the desk's own state to "make it safe". That happened
-    # The case it guards: a factory-FX rebuild finishing by announcing it had switched off Input 1
-    # and Scene A. The detection is shared, so this also stopped _hk_pad_verify unlatching Input 1
-    # whenever a shortcut press did not take.
+    # Their padActive is the desk showing which input and scene it has selected. Treated as latched
+    # pads, unlatch_all switches off the desk's own state to "make it safe", and a factory-FX rebuild
+    # ends by announcing it switched off Input 1 and Scene A. The detection is shared, so the same
+    # mistake would make _hk_pad_verify unlatch Input 1 whenever a shortcut press did not take.
     latched, engaged = with_pads(PADS_WITH_SYSTEM, [False, False, False, True, True])
     check("Input 1 and Scene A being on is not a latched pad", latched, [])
     check("and the overview does not report them either", engaged, [])

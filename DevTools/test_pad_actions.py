@@ -113,9 +113,8 @@ print("\nthe per-action value checks, all of which must land before the lock")
 check_in("a play mode outside 0-2 is named, with the three options spelled out",
          "0 (toggle), 1 (hold) or 2 (one shot)",
          server.action_set_play_mode(1, 99)["message"])
-# 0 IS MOMENTARY AND 1 IS LATCHING, ear-proven on a real latching pad. This check asserted the
-# opposite for as long as the code did, which is how a test keeps a wrong fact alive: it was
-# written from the same belief it was meant to check.
+# 0 IS MOMENTARY AND 1 IS LATCHING, on a real latching pad. The expectation comes from the desk,
+# not from the code under test, or the check only repeats the code's own belief.
 check_in("a mixer trigger outside 0-1 says which two it may be",
          "0 (Momentary) or 1 (Latching)",
          server.action_set_mixer_trigger(1, 7)["message"])

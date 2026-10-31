@@ -10,13 +10,17 @@ Run: python DevTools/test_driver_install.py
 """
 from __future__ import annotations
 
+import glob
 import io
 import os
+import re
 import tempfile
 import zipfile
 
-import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _bootstrap  # puts Project/ on sys.path
 import driver_install as di
+import server
+import virtual_devices
 
 FAILED = 0
 
@@ -107,9 +111,6 @@ else:
     print("  SKIP no local copy in _driver/ to check against")
 
 print("\nTHE REFUSAL TO INSTALL OVER ONE THAT IS ALREADY THERE")
-import server  # noqa: E402  (after _bootstrap)
-import virtual_devices  # noqa: E402
-
 _real = virtual_devices.read_status
 try:
     class _St:
@@ -126,9 +127,6 @@ print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
 # The claim the README and Help both make, asserted rather than trusted: no other module reaches
 # the network. `urllib`/`socket` appear elsewhere for the LAN server and for reading this machine's
 # own address, so match on the ACT of fetching a URL rather than on the import.
-import glob  # noqa: E402
-import re  # noqa: E402
-
 proj = os.path.join(os.path.dirname(os.path.abspath(_bootstrap.__file__)), "..", "Project")
 callers = []
 for path in glob.glob(os.path.join(proj, "*.py")):

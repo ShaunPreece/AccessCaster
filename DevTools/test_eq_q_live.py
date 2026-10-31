@@ -1,6 +1,6 @@
 """Settle - and keep settled - what the three EQ Q values actually are. Reversible, restores itself.
 
-THE TWO WRONG ANSWERS, both of which have been held as fact here: that Q follows device-side when
+THE TWO WRONG ANSWERS: that Q follows device-side when
 the EQ parameters are written, so no writer is needed; and that Q cannot be written at all, offered
 as the explanation for a 2e-8 float32 residue the RODE app leaves behind.
 

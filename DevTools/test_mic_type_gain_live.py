@@ -1,16 +1,13 @@
 """Does setting a mic's TYPE also move its GAIN? (the clean-restore defect)
 
-WHY. A CLEAN profile restore left Mic 1's gain at 55 when the profile said 47, while the ordinary
-MERGE restore of the same profile was perfect. The dumps say why that is not a contradiction: on the
-merge the desk was ALREADY on the saved mic type, so the type write was a no-op; on the clean path
-the reset had put the type back to PodMic (4) and the restore wrote SM7B (10) - and `profiles.apply`
-writes the GAIN FIRST and the TYPE FOURTH. If choosing a voicing carries its own default gain, the
-type write lands on top of the gain we just restored, every time.
+WHY. A voicing carries its own default gain, so a restore that writes the GAIN before the TYPE
+loses the gain whenever the type changes: after a factory reset puts the type back to PodMic (4),
+restoring SM7B (10) leaves the gain at SM7B's 55, not the profile's 47. A merge restore onto a desk
+already on the saved type writes the type as a no-op, which is why only the clean path shows it.
 
-This measures it directly, and while it is at it records what gain each voicing sets, which is the
-table nothing in this project has ever had.
+This measures it directly, and records what gain each voicing sets.
 
-REVERSIBLE. Runs on Mic 3 (nothing plugged into it, and the standing rule keeps Shaun's Mic 1 out of
+REVERSIBLE. Runs on Mic 3 (nothing plugged into it, and the standing rule keeps Mic 1 out of
 tests), records the channel's gain and type first, and puts both back at the end, read-back verified.
 
 Usage: python DevTools/test_mic_type_gain_live.py [--channel 3]
@@ -99,8 +96,8 @@ def main() -> int:
         print("\n-- restoring --")
         # THE INSTRUMENT GAIN NEEDS PUTTING BACK TOO. Stepping through the voicings passes through
         # Instrument, which sets inputInstrumentGain to 20 and leaves it there when you move on
-        # (that is exactly why profiles restore it), so a restore that only put the type and gain
-        # back left the channel changed. Found by this file's own read-back, first run.
+        # (that is exactly why profiles restore it), so putting back only the type and gain leaves
+        # the channel changed.
         channels.set_mic_type(ch, base_type)
         time.sleep(SETTLE)
         channels.set_mic_gain(ch, base_gain)

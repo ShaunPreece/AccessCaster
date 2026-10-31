@@ -4,6 +4,7 @@ parser. No device needed: everything here works on a synthetic model blob or a p
 Run: python DevTools/test_shows.py
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import devices
 import fake_model
 import server
 import shows
@@ -43,9 +44,8 @@ blob = fake_blob([
 ])
 got = shows.read_shows(blob)
 check("two shows", len(got), 2)
-# NEWEST FIRST, by snapshot index. The unit emits newest first, but the sort does not rely on that:
-# an earlier draft reversed the stream on a belief borrowed from the recordings list and put the
-# OLDEST at the top, labelled "the newest".
+# NEWEST FIRST, by snapshot index. The unit emits newest first, but the sort does not rely on that,
+# and the recordings list's order is no guide to this one.
 check("newest first", [s["name"] for s in got], ["Newest", "Older"])
 check("uuid carried", got[0]["uuid"], "uuid-new")
 check("uid carried", got[0]["uid"], 0)
@@ -68,7 +68,7 @@ odd = shows.read_shows(fake_blob([
 ]))
 check("unplaceable node sorts last", [s["name"] for s in odd], ["Indexed", "NoIndex"])
 
-# A UUID IS NOT A FILE HANDLE. Measured on hardware: three exports of one desk state produce three
+# A UUID IS NOT A FILE HANDLE. Three exports of one desk state produce three
 # SHOW nodes with the SAME uuid and the same name, so uuid-keyed code cannot detect a repeat backup
 # and a delete can never verify itself. Only the snapshot index tells these apart.
 print("duplicate uuids: the case a uuid-keyed design cannot see")
@@ -133,13 +133,10 @@ check("restore takes clean", [f[1] for f in server.POST_ROUTES["/api/profiles/re
       ["name", "clean"])
 
 print("the write gate")
-import devices
-
 check("Pro II may write shows", "shows" in devices.PRO2.caps, True)
-# The Duo MAY TOO. The address carries a factory reset, so it needed settling rather than guessing:
-# root child 0x28E on a live Duo IS SHOWCONTROL in the tree, and the engine then proved the address
-# live by answering an impossible export with error 8 in one second. See the cap comment in
-# devices.py.
+# The Duo MAY TOO. The address carries a factory reset, so it is confirmed rather than guessed:
+# root child 0x28E on a Duo is SHOWCONTROL in the tree, and the engine answers an impossible export
+# there with error 8. See the cap comment in devices.py.
 check("the Duo may too", "shows" in devices.DUO.caps, True)
 
 print("\nALL SHOW AND SCAN CHECKS PASSED")

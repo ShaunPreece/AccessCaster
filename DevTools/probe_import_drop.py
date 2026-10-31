@@ -60,7 +60,7 @@ import time
 import urllib.error
 import urllib.request
 
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _bootstrap  # puts Project/ on the path; import FIRST
 import diagnostics
 
 BASE = "http://127.0.0.1:8770"
@@ -155,8 +155,7 @@ def nudge(value: int) -> int:
 # announcer and the recorder watcher, both long-lived read handles. A force-kill tears those down
 # without ever closing them, so the desk is left with handles that were never released.
 #
-#
-# That makes it a candidate in its own right: a captured drop came two minutes after exactly this,
+# That makes it a candidate in its own right: one recorded drop came two minutes after exactly this,
 # while fifteen clean imports all ran on a server that came up with nobody to kill.
 
 def listening_pid() -> int:
