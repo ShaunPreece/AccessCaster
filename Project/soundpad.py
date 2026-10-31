@@ -239,10 +239,10 @@ def sanitise_preview_edit(param: str, value):
 
 
 # ----------------------------------------------------------------------------------------------
-# LIVE PREVIEW (temp pad + in-place edits; both primitives ear-proven)
+# LIVE PREVIEW (temp pad + in-place edits)
 # A scratch FX pad carries the in-progress effect. Creating it sets padActive ON, which engages
-# the effect on the live mic hands-free (ear-proven). Each control change is streamed
-# as an in-place edit (padActive + the one field on the FX sub-handle; ear-proven), so
+# the effect on the live mic hands-free. Each control change is streamed
+# as an in-place edit (padActive + the one field on the FX sub-handle), so
 # nothing is reallocated. Stopping clears the pad. padEffectInput 0 = Mic 1 (the create default).
 # ----------------------------------------------------------------------------------------------
 
@@ -698,7 +698,7 @@ def free_effect_subhandle(target_idx: int) -> int:
     """Effects sub-handle for a pad = REUSE the pad's FIRST existing effect object's index under
     PADEFFECTS; only APPEND (the object count) if the pad has no object yet.
 
-    WHY REUSE, NOT APPEND (decoded + ear-proven): the LIVE FX engine binds a pad to the
+    WHY REUSE, NOT APPEND: the LIVE FX engine binds a pad to the
     FIRST region-B effect-object whose effectsIdx == padIdx. Appending our effect at the end left
     the first object empty, so the engine binds silence and the pad goes dead after a reboot. The
     RODE app writes to the pad's FIRST matching object, so that index is reused. A hard-coded 0x0B,
@@ -981,11 +981,11 @@ BACK_CHANNEL_SOURCES = (
 )
 
 # padMixerTriggerMode, shared by every mixer action (Censor/Trash Talk/Fade/Back Channel/Ducking).
-# 1 latches and 0 is momentary, ear-proven on a Back Channel pad. That is the SAME way round as
+# 1 latches and 0 is momentary. That is the SAME way round as
 # padTriggerMode on a MIDI pad, so the two share one convention: do not invert this pair.
 MIXER_TRIGGER_LABEL = {0: "Momentary (only while held)", 1: "Latching (press on, press again off)"}
 
-# padPlayMode on SOUND pads, EAR-PROVEN one value at a time: 0 press to play / press to stop /
+# padPlayMode on SOUND pads: 0 press to play / press to stop /
 # press to play from the start; 1 plays only while held, stops on release, restarts from the start
 # next hold; 2 press to play, press again restarts from the beginning, CANNOT be stopped.
 # NOTE THE ORDER. The RODE guide lists these as "Toggle / One Shot / Hold", so the obvious guess is
@@ -1017,16 +1017,8 @@ def back_channel_sources() -> list[dict]:
             for s in BACK_CHANNEL_SOURCES if s["channel"] in have]
 
 
-# padColourIndex 0-11 -> the palette's real colour names, which the RODE user guide does not list.
-# Method: the RODE app's Customize SMART Pads screen draws each pad's tile icon in that pad's colour
-# at FULL saturation, so the swatches were sampled straight off the app UI (no Transfer Mode needed,
-# nothing written). Measured hues, in index order: 0, 28.6, 43.1, 54.1, 83.1, 120.0, 165.3, 190.9,
-# 223.5, 266.3, 280.8, 306.3 - an even sweep round the wheel from red to magenta.
-# CROSS-CHECKED three ways: (1) pad bank 2 carries indices 0, 1, 2 and 6 again and sampled
-# byte-identically to bank 1; (2) a webcam run that stepped ONE pad through all 12 indices and
-# photographed the physical LED agreed on every index it could resolve (the white pad diffuser
-# washes the pale ones out, which is why the camera alone was not enough); (3) that same run proves
-# the index-to-pad alignment, so these names are pinned to the real values, not inferred order.
+# padColourIndex 0-11 -> the palette's colour names, which the RODE user guide does not list. The
+# indices sweep evenly round the colour wheel from red to magenta.
 PAD_COLOUR_NAME = {
     0: "Red", 1: "Orange", 2: "Amber", 3: "Yellow", 4: "Lime", 5: "Green",
     6: "Teal", 7: "Cyan", 8: "Blue", 9: "Violet", 10: "Purple", 11: "Magenta",
@@ -1079,7 +1071,7 @@ PAD_PROP = {
 # payload, the writer and the profile share ONE definition. The firmware's default, which is what a
 # pad is stuck with unless these are written, is a Control Change on control = padIdx (bank 1 pad 1
 # = CC 0, counting up), channel 1, value 127 on press and 0 on release.
-# padTriggerMode IS latching versus momentary, PROVEN ON HARDWARE on the desk's own MIDI output
+# padTriggerMode IS latching versus momentary, as the desk's own MIDI output shows
 # (DevTools/midi_monitor.py):
 #   mode 1 (the app's default): press sends the ON value, the NEXT press sends the OFF value.
 #     LATCHING.
@@ -1110,16 +1102,11 @@ TRIGGER_TYPE_LABEL = pr.TRIGGER_TYPE_LABEL          # 0 Control Change, 1 Note
 # trigger fields above.
 #
 # ENVELOPE (sound pads). Four floats, and they are FOUR POSITIONS ALONG THE SOUND, 0.0 to 1.0.
-# EAR-PROVEN on a 44-second sound, where a position and a length in seconds cannot be confused:
-#   start 0.5              -> playback began about halfway in, NOT half a second in. So a POSITION.
-#   start 0.5, fadeIn 0.25 -> NO fade at all, full level from halfway to the end. So fadeIn is an
-#                             ABSOLUTE POSITION too (the fade had already "finished" before playback
-#                             began), not a fade LENGTH measured from the start point.
-#   fadeOut 0.1, stop 0.2  -> started at the beginning, faded down early and stopped. So fadeOut is
-#                             where the fade-down BEGINS and stop is where playback ENDS.
-# Hence: play from `start` to `stop`, fading up until `fade_in` and down from `fade_out`. That also
-# explains the create default (0.0 / 0.0 / 1.0 / 1.0) exactly: play it all, with both fade points
-# sitting on the ends so neither does anything.
+# Playback runs from `start` to `stop`, fading up until `fade_in` and down from `fade_out`. Every
+# one is a POSITION, not a length: start 0.5 begins halfway through the sound, not half a second
+# in, and a fade_in at or before start fades nothing. That also explains the create default
+# (0.0 / 0.0 / 1.0 / 1.0) exactly: play it all, with both fade points sitting on the ends so
+# neither does anything.
 # A fade point OUTSIDE the played region is accepted by the desk and simply does nothing, which is a
 # silent no-op a blind operator cannot see, so the editor says so rather than leaving it quiet.
 ENV_FIELD = {
@@ -1247,7 +1234,7 @@ for _tf in TRIGGER_EDIT:
         "help": "MIDI trigger pads: " + _tf["help"],
     }
 del _tf
-# The envelope, fade and censor settings. The envelope's 0.0-1.0 range is EAR-PROVEN (see ENV_FIELD),
+# The envelope, fade and censor settings. The envelope is 0.0-1.0 (see ENV_FIELD),
 # so it is clamped; the fade seconds are clamped to a sanity bound rather than a device limit.
 for _e in ENV_EDIT:
     PAD_PROP[ENV_FIELD[_e["key"]]] = {
@@ -1472,7 +1459,7 @@ def set_trigger_mapping(grid: int, **fields) -> dict:
 def set_envelope_percent(grid: int, field: str, percent: float) -> dict:
     """Sound pads: move one point of the trim/fade envelope, given as a PERCENTAGE through the sound.
 
-    The desk stores a 0-1 fraction (ear-proven, see ENV_FIELD); percent is the editor's unit because
+    The desk stores a 0-1 fraction (see ENV_FIELD); percent is the editor's unit because
     it reads and arrows sensibly and needs no file duration. A point outside the played region is
     accepted by the desk and does nothing, so the caller is TOLD when that is the result rather than
     left with a control that silently achieves nothing."""
@@ -2300,8 +2287,7 @@ def unlatch_pad(position: int) -> None:
     removes the record. Sending only the OFF therefore switches the effect off and leaves the pad
     exactly where it was, which is what you want when a create left something engaged.
 
-    No transfer mode, deliberately: this is a live state toggle, not a record edit, and the
-    disengage proven on hardware is sent exactly like this."""
+    No transfer mode, deliberately: this is a live state toggle, not a record edit."""
     _require_pad_write()
     iface = t.find_control_interface()
     if iface is None:
@@ -2431,9 +2417,9 @@ def _pad_audio_source(root: str, grid: int, wanted: str | None):
 # somebody else's sounds for others, which is worse than not offering it.
 #
 # **A FACTORY RESET IS THE ANSWER, and it is the same answer for every user.** The desk keeps its
-# own copies and `showControlNewFromDefault` restores them - proven on hardware, files and all
-# (DevTools/test_factory_sfx_live.py). A user with a backup should restore that first, because it
-# needs no reset; see server.action_show_reset, which says both.
+# own copies and `showControlNewFromDefault` restores them, files and all
+# (DevTools/test_factory_sfx_live.py checks it). A user with a backup should restore that first,
+# because it needs no reset; see server.action_show_reset, which says both.
 #
 # WHAT IS LEFT HERE NEEDS NO FILE AT ALL: the six voice effects are recipes and the two mixer pads
 # are settings, so both can be rebuilt from nothing but the tables below. That is

@@ -88,8 +88,7 @@ import rcp_transfer
 # The two blocks. SHOWS holds one SHOW node per exported file; SHOWCONTROL holds the commands.
 # Both are past what the one-byte global address can carry, so writes use the two-byte channel form
 # (`01 01 01 02 <lo> <hi>`), exactly as recorder.build_delete_request does for RECORDINGS 0x28F.
-# 0x28E is PROVEN on hardware, and again through the whole export / import / reset loop; RECORDINGS
-# at 0x28F is anchored one slot above it.
+# 0x28E is a confirmed selector; RECORDINGS at 0x28F sits one slot above it.
 SEL_SHOWCONTROL = 0x28E
 BLOCK_SHOW = "SHOW"
 

@@ -365,8 +365,8 @@ class HeadphoneTypeSpec:
       outputs : (selector, label) per addressable headphone output, in UI order.
       values  : (int, label) per selectable amp type, in UI order.
 
-    NOT YET CONFIRMED ON HARDWARE:
-      * value 2 = "Low sensitivity" - named from the RODE app UI but not yet capture-verified.
+    NOT CONFIRMED:
+      * value 2 = "Low sensitivity" - the RODE app's label; the value itself is unverified.
       * HP2 (0x0A) on the PRO II specifically (confirmed on the Duo; the Pro II shares the selector).
       * The Pro II's Headphone 3/4 outputs (inferred 0x0B/0x0C) are deliberately NOT listed: their
         selectors are unconfirmed, so listing them would risk writing an unmapped selector (a stray).
@@ -552,7 +552,7 @@ CHANNELS_DUO = (
     Channel(8, "Chat", "Chat", "line", stereo=True),
     Channel(9, "USB2", "USB 2", "line", stereo=True),
     Channel(10, "Bluetooth", "Bluetooth", "line", stereo=True),
-    # Mute is EAR-PROVEN here and only the mute: the pads go silent and come back, and the desk
+    # Mute works here and only the mute: the pads go silent and come back, and the desk
     # mutes all 13 of source 11's cross-points on its own. The processing chain does nothing on
     # this desk either - see CHANNELS_PRO2 above.
     Channel(11, "SMARTpads", "SMART pads", "bus"),
@@ -572,7 +572,6 @@ PRO2_FADERS = FaderSpec(
     # off-fader.
     assignable=_assignable_view(CHANNELS_PRO2),
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
-    # All three codes captured from the RODE app on hardware.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4")),
     # Found by their INPUTSOURCE entries: every usable input carries a non-black `inputColour`, and
     # `inputDigitalGain` -12 marks the family that arrives over USB. `DevTools/input_sources.py`
@@ -794,8 +793,8 @@ class DeviceModel:
 # channel's INPUTSOURCE entry, never by array position - see DeviceModel.input_path.
 #
 # PROCESSING and EFFECTS are per-STRIP, i.e. per FADER POSITION, not per source, so a channel's strip
-# is resolved from the LIVE fader vector (channels._strip_index), on both desks. HARDWARE-CONFIRMED:
-# with USB 1 moved onto strip 1, switching off strip 1's gate removes the gating from USB 1's audio.
+# is resolved from the LIVE fader vector (channels._strip_index), on both desks: with USB 1 moved
+# onto strip 1, switching off strip 1's gate removes the gating from USB 1's audio.
 # DO NOT PIN a strip per channel: on the default layout a pinned map returns the same indices as the
 # live lookup, so it looks correct until somebody moves a fader.
 PRO2_UI_CHANNELS = _ui_channel_view(CHANNELS_PRO2)
@@ -806,7 +805,7 @@ PRO2_UI_CHANNELS = _ui_channel_view(CHANNELS_PRO2)
 # carrying `inputDigitalGain`, so the Level control addresses the same property at the same kind of
 # address as every other line input, and the processing chain is the ordinary per-STRIP one.
 #
-# THE LEVEL IS PROVEN ON HARDWARE and the processing is not. A write reaching its own address and
+# THE LEVEL IS CONFIRMED and the processing is not. A write reaching its own address and
 # reading back is never proof that it reaches audio - the SMART pads bus is the standing example,
 # and it is why that one is kind "bus". These four are treated as ordinary line inputs because they
 # arrive on the same cable as USB 1, which is processed; if one turns out to be inaudible, the

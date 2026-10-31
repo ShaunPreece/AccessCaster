@@ -1,8 +1,8 @@
 """Pad CREATE record builders: every record built from the target pad's parameters.
 
-Nothing is replayed from a capture. A replayed template carries the captured pad's identity in every
-field it does not overwrite (`padTriggerControl` and `effectsIdx` both track padIdx), so a created
-pad would answer to another pad's MIDI trigger. The captures are the byte-layout spec only.
+Nothing is a replayed byte template. A template carries its source pad's identity in every field it
+does not overwrite (`padTriggerControl` and `effectsIdx` both track padIdx), so a created pad would
+answer to another pad's MIDI trigger.
 
 A create is one held-open HID session (`soundpad` sends it):
   handoff "PAD"                 binds the pad edit handle H

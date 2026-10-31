@@ -334,10 +334,8 @@ def fx_selector(channel) -> int:
 # app itself sends are allowed, per the capture-replay safety rule.
 PROCESSING_PROPS = frozenset({
     "eqHighGain", "eqHighBell", "eqMidGain", "eqMidBell", "eqLowGain", "eqLowShelf",
-    # THE THREE Q VALUES are independent and writable, measured on Mic 3 (strip 2, selector 0x1E):
-    # no other EQ write moves a Q, and a direct write lands, reads back exactly and restores
-    # byte-for-byte with no stray. The one entry here not taken from a capture of the RODE app,
-    # which has no Q control; the hardware read-back is the evidence.
+    # THE THREE Q VALUES are independent and writable: no other EQ write moves a Q, and a direct
+    # write lands and reads back with no stray. The RODE app has no Q control.
     "eqLowQ", "eqMidQ", "eqHighQ",
     "compressorThreshold", "compressorRatio", "compressorAttack", "compressorRelease",
     "compressorGain",
@@ -455,7 +453,7 @@ CHAIN_PRESET_MARKER_PROP = "channelCurrentFxPreset"
 def set_channel_advanced(channel: int, on: bool) -> int:
     """Set a strip's processing MODE: True = advanced (modules + params), False = simple (the three
     VoxLab knobs). Compact bool on the channel's own processing selector, i.e. the same record shape
-    as any module toggle. Verified on hardware: writing this flips the mode and changes NO
+    as any module toggle. Writing this flips the mode and changes NO
     parameter (the RODE app's "disabling Advanced will reset all parameters" warning is the APP
     clearing them itself, not the firmware)."""
     _require_processing()
@@ -498,16 +496,13 @@ def set_processing_enabled(channel: int, on: bool) -> int:
 
 # CHANNEL MUTE. `channelOutputMute` is a compact bool on the channel's own processing selector
 # (SEL_CHANNEL_PROC + strip), i.e. byte-for-byte the same record shape as any module toggle above.
-# PROVEN ON HARDWARE (Mic 2, strip 1, selector 0x1D): wrote True, channelOutputMute[1]
-# flipped, and the firmware PROPAGATED it into the mix matrix - the twelve mixMute cells for that
-# source all went True - so it is a REAL mute, not a stored flag. Wrote False, everything returned
-# to baseline, no stray appended. It does NOT take the input-address format: written there it
-# looks unwritable.
+# The firmware PROPAGATES it into the mix matrix (every mixMute cell for that source follows), so
+# it is a REAL mute, not a stored flag, and clearing it puts everything back. It does NOT take the
+# input-address format: written there it looks unwritable.
 #
 # Gated by the same "processing" cap as the module toggles, because it is the same selector family.
-# EAR-PROVEN ON THE DUO TOO, on Mic 2 (strip 1, deliberately not strip 0): the mic went silent and
-# unmute brought it back. On that desk a mute moves 14 properties, its own plus the 13
-# matrix cross-points for the source, which is the firmware propagating it exactly as here.
+# The Duo behaves the same: a mute moves 14 properties, its own plus the 13 matrix cross-points
+# for the source.
 MUTE_PROP = "channelOutputMute"
 
 
@@ -527,10 +522,8 @@ def set_channel_mute(channel, on: bool) -> int:
 # mute above - a compact bool on SEL_CHANNEL_PROC + strip. The RODE app has no control for it, which
 # means no capture route, never that it is unwritable.
 #
-# PROVEN ON HARDWARE (Mic 3, strip 2, selector 0x1E): wrote True, channelCueEnable[2]
-# flipped to True and nothing else in the model moved; wrote False, the whole vector returned to
-# baseline. Model length identical before and after (139485 bytes) and the occurrence counts for
-# channelCueEnable / channelOutputMute / channelInputSource were unchanged, so no stray was appended.
+# A write moves channelCueEnable for that strip and nothing else in the model, and appends no
+# stray.
 #
 # UNLIKE the mute, the desk pushes NOTHING back when this is written from software: not the
 # property, not a matrix propagation. A solo is a monitoring change, so there is no mix matrix for
@@ -586,8 +579,8 @@ def clear_all_solos(blob: bytes | None = None) -> int:
 # 30-entry table indexed by SOURCE CODE, a different block and a different index, where a write goes
 # to an address the audio engine does not read.
 #
-# NOT EAR-PROVEN: no transmitter has been paired with either desk here. That is why the reply says
-# what was sent rather than what happened, and why nothing here claims the mic went quiet.
+# UNTESTED WITH A TRANSMITTER, so the reply says what was sent rather than what happened, and
+# nothing here claims the mic went quiet.
 WIRELESS_MUTE_PROP = "channelWirelessMute"
 
 
@@ -628,7 +621,7 @@ def set_channel_effect(channel: int, effect: str, on: bool) -> int:
     return _t.send_record(_t.build_global_prop_bool(prop, on, fx_selector(channel)))
 
 
-# The adjustable PARAMS for each channel effect, from a capture of the RODE app: GLOBAL float64
+# The adjustable PARAMS for each channel effect: GLOBAL float64
 # (normalised 0..1) on the same strip selector as the on/off. Names match the pad-FX names
 # (echoMix = Level, reverbModel = size/type, etc.).
 CHANNEL_FX_PARAMS = {

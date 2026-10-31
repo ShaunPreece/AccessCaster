@@ -6,7 +6,7 @@ or a drive with no room) are only visible on the touchscreen. So an operator cou
 into a unit that never started. This module makes the transport writable from software and the state
 readable, and the state arrives as a PUSH, so a press on the unit itself is caught too.
 
-WHAT IS PROVEN ON HARDWARE (DevTools/test_recorder_live.py):
+WHAT THE DESK DOES (DevTools/test_recorder_live.py checks it):
   * `requestRecordState` on RECORDER selector 0x03 is the command. 2 = record, 1 = pause, 0 = stop.
     It is a REQUEST: the firmware consumes it and resets it to 3, so reading it back tells you
     nothing about whether you are recording. Read `recordState` for that.
@@ -479,9 +479,8 @@ def drop_marker() -> None:
 # DELETING A RECORDING: `requestDeleteUID` in the RECORDINGS block, root child 0x28F, which is past
 # the one-byte global form and so is sent in the TWO-BYTE form (`01 01 01 02 <lo> <hi>`).
 #
-# PROVEN ON HARDWARE: `requestDeleteUID` = 20 removed Recording 20 from the pendrive; the list went
-# from 20 to 19, `recordingUID` and `recordingContent` each lost exactly one occurrence, and nothing
-# else in the model moved. Two facts from the same run:
+# `requestDeleteUID` = N removes Recording N from the drive and nothing else: `recordingUID` and
+# `recordingContent` each lose one occurrence and no other property moves. Two more facts:
 #   - THE REMAINING RECORDINGS ARE NOT RENUMBERED, so a UID is a stable handle and a list held by a
 #     page does not shift under it.
 #   - THE FIELD SELF-CLEARS, so the write never confirms itself. `server.action_delete_recording`

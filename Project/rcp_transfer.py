@@ -89,7 +89,7 @@ def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
 # of the source code rather than as a link flag is also what hides stereo linking entirely.
 #
 # STEREO-LINKED PAIRS get their own codes, not a bit flag: 4/5/6 fill the exact gap between Mic 4
-# and USB 1, one per legal pair. Proven on hardware for all three.
+# and USB 1, one per legal pair.
 INPUT_SOURCE_CODE = {
     "Mic1": 0, "Mic2": 1, "Mic3": 2, "Mic4": 3,
     "Mic1+2": 4, "Mic2+3": 5, "Mic3+4": 6,
@@ -147,14 +147,13 @@ def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
 
 
 SEL_SYSTEM = 0x0F  # SYSTEM block: transferModeType, systemMidiControl, haptics, REC button
-SEL_NETWORK = 0x10 # NETWORK block: wifi and Bluetooth (proven on hardware)
+SEL_NETWORK = 0x10 # NETWORK block: wifi and Bluetooth (confirmed)
 
 
 def build_global_prop_bool(name: str, on: bool, selector: int = SEL_SYSTEM) -> bytes:
     """Build a global report-3 record for a compact boolean property: 01 01 <02 on / 03 off>.
 
-    Enabled is 0x02 and disabled is 0x03, NOT 1/0. Verified byte-for-byte against the
-    systemMidiControl ON/OFF captures."""
+    Enabled is 0x02 and disabled is 0x03, NOT 1/0."""
     value_block = bytes([0x01, 0x01, 0x02 if on else 0x03])
     return _frame(build_address([selector]) + name.encode("ascii") + b"\x00" + value_block)
 
@@ -197,9 +196,8 @@ def build_channel_prop_int(name: str, value: int, chan_sel: int,
                            trailer: int = CHANNEL_ADDR_TRAILER_PRO2) -> bytes:
     """A channel-addressed integer property: address 01 01 01 02 <chan_sel> <trailer>.
 
-    Pro II verified byte-for-byte against inputMicrophoneGain (Mic 1 0x6e, Mic 2 0x6f) and
-    inputPower. The Duo selectors in the selftest (0x48, 0x4f, trailer 0x01) match the RODE app's
-    capture exactly, and the Duo's audio engine ignores that node: see
+    Pro II mic inputs are 0x6e (Mic 1) and 0x6f (Mic 2). The Duo selectors in the selftest (0x48,
+    0x4f, trailer 0x01) are well formed, but the Duo's audio engine ignores that node: see
     devices.DeviceModel.input_path. Nothing in the app addresses a Duo input this way."""
     return build_path_prop_int(name, value, [(chan_sel & 0xFF) | ((trailer & 0xFF) << 8)])
 

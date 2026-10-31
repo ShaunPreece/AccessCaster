@@ -240,7 +240,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     cis = rcp_read.values(blob, "channelInputSource")
     midi = first("systemMidiControl")
 
-    # The two levels the desk otherwise keeps to itself (writes proven on hardware): each fader's
+    # The two levels the desk otherwise keeps to itself: each fader's
     # faderLevel (0..127, per STRIP, only the VIRTUAL slots are ours to write) and the monitor
     # SPEAKER level (outputMonLevel, a 0..1 float). Both are recorded RAW, so a profile round-trips
     # them exactly. Like the fader vector, capture is deliberately wider than write: we store every
@@ -251,8 +251,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
                     for v in rcp_read.values(blob, "faderLevel")]
     mon_level = first("outputMonLevel")
     # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
-    # positionally to the outputs the device addresses - the same read read_routing_live does, and
-    # the ordering is hardware-confirmed. The old single "headphone_type" key is still written (it
+    # positionally to the outputs the device addresses - the same read read_routing_live does.
+    # The old single "headphone_type" key is still written (it
     # is Headphone 1's value) so a profile saved now still restores on an older build.
     hp_all = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
     headphone_types = [hp_all[i] if i < len(hp_all) else None
@@ -266,8 +266,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # It covers EVERY output, not only the monitor ones, so a level set on the REC, USB or Chat mix is
     # backed up; and it records nothing but `excluded` for an excluded cross-point, whose "level" is
     # an inert number frozen where the fader stood (see PROJECT_GUIDE).
-    # Writing a manual level to a non-monitor cross-point is hardware-proven (the mix-scheme live
-    # test set one on the Chat output and read it back), so no new capability is being assumed here.
+    # Writing a manual level to a non-monitor cross-point is a confirmed write, so no new capability
+    # is being assumed here.
     #
     # The read refuses if the matrix changed shape (a phone caller) or if this device's matrix read
     # is unverified, so we store null + a note rather than a wrong snapshot. Same blob, no extra read.
@@ -565,7 +565,7 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     r = prof.get("routing") or {}
     faders = r.get("faders") or []
     # THE FADER LAYOUT GOES FIRST, before any channel processing. Processing and effects are
-    # addressed per fader STRIP (channels._strip_index; per-strip behaviour hardware-confirmed),
+    # addressed per fader STRIP (channels._strip_index),
     # so the layout decides where each channel's chain has to be written. Run this block LAST and
     # every restored chain is written against the OLD layout and then has the layout moved out from
     # under it, so a profile saved with a reordered layout restores its voicings onto the wrong
@@ -685,8 +685,8 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
             if ch.get("polarity") is not None:
                 w(f"{cname} polarity", lambda cnum=cnum, v=ch["polarity"]: channels.set_polarity(cnum, bool(v)))
             # INSTRUMENT GAIN is restored; INPUT TYPE deliberately is not (profile-coverage report).
-            # inputType is DERIVED from the mic type just restored above (proven on hardware:
-            # Line-in -> 2, Instrument -> 1, any mic voicing -> 0), so the path comes back on its
+            # inputType is DERIVED from the mic type just restored above (Line-in -> 2,
+            # Instrument -> 1, any mic voicing -> 0), so the path comes back on its
             # own, and writing it as well could only ever produce a state the desk's own UI cannot
             # make. The instrument gain is NOT derived the same way - selecting Instrument sets it to
             # 20 and leaving Instrument does not clear it - so that one does need writing.

@@ -1587,9 +1587,8 @@ def callme_status_sentence() -> str:
 # ----------------------------------------------------------------------------
 # UNIT SETTINGS - the desk's own display, buttons and listen behaviour.
 #
-# All of these are readable from any dump; what makes them WRITABLE is the write SELECTOR, read-back
-# verified on hardware (rcp_transfer.UNIT_SETTING_SEL says which were captured from the RODE app
-# and which derived from the block rule). Without them the whole group is reachable ONLY from
+# All of these are readable from any dump; what makes them WRITABLE is a confirmed write SELECTOR
+# for each (rcp_transfer.UNIT_SETTING_SEL). Without them the whole group is reachable ONLY from
 # the touchscreen, which is exactly the class of setting this project exists to replace.
 #
 # ONE SPEC DRIVES FOUR THINGS: the read, the write's value validation, the control the browser
@@ -1675,7 +1674,7 @@ UNIT_SETTINGS_NOT_ON_PAGE = {
                           "saved and restored by a profile, because it is real stored state.",
     "systemDateTimeDaylightSavings": "NOT OFFERED, for the same reason as the timezone: a write is "
                                      "stored and reads back, and the clock on the unit's screen "
-                                     "stays where it was (watched on camera). The touchscreen "
+                                     "stays where it was. The touchscreen "
                                      "applies it. Still saved and restored by a profile.",
 }
 
@@ -2191,10 +2190,9 @@ def read_network_status() -> dict:
 # ----------------------------------------------------------------------------
 # NETWORK WRITES. Joining wifi and making the unit discoverable, with no touchscreen.
 #
-# NETWORK IS SELECTOR 0x10, proven on hardware: `btVisible` written there reads back in the NETWORK
-# block (not the SYSTEM duplicate), leaves no stray, and a phone then finds the unit, pairs, and
-# plays audio through it. `wifiSSID` and `wifiPSK` write as strings, and with the radio on the unit
-# holds a DHCP address 15 seconds later - confirmed by PINGING it, not by the unit reporting success.
+# NETWORK IS SELECTOR 0x10: `btVisible` written there reads back in the NETWORK block (not the
+# SYSTEM duplicate), leaves no stray, and makes the unit discoverable. `wifiSSID` and `wifiPSK`
+# write as strings, and with the radio on the unit holds a DHCP address about 15 seconds later.
 # The RODE app's Network screen being read-only says nothing about what the bus can write.
 #
 # WHAT IS DELIBERATELY NOT OFFERED, and it is not caution:
@@ -2459,7 +2457,7 @@ def action_set_bt_visible(on: bool) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# SCANNING FOR WIFI NETWORKS, proven on hardware.
+# SCANNING FOR WIFI NETWORKS.
 #
 # `wifiScan` written on the NETWORK selector pushes NOTHING back. What it does is fill in
 # `wifiScan1` to `wifiScan10` SILENTLY, so the results appear only in a later model dump. Format of
@@ -3080,7 +3078,7 @@ def _ann_say(text: str) -> None:
         pass
 
 
-# MUTE / SOLO STATE, hardware-observed.
+# MUTE / SOLO STATE.
 # Pressing mute or solo pushes, unasked and about 70 ms after the button edge, the STATE property
 # `channelOutputMute` / `channelCueEnable`, addressed at SEL_CHANNEL_PROC + strip index. So the
 # announcer can say WHICH channel and WHETHER it is now muted, instead of the bare word "Mute" - and
@@ -3098,7 +3096,7 @@ _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
 # real mute a moment later still speaks.
 _ANN_MIXER_QUIET_S = 0.75
 _ann_mixer_quiet_until = 0.0
-# PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Hardware-measured: a short press runs
+# PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Measured: a short press runs
 # 475 ms down-to-up and mutes nothing; a hold pushes `channelOutputMute = True` 765 ms after the
 # press edge, WHILE STILL HELD, and mutes the channel selected BEFORE the press. So the desk does
 # not advance its encoder ring on a hold. RODE's user guide documents press-and-hold only on the REC
@@ -3165,12 +3163,9 @@ _ANN_RUN_S = 1.5           # within this of the last update on the same target, 
 # that order and say what has just been selected BEFORE it is turned - which matters, because the
 # first click already moves the value by 1/127.
 #
-# The order is HARDWARE-OBSERVED, not assumed: pressing walks fader 7 -> fader 8 -> fader 9 ->
-# monitor level -> round again, i.e. exactly the things with no physical fader. Evidence from one
-# capture: consecutive press-then-click pairs revealed 0x0d, 0x0a, 0x0b, 0x0c in that order, and a run
-# of FIVE presses with no turn in between landed one step on from where it started, which is what a
-# four-step ring does. Selectors: faderLevel 0x04 + fader index (7 -> 0x0a, 8 -> 0x0b, 9 -> 0x0c, all
-# observed), outputMonLevel 0x0d.
+# On a Pro II, pressing walks fader 7 -> fader 8 -> fader 9 -> monitor level -> round again, i.e.
+# exactly the things with no physical fader. Selectors: faderLevel 0x04 + fader index (7 -> 0x0a,
+# 8 -> 0x0b, 9 -> 0x0c), outputMonLevel 0x0d.
 #
 # We never TRUST the prediction blindly: the first movement reports the real target, which re-seats
 # our position, so a wrong guess self-corrects and costs one spoken phrase.
@@ -3201,8 +3196,7 @@ _ANN_FADER_LEVEL_MAX = 127.0     # faderMax; faderLevel/127 IS the cross-point l
 _ANN_POT_LEVEL_MAX = 127.0
 _ANN_POT_COUNT = 4
 # TURNING WITH NOTHING BOUND. The encoder only adjusts a level while the desk has one bound to it,
-# and pressing the BANK buttons moves the screen to the pads page, which unbinds it (webcam-confirmed:
-# 2x4 pad grid on screen, and a full model diff over ten clicks changed 0 of 459 properties).
+# and pressing the BANK buttons moves the screen to the pads page, which unbinds it.
 # In that state the desk still reports the rotation as `encoderSignal` but nothing moves,
 # so silence is technically correct and infuriating in practice. Say so instead: if a turn is followed
 # by no level change, announce that it is not linked. `encoderColour` corroborates it - it read 7 while
@@ -3356,7 +3350,7 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
             st["enc_bound"] = (ival >= 0)
         return
     if name == "faderLevel":
-        # The VIRTUAL fader level, 0-127, hardware-observed. This is the encoder's own report of
+        # The VIRTUAL fader level, 0-127. This is the encoder's own report of
         # what it just moved, and its address names the FADER directly
         # (PHYSICALINTERFACE.FADER[base + index]), so it is the cleanest signal for re-seating the
         # ring - the cross-point pushes that follow say the same thing by source.
@@ -4637,7 +4631,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
 
 
 def action_set_channel_solo(name: str, on: bool) -> dict:
-    """Solo ("Listen") a channel from software, or clear it (channelCueEnable, proven on hardware).
+    """Solo ("Listen") a channel from software, or clear it (channelCueEnable).
 
     The reach argument is the same as the mute's, but the SAFETY argument is stronger and shapes the
     message. A solo replaces the headphone feed: leave one on by accident and the desk sounds broken
@@ -5180,7 +5174,7 @@ def action_set_channel_advanced(name: str, on: bool) -> dict:
     Worth knowing, and why the message says so: in SIMPLE mode the unit DERIVES most of the chain
     from Depth/Sparkle/Punch, so the module parameters below can be recomputed from those three. The
     RODE app clears them outright when you leave advanced mode; we do not touch them, so switching
-    back and forth here is non-destructive (hardware-verified)."""
+    back and forth here is non-destructive."""
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
@@ -5263,7 +5257,7 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
             "message": f"{ch['label']} {_PROCESSING_SPOKEN[prop].lower()} set to {where}."}
 
 
-# --- Mic processing PRESETS (whole-chain, captured from the RODE app + user-saved) -----
+# --- Mic processing PRESETS (whole-chain: the RODE app's factory set + user-saved) -----
 _FACTORY_PRESET_FILE = resource_path("mic_presets.json")   # ships with the app (read-only)
 _USER_PRESET_FILE = data_path("user_presets.json")         # user-saved (writable, %LOCALAPPDATA%)
 
@@ -5434,7 +5428,7 @@ def _read_channel_preset_props(channel: int) -> dict:
     """Read the current preset-property values for one mic channel (for 'save as').
 
     NEVER INDEX THE PROCESSING ARRAYS WITH `channel - 1`: that assumes a mic's chain sits at its own
-    slot, and processing is per fader STRIP (hardware-confirmed). On a reordered layout - a line
+    slot, and processing is per fader STRIP. On a reordered layout - a line
     channel on fader 2 pushing Mic 2 to strip 6 - "save Mic 2's settings as a preset" then silently
     saves whatever chain sits on strip 1. The strip is resolved the same way every other processing
     read and write does it (channels._channel_strip, off the live fader vector). The processing MODE
@@ -5917,8 +5911,8 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
 
     LINKING is two vacates and one write: the pair code goes onto the LOWER mic's fader and the other
     fader is emptied, because a linked pair occupies one fader rather than two. That is the desk's
-    own shape, captured from the RODE app; the app's other two records are cosmetic and writing the
-    source code alone leaves the desk byte-identical (verified).
+    own shape; the RODE app sends two more records, which are cosmetic: writing the source code
+    alone leaves the desk byte-identical.
 
     UNLINKING is where we deliberately DIVERGE from the desk. It returns only the lower mic and
     abandons the upper one off-fader, which on the RODE app leaves you with a mic you cannot hear and
@@ -6168,7 +6162,7 @@ def action_set_fader(fader_index: int, code: int) -> dict:
 # physical fader, and the monitor speaker level has no control in the RODE app either, so without
 # these writes both are reachable only from the desk, by encoder or touchscreen. The encoder is not
 # usable without sight (its target is chosen by touch and it silently unbinds), which is why these
-# matter. Writes PROVEN on hardware, read back and restored; see RODECASTER_PROTOCOL.txt 6.1.
+# matter. Both are confirmed writes; see RODECASTER_PROTOCOL.txt 6.1.
 def _level_write_gate():
     """Fader and monitor LEVEL writes. The one gate with a second condition beyond the cap: the
     device must also carry confirmed faderLevel selectors, so it cannot use _cap_gate alone."""
@@ -6946,7 +6940,7 @@ def action_reset_faders() -> dict:
             "stereo": stereo_link_state(new, spec), "message": msg}
 
 
-# --- MONITOR MIX: per-output source levels (decoded and proven on hardware) ------------------
+# --- MONITOR MIX: per-output source levels ----------------------------------------------------
 # Set how loud each source is in ONE output (e.g. your headphones), independent of the recording
 # and other outputs. Uses the matrix cross-point level (mixLevelWithAnchor): the output must be in
 # Custom mode, then we unlink the one source and set its absolute level. Reading is reliable (the
@@ -7269,9 +7263,8 @@ def read_routing_live() -> dict:
         "bt_auto_mute": rcp_read.block_value(blob, "OUTPUT", "outputBTAutoMute"),
         # Per-output headphone types: the model dump carries one headphoneType per output
         # (4 on the Duo: HP1,HP2,HP3,HP4); we map them POSITIONALLY to the device's exposed headphone
-        # outputs (HP1 then HP2). This dump->output ordering is HARDWARE-CONFIRMED on the Duo:
-        # HP1=0x09 moves dump position 0, HP2=0x0A moves position 1, value 2 accepted and read back,
-        # restored byte-clean. headphone_type is kept as the HP1 value for compatibility.
+        # outputs (HP1 then HP2): HP1 (0x09) is dump position 0 and HP2 (0x0A) is
+        # position 1. headphone_type is kept as the HP1 value for compatibility.
         "headphone_type": headphone_types[0] if headphone_types else None,
         "headphone_types": [headphone_types[i] if i < len(headphone_types) else None
                             for i in range(len(_active_headphones().outputs))],
@@ -9572,7 +9565,7 @@ def action_restore_backup(name: str, clean: bool = False) -> dict:
     WHY THAT IS WORTH THE COST, and the cost is real: the profile writes back 148 of 182 writable
     properties one at a time and takes two minutes against six seconds. What it misses that anyone
     would notice is the monitor output level and the auto-duck depth. Bluetooth pairing, the
-    headline reason for shows existing at all, is NOT carried by a show either (proven on hardware).
+    headline reason for shows existing at all, is NOT carried by a show either.
     Against that: the desk IS the screen reader's audio device for the people this app is for, so a
     desk that stops responding takes their speech with it, and an NVDA add-on that can escape to
     another output is not something everyone has.
@@ -9772,8 +9765,8 @@ def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True)
     NEVER an overwrite-in-place. create_sound clears the slot if occupied, then creates a fresh
     sound pad writing pads/<grid>/sound.<ext>, and is gated on a clean effect-object pool.
 
-    NO CONVERSION, ear-proven: the unit's pad player accepts WAV at every rate (22k-192k), bit depth
-    (16/24/32-float) and channel count tested, plus MP3, all played natively. So we write the file
+    NO CONVERSION: the unit's pad player accepts WAV at every rate (22k-192k), bit depth
+    (16/24/32-float) and channel count, plus MP3, all played natively. So we write the file
     AS-IS (no resample / downmix / bit-depth change) and never degrade quality. We only require the
     file to be WAV or MP3 (the two formats the RODE manual lists) and preserve its extension on
     the device, because an MP3 written under a .wav name plays as silence (the firmware trusts the
@@ -9842,7 +9835,7 @@ def action_set_pad_loop(grid: int, on: bool) -> dict:
 
 
 def action_set_play_mode(grid: int, mode: int) -> dict:
-    """Sound pads: Toggle (0), Hold (1) or One Shot (2). Values ear-proven on hardware: the stored
+    """Sound pads: Toggle (0), Hold (1) or One Shot (2). The stored
     order is NOT the guide's printed "Toggle / One Shot / Hold" order."""
     return _pad_write(grid, "Could not change how the pad plays",
                       lambda: soundpad.set_play_mode(grid, mode),
@@ -9897,7 +9890,7 @@ def action_set_pad_envelope(grid: int, field: str, percent: float) -> dict:
     """Sound pads: one point of the trim/fade envelope, as a percentage through the sound.
 
     The four points are start / fade_in / fade_out / stop, and they are POSITIONS along the sound
-    (ear-proven, see soundpad.ENV_FIELD). soundpad validates the field name and the range
+    (see soundpad.ENV_FIELD). soundpad validates the field name and the range
     and reports when the result is a fade that cannot be heard."""
     return _pad_write(grid, "Could not change the pad's trim and fade",
                       lambda: soundpad.set_envelope_percent(grid, field, percent))
@@ -10659,7 +10652,7 @@ def _hk_pad_verify(pad_idx: int, want_on: bool) -> None:
 #
 #   SOUND pad  -> MIDI, CC 35 on the pad's own channel. It is a PLAY, and what a second press does
 #                 is the pad's own `padPlayMode`. Over HID a sound pad sets `padActive` and plays
-#                 nothing: an ear-proven negative, so do not route sound pads down the HID path.
+#                 nothing, so do not route sound pads down the HID path.
 #   VOICE-FX
 #   and MIXER  -> HID, `padActive` at the pad's stream position. It is a TOGGLE and we hold the
 #                 state in `_hk_pads_on`, because for those two the flag IS the state and the desk
@@ -10729,7 +10722,7 @@ def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
     """Switch a VOICE-FX or MIXER pad on, and off again on the next press.
 
     Writing `padActive` at a pad's position ENGAGES it, and that is the same mechanism a latched
-    voice-FX pad uses, the one that can put a robot voice on a live mic. Proven on hardware: a
+    voice-FX pad uses, the one that can put a robot voice on a live mic. A
     voice-FX pad engages and releases, and a MIXER pad performs its whole action (Back Channel moves
     `channelCueEnable`, `channelTalkbackEnable`, `mixMute` and `channelOutputMute` together).
 

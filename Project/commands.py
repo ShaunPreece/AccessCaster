@@ -444,7 +444,7 @@ def _run_scheme(arg: str) -> str:
 # PADS: every type that does something when fired from software, which since MIDI is all of them.
 # ---------------------------------------------------------------------------------------------
 # SOUND PADS ARE HERE BECAUSE OF MIDI, NOT BECAUSE HID CAN FIRE THEM. Writing `padActive` switches
-# a sound pad's flag and the unit plays nothing - an ear-proven negative, and it still stands. MIDI
+# a sound pad's flag and the unit plays nothing. MIDI
 # lifts that limit. Voice-effect and mixer pads go over HID, where the flag IS the state; the
 # dispatch is per pad in server._hk_fire_pad.
 PAD_TYPES = (soundpad.PAD_TYPE_SOUND, soundpad.PAD_TYPE_VOICE_FX, soundpad.PAD_TYPE_MIXER)
