@@ -22,11 +22,10 @@ ELAPSED TIME IS NOT THE UNIT'S. `recordTimeMs` stays 0 right through a recording
 the push stream, so elapsed time is COUNTED HERE from the state changes we saw, and reported as
 unknown when we did not see the start.
 
-MARKERS WORK, PROVEN BY READING THE DRIVE ON A PC, which is the only place the evidence exists.
-`requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the recording. Nothing over
-USB shows it: the desk consumes the write and pushes the field back cleared, and the recording's own
-record carries identical flags either way. A take with markers dropped at 4.0 s and 8.0 s carries
-cue points at exactly those times, and one with none has no cue chunk at all. Both the int and the
+MARKERS: `requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the recording at
+the moment of the write. Nothing over USB shows it: the desk consumes the write and pushes the field
+back cleared, and the recording's own record carries identical flags either way, so the only place a
+marker can be seen is the file itself. A take with no markers has no cue chunk. Both the int and the
 double form of the write land; the double is used here because that is the type the desk's own echo
 comes back as.
 """
