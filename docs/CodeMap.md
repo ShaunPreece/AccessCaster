@@ -308,7 +308,7 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (149 files; the ones worth knowing)
+## DevTools/ (148 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, and resolves `docs/` and the notes),

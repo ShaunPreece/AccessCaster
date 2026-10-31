@@ -1400,6 +1400,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **The exception, proven 28th August 2026: it DOES push our own property writes back on report 04.**
   That is why the announcer needs the 1.5 s echo-suppression window per target. The two facts sit at
   different layers; do not collapse them.
+- **EVERY PHYSICAL-CONTROL PUSH IS ONE WHOLE RECORD, AND THE DUMP FOLLOWS A MUTE SET AT THE DESK.**
+  Measured on the Pro II, fw 1.7.6, 31st October 2026: four minutes of mutes, solos, the encoder, a
+  fader and pads gave 1124 pushes, none of them a malformed frame, so `rcp_read.parse_push` (and the
+  announcer) hears all of them. Mutes held on at the desk read True in `channelOutputMute` in the
+  dump taken while they were held, so the app's mute display from the dump is right. `potLevel` was
+  never pushed.
 - **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `rcp_read.PushListener`: own
   read-only handle, no HID lock, dump frames filtered by `parse_push`. A factory reset pushes
   `currentShowUUID` itself at about t+1.75 s. **OPEN IT BEFORE THE WRITE** - the burst starts 0.02 s
@@ -2539,6 +2545,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A PAD SHORTCUT WRITES TO THE DESK UNDER `_hid_lock`, THROUGH `_hk_desk`**, which gives up after
   `_HK_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
   restore has the desk in transfer mode lands inside the transfer.
+  **A SOUND PAD PLAYS THROUGH A RESTORE, BY DESIGN.** Once MIDI is armed and the bank is cached, a
+  sound-pad press is a MIDI note and touches no HID, so it neither waits nor is refused: measured on
+  the Pro II, 31st October 2026, pads played during a profile restore with a second or two of lag at
+  most. The restore re-arms MIDI when it ends, so the first press after it writes
+  `systemMidiControl` again. Only voice-FX and mixer pads, a bank change and the arming write go
+  through `_hk_desk`.
 
 - **THE WINDOW SHORTCUT MUST RUN ON THE PUMP THREAD, AND THAT IS THE WHOLE FIX. DO NOT ADD A
   WORKAROUND TO THE RAISE.** Windows grants a process the right to set the foreground while it is
