@@ -82,8 +82,8 @@ async function run() {
   check("and it is still SHORT: this one is read on every single focus",
     hint && hint.textContent.trim().length < 200, hint && hint.textContent.trim().length);
 
-  // The mute must still be there, and must still be the first thing on the tab: solo was inserted
-  // AFTER it deliberately, so a reader arriving at the panel reaches Mute before Listen.
+  // The mute must still be there, and must still be the first thing on the tab: solo comes AFTER
+  // it deliberately, so a reader arriving at the panel reaches Mute before Listen.
   const mute = el("mute-" + micName);
   check("the mute is still present", !!mute);
   check("mute comes BEFORE solo in reading order",
@@ -114,8 +114,8 @@ async function run() {
     JSON.stringify(log.map((r) => r.path)));
   check("the switch is unticked once the clear succeeds", solo.checked === false, solo.checked);
 
-  // A live region is what a screen reader reads back, and the whole point of the wording work is
-  // that the REPLY names what is still soloed. It has to land somewhere polite.
+  // A live region is what a screen reader reads back, and the REPLY names what is still soloed.
+  // It has to land somewhere polite.
   const live = document.querySelector("[aria-live]");
   check("there is a live region for the reply to land in", !!live);
 

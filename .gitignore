@@ -72,8 +72,9 @@ __pycache__/
 # Claude Code per-project settings (may contain machine-specific permission paths).
 .claude/
 
-# ui_probe fixtures generated from the connected desk (--stub). Regenerable in one command, see
-# the header of DevTools/ui_checks_baseline.js, so the repo carries the checks, not the snapshot.
+# ui_probe fixtures taken from the connected desk (--stub). make_readonly_stub.py and
+# make_callme_unready_stub.py build two of them; the others are made by hand. The repo carries the
+# checks, not the snapshot.
 DevTools/_probe_stub_*.json
 
 # Scratch space for webcam grabs and throwaway diffs. Never committed.

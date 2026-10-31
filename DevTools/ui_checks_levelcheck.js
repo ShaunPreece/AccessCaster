@@ -2,11 +2,11 @@
    Run:
      python DevTools/ui_probe.py --checks DevTools/ui_checks_levelcheck.js --route channels --timeout 240
 
-   WHY IT MOVED, since that is what these checks are really about: the old check metered a Windows
-   STREAM, and every stream this desk offers is a MIX - "Microphone (RODECaster Pro II Main Stereo)"
-   is four mics, two USB returns and Bluetooth at once. So it could say "something is reaching the
-   computer" and never "Mic 2 is right", which is the question you have while setting up. The server
-   now isolates one channel on a temporary Chat mix and corrects for the fader
+   WHY IT IS PER CHANNEL, since that is what these checks are really about: every Windows stream a
+   RODECaster offers is a MIX - "Microphone (RODECaster Pro II Main Stereo)" is four mics, two USB
+   returns and Bluetooth at once. A stream meter can say "something is reaching the computer" and
+   never "Mic 2 is right", which is the question you have while setting up. So the server isolates
+   one channel on a temporary Chat mix and corrects for the fader
    (server.action_channel_level_check).
 
    What is asserted here, and each one is a decision rather than plumbing:
@@ -81,8 +81,8 @@ async function run() {
     .map((p) => p.textContent.replace(/\s+/g, " ").trim()).join(" ");
   check("the hint says how long it talks for", /half a minute|30 seconds/i.test(hintText), hintText);
   // THE FADER FACT has to be in there. The cross-point it listens through is post-fader, the server
-  // divides it out, and a reading that silently ignored a fader would be the same trap the old
-  // percent-based meter was.
+  // divides it out, and a reading that silently ignored the fader would be wrong by however far the
+  // fader is down.
   check("and says the fader position is taken out of the reading",
     /fader/i.test(hintText), hintText);
 

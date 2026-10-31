@@ -9,8 +9,8 @@
    a control that is read out, focused, operated and does nothing.
 
    The probe never forwards a POST, so the endpoint and body are asserted from its log without a byte
-   reaching the desk - which matters here more than usual, because nobody on the project owns a
-   wireless mic to hear the result.
+   reaching the desk - which matters here more than usual, because the write is untested with a
+   real transmitter.
 
    Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_wireless.js --route channels */
 
@@ -88,8 +88,7 @@ async function run() {
 
   // ---- It is absent everywhere a transmitter cannot be paired -----------------------------
   // DERIVED, not a written-out list. A Pro II has Mic 3 and Mic 4, which DO get the switch, so
-  // "everything except Mic1 and Mic2" would have failed there while passing on the Duo it was
-  // written against.
+  // "everything except Mic1 and Mic2" would pass on a Duo and fail on a Pro II.
   const shouldNotHaveIt = names.filter((n) => !/^Mic\d+$/.test(n));
   for (const n of shouldNotHaveIt) {
     await pick(n);

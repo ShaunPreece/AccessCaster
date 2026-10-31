@@ -823,7 +823,6 @@ print("\nMUTING FROM SOFTWARE KEEPS THE ANNOUNCER'S MUTE CACHE HONEST")
 # cache holding mute state has to be told about it explicitly. Left untold, the encoder ring would
 # quote a healthy percentage for a channel that is now silent - the mirror image of the stale-level
 # bug fixed the same day.
-import rcp_transfer  # noqa: E402
 
 RECORDS: list = []
 _real_send = rcp_transfer.send_record

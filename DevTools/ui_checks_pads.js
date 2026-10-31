@@ -1,4 +1,4 @@
-/* Machine checks for the SMART pads page (UI rebuild phase 4).
+/* Machine checks for the SMART pads page.
    Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_pads.js --route pads
    Same shape as ui_checks_device.js. This is NOT a screen-reader pass: it pins the things a screen
    reader depends on and the eye cannot see (roles, states, one tab stop, what is exposed, what each
@@ -356,8 +356,7 @@ async function run() {
   }
 
   /* ---- trim and fade, fade times, censor sound -------------------------
-     The last per-pad settings a profile dropped, exposed. Each group must appear ONLY on
-     the pad type that owns it: a control that cannot do anything is worse than no control, because
+     Each group must appear ONLY on the pad type that owns it: a control that cannot do anything is worse than no control, because
      it reads as available. */
   const soundPad = (padsData.pads || []).find((p) => p.present && p.type === 1);
   const censorPad = (padsData.pads || []).find((p) => p.present && p.censor);
@@ -595,10 +594,9 @@ async function run() {
       after.map((e) => e.path).join(" "));
   }
 
-  // ---- Maintenance tab: the two jobs added. --------------------------------------
-  // Restore the factory voice effects was decoded long ago and never wired up, and exporting a
-  // pad's sound is new. Both live under their own h3 on Maintenance, and what is worth pinning is
-  // not that the buttons exist but that they are told apart from the ones beside them: two
+  // ---- Maintenance tab: restoring the voice effects, and exporting a pad's sound ----
+  // Both live under their own h3 on Maintenance, and what is worth pinning is not that the buttons
+  // exist but that they are told apart from the ones beside them: two
   // "restore" buttons that destroy different amounts of the grid is exactly the pair a screen
   // reader user must not confuse.
   el("tab-pads-maint").click();

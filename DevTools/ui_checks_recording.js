@@ -1,12 +1,10 @@
 /* The Recording page. Run:
      python DevTools/ui_probe.py --checks DevTools/ui_checks_recording.js --route recording --timeout 240
 
-   IT NEEDS A SERVER THAT HAS /api/recorder. The probe proxies reads to whatever is on 8770, and the
-   installed 2.00 build predates this page, so start DevTools/run_dev_server.py first. The suite
-   checks this itself and says so in one line rather than failing seven ways (see the precondition
-   below).
+   IT NEEDS A SERVER THAT HAS /api/recorder. The probe proxies reads to whatever is on 8770, so if
+   the installed build predates this page, start DevTools/run_dev_server.py first.
 
-   WHAT IS WORTH ASSERTING HERE, and it is not the plumbing. Three things make this page different
+   WHAT IS WORTH ASSERTING HERE, and it is not the plumbing. Four things make this page different
    from every other one in the app:
 
      1. **ONE live region.** Everything spoken goes through `rec-state`. A second status line for
@@ -49,8 +47,7 @@ function nameOf(node) {
 }
 
 /* The hints are wrapped source, so a check must match across whitespace rather than on an exact
-   phrase. An earlier version failed purely on a line break, which is a false alarm about wording
-   that was in fact correct. */
+   phrase, or a line break fails wording that is correct. */
 function flatText(node) {
   return node ? node.textContent.replace(/\s+/g, " ").trim() : "";
 }
@@ -214,9 +211,8 @@ async function run() {
       !start.hasAttribute("aria-disabled"));
   }
 
-  // MARKERS. Proven by reading the drive on a PC: requestDropMarker writes a standard
-  // WAV cue point (two at exactly 4.0 s and 8.0 s where they were dropped, against a marker-free
-  // take with no cue chunk at all). A marker needs a POSITION, so it is offered only while
+  // MARKERS. requestDropMarker writes a standard WAV cue point at the moment it is dropped, and a
+  // take with no markers has no cue chunk at all. A marker needs a POSITION, so it is offered only while
   // something is actually recording - paused counts as not recording, since nothing is going in.
   const marker = el("rec-marker");
   check("there is a Drop a marker button", !!marker && marker.tagName === "BUTTON");
@@ -265,8 +261,7 @@ async function run() {
   // ---- announcements going INTO the recording ----------------------------
   // The announcer's output defaults to the system default device, which on a machine with a
   // RODECaster plugged in IS the RODECaster - so this app's speech travels down USB 1 into the mix
-  // and into every recording, and nothing shows it until the recording is played back. Shaun
-  // spotted it the moment the recorder shipped.
+  // and into every recording, and nothing shows it until the recording is played back.
   const warn = el("rec-announcer-warn");
   const mute = el("rec-mute-announcer");
   check("there is a switch for it, so it is a CHOICE and not a policy",
@@ -285,8 +280,8 @@ async function run() {
     check("and it says announcements stop and come back",
       /switched off while recording/i.test(flatText(warn)), flatText(warn));
   }
-  // The old fix-it button is GONE on purpose: moving our speech to another output still plays it
-  // in the room, where the microphones hear it. That control belongs on the Device page, for the
+  // There is NO move-the-output button here, on purpose: moving the app's speech to another output
+  // still plays it in the room, where the microphones hear it. That control belongs on the Device page, for the
   // separate problem of announcements vanishing when a channel is soloed.
   check("no move-the-output button on this page", !el("rec-announcer-btn"));
   await probeClear();
@@ -364,10 +359,10 @@ async function run() {
     await sleep(500);
   }
 
-  // ---- the recording FORMAT (WAV / MP3), added ---------
+  // ---- the recording FORMAT (WAV / MP3) ---------
   // It sits with "what to record" because both are decisions that cannot be fixed after the take.
   // THE COUNT IS THE POINT: `recordingCompressionQuality` is an unclamped store whose enum has two
-  // members, and takes at 1, 2 and 3 came back byte-identical. Offering three MP3 "qualities" would
+  // members, and takes at 1, 2 and 3 are byte-identical. Offering three MP3 "qualities" would
   // be inventing a difference the desk does not make, so a third option here is a REGRESSION.
   const fmt = el("rec-format-mode");
   check("the recording format control is on this page", !!fmt);
@@ -401,7 +396,7 @@ async function run() {
   // THE STORAGE DETAIL IS NOT HERE AT ALL. It listed every volume including the unit's pad
   // storage and an empty card slot - a reading nobody wants mid-session. It lives on Device >
   // Hardware; where a recording GOES is in the status sentence and in the reply to pressing
-  // record. The explaining moved to Help.
+  // record. The explanation is on the Help page.
   check("no storage volume list on this page", !el("rec-dest-list"));
   check("no destination paragraph either", !el("rec-dest-line"));
   check("and the explaining has moved to the Help page, not this one", !el("rec-dest-hint"));
@@ -420,8 +415,7 @@ async function run() {
 
   // ---- deleting a recording ---------------------------
   // The list stays a LIST: the choice is made in a labelled dropdown, because a list item is not a
-  // control. The button carries its own reason when it cannot be used, which is the standing state
-  // until the delete write is proven on hardware.
+  // control. The button carries its own reason when it cannot be used.
   const delSel = el("rec-delete-select");
   const delBtn = el("rec-delete-btn");
   check("the delete choice is a real dropdown with a label",
@@ -448,8 +442,8 @@ async function run() {
       /recorded/i.test(delSel.options[0].textContent), delSel.options[0].textContent);
   }
   // aria-disabled, never the disabled attribute: a button that leaves the tab order takes its
-  // reason with it. With recordings on the unit and the delete proven it should
-  // be USABLE - the gated state is still checked, because a Duo or an empty drive reaches it.
+  // reason with it. With recordings on the unit it should be USABLE; the gated state is still
+  // checked, because a Duo or an empty drive reaches it.
   if (delBtn.hasAttribute("aria-disabled")) {
     check("a delete button that cannot be used still says why",
       !!delBtn.dataset.offReason, delBtn.dataset.offReason);

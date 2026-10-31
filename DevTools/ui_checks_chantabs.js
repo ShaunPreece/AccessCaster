@@ -1,7 +1,7 @@
-/* Reproduce the Channels-tab focus fault: tab into the strip on Mic 2, arrow right
-   to Presets (announced correctly), arrow LEFT back to tab 1 and the screen reader reads a combo box
-   from inside the panel ("Line-in, 1 of 11" = the mic type list) instead of the tab; arrow right
-   again and it reads the preset list. So the question this answers is simply: WHERE DOES FOCUS GO?
+/* Where focus goes while arrowing along a channel's tab strip. Tab into the strip on Mic 2, arrow
+   right to Presets, arrow LEFT back to tab 1, then right again: focus must stay on a tab each time.
+   If a pane is rebuilt under it, a screen reader reads a control from inside the panel instead
+   ("Line-in, 1 of 11", the mic type list, or the preset list).
    Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_chantabs.js --route channels */
 
 const el = (id) => document.getElementById(id);
@@ -34,7 +34,7 @@ async function run() {
   await waitFor(() => !el("sec-channels").hidden && strip(), 20000);
   await sleep(1200);
 
-  // Mic 2, the channel he was on.
+  // Mic 2.
   const sel = el("channel-select");
   sel.value = "Mic2";
   sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -54,7 +54,7 @@ async function run() {
     /\[tab\]/.test(afterRight) && selected() === "tab-channels-presets",
     afterRight + " selected=" + selected());
 
-  // THE FAULT: arrow LEFT back to tab one.
+  // Arrow LEFT back to tab one.
   key("ArrowLeft", document.activeElement);
   const leftImmediate = where();
   await sleep(900);                       // let anything asynchronous land
@@ -64,7 +64,7 @@ async function run() {
   check("and it is the first tab that is selected",
     selected() === "tab-channels-settings", selected());
 
-  // And right again, where he heard the preset list.
+  // And right again.
   key("ArrowRight", document.activeElement);
   const rightImmediate = where();
   await sleep(900);
@@ -74,10 +74,9 @@ async function run() {
   check("arrow right again is STILL on a tab a moment later", /\[tab\]/.test(rightSettled),
     rightSettled);
 
-  /* THE REAL FIX: a tab change no longer rebuilds ANYTHING. Every pane is built once when the
-     channel is rendered, and switching tab only flips `hidden`. So the subtree the screen reader is
-     reading can no longer be replaced from under it, which is what made it announce a combo box from
-     inside the panel instead of the tab. Same lesson as the Device page's Unit settings. */
+  /* A TAB CHANGE REBUILDS NOTHING. Every pane is built once when the channel is rendered, and
+     switching tab only flips `hidden`, so the subtree a screen reader is reading is never replaced
+     from under it. Same rule as the Device page's Unit settings. */
   const paneOf = (k) => document.querySelector("#tabpanel-channels > .cat-tab[data-tab-key='" + k + "']");
   check("every tab has its own pane, built up front",
     buttons().every((b) => !!paneOf(b.id.replace("tab-channels-", ""))),

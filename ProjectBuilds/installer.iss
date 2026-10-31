@@ -146,8 +146,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; was once called "Access Caster" with a space, and the Run value carries that name on any machine
 ; installed then. Both entries name the same exe, so a machine upgrading with autostart already
 ; ticked would otherwise launch the app twice at sign-in. No Tasks: clause, because it has to go
-; whether or not
-; the user wants autostart this time. Project/autostart.py deletes the same name for the same
+; whether or not the user wants autostart this time. Project/autostart.py deletes the same name for the same
 ; reason; see LEGACY_VALUE_NAME there.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
     ValueName: "Access Caster"; Flags: deletevalue

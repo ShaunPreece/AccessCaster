@@ -1,8 +1,7 @@
 # AccessCaster - elevated USB capture server.
 #
 # USBPcap capture needs Administrator rights. Rather than elevate for every
-# capture (a UAC prompt each time, painful with a screen reader), this runs
-# ONCE elevated and then takes commands from a control file, so the rest of the
+# capture (a UAC prompt each time), this runs ONCE elevated and then takes commands from a control file, so the rest of the
 # session can start and stop captures without further prompts.
 #
 # Launch (from the normal session):
@@ -32,7 +31,7 @@ try {
         Add-Type -MemberDefinition $hideSig -Name 'ConHide' -Namespace 'Cap' | Out-Null
     }
     # SW_HIDE the console window, then DETACH from it (FreeConsole) so the conhost window actually
-    # closes - SW_HIDE alone is re-shown by the elevated conhost (verified), but a console with no
+    # closes - SW_HIDE alone is re-shown by the elevated conhost, but a console with no
     # attached process goes away, removing the foreground/UIPI input-block entirely. Logging goes to
     # files, so a console-less server loses nothing.
     $cw = [Cap.ConHide]::GetConsoleWindow()
@@ -120,8 +119,8 @@ function Invoke-Scan() {
     }
     Push-Location $base
     # Pass $scan WITHOUT a trailing separator: `Join-Path $scan ''` ends in a backslash, and a
-    # trailing backslash before the closing quote escapes the quote, so pick_hub saw a mangled path,
-    # fell back to its own default dir (empty) and printed NONE even though the scan was good.
+    # trailing backslash before the closing quote escapes the quote, so pick_hub would get a mangled
+    # path, fall back to its own empty default folder and print NONE for a good scan.
     $pick = (& python (Join-Path $base "pick_hub.py") $scan) 2>&1
     Pop-Location
     Log "scan: pick_hub -> $pick"

@@ -3,8 +3,7 @@
    API path for nothing. Run:
      python DevTools/ui_probe.py --checks DevTools/ui_checks_network.js --route status --timeout 240
 
-   This tab was a list of facts with a paragraph explaining why nothing on it could be changed.
-   Three things are proven writable now (the wifi radio, joining a network, and Bluetooth
+   Three things on this tab are writable (the wifi radio, joining a network, and Bluetooth
    discoverability), and the checks here are mostly about the PASSWORD and about honesty:
 
      - the password field is a real password field, is never prefilled, and is EMPTIED after a
@@ -52,8 +51,8 @@ async function run() {
   // Open the Network tab and let its read land (it reads /api/network, about 1.5 s).
   const tab = el("tab-device-network");
   check("the Wireless connections tab is on the strip", !!tab);
-  // The NAME is the point of the rename: "Network" said cables and IP addresses, so Bluetooth read
-  // as an intruder and the pairing switch felt misfiled.
+  // "Network" would say cables and IP addresses, so Bluetooth would read as an intruder and the
+  // pairing switch as misfiled.
   check("and it is named for every radio, not for the network",
     /wireless connections/i.test(tab.textContent), tab.textContent);
   tab.click();
@@ -110,9 +109,9 @@ async function run() {
   check("the page still says what CANNOT be done here", ro.length > 40, ro);
   check("it names scanning, pairing and the fixed IP address",
     /scanning/i.test(ro) && /pairing/i.test(ro) && /fixed IP/i.test(ro), ro);
-  // PARKED, NOT WRITTEN OFF. The page must not read as a closed door: a single attempt on a quiet
-  // network with nothing in pairing mode proves nothing either way. What the page does NOT do is
-  // explain the protocol - that is not the user's problem.
+  // PARKED, NOT WRITTEN OFF. The page must not read as a closed door, since none of the three is
+  // known to be impossible. What the page does NOT do is explain the protocol - that is not the
+  // user's problem.
   check("and says they are still being worked on, not that they are impossible",
     /still being worked on/i.test(ro), ro);
   check("and says what to do instead", /discoverable/i.test(ro), ro);

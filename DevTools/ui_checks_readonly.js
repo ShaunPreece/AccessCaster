@@ -1,10 +1,10 @@
 /* EVERY CONTROL A READ-ONLY DESK CANNOT DRIVE MUST STAY WHERE IT IS AND SAY WHY.
 
-   This is the check for the eleven converted raw `disabled` sites. The raw
-   attribute takes a control OUT OF THE TAB ORDER and out of the accessibility tree with it, so on a
-   desk missing a write cap the page did not read as "you cannot change this" - it read as though the
-   control had never existed, and the explanation went with it. aria-disabled keeps the control
-   readable, keeps its label and its description, and lets pressing it say why.
+   The raw `disabled` attribute takes a control OUT OF THE TAB ORDER and out of the accessibility
+   tree with it, so on a desk missing a write cap the page would not read as "you cannot change
+   this" - it would read as though the control did not exist, and the explanation would go with it.
+   aria-disabled keeps the control readable, keeps its label and its description, and lets pressing
+   it say why.
 
    IT CANNOT BE DRIVEN FROM A DESK. All six gates (unit_settings, pad_write, fader_write,
    output_write, level_write, matrix_write) are ON for both the Pro II and the Duo, so no desk in
@@ -45,8 +45,8 @@ async function tab(pageKey, key) {
 }
 
 /* THE WHOLE POINT, asserted per control: still here, still reachable, marked unavailable, and
-   carrying a reason somebody can hear. A control that fails the second test is the exact fault this
-   change was made to fix, so it is checked explicitly rather than inferred from the attribute. */
+   carrying a reason somebody can hear. A control that fails the second test has vanished for a
+   keyboard user, so it is checked explicitly rather than inferred from the attribute. */
 function blocked(label, node) {
   if (!node) { check(label + ": the control is on the page", false, "not found"); return; }
   check(label + ": not the raw disabled attribute", !node.disabled && !node.hasAttribute("disabled"),
@@ -121,8 +121,8 @@ async function run() {
   // a hint is not a control.
   const faderSels = document.querySelectorAll("select[id^='routing-fader-']");
   blockedAll("fader layout dropdowns", faderSels);
-  // The note on this tab promises you can still see which channel is on each fader. With the raw
-  // attribute that was untrue, so it is asserted rather than assumed.
+  // The note on this tab promises you can still see which channel is on each fader. The raw
+  // attribute would make that untrue, so it is asserted rather than assumed.
   const first = faderSels[0];
   check("a fader dropdown still reports which channel is on it",
     !!(first && first.options[first.selectedIndex]

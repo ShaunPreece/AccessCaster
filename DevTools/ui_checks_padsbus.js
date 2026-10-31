@@ -1,8 +1,8 @@
 /* The SMART pads bus on the Channels page: it is a channel, and it must not offer controls it does
    not have. It has MUTE and SOLO and nothing else. NO level (that is its fader), no mic voicing, no
-   preamp, and - tested by ear on both desks - NO PROCESSING either. The strip PUBLISHES a whole
-   chain and accepts every write to it, which is what tempts an app into offering an equaliser here;
-   RODE's own guide and their app both say the SMART pads take no processing, and the ears agree. A
+   preamp, and NO PROCESSING either: on both desks none of the chain reaches the audio. The strip
+   PUBLISHES a whole chain and accepts every write to it, which is what tempts an app into offering
+   an equaliser here; RODE's own guide and their app both say the SMART pads take no processing. A
    dead control is worse than a missing one for a screen reader: it is read out, focused, operated,
    and nothing happens.
    Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_padsbus.js --route channels */

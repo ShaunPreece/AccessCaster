@@ -73,9 +73,9 @@ async function run() {
 
   // ---- the spoken startup summary ----------------------------------------
   // WORDING, PINNED. It is assembled from parts that arrive in different shapes (some ending in a
-  // full stop, some not, some lower case) and two faults got through a read-through by eye:
-  // a doubled full stop and a lower-case sentence in the middle. Both are inaudible in code review
-  // and obvious in the ear, which is exactly what a check is for.
+  // full stop, some not, some lower case), so the faults to catch are a doubled full stop and a
+  // lower-case sentence in the middle. Both are easy to miss reading the code and obvious to the
+  // ear, which is exactly what a check is for.
   const clear = summariseOverview(
     {ok: true, muted: [], soloed: [], routing: {ok: true, notes: []}, bank: 1});
   check("a clean desk says so in one sentence, and names the bank",

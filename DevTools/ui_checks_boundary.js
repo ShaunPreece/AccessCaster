@@ -11,7 +11,7 @@
    not have moved even without our handler. So "focus did not move" is worthless here and is not
    asserted. What IS meaningful is whether the handler called preventDefault, which is exactly what
    a real Tab press obeys, so that is what every check below looks at. The stop actually being felt,
-   and the tone actually being heard, is Shaun's NVDA pass.
+   and the tone actually being heard, is for a screen-reader pass by hand.
 
    The route is About because it is the simplest page (prose only, reads nothing from the unit), but
    the handler is global, so this is about the mechanism rather than that page. */
@@ -114,9 +114,9 @@ async function run() {
 
   btnA.focus();
   // NOT `back`: that name is taken by the page-end Shift+Tab check above, and a second `const back`
-  // in the same scope is a SyntaxError, so the whole suite failed to parse and timed out without
-  // running a single check (found, introduced with these modal checks on the
-  // 3rd). A suite that cannot parse looks exactly like a hung page, so check the console first.
+  // in the same scope is a SyntaxError: the whole suite then fails to parse and times out without
+  // running a single check. A suite that cannot parse looks exactly like a hung page, so check the
+  // console first.
   const backInModal = key(btnA, { shiftKey: true });
   check("Shift+Tab on a modal's FIRST control is intercepted", backInModal.defaultPrevented);
   check("...and wraps to its last control",

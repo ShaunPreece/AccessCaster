@@ -1,15 +1,13 @@
-/* Machine checks for the Routing page's tab strip (UI rebuild phase 2).
+/* Machine checks for the Routing page's tab strip.
    Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_routing.js --route routing
    This is NOT a screen-reader pass. It pins the things a screen reader depends on and the eye cannot
-   see (roles, states, one tab stop, what is exposed, what a tab reads from the device), so Shaun's
-   NVDA run is about how it SOUNDS rather than hunting for a broken attribute. */
+   see (roles, states, one tab stop, what is exposed, what a tab reads from the device), so the
+   screen-reader run is about how it SOUNDS rather than hunting for a broken attribute. */
 
 const TABS = ["mixes", "faders", "levels", "master"];
-// TITLES AND KEYS DIVERGE ON PURPOSE, so that a remembered tab position still lands: the last
-// tab's KEY is "recording" though it is titled for auto-mute, the multitrack setting having its
-// home on the Recording page, and "master" covers Master Mix including its USB audio SECTION. USB
-// audio is not a tab of its own - it and the master mix are both the main mix on its way out, and
-// one tab fewer is one fewer arrow press to everything past it.
+// "master" covers Master Mix including its USB audio SECTION. USB audio is not a tab of its own:
+// it and the master mix are both the main mix on its way out, and one tab fewer is one fewer arrow
+// press to everything past it.
 const TITLES = ["Output mixes", "Faders", "Levels", "Master Mix"];
 const tabId = (k) => "tab-routing-" + k;
 const strip = () => document.querySelector("#sec-routing [role='tablist']");
@@ -38,8 +36,8 @@ async function waitFor(fn, ms) {
    debounce, so nothing here may assume a fixed delay: wait for the read to actually land, then wait
    for the traffic to go quiet, and only then assert what did NOT happen. */
 const TAB_READS = {
-  // Output mixes reads the live matrix AND the saved mix schemes (added), so a
-  // scheme saved in another window is in the list when you come back to this one.
+  // Output mixes reads the live matrix AND the saved mix schemes, so a scheme saved in another
+  // window is in the list when you come back to this one.
   mixes: ["/api/routing/matrix/live", "/api/routing/schemes"],
   faders: ["/api/routing/live"],
   levels: ["/api/faders/levels", "/api/monitormix/live", "/api/routing/live"],
@@ -148,18 +146,17 @@ async function run() {
     // "Mix presets" on the page, "schemes" in the code: the user-facing name and the internal one
     // differ on purpose, so assert the PAGE's wording here.
     mergedH3.join(" | ") === "Mix presets | Reset all output mixes", mergedH3.join(" | "));
-  // NO NAMED GROUPS ANY MORE. A role="group" with a name is announced on the way in,
-  // before the control you were heading for, and again as "out of grouping" on the way out. The
-  // h3 above each section says the same thing, is reachable with H, and costs nothing when you are
-  // not looking for it. What is pinned now is that the HEADINGS are still there, since they are
-  // what carries the structure.
+  // NO NAMED GROUPS. A role="group" with a name is announced on the way in, before the control you
+  // were heading for, and again as "out of grouping" on the way out. The h3 above each section says
+  // the same thing, is reachable with H, and costs nothing when you are not looking for it. What is
+  // pinned is that the HEADINGS are there, since they are what carries the structure.
   check("no named groups are left on this pane",
     mixPane.querySelectorAll("[role='group']").length === 0,
     mixPane.querySelectorAll("[role='group']").length);
 
   // ---- mix schemes ----------------------------------
-  // The two Chat preset buttons became built-in schemes, so what is pinned here is that the ONE
-  // control that replaced them is properly labelled, says what it would do before you commit, and
+  // The Chat presets are built-in schemes, so what is pinned here is that the ONE control that
+  // carries them is properly labelled, says what it would do before you commit, and
   // reports through a live region rather than silently.
   check("the Chat preset buttons are gone, replaced by the scheme control",
     !document.getElementById("chat-mic-only-btn") && !document.getElementById("chat-full-btn"));
@@ -191,9 +188,9 @@ async function run() {
   check("a saved scheme is listed under its own name space, so the two cannot collide",
     Array.from(schemeSel.options).every((o) => /^(builtin|saved):/.test(o.value)),
     Array.from(schemeSel.options).map((o) => o.value).join(","));
-  // EVERY OPTION SAYS ITS SCOPE. Michael could not tell that the Chat
-  // presets leave other outputs alone; the description says so but hangs off Apply, which is read
-  // after the choice. This is the one piece of information needed BEFORE choosing.
+  // EVERY OPTION SAYS ITS SCOPE. Whether a Chat preset leaves the other outputs alone is the one
+  // piece of information needed BEFORE choosing, and the description that says so hangs off Apply,
+  // which is read after the choice.
   check("every option says how much of the desk it would rewrite",
     Array.from(schemeSel.options).every((o) => /(every output|only)\)$/.test(o.text)),
     Array.from(schemeSel.options).map((o) => o.text).join(" | "));
@@ -224,11 +221,11 @@ async function run() {
   check("but it keeps its place in the tab order", !delSchemeBtn.disabled);
   await openTab("levels");
   const lvlPane = document.querySelector("#routing-panel > .cat-tab[data-tab-key='levels']");
-  // The output mutes joined this tab on (outputMonMute / outputBTMute / outputBTLevel).
-  // The order is asserted, not just the membership: the sliders come first, then the mutes, then
-  // the per-output mixes, so the tab reads from "what level is it at" to "is it on at all".
-  // Auto-mute joined this tab on and sits DIRECTLY AFTER the manual mutes: it is
-  // the automatic version of them, so everything that silences an output reads as one group.
+  // The output mutes (outputMonMute / outputBTMute / outputBTLevel) are on this tab. The order is
+  // asserted, not just the membership: the sliders come first, then the mutes, then the per-output
+  // mixes, so the tab reads from "what level is it at" to "is it on at all". Auto-mute sits
+  // DIRECTLY AFTER the manual mutes: it is the automatic version of them, so everything that
+  // silences an output reads as one group.
   check("Levels merges the mutes, auto-mute, the monitor mix and the headphones under h3s",
     Array.from(lvlPane.querySelectorAll("h3")).map((h) => h.textContent.trim()).join(" | ")
       === "Output mutes and Bluetooth level | Auto-mute | Monitor mix levels | Headphones",
@@ -285,7 +282,7 @@ async function run() {
 
   // ---- FADER ASSIGNMENT APPLIES ON ENTER, NOT ON ARROWING ---------
   // A closed select fires change on EVERY arrow press, and arrowing a closed select is how a screen
-  // reader reads one, so writing on change performed the swap while you browsed. The full rule is
+  // reader reads one, so writing on change would perform the swap while you browse. The full rule is
   // ui_checks_staged.js; this is the page-level guard.
   await openTab("faders");
   await probeClear();
@@ -374,7 +371,7 @@ async function run() {
     !hit(log, "/api/faders/levels") && !hit(log, "/api/routing/matrix/live"),
     apiCalls.join(" "));
 
-  // ---- 0b.1: the levels must not be stale on re-entry -------------------
+  // ---- the levels must not be stale on re-entry --------------------------
   await openTab("levels");
   await probeClear();
   location.hash = "#/status";
@@ -396,7 +393,6 @@ async function run() {
   // THE PRINCIPLE: nothing may replace a subtree a screen reader may be sitting in, whatever
   // triggered the replacement. Both of these tabs re-read the device every time they are opened, so
   // the controls are replaced at the moment you arrive on them unless the loader updates in place.
-  // Nothing asserted this before, which is exactly why the shape survived two fixes.
   await openTab("levels");
   const lvlHost = document.getElementById("fader-levels");
   const lvlFirst = lvlHost.firstElementChild;

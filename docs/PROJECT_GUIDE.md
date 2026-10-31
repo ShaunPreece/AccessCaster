@@ -2855,8 +2855,8 @@ shared one; a new copy is how they drifted apart the first time.
   Windows' "restart apps after sign-in" relaunches them: hundreds had piled up by 17th October 2026.
   Do not go back to `subprocess.Popen` plus `terminate()`. Profiles a killed run leaves are swept
   after a day.
-- **`ui_probe.py`'s default 90 s timeout is not enough.** Pads needs `--timeout 600` (about nine
-  minutes), device 240. A timeout reports as "never reported back", which reads like a fault.
+- **`ui_probe.py`'s default 90 s timeout is not enough.** Pads and Device need `--timeout 600`
+  (about nine minutes); `run_ui_probes.py` passes each suite its own. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
   a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026
   (`DevTools/transfer_volumes.py`), so do not reach for transfer mode to get at recordings.

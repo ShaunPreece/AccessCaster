@@ -23,12 +23,11 @@ _ASSETS = os.path.join(_ROOT, 'ProjectAssets')  # device data: fx_recipes, mic_p
 # ---------------------------------------------------------------------------
 # WINDOWS VERSION INFO, GENERATED FROM Project/version.py AT BUILD TIME.
 #
-# WHY IT IS GENERATED RATHER THAN WRITTEN OUT. Until 3rd September 2026 the frozen exe carried NO
-# version resource at all: file properties, Task Manager and Programs and Features all showed a
-# blank version, and the only place the number appeared was the installer's filename. The obvious
-# fix is a hand-written version resource file, and it is the wrong one - it would be a SECOND place
-# holding the number, and version.py's whole contract is that there is exactly one. So the spec,
-# which is ordinary Python executed at build time, reads that file and writes the resource itself.
+# WHY IT IS GENERATED RATHER THAN WRITTEN OUT. Without a version resource, file properties, Task
+# Manager and Programs and Features all show a blank version. A hand-written version resource file
+# would be a SECOND place holding the number, and version.py's whole contract is that there is
+# exactly one. So the spec, which is ordinary Python executed at build time, reads that file and
+# writes the resource itself.
 #
 # READ WITH A REGEX, NOT AN IMPORT: importing anything out of Project/ during a spec parse drags
 # sys.path games into the build for a single string, and version.py is deliberately import-free.

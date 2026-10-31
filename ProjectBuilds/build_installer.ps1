@@ -9,7 +9,7 @@
 #
 # BUILD PREREQUISITES (install once per machine; NOT tracked in the repo):
 #   - Python 3.12 on PATH.
-#   - pip packages:  python -m pip install -r ProjectBuildsequirements-build.txt
+#   - pip packages:  python -m pip install -r ProjectBuilds\requirements-build.txt
 #   - Inno Setup 6   (winget install --id JRSoftware.InnoSetup -e), at
 #                    %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
 # Missing any of these FAILS LOUDLY below: PowerShell silently ignores a native tool returning
@@ -36,7 +36,7 @@ Set-Location -Path (Split-Path -Parent $PSScriptRoot)
 # EVERYTHING THE BUILD GENERATES LIVES UNDER ProjectBuilds\. PyInstaller defaults to dist\ and
 # build\ in the working directory, which is the repo root, so it is told otherwise below: without
 # these two switches the root collects two generated folders that have nothing to do with the
-# source. ProjectBuilds\Output\ (the installer) already worked this way via the .iss OutputDir.
+# source. ProjectBuilds\Output\ (the installer) is set by the .iss OutputDir.
 $DistDir = "ProjectBuilds\dist"
 $WorkDir = "ProjectBuilds\build"
 $AppDir  = "$DistDir\AccessCaster"
@@ -56,7 +56,7 @@ $AppVer = $versionLine.Matches[0].Groups[1].Value
 $SetupExe = "ProjectBuilds\Output\AccessCasterSetup-v$AppVer.exe"
 Write-Host "==> Building AccessCaster v$AppVer"
 
-Write-Host "==> 1/3  Generating app icon (Project\assets\icon.ico)..."
+Write-Host "==> 1/4  Generating app icon (Project\assets\icon.ico)..."
 Invoke-Native "Icon generation (gen_icon.py; needs the 'pillow' package)" { python ProjectBuilds\gen_icon.py }
 if (-not (Test-Path "Project\assets\icon.ico")) {
     throw "gen_icon.py reported success but Project\assets\icon.ico is missing."
@@ -64,8 +64,8 @@ if (-not (Test-Path "Project\assets\icon.ico")) {
 
 # The release notes the installer offers to open at the end. GENERATED from Project/version.py
 # HISTORY, never hand-written, so there is no second copy of the history to drift from the first.
-# Written into Project/ before the freeze because the spec bundles it from there, which is
-# also why it is regenerated on every build rather than committed.
+# Written into Project/ (gitignored) on every build, then copied beside the exe after the freeze
+# (see below).
 Write-Host "==> 2/4  Generating release notes from version.py..."
 Invoke-Native "release notes" { python ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html }
 

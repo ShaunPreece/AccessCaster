@@ -102,8 +102,8 @@ function describedBy(el) {
     const dropdown = document.querySelector("select[id^='preset-apply-']");
     const label = document.querySelector("label[for='" + dropdown.id + "']");
     check("the dropdown has a label", !!label);
-    // THE POINT OF THE CHANGE: tabbing to this control tells you what the channel is on. It used to
-    // say only "Preset", with the answer in a paragraph above that nobody lands on.
+    // Tabbing to this control tells you what the channel is on, because the answer is in its label
+    // rather than in a paragraph nobody lands on.
     check("the label names the CURRENT preset, so focusing it announces the answer",
           (label.textContent || "").indexOf("currently") >= 0, label.textContent);
     check("and names the real one read back from the unit",
@@ -135,9 +135,9 @@ function describedBy(el) {
       line.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_PRECEDING).pop();
     check("and it sits under Manage saved profiles",
           !!prev && prev.id === "h-prof-manage", prev ? prev.id : "no preceding h2");
-    // THE VERBOSITY TRAP, PINNED. The list hint is on the dropdown because Shaun wants the count
-    // there; hanging the as-found sentence off the same control would read the whole thing out every
-    // time the select is reached, which is exactly the fault that got it taken off the buttons.
+    // THE VERBOSITY TRAP, PINNED. The list hint on the dropdown carries the count; hanging the
+    // as-found sentence off the same control would read the whole thing out every time the select
+    // is reached, which is also why it is not on the buttons.
     const desc = $("profile-select").getAttribute("aria-describedby") || "";
     check("and is NOT described-by on the profile dropdown",
           desc.split(/\s+/).indexOf("baseline-state") < 0, desc);

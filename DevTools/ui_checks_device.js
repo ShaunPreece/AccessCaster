@@ -1,4 +1,4 @@
-/* Machine checks for the Device page's tab strip (UI rebuild phase 3).
+/* Machine checks for the Device page's tab strip.
    Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_device.js --route status --timeout 600
    (127 checks; the default 90, and even 240, run out before the page reports back.)
    Same shape as ui_checks_routing.js: this is NOT a screen-reader pass, it pins the things a screen
@@ -296,9 +296,10 @@ async function run() {
   check("the USB list is never left empty (it says so instead)",
     ifList.children.length > 0, ifList.children.length);
 
-  // ---- what moved when Network became Wireless connections ----
-  // Three readouts changed tab, so the thing to pin is that each landed WHERE IT WAS SENT and is
-  // actually painted there. A moved readout that renders nowhere still looks fine on the tab it left.
+  // ---- which readouts are on Hardware and which on Wireless connections ----
+  // Firmware and the wired network are on Hardware, the wireless mics on Wireless connections. The
+  // thing to pin is that each is actually painted on its own tab: a readout that renders nowhere
+  // still looks fine from the other tab.
   const flat = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : "");
   const hwPane = () => document.querySelector("#device-panel > .cat-tab[data-tab-key='hardware']");
   const wlPane = () => document.querySelector("#device-panel > .cat-tab[data-tab-key='network']");
@@ -363,8 +364,7 @@ async function run() {
   await openTab("state");
   document.getElementById(tabId("state")).focus();
   await probeClear();
-  // TEN rights over EIGHT tabs lands on Unit settings, index 2 (it was nine over seven, and eight
-  // over six before Keyboard shortcuts). The TARGET is what matters, not the number: Unit settings
+  // TEN rights over EIGHT tabs lands on Unit settings, index 2. The TARGET is what matters, not the number: Unit settings
   // takes exactly ONE call, so "one read, not one per tab" is a clean count. Hardware would muddy
   // it, being the one tab that legitimately makes two; Keyboard shortcuts reads the service rather
   // than the desk; Remote access reads nothing at all. **Recompute this when a tab is added.**
@@ -406,9 +406,8 @@ async function run() {
   const all = await probeLog();
   // ---- the LEVELS tab -------------------------------------------------------------
   // What is worth pinning here is not the controls, it is the HONEST DEGRADATION. This is the only
-  // part of the app that cannot work over Remote Desktop, and it was written IN a Remote Desktop
-  // session, so the failure path is the one path that has definitely been exercised. It must
-  // explain itself rather than showing dead controls or an empty dropdown.
+  // part of the app that cannot work over Remote Desktop, so its failure path must explain itself
+  // rather than showing dead controls or an empty dropdown.
   await openTab("levels");
   await sleep(600);
   const lv = document.querySelector("#device-panel > .cat-tab[data-tab-key='levels']");
@@ -453,11 +452,10 @@ async function run() {
     /every application/i.test((document.getElementById("meter-input-hint") || {})
       .textContent || ""));
   }
-  // NO NAMED GROUPS ANY MORE. A role="group" with a name is announced on the way in,
-  // before the control you were heading for, and again as "out of grouping" on the way out. The
-  // h3 above each section says the same thing, is reachable with H, and costs nothing when you are
-  // not looking for it. What is pinned now is that the HEADINGS are still there, since they are
-  // what carries the structure.
+  // NO NAMED GROUPS. A role="group" with a name is announced on the way in, before the control you
+  // were heading for, and again as "out of grouping" on the way out. The h3 above each section says
+  // the same thing, is reachable with H, and costs nothing when you are not looking for it. What is
+  // pinned is that the HEADINGS are there, since they are what carries the structure.
   check("no named groups are left on this pane",
     lv.querySelectorAll("[role='group']").length === 0,
     lv.querySelectorAll("[role='group']").length);
@@ -495,7 +493,7 @@ async function run() {
   check("clipping can be a sound as well as a sentence, and it is on by default",
     document.getElementById("meter-clip-sound").checked);
   // Windows' own MUTE, which reads exactly like a dead microphone and is fixed in a Windows
-  // dialog rather than anywhere on the desk. Found live on with both desk inputs muted.
+  // dialog rather than anywhere on the desk.
   const mutedSw = document.getElementById("meter-input-muted");
   check("a Windows mute can be seen and undone from here",
     !mutedSw || mutedSw.type === "checkbox", mutedSw && mutedSw.type);
@@ -507,10 +505,10 @@ async function run() {
   check("speaking the level on a timer is OFF by default: a commentary during a take is unusable",
     document.getElementById("meter-speak-every").value === "0",
     document.getElementById("meter-speak-every").value);
-  // THE CHECK IS NOT ON THIS TAB ANY MORE. It measured a Windows STREAM, and every
-  // stream this desk offers is a mix, so it could never answer "is Mic 2 right". It is per channel
-  // now (DevTools/ui_checks_levelcheck.js). What is pinned here is that it LEFT CLEANLY: no orphan
-  // button, and the tab says where the check went rather than leaving a reader to find out.
+  // THE LEVEL CHECK IS NOT ON THIS TAB. Every Windows stream a RODECaster offers is a mix, so a
+  // stream meter cannot answer "is Mic 2 right"; the check is per channel, on Channels
+  // (DevTools/ui_checks_levelcheck.js). What is pinned here is that this tab has no orphan button
+  // and says where the check lives.
   check("the stream check button is gone from this tab",
     !document.getElementById("meter-check-btn"));
   check("and so is its result line, which would now never be written to",

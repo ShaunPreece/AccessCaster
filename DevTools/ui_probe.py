@@ -1,9 +1,8 @@
-"""Drive the real app page in a headless browser, WITHOUT touching Shaun's running app.
+"""Drive the real app page in a headless browser, WITHOUT touching the running app.
 
-Why this exists. The UI rebuild to tab strips converted one page per pass, and each
-pass needs machine proof of the things a screen reader depends on and the eye cannot see: the ARIA
-roles and states, one tab stop for the strip, arrow/Home/End travel, only the selected pane exposed,
-and - new for the Routing page - WHICH device reads a tab fires when you open it.
+The checks pin what a screen reader depends on and the eye cannot see: the ARIA roles and states,
+one tab stop for a strip, arrow/Home/End travel, only the selected pane exposed, and WHICH device
+reads a tab fires when you open it.
 
 The obvious way (point a headless browser at http://127.0.0.1:8770) is a trap, twice over:
   1. The page fires sendBeacon("/api/quit") on pagehide, so the render finishing STOPS the running
@@ -245,8 +244,7 @@ class ProbeServer(ThreadingHTTPServer):
     """Like ThreadingHTTPServer, but it REFUSES to share a port.
 
     ThreadingHTTPServer sets allow_reuse_address = 1, and on Windows SO_REUSEADDR lets a SECOND
-    process bind a port that is already bound, with no error at all (measured: two servers on 8771
-    both bind clean). Requests then land on whichever socket Windows picks, so two probe suites
+    process bind a port that is already bound, with no error at all. Requests then land on whichever socket Windows picks, so two probe suites
     sharing a fixed port steal each other's traffic: a browser's results POST arrives at the other
     run's server, and the run it belonged to reports "the page never reported back", which reads
     exactly like a real page fault. Each suite takes a free port of its own (see pick_port), and
@@ -260,8 +258,8 @@ class ProbeServer(ThreadingHTTPServer):
 
         A headless browser being terminated drops its keep-alive sockets, and socketserver prints a
         full ConnectionReset traceback per socket. On a five-suite run that is dozens of tracebacks
-        interleaved across the suites, which reads exactly like a crashing test and is nothing of the
-        kind - it flooded the output of a run on and buried the actual results.
+        interleaved across the suites, which reads exactly like a crashing test and buries the
+        actual results.
         """
         exc = sys.exc_info()[1]
         if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
@@ -377,7 +375,7 @@ def main():
                                                "build does not have yet")
     ap.add_argument("--offer-baseline", action="store_true",
                     help="let /api/baseline/status through to the real server. Only the baseline "
-                         "suite wants this; see the note beside BASELINE_QUIET below.")
+                         "suite wants this; see the note where it is applied below.")
     args = ap.parse_args()
 
     checks_path = args.checks if os.path.isabs(args.checks) else os.path.join(ROOT, args.checks)
@@ -388,10 +386,9 @@ def main():
     # THE FIRST-RUN BASELINE DIALOG IS OFF BY DEFAULT, and this is not a convenience.
     # It is a MODAL alertdialog that opens on page entry and takes focus, exactly as designed. Every
     # page suite that asks "where did focus go?" then answers "baseline-save-btn", and the run reports
-    # a wall of failures that have nothing to do with the page under test - which is what happened on
-    # What that costs: Channels loses 6 checks and Routing 9, all of them false. Worse, a suite that does
-    # not test focus (the solo suite) passed cleanly through the same dialog, so the trap is silent
-    # unless you happen to be checking focus that day.
+    # a wall of failures that have nothing to do with the page under test (6 on Channels, 9 on
+    # Routing). A suite that does not test focus passes cleanly through the same dialog, so the trap
+    # is silent unless that suite happens to check focus.
     # So: quieten it here, once, for everyone. --offer-baseline puts it back for the one suite whose
     # subject IS the dialog.
     if not args.offer_baseline:

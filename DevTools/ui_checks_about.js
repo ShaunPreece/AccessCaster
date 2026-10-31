@@ -1,20 +1,20 @@
-/* Machine checks for the About page's tab strip (UI rebuild phase 5, the last page converted).
+/* Machine checks for the About page's tab strip.
    Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_about.js --route about
    Same shape as ui_checks_device.js. NOT a screen-reader pass: it pins the things a screen reader
    depends on and the eye cannot see (roles, states, one tab stop, what is exposed, heading order),
    so the NVDA run is about how it sounds.
 
-   This page is different from the other four in two ways worth checking hard:
+   This page differs from the other tabbed pages in two ways worth checking hard:
      - it is TEXT ONLY (with one exception: Support gains a link once a donation URL is set), so a
-       pane with no control needs the PANEL itself to be the tab stop - the Device page's
-       Network/Technical fault, and here it is nearly every tab;
+       pane with no control needs the PANEL itself to be the tab stop, and here that is nearly every
+       tab;
      - it reads NOTHING from the unit, so a tab change must fire no device traffic at all.
    It is also where the app-wide absence of collapsible groups is asserted: "no ac-group is left
    anywhere in the app" and "the whole group store is dropped". */
 
 /* FOUR TABS, AND NO Limitations TAB. Its content is a short list in the page's own intro, above
-   the strip: as a tab it was one screen of prose that went stale precisely because it duplicated
-   facts the Help guide also carries. Support is LAST - the tab you visit deliberately and least
+   the strip: a tab of prose would duplicate facts the Help guide carries, and go stale. Support is
+   LAST - the tab you visit deliberately and least
    often. */
 const TABS = ["can", "help", "issues", "support"];
 const TITLES = ["What it can control", "Help", "Known issues", "Support this project"];
@@ -80,7 +80,7 @@ async function run() {
   check("the strip is a tablist, and deliberately has no name of its own",
     strip().getAttribute("role") === "tablist" && !strip().getAttribute("aria-label"),
     strip().getAttribute("aria-label"));
-  check("three tabs, in the agreed order",
+  check("four tabs, in the agreed order",
     buttons().length === TABS.length && buttons().every((b, i) => b.id === tabId(TABS[i])),
     buttons().map((b) => b.id).join(","));
   check("the tab titles are the agreed ones",
@@ -186,7 +186,7 @@ async function run() {
   // ---- EVERY panel here must be a tab stop -----------------------------
   // No pane on this page holds a control, so without tabindex="0" on the panel the Tab key sails
   // past the whole page and lands on the footer or the nav, which reads as being dumped somewhere
-  // else entirely. This is the Device page's Network/Technical fault, and here it is every tab.
+  // else entirely.
   for (const k of TABS) {
     openTab(k);
     const hasControl = visiblePanes()[0].querySelectorAll(
@@ -230,7 +230,8 @@ async function run() {
     selectedKey());
 
   // ---- remembered tab, and the retired group state ----------------------
-  // Deliberately the tab we are NOT on: the run ends on Help, so switching to Can is a real change.
+  // Deliberately the tab we are NOT on: the loops above end on Support, so switching to Can is a
+  // real change.
   openTab("can");
   let stored = null;
   try { stored = JSON.parse(window.localStorage.getItem("accesscaster.tabs") || "{}"); } catch {}
