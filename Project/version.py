@@ -1,6 +1,6 @@
 """AccessCaster application version. SINGLE SOURCE OF TRUTH.
 
-Bump `__version__` ONLY when Shaun explicitly says so. It NEVER changes automatically
+`__version__` is bumped by hand, for a release. It NEVER changes automatically
 (not per build, not per commit). Everything that shows or stamps a version reads from
 here so there is exactly one number to change:
   - the server:    /api/version (and /api/status) -> the Help & About page's version line.

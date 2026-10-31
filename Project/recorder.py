@@ -26,8 +26,9 @@ MARKERS WORK, PROVEN BY READING THE DRIVE ON A PC, which is the only place the e
 `requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the recording. Nothing over
 USB shows it: the desk consumes the write and pushes the field back cleared, and the recording's own
 record carries identical flags either way. A take with markers dropped at 4.0 s and 8.0 s carries
-cue points at exactly those times, and one with none has no cue chunk at all. Both the int and the double form of the write land; the double is
-used here because that is the type the desk's own echo comes back as.
+cue points at exactly those times, and one with none has no cue chunk at all. Both the int and the
+double form of the write land; the double is used here because that is the type the desk's own echo
+comes back as.
 """
 from __future__ import annotations
 
@@ -142,7 +143,7 @@ MULTITRACK_LABEL = {
     2: "Post-fader separate tracks, plus the mix",
 }
 
-# SHORT, because the labels now carry the "plus the mix" part. What is left is the two things a
+# SHORT, because the labels carry the "plus the mix" part. What is left is the two things a
 # label cannot fit: the cost, and what pre versus post actually means.
 # LIVES HERE, NOT IN app.js, so all three of this page's hints come from one place and the browser
 # holds none of the wording. The other two are below.
@@ -155,8 +156,9 @@ MULTITRACK_HINT = ("Separate tracks use about seven times the space. Pre-fader i
 #
 # ONLY 0 AND 1 MAY EVER BE WRITTEN. The property is an unclamped raw store, so 2, 3, 99, -1 and 255
 # all stick and read back, and the recorder treats any non-zero as MP3, so it can look like a
-# quality scale when it is not. Takes at 1, 2 and 3 come back byte-identical in format: 128 kbps CBR, 48 kHz, stereo. Writing a 2 would leave the desk holding a value its own
-# screen cannot draw. See PROJECT_GUIDE.md.
+# quality scale when it is not. Takes at 1, 2 and 3 come back byte-identical in format: 128 kbps
+# CBR, 48 kHz, stereo. Writing a 2 would leave the desk holding a value its own screen cannot draw.
+# See PROJECT_GUIDE.md.
 #
 # The labels carry the SIZE, because that is the whole trade and it is the part you cannot hear:
 # measured on the same take, the WAV was about eighteen times the MP3.

@@ -97,7 +97,8 @@ def _require_pad_write() -> None:
 @contextlib.contextmanager
 def _transfer_mode(settle: float):
     """Enter transfer mode, wait `settle` seconds, and ALWAYS leave again, even on an error. A desk
-    left in transfer mode keeps its FAT volume exposed until something else exits it. Inside rcp_transfer.transfer_session both calls do nothing; the session owns them."""
+    left in transfer mode keeps its FAT volume exposed until something else exits it. Inside
+    rcp_transfer.transfer_session both calls do nothing; the session owns them."""
     t.set_transfer_mode(True)
     try:
         time.sleep(settle)
@@ -699,9 +700,9 @@ def free_effect_subhandle(target_idx: int) -> int:
 
     WHY REUSE, NOT APPEND (decoded + ear-proven): the LIVE FX engine binds a pad to the
     FIRST region-B effect-object whose effectsIdx == padIdx. Appending our effect at the end left
-    the first object empty, so the engine bound silence and the pad went dead after a reboot. The
-    RODE app writes to the pad's FIRST matching object. So we reuse that index. (Dead ends: hard-
-    coded 0x0B; sub=total count; sub=region-B append - all silenced this/other pad's FX.)
+    the first object empty, so the engine binds silence and the pad goes dead after a reboot. The
+    RODE app writes to the pad's FIRST matching object, so that index is reused. A hard-coded 0x0B,
+    the total object count, or a plain append each silence this pad's effect or another's.
     """
     objects = effect_objects()
     return next((o.index for o in objects if o.effects_idx == target_idx), len(objects))
@@ -1337,7 +1338,7 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
     if not items:
         return {"ok": False, "message": "Nothing to change on the pad."}
     kinds = kinds or {}
-    pos, ptype, padname = _position_of(grid - 1, blob)
+    pos, ptype, _name = _position_of(grid - 1, blob)
     if pos is None:
         return {"ok": False, "message": f"Pad {grid} is empty; nothing to edit."}
 
@@ -2166,9 +2167,9 @@ def heal_fx_pool(progress=None) -> dict:
     """Rebuild any voice-FX pad whose effect DEFINITION is missing, and touch nothing else.
 
     THE DESK REACHES THIS STATE BY ITSELF, which is why this is a repair rather than a diagnostic.
-    Proven against model dumps: `pre-showreset-raw.bin` holds all seven region-B objects, `post-showreset-raw.bin` holds only the
-    special one at 65 with all six FX pad records still present, and `default-show-raw.bin` shows
-    why - RODE's factory default show ships the FX pad records with their `effectsIdx` pointers and
+    Proven against model dumps: one taken before a software reset holds all seven region-B
+    objects, one taken after holds only the special one at 65 with all six FX pad records still
+    present, and a dump of the default show says why - RODE's factory default show ships the FX pad records with their `effectsIdx` pointers and
     no objects for them to point at. The firmware garbage-collects an object the moment no pad claims
     it but never allocates one (SOUNDPADS.md section 5), and only an explicit effects block (a 0x9d
     frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
@@ -2177,7 +2178,7 @@ def heal_fx_pool(progress=None) -> dict:
     of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
     pad-keyed GC never reaches it.
 
-    A show IMPORT is NOT affected (`post-showimport-raw.bin` holds all seven): an exported show
+    A show IMPORT is NOT affected (a dump after an import holds all seven): an exported show
     carries the objects. It is the DEFAULT show alone that does not.
 
     IDEMPOTENT AND CHEAP WHEN HEALTHY: one dump, and no writes at all when nothing is missing. That
@@ -2425,7 +2426,7 @@ def _pad_audio_source(root: str, grid: int, wanted: str | None):
 # THE EIGHT FACTORY SOUNDS ARE THE DESK'S TO RESTORE, NOT OURS, and the app ships none of RODE's
 # audio. Putting a factory SOUND back needs the WAV itself, and there is no copy this app can rely
 # on:
-#   * shipping them republishes RODE's samples, which is what keeps the repo private;
+#   * shipping them would republish RODE's samples;
 #   * the desk's own copy under /Application/emmc-data/pads/<n>/ is deleted the moment that pad is
 #     replaced (tidy_pad_folder), so it is there exactly until somebody needs it;
 #   * the as-found baseline holds whatever was on the desk WHEN IT WAS TAKEN, which is the factory

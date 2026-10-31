@@ -78,10 +78,10 @@ class MatrixSpec:
         WRITES a cross-point should walk.
 
         The desk publishes all 30 source rows whichever mode it is in, so the Expanded four are
-        ordinary MIX nodes with real state at all times. Reading or storing a NARROWER set than
-        that is what made a mix scheme mode-dependent: saved in Standard it carried no Virtual A
-        cell, and applied in Expanded it left one behind. A scheme and a profile are keyed off
-        this, so the saved shape is the same whatever mode the desk was in.
+        ordinary MIX nodes with real state at all times. Reading or storing a NARROWER set makes a
+        mix scheme mode-dependent: saved in Standard it carries no Virtual A cell, and applied in
+        Expanded it leaves one behind. A scheme and a profile are keyed off this, so the saved
+        shape is the same whatever mode the desk was in.
 
         No relabelling: a scheme is keyed, so the Expanded names would be decoration here, and in
         Standard they would be wrong."""
@@ -202,12 +202,11 @@ class FaderSpec:
         fight the hardware - and the desk says so itself: on a Duo the four physical nodes read a
         flat 0 while the five virtual ones carry a real level.
 
-        DERIVED, never a hand-kept dict of "observed selectors": that shape is empty on any desk
-        nobody has captured, so the whole feature refuses there. The Pro II's three entries
-        (6:0x0A, 7:0x0B, 8:0x0C) are exactly what this returns. They look device-specific and
-        unguessable only when they are recorded as one-level selectors, when they have always been
-        the SECOND index of a two-level path.
-        `test_duo_parity.py` asserts the retired Pro II three against this derivation.
+        A hand-kept dict of "observed selectors" is empty on any desk nobody has captured, so the
+        whole feature would refuse there. The Pro II's three (6:0x0A, 7:0x0B, 8:0x0C) are exactly
+        what this returns: each is the SECOND index of a two-level path, which is why they look
+        device-specific when written down as one-level selectors. `test_duo_parity.py` asserts
+        those three against this derivation.
         """
         return {i: FADER_NODE_BASE + i for i in range(self.physical, self.count)}
 
@@ -223,12 +222,12 @@ class FaderSpec:
         captured slot round-trips into the JSON without ever being written back."""
         return self.capture_len if self.capture_len is not None else self.vector_length
 
-    # THERE IS NO `code_label` ANY MORE, and it is not coming back. It returned {code: label} for the
-    # ASSIGNABLE channels only, which is the wrong set for naming: a fader can HOLD a stereo-linked
-    # pair (codes 4, 5, 6) that is deliberately not assignable, so every caller that named something
-    # from it is one linked pair away from saying a bare number out loud: "0 percent, Source 4" for
-    # a linked Mic 1 + 2. Use `all_labels` to NAME anything the vector can hold, and `code_set` /
-    # `code_order` to decide what may be WRITTEN. Naming is the wide set, writing is the narrow one.
+    # DO NOT ADD A {code: label} OF THE ASSIGNABLE CHANNELS ONLY. It is the wrong set for naming: a
+    # fader can HOLD a stereo-linked pair (codes 4, 5, 6) that is deliberately not assignable, so
+    # every caller that named something from it would be one linked pair away from saying a bare
+    # number out loud: "0 percent, Source 4" for a linked Mic 1 + 2. Use `all_labels` to NAME
+    # anything the vector can hold, and `code_set` / `code_order` to decide what may be WRITTEN.
+    # Naming is the wide set, writing is the narrow one.
     @property
     def code_set(self) -> frozenset:
         """The set of assignable source codes (for validating a requested placement)."""
@@ -757,8 +756,8 @@ class DeviceModel:
         FOR RESOLVING, NOT FOR DISPLAY, and that distinction is what `channel_for_input_path`
         needs: an address that resolves to Game is Game whatever mode we happen to think we are
         in, so a push must never fail to name a channel because a cached flag says otherwise. Take
-        the LABEL from `ui_channels_for` instead - resolving with the wide set and then displaying
-        its label is how the Standard-mode announcer came to say "USB 1 (System)"."""
+        the LABEL from `ui_channels_for` instead: displaying the label of the wide set makes the
+        Standard-mode announcer say "USB 1 (System)"."""
         return tuple(self.ui_channels) + tuple(self.expanded_ui_channels)
 
     def ui_channels_for(self, expanded: bool) -> tuple:

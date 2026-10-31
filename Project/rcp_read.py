@@ -612,8 +612,8 @@ def path_value(blob: bytes, path, name: str, default=None):
     numbering. On the Pro II it does, because its per-input write selectors ARE the INPUTSOURCE
     table entries. On a Duo a write into a MIX node at 0x48+source_code CREATES the property there,
     and one of those ahead of the table shifts every index past it, so one mic's gain is reported
-    as another's. Nothing writes there now, but the litter survives until a factory reset, so a
-    positional read stays wrong on a used Duo.
+    as another's. The app never writes there, but RODE's app does, and the property survives until
+    a factory reset, so a positional read stays wrong on a used Duo.
     """
     node = node_at(blob, path)
     if node is None:
