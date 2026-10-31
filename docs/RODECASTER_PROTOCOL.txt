@@ -1025,6 +1025,14 @@ padIdx is 0-based; grid position N = padIdx N-1. padType: 1 = Sound, 2 = Voice-F
       which is exactly the padFilePath value. FOLDER NUMBER == GRID POSITION. The
       SCSI / Bulk-Only-Transport traffic in a capture is just Windows' usbstor
       driver; you do NOT implement SCSI, you mount the volume and copy files.
+      FINDING THE VOLUME (Pro II, fw 1.7.6, Windows 11, 31st October 2026): the
+      gadget is interface MI_08 of the desk's composite USB device, and its disk
+      (USBSTOR\DISK&VEN_LINUX&PROD_FILE-STOR_GADGET, instance ID ending in the
+      desk's USB serial) is present OUT of transfer mode too, as a removable drive
+      with no media and size 0, keeping its letter. After an exit the letter can
+      go on listing the old folders from cache for over 60 s. So identify the
+      volume by the disk's place in the device tree (drive letter -> disk number
+      -> disk under USB\VID_19F7), not by which letter appears after entry.
   (b) PAD CONFIG = report-3 property records on MI_09 (the property channel).
 
 7.2a EJECTING AND ERASING THE CARD OR DRIVE (Pro II, fw 1.7.6, 3rd October 2026)

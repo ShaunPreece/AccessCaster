@@ -31,11 +31,11 @@ import struct
 import subprocess
 import time
 
+import desk_drives  # which drive letter is the desk's own volume
 import devices  # per-device matrix and fader shape
 import diagnostics  # the app's own account of every record it sends
 import model_tree  # the tree grammar, and with it the ONE address format
 import rcp_hid  # write-generation counter (invalidates cached model reads)
-import rcp_read
 import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
 
@@ -697,9 +697,7 @@ class transfer_session:
 def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
     global _session_pad_root
-    if on:
-        _note_volumes_before_entry()
-    else:
+    if not on:
         _session_pad_root = None
     rec = build_global_prop_int("transferModeType", SEL_SYSTEM, 2 if on else 0)
     # Logged as its own event as well as the record below it: entering transfer mode
@@ -858,91 +856,33 @@ def _is_pad_volume(root: str) -> bool:
         return False
 
 
-def _volume_serial(root: str) -> int | None:
-    """The volume serial number of `root`, or None when Windows does not give one."""
-    serial = ctypes.c_uint(0)
-    try:
-        with quiet_drive_errors():
-            ok = ctypes.WinDLL("kernel32").GetVolumeInformationW(
-                root, None, 0, ctypes.byref(serial), None, None, None, 0)
-    except (AttributeError, OSError):
-        return None
-    return serial.value if ok else None
-
-
-# THE DESK'S VOLUME IS THE ONE THAT APPEARS AFTER TRANSFER MODE IS ENTERED. Any other drive with a
-# `pads` folder, such as a USB stick holding a copy of the pad folder, is already there before entry,
-# and taking it for the desk sends uploads to it and lets the tidy delete its files. So the pad
-# volumes present before entry are noted and refused, except one whose serial is the desk volume's
-# own from an earlier find: a quick exit and re-enter can find the desk's volume still mounted.
-_volumes_before_entry: set[str] = set()
-_desk_volume_serial: int | None = None
 # The root found during a held transfer_session. Every find in the session returns this one, so the
 # batch cannot move to another volume part way through.
 _session_pad_root: str | None = None
-
-
-def _desk_transfer_mode() -> int:
-    """The desk's `transferModeType` from a fresh dump: 0 when it is out of transfer mode."""
-    return rcp_read.first(rcp_read.read_model(fresh=True), "transferModeType", default=0) or 0
-
-
-def _leave_stale_transfer_mode(timeout_s: float = 8.0) -> None:
-    """Take the desk out of a transfer mode it is already in, and wait for its volume to go.
-
-    A run that stops mid-transfer leaves the desk in transfer mode with its pad volume mounted.
-    Until a find has learned that volume's serial, it looks like any other drive holding a `pads`
-    folder, so noting the volumes before entry would refuse the desk's own.
-    """
-    try:
-        mode = _desk_transfer_mode()
-    except (OSError, RuntimeError, ValueError) as exc:   # no desk, a failed read, an unreadable dump
-        diagnostics.event("transfer.mode_unread", str(exc))
-        return
-    if not mode:
-        return
-    diagnostics.event("transfer.stale_exit", "the desk was already in transfer mode", mode=mode)
-    mounted = {root for root in _drive_roots() if _is_pad_volume(root)}
-    send_record(build_global_prop_int("transferModeType", SEL_SYSTEM, 0))
-    deadline = time.monotonic() + timeout_s
-    while mounted and time.monotonic() < deadline:
-        if any(not _is_pad_volume(root) for root in mounted):
-            return
-        time.sleep(0.5)
-
-
-def _note_volumes_before_entry() -> None:
-    global _volumes_before_entry
-    if _desk_volume_serial is None:
-        _leave_stale_transfer_mode()
-    _volumes_before_entry = {root for root in _drive_roots() if _is_pad_volume(root)
-                             and (_desk_volume_serial is None
-                                  or _volume_serial(root) != _desk_volume_serial)}
-    if _volumes_before_entry:
-        diagnostics.event("transfer.other_pad_volumes", "refused as the pad volume",
-                          roots=" ".join(sorted(_volumes_before_entry)))
 
 
 def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0):
     """Wait for the pad-storage FAT volume to mount; return its root path (e.g. 'F:\\'), or None
     if it never appears within timeout_s.
 
-    The re-arm can be slow (over 8 s after a fresh enter), so the timeout is generous and
-    remountPadStorage is re-issued periodically in case the first one was swallowed. A volume
-    counts only when `_is_pad_volume` passes and it was not there before transfer mode was entered
-    (see `_volumes_before_entry`). A not-yet-ready volume just keeps the wait loop going.
+    Only a drive on the desk's own USB device can be the pad volume (`desk_drives.on_desk`), so a
+    USB stick holding a copy of the pad folder is never taken for it: an upload would go to the
+    stick and the tidy would delete its files. The desk's letter stays assigned out of transfer
+    mode and after a stuck one, as an empty or not-yet-ready drive, which `_is_pad_volume` rejects
+    until the volume reads bytes. The re-arm can be slow (over 8 s after a fresh enter), so the
+    timeout is generous and remountPadStorage is re-issued periodically in case the first one was
+    swallowed.
     """
-    global _desk_volume_serial, _session_pad_root
+    global _session_pad_root
     deadline = time.monotonic() + timeout_s
     next_remount = time.monotonic() + reissue_remount_every
     while time.monotonic() < deadline:
         if _transfer_hold > 0 and _session_pad_root:
             candidates = [_session_pad_root]
         else:
-            candidates = [r for r in _drive_roots() if r not in _volumes_before_entry]
+            candidates = sorted(desk_drives.on_desk(_drive_roots()))
         for root in candidates:
             if _is_pad_volume(root):
-                _desk_volume_serial = _volume_serial(root) or _desk_volume_serial
                 if _transfer_hold > 0:
                     _session_pad_root = root
                 return root

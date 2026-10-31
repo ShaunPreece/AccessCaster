@@ -102,6 +102,8 @@ VOLUME SAFETY: rcp_transfer.find_pad_volume requires a volume that READS BYTES
   (`pad_volume_readable`), not one that merely exists or reports a size: a half-mounted volume passes
   both of those and then fails the first real read with EINVAL. A create either gets a readable
   volume or aborts BEFORE sending any pad record. See PROJECT_GUIDE part 2 under `find_pad_volume`.
+  Only a drive on the desk's own USB device is considered (`desk_drives.on_desk`), so a USB stick
+  holding a `pads` folder is never written to or tidied.
 
 ================================================================================
 ## 1d. CREATING THE OTHER PAD TYPES - Mixer, MIDI Trigger, Quick Dial  [decoded 2026-06-17]

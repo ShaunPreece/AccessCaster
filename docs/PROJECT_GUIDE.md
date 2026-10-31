@@ -1326,11 +1326,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   readiness test has to do the SAME KIND of I/O as the use it gates, or it is not a test. Do not
   "optimise" `pad_volume_readable` out of the wait loop: a not-ready volume returning False is what
   keeps the remount loop going, and this guards backup, restore AND create.
-- **The pad volume is the one that APPEARS AFTER transfer mode is entered.** `_set_transfer_mode_raw`
-  notes every readable pad volume already mounted, and `find_pad_volume` refuses those, so a USB
-  stick holding a copy of the pad folder is never taken for the desk (an upload would go to it and
-  the tidy would delete its files). The one exception is a volume with the serial the desk's had
-  last time. Inside a `transfer_session` every find returns the session's first root.
+- **The pad volume is the drive on the DESK'S OWN USB DEVICE, found by hardware
+  (`desk_drives.on_desk`), never by what is on it.** A USB stick holding a copy of the pad folder
+  passes every content test, and taking it sends uploads to it and lets the tidy delete its files.
+  Do not go back to judging by timing (the drive that appears after entry): the desk's letter stays
+  assigned out of transfer mode as an empty drive, and after an exit it can linger over 60 s still
+  listing `pads` from cache, so a before-and-after comparison counts the desk's own letter as
+  somebody else's and refuses it. A desk left in transfer mode needs no exit first; its volume is
+  simply found. Inside a `transfer_session` every find returns the session's first root.
 - **Wrap pad-volume I/O in `rcp_transfer.quiet_drive_errors`.** A half-mounted removable volume makes
   Windows raise a MODAL "There is a problem with this drive" box on our behalf, for a condition we
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
