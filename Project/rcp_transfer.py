@@ -119,7 +119,7 @@ STEREO_LINK_PAIRS = {4: (0, 1), 5: (1, 2), 6: (2, 3)}
 def build_pad_prop_string(name: str, value: str, selector: int = 0x01) -> bytes:
     """Build a 256-byte report-id-3 record setting a pad-addressed string property.
 
-    The default selector 0x01 keeps the byte-for-byte selftest against sound4.pcap valid."""
+    The default selector 0x01 is the one `_selftest`'s expected bytes are built with."""
     value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated
     value_block = bytes([0x01, 1 + len(value_b), 0x05]) + value_b
     addr = build_address([SOUNDPADS_INDEX, selector & 0xFF])
@@ -128,8 +128,7 @@ def build_pad_prop_string(name: str, value: str, selector: int = 0x01) -> bytes:
 
 def build_pad_prop_int(name: str, value: int, selector: int = 0x01) -> bytes:
     """Build a 256-byte report-id-3 record setting a pad-addressed integer property (padIdx,
-    which binds `selector` to a pad, is the main user). Verified byte-for-byte against
-    fx_assign.pcap (padIdx=15 under selector 0x17)."""
+    which binds `selector` to a pad, is the main user)."""
     value_block = bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little")
     addr = build_address([SOUNDPADS_INDEX, selector & 0xFF])
     return _frame(addr + name.encode("ascii") + b"\x00" + value_block)
@@ -140,7 +139,7 @@ def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
     NETWORK 0x10, the CallMe and Icecast strings).
 
     It joins two separately verified halves: the global address of build_global_prop_int and the
-    string value block of build_pad_prop_string (sound4.pcap frame 167). The combination is proven
+    string value block of build_pad_prop_string. The combination is proven
     per property, so read back the first write on any new one."""
     value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated
     value_block = bytes([0x01, 1 + len(value_b), 0x05]) + value_b
@@ -356,7 +355,7 @@ def build_cross_point_level(selector: int, level: float, anchor: int = 0) -> byt
     """mixLevelWithAnchor on a cross-point: the ASCII string '<level>|<anchor>'.
 
     level = normalised fader position 0.0 .. 1.0; anchor = 0 for an unlinked (absolute)
-    cross-point. Decoded from a fader-drag capture (captures/matrix_level.pcap)."""
+    cross-point."""
     s = f"{_level_str(level)}|{int(anchor)}".encode("ascii")
     value_block = bytes([0x01, len(s) + 2, 0x05]) + s + b"\x00"
     return _frame(build_address([selector]) + b"mixLevelWithAnchor" + b"\x00" + value_block)
@@ -875,7 +874,7 @@ def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0)
 
 def _selftest() -> None:
     """Prove the builders reproduce the RODE app's captured bytes, no hardware."""
-    # padFilePath assignment, sound4.pcap frame 167 (pad 2 -> sound.wav).
+    # padFilePath assignment (pad 2 -> sound.wav).
     expected = bytes.fromhex(
         "033f000000010102029a02010170616446696c6550617468000129052f4170706c"
         "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
@@ -886,7 +885,7 @@ def _selftest() -> None:
         "build_pad_prop_string mismatch:\n"
         f"  expected {expected[:64].hex()}\n  got      {got[:64].hex()}"
     )
-    # padFilePath clear (empty value), sound4.pcap frame 9.
+    # padFilePath clear (empty value).
     expected_clear = bytes.fromhex(
         "0318000000010102029a02010170616446696c65506174680001020500"
     ).ljust(BULK_LEN, b"\x00")
@@ -895,7 +894,7 @@ def _selftest() -> None:
         "empty padFilePath mismatch:\n"
         f"  expected {expected_clear[:32].hex()}\n  got      {got_clear[:32].hex()}"
     )
-    # padIdx pad-addressed int, fx_assign.pcap (padIdx=15 under selector 0x17).
+    # padIdx pad-addressed int (padIdx=15 under selector 0x17).
     expected_idx = bytes.fromhex(
         "0316000000010102029a020117706164496478000105010f000000"
     ).ljust(BULK_LEN, b"\x00")
@@ -904,7 +903,7 @@ def _selftest() -> None:
         "build_pad_prop_int mismatch:\n"
         f"  expected {expected_idx[:32].hex()}\n  got      {got_idx[:32].hex()}"
     )
-    # systemMidiControl ON/OFF, midi_on.pcap / midi_off.pcap.
+    # systemMidiControl ON/OFF.
     expected_midi_on = bytes.fromhex(
         "031a000000010101010f73797374656d4d696469436f6e74726f6c00010102"
     ).ljust(BULK_LEN, b"\x00")
@@ -913,7 +912,7 @@ def _selftest() -> None:
     ).ljust(BULK_LEN, b"\x00")
     assert build_global_prop_bool("systemMidiControl", True) == expected_midi_on, "midi ON mismatch"
     assert build_global_prop_bool("systemMidiControl", False) == expected_midi_off, "midi OFF mismatch"
-    # inputMicrophoneGain Mic 1 = 56 dB (gain_up.pcap) and Mic 2 (mic2_gain.pcap).
+    # inputMicrophoneGain Mic 1 = 56 dB and Mic 2 = 51 dB.
     exp_gain1 = bytes.fromhex(
         "0321000000010101026e02696e7075744d6963726f70686f6e654761696e0001050138000000"
     ).ljust(BULK_LEN, b"\x00")
@@ -922,14 +921,14 @@ def _selftest() -> None:
         "0321000000010101026f02696e7075744d6963726f70686f6e654761696e0001050133000000"
     ).ljust(BULK_LEN, b"\x00")
     assert build_channel_prop_int("inputMicrophoneGain", 0x33, 0x6F) == exp_gain2, "mic2 gain mismatch"
-    # inputPower (P48) Mic 1 ON (p48_on.pcap).
+    # inputPower (P48) Mic 1 ON.
     exp_p48 = bytes.fromhex(
         "0318000000010101026e02696e707574506f7765720001050101000000"
     ).ljust(BULK_LEN, b"\x00")
     assert build_channel_prop_int("inputPower", 1, 0x6E) == exp_p48, "p48 mismatch"
 
     # --- DUO channel-address format (trailing 0x01, selector 0x48 + source_code) ---
-    # Captured + decoded from the Duo console (see RODECASTER_PROTOCOL.txt section 4.1).
+    # The format is in RODECASTER_PROTOCOL.txt section 4.1.
     # inputPower Mic1 (sel 0x48) = off:
     exp_duo_p48 = bytes.fromhex(
         "0318000000010101024801696e707574506f7765720001050100000000"
@@ -950,45 +949,44 @@ def _selftest() -> None:
         "duo inputDigitalGain mismatch"
 
     # --- DUO polarity + mic-type (channel form) and the two Mic1 processing/global-form props
-    # (channelBypassProcessing + channelCurrentFxPreset), all byte-for-byte from console captures
-    # (duo_phaseflip / duo_mt_condenser / duo_procbypass / duo_preset).
-    # inputPhaseFlip Mic1 (channel sel 0x48, trailer 0x01) = ON (duo_phaseflip.pcap frame 117):
+    # (channelBypassProcessing + channelCurrentFxPreset).
+    # inputPhaseFlip Mic1 (channel sel 0x48, trailer 0x01) = ON:
     exp_duo_phase = bytes.fromhex(
         "0318000000010101024801696e7075745068617365466c697000010102"
     ).ljust(BULK_LEN, b"\x00")
     assert build_channel_prop_bool("inputPhaseFlip", True, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_phase, \
         "duo inputPhaseFlip mismatch"
-    # inputMicrophoneType Mic1 (channel sel 0x48, trailer 0x01) = 3 Condenser (duo_mt_condenser.pcap):
+    # inputMicrophoneType Mic1 (channel sel 0x48, trailer 0x01) = 3 Condenser:
     exp_duo_mtype = bytes.fromhex(
         "0321000000010101024801696e7075744d6963726f70686f6e65547970650001050103000000"
     ).ljust(BULK_LEN, b"\x00")
     assert build_channel_prop_int("inputMicrophoneType", 3, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_mtype, \
         "duo inputMicrophoneType mismatch"
-    # channelBypassProcessing Mic1 (global/processing form, sel 0x1C) = ON (duo_procbypass.pcap frame 67):
+    # channelBypassProcessing Mic1 (global/processing form, sel 0x1C) = ON:
     exp_duo_bypass = bytes.fromhex(
         "0320000000010101011c6368616e6e656c42797061737350726f63657373696e6700010102"
     ).ljust(BULK_LEN, b"\x00")
     assert build_global_prop_bool("channelBypassProcessing", True, 0x1C) == exp_duo_bypass, \
         "duo channelBypassProcessing mismatch"
-    # DUO: NON-Mic1 processing selectors, from the duo_proc_<chan>.pcap captures.
+    # DUO: NON-Mic1 processing selectors.
     # channelBypassProcessing rides the GLOBAL/processing form at sel = proc_sel_base (0x1C)
-    # + STRIP index, where strip index = channelInputSource.index(source_code). Six channels
-    # on non-contiguous strips prove STRIP-index (not carousel-position) addressing:
+    # + STRIP index, where strip index = channelInputSource.index(source_code), not the
+    # channel's carousel position:
     #   Mic1 s0->0x1C, USB1 s1->0x1D, Chat s2->0x1E, USB2 s3->0x1F, Headset s6->0x22,
-    #   Bluetooth s8->0x24. The gaps (strips 4/5/7 empty) are the decisive evidence.
+    #   Bluetooth s8->0x24. Strips 4, 5 and 7 are empty, so carousel addressing fails this check.
     _duo_proc_name = "6368616e6e656c42797061737350726f63657373696e67"  # "channelBypassProcessing"
     for _sel in (0x1D, 0x1E, 0x1F, 0x22, 0x24):
         _exp = bytes.fromhex("0320000000" + "01010101" + f"{_sel:02x}" + _duo_proc_name
                              + "00010102").ljust(BULK_LEN, b"\x00")
         assert build_global_prop_bool("channelBypassProcessing", True, _sel) == _exp, \
             f"duo channelBypassProcessing strip-selector 0x{_sel:02x} mismatch"
-    # channelCurrentFxPreset Mic1 (global/processing form, sel 0x1C) = 1 Podcast Studio (duo_preset.pcap):
+    # channelCurrentFxPreset Mic1 (global/processing form, sel 0x1C) = 1 Podcast Studio:
     exp_duo_preset = bytes.fromhex(
         "0323000000010101011c6368616e6e656c43757272656e7446785072657365740001050101000000"
     ).ljust(BULK_LEN, b"\x00")
     assert build_global_prop_int("channelCurrentFxPreset", 0x1C, 1) == exp_duo_preset, \
         "duo channelCurrentFxPreset mismatch"
-    # DUO: EFFECTS on a NON-Mic1 strip (captures/duo_fx_mic2_strip1.pcap). echoOn rides the
+    # DUO: EFFECTS on a NON-Mic1 strip. echoOn rides the
     # GLOBAL/effects form at sel = fx_sel_base (0x26) + STRIP index; Mic2 sits on strip 1 -> 0x27.
     exp_duo_fx_on = bytes.fromhex(
         "030f000000" + "01010101" + "27" + "6563686f4f6e" + "00010102"    # echoOn=True, sel 0x27
@@ -1001,7 +999,7 @@ def _selftest() -> None:
     assert build_global_prop_bool("echoOn", False, 0x27) == exp_duo_fx_off, \
         "duo echoOn strip-1 fx-selector 0x27 (OFF) mismatch"
 
-    # DUO: MASTER / GLOBAL OUTPUT writes (captures/duo_outwrite.pcap). The selectors are
+    # DUO: MASTER / GLOBAL OUTPUT writes. The selectors are
     # byte-identical to the Pro II, which is what the "output_write" cap rests on:
     # recordingMultitrackMode 0x0D (int), outputBTAutoMute 0x0D (bool), masterCompellorOn 0x0E
     # (bool), headphoneType 0x09 (Headphone 1) / 0x0A (Headphone 2) (int).

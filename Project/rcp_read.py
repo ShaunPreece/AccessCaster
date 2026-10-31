@@ -22,8 +22,7 @@ from rcp_hid import find_control_interface
 import devices   # device model table (matrix shape, channel order) keyed by product id
 
 BULK_LEN = 256
-# Verbatim trigger captured from the app (micmidi_reads.pcap frame 70043):
-# report 0x03, payload-len 4, payload ad10a7b0 = "dump full device model".
+# The dump trigger: report 0x03, payload-len 4, payload ad10a7b0 = "dump full device model".
 TRIGGER = (bytes([0x03]) + (4).to_bytes(4, "little")
            + bytes.fromhex("ad10a7b0")).ljust(BULK_LEN, b"\x00")
 

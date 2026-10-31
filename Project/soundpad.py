@@ -726,11 +726,10 @@ def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
 
 # CURSOR-addressed variants (addressing mode 0x00 = the device's current model-edit cursor,
 # no stream-position byte). The position-addressed select-begin above over-deletes the
-# NEIGHBOUR when the target is the FIRST stream record (a firmware edge case the app never
-# hit). The app clears the first record via the cursor instead: a model dump (rcp_read.TRIGGER)
+# NEIGHBOUR when the target is the FIRST stream record (a firmware edge case), so the first
+# record is cleared via the cursor instead: a model dump (rcp_read.TRIGGER)
 # parks the edit cursor at position 0, then these cursor-addressed records remove exactly that
-# one record. Decoded from the app clearing grid pad 10 while it sat at stream pos 0
-# (captures/clearpos0.pcap), and verified byte-for-byte on the device.
+# one record.
 def build_pad_bool_cursor(name: str, on: bool) -> bytes:
     """Pad bool on the edit CURSOR: 01 01 02 02 9a 02 00 <name> 00 01 01 <02/03>."""
     return t._frame(bytes([0x01, 0x01, 0x02, 0x02, 0x9a, 0x02, 0x00]) + name.encode()
@@ -807,20 +806,17 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
 # ----------------------------------------------------------------------------------------------
 
 def clear_pad(position: int, debug: bool = False) -> str:
-    """Clear the pad at 0-based stream `position`, exactly as the app does (decoded from
-    captures/padclear.pcap). The ENTIRE clear is: padActive ON -> padActive OFF -> select-begin,
-    then exit transfer mode, and NOTHING else. It sends NO remountPadStorage (writes no files),
+    """Clear the pad at 0-based stream `position`. The ENTIRE clear is: padActive ON ->
+    padActive OFF -> select-begin, then exit transfer mode, and NOTHING else. It sends NO remountPadStorage (writes no files),
     so it does NOT mount drive F and produces NO Windows "drive has a problem" toast.
 
     Re-read positions first - they shift when a record drops.
 
     POSITION 0 IS SPECIAL. A position-addressed select-begin (mode 0x01 + selector) over-deletes
-    the NEIGHBOUR at position 1 when the target is the FIRST stream record - a firmware edge case
-    the RODE app never triggered (its clears were always mid-table). The app clears the first
-    record via the model-edit CURSOR instead: dump the model (parks the cursor at position 0),
-    then send cursor-addressed (mode 0x00) padActive OFF + select-begin, which removes exactly
-    that one record. Decoded from the app clearing grid pad 10 at stream pos 0 and verified on
-    device (captures/clearpos0.pcap). So: cursor method for position 0, position method for >=1.
+    the NEIGHBOUR at position 1 when the target is the FIRST stream record - a firmware edge case.
+    So the first record is cleared via the model-edit CURSOR instead: dump the model (parks the
+    cursor at position 0), then send cursor-addressed (mode 0x00) padActive OFF + select-begin,
+    which removes exactly that one record. Cursor method for position 0, position method for >=1.
     """
     _require_pad_write()   # backstop: no clear HID write on a device lacking the pad_write cap
     iface = t.find_control_interface()
