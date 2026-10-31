@@ -2869,6 +2869,12 @@ shared one; a new copy is how they drifted apart the first time.
   by `recorder.read_volumes(include_extra=True)`, and it is NOT a real extra device.
 - **THE CAPTURE TASK MUST BE RUNNING.** `AccessCasterCapServer` in state **Ready is NOT polling**;
   `cmd.txt` is read only once `Start-ScheduledTask` puts it in Running.
+- **REMOVE THE CAPTURE TASK WHEN CAPTURING IS FINISHED.** While `AccessCasterCapServer` is
+  registered, anything running as the user can edit `cap_server.ps1` or the Python it runs, all in
+  the user-writable `DevTools` folder, then start the task and get an elevated process with no
+  prompt. It is kept registered between sessions on purpose, because registering it costs a UAC
+  prompt, so check whether it is still there (`Get-ScheduledTask AccessCasterCapServer`) and remove
+  it once USB capture is no longer in use (`Unregister-ScheduledTask AccessCasterCapServer`, elevated).
 - **`ui_checks_recording.js` FAILS ON A MISSING PRECONDITION, not on a bug.** It proxies reads to
   whatever is on 8770, so it needs `DevTools/run_dev_server.py` (the installed build predates the
   page), and it needs a card or drive IN: with no destination the unit reports state 3 and the page
