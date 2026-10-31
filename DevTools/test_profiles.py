@@ -81,8 +81,8 @@ def prop_str(name, value):
 
 
 # Nine faders: the six physical pots read 0, the three virtual ones carry a level. Two headphone
-# outputs with DIFFERENT types, the second of them "Low sensitivity" (2) - the value that used to
-# be dropped. Monitor speaker at 3 percent, which is where Shaun's desk actually sits.
+# outputs with DIFFERENT types, the second of them "Low sensitivity" (2), the value a literal (0, 1)
+# check drops. Monitor speaker at 3 percent, a realistic resting level.
 FADER_LEVEL_VALUES = [0, 0, 0, 0, 0, 0, 100, 64, 127]
 blob = fake_model.encode(
     [prop_int("channelInputSource", c) for c in (0, 7, 2, 3, 10, 11, 1, 8, 9, 9)]
@@ -499,7 +499,7 @@ check_true("every fader SOURCE write precedes the first level write", last_sourc
 print("\nRESTORE ORDER: the mic type goes before the gain")
 # CHOOSING A VOICING SETS THAT VOICING'S OWN DEFAULT GAIN (hardware: SM7B 55,
 # Condenser 25, ... only Line-in and Instrument leave it alone). So a gain written before the type
-# is thrown away. It cost a clean restore: the profile said 47, SM7B followed it, the desk kept 55.
+# is thrown away: a profile saying 47 with SM7B written after it leaves the desk at 55.
 mic_prof = dict(profile(), channels=[{"name": "Mic1", "kind": "mic", "level_db": 47,
                                       "mic_type": 10, "phantom": False, "polarity": False,
                                       "instrument_gain": 20}])
@@ -588,9 +588,8 @@ check("a profile with no expanded key restores as Standard",
 print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is deliberate")
 # The Duo HAS the output_write cap, so it gets these four. That is the right answer rather than a
 # hole: they all sit on the OUTPUT block 0x0D, which is confirmed on BOTH desks (rcp_transfer's own
-# self-check asserts the Duo's recordingMultitrackMode record byte-for-byte). This was true even
-# while the Duo lacked the "recorder" cap, because what a recording CONTAINS is an OUTPUT setting
-# and not the transport. The cap came on and nothing here needed to change,
+# self-check asserts the Duo's recordingMultitrackMode record byte-for-byte). It does not depend on
+# the "recorder" cap, because what a recording CONTAINS is an OUTPUT setting and not the transport,
 # which is the point of keeping those two apart.
 with as_device(devices.DUO), recorder() as duo_mt:
     profiles.apply(profile(multitrack=2, processing_bypass=True, usb_multitrack=1,
@@ -640,8 +639,8 @@ check("nothing was reported as unrestorable", res_unit["errs"], [])
 # The two output MUTES are in the address table and ARE saved, but a restore must never write them.
 # A profile has to be safe to run mid-session, and silencing the speakers because that is how they
 # sat when the profile was taken would be a nasty surprise with no visible cause. Same reasoning
-# that keeps the channel mutes out. The FLOAT is here too: it is the one type the save path used to
-# drop, so it is worth pinning that it survives the round trip and is written back.
+# that keeps the channel mutes out. The FLOAT is here too: a save path that keeps ints and bools
+# only drops it, so it is worth pinning that it survives the round trip and is written back.
 calls_mute, res_mute = apply_pro2(dict(profile(), **{profiles.UNIT_KEY: {
     "outputMonMute": 1, "outputBTMute": 1, "outputBTLevel": 0.4, "screenBrightness": 90}}))
 check("a saved output mute is NOT written back",

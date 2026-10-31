@@ -9,8 +9,8 @@ ones that need a THRESHOLD JUDGED are not, because judgement gets stretched in t
 a refactor ends up in the FEATURE log, a session runs long with no /clear nudge. So the judged ones
 are converted into checks here. Same move as deriving the CodeMap line numbers.
 
-It does NOT check taste. It cannot tell a good invariant from a bad one, and does not try. It
-catches the specific ways these files have actually gone wrong before.
+It does NOT check taste. It cannot tell a good invariant from a bad one, and does not try. Each
+check catches one specific way these files go wrong.
 """
 from __future__ import annotations
 
@@ -46,9 +46,9 @@ def read(p: pathlib.Path) -> str:
 # ---------------------------------------------------------------------------
 # 1. Completed.md is a FEATURE log
 # ---------------------------------------------------------------------------
-# The failure this catches: a 93-line write-up of a code audit and duplication sweep added as the
-# top entry. That is not a feature. The rule says "features and reworks", and "rework" stretches to
-# cover a cleanup if nothing stops it.
+# The failure this catches: a code audit or duplication sweep written up as an entry. That is not a
+# feature. The rule says "features and reworks", and "rework" stretches to cover a cleanup if
+# nothing stops it.
 REFACTOR_WORDS = re.compile(
     r"\b(refactor\w*|duplication sweep|dead code|code audit|cleanup pass|tidy-?up|"
     r"consolidat\w+|merged? (?:the )?(?:two|three|four|\w+) (?:files|helpers|copies))\b", re.I)
@@ -75,8 +75,8 @@ def check_completed() -> None:
 # ---------------------------------------------------------------------------
 # 2. No status column in a reference file
 # ---------------------------------------------------------------------------
-# PARITY.md is the TARGET, not a tracker. A status column is a hand-maintained derived fact and it
-# rotted: 14 features listed as outstanding, 8 of them already built.
+# PARITY.md is the TARGET, not a tracker. A status column is a hand-maintained derived fact, so it
+# goes stale: features stay listed as outstanding after they are built.
 STATUS_CODE = re.compile(r"\|\s*(DONE|DECODED|CAPTURE|BLOCKED|TODO|WIP|IN PROGRESS)\b", re.I)
 
 
@@ -118,7 +118,7 @@ def check_projectnotes() -> None:
                                     f"delete the note.")
     except StopIteration:
         fail("ProjectNotes.md", "no '## Now / Next' section")
-    # A session summary reforming under any heading. The rule that failed on its own, twice.
+    # A session summary reforming under any heading: a rule that does not hold unless checked.
     for bad in ("Last session", "Recently completed", "Session summary", "This session"):
         if re.search(r"^#+.*" + re.escape(bad), body, re.M | re.I):
             fail("ProjectNotes.md", f'"{bad}" heading. No session summaries: Completed.md is '
@@ -155,8 +155,8 @@ def check_style() -> None:
 # ---------------------------------------------------------------------------
 # 5. Nothing points at a file that no longer exists
 # ---------------------------------------------------------------------------
-# The failure this catches: deleting a spent plan and leaving 48 references to it, or replacing them
-# with a phrase that reads as nonsense ("See earlier measurement for why").
+# The failure this catches: a deleted file still named elsewhere, or its name replaced with a
+# phrase that reads as nonsense ("See earlier measurement for why").
 LINK = re.compile(r"`?(?:ProjectMemory/)?([A-Z][A-Z0-9_]{3,})\.md`?")
 
 
@@ -194,8 +194,8 @@ def check_dead_links() -> None:
 # ---------------------------------------------------------------------------
 # 6. No entry written twice
 # ---------------------------------------------------------------------------
-# The failure this catches: an invariant pasted into a second section, after which one copy is
-# corrected and the other is not, so the file states both sides of a settled question. An entry is a
+# The failure this catches: an invariant pasted into a second section, where one copy is corrected
+# and the other is not, so the file states both sides of a settled question. An entry is a
 # top-level bullet; its KEY is the bold lead-in, or the first 80 characters when there is none.
 ENTRY = re.compile(r"^- (.+)$", re.M)
 BOLD = re.compile(r"\*\*(.+?)\*\*")

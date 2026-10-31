@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _bootstrap  # noqa: F401  (puts Project/ on sys.path; unused here but keeps the convention)
+import _bootstrap  # puts Project/ on sys.path, and finds docs/ and the notes
 
 REPO = Path(__file__).resolve().parent.parent
 # The spec stays in THIS repo (it is written for anyone building their own controller); the reports
@@ -35,10 +35,9 @@ REPO = Path(__file__).resolve().parent.parent
 PROTOCOL = REPO / "docs" / "RODECASTER_PROTOCOL.txt"
 
 # DEVICE-SCOPED, because this report consumes the OCCURRENCE COUNTS and those genuinely differ
-# between the desks (Duo PAD x22 vs Pro II x24, PADBUTTON x48 vs x64 - the physical shape). The
-# property NAMES are identical on both (463, measured), so anything needing only
-# the name universe does NOT need to be device-aware; this does. Still no hardware required:
-# get_active_device() falls back to the Pro II when nothing is plugged in.
+# between the desks (Duo PAD x22 vs Pro II x24, PADBUTTON x48 vs x64 - the physical shape), and so
+# do the names each desk's firmware publishes. Still no hardware required: get_active_device()
+# falls back to the Pro II when nothing is plugged in.
 import devices  # noqa: E402  (after _bootstrap puts Project/ on sys.path)
 
 
@@ -63,10 +62,9 @@ DEV_GLOBS = ["DevTools/*.py"]
 # 1. The property list
 # ---------------------------------------------------------------------------
 # READS docs/PROPERTY_LIST_<DESK>.md, which DevTools/property_list.py generates from the live
-# desk. NO DEVICE NEEDED - it reads the generated file, not the desk. Do not point it back at a
-# hand-frozen appendix: one written by the old flat walk truncated EFFECTS_PARAMETERS to
-# PARAMETERS, invented a YPOT and missed five nested container blocks, so coverage came out
-# measured against a slightly wrong universe.
+# desk. NO DEVICE NEEDED - it reads the generated file, not the desk. Do not point it at a
+# hand-frozen appendix: a flat walk of the dump truncates EFFECTS_PARAMETERS to PARAMETERS, invents
+# a YPOT and misses five nested container blocks, so coverage is measured against a wrong universe.
 _LIST_ROW = re.compile(r"^- `([A-Za-z]\w*)` - ([\w/?]+), x(\d+)\s*$")
 
 
@@ -184,8 +182,7 @@ FALSE_POSITIVES = {
 
 # Some property names are held in a CONSTANT instead of being repeated as a literal, so scanning for
 # the literal alone finds only the constant's definition and under-reports the property as merely
-# "referenced" (it did exactly that for the two chain properties added). Count uses of the
-# constant as uses of the property.
+# "referenced". Count uses of the constant as uses of the property.
 NAME_ALIASES = {
     "channelAdvancedProcessing": ("CHAIN_ADVANCED_PROP",),
     "channelCurrentFxPreset": ("CHAIN_PRESET_MARKER_PROP",),

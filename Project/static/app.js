@@ -815,9 +815,8 @@ async function onWifiJoin(ev) {
    announce the result, and revert the checkbox to !on if the write failed or the
    service was unreachable, then re-enable. Every switch (MIDI, announcer, phantom,
    polarity, channel effects, processing on, modules) goes through this so the
-   announce text and the revert-on-failure behaviour are identical everywhere. */
-/* Returns true when the write was accepted, so a caller keeping its own copy of the state updates
-   it only then. */
+   announce text and the revert-on-failure behaviour are identical everywhere. Returns true when
+   the write was accepted, so a caller keeping its own copy of the state updates it only then. */
 async function sendToggle(url, body, input, on) {
   setBusy(input, true);   // NOT input.disabled: that would blur the switch you just flipped
   try {
@@ -4989,9 +4988,8 @@ function setStagedValue(sel, value, label) {
   markStaged(sel);
 }
 
-/* A labelled checkbox switch. `onChange(on, input)` runs on every change; `span` is the label text,
-   for callers that retarget it. */
-/* The one labelled checkbox switch. With `hint`, the row is a field-block holding the switch and a
+/* The one labelled checkbox switch. `onChange(on, input)` runs on every change; `span` is the label
+   text, for callers that retarget it. With `hint`, the row is a field-block holding the switch and a
    hint paragraph the switch is described by, so the hint is read each time the switch takes focus. */
 function makeSwitchRow(id, labelText, checked, onChange, hint) {
   const row = document.createElement("p");

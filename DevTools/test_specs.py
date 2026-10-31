@@ -16,7 +16,7 @@ This is the place for any other "two tables that must agree" check. Run:
 import pathlib
 import re
 
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import _bootstrap  # puts Project/ on the path; import FIRST
 import rcp_transfer
 import server
 
@@ -74,10 +74,9 @@ check("every exemption gives a real reason", not thin, f"reason too thin to be o
 print("\nlookups that could match inside a longer property name")
 
 # rcp_read.find_all searches the dump for a property name as RAW TEXT, so a name that is a PREFIX of
-# another real property matches both and takes whichever comes first in the stream. That is how
-# polarity once always read off ("inputPhase" inside "inputPhaseFlip"), and on it
-# was found lying in wait on the two auto-mutes: "outputMonAutoMute" also matches inside
-# "outputMonAutoMuteActive", the live ducking flag. It worked only because of stream order.
+# another real property matches both and takes whichever comes first in the stream: "inputPhase"
+# matches inside "inputPhaseFlip", and "outputMonAutoMute" inside "outputMonAutoMuteActive", the
+# live ducking flag. Such a lookup is right only by the accident of stream order.
 #
 # The names below are the ones the app looks up that way. Any name that is a prefix of another real
 # property must NOT be in this list: read it by block and exact name instead.
@@ -86,13 +85,12 @@ looked_up = sorted(set(re.findall(r'first\("([A-Za-z][A-Za-z0-9_]+)"\)',
                                   src.read_text(encoding="utf-8"))))
 
 # The full property list, from the GENERATED docs/PROPERTY_LIST_<DESK>.md, so this needs
-# no device. Do not point it at a frozen appendix in RODECASTER_PROTOCOL.txt: one written by the
-# old flat walk carries that reader's defects.
+# no device. Do not point it at a frozen appendix in RODECASTER_PROTOCOL.txt: a hand-frozen list
+# carries the defects of the reader that wrote it.
 #
-# DELIBERATELY NOT DEVICE-AWARE: this check wants the NAME universe, and the two
-# desks publish identical names (463 each, measured). Only the occurrence COUNTS differ, and nothing
-# here reads a count. So it takes whichever desk's list is present, which also means it still runs
-# on a machine that has only ever seen one of the two desks.
+# DELIBERATELY NOT DEVICE-AWARE: this check wants the NAME universe, so it takes the union of
+# every desk's list that is present, and nothing here reads an occurrence count. It still runs on a
+# machine that has only ever seen one of the two desks.
 _lists = sorted(pathlib.Path(_bootstrap.docs_path())
                 .glob("PROPERTY_LIST_*.md"))
 check("a generated property list exists", bool(_lists),

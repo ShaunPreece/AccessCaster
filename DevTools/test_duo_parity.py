@@ -177,8 +177,8 @@ for want, addr in (([0x26E], b"\x01\x01\x01\x02\x6e\x02"), ([0x6E], b"\x01\x01\x
     check(f"address {addr.hex(' ')} decodes to {want}", rcp_read.parse_push(frame)[0], want)
 
 print("\nFADER LEVEL ADDRESSES ARE DERIVED, AND THE PRO II'S THREE ARE UNCHANGED")
-# The retired Pro II table, asserted against the derivation that replaced it. These three values are
-# the only evidence that turning this on for the Duo cannot have moved a byte on Shaun's own desk.
+# The Pro II's confirmed selectors, asserted against the derivation. These three values pin that
+# deriving them for both desks moves no byte on a Pro II.
 check("Pro II virtual faders still address 0x0a/0x0b/0x0c",
       dict(devices.PRO2.fader.level_selectors), {6: 0x0A, 7: 0x0B, 8: 0x0C})
 # The Duo has FIVE virtual faders where the Pro II has three, so its set starts two lower. Read off
@@ -192,12 +192,12 @@ for _dev in (devices.PRO2, devices.DUO):
     check(f"{_dev.name}: no physical fader has an address",
           any(i < _dev.fader.physical for i in _sel), False)
 
-print("\nLEVEL WRITES ARE ALLOWED ON THE DUO NOW; THE REST STILL REFUSE")
+print("\nLEVEL WRITES AND CHAIN-FOLLOW ARE ON FOR BOTH DESKS")
 with as_device(devices.DUO):
-    check("level writes are no longer gated", server._level_write_gate(), None)
+    check("level writes are not gated", server._level_write_gate(), None)
     check("chain-follow is on", server._chain_follow_on(), True)
 with as_device(devices.PRO2):
-    check("Pro II keeps all three", server._level_write_gate(), None)
+    check("Pro II level writes are not gated", server._level_write_gate(), None)
     check("Pro II chain-follow on", server._chain_follow_on(), True)
 
 print("\nCAPS AND SHAPES THE DUO WORK ALREADY SETTLED (do not regress these)")
@@ -208,7 +208,7 @@ check("Duo default layout fills all 10 slots", len(devices.DUO.fader.default_vec
 # THE BOUND IN set_fader_source IS vector_length, NOT count, and this pins it because reading
 # `count` broke RESET FADERS and PROFILE RESTORE on a Duo while fader_write was already on: both
 # walk all ten slots, and slot 9 met a bound of 9. Asserted by the REFUSAL at index 10, which
-# raises before anything is sent, so this stays an offline test. Found live.
+# raises before anything is sent, so this stays an offline test.
 try:
     import rcp_transfer as _rt
     _prev = devices.force_device(devices.DUO)
@@ -221,9 +221,9 @@ try:
 finally:
     devices.force_device(_prev)
 check("Duo pads are 6 per bank", devices.DUO.pad.pads_per_bank, 6)
-# 390 is the MIX BLOCK, which is the grid, and it is the same on both desks and both firmwares. The
-# old 516 counted MIX plus RCSYNCMIX, which reuses all six cross-point names and follows it in the
-# stream, so an unscoped read returned the two concatenated - and 1.7.6 changed that total again.
+# 390 is the MIX BLOCK, which is the grid, and it is the same on both desks and both firmwares.
+# RCSYNCMIX reuses all six cross-point names and follows MIX in the stream, so an unscoped read
+# returns the two concatenated, a total that changes with the firmware.
 check("Duo matrix guard counts the MIX block alone",
       (devices.DUO.matrix.cell_count, devices.DUO.matrix.row_stride), (390, 13))
 for cap in ("input_mic_write", "processing", "channel_read", "matrix_read", "matrix_write",
@@ -249,7 +249,7 @@ check("Duo has exactly one stereo pair, Mic 1 + 2",
       devices.DUO.fader.stereo_pairs, ((4, 0, 1, "Mic 1 + 2"),))
 check("Pro II still has its three", len(devices.PRO2.fader.stereo_pairs), 3)
 
-print("\nTHE UNIT'S OWN SETTINGS: NOW WRITTEN ON BOTH DESKS (DUO-T10)")
+print("\nTHE UNIT'S OWN SETTINGS: WRITTEN ON BOTH DESKS")
 # The Duo's unit_settings cap rests on the desk's own TREE rather than on a capture: all 20
 # selectors in UNIT_SETTING_SEL resolve to a node of the right block carrying the property, and a
 # write/read-back/restore runs in each of the three blocks. DevTools/test_duo_caps_live.py re-proves

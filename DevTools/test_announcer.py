@@ -104,7 +104,7 @@ check("mute on, cold cache", said, ["Channel 2 muted"])
 said, _ = run([state_packet("channelOutputMute", 1, False)])
 check("unmute, cold cache", said, ["Channel 2 unmuted"])
 
-# Warm layout cache: Shaun's real layout, USB 1 on strip 1 and Mic 2 pushed to strip 6.
+# Warm layout cache: a real layout, USB 1 on strip 1 and Mic 2 pushed to strip 6.
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
 check("mute names the SOURCE on that strip", said, ["USB 1 (Main Stereo) muted"])
@@ -119,10 +119,10 @@ check("strip 0", said, ["Mic 1 muted"])
 said, _ = run([state_packet("channelOutputMute", 9, True)], cold_cache=False)
 check("last slot still names its source", said, ["USB 2 (Secondary) muted"])
 
-print("\nNAMES SURVIVE THE CACHE EXPIRING (the flaw the live check found)")
-# The TTL'd cache is what processing WRITES use; it goes cold after 15 s of no reads, which made
-# every announcement past that point say "Channel 4". Naming now falls back to the last known
-# layout, which has no expiry.
+print("\nNAMES SURVIVE THE CACHE EXPIRING")
+# The TTL'd cache is what processing WRITES use; it goes cold after 15 s of no reads. Naming falls
+# back to the last known layout, which has no expiry, so an announcement past that point still names
+# the channel rather than saying "Channel 4".
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 channels.invalidate_strip_vector()
 check("TTL'd cache is cold", channels.cached_strip_vector(), None)
@@ -359,7 +359,7 @@ check("second press re-arms the naming", SPOKEN, ["Select", "90 percent, USB 2 (
 print("\nPRESS AND HOLD IS THE DESK'S MUTE, NOT A RING STEP")
 # Measured on hardware: holding pushes channelOutputMute ~765 ms in, while still held,
 # and mutes the channel selected BEFORE the press. Announcing the next ring position on the press
-# edge therefore named the wrong channel AND left our ring one step out - both reported by Shaun.
+# edge would name the wrong channel AND leave our ring one step out.
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
 st = fresh_st()
 st["enc_pos"] = 0                                            # sitting on fader 7 (Mic 2)
@@ -412,7 +412,7 @@ check("and the settle adds nothing to repeat", SPOKEN, [])
 
 print("\nA TURN THAT MOVES NOTHING SAYS SO")
 # The encoder is only bound to a level while the desk is on a page that binds one; pressing the BANK
-# buttons moves the screen to the pads page and unbinds it (webcam-confirmed). The desk
+# buttons moves the screen to the pads page and unbinds it. The desk
 # still reports the rotation, so we can tell the operator the turn did nothing rather than leave them
 # wondering whether the app has broken.
 
@@ -629,8 +629,8 @@ check("unknown level means we still watch", st.get("enc_turn_at") is not None, T
 print("\nTHE ENCODER ON A SELECTED CHANNEL: GAIN FOR MICS, LEVEL FOR LINE STRIPS")
 # Pressing a channel button hands the encoder to that channel's gain. Mic strips move
 # inputMicrophoneGain; line strips (USB 1, Chat, USB 2, Bluetooth) move inputDigitalGain. Decoding
-# only the first meant a working turn on USB 1 was announced as "not linked" while Shaun's system
-# audio audibly changed.
+# only the first would announce a working turn on USB 1 as "not linked" while the computer's audio
+# audibly changed.
 
 
 def chan_gain_packet(prop: bytes, chan_sel: int, value: int, trailer: int = 0x02) -> bytes:
@@ -649,8 +649,7 @@ st = fresh_st()
 SPOKEN.clear()
 server._ann_handle_report(chansel_packet(1), st)
 # The phrase says up front what the encoder will do, worked out from the channel itself: gain for a
-# mic, level for a line strip, and "nothing to adjust" for SMART pads - which has no processing at
-# all per RODE's guide, and is the case that started the whole encoder hunt.
+# mic, level for a line strip, and "fader level only" for SMART pads, which has no input gain.
 check("a channel button names what took the encoder and what it does",
       SPOKEN, ["USB 1 (Main Stereo) selected. Encoder sets its input level in decibels"])
 SPOKEN.clear()
@@ -819,11 +818,10 @@ finally:
     rcp_read.find_all, rcp_read.read_model = _real_find_all, _real_read_model
 
 print("\nMUTING FROM SOFTWARE KEEPS THE ANNOUNCER'S MUTE CACHE HONEST")
-# The class of bug this closes is the one that has now bitten three times: THE DESK DOES NOT ECHO OUR
-# OWN WRITES. So a mute set from the web UI never appears on the pushed stream, and any announcer
-# cache holding mute state has to be told about it explicitly. Left untold, the encoder ring would
-# quote a healthy percentage for a channel that is now silent - the mirror image of the stale-level
-# bug fixed the same day.
+# THE DESK DOES NOT ECHO OUR OWN WRITES. So a mute set from the web UI never appears on the pushed
+# stream, and any announcer cache holding mute state has to be told about it explicitly. Left
+# untold, the encoder ring would quote a healthy percentage for a channel that is now silent, the
+# mirror image of quoting a stale level.
 
 RECORDS: list = []
 _real_send = rcp_transfer.send_record
@@ -1091,9 +1089,9 @@ check("and so is the one past it",
 # --- THE EXPANDED FLAG MUST BE SEEDED AT STARTUP, not left to whichever page is opened first ------
 # `usb_expanded()` is a published cache and answers False while unpublished. That is not a harmless
 # default: unpublished, the fader dropdown omits Game, Music, A and B and the write gate refuses
-# them, so on a desk that IS in Expanded the four cannot be assigned at all. The announcer seeds it,
-# which is why this went unnoticed - but announcements are a user setting, so with them off nothing
-# published until the Routing page was opened.
+# them, so on a desk that IS in Expanded the four cannot be assigned at all. The announcer seeds it
+# only while announcements are on, which is a user setting, so the startup seed is what publishes
+# it otherwise.
 print()
 print("The Expanded flag is seeded at startup")
 _saved = channels._usb_expanded["on"]

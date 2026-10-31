@@ -246,8 +246,8 @@ inline, because what the browser receives is unchanged.
   mic processing preset, the
   Unit settings choices, the pad Settings dropdowns and the MIDI trigger choices. A dropdown that
   only changes what you are looking at acts at once; the metered stream waits `SELECT_COMMIT_MS`.
-- Rebuild guards: `fillOptions` (3353), `rebuildIfChanged` (3381), `setLevelValue` (5609),
-  `markLevelsUnread` (5587), `applyUnitSettingValues` (1458).
+- Rebuild guards: `fillOptions` (3352), `rebuildIfChanged` (3380), `setLevelValue` (5607),
+  `markLevelsUnread` (5585), `applyUnitSettingValues` (1457).
 - Live region: `announce` (18). It REPLACES, it does not queue.
 - Confirm modal: **`confirmAction`** (every confirm in the app: pads, mix schemes, deleting a
   recording or a custom effect, and the access link). Its DOM ids are `pad-confirm-*`. A mic
@@ -261,25 +261,25 @@ inline, because what the browser receives is unchanged.
 - App shell: `summariseOverview` + `speakStartupSummary` (the spoken startup state, by exception; `networkLine` is the overview's network sentence),
   and `loadVersionBeforeRender`, which the first render awaits so the app heading carries the version
   before focus lands on it. Pinned by `DevTools/ui_checks_shell.js`.
-- Keyboard: `bindPageBoundary` (9175, the end-of-page hard stop).
-- Router: `render` (8930). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
+- Keyboard: `bindPageBoundary` (9173, the end-of-page hard stop).
+- Router: `render` (8928). Its `focusTo` argument decides where focus lands: `init` passes `"nav"`
   so an opening window starts on the current page's nav link, and a route change takes the default
   and focuses the section's h1.
 - Page loaders: `loadVersion` (497, `/api/version`, called from init so the Help & About version is
-  there without visiting Device), `loadStatus` (524), `loadOverview` (851), `loadChannels` (2364),
-  `renderChannelPanel` (2476), `loadPads` (3447), `loadMonmixOutput` (5376),
-  `loadFaderLevels` (5431), `buildMatrix` (5692), `onMatrixOutputChange` (5834, which also words each
+  there without visiting Device), `loadStatus` (524), `loadOverview` (850), `loadChannels` (2363),
+  `renderChannelPanel` (2475), `loadPads` (3446), `loadMonmixOutput` (5374),
+  `loadFaderLevels` (5429), `buildMatrix` (5690), `onMatrixOutputChange` (5832, which also words each
   source switch, including the source that matches the output).
-- Mix schemes: `wireSchemes` (5947), `loadSchemes` (5963, fills the dropdown; option values are
-  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (6048).
-- Recording: `fillRecordingList` (7792), `fillRecordingDeleteChoices` (7921),
-  `onDeleteRecording` (7951). Everything on that page speaks through `setStatus("rec-state", ...)`, the page's
+- Mix schemes: `wireSchemes` (5945), `loadSchemes` (5961, fills the dropdown; option values are
+  `builtin:<id>` or `saved:<name>` so the two name spaces cannot collide), `onSchemeApply` (6046).
+- Recording: `fillRecordingList` (7790), `fillRecordingDeleteChoices` (7919),
+  `onDeleteRecording` (7949). Everything on that page speaks through `setStatus("rec-state", ...)`, the page's
   ONE live region.
-- Builders: `makeSwitchRow`, `buildLevelSlider` (5623, the monitor-mix sliders too),
-  `buildScaleFields` (3937), `buildTriggerFields` (4101), `buildBackChannelList` (3902),
-  `renderCustomFxList` (4640), `fillSpeechChoices` (1701).
-- Specs: `REC_TRANSPORT` (7517). Never delete a `label:` key from one.
-- Progress dialogs: `pollJob` (6670), which the pad restore's `pollPadRestore` uses too. Page
+- Builders: `makeSwitchRow`, `buildLevelSlider` (5621, the monitor-mix sliders too),
+  `buildScaleFields` (3936), `buildTriggerFields` (4100), `buildBackChannelList` (3901),
+  `renderCustomFxList` (4639), `fillSpeechChoices` (1700).
+- Specs: `REC_TRANSPORT` (7515). Never delete a `label:` key from one.
+- Progress dialogs: `pollJob` (6668), which the pad restore's `pollPadRestore` uses too. Page
   polls: `makePoller`.
 - The factory reset (after `doRestore`): `loadShows` (can it be reset, can it back itself up),
   `openShowConfirm`, `onShowBackupFirstChange`, `doShowConfirmed`, `runShowJob`. Export, restore and
@@ -295,7 +295,7 @@ inline, because what the browser receives is unchanged.
   (`onHotkeyAddOpen` / `fillHotkeyAddCommands` / `onHotkeyAddConfirm`), Delete
   (`onHotkeyDeleteOpen` / `onHotkeyDeleteConfirm`), Restore (`onHotkeyRestoreOpen` /
   `onHotkeyRestoreConfirm`), all closed through `closeHotkeyDialog`.
-- `dropRetiredGroupState` (9360) drops the whole retired `accesscaster.groups` key.
+- `dropRetiredGroupState` (9358) drops the whole retired `accesscaster.groups` key.
 
 Page shortcuts (`bindShortcuts` in app.js is the source): Alt+1 Channels, Alt+2 Routing, Alt+3 Pads,
 Alt+4 Recording, Alt+5 CallMe, Alt+6 Backups (route `profiles`, section `sec-profiles`), Alt+7

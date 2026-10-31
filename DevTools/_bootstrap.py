@@ -24,7 +24,7 @@ if PROJECT not in sys.path:
 # data dir, set BEFORE the first Project import so `paths.DATA_DIR` and every constant derived from
 # it (profiles, schemes, parked chains, app settings) land there instead of %LOCALAPPDATA%. Without
 # it, a sweep of the offline suites rewrites the user's real `off_fader_chains.json` and leaves
-# profiles in his real profiles folder.
+# profiles in the user's real profiles folder.
 #
 # A TEST NEVER MAKES A NOISE EITHER. A suite that does not stub `_ann_say` leaves the real announcer
 # in place, so anything it exercises SPEAKS OR CHIMES through SAPI, onto the desk the user monitors
@@ -129,11 +129,10 @@ def test_wav(name: str = "accesscaster-test-tone.wav", seconds: float = 0.5) -> 
     sound if it is ever left on a desk.
 
     Written once into the temp dir and reused. Mono 22.05 kHz 16-bit, which is well inside what the
-    pad player accepts (see soundpad.action_add_sound: every rate and depth tried plays natively).
+    pad player accepts (see server.action_add_sound: every rate and depth tried plays natively).
     """
     import math
     import struct
-    import tempfile
     import wave
 
     path = os.path.join(tempfile.gettempdir(), name)

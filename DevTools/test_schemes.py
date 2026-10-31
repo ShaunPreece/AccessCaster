@@ -90,9 +90,9 @@ class capture_writes:
 
 
 # --- a synthetic model blob carrying a full matrix ------------------------------------------------
-# 516 cross-points (the guard value both desks report) at read index 13*source + output, plus the
-# MIXMINUSES nodes read_output_modes reads. mixLevelWithAnchor is the ASCII 'level|anchor'
-# string: equal halves = LINKED (follows the fader), different = a manual level.
+# The MIX block's cross-points (the count the matrix guard checks) at read index
+# 13*source + output, plus the MIXMINUSES nodes read_output_modes reads. mixLevelWithAnchor is the
+# ASCII 'level|anchor' string: equal halves = LINKED (follows the fader), different = a manual level.
 
 # The desk we pretend to read: Chat (output 8) on Custom carrying Mic 1 only, Headphone 1 (output 0)
 # on Custom with USB 1 (source 7) pulled down to 0.4 by hand, everything else normal.
@@ -172,7 +172,7 @@ check("with the same content the whole-desk capture gave it",
 check("an output this desk does not have is refused rather than saved empty", bad.get("ok"), False)
 with as_device(devices.PRO2):
     # The SCOPE SUFFIX is what the dropdown reads out, so it is pinned: a preset that rewrites
-    # everything and one that touches a single output must never sound alike (Michael's report).
+    # everything and one that touches a single output must never sound alike.
     check("a one-output preset says so", routing_schemes.scope_text(one["scheme"]), "Chat only")
     check("a whole-desk one says so", routing_schemes.scope_text(scheme), "every output")
 with as_device(devices.DUO):
@@ -268,7 +268,7 @@ check("and puts each one back to its default mode",
 check("the Chat presets touch the CHAT OUTPUT ONLY",
       (sorted(b["chat-mic-only"]["scheme"]["outputs"]),
        sorted(b["chat-normal"]["scheme"]["outputs"])), (["Chat"], ["Chat"]))
-check("'Chat back to normal' writes MIX MINUS, not the Main Mix the old button left behind",
+check("'Chat back to normal' writes MIX MINUS, the Chat output's own default, not the Main Mix",
       b["chat-normal"]["scheme"]["outputs"]["Chat"]["mode"], 1)
 check("and re-includes every source, following the faders",
       all(not c["excluded"] and c["linked"]
@@ -285,7 +285,7 @@ check("and its 'everything normal' names only the Duo's outputs",
 check("'Chat = my mic only' excludes the Duo's Headset, which the Pro II has no source for",
       duo_b["chat-mic-only"]["scheme"]["outputs"]["Chat"]["sources"]["Headset"]["excluded"], True)
 
-print("\nBUILT-IN 'everything normal' == the old reset sweep, write for write")
+print("\nBUILT-IN 'everything normal' resets every output, write for write")
 with as_device(devices.PRO2), capture_writes() as w:
     routing_schemes.apply(b["normal"]["scheme"])
 check("every output gets its default mode",
