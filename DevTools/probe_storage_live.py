@@ -10,6 +10,7 @@ the chosen volume.
     python DevTools/probe_storage_live.py erase <0 card | 1 drive> [seconds]
 """
 from __future__ import annotations
+
 import json
 import sys
 import time
@@ -17,7 +18,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import model_tree
 import rcp_hid
 import rcp_read

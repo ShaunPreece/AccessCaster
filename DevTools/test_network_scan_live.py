@@ -20,6 +20,7 @@ Occurrence counts are diffed at the end so a stray would be caught rather than a
     python DevTools/test_network_scan.py --wifi --bt --wait 20
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -28,7 +29,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 import rcp_transfer
 

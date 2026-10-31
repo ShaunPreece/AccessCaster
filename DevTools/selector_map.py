@@ -28,6 +28,7 @@ STILL REQUIRED, per property, before trusting a write:
 Pick something harmless for the first write on any newly-derived block.
 """
 from __future__ import annotations
+
 import sys
 from collections import Counter
 

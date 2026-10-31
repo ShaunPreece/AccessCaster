@@ -29,7 +29,6 @@ import shutil
 import tempfile
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import rcp_transfer
 import soundpad
 

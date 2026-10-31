@@ -13,6 +13,7 @@ of restoring somebody's keyboard shortcuts.
 Run: python DevTools/test_app_settings.py
 """
 from __future__ import annotations
+
 import json
 import pathlib
 import re

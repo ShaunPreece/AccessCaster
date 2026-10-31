@@ -25,10 +25,8 @@ import time
 import urllib.request
 
 import _bootstrap  # noqa: F401
-
 import comtypes
 import comtypes.client
-
 import meters
 import virtual_devices as vd
 from bind_timeline import interfaces

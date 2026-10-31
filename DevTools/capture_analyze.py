@@ -42,7 +42,6 @@ import sys
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-
 RODE_VENDOR_ID = 0x19F7
 
 # pcap/pcapng link-layer type for USBPcap captures.
@@ -519,7 +518,8 @@ def cmd_selftest() -> None:
         (False, 0x03, b"\x03" + bytes(range(64))),     # host->device bulk
     ]
     blob = _build_pcapng(synthetic)
-    import tempfile, os
+    import os
+    import tempfile
     fd, p = tempfile.mkstemp(suffix=".pcapng")
     os.close(fd)
     with open(p, "wb") as f:

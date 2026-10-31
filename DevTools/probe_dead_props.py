@@ -16,15 +16,15 @@ Run it from anywhere, with either desk attached:
     python DevTools/probe_dead_props.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
+import devices
 import model_tree as mt
 import rcp_read
-import devices
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import property_list

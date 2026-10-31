@@ -16,12 +16,12 @@ again, so it is driven from synthetic dumps instead.
 Run: python DevTools/test_latched_pads.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import server
 import soundpad
 
@@ -124,8 +124,9 @@ def main() -> int:
         server._hk_pads_on.clear()
         said = server._hk_pad_toggle(14, 23, "Small Robot")
         check("it says the pad has nothing behind it",
-              "no effect behind it" in said, True)
-        check("it names the way out", "Restore the factory voice effects" in said, True)
+              "no effect behind it" in said["message"], True)
+        check("it names the way out", "Restore the factory voice effects" in said["message"], True)
+        check("and reports it as a failure, so a silent shortcut still speaks it", said["ok"], False)
         check("and it does NOT record the pad as engaged", 14 in server._hk_pads_on, False)
 
         # Turning OFF is never blocked: a pad that is somehow already latched must always be
@@ -150,7 +151,7 @@ def main() -> int:
         finally:
             soundpad.unlatch_pad, server._hk_pad_verify = real_unlatch, real_verify
         check("releasing one is not blocked by the same guard",
-              "no effect behind it" in off, False)
+              "no effect behind it" in off["message"], False)
         check("and the release really was sent", released, [23])
     finally:
         server._hk_fx_missing = saved_missing

@@ -1,3 +1,4 @@
+// probe: route=routing timeout=90 stub=_probe_stub_readonly.json
 /* EVERY CONTROL A READ-ONLY DESK CANNOT DRIVE MUST STAY WHERE IT IS AND SAY WHY.
 
    The raw `disabled` attribute takes a control OUT OF THE TAB ORDER and out of the accessibility
@@ -13,21 +14,11 @@
 
    Run:
      python DevTools/make_readonly_stub.py
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_readonly.js \
-         --stub DevTools/_probe_stub_readonly.json --route routing
+     python DevTools/run_ui_probes.py readonly
 */
 
 const el = (id) => document.getElementById(id);
 const alertText = () => (el("alert-region") || {}).textContent || "";
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 10000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function goTo(route, sectionId) {
   location.hash = "#/" + route;
@@ -69,12 +60,6 @@ function blockedAll(label, nodes) {
     bad.length === 0, bad.map((n) => n.id || n.tagName).join(","));
 }
 
-/* Every write the page attempted. `/api/ping` is the page's own keepalive heartbeat, posted on a
-   timer whatever the user does, so it is not a write and must not count as one. */
-async function writesSince() {
-  return (await probeLog()).filter((e) => e.method === "POST" && e.path.indexOf("/api/ping") < 0);
-}
-
 /* Press it and prove NOTHING went to the device and the reason was spoken. The probe never forwards
    a POST, so the log is the honest record of what the page tried to write. */
 /* `statusId` names the button's own role="status" line when it reports there (setStatus) rather
@@ -86,7 +71,7 @@ async function pressAndProveSilent(label, node, statusId) {
   if (statusId && el(statusId)) el(statusId).textContent = "";
   node.click();
   await sleep(900);
-  const posts = await writesSince();
+  const posts = pagePosts(await probeLog());
   check(label + ": pressing it writes nothing to the device", posts.length === 0,
     posts.map((p) => p.path).join(","));
   const said = statusId && el(statusId) && el(statusId).getAttribute("role") === "status"
@@ -106,7 +91,7 @@ async function moveAndProveReverts(label, node) {
   await sleep(1200);
   check(label + ": moving it puts it straight back", node.value === was,
     "was " + was + ", asked for " + target + ", ended at " + node.value);
-  const posts = await writesSince();
+  const posts = pagePosts(await probeLog());
   check(label + ": and nothing was written", posts.length === 0,
     posts.map((p) => p.path).join(","));
   check(label + ": and it says why out loud", alertText().length > 10, alertText());
@@ -147,7 +132,7 @@ async function run() {
   const wasOn = comp.checked;
   comp.click();
   await sleep(900);
-  check("flipping the Compellor switch writes nothing", (await writesSince()).length === 0);
+  check("flipping the Compellor switch writes nothing", (pagePosts(await probeLog())).length === 0);
   check("and the switch goes back to what the unit has", comp.checked === wasOn,
     "was " + wasOn + ", now " + comp.checked);
   check("and it says why out loud", alertText().length > 10, alertText());
@@ -195,7 +180,7 @@ async function run() {
       sel.dispatchEvent(new Event("change", { bubbles: true }));
       sel.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await sleep(900);
-      check("changing a unit setting writes nothing", (await writesSince()).length === 0);
+      check("changing a unit setting writes nothing", (pagePosts(await probeLog())).length === 0);
       check("and the dropdown goes back to what the unit has", sel.value === wasVal,
         "was " + wasVal + ", now " + sel.value);
       check("and it says why out loud", alertText().length > 10, alertText());
@@ -223,7 +208,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

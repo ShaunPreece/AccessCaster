@@ -22,9 +22,10 @@ def _font(px: int):
     for name in ("arialbd.ttf", "arial.ttf", "seguisb.ttf", "segoeui.ttf"):
         try:
             return ImageFont.truetype(name, px)
-        except Exception:
+        except OSError:
             continue
-    return ImageFont.load_default()
+    print("WARNING: none of Arial or Segoe UI was found, so the icon uses Pillow's default font.")
+    return ImageFont.load_default(px)
 
 
 def main() -> None:

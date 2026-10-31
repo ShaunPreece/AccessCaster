@@ -16,6 +16,7 @@ tests), records the channel's gain and type first, and puts both back at the end
 Usage: python DevTools/test_mic_type_gain_live.py [--channel 3]
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -23,7 +24,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import channels
 import rcp_read
 from model_tree import parse, walk

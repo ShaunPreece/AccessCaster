@@ -23,11 +23,10 @@ WHAT THE ANSWER MEANS:
 
 Run: python DevTools/test_factory_sfx_live.py
 """
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import os
 import time
 
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import rcp_read
 import rcp_transfer as t
 import soundpad

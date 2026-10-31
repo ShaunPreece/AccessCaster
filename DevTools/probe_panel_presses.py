@@ -21,6 +21,7 @@ NOTHING IS WRITTEN TO THE DESK. This only listens and dumps.
     python DevTools/probe_panel_presses.py --seconds 240
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import threading
@@ -30,7 +31,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_hid
 import rcp_read
 

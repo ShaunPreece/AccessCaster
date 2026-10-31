@@ -41,6 +41,7 @@ listener's SCREEN READER shares this output, so it goes quiet along with everyth
 end of the sweep; that is expected and is why the sweep is short.
 """
 from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -50,7 +51,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 
 BASE = "http://127.0.0.1:8770"

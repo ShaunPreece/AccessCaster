@@ -19,12 +19,12 @@ Measured.
 Usage: python DevTools/test_meters_ceiling.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import meters
 
 fails = []
@@ -134,6 +134,35 @@ metering_only = src.split("def endpoint_volume")[0]
 check("NOTHING in the metering path itself writes a level",
       "SetMasterVolumeLevel(" in metering_only.replace(
           'COMMETHOD([], HRESULT, "SetMasterVolumeLevel"', ""), False)
+
+print("\nA METER THAT FAILS IS NOT A QUIET ONE")
+
+
+class _GoneMeter:
+    """An endpoint that opens and then stops answering, as an unplugged desk does."""
+    name, wake_failed, ceiling, volume_db, muted = "Desk", False, 1.0, 0.0, False
+
+    def __init__(self, endpoint_id):
+        pass
+
+    def peak(self):
+        raise OSError("the device is gone")
+
+    def close(self):
+        pass
+
+
+said = []
+real_meter = meters.Meter
+meters.Meter = _GoneMeter
+try:
+    w = meters.Watcher("endpoint", said.append, silence_after=0.0)
+    w.start()
+    w._thread.join(timeout=2.0)
+    check("the failure is reported as an error", "stopped part-way" in w.error, True)
+    check("and nothing calls it silent", [s for s in said if "silent" in s], [])
+finally:
+    meters.Meter = real_meter
 
 print("\n" + ("ALL CHECKS PASSED" if not fails else f"{len(fails)} FAILURE(S): {fails}"))
 raise SystemExit(1 if fails else 0)

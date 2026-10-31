@@ -1,5 +1,6 @@
+// probe: route=channels timeout=240
 /* The SOLO (Listen) control on the Channels page, which rides the writable channelCueEnable. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_solo.js --route channels --timeout 240
+     python DevTools/run_ui_probes.py solo
 
    What is worth asserting here, as opposed to on the tab strip (ui_checks_chantabs.js covers that):
    this control is the one on the page that can leave the desk sounding broken with nothing visible
@@ -14,24 +15,6 @@
 
 const el = (id) => document.getElementById(id);
 const strip = () => document.querySelector("#channel-panel [role='tablist']");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST");
-
-function nameOf(input) {
-  // The accessible name as a screen reader would build it: the wrapping <label>, or aria-label.
-  if (input.getAttribute("aria-label")) return input.getAttribute("aria-label");
-  const lab = input.closest("label") || document.querySelector(`label[for='${input.id}']`);
-  return lab ? lab.textContent.trim() : "";
-}
 
 async function run() {
   await waitFor(() => !el("sec-channels").hidden && strip(), 20000);
@@ -59,7 +42,7 @@ async function run() {
   check("it is a checkbox, not a custom widget",
     solo && solo.type === "checkbox", solo && solo.type);
 
-  const name = nameOf(solo);
+  const name = accessibleName(solo);
   check("its name carries BOTH words a user might search for",
     /listen/i.test(name) && /solo/i.test(name), name);
   check("its name names the channel too", name.indexOf(micLabel) >= 0,
@@ -98,8 +81,8 @@ async function run() {
   // ---- the write. Everything above is structure; this is the one behaviour worth pressing. ----
   await probeClear();
   solo.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-  let log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+  let log = pagePosts(await probeLog());
   check("flipping it posts to /api/channels/solo",
     log.length === 1 && log[0].path === "/api/channels/solo",
     JSON.stringify(log.map((r) => r.path)));
@@ -107,8 +90,8 @@ async function run() {
 
   await probeClear();
   clear.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-  log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+  log = pagePosts(await probeLog());
   check("Clear every solo posts to /api/channels/solo/clear",
     log.length === 1 && log[0].path === "/api/channels/solo/clear",
     JSON.stringify(log.map((r) => r.path)));
@@ -122,7 +105,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

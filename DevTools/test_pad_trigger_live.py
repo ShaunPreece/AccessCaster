@@ -23,7 +23,6 @@ import argparse
 import json
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import soundpad
 
 CUSTOM = {"type": 1, "control": 60, "channel": 2, "on": 100, "off": 0}

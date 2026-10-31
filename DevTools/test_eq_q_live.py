@@ -21,6 +21,7 @@ in daily use) unwritten by tests.
 Usage: python DevTools/test_eq_q_live.py [--channel 3]
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -28,7 +29,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import channels
 import rcp_read
 

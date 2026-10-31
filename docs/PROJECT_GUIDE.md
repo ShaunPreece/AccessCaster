@@ -477,7 +477,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   verify too. A suite that passes and then crashes is worse than one that fails.
   **WINDOWS' AUDIO IS GUARDED THE SAME WAY** (5th October 2026). Moving the default output,
   enabling or disabling an endpoint, and setting an endpoint's level or mute all raise in an
-  offline test through `meters.refuse_audio_change_in_tests`: every endpoint change goes through
+  offline test through `write_guard.refuse_in_tests`: every endpoint change goes through
   `virtual_devices._policy`, and the level and mute setters call it first. A new Windows audio
   write must do the same. Without it, `test_announcer_reconnect`'s reconnects ran the real
   `_virtual_devices_follow` and moved Shaun's screen reader between the laptop and the desk.
@@ -904,7 +904,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE VIRTUAL DEVICES DRIVER IS SIGNED "FREEDMAN ELECTRONICS PTY LTD", NOT "RODE".** Freedman is
   RODE's parent company, so a publisher check looking for the string "RODE" REJECTS THE GENUINE
   INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026. `driver_install.SIGNER` is
-  that string, and it is the whole of what makes the download safe to run.
+  that string, compared WHOLE against the certificate's O= field (`subject_organisation`), never
+  searched for in the subject, and it is the whole of what makes the download safe to run.
 - **THE DRIVER DOWNLOAD IS THE APP'S ONLY OUTBOUND INTERNET CALL, AND KEEPING IT SO IS A FEATURE.**
   Everything else talks to localhost and the USB cable. It runs only from the button press: never
   at startup, never on a timer, never a version check. `test_driver_install.py` asserts the claim
@@ -1131,7 +1132,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   because a pair code in `assignable` would let the UI offer "Mic 1 + 2" as a drop target and let
   `_tidy_fader_target` gap-fill with it. Pinned by `test_announcer.py`.
 - **`channelWirelessMute` IS IN THE CHANNEL BLOCK, PER STRIP, NOT IN THE INPUT TABLE.** It sits on
-  exactly the nodes `channelOutputMute` and `channelCueEnable` sit on (`proc_sel_base + strip`, ten
+  exactly the nodes `channelOutputMute` and `channelCueEnable` sit on (`rcp_transfer.SEL_CHANNEL + strip`, ten
   of them, read off a live tree 2nd September 2026), so it is written with
   `channels.set_channel_wireless_mute` like any other toggle there. `CHANNEL_PROP` listed it among
   the properties addressed at the INPUT selector until then, which is a different block indexed by
@@ -1329,6 +1330,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   readiness test has to do the SAME KIND of I/O as the use it gates, or it is not a test. Do not
   "optimise" `pad_volume_readable` out of the wait loop: a not-ready volume returning False is what
   keeps the remount loop going, and this guards backup, restore AND create.
+- **The pad volume is the one that APPEARS AFTER transfer mode is entered.** `_set_transfer_mode_raw`
+  notes every readable pad volume already mounted, and `find_pad_volume` refuses those, so a USB
+  stick holding a copy of the pad folder is never taken for the desk (an upload would go to it and
+  the tidy would delete its files). The one exception is a volume with the serial the desk's had
+  last time. Inside a `transfer_session` every find returns the session's first root.
 - **Wrap pad-volume I/O in `rcp_transfer.quiet_drive_errors`.** A half-mounted removable volume makes
   Windows raise a MODAL "There is a problem with this drive" box on our behalf, for a condition we
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
@@ -1604,9 +1610,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **EVERY USER-DATA JSON FILE IS WRITTEN WITH `paths.write_json`, NEVER `open(..., "w")`.** It
   writes a temporary file beside the target and swaps it in, so a kill or power cut mid-write leaves
   the old file whole; written in place, a half file parses as nothing and the next
-  `update_settings` writes a file holding only its own key. `update_settings` keeps a file that
-  will not parse as `settings.json.bad`, and drops the change when the file cannot be opened at all,
-  because writing then would replace every other key with nothing.
+  `update_settings` writes a file holding only its own key. **Every one is read with
+  `paths.read_json`**, which keeps a file that will not parse as `<name>.bad` and raises when the
+  file cannot be opened, so no caller saves over a file it could not read: `update_settings` drops
+  the change then, because writing would replace every other key with nothing.
 
 ## Web UI and screen reader
 
@@ -1921,7 +1928,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **ELEVEN HANDLERS STILL DO THE TWO-VOICE VERSION** across the pad editor, the Levels tab, Reset all
   outputs, Mix presets and stereo link. Do not add a twelfth.
 - **THE RECORDING PAGE HAS EXACTLY ONE LIVE REGION (`rec-state`), and its own suite asserts it.**
-  Every outcome on that page, deleting included, goes through `setRecState` - not `announce()` and
+  Every outcome on that page, deleting included, goes through `setStatus("rec-state", ...)` - not `announce()` and
   not a second status line. A new control there must not bring its own.
 - **A panel with no focusable content needs `tabindex="0"`.** `setPanelTabStop()` does this in both
   tab helpers; do not undo it. Without it Tab sails past the whole page.
@@ -2243,15 +2250,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   exists, since a solo hijacks the monitor path and would silence anything still going to the desk.
   Shaun set it back to the system default afterwards, so the default remains "announcements go to
   the desk". Do not treat the picker as untested, and do not remove it as unused.
-- **`say_worker.ps1` HAS NO `-Text`. IT READS STDIN.** It is the announcer's PERSISTENT worker: one
-  phrase per line on stdin, and it exists so the server does not pay 1.3-1.7 s of PowerShell startup
-  per announcement. Called as `say_worker.ps1 -Text "..."` it starts, selects the device, prints
-  "WORKER ready", hits end-of-stdin and exits HAVING SPOKEN NOTHING, with no error. Two DevTools
-  scripts did exactly that and their `--speak` had never once spoken; one of them was a WITNESS, so
-  its "the audio reached the desk" readings were whatever else was playing. **For a one-shot use
-  `say.ps1`**: it takes `-Text` and `-Device`, speaks SYNCHRONOUSLY so the process cannot exit
-  mid-phrase, and takes `-Force` to defeat the Claudio focus gate. **CHECK ITS OUTPUT FOR "SAY
-  spoken"** rather than assuming, especially in anything that uses sound as evidence.
+- **`say.ps1` IS A ONE-SHOT ONLY WITH `-Text`.** Without it, it is the announcer's PERSISTENT
+  worker: it reads one phrase per line on stdin, so the server does not pay 1.3-1.7 s of PowerShell
+  startup per announcement, and a script that runs it with no `-Text` and no stdin exits HAVING
+  SPOKEN NOTHING, with no error. The one-shot speaks SYNCHRONOUSLY, so the process cannot exit
+  mid-phrase. **CHECK ITS OUTPUT FOR "SAY spoken"** rather than assuming, especially in anything
+  that uses sound as evidence. The app's speech has no focus gate: that is
+  `DevTools/say_gated.ps1`, for development sessions only.
 - **`outputMonLevel` AND `outputMonFixed` BOTH WORK, ear-proven 29th August 2026.** Fixed OFF, the
   monitor output follows the level; Fixed ON, six alternations between 10% and 100% produced no
   audible change whatever. The UI copy for Fixed is accurate, so do not soften it to "stored".
@@ -2855,8 +2860,8 @@ shared one; a new copy is how they drifted apart the first time.
   Windows' "restart apps after sign-in" relaunches them: hundreds had piled up by 17th October 2026.
   Do not go back to `subprocess.Popen` plus `terminate()`. Profiles a killed run leaves are swept
   after a day.
-- **`ui_probe.py`'s default 90 s timeout is not enough.** Pads and Device need `--timeout 600`
-  (about nine minutes); `run_ui_probes.py` passes each suite its own. A timeout reports as "never reported back", which reads like a fault.
+- **`ui_probe.py`'s default 90 s timeout is not enough.** Pads and Device need 600 s (about nine
+  minutes); each suite's `// probe:` first line gives its own, and `run_ui_probes.py` reads it. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
   a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026
   (`DevTools/transfer_volumes.py`), so do not reach for transfer mode to get at recordings.

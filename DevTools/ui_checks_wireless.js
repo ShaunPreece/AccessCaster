@@ -1,3 +1,4 @@
+// probe: route=channels timeout=90
 /* THE WIRELESS MIC'S OWN MUTE on the Channels page (channelWirelessMute). Two controls a keystroke
    apart are both called mute and do different things - one silences the strip inside the desk, the
    other tells a paired RODE transmitter to stop sending - so the thing worth checking by machine is
@@ -12,19 +13,10 @@
    reaching the desk - which matters here more than usual, because the write is untested with a
    real transmitter.
 
-   Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_wireless.js --route channels */
+   Run: python DevTools/run_ui_probes.py wireless */
 
 const el = (id) => document.getElementById(id);
 const wireless = (name) => el("wireless-mute-" + name);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 10000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function pick(name) {
   const sel = el("channel-select");
@@ -32,17 +24,6 @@ async function pick(name) {
   sel.dispatchEvent(new Event("change", { bubbles: true }));
   await sleep(800);
   return sel.value;
-}
-
-/* The text a screen reader reads for a control: its label plus whatever aria-describedby points at.
-   Checking the two separately is what would let "Mute Mic 1" and "Mute Mic 1" both pass. */
-function spoken(input) {
-  if (!input) return "";
-  const lab = document.querySelector("label[for='" + input.id + "']")
-    || (input.closest("label") || null);
-  const desc = input.getAttribute("aria-describedby");
-  const d = desc && el(desc);
-  return ((lab ? lab.textContent : "") + " " + (d ? d.textContent : "")).trim();
 }
 
 async function run() {
@@ -62,8 +43,8 @@ async function run() {
   // ---- And it cannot be mistaken for the channel mute -------------------------------------
   const chanMute = el("mute-Mic1");
   check("the channel mute is still there beside it", !!chanMute);
-  const wSaid = spoken(w);
-  const mSaid = spoken(chanMute);
+  const wSaid = accessibleName(w) + " " + describedText(w);
+  const mSaid = accessibleName(chanMute) + " " + describedText(chanMute);
   check("the two mutes do not read out the same", wSaid !== mSaid, wSaid + " || " + mSaid);
   check("the wireless one names the wireless mic", /wireless/i.test(wSaid), wSaid);
   check("and its description says it is not the channel mute",
@@ -75,8 +56,7 @@ async function run() {
   await probeClear();
   w.click();
   await sleep(900);
-  const posts = (await probeLog()).filter((e) => e.method === "POST"
-                                                 && e.path.indexOf("/api/ping") < 0);
+  const posts = pagePosts(await probeLog());
   const paths = posts.map((p) => p.path);
   check("pressing it posts to the wireless-mute endpoint",
     paths.indexOf("/api/channels/wireless-mute") >= 0, paths.join(","));
@@ -104,7 +84,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

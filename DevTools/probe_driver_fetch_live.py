@@ -14,6 +14,7 @@ unasked, and `_bootstrap` would give a `test_` a throwaway data dir.
     python DevTools/probe_driver_fetch_live.py
 """
 from __future__ import annotations
+
 import os
 import sys
 import tempfile
@@ -22,7 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import driver_install as di
 
 FAILED = 0

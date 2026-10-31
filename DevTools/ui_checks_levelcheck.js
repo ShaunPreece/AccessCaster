@@ -1,6 +1,7 @@
+// probe: route=channels timeout=240
 /* THE PER-CHANNEL LEVEL CHECK on the Channels page, not on Device > Levels.
    Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_levelcheck.js --route channels --timeout 240
+     python DevTools/run_ui_probes.py levelcheck
 
    WHY IT IS PER CHANNEL, since that is what these checks are really about: every Windows stream a
    RODECaster offers is a MIX - "Microphone (RODECaster Pro II Main Stereo)" is four mics, two USB
@@ -23,24 +24,6 @@
 
 const el = (id) => document.getElementById(id);
 const strip = () => document.querySelector("#channel-panel [role='tablist']");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
-
-function nameOf(node) {
-  if (!node) return "";
-  if (node.getAttribute("aria-label")) return node.getAttribute("aria-label");
-  const lab = node.closest("label") || document.querySelector(`label[for='${node.id}']`);
-  return lab ? lab.textContent.trim() : node.textContent.trim();
-}
 
 async function pick(name, waitForId) {
   const sel = el("channel-select");
@@ -72,7 +55,7 @@ async function run() {
     btn && btn.tagName === "BUTTON" && btn.type === "button", btn && btn.tagName);
   check("it is reachable by keyboard", btn && btn.tabIndex >= 0);
   check("it names what pressing it will do, and says whose level",
-    /check this channel's level/i.test(nameOf(btn)), nameOf(btn));
+    /check this channel's level/i.test(accessibleName(btn)), accessibleName(btn));
 
   // THE HINT: on the page, not on the control.
   check("its hint is NOT attached with aria-describedby",
@@ -108,8 +91,8 @@ async function run() {
   await pick(micName, "levelcheck-" + micName);
   await probeClear();
   el("levelcheck-" + micName).click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-  const log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+  const log = pagePosts(await probeLog());
   check("pressing it posts to /api/channels/level-check and nothing else",
     log.length === 1 && log[0].path === "/api/channels/level-check",
     JSON.stringify(log.map((r) => r.path)));
@@ -126,7 +109,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

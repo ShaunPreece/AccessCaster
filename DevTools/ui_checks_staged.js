@@ -1,5 +1,6 @@
+// probe: route=routing timeout=90
 /* THE DROPDOWNS THAT CHANGE THE DESK: arrowing browses, Enter applies, leaving puts it back.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_staged.js --route routing
+   Run with: python DevTools/run_ui_probes.py staged
    and again with --route channels.
 
    THE RULE THIS GUARDS (app.js enterToApply): a CLOSED select fires `change` on every arrow press,
@@ -13,21 +14,6 @@
 const el = (id) => document.getElementById(id);
 const paths = (log) => log.map((e) => e.method + " " + e.path);
 const ENTER_HINT = "enter-to-apply-hint";
-
-async function apiLog() {
-  return (await probeLog()).filter((e) => e.path.indexOf("/api/") === 0
-                                          && e.path.indexOf("/api/ping") < 0);
-}
-const posts = async () => (await apiLog()).filter((e) => e.method === "POST");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 20000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(100);
-  }
-  return false;
-}
 
 const keydown = (sel, key) => {
   const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -66,14 +52,14 @@ async function checkOne(sel, writePath) {
   await probeClear();
   arrowTo(sel, other.value);
   await sleep(1200);                       // longer than any pause a timer would have taken
-  check(sel.id + ": arrowing it writes NOTHING", (await posts()).length === 0,
-        paths(await posts()).join(" "));
+  check(sel.id + ": arrowing it writes NOTHING", pagePosts(await probeLog()).length === 0,
+        paths(pagePosts(await probeLog())).join(" "));
   if (hint) check(sel.id + ": the page says what the unit still has",
                   /still has/i.test(hint.textContent), hint.textContent);
 
   sel.dispatchEvent(new FocusEvent("blur"));
   check(sel.id + ": leaving without Enter puts it back", sel.value === start, sel.value);
-  check(sel.id + ": and writes nothing", (await posts()).length === 0);
+  check(sel.id + ": and writes nothing", pagePosts(await probeLog()).length === 0);
 
   arrowTo(sel, other.value);
   keydown(sel, "Escape");
@@ -87,7 +73,7 @@ async function checkOne(sel, writePath) {
   sel.dispatchEvent(new Event("change", { bubbles: true }));
   await sleep(800);
   check(sel.id + ": closing an expanded list with Escape writes NOTHING",
-        (await posts()).length === 0, paths(await posts()).join(" "));
+        pagePosts(await probeLog()).length === 0, paths(pagePosts(await probeLog())).join(" "));
   keydown(sel, "Escape");
   check(sel.id + ": and a second Escape puts it back", sel.value === start, sel.value);
 
@@ -95,7 +81,7 @@ async function checkOne(sel, writePath) {
   arrowTo(sel, other.value);
   const enter = keydown(sel, "Enter");
   await sleep(800);
-  const sent = await posts();
+  const sent = pagePosts(await probeLog());
   check(sel.id + ": Enter writes, and writes ONCE",
     sent.length === 1 && (!writePath || sent[0].path.indexOf(writePath) === 0),
     paths(sent).join(" "));
@@ -158,7 +144,4 @@ async function runRouting() {
   }
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

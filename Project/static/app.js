@@ -12,6 +12,8 @@
    transfer mode (~0.5 s), so it is worth waiting a little longer to be sure the drag has finished. */
 const WRITE_DEBOUNCE_MS = 150;
 const PAD_WRITE_DEBOUNCE_MS = 400;
+// What every page says when a request gets no answer from the server at all.
+const SERVICE_UNREACHABLE = "Could not reach the AccessCaster service.";
 
 function announce(message, assertive) {
   const region = document.getElementById(assertive ? "alert-region" : "live-region");
@@ -479,7 +481,7 @@ function wireAccess() {
       }
       setStatus("dev-access-status", res.message || "Done.");
     } catch {
-      announce("Could not reach the device service.", true);
+      announce(SERVICE_UNREACHABLE, true);
     } finally {
       setBusy(make, false);
     }
@@ -526,10 +528,10 @@ async function loadStatus(announceResult) {
     const resp = await fetch("/api/status");
     data = await resp.json();
   } catch {
-    setText("status-line", "Could not reach the AccessCaster service.");
+    setText("status-line", SERVICE_UNREACHABLE);
     setText("status-connection", "Service unreachable");
     setText("app-device", "AccessCaster service unreachable");
-    if (announceResult) announce("Could not reach the AccessCaster service.", true);
+    if (announceResult) announce(SERVICE_UNREACHABLE, true);
     return;
   }
 
@@ -642,8 +644,8 @@ async function loadNetwork() {
     paintWirelessMics(data.wireless_mics);
     setText("net-status", "");
   } catch {
-    setText("net-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("net-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
   } finally {
     setBusy(btn, false);
   }
@@ -706,7 +708,7 @@ async function netPost(url, body, el, working) {
     res = await postJSON(url, body);
   } catch {
     setBusy(el, false);
-    setStatus("net-write-status", "Could not reach the AccessCaster service.");
+    setStatus("net-write-status", SERVICE_UNREACHABLE);
     return null;
   }
   setBusy(el, false);
@@ -814,15 +816,19 @@ async function onWifiJoin(ev) {
    service was unreachable, then re-enable. Every switch (MIDI, announcer, phantom,
    polarity, channel effects, processing on, modules) goes through this so the
    announce text and the revert-on-failure behaviour are identical everywhere. */
+/* Returns true when the write was accepted, so a caller keeping its own copy of the state updates
+   it only then. */
 async function sendToggle(url, body, input, on) {
   setBusy(input, true);   // NOT input.disabled: that would blur the switch you just flipped
   try {
     const res = await postJSON(url, body);
     announce(res.message || "Done.", !res.ok);
     if (!res.ok) input.checked = !on;  // revert the visual on failure
+    return !!res.ok;
   } catch {
-    announce("Could not reach the device service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     input.checked = !on;
+    return false;
   } finally {
     setBusy(input, false);
   }
@@ -924,7 +930,7 @@ async function loadOverview() {
         lines.push(`Currently selected SMART pad bank: ${d.bank}.`);
     }
   } catch {
-    lines.push("Could not reach the app service.");
+    lines.push(SERVICE_UNREACHABLE);
   }
   out.textContent = "";
   lines.forEach((l) => {
@@ -1045,7 +1051,7 @@ async function onFirmwareCheck(btn) {
   try {
     res = await postJSON("/api/device/firmware-check", {});
   } catch {
-    res = { ok: false, message: "Could not reach the AccessCaster service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setBusy(btn, false);
   if (res.ok) setText("dev-firmware", firmwareLine(res.firmware, res.firmware_update));
@@ -1110,7 +1116,7 @@ async function loadDeviceState() {
       out.appendChild(p);
     });
   } catch {
-    out.textContent = "Could not reach the app service.";
+    out.textContent = SERVICE_UNREACHABLE;
   } finally {
     if (btn) setBusy(btn, false);
   }
@@ -1151,7 +1157,7 @@ function loadMeters() {
     buildMeterWatchControls(d);
     return d;
   }).catch(() => {
-    setText("meter-status", "Could not reach the app service.");
+    setText("meter-status", SERVICE_UNREACHABLE);
   });
 }
 
@@ -1260,7 +1266,7 @@ async function sendInputLevel(db, el) {
     res = await postJSON("/api/meters/input-level", { db });
   } catch {
     setBusy(el, false);
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     return;
   }
   setBusy(el, false);
@@ -1355,7 +1361,7 @@ function buildMeterNumber(id, option, label, min, max, hint) {
       const res = await postJSON("/api/meters/option", { name: option, value: v });
       announce(res.message || "Done.", !res.ok);
     } catch {
-      announce("Could not reach the app service.", true);
+      announce(SERVICE_UNREACHABLE, true);
     }
   });
   row.appendChild(input);
@@ -1412,7 +1418,7 @@ async function loadUnitSettings() {
     const resp = await fetch("/api/device/settings");
     d = await resp.json();
   } catch {
-    setText("dev-unit-status", "Could not reach the app service.");
+    setText("dev-unit-status", SERVICE_UNREACHABLE);
     return;
   }
   if (!d.ok) {
@@ -1551,7 +1557,7 @@ function buildUnitChoice(s, id, known) {
       announce(res.message || "Done.", !res.ok);
       if (res.ok) setStagedValue(sel, chosen, null);
     } catch {
-      announce("Could not reach the device service.", true);
+      announce(SERVICE_UNREACHABLE, true);
     } finally {
       setBusy(sel, false);
       revertStaged(sel, false);   // a refusal leaves the unit as it was, so the dropdown says so
@@ -1608,7 +1614,7 @@ function buildUnitSlider(s, id, known) {
       try {
         const res = await postJSON("/api/device/setting", { prop: s.prop, value: v });
         if (res && !res.ok) announce(res.message || "Could not set it.", true);
-      } catch { announce("Could not reach the device service.", true); }
+      } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(input);
@@ -1730,7 +1736,7 @@ function onAnnounceSpeechChange(kind) {
       const res = await postJSON("/api/announce/" + kind, { [kind]: sel.value });
       setStatus("announce-speech-status", res.message || `Could not change the ${kind}.`);
     } catch {
-      setStatus("announce-speech-status", "Could not reach the app service.");
+      setStatus("announce-speech-status", SERVICE_UNREACHABLE);
     } finally {
       setBusy(sel, false);
     }
@@ -1746,7 +1752,7 @@ async function onAnnounceDevicesRefresh(ev) {
     await loadAnnounceState();
     setStatus("announce-speech-status", res.message || "Done.");
   } catch {
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
   } finally {
     setBusy(btn, false);
   }
@@ -1815,7 +1821,7 @@ async function loadHotkeys() {
     const resp = await fetch("/api/hotkeys");
     data = await resp.json();
   } catch {
-    setText("hotkeys-status", "Could not reach the app service, so the shortcuts cannot be read.");
+    setText("hotkeys-status", "Could not reach the AccessCaster service, so the shortcuts cannot be read.");
     return;
   }
   applyHotkeyState(data);
@@ -2021,7 +2027,7 @@ async function sendHotkey(s, changes, quiet) {
   try {
     res = await postJSON("/api/hotkeys/set", body);
   } catch {
-    res = { ok: false, message: "Could not reach the app service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   if (!quiet) announce(res.message || "Done.", !res.ok);
   if (res.state) applyHotkeyState(res.state, s.id);
@@ -2113,7 +2119,7 @@ async function onHotkeyModsSave() {
       setText("hotkey-mods-status", res.message || "Those keys cannot be used.");
     }
   } catch {
-    setText("hotkey-mods-status", "Could not reach the app service.");
+    setText("hotkey-mods-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -2130,7 +2136,7 @@ function onHotkeysEnabledToggle(ev) {
       if (!res.ok) input.checked = !on;
     })
     .catch(() => {
-      announce("Could not reach the app service.", true);
+      announce(SERVICE_UNREACHABLE, true);
       input.checked = !on;
     })
     .finally(() => setBusy(input, false));
@@ -2158,7 +2164,7 @@ async function onHotkeyAddOpen() {
     hotkeyCommands = await resp.json();
   } catch {
     hotkeyCommands = null;
-    setText("hotkey-add-status", "Could not reach the app service.");
+    setText("hotkey-add-status", SERVICE_UNREACHABLE);
     return;
   }
   const groups = (hotkeyCommands && hotkeyCommands.groups) || [];
@@ -2189,7 +2195,7 @@ async function onHotkeyPadSetToggle(ev) {
     announce(res.message || "Done.", !res.ok);
     if (res.state) applyHotkeyState(res.state);
   } catch {
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     if (hotkeyData) applyHotkeyState(hotkeyData);
   } finally {
     setBusy(input, false);
@@ -2222,7 +2228,7 @@ async function onHotkeyAddConfirm() {
     closeHotkeyDialog("hotkey-add-dialog");
     announceAfterFocus(res.message || "Done.");
   } catch {
-    setText("hotkey-add-status", "Could not reach the app service.");
+    setText("hotkey-add-status", SERVICE_UNREACHABLE);
   }
 }
 
@@ -2241,7 +2247,7 @@ function onHotkeyRestoreOpen() {
 }
 
 async function onHotkeyRestoreConfirm() {
-  let said = "Could not reach the app service.";
+  let said = SERVICE_UNREACHABLE;
   let bad = true;
   try {
     const res = await postJSON("/api/hotkeys/restore-defaults", {});
@@ -2267,7 +2273,7 @@ function onHotkeyDeleteOpen(opener) {
 async function onHotkeyDeleteConfirm() {
   const s = currentHotkey();
   if (!s) { closeHotkeyDialog("hotkey-delete-dialog"); return; }
-  let said = "Could not reach the app service.";
+  let said = SERVICE_UNREACHABLE;
   let bad = true;
   try {
     const res = await postJSON("/api/hotkeys/delete", { id: s.id });
@@ -2362,8 +2368,8 @@ async function loadChannels(focusProcessing) {
     const resp = await fetch("/api/channels");
     data = await resp.json();
   } catch {
-    setText("mixer-note", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("mixer-note", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
     return;
   }
   if (!data.ok) {
@@ -2583,19 +2589,10 @@ function fillChannelProcessing(body, ch) {
   // from Depth/Sparkle/Punch, so the sliders on the other tabs may be recomputed from those three -
   // say so rather than leaving a screen-reader user wondering why a value moved on its own.
   if (ch.advanced !== null && ch.advanced !== undefined) {
-    const hintId = "adv-hint-" + ch.name;
-    const sw = makeSwitchRow("adv-" + ch.name, "Advanced processing (use the modules below)",
+    body.appendChild(makeSwitchRow("adv-" + ch.name, "Advanced processing (use the modules below)",
       ch.advanced === true,
-      (on, input) => sendToggle("/api/channels/advanced", { name: ch.name, on }, input, on)).row;
-    const inp = sw.querySelector("input");
-    if (inp) inp.setAttribute("aria-describedby", hintId);
-    body.appendChild(sw);
-    const hint = document.createElement("p");
-    hint.className = "hint";
-    hint.id = hintId;
-    hint.textContent = "Off, Tone shaping sets the modules for you. Your settings are kept either "
-      + "way.";
-    body.appendChild(hint);
+      (on, input) => sendToggle("/api/channels/advanced", { name: ch.name, on }, input, on),
+      "Off, Tone shaping sets the modules for you. Your settings are kept either way.").row);
   }
   (channelsData.modules || []).forEach((m) => {
     const onNow = ch.modules ? ch.modules[m.key + "On"] === true : false;
@@ -2735,7 +2732,7 @@ function fillStereoPan(host, ch, legs) {
         if (st[ch.name]) { st[ch.name].offset = off; saveStereoPanLinks(st); }
         entry.offset = off;
         announce(`${ch.label} pan ${panOffsetWords(off)}.`);
-      } catch { announce("Could not reach the device service.", true); }
+      } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label);
@@ -2759,30 +2756,17 @@ function fillChannelEffects(body, ch) {
    reach. The state shown is read live from the unit, so a channel muted on the desk already reads
    as muted when the panel opens. */
 function buildChannelMute(ch) {
-  const wrap = document.createElement("div");
-  wrap.className = "field-block";
-  const id = "mute-" + ch.name;
-  const hintId = id + "-hint";
-  const sw = makeSwitchRow(id, "Mute " + ch.label, ch.muted === true,
-    (on, input) => {
-      ch.muted = on;
-      return sendToggle("/api/channels/mute", { name: ch.name, on }, input, on);
-    }).row;
-  const input = sw.querySelector("input");
-  if (input) input.setAttribute("aria-describedby", hintId);
-  wrap.appendChild(sw);
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.id = hintId;
-  // ONE FACT. This is attached with aria-describedby, so it is read on EVERY focus, and length
+  // ONE FACT. The hint is attached with aria-describedby, so it is read on EVERY focus, and length
   // costs more here than anywhere else on the page. That the unit's own button does the same thing
   // is on the Help page.
-  hint.textContent = "Silences this channel everywhere, including the recording."
+  const hint = "Silences this channel everywhere, including the recording."
     + (ch.on_fader === false ? noStripNote(ch, "mute")
       : (ch.muted === null || ch.muted === undefined
         ? " The unit did not report this channel's mute state, so this shows unmuted." : ""));
-  wrap.appendChild(hint);
-  return wrap;
+  return makeSwitchRow("mute-" + ch.name, "Mute " + ch.label, ch.muted === true,
+    async (on, input) => {
+      if (await sendToggle("/api/channels/mute", { name: ch.name, on }, input, on)) ch.muted = on;
+    }, hint).row;
 }
 
 /* SOLO / LISTEN for one channel (channelCueEnable, writable).
@@ -2798,30 +2782,19 @@ function buildChannelMute(ch) {
    without first working out which channel did it. It is a plain button, not a switch, because it is
    an action with no state of its own. */
 function buildChannelSolo(ch) {
-  const wrap = document.createElement("div");
-  wrap.className = "field-block";
-  const id = "solo-" + ch.name;
-  const hintId = id + "-hint";
-  const sw = makeSwitchRow(id, "Listen (solo) " + ch.label, ch.solo === true,
-    (on, input) => {
-      ch.solo = on;
-      return sendToggle("/api/channels/solo", { name: ch.name, on }, input, on);
-    }).row;
-  const input = sw.querySelector("input");
-  if (input) input.setAttribute("aria-describedby", hintId);
-  wrap.appendChild(sw);
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.id = hintId;
-  // The caution stays where the rest went, and it earns its place: this is the one control on the
-  // page that can leave a screen-reader user with no audio at all and nothing to explain it,
-  // because announcements arriving on USB 1 are not what you are soloing.
-  hint.textContent = "Only this channel in your headphones. Announcements go quiet while anything "
+  // The caution earns its place in the hint: this is the one control on the page that can leave a
+  // screen-reader user with no audio at all and nothing to explain it, because announcements
+  // arriving on USB 1 are not what you are soloing.
+  const hint = "Only this channel in your headphones. Announcements go quiet while anything "
     + "is soloed."
     + (ch.on_fader === false ? noStripNote(ch, "solo")
       : (ch.solo === null || ch.solo === undefined
         ? " The unit did not report this channel's solo state, so this shows off." : ""));
-  wrap.appendChild(hint);
+  const { row: wrap, input } = makeSwitchRow("solo-" + ch.name, "Listen (solo) " + ch.label,
+    ch.solo === true,
+    async (on, sw) => {
+      if (await sendToggle("/api/channels/solo", { name: ch.name, on }, sw, on)) ch.solo = on;
+    }, hint);
 
   const clear = document.createElement("button");
   clear.type = "button";
@@ -2834,10 +2807,10 @@ function buildChannelSolo(ch) {
       announce(res.message || "Done.", !res.ok);
       if (res.ok) {
         ch.solo = false;
-        if (input) input.checked = false;
+        input.checked = false;
       }
     } catch {
-      announce("Could not reach the device service.", true);
+      announce(SERVICE_UNREACHABLE, true);
     } finally {
       setBusy(clear, false);
     }
@@ -2871,37 +2844,26 @@ function buildChannelSolo(ch) {
    unknown, so a per-channel gate would need a mapping we do not have. An EMPTY slot list
    leaves the switch available on purpose: "could not read it" is not "there is not one". */
 function buildWirelessMute(ch) {
-  const wrap = document.createElement("div");
-  wrap.className = "field-block";
-  const id = "wireless-mute-" + ch.name;
-  const hintId = id + "-hint";
   const wireless = (channelsData && channelsData.wireless_mics) || null;
   const noneConnected = !!(wireless && wireless.present && !wireless.any_connected);
-  const sw = makeSwitchRow(id, "Mute the wireless mic on " + ch.label, ch.wireless_muted === true,
-    (on, input) => {
-      // setAvailable only marks it; the HANDLER has to refuse, or the switch writes anyway and then
-      // reports a state the unit is not in. Same shape as onMatrixSourceToggle.
-      const no = unavailableReason(input);
-      if (no !== null) { input.checked = !input.checked; announce(no, true); return; }
-      ch.wireless_muted = on;
-      return sendToggle("/api/channels/wireless-mute", { name: ch.name, on }, input, on);
-    }).row;
-  const input = sw.querySelector("input");
-  if (input) {
-    input.setAttribute("aria-describedby", hintId);
-    setAvailable(input, !noneConnected, "No wireless mics detected.");
-  }
-  wrap.appendChild(sw);
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.id = hintId;
-  hint.textContent = noneConnected
+  const hint = noneConnected
     ? "No wireless mics detected."
     : "Mutes a paired RODE wireless transmitter at the mic, not the channel here."
       + (ch.wireless_muted === null || ch.wireless_muted === undefined
         ? " The unit did not report this, so the switch shows unmuted." : "");
-  wrap.appendChild(hint);
-  return wrap;
+  const { row, input } = makeSwitchRow("wireless-mute-" + ch.name,
+    "Mute the wireless mic on " + ch.label, ch.wireless_muted === true,
+    async (on, sw) => {
+      // setAvailable only marks it; the HANDLER has to refuse, or the switch writes anyway and then
+      // reports a state the unit is not in. Same shape as onMatrixSourceToggle.
+      const no = unavailableReason(sw);
+      if (no !== null) { sw.checked = !sw.checked; announce(no, true); return; }
+      if (await sendToggle("/api/channels/wireless-mute", { name: ch.name, on }, sw, on)) {
+        ch.wireless_muted = on;
+      }
+    }, hint);
+  setAvailable(input, !noneConnected, "No wireless mics detected.");
+  return row;
 }
 
 /* A labelled range slider in dB. Debounced so arrow-keying does not flood USB. */
@@ -2935,14 +2897,14 @@ function buildLevelField(ch, min, max) {
   input.addEventListener("change", () => {
     const db = parseInt(input.value, 10);
     if (Number.isNaN(db)) return;
-    ch.level_db = db;
     const key = "level-" + ch.name;
     window.clearTimeout(channelDebounce[key]);
     channelDebounce[key] = window.setTimeout(async () => {
       try {
         const res = await postJSON("/api/channels/level", { name: ch.name, db });
         announce(res.message || "Done.", !res.ok);
-      } catch { announce("Could not reach the device service.", true); }
+        if (res.ok) ch.level_db = db;
+      } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(out);
@@ -3013,7 +2975,7 @@ function buildFxParamSlider(ch, effect, param, value01) {
         const res = await postJSON("/api/channels/effect-param",
           { name: ch.name, param, value: parseInt(input.value, 10) / 100 });
         if (!res.ok) announce(res.message || "Could not set the effect.", true);
-      } catch { announce("Could not reach the device service.", true); }
+      } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(label); row.appendChild(input); row.appendChild(out);
@@ -3061,7 +3023,6 @@ function buildParamSlider(ch, ctrl, percent) {
   });
   input.addEventListener("change", () => {
     const pct = parseInt(input.value, 10);
-    if (ch.params) ch.params[ctrl.prop] = pct;
     const key = "param-" + ctrl.prop + "-" + ch.name;
     window.clearTimeout(channelDebounce[key]);
     channelDebounce[key] = window.setTimeout(async () => {
@@ -3069,7 +3030,8 @@ function buildParamSlider(ch, ctrl, percent) {
         const res = await postJSON("/api/channels/param",
           { name: ch.name, prop: ctrl.prop, value: pct / 100 });
         announce(res.message || "Done.", !res.ok);
-      } catch { announce("Could not reach the device service.", true); }
+        if (res.ok && ch.params) ch.params[ctrl.prop] = pct;
+      } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
   row.appendChild(input);
@@ -3138,7 +3100,7 @@ function fillPresetControls(wrap, ch) {
       // Re-read so the sliders show the applied voicing. That rebuilds the panel, which re-reads
       // the preset onto the dropdown as well.
       if (res.ok) { await keepingFocus(loadChannels); return; }
-    } catch { announce("Could not reach the device service.", true); }
+    } catch { announce(SERVICE_UNREACHABLE, true); }
     finally { setBusy(sel, false); }
     revertStaged(sel, false);         // refused: the channel is as it was, and the dropdown says so
   });
@@ -3181,7 +3143,7 @@ function fillPresetControls(wrap, ch) {
       // Only the preset LIST changed, so refresh the dropdown in place. Rebuilding the panel here
       // destroys this button and throws focus to the top of the page.
       if (res.ok) { channelPresets = res.presets || channelPresets; nameInput.value = ""; fillPresetOptions(applySel); }
-    } catch { announce("Could not reach the device service.", true); }
+    } catch { announce(SERVICE_UNREACHABLE, true); }
     finally { setBusy(saveBtn, false); }
   });
   // DELETING HAS ITS OWN DIALOG AND LIST. The preset dropdown applies on Enter and goes back to the
@@ -3232,7 +3194,7 @@ async function onPresetDelete(ev) {
     document.getElementById("preset-delete-dialog").close();
     announce(res.message || "Deleted.");
   } catch {
-    setText("preset-delete-error", "Could not reach the device service.");
+    setText("preset-delete-error", SERVICE_UNREACHABLE);
   }
 }
 
@@ -3269,7 +3231,7 @@ async function setMicType(channel, sel, ch) {
     // Refused, so the unit still holds the old type: put the dropdown back in step with the desk.
     setStagedValue(sel, ch && ch.mic_type, null);
   } catch {
-    announce("Could not reach the device service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     setStagedValue(sel, ch && ch.mic_type, null);
   } finally {
     setBusy(sel, false);
@@ -3633,11 +3595,7 @@ function fillPadSettings(pad) {
   // to set a level on (its loudness is the effect's own mix), so the control is hidden for it.
   showEl("pad-ed-volume-row", isSound);
   const volEl = document.getElementById("pad-ed-volume");
-  if (volEl && isSound) {
-    const g = (pad.gain !== null && pad.gain !== undefined) ? pad.gain : -12;
-    volEl.value = String(g);
-    volEl.setAttribute("aria-valuetext", g + " dB");   // NVDA reads "X dB", not a bare number
-  }
+  if (volEl && isSound) showPadVolume(volEl, pad.gain);
 
   // How the pad plays (sound pads only). Loop cannot apply in One Shot, so its row follows the
   // chosen mode instead of always showing.
@@ -3816,8 +3774,8 @@ async function applySound(pad, file) {
     await keepingFocus(loadPads);
     return res;
   } catch {
-    setText("pad-ed-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("pad-ed-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
     return null;
   }
 }
@@ -3831,8 +3789,8 @@ async function applyJsonAction(url, body, working) {
     await keepingFocus(loadPads);
     return res;
   } catch {
-    setText("pad-ed-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("pad-ed-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
     return null;
   }
 }
@@ -3846,8 +3804,8 @@ async function padEditPost(url, body) {
     announce(res.message || "Done.", !res.ok);
     return res;
   } catch {
-    setText("pad-ed-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("pad-ed-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
     return { ok: false };
   }
 }
@@ -3886,6 +3844,13 @@ async function onPadRename() {
 // the wrong pad.
 let _volDebounce = null;
 
+/* Put the volume slider on the pad's gain, or on -12 dB when the pad did not report one. */
+function showPadVolume(volEl, gain) {
+  const g = (gain !== null && gain !== undefined) ? gain : -12;
+  volEl.value = String(g);
+  volEl.setAttribute("aria-valuetext", g + " dB");   // NVDA reads "X dB", not a bare number
+}
+
 function onPadVolumeInput() {
   const volEl = document.getElementById("pad-ed-volume");
   if (!volEl) return;
@@ -3903,6 +3868,7 @@ async function commitPadVolume() {
   if (pad.gain === db) return;            // already at this value; nothing to write
   const res = await padEditPost("/api/pad/gain", { pad: pad.grid, db: db });
   if (res.ok) pad.gain = db;
+  else showPadVolume(volEl, pad.gain);    // on a refusal, puts the slider back to the truth
 }
 
 async function onPadColour() {
@@ -4321,8 +4287,8 @@ async function onPadClear() {
     announce(res.message || "Done.", !res.ok);
     await loadPads();
   } catch {
-    setText("pad-ed-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("pad-ed-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
   } finally {
     setBusy(btn, false);
     // Clearing worked, so this button is now unavailable (nothing left to clear: fillPadSettings
@@ -4349,7 +4315,7 @@ async function onClearAllPads() {
     setStatus("clear-all-status", res.message || "Done.");
     await keepingFocus(loadPads);
   } catch {
-    setStatus("clear-all-status", "Could not reach the device service.");
+    setStatus("clear-all-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -4371,7 +4337,7 @@ async function onTidyPadAudio() {
     const res = await postJSON("/api/pads/tidy-audio", {});
     setStatus("tidy-audio-status", res.message || "Done.");
   } catch {
-    setStatus("tidy-audio-status", "Could not reach the device service.");
+    setStatus("tidy-audio-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -4402,7 +4368,7 @@ async function onRestoreFactoryFx() {
     await pollPadRestore("restore-fx-status");
     await keepingFocus(loadPads);
   } catch {
-    setStatus("restore-fx-status", "Could not reach the device service.");
+    setStatus("restore-fx-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -4424,7 +4390,7 @@ async function onExportPad() {
     const res = await postJSON("/api/pad/export", { pad: grid });
     setStatus("export-pad-status", res.message || "Done.");
   } catch {
-    setStatus("export-pad-status", "Could not reach the device service.");
+    setStatus("export-pad-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -4435,7 +4401,7 @@ async function onOpenPadExports() {
     const res = await postJSON("/api/pads/exports/open", {});
     setStatus("export-pad-status", res.message || "Done.");
   } catch {
-    announce("Could not reach the device service.", true);
+    announce(SERVICE_UNREACHABLE, true);
   }
 }
 
@@ -4829,7 +4795,7 @@ async function startPreview() {
     }
   } catch {
     toggle.checked = false;
-    setStatus("fx-preview-status", "Could not reach the device service.");
+    setStatus("fx-preview-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(toggle, false);
   }
@@ -5025,7 +4991,9 @@ function setStagedValue(sel, value, label) {
 
 /* A labelled checkbox switch. `onChange(on, input)` runs on every change; `span` is the label text,
    for callers that retarget it. */
-function makeSwitchRow(id, labelText, checked, onChange) {
+/* The one labelled checkbox switch. With `hint`, the row is a field-block holding the switch and a
+   hint paragraph the switch is described by, so the hint is read each time the switch takes focus. */
+function makeSwitchRow(id, labelText, checked, onChange, hint) {
   const row = document.createElement("p");
   row.className = "field";
   const label = document.createElement("label");
@@ -5040,7 +5008,17 @@ function makeSwitchRow(id, labelText, checked, onChange) {
   label.appendChild(input);
   label.appendChild(span);
   row.appendChild(label);
-  return { row, input, span };
+  if (hint === undefined) return { row, input, span };
+  const block = document.createElement("div");
+  block.className = "field-block";
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.id = id + "-hint";
+  note.textContent = hint;
+  input.setAttribute("aria-describedby", note.id);
+  block.appendChild(row);
+  block.appendChild(note);
+  return { row: block, input, span };
 }
 
 function clampNum(v, lo, hi) {
@@ -5087,7 +5065,7 @@ async function routingPost(url, body, control) {
     announce(res.message || "Done.", !res.ok);
     return res;
   } catch {
-    announce("Could not reach the device service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     return { ok: false };
   } finally {
     setBusy(control, false);
@@ -5273,7 +5251,7 @@ async function loadRouting() {
         const res = await postJSON("/api/driver/page", {});
         announce(res.message || "", !res.ok);
       } catch {
-        announce("Could not reach the device service.", true);
+        announce(SERVICE_UNREACHABLE, true);
       }
     });
     const dhint = document.createElement("span");
@@ -5526,7 +5504,7 @@ async function loadFaderLevels(announceResult) {
     if (d.read_only && d.message) setStatus("fader-levels-status", d.message);
     else if (announceResult) setStatus("fader-levels-status", "Levels read from the device.");
   } catch {
-    setStatus("fader-levels-status", "Could not reach the app service.");
+    setStatus("fader-levels-status", SERVICE_UNREACHABLE);
     markLevelsUnread(host);
     markLevelsUnread(document.getElementById("routing-outmutes"));
   }
@@ -5551,7 +5529,7 @@ async function onFaderSwitch(kind, index, input) {
   try {
     res = await postJSON(url, { fader: index, on: wanted });
   } catch {
-    res = { ok: false, message: "Could not reach the device service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   if (typeof res[key] === "boolean") input.checked = res[key];
   else if (!res.ok) input.checked = !wanted;
@@ -5567,7 +5545,7 @@ async function onClearFaderSolos() {
   try {
     res = await postJSON("/api/channels/solo/clear", {});
   } catch {
-    res = { ok: false, message: "Could not reach the device service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setStatus("fader-levels-status", res.message || "Done.");
   setBusy(btn, false);
@@ -5678,7 +5656,7 @@ function buildLevelSlider(id, labelText, readOnly, send, statusId = "fader-level
           const res = await send(parseInt(input.value, 10));
           setStatus(statusId, res.message || "Done.");
         } catch {
-          setStatus(statusId, "Could not reach the device service.");
+          setStatus(statusId, SERVICE_UNREACHABLE);
         }
       }, WRITE_DEBOUNCE_MS);
     });
@@ -5703,7 +5681,7 @@ async function onMonmixReset() {
     setStatus("monmix-status", res.message || "Done.");
     await keepingFocus(loadMonmixOutput);
   } catch {
-    setStatus("monmix-status", "Could not reach the device service.");
+    setStatus("monmix-status", SERVICE_UNREACHABLE);
   } finally { setBusy(btn, false); }
 }
 
@@ -5950,7 +5928,7 @@ async function onResetAllOutputs() {
     setStatus("reset-outputs-status", res.message || "Done.");
     if (res.ok) await loadMatrixState();   // refresh the per-output panel to the new live state
   } catch {
-    setStatus("reset-outputs-status", "Could not reach the device service.");
+    setStatus("reset-outputs-status", SERVICE_UNREACHABLE);
   } finally {
     setBusy(btn, false);
   }
@@ -5988,7 +5966,7 @@ async function loadSchemes() {
     const r = await fetch("/api/routing/schemes");
     data = await r.json();
   } catch {
-    setText("scheme-status", "Could not reach the device service.");
+    setText("scheme-status", SERVICE_UNREACHABLE);
     return;
   }
   if (!data || !data.ok) return;
@@ -6098,7 +6076,7 @@ async function onSchemeApply() {
     setText("scheme-status", msg);
     if (res.ok) await loadMatrixState();   // the read-back: refresh the per-output panel
   } catch {
-    msg = "Could not reach the device service.";
+    msg = SERVICE_UNREACHABLE;
     bad = true;
     setText("scheme-status", msg);
   } finally { setBusy(btn, false); }
@@ -6146,7 +6124,7 @@ async function onSchemeSave(oneOutput) {
       if (sel) { sel.value = "saved:" + res.name; onSchemeChange(); }
     }
   } catch {
-    msg = "Could not reach the device service.";
+    msg = SERVICE_UNREACHABLE;
     bad = true;
     setText("scheme-status", msg);
   } finally { setBusy(btn, false); }
@@ -6173,7 +6151,7 @@ async function onSchemeDelete() {
     setText("scheme-status", msg);
     if (res.ok) await keepingFocus(loadSchemes);
   } catch {
-    msg = "Could not reach the device service.";
+    msg = SERVICE_UNREACHABLE;
     bad = true;
     setText("scheme-status", msg);
   } finally { setBusy(btn, false); }
@@ -6235,7 +6213,7 @@ async function onStereoLink(pair, input) {
   try {
     res = await postJSON("/api/faders/stereo-link", { pair: pair.code, on: wanted });
   } catch {
-    res = { ok: false, message: "Could not reach the device service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setStatus("stereo-status", res.message || "Done.");
   // A link rewrites the fader layout, so the dropdowns above have to move with it.
@@ -6325,7 +6303,7 @@ async function onResetFaders() {
     if (res.ok && res.faders) applyFaderValues(res.faders, res.labels);
     if (res.stereo) applyStereoValues(res.stereo);   // the default layout carries no linked pair
   } catch {
-    setStatus("faders-reset-status", "Could not reach the device service.");
+    setStatus("faders-reset-status", SERVICE_UNREACHABLE);
   } finally { setBusy(btn, false); }
 }
 
@@ -6485,8 +6463,8 @@ async function refreshRoutingLive() {
     setText("routing-status", "");
     return true;
   } catch {
-    setText("routing-status", "Could not reach the device service.");
-    announce("Could not reach the device service.", true);
+    setText("routing-status", SERVICE_UNREACHABLE);
+    announce(SERVICE_UNREACHABLE, true);
     return false;
   }
 }
@@ -6610,8 +6588,9 @@ function updateBackupDetail() {
   setText("backup-detail", text);
 }
 
-// The backup currently picked on the page, or "" when the list is empty. The value is the KEY
-// ("profile:<name>" or "show:<snapshot>"), which is also what every backup endpoint takes.
+// The backup currently picked on the page, or "" when the list is empty. The value is the list KEY
+// ("profile:<name>" or "show:<snapshot>"), which only `backupEntry` takes; every backup endpoint
+// takes `selectedBackupName()`.
 function selectedProfile() {
   return document.getElementById("profile-select").value || "";
 }
@@ -6770,7 +6749,7 @@ async function onProfileSave(ev) {
     finishProgressDialog(s.ok ? "Backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles(name);            // leave the backup just made selected on the page
   } catch {
-    finishProgressDialog("Backup failed", "Could not reach the device service.");
+    finishProgressDialog("Backup failed", SERVICE_UNREACHABLE);
   }
 }
 
@@ -6880,7 +6859,7 @@ async function doRestore() {
     finishProgressDialog(s.ok ? "Backup restored" : "Restore failed", s.message || "Done.");
     await loadProfiles(selectedProfile());
   } catch {
-    finishProgressDialog("Restore failed", "Could not reach the device service.");
+    finishProgressDialog("Restore failed", SERVICE_UNREACHABLE);
   }
 }
 
@@ -7010,7 +6989,7 @@ function onAppSettingsPress(btnId, url) {
       msg = res.message || "Done.";
       bad = !res.ok;
     } catch {
-      msg = "Could not reach the device service.";
+      msg = SERVICE_UNREACHABLE;
       bad = true;
     } finally { setBusy(btn, false); }
     setText("appsettings-state", msg);
@@ -7035,7 +7014,7 @@ async function loadAutostart() {
     setText("autostart-hint", d.message
       || "It starts in the system tray, so your shortcuts work from the moment you sign in.");
   } catch {
-    setAvailable(sw, false, "Could not reach the device service.");
+    setAvailable(sw, false, SERVICE_UNREACHABLE);
   }
 }
 
@@ -7049,7 +7028,7 @@ async function onAutostartToggle(on, input) {
     bad = !res.ok;
     if (!res.ok) input.checked = !!res.enabled;   // a refusal must not leave the switch lying
   } catch {
-    msg = "Could not reach the device service.";
+    msg = SERVICE_UNREACHABLE;
     bad = true;
     input.checked = !input.checked;
   }
@@ -7162,7 +7141,7 @@ async function installDriver() {
     finishProgressDialog(s.ok ? "RODE's installer is running" : "Driver not installed",
                          s.message || "Done.");
   } catch {
-    finishProgressDialog("Driver not installed", "Could not reach the device service.");
+    finishProgressDialog("Driver not installed", SERVICE_UNREACHABLE);
   }
   // The driver's own line, and the buttons, come off the live read rather than being guessed at
   // here: the install is RODE's from the moment it is handed over, and it may need a restart before
@@ -7185,7 +7164,7 @@ async function runShowJob(closeDialogId, spec) {
     const s = await pollJob("/api/shows/status", "progress-dialog-step");
     finishProgressDialog(s.ok ? spec.okTitle : spec.failTitle, s.message || "Done.");
   } catch {
-    finishProgressDialog(spec.failTitle, "Could not reach the device service.");
+    finishProgressDialog(spec.failTitle, SERVICE_UNREACHABLE);
   }
   await loadShows();
 }
@@ -7224,7 +7203,7 @@ function openRenameDialog() {
 
 async function onProfileRename(ev) {
   ev.preventDefault();
-  const oldName = selectedProfile();
+  const oldName = selectedBackupName();
   const input = document.getElementById("profile-new-name");
   const newName = input.value.trim();
   const fail = (msg) => {
@@ -7243,7 +7222,7 @@ async function onProfileRename(ev) {
     closeProfileDialog("rename-dialog");
     announce(_profileLastResult);
   } catch {
-    fail("Could not reach the device service.");
+    fail(SERVICE_UNREACHABLE);
   }
 }
 
@@ -7266,7 +7245,7 @@ function openDeleteDialog() {
 }
 
 async function onProfileDelete() {
-  const name = selectedProfile();
+  const name = selectedBackupName();
   try {
     // _baselineDeleteArmed: the as-found backup does not go on the same click as any other profile.
     // The server refuses the first attempt and says why; that reason goes on the dialog's error
@@ -7298,7 +7277,7 @@ async function onProfileDelete() {
     closeProfileDialog("delete-dialog");
     announce(_profileLastResult);
   } catch {
-    setText("delete-error", "Could not reach the device service.");
+    setText("delete-error", SERVICE_UNREACHABLE);
   }
 }
 
@@ -7365,7 +7344,7 @@ async function onBaselineSave() {
     finishProgressDialog(s.ok ? "Unit backed up" : "Backup failed", s.message || "Done.");
     await loadProfiles();
   } catch {
-    finishProgressDialog("Backup failed", "Could not reach the device service.");
+    finishProgressDialog("Backup failed", SERVICE_UNREACHABLE);
   }
 }
 
@@ -7395,7 +7374,7 @@ async function onBaselineAddPads() {
                          s.message || "Done.");
     await loadProfiles();
   } catch {
-    finishProgressDialog("Could not add the pads", "Could not reach the device service.");
+    finishProgressDialog("Could not add the pads", SERVICE_UNREACHABLE);
   }
 }
 
@@ -7478,7 +7457,7 @@ function closeProfileDialog(id) {
    would fire TWO regions at once (the outcome and the new state), and a screen reader reads one
    over the other.
 
-   `setRecState` clears the region before writing, so pressing "Check the recorder" twice speaks
+   `setStatus` clears the region before writing, so pressing "Check the recorder" twice speaks
    twice even though the words did not change - a status region that only fires on a DIFFERENT
    string would leave that button silently doing nothing.
 
@@ -7496,13 +7475,6 @@ let recordingSeenState = null;
 const recordingCtl = { multitrack: null, bypass: null, bypassHint: null,
                        usbMultitrack: null, usbBypass: null, usbBypassHint: null };
 
-function setRecState(text) {
-  const el = document.getElementById("rec-state");
-  if (!el) return;
-  el.textContent = "";
-  window.setTimeout(() => { el.textContent = text; }, 50);
-}
-
 async function loadRecording() {
   setText("rec-state", "Reading the unit...");
   let d;
@@ -7510,15 +7482,15 @@ async function loadRecording() {
     const resp = await fetch("/api/recorder");
     d = await resp.json();
   } catch {
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
     return;
   }
   if (!d.ok) {
-    setRecState(d.message || "Could not read the recorder.");
+    setStatus("rec-state", d.message || "Could not read the recorder.");
     return;
   }
   loadRecordingFrom(d);
-  setRecState(d.message || "");
+  setStatus("rec-state", d.message || "");
   recordingPoller.start();
 }
 
@@ -7643,13 +7615,13 @@ async function onApplyRecordingSetting(sel) {
   setBusy(sel, true);
   try {
     const res = await postJSON(spec.path, spec.body(value));
-    setRecState(res.message || "Done.");
+    setStatus("rec-state", res.message || "Done.");
     if (res.ok) {
       setStagedValue(sel, value, null);
       if (spec.after) spec.after(value);
     }
   } catch {
-    setRecState("Could not reach the device service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
   } finally {
     setBusy(sel, false);
     revertStaged(sel, false);   // a refusal leaves the unit as it was, so the dropdown says so
@@ -7690,7 +7662,8 @@ function fillRecordingSettings(d) {
     // THE RAW SWITCH, instant and last. It only ever means anything alongside a multitrack choice,
     // and reading them one after the other is how the decision is actually made.
     const bp = makeSwitchRow("rec-bypass", "Record the separate tracks raw", false,
-      (_on, input) => sendBypass("/api/recorder/processing-bypass", input, setRecState));
+      (_on, input) => sendBypass("/api/recorder/processing-bypass", input,
+        (text) => setStatus("rec-state", text)));
     const bpHint = document.createElement("span");
     bpHint.className = "hint";
     bpHint.id = "rec-bypass-hint";
@@ -7809,7 +7782,7 @@ async function sendBypass(path, input, say) {
     say(res.message || "Setting sent.");
     if (!res.ok) input.checked = !on;
   } catch {
-    say("Could not reach the device service.");
+    say(SERVICE_UNREACHABLE);
     input.checked = !on;
   } finally {
     setBusy(input, false);
@@ -7907,38 +7880,38 @@ function applyStorageButtons(d) {
 
 async function onStorageEject(btn) {
   const why = unavailableReason(btn);
-  if (why !== null) { setRecState(why); return; }
+  if (why !== null) { setStatus("rec-state", why); return; }
   const v = selectedStorage(recordingModel);
   if (!v) return;
   const on = btn.dataset.on !== "0";
   setBusy(btn, true);
-  setRecState(on ? "Ejecting, please wait." : "Reconnecting, please wait.");
+  setStatus("rec-state", on ? "Ejecting, please wait." : "Reconnecting, please wait.");
   try {
     const res = await postJSON("/api/storage/eject", { index: v.index, on: on });
-    setRecState(res.message || "Done.");
+    setStatus("rec-state", res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
   } catch {
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
   } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
 }
 
 async function onStorageErase(btn) {
   const why = unavailableReason(btn);
-  if (why !== null) { setRecState(why); return; }
+  if (why !== null) { setStatus("rec-state", why); return; }
   const v = selectedStorage(recordingModel);
   if (!v) return;
   const ok = await confirmAction("Erase the " + v.spoken + "?",
     "Everything on it is deleted, recordings and any other files. It cannot be undone, and "
     + "AccessCaster has no copy.", "Erase");
-  if (!ok) { setRecState("Cancelled. Nothing was erased."); return; }
+  if (!ok) { setStatus("rec-state", "Cancelled. Nothing was erased."); return; }
   setBusy(btn, true);
-  setRecState("Erasing the " + v.spoken + ". This takes up to a minute.");
+  setStatus("rec-state", "Erasing the " + v.spoken + ". This takes up to a minute.");
   try {
     const res = await postJSON("/api/storage/erase", { index: v.index });
-    setRecState(res.message || "Done.");
+    setStatus("rec-state", res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; loadRecordingFrom(res.recorder); }
   } catch {
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
   } finally { setBusy(btn, false); applyStorageButtons(recordingModel); }
 }
 
@@ -7973,27 +7946,27 @@ function fillRecordingDeleteChoices(d) {
   }
 }
 
-/* Everything here reports through setRecState, the page's ONE live region. No second region and no
+/* Everything here reports through setStatus("rec-state"), the page's ONE live region. No second region and no
    announce(): this page speaks in one voice, which is why a delete has no status line of its own. */
 async function onDeleteRecording() {
   const btn = document.getElementById("rec-delete-btn");
   const why = unavailableReason(btn);
-  if (why !== null) { setRecState(why); return; }
+  if (why !== null) { setStatus("rec-state", why); return; }
   const sel = document.getElementById("rec-delete-select");
   const chosen = sel.options[sel.selectedIndex];
   if (!chosen) return;
   const ok = await confirmAction("Delete " + chosen.textContent + "?",
     "This removes the recording from the unit's card or drive. It cannot be undone, and "
     + "AccessCaster has no copy of it.", "Delete recording");
-  if (!ok) { setRecState("Cancelled. The recording was not deleted."); return; }
+  if (!ok) { setStatus("rec-state", "Cancelled. The recording was not deleted."); return; }
   setBusy(btn, true);
-  setRecState("Deleting, please wait.");
+  setStatus("rec-state", "Deleting, please wait.");
   try {
     const res = await postJSON("/api/recorder/delete", { uid: parseInt(sel.value, 10) });
-    setRecState(res.message || "Done.");
+    setStatus("rec-state", res.message || "Done.");
     if (res.recorder) { recordingModel = res.recorder; fillRecordingList(res.recorder); }
   } catch {
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
   } finally { setBusy(btn, false); }
 }
 
@@ -8045,18 +8018,18 @@ async function onRecordCommand(cmd, btn) {
   // having missed the press.
   const why = unavailableReason(btn);
   if (why !== null) {
-    setRecState(why);
+    setStatus("rec-state", why);
     return;
   }
   setBusy(btn, true);
-  setRecState(cmd === "stop" ? "Stopping..." : cmd === "pause" ? "Pausing..." : "Starting...");
+  setStatus("rec-state", cmd === "stop" ? "Stopping..." : cmd === "pause" ? "Pausing..." : "Starting...");
 
   let res;
   try {
     res = await postJSON("/api/recorder/command", { command: cmd });
   } catch {
     setBusy(btn, false);
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
     return;
   }
   setBusy(btn, false);
@@ -8069,7 +8042,7 @@ async function onRecordCommand(cmd, btn) {
   // From the state the unit REPORTED, not from the command we sent: a refused command must not
   // leave the button offering the next step of something that never started.
   if (res.state !== null && res.state !== undefined) applyTransport(res.state);
-  setRecState(res.message || "Done.");
+  setStatus("rec-state", res.message || "Done.");
 }
 
 async function onRecordCheck(btn) {
@@ -8084,17 +8057,17 @@ async function onRecordCheck(btn) {
   // The cheap endpoint carries the whole sentence, elapsed time included, at no device cost. The
   // last full read is only the fallback for the moment before one has happened.
   if (live && live.ok && live.message) {
-    setRecState(live.message);
+    setStatus("rec-state", live.message);
     return;
   }
-  setRecState(recordingModel ? (recordingModel.message || "") : "The unit has not been read yet.");
+  setStatus("rec-state", recordingModel ? (recordingModel.message || "") : "The unit has not been read yet.");
 }
 
 async function onDropMarker(btn) {
   if (isBusy(btn)) return;
   const why = unavailableReason(btn);
   if (why !== null) {
-    setRecState(why);
+    setStatus("rec-state", why);
     return;
   }
   setBusy(btn, true);
@@ -8103,11 +8076,11 @@ async function onDropMarker(btn) {
     res = await postJSON("/api/recorder/marker", {});
   } catch {
     setBusy(btn, false);
-    setRecState("Could not reach the AccessCaster service.");
+    setStatus("rec-state", SERVICE_UNREACHABLE);
     return;
   }
   setBusy(btn, false);
-  setRecState(res.message || "Marker sent.");
+  setStatus("rec-state", res.message || "Marker sent.");
 }
 
 function wireRecording() {
@@ -8233,7 +8206,7 @@ async function onLevelCheck(ch) {
       announce(res.message || "Done.", !res.ok);
     }
   } catch {
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
   } finally {
     setBusy(btn, false);
   }
@@ -8316,7 +8289,7 @@ async function agStart() {
     res = await postJSON("/api/channels/autogain", { name: agChannel });
   } catch {
     agClose("ag-progress-dialog");
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     return;
   }
   if (!res.ok) {
@@ -8413,7 +8386,7 @@ async function agUndo() {
   try {
     res = await postJSON("/api/channels/autogain/undo", {});
   } catch {
-    announce("Could not reach the app service.", true);
+    announce(SERVICE_UNREACHABLE, true);
     return;
   }
   agClose("ag-result-dialog");
@@ -8480,7 +8453,7 @@ async function loadCallme() {
   try {
     d = await (await fetch("/api/callme")).json();
   } catch {
-    setStatus("callme-state", "Could not reach the AccessCaster service.");
+    setStatus("callme-state", SERVICE_UNREACHABLE);
     return;
   }
   if (!d.ok) {
@@ -8596,7 +8569,7 @@ async function onCallmeFaderApply(sel) {
   try {
     res = await postJSON("/api/faders/set", { fader: Number(sel.value), code: callme1Code });
   } catch {
-    res = { ok: false, message: "Could not reach the AccessCaster service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setBusy(sel, false);
   if (!res.ok) {
@@ -8744,7 +8717,7 @@ async function postCallmeContact(path, body) {
   try {
     res = await postJSON(path, body);
   } catch {
-    res = { ok: false, message: "Could not reach the AccessCaster service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setStatus("callme-state", res.message || "Done.");
   if (res.ok) renderCallmeContacts(res.contacts);
@@ -8796,7 +8769,7 @@ async function onCallmeRespond(btn, path, body) {
   try {
     res = await postJSON(path, body || {});
   } catch {
-    res = { ok: false, message: "Could not reach the AccessCaster service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   setBusy(btn, false);
   setStatus("callme-state", res.message || "Done.");
@@ -8819,7 +8792,7 @@ async function onCallmeHosting(input) {
   try {
     res = await postJSON("/api/callme/hosting", { on: wanted });
   } catch {
-    res = { ok: false, message: "Could not reach the AccessCaster service." };
+    res = { ok: false, message: SERVICE_UNREACHABLE };
   }
   if (res.slots) applyCallme(res);
   else input.checked = !wanted;
@@ -8847,7 +8820,7 @@ function wireCallme() {
       try {
         res = await postJSON("/api/callme/auto-extend", { on: auto.checked });
       } catch {
-        res = { ok: false, message: "Could not reach the AccessCaster service." };
+        res = { ok: false, message: SERVICE_UNREACHABLE };
       }
       if (!res.ok) auto.checked = !auto.checked;
       setStatus("callme-state", res.message || "Done.");
@@ -8860,7 +8833,7 @@ function wireCallme() {
       try {
         res = await postJSON("/api/callme/ringtone", { on: ring.checked });
       } catch {
-        res = { ok: false, message: "Could not reach the AccessCaster service." };
+        res = { ok: false, message: SERVICE_UNREACHABLE };
       }
       if (!res.ok) ring.checked = !ring.checked;
       setStatus("callme-state", res.message || "Done.");
@@ -8984,11 +8957,7 @@ function render(route, focusTo = "heading") {
   const h1 = document.querySelector("#" + info.section + " > h1[tabindex='-1']");
   const target = appTitle || h1;
   if (target) target.focus();
-  const ann = document.getElementById("route-announcer");
-  if (ann) {
-    ann.textContent = "";
-    window.setTimeout(() => { ann.textContent = info.title + " loaded"; }, 50);
-  }
+  setStatus("route-announcer", info.title + " loaded");
   // Read live from the device every time a section is entered, so what you see
   // is always the unit's current state (no manual "read" button).
   if (info.onShow) {
@@ -9222,7 +9191,6 @@ function bindPageBoundary() {
    a role="status" region announces the new state after activation. */
 function initThemeToggle() {
   const toggle = document.getElementById("theme-toggle");
-  const status = document.getElementById("theme-toggle-status");
   if (!toggle) return;
   function apply(t) {
     document.documentElement.setAttribute("data-theme", t);
@@ -9237,10 +9205,7 @@ function initThemeToggle() {
     const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     apply(next);
     try { localStorage.setItem("theme", next); } catch { /* storage blocked: lasts this visit */ }
-    status.textContent = "";
-    window.setTimeout(() => {
-      status.textContent = "Dark mode is now " + (next === "dark" ? "on" : "off") + ".";
-    }, 50);
+    setStatus("theme-toggle-status", "Dark mode is now " + (next === "dark" ? "on" : "off") + ".");
   });
 }
 
@@ -9468,7 +9433,7 @@ async function init() {
         announce(res.message || "Done.", !res.ok);
         loadMeters();                 // the level and mute belong to the stream, so re-read them
       } catch {
-        announce("Could not reach the app service.", true);
+        announce(SERVICE_UNREACHABLE, true);
       }
     }, SELECT_COMMIT_MS);
   });

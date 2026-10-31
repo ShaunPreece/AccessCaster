@@ -18,6 +18,7 @@ no USB setting is touched.
     python DevTools/test_announcer_reconnect.py
 """
 from __future__ import annotations
+
 import sys
 import threading
 import time
@@ -25,7 +26,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_hid
 import rcp_transfer
 import server

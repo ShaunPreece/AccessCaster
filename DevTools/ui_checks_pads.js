@@ -1,5 +1,6 @@
+// probe: route=pads timeout=600
 /* Machine checks for the SMART pads page.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_pads.js --route pads
+   Run with: python DevTools/run_ui_probes.py pads
    Same shape as ui_checks_device.js. This is NOT a screen-reader pass: it pins the things a screen
    reader depends on and the eye cannot see (roles, states, one tab stop, what is exposed, what each
    tab reads), so the NVDA run is about how it SOUNDS.
@@ -32,44 +33,6 @@ const key = (ev, target) => target.dispatchEvent(
   new KeyboardEvent("keydown", { key: ev, bubbles: true, cancelable: true }));
 const paths = (log) => log.map((e) => e.method + " " + e.path);
 const hit = (log, needle) => paths(log).some((p) => p.indexOf(needle) >= 0);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-async function apiLog() {
-  const log = await probeLog();
-  return log.filter((e) => e.path.indexOf("/api/") === 0 && e.path.indexOf("/api/ping") < 0);
-}
-
-async function waitForApi(wanted, ms) {
-  const until = Date.now() + (ms || 25000);
-  while (Date.now() < until) {
-    const seen = (await apiLog()).map((e) => e.path);
-    if (wanted.every((w) => seen.some((p) => p.indexOf(w) >= 0))) return true;
-    await sleep(120);
-  }
-  return false;
-}
-
-/* Wait for the device traffic to stop, so a "nothing else was read" check cannot pass by looking too
-   early. The window is comfortably longer than the 350 ms tab-read debounce. */
-async function quiet(ms) {
-  let last = (await apiLog()).length;
-  let lastChange = Date.now();
-  const until = Date.now() + 25000;
-  while (Date.now() < until) {
-    await sleep(150);
-    const n = (await apiLog()).length;
-    if (n !== last) { last = n; lastChange = Date.now(); }
-    else if (Date.now() - lastChange > (ms || 1400)) return;
-  }
-}
 
 /* A logged request is not a finished read: /api/soundpads is a ~1.5 s device dump, and a check that
    looked at the page in between would be reading the PREVIOUS pad state. loadPads replaces padsData
@@ -557,13 +520,12 @@ async function run() {
     window.localStorage.getItem("accesscaster.groups") === null,
     window.localStorage.getItem("accesscaster.groups"));
 
-  // ---- nothing was written --------------------------------------------
-  const HOUSEKEEPING = ["/api/ping", "/api/focus", "/api/quit"];
-  const isWrite = (e) => e.method === "POST" && e.path.indexOf("/api/") === 0
-                         && HOUSEKEEPING.indexOf(e.path) < 0;
-  const writes = (await probeLog()).filter(isWrite);
-  check("nothing up to here tried to write to the device", writes.length === 0,
-    writes.map((e) => e.path).join(" "));
+  // ---- nothing else was written, in the whole run ---------------------------------
+  // The dropdown checks above made the run's only writes so far, both stubbed: Enter, and a mouse
+  // pick, each writing the colour once.
+  const writePaths = (await probeWrites()).map((e) => e.path.split("?")[0]);
+  checkEqual("up to here, the only writes were the two stubbed colour picks", writePaths,
+    [COLOUR_API, COLOUR_API]);
 
   /* ---- LAST, because it is the one check that presses a write button ----
      A successful Apply is supposed to leave Pad Type for Settings, since volume and looping are
@@ -588,10 +550,9 @@ async function run() {
     check("Apply re-read the pads before showing you the settings",
       await padsRead(before));
     await quiet();
-    const after = (await probeLog()).filter(isWrite);
-    check("the only write in the whole run was that one stubbed Apply",
-      after.length === 1 && after[0].path.indexOf("/api/pad/create-special") === 0,
-      after.map((e) => e.path).join(" "));
+    const after = (await probeWrites()).map((e) => e.path.split("?")[0]);
+    checkEqual("the only other write in the whole run was that one stubbed Apply", after,
+      [COLOUR_API, COLOUR_API, "/api/pad/create-special"]);
   }
 
   // ---- Maintenance tab: restoring the voice effects, and exporting a pad's sound ----
@@ -631,7 +592,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

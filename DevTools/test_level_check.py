@@ -14,12 +14,13 @@ NO DEVICE NEEDED. What this pins is the reasoning, not the plumbing:
     python DevTools/test_level_check.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
+import autogain
 import devices
 import meters
 import server
@@ -210,6 +211,13 @@ st = server.channel_level_check_status()
 check("nothing is running to begin with", st["running"], False)
 check("and it says so with no channel named", st["channel"], "")
 
+print("\nAUTO GAIN'S VERDICT ON A TAKE WITH NOTHING USABLE")
+short = autogain.verdict({"loud_db": -60.0, "max_db": -20.0})
+check("a short sound is not used", short["ok"], False)
+check_in("and is called a short sound", "short sound", short["reason"])
+check_not_in("not a missing microphone", "plugged in", short["reason"])
+none = autogain.verdict({"loud_db": -60.0, "max_db": -60.0})
+check_in("nothing at all says to check the microphone", "plugged in", none["reason"])
 print("")
 if FAILS:
     print("FAILURES (%d):" % len(FAILS))

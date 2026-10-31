@@ -7,12 +7,12 @@ DevTools/probe_callme_live.py.
     python DevTools/test_callme.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import callme
 import model_tree
 

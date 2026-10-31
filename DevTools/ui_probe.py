@@ -44,17 +44,12 @@ import win32process
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _bootstrap  # noqa: E402,F401  (puts Project/ on sys.path)
-import page        # noqa: E402  - the same index.html assembly the real server uses
+import page  # noqa: E402  - the same index.html assembly the real server uses
+from browser import find_browser  # the same browser the app opens its UI in
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 STATIC = os.path.join(ROOT, "Project", "static")
-
-BROWSERS = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-]
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -63,13 +58,24 @@ MIME = {
     ".json": "application/json; charset=utf-8",
 }
 
-# The harness the checks file runs inside. `check(name, cond, detail)` records a result, `probeLog()`
-# fetches the recorded request log, and `done()` posts everything back for this script to print.
+# The harness the checks file runs inside: the helpers every suite shares, so no suite writes its
+# own copy. A copy drifts: a `waitFor` that does not await its predicate returns at once on an async
+# one, and a "nothing was written" filter that forgets the heartbeat fails on it.
 HARNESS = r"""
 (function () {
   const results = [];
+  // check(name, cond, detail): one result, passed when `cond` is truthy.
   window.check = function (name, cond, detail) {
     results.push({ name: name, ok: !!cond, detail: detail === undefined ? "" : String(detail) });
+  };
+  // checkEqual(name, actual, expected): passes when the two are equal, compared as JSON so arrays
+  // and objects compare by value. The argument order has one right way to be written, which a
+  // check(name, actual, expected) does not: that passes on any truthy `actual`.
+  window.checkEqual = function (name, actual, expected) {
+    const ok = JSON.stringify(actual) === JSON.stringify(expected);
+    results.push({ name: name, ok: ok,
+      detail: ok ? String(actual) : "got " + JSON.stringify(actual)
+                                   + ", wanted " + JSON.stringify(expected) });
   };
   window.probeLog = async function () {
     const r = await fetch("/__probe_log");
@@ -79,6 +85,86 @@ HARNESS = r"""
     await fetch("/__probe_clear", { method: "POST" });
   };
   window.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // What the page sends on its own whatever is being tested: the heartbeat every 4 seconds, the
+  // focus report and the quit beacon. None of them is a write to the desk.
+  window.HOUSEKEEPING = ["/api/ping", "/api/focus", "/api/quit"];
+  const housekeeping = (path) => window.HOUSEKEEPING.some((h) => path.indexOf(h) === 0);
+  // The /api POSTs in `log`, housekeeping left out: what the page tried to write.
+  window.pagePosts = (log) => log.filter((e) => e.method === "POST"
+    && e.path.indexOf("/api/") === 0 && !housekeeping(e.path));
+  // Every /api POST of the WHOLE run, housekeeping left out. probeClear() does not empty this, so
+  // a "nothing was written" check sees the run and not only the writes since the last clear.
+  window.probeWrites = async function () {
+    const r = await fetch("/__probe_writes");
+    return window.pagePosts(await r.json());
+  };
+  // The /api requests in the log since the last clear, housekeeping left out.
+  window.apiLog = async function () {
+    return (await window.probeLog()).filter((e) => e.path.indexOf("/api/") === 0
+      && !housekeeping(e.path));
+  };
+
+  // Wait until fn() is truthy, awaiting it when it is async, or `ms` passes. Returns whether it
+  // came true. A throw counts as "not yet", so a predicate can reach for an element not built yet.
+  window.waitFor = async function (fn, ms) {
+    const until = Date.now() + (ms || 8000);
+    while (Date.now() < until) {
+      try { if (await fn()) return true; } catch { /* not ready */ }
+      await window.sleep(80);
+    }
+    return false;
+  };
+  // Wait until every path fragment in `wanted` has been requested.
+  window.waitForApi = async function (wanted, ms) {
+    return window.waitFor(async () => {
+      const seen = (await window.apiLog()).map((e) => e.path);
+      return wanted.every((w) => seen.some((p) => p.indexOf(w) >= 0));
+    }, ms || 25000);
+  };
+  // Wait for the device traffic to stop for `ms`, so a "nothing else was read" check cannot pass by
+  // looking too early. The default is comfortably longer than the 350 ms tab-read debounce.
+  window.quiet = async function (ms) {
+    let last = (await window.apiLog()).length;
+    let lastChange = Date.now();
+    const until = Date.now() + 25000;
+    while (Date.now() < until) {
+      await window.sleep(150);
+      const n = (await window.apiLog()).length;
+      if (n !== last) { last = n; lastChange = Date.now(); }
+      else if (Date.now() - lastChange > (ms || 1400)) return;
+    }
+  };
+
+  // A node's text with the source's line wrapping collapsed, so a check matches across a line break.
+  window.flatText = (node) => (node ? node.textContent.replace(/\s+/g, " ").trim() : "");
+  // The accessible name as a screen reader builds it: aria-label, then aria-labelledby, then the
+  // <label> for or around the control, then the control's own text.
+  window.accessibleName = function (node) {
+    if (!node) return "";
+    if (node.getAttribute("aria-label")) return node.getAttribute("aria-label").trim();
+    const by = (node.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean);
+    if (by.length) return by.map((id) => window.flatText(document.getElementById(id))).join(" ");
+    const lab = (node.id && document.querySelector("label[for='" + node.id + "']"))
+      || node.closest("label");
+    return window.flatText(lab || node);
+  };
+  // The description a screen reader reads after the name: the text of EVERY element
+  // aria-describedby names, since it may name several.
+  window.describedText = function (node) {
+    const ids = ((node && node.getAttribute("aria-describedby")) || "").split(/\s+/)
+      .filter(Boolean);
+    return ids.map((id) => window.flatText(document.getElementById(id))).join(" ");
+  };
+
+  // Run a suite's `run`, and report a throw as a failed check rather than a page that never
+  // reported back.
+  window.probeRun = function (run) {
+    run().catch(async (e) => {
+      window.check("the checks ran to the end", false, String((e && e.stack) || e));
+      await window.probeDone();
+    });
+  };
   window.probeDone = async function () {
     const errs = window.__probeErrors || [];
     try {
@@ -112,6 +198,9 @@ class Probe:
         # Stubs are read-only fixtures; nothing here can reach the desk.
         self.stubs = stubs or {}
         self.log: list[dict] = []
+        # Every /api POST of the run. /__probe_clear empties `log` and never this, so a check that
+        # nothing was written sees the whole run.
+        self.writes: list[dict] = []
         self.lock = threading.Lock()
         self.payload = None
         self.finished = threading.Event()
@@ -130,10 +219,16 @@ class Probe:
                 entry["body"] = text
         with self.lock:
             self.log.append(entry)
+            if method == "POST" and path.startswith("/api/"):
+                self.writes.append(entry)
 
     def snapshot(self):
         with self.lock:
             return list(self.log)
+
+    def writes_snapshot(self):
+        with self.lock:
+            return list(self.writes)
 
     def clear(self):
         with self.lock:
@@ -156,8 +251,8 @@ def make_handler(probe: Probe):
             self.end_headers()
             try:
                 self.wfile.write(body)
-            except Exception:
-                pass
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass            # the browser hung up, as it does when the run ends
 
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj).encode("utf-8"),
@@ -187,6 +282,9 @@ def make_handler(probe: Probe):
                 return
             if path == "/__probe_log":
                 self._json(probe.snapshot())
+                return
+            if path == "/__probe_writes":
+                self._json(probe.writes_snapshot())
                 return
             if path == "/__probe.js":
                 self._send(200, (HARNESS + "\n" + probe.checks_js).encode("utf-8"),
@@ -284,13 +382,6 @@ def pick_port(preferred: int, probe: Probe):
     raise SystemExit("no free port from %d upwards: %s" % (preferred, last))
 
 
-def find_browser():
-    for path in BROWSERS:
-        if os.path.isfile(path):
-            return path
-    return None
-
-
 PROFILE_PREFIX = "ui_probe_"
 PROFILE_MAX_AGE_S = 24 * 3600   # far longer than any run, so a concurrent suite's profile is safe
 
@@ -344,8 +435,8 @@ class BrowserJob:
     def close(self, wait_s: float = 10.0):
         """End every process in the job and wait for them to go, so the profile can be deleted."""
         win32job.TerminateJobObject(self.job, 0)
-        deadline = time.time() + wait_s
-        while time.time() < deadline:
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
             accounting = win32job.QueryInformationJobObject(
                 self.job, win32job.JobObjectBasicAccountingInformation)
             if not accounting["ActiveProcesses"]:

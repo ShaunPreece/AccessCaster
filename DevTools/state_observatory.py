@@ -32,6 +32,7 @@ disk or printed is redacted by SECRET_NAME below. Snapshots land in DevTools/cap
 gitignored; never move one out of there.
 """
 from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -41,11 +42,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hid
 import model_tree
-import rcp_read
 import rcp_hid
+import rcp_read
 
 OUT_DIR = Path(__file__).resolve().parent / "captures" / "observatory"
 
@@ -271,9 +271,7 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # Guided session: speak each step, listen throughout, tag events by step
 # ---------------------------------------------------------------------------
-# Shaun is at the DESK during phase 1, not at the keyboard, so the steps have to be spoken.
-# say.ps1 normally stays silent while the Claude GUI has focus; -Force overrides that, which is
-# exactly this case (he is not reading the chat, he is pressing buttons).
+# Phase 1 is done at the DESK, not at the keyboard, so the steps have to be spoken.
 SAY = Path(__file__).resolve().parent.parent / "Project" / "say.ps1"
 
 # (spoken prompt, seconds to allow). Kept here so a re-run on the Duo uses the same script.
@@ -293,7 +291,7 @@ def _say(text: str) -> None:
     import subprocess
     try:
         subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-File", str(SAY),
-                          "-Text", text, "-Force"],
+                          "-Text", text],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         print(f"(could not speak: {e})")

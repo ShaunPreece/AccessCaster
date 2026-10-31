@@ -33,13 +33,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 
 import devices
+import diagnostics
 import rcp_read
 import rcp_transfer
-from paths import data_path, write_json
+from paths import data_path, safe_name, write_json
 from wording import count, plural
 
 # Saved schemes are user data, beside the profiles in %LOCALAPPDATA%\AccessCaster, so they survive
@@ -51,14 +51,6 @@ SCHEME_VERSION = 1
 WRITE_PACE = 0.03
 
 # ---- naming + listing (pure file ops, no device) ----------------------------------------------
-
-def safe_name(name: str):
-    """The same rule as a profile name, so the two stores cannot disagree about what is nameable."""
-    name = (name or "").strip()
-    if not re.match(r"^[A-Za-z0-9 _-]{1,40}$", name):
-        return None
-    return name
-
 
 def _path(safe: str) -> str:
     return os.path.join(SCHEMES_DIR, safe + ".json")
@@ -298,7 +290,8 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
             fn()
             applied += 1
             ok = True
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("scheme.write_failed", str(exc))
             failed += 1
             ok = False
         time.sleep(pace)

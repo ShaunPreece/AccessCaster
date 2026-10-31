@@ -36,9 +36,8 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401,E402  - puts Project/ on sys.path
-
-import model_tree   # noqa: E402
-import rcp_read     # noqa: E402
+import model_tree  # noqa: E402
+import rcp_read  # noqa: E402
 
 CAPTURES = pathlib.Path(__file__).resolve().parent / "captures"
 PLACEHOLDER_COLOUR = "ff000000"

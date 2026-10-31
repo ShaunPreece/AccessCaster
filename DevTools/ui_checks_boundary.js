@@ -1,5 +1,6 @@
+// probe: route=about timeout=90
 /* Machine checks for THE END-OF-PAGE HARD STOP (app.js bindPageBoundary).
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_boundary.js --route about
+   Run with: python DevTools/run_ui_probes.py boundary
 
    WHAT IT IS. Tab on the last control of a page stays put and plays a short tone. Wrapping round
    to the top instead tells you nothing: you quietly find yourself somewhere else. Nothing is made
@@ -22,15 +23,6 @@ const key = (target, opts) => {
   target.dispatchEvent(ev);
   return ev;
 };
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function run() {
   await waitFor(() => !document.getElementById("sec-about").hidden, 20000);
@@ -176,7 +168,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

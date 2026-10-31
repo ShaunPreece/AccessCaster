@@ -33,8 +33,8 @@ Usage:
 import sys
 import time
 
-import hid
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import hid
 import rcp_read as rr
 import rcp_transfer as t
 

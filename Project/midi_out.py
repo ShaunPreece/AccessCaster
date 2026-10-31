@@ -27,18 +27,14 @@ ordinary HID write - `soundpad.select_bank`. Do not go looking for the CC 0 / CC
 RODE's spec; it is marked "verify" and it is not needed.
 """
 from __future__ import annotations
+
 import contextlib
 import ctypes
-import os
 import threading
 import time
 from ctypes import wintypes
 
-# AN OFFLINE TEST MUST NOT BE ABLE TO PLAY A PAD. Read from the environment rather than imported
-# from rcp_hid, which keeps this module dependency-light: it speaks winmm through ctypes and must
-# not drag hidapi in behind it. `DevTools/_bootstrap` sets the variable for any `test_*` script.
-_NO_WRITE = bool(os.environ.get("ACCESSCASTER_NO_DEVICE_WRITE")) and not os.environ.get(
-    "ACCESSCASTER_ALLOW_DEVICE_WRITE")
+import write_guard
 
 PORT_NAME = "MIDI function"
 CC_PLAY_PAD = 35
@@ -73,15 +69,6 @@ def find_port(name: str = PORT_NAME):
     return None
 
 
-def _refuse_in_tests() -> None:
-    """GUARDED LIKE EVERY OTHER DEVICE WRITE. A send PLAYS A PAD, so an offline suite that reaches
-    one makes a noise in somebody's room and possibly in their recording."""
-    if _NO_WRITE:
-        raise RuntimeError("REFUSING TO PLAY A PAD: this is an offline test "
-                           "(ACCESSCASTER_NO_DEVICE_WRITE). Stub it, or set "
-                           "ACCESSCASTER_ALLOW_DEVICE_WRITE if it is a live suite.")
-
-
 def _cc_message(channel: int, control: int, value: int) -> int:
     """midiOutShortMsg packs a message little-endian into one DWORD: status, data1, data2."""
     return (0xB0 | (channel & 0x0F)) | ((control & 0x7F) << 8) | ((value & 0x7F) << 16)
@@ -111,7 +98,7 @@ class MidiOut:
 
     def cc(self, channel: int, control: int, value: int) -> None:
         """One control-change message. `channel` is 0-based (MIDI channel 1 = 0)."""
-        _refuse_in_tests()
+        write_guard.refuse_in_tests("play a pad")
         if self._h is None:
             raise RuntimeError("this MidiOut is closed (send inside the `with` block)")
         rc = _winmm.midiOutShortMsg(self._h, wintypes.DWORD(_cc_message(channel, control, value)))
@@ -176,7 +163,7 @@ def send_cc(channel: int, control: int, value: int) -> None:
     great many things but not across a replug, and without the retry the first unplug of a session
     would leave every later pad shortcut dead until the app was restarted - which reads as "pads
     stopped working" rather than as "the cable moved"."""
-    _refuse_in_tests()
+    write_guard.refuse_in_tests("play a pad")
     with _lock:
         _open_locked()
         rc = _winmm.midiOutShortMsg(_handle, wintypes.DWORD(_cc_message(channel, control, value)))

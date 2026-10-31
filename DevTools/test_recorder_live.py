@@ -22,6 +22,7 @@ end so a stray would be caught rather than assumed away.
     python DevTools/test_recorder_live.py --secs 12
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import threading
@@ -31,7 +32,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hid
 import rcp_read
 import rcp_transfer

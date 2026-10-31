@@ -14,9 +14,9 @@ Usage:
 import sys
 import time
 
-import hid
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-import rcp_hid          # write_report: bumps the model-read cache so read-back is honest
+import hid
+import rcp_hid  # write_report: bumps the model-read cache so read-back is honest
 import rcp_read as rr
 import rcp_transfer as t
 

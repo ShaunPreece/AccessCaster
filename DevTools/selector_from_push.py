@@ -22,6 +22,7 @@ Usage:
     python DevTools/selector_from_push.py --secs 20 --raw
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -29,7 +30,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hid
 import rcp_transfer
 

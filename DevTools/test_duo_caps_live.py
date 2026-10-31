@@ -21,6 +21,7 @@ take the desk's buttons or its outputs away, and this suite is meant to run with
 Run: python DevTools/test_duo_caps_live.py [--only NAME]
 """
 from __future__ import annotations
+
 import sys
 import time
 
@@ -29,6 +30,7 @@ import channels as c
 import devices
 import model_tree
 import rcp_read as rr
+import rcp_transfer
 
 FAILED = 0
 NOTES: list[str] = []
@@ -229,7 +231,7 @@ if "input_mic_write" in dev.caps:
 # ---- processing ------------------------------------------------------------------------------
 if "processing" in dev.caps:
     strip = c._strip_index(mic)
-    proc_path = (dev.proc_sel_base + strip,)
+    proc_path = (rcp_transfer.SEL_CHANNEL + strip,)
     blob, snap = snapshot()
     cur = snap.get((proc_path, "CHANNEL", "hpfOn"))
     probe(f"processing: {mic['label']} high-pass filter on/off (strip {strip})",
@@ -268,7 +270,7 @@ if "processing" in dev.caps:
     if pads is not None:
         import rcp_transfer as _rt
         pads_strip = c._strip_index(pads)
-        pads_path = (dev.proc_sel_base + pads_strip,)
+        pads_path = (rcp_transfer.SEL_CHANNEL + pads_strip,)
         pads_row = [(_rt.cross_point_selector(o, pads["source_code"]),)
                     for o in range(dev.matrix.output_count)]
         cur = snap.get((pads_path, "CHANNEL", c.MUTE_PROP))
@@ -731,7 +733,7 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
 # the desk consumes, so only the desk's own ANSWER can prove the address. Here that answer is
 # `showControlLastError`, which a dead address could never set.
 if "shows" in dev.caps and (not ONLY or "show" in ONLY):
-    import recorder as rec          # for read_volumes: the gate below needs to know about storage
+    import recorder as rec  # for read_volumes: the gate below needs to know about storage
     import shows as sh
     print("\n=== shows: SHOWCONTROL resolves on this desk ===")
     b0, snap0 = snapshot()

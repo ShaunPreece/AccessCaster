@@ -13,8 +13,10 @@ the page or is named in UNIT_SETTINGS_NOT_ON_PAGE with the reason.
 This is the place for any other "two tables that must agree" check. Run:
     python DevTools/test_specs.py
 """
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import pathlib
+import re
 
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import rcp_transfer
 import server
 
@@ -79,7 +81,6 @@ print("\nlookups that could match inside a longer property name")
 #
 # The names below are the ones the app looks up that way. Any name that is a prefix of another real
 # property must NOT be in this list: read it by block and exact name instead.
-import re, pathlib
 src = pathlib.Path(__file__).resolve().parents[1].joinpath("Project", "server.py")
 looked_up = sorted(set(re.findall(r'first\("([A-Za-z][A-Za-z0-9_]+)"\)',
                                   src.read_text(encoding="utf-8"))))
@@ -172,6 +173,7 @@ print("\nunit settings: what a profile does with them")
 # is not one, and the reason it is acceptable here (a restored mute silences someone mid-show) has
 # to stay attached to the decision.
 import profiles
+
 never = profiles.UNIT_NEVER_RESTORE
 check("the never-restore list only names writable settings",
       all(p in rcp_transfer.UNIT_SETTING_SEL for p in never), f"{sorted(never)}")
@@ -187,6 +189,7 @@ print("\nstereo-linked pairs: nameable, never assignable")
 # would hand "Mic 1 + 2" to a spare strip while Mic 1 and Mic 2 were also assignable, and a mic
 # would end up both linked and on its own fader.
 import devices as _dev
+
 for _d in _dev.DEVICES.values():
     _f = _d.fader
     check(f"{_d.name}: pair codes stay OUT of code_set",
@@ -204,11 +207,6 @@ for _d in _dev.DEVICES.values():
     check(f"{_d.name}: the stereo_link cap and the pair table agree",
           ("stereo_link" in _d.caps) == bool(_f.stereo_pairs),
           f"cap={'stereo_link' in _d.caps} pairs={bool(_f.stereo_pairs)}")
-
-# The pair codes are protocol facts, so they must match the one table that records them.
-check("the pair codes match rcp_transfer.STEREO_LINK_PAIRS",
-      _dev.PRO2.fader.pair_map == rcp_transfer.STEREO_LINK_PAIRS,
-      f"{_dev.PRO2.fader.pair_map} vs {rcp_transfer.STEREO_LINK_PAIRS}")
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +261,7 @@ for _id in ("fader-levels-status", "reset-outputs-status", "stereo-status"):
 # on the id alone then falls through to DEFAULT, which IS a Pro II - so the fault is invisible on a
 # Pro II and hands a DUO the wrong matrix shape and channel layout. Checked here rather than on
 # hardware because only the Duo half is wrong and no Duo is attached.
-import devices                                                          # noqa: E402
+import devices  # noqa: E402
 
 print("\nIDENTIFYING A DESK WHOSE PRODUCT ID IS NOT IN THE TABLE")
 
@@ -377,9 +375,6 @@ for _dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, device
         check(f"{_n}: the grid read covers every row offered (expanded={_exp})",
               set(s["index"] for s in _dev.matrix.sources_for(_exp))
               <= set(_dev.matrix.all_source_indices))
-        check(f"{_n}: the display list and its index view agree (expanded={_exp})",
-              tuple(_dev.matrix.source_indices_for(_exp))
-              == tuple(s["index"] for s in _dev.matrix.sources_for(_exp)))
     # A SCHEME'S SHAPE MUST NOT DEPEND ON THE MODE, so what is read and stored is the wide set in
     # both: a scheme saved in Standard carrying no Virtual A cell left one behind when applied in
     # Expanded, and "Everything normal" could not reset it.

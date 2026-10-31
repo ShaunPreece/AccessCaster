@@ -9,6 +9,7 @@ the format stores keys rather than indices, and an index bug there is silent on 
 Run: python DevTools/test_schemes.py
 """
 from __future__ import annotations
+
 import os
 import sys
 import tempfile

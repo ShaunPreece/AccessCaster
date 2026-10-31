@@ -24,6 +24,7 @@ It reads only, and opens each WAV's chunk headers rather than its audio, so it i
 long take.
 """
 from __future__ import annotations
+
 import struct
 import sys
 from pathlib import Path

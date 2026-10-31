@@ -21,6 +21,7 @@ any volume and no recording is touched.
     python DevTools/transfer_volumes.py [--mode N]
 """
 from __future__ import annotations
+
 import argparse
 import os
 import shutil
@@ -31,7 +32,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_transfer as _t
 
 AUDIO = (".wav", ".mp3", ".flac", ".aiff", ".aif")
@@ -97,7 +97,7 @@ def main() -> int:
 
     try:
         print(f"\ntransferModeType = {args.mode} (enter) ...")
-        _t.send_record(_t.build_global_prop_int("transferModeType", _t.SEL_TRANSFER_MODE,
+        _t.send_record(_t.build_global_prop_int("transferModeType", _t.SEL_SYSTEM,
                                                 args.mode))
         time.sleep(1.5)
         print("remountPadStorage ...")

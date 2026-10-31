@@ -7,13 +7,13 @@ their timing. Nothing here downloads or installs: `updateInitiateRequested` is n
     python DevTools/probe_update_check.py [seconds]
 """
 from __future__ import annotations
+
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import model_tree
 import rcp_hid
 import rcp_read

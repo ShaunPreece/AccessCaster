@@ -27,13 +27,12 @@ import subprocess
 import sys
 import time
 
-import win32api
-import win32con
-import win32gui
-
 import autostart
 import diagnostics
 import server
+import win32api
+import win32con
+import win32gui
 from paths import resource_path
 
 APP_NAME = "AccessCaster"

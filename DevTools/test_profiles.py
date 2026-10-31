@@ -15,6 +15,7 @@ than writing an unmapped selector (the stray-append hazard).
 Run: python DevTools/test_profiles.py
 """
 from __future__ import annotations
+
 import os
 import shutil
 import sys

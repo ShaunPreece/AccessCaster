@@ -26,46 +26,52 @@ import datetime
 import json
 import os
 import queue
-import secrets                    # remote-access token (see access_token)
-import shutil
-import socket                     # to report this machine's LAN address for the remote link
+import secrets  # remote-access token (see access_token)
+import socket  # to report this machine's LAN address for the remote link
 import subprocess
 import tempfile
 import threading
-import urllib.parse               # to read ?t=<token> off a request path
 import time
+import urllib.parse  # to read ?t=<token> off a request path
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import diagnostics            # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
+import app_settings  # this app's own settings file: export and import, no file access
+import autogain  # sets a mic's gain by measuring it
+import autostart  # the HKCU Run entry, shared with installer.iss
+import browser  # the Chromium browser the UI opens in
+import callme  # RODE's remote guests: hosting, answering, call state
+import channels
+import commands  # the catalogue of what a shortcut can do, from the spec tables
+import devices  # per-device model (matrix labels, caps) keyed by product id
+import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
+import driver_install  # fetching that driver from RODE: the app's ONLY outbound call
+import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
+import meters  # level metering, read from Windows' audio endpoints (not over USB)
+import midi_out  # the desk's own MIDI port: the ONLY way to play a sound pad
+import model_tree
+import page  # assembles index.html from static/index.html + static/help.html
+import profiles  # settings backup/restore (save+restore live here, not in server)
 import rcp_hid
 import rcp_read
-import model_tree
 import rcp_transfer
-import channels
-import devices                  # per-device model (matrix labels, caps) keyed by product id
-import soundpad                 # single source of truth for ALL pad operations
-import midi_out                 # the desk's own MIDI port: the ONLY way to play a sound pad
-import autostart               # the HKCU Run entry, shared with installer.iss
-import app_settings            # THIS APP's own settings (shortcuts, announcements) - export /
-                               # import. Pure, like profiles: it never touches a file.
-import profiles                 # settings backup/restore (save+restore live here, not in server)
-import routing_schemes          # saved output-mix schemes (the matrix under a name) + the built-ins
-import meters                   # level metering, read from Windows' audio endpoints (not over USB)
-import virtual_devices          # RODE's Virtual Device Driver: its state, and switching its endpoints on
-import driver_install           # fetching that driver from RODE: the app's ONLY outbound call
-import autogain                # sets a mic's gain by measuring it
-import recorder                 # the transport: start/pause/stop, storage volumes, recordings
-import callme                   # RODE's remote guests: hosting, answering, call state
-import shows                    # the DESK'S own backup: export/import/factory reset (not profiles)
-import tones                    # the announcer's non-speech cues (the mute tones), generated WAVs
-import hotkeys                  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
-import commands                 # ...and the CATALOGUE of what a shortcut can do, generated from
-                                # the app's own spec tables
-import page                     # assembles index.html from static/index.html + static/help.html
-import wording                  # plurals, spoken lists and durations
-from paths import resource_path, data_path, write_json   # frozen-build-safe asset/data locations
-from version import __version__ as APP_VERSION   # single source of truth (Project/version.py)
+import recorder  # the transport: start/pause/stop, storage volumes, recordings
+import routing_schemes  # saved output-mix schemes (the matrix under a name) + the built-ins
+import shows  # the DESK'S own backup: export/import/factory reset (not profiles)
+import soundpad  # single source of truth for ALL pad operations
+import tones  # the announcer's non-speech cues (the mute tones), generated WAVs
+import virtual_devices  # RODE's Virtual Device Driver: its state, and switching its endpoints on
+import wording  # plurals, spoken lists and durations
+from paths import (  # frozen-build-safe asset/data locations
+    data_path,
+    read_json,
+    resource_path,
+    safe_name,
+    write_json,
+)
+from version import (
+    __version__ as APP_VERSION,  # single source of truth (Project/version.py)
+)
 
 HTTP_HOST = "0.0.0.0"     # bind all interfaces so a phone on the LAN can view the UI
 HTTP_PORT = 8770
@@ -633,7 +639,8 @@ def _announcer_into_desk() -> dict:
                 "default_output": default_name,
                 "announcing": _announce_on.is_set(),
                 "mute_while_recording": _record_mutes_announcer()}
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("announcer.route_unknown", str(exc))
         return {"known": False}
 
 
@@ -992,10 +999,13 @@ def action_storage_eject(index: int, on: bool = True) -> dict:
                 rcp_transfer.build_path_prop_bool("storageVolumeEject", on, path))
             time.sleep(1.5 if on else 3.0)
             blob = rcp_read.read_model_stable(fresh=True)
-        now = next(v for v in recorder.read_volumes(blob) if v["index"] == vol["index"])
+        now = next((v for v in recorder.read_volumes(blob) if v["index"] == vol["index"]), None)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the {recorder.volume_spoken(index)}: "
                                         f"{exc}"}
+    if now is None:
+        return _storage_reply(blob, False, f"The unit no longer reports the {vol['spoken']}. If it "
+                                           f"has been unplugged, plug it in again to use it.")
     if on:
         if now["mounted"]:
             return _storage_reply(blob, False, f"The {vol['spoken']} is still in use: the unit "
@@ -1573,15 +1583,15 @@ def action_callme_decline() -> dict:
     return _callme_respond(False)
 
 
-def callme_status_sentence() -> str:
+def callme_status() -> dict:
     """For the status shortcut: from the Watcher, falling back to a dump."""
     try:
         d, _path = _callme_state_now()
     except Exception as exc:
-        return f"Could not read CallMe: {exc}"
+        return {"ok": False, "message": f"Could not read CallMe: {exc}"}
     if not d.get("ok", True):
-        return d.get("message") or "CallMe could not be read."
-    return callme.status_sentence(d)
+        return {"ok": False, "message": d.get("message") or "CallMe could not be read."}
+    return {"ok": True, "message": callme.status_sentence(d)}
 
 
 # ----------------------------------------------------------------------------
@@ -2354,7 +2364,8 @@ def _wait_for_wifi_address():
         try:
             with _hid_lock:
                 state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("wifi.read_failed", "still waiting for an address", error=str(exc))
             continue
         if state.get("wrong_password") or state.get("ip"):
             break
@@ -2538,7 +2549,7 @@ def action_scan_wifi() -> dict:
                         f"from this list; you can always type the name instead.")}
 
 
-def _cap_gate(cap: str, refusal) -> dict:
+def _cap_gate(cap: str, refusal) -> dict | None:
     """None if the CONNECTED device has `cap`, else a refusal dict carrying `refusal(device name)`.
 
     THE ONE SHAPE EVERY RISKY WRITE FAMILY IS GATED BY. The rule behind all of them: a selector
@@ -2665,9 +2676,9 @@ _ANN_RECONNECT_SPEAK_AFTER_S = 1.0
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-# SPEECH: one PERSISTENT worker process, fed a phrase per line on stdin (say_worker.ps1).
-# NOT one `say.ps1` process per phrase: that costs 1.3-1.7 s each (PowerShell + speech-stack
-# startup, not the speaking), and since the announcer speaks on every mute/solo press, a few quick
+# SPEECH: one PERSISTENT worker process, fed a phrase per line on stdin (say.ps1 run without
+# -Text). NOT one `say.ps1 -Text` process per phrase: that costs 1.3-1.7 s each (PowerShell and
+# speech-stack startup, not the speaking), and since the announcer speaks on every mute/solo press, a few quick
 # presses spawn several such processes all fighting for the audio device, so announcements lag and
 # then appear to stop. With the worker, only the FIRST phrase pays startup. If the worker cannot be
 # started we fall back to the one-shot, so the worst case is slow rather than silent.
@@ -2716,25 +2727,18 @@ _SETTINGS_FILE = data_path("settings.json")
 _settings_lock = threading.Lock()
 
 
-def _read_settings() -> tuple[dict | None, str]:
-    """The settings file's contents and how the read went: "ok" (including no file yet, which is
-    {}), "corrupt" (it exists but is not a JSON object) or "unreadable" (it could not be opened,
-    which may be passing, such as a scanner holding it). The contents are None unless "ok"."""
+def _read_settings() -> dict | None:
+    """The settings file's contents, {} when there is none yet or it did not parse (see
+    `paths.read_json`), or None when it could not be opened, which may be passing, such as a
+    scanner holding it."""
     try:
-        with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return {}, "ok"
+        return read_json(_SETTINGS_FILE, {})
     except OSError:
-        return None, "unreadable"
-    except ValueError:
-        return None, "corrupt"
-    return (data, "ok") if isinstance(data, dict) else (None, "corrupt")
+        return None
 
 
 def load_settings() -> dict:
-    data, _ = _read_settings()
-    return data if data is not None else {}
+    return _read_settings() or {}
 
 
 def update_settings(**changes) -> None:
@@ -2746,21 +2750,13 @@ def update_settings(**changes) -> None:
     be opened at all is left alone and this change is dropped: writing would replace every other
     key with nothing."""
     with _settings_lock:
-        data, status = _read_settings()
-        if status == "unreadable":
+        data = _read_settings()
+        if data is None:
             diagnostics.event("settings.unreadable", "settings.json could not be opened",
                               dropped=",".join(changes))
             return
-        if status == "corrupt":
-            try:
-                os.replace(_SETTINGS_FILE, _SETTINGS_FILE + ".bad")
-                diagnostics.event("settings.corrupt", "settings.json did not parse; kept as .bad")
-            except OSError as exc:
-                diagnostics.event("settings.corrupt", "settings.json did not parse",
-                                  error=str(exc))
-                return
         try:
-            write_json(_SETTINGS_FILE, {**(data or {}), **changes})
+            write_json(_SETTINGS_FILE, {**data, **changes})
         except OSError as exc:
             diagnostics.event("settings.write_failed", "settings.json not written", error=str(exc))
 
@@ -2801,8 +2797,8 @@ def _sapi_lists(refresh: bool = False) -> dict:
             return dict(_ann_speech_cache)
         voices, outputs = [], []
         try:
-            import pythoncom                      # noqa: PLC0415  (pywin32, Windows only)
-            import win32com.client                # noqa: PLC0415
+            import pythoncom  # noqa: PLC0415  (pywin32, Windows only)
+            import win32com.client  # noqa: PLC0415
             pythoncom.CoInitialize()
             try:
                 spv = win32com.client.Dispatch("SAPI.SpVoice")
@@ -2815,8 +2811,9 @@ def _sapi_lists(refresh: bool = False) -> dict:
                 # sort of thing that gets blamed for an unrelated fault later.
                 spv = None
                 pythoncom.CoUninitialize()
-        except Exception:
-            pass
+        except Exception as exc:
+            diagnostics.event("announcer.sapi_unread", "voices and outputs not listed",
+                              error=str(exc))
         _ann_speech_cache["voices"] = voices
         _ann_speech_cache["outputs"] = outputs
         return dict(_ann_speech_cache)
@@ -2824,7 +2821,7 @@ def _sapi_lists(refresh: bool = False) -> dict:
 
 # The queue between _ann_say and the speech worker carries plain phrases. A line starting with this
 # prefix is a CUE instead: the worker plays the named WAV through the same SpVoice (see
-# say_worker.ps1), so it lands on the announcer's chosen output rather than the system default.
+# say.ps1), so it lands on the announcer's chosen output rather than the system default.
 _ANN_WAV_PREFIX = "!wav "
 
 # NOTHING IS EVER PLAYED OUT LOUD UNDER THIS FLAG, set by `DevTools/_bootstrap` for any script
@@ -2874,7 +2871,7 @@ def _ann_say_oneshot(text: str) -> None:
             text = _ann_wav_spoken_form(wav)
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
                resource_path("say.ps1"), "-Text", text,
-               "-Volume", str(_ann_volume), "-Force"]
+               "-Volume", str(_ann_volume)]
         if wav:
             cmd += ["-Wav", wav]
         if _ann_voice:
@@ -2885,8 +2882,8 @@ def _ann_say_oneshot(text: str) -> None:
                              creationflags=_NO_WINDOW)
         if sync_id is not None:
             p.wait(timeout=_ANN_SYNC_TIMEOUT_S)    # say.ps1 exits when it has finished speaking
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("announcer.oneshot_failed", str(exc))
     if sync_id is not None:
         _ann_sync_done(sync_id)
 
@@ -2910,8 +2907,8 @@ def _ann_worker_replies(proc) -> None:
         for line in proc.stdout:
             if line.startswith("DONE "):
                 _ann_sync_done(line[5:].strip())
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("announcer.worker_replies_lost", str(exc))
 
 
 def _ann_say_and_wait(text: str) -> None:
@@ -2990,7 +2987,7 @@ def _ann_speak_pump() -> None:
         vol = _ann_volume                                   # read once; it can change under us
         if proc is None:
             cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
-                   resource_path("say_worker.ps1"), "-NoGate", "-Volume", str(vol)]
+                   resource_path("say.ps1"), "-Volume", str(vol)]
             if voice:
                 cmd += ["-Voice", voice]
             if device:
@@ -3072,20 +3069,16 @@ def _ann_say(text: str) -> None:
             _ann_release(_ann_speak_q.get_nowait())
         except queue.Empty:
             break
-    try:
-        _ann_speak_q.put_nowait(text)
-    except Exception:
-        pass
+    _ann_speak_q.put_nowait(text)
 
 
 # MUTE / SOLO STATE.
 # Pressing mute or solo pushes, unasked and about 70 ms after the button edge, the STATE property
-# `channelOutputMute` / `channelCueEnable`, addressed at SEL_CHANNEL_PROC + strip index. So the
+# `channelOutputMute` / `channelCueEnable`, addressed at SEL_CHANNEL + strip index. So the
 # announcer can say WHICH channel and WHETHER it is now muted, instead of the bare word "Mute" - and
 # it catches a mute from any source (button, touchscreen, MIDI), not just a press edge. Still
 # strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
 # BUTTON, which names no channel, so it is only the fallback when no state follows.
-_ANN_STATE_SEL_BASE = channels.SEL_CHANNEL_PROC      # 0x1C + strip index
 _ANN_STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
 # HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
 # these at once (both members' mute and cue), and each edge of a momentary pad brings its own burst,
@@ -3262,8 +3255,8 @@ def _ann_handle_report(b: bytes, st: dict) -> None:
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
     fval = val if kind == "float" else None
-    # The strip a one-level push at SEL_CHANNEL_PROC + strip is addressed at, else -1.
-    strip = path[0] - _ANN_STATE_SEL_BASE if len(path) == 1 else -1
+    # The strip a one-level push at SEL_CHANNEL + strip is addressed at, else -1.
+    strip = path[0] - rcp_transfer.SEL_CHANNEL if len(path) == 1 else -1
     if not 0 <= strip < 16:
         strip = -1
 
@@ -4036,11 +4029,11 @@ def _announce_loop(gen: int | None = None) -> None:
             # Runs every read cycle (the read above blocks at most 200 ms), so a held press edge is
             # spoken promptly when the desk sends no state to supersede it.
             _ann_flush_pending(st)
-        except Exception:
+        except Exception as exc:
             # Decoding is best-effort: a malformed or unexpected packet costs us ONE announcement,
-            # never the announcer. Silently carrying on beats a thread that dies and leaves the UI
-            # claiming announcements are on.
-            pass
+            # never the announcer. Carrying on beats a thread that dies and leaves the UI claiming
+            # announcements are on.
+            diagnostics.event("announcer.push_undecoded", str(exc))
     if dev is not None:
         rcp_hid.close_handle(dev, "announcer")
     if gen != _ann_loop_gen:
@@ -4236,7 +4229,7 @@ def action_set_announce_volume(percent: int) -> dict:
     return {"ok": True, "volume": _ann_volume, "message": msg}
 
 
-def _ann_pick(value: str, offered: list) -> str:
+def _ann_pick(value: str, offered: list) -> str | None:
     """Resolve what the page sent against what SAPI actually offers. An exact name wins; failing
     that a case-insensitive substring is accepted, so a shortened name ("Zira", "Realtek") still
     works from a script or an older saved setting. Anything else is rejected rather than passed to
@@ -4882,6 +4875,9 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
                 endpoint["id"], seconds,
                 should_stop=lambda: _autogain_state().get("cancel"))
             meters.cue("stop")
+            # Stop during the take ends the run after it: the check take would stop at once and
+            # read as a microphone that failed.
+            stopped = bool(_autogain_state().get("cancel"))
             # POST-FADER, corrected: the cross-point carries the channel at its own level, so
             # the gain we derive must not move with the fader.
             result = autogain.correct_for_level(result, iso.level)
@@ -4897,6 +4893,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
                     with _session_state_lock:
                         _session_state["channels"][mic]["gain_db"] = target
                     time.sleep(0.4)
+            if decision["ok"] and not stopped:
                 # CHECK ITS OWN WORK: set the gain from the results, then measure again.
                 # Without the second take the result is a PREDICTION rather than a measurement,
                 # and nothing tells the user whether it landed. The isolation is still open, so
@@ -4916,8 +4913,12 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         if not decision["ok"]:
             _autogain_set(phase="failed", done=True, result=result, message=decision["reason"])
             return
+        words = _autogain_words(name, gain_before, target, result, win, check)
+        if stopped:
+            words += (" You stopped it early, so the gain was set from a shortened take and not "
+                      "checked.")
         _autogain_set(phase="done", done=True, gain_after=target, result=result, check=check,
-                      message=_autogain_words(name, gain_before, target, result, win, check))
+                      message=words)
     except Exception as exc:
         _autogain_set(phase="failed", done=True, message=f"Auto gain stopped: {exc}")
     finally:
@@ -5035,7 +5036,8 @@ class _ChatIsolation:
             self.restored = (mode_now == self.mode_before
                              and excl_now == self.excluded_before)
             return self.restored
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("chat.restore_failed", str(exc))
             return False
 
 
@@ -5271,11 +5273,7 @@ def _load_factory_presets() -> dict:
 
 
 def _load_user_presets() -> dict:
-    try:
-        with open(_USER_PRESET_FILE, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (OSError, ValueError):
-        return {}
+    return read_json(_USER_PRESET_FILE, {})
 
 
 def _save_user_presets(d: dict) -> None:
@@ -6249,8 +6247,13 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
                 "message": (f"{_fader_label(int(fader), spec)} has no level control here. Only the "
                             f"virtual faders do: the others are physical faders you move by hand.")}
     pct = max(0, min(100, int(percent)))
+    # The reply names the fader's channel from the layout already held: a slider step that dumped
+    # the model to name it would cost a second and a half per step.
+    vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
     try:
         with _hid_lock:
+            if vec is None:
+                vec = _read_fader_vector(spec=spec)
             rcp_transfer.set_fader_level(sel, round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the level: {exc}"}
@@ -6258,7 +6261,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
     # can quote the level this fader had BEFORE the slider moved, and the echo that DOES arrive would
     # otherwise be spoken over the top of the UI's own announcement (see _ann_publish_level).
     _ann_publish_level("fader", int(fader), pct / 100.0)
-    who = _channel_name(_read_fader_vector(spec=spec)[int(fader)], spec)
+    who = _channel_name(vec[int(fader)] if int(fader) < len(vec) else None, spec)
     return {"ok": True, "percent": pct,
             "message": f"{_fader_label(int(fader), spec)} ({who}) set to {pct} percent."}
 
@@ -6601,7 +6604,7 @@ def action_meter_watch(on: bool) -> dict:
         found = meters.desk_streams()
         if not found["ok"]:
             return {"ok": False, "message": found["reason"]}
-        stream = prefs["stream"] or found["streams"][0]["id"]
+        stream = _meter_stream(found)
         # THE LEVEL WATCH FOLLOWS THE ANNOUNCER (_ann_say enforces it). It speaks unasked, in the
         # background, which is exactly the kind of voice that must go quiet when the announcer
         # does, recordings included.
@@ -6691,7 +6694,7 @@ def _chan_check_state() -> dict:
                                  if live else 0.0)}
 
 
-def _chan_check_stop(speak: bool = True, run_id: int = None) -> str:
+def _chan_check_stop(speak: bool = True, run_id: int | None = None) -> str:
     """End the check, PUT THE CHAT MIX BACK, and say what the run came to.
 
     The restore is the part that must not be quiet about failing. A Chat output left carrying one
@@ -7263,8 +7266,7 @@ def read_routing_live() -> dict:
         # Per-output headphone types: the model dump carries one headphoneType per output
         # (4 on the Duo: HP1,HP2,HP3,HP4); we map them POSITIONALLY to the device's exposed headphone
         # outputs (HP1 then HP2): HP1 (0x09) is dump position 0 and HP2 (0x0A) is
-        # position 1. headphone_type is kept as the HP1 value for compatibility.
-        "headphone_type": headphone_types[0] if headphone_types else None,
+        # position 1.
         "headphone_types": [headphone_types[i] if i < len(headphone_types) else None
                             for i in range(len(_active_headphones().outputs))],
         **rcp_read.master_processing(blob),
@@ -8167,7 +8169,7 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
 
     Overwriting an existing scheme is allowed and deliberate (unlike the as-found baseline, a scheme
     is cheap to re-take), but the page asks first so it is never a surprise."""
-    safe = routing_schemes.safe_name(name)
+    safe = safe_name(name)
     if not safe:
         return {"ok": False, "message": "A mix preset name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
@@ -8301,8 +8303,8 @@ class _BackgroundJob:
             self._state["message"] = (self._phrase(message, self._n, self._state["total"])
                                       if self._phrase else message)
 
-    def start(self, work, message: str, total: int = 0, phrase=None, started: str = None,
-              failed: str = None) -> dict:
+    def start(self, work, message: str, total: int = 0, phrase=None,
+              started: str | None = None, failed: str | None = None) -> dict:
         """Claim the job and run it. `message` is what the dialog says until the first report;
         `phrase(msg, n, total)` words a counted step ("Pad 3 (3 of 16)."); `started` overrides the
         sentence handed straight back to the caller; `failed` overrides the wording of a crash for
@@ -8511,7 +8513,7 @@ def action_backup_now(name: str) -> dict:
     profile goes on alone and nothing announces a missing feature.
 
     The show is exported FIRST, while the desk still holds exactly what is being named."""
-    safe = profiles.safe_name(name)
+    safe = safe_name(name)
     if not safe:
         return {"ok": False, "message": "Backup name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
@@ -8550,7 +8552,7 @@ def _backup_wording(safe: str, show) -> str:
 def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = False) -> dict:
     """Validate the name, then start the save on a worker thread. The name check stays synchronous
     so a bad name comes straight back as an error instead of through the progress dialog."""
-    safe = profiles.safe_name(name)
+    safe = safe_name(name)
     if not safe:
         return {"ok": False, "message": "Profile name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
@@ -8618,7 +8620,7 @@ def _baseline_name() -> str:
     more. The date is spoken rather than numeric because a profile name is heard."""
     when = f"As found {wording.spoken_date(datetime.date.today())}"
     desk = devices.get_active_device().name.removeprefix("RODECaster ").strip()
-    return profiles.safe_name(f"{when} {desk}"[:40]) or when
+    return safe_name(f"{when} {desk}"[:40]) or when
 
 
 def baseline_status() -> dict:
@@ -8890,6 +8892,13 @@ def _shows_write_gate():
                      f"risk it.")
 
 
+_NO_BACKUP_STORAGE = ("There is no memory card or USB drive in the unit, so there is nowhere to "
+                      "save a backup.")
+_RESET_STOPPED_NO_BACKUP = ("Stopped before resetting anything, and nothing on the desk has changed: "
+                            "the backup did not appear on the drive, so there would have been no "
+                            "way back. Check there is a drive in with room on it, and try again.")
+
+
 def read_show_state() -> dict:
     """The Shows section of the Backups page: what is loaded, and what is on the drive."""
     try:
@@ -8938,9 +8947,7 @@ def read_show_state() -> dict:
     dest = recorder.destination(recorder.read_volumes(blob))
     state["can_backup"] = bool(dest)
     state["backup_to"] = dest["spoken"] if dest else ""
-    state["backup_blocked_reason"] = ("" if dest else
-                                      "There is no memory card or USB drive in the unit, so there "
-                                      "is nowhere to save a backup.")
+    state["backup_blocked_reason"] = "" if dest else _NO_BACKUP_STORAGE
     return state
 
 
@@ -9011,8 +9018,7 @@ def _export_and_wait(step, label: str) -> dict:
             # `no_storage` so callers can word their own refusal for this specific cause - a clean
             # restore wants to point at the merge restore, which needs no backup at all.
             return {"ok": False, "count": len(before), "no_storage": True,
-                    "message": ("There is no memory card or USB drive in the unit, so there is "
-                                "nowhere to save a backup.")}
+                    "message": _NO_BACKUP_STORAGE}
         known = {s["snapshot"] for s in before if s.get("snapshot") is not None}
         step(label)
         shows.send_export()
@@ -9153,10 +9159,7 @@ def _clean_restore_reset(step) -> dict:
                                 "because it wipes anything the profile does not cover, so it cannot "
                                 "be done. Choose the ordinary restore instead: it puts your settings "
                                 "back and leaves everything else as it is.")}
-        return {"ok": False,
-                "message": ("Stopped before resetting anything, and nothing on the desk has "
-                            "changed: the backup did not appear on the drive, so there would have "
-                            "been no way back. Check there is a drive in with room on it.")}
+        return {"ok": False, "message": _RESET_STOPPED_NO_BACKUP}
     done = _reset_and_wait(step)
     if not done.get("ok"):
         return done
@@ -9304,7 +9307,8 @@ def wake_channels() -> dict:
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("wake.read_failed", str(exc))
         blob = None
     if not rcp_read.is_model_dump(blob):
         return {"ok": False, "woken": [],
@@ -9323,8 +9327,8 @@ def wake_channels() -> dict:
                 channels.set_mic_gain(ch, now)
             _ann_mark_self_gain(ch, True)
             woken.append(ch)
-        except Exception:
-            continue                      # one channel failing must not leave the rest unwoken
+        except Exception as exc:          # one channel failing must not leave the rest unwoken
+            diagnostics.event("wake.channel_failed", str(exc), mic=ch)
     return {"ok": True, "woken": woken,
             "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the unit's audio "
                         f"engine picks them up again." if woken
@@ -9625,11 +9629,7 @@ def action_show_reset(backup_first: bool = True) -> dict:
                             "message": (res["message"] + " Nothing on the desk has changed. Either "
                                         "put a card or drive in, or choose the reset without a "
                                         "backup, which cannot be undone.")}
-                return {"ok": False,
-                        "message": ("Stopped before resetting anything, and nothing on the desk "
-                                    "has changed: the backup did not appear on the drive, so there "
-                                    "would have been no way back. Check there is a drive in with "
-                                    "room on it, and try again.")}
+                return {"ok": False, "message": _RESET_STOPPED_NO_BACKUP}
             saved = res["show"]
         done = _reset_and_wait(step)
         if not done.get("ok"):
@@ -9715,7 +9715,7 @@ def _delete_show_then_profile(snapshot: int, name: str):
     return _run_show_job("Deleting the backup", work)
 
 
-def _pad_write(grid: int, failed: str, work, invalid: str = None,
+def _pad_write(grid: int, failed: str, work, invalid: str | None = None,
                plain_value_error: bool = False) -> dict:
     """Range-check a grid pad, take the HID lock, run `work()`, and turn a crash into a sentence.
 
@@ -9814,23 +9814,23 @@ def action_set_pad_gain(grid: int, db: float) -> dict:
 
     THE NAME MUST STAY DISTINCT from the mic action_set_gain above. Give both the same name and
     Python keeps the last def, so this pad version silently shadows the mic one and every mic
-    Level/gain write is routed into soundpad.set_pad_gain."""
+    Level/gain write is routed into the pad's."""
     return _pad_write(grid, "Could not change the pad's volume",
-                      lambda: soundpad.set_pad_gain(grid, db))
+                      lambda: soundpad.set_pad_property(grid, "padGain", db))
 
 
 def action_set_pad_name(grid: int, name: str) -> dict:
     """Rename an existing pad in place (padName). Read-back verifiable."""
     name = (name or "").strip()
     return _pad_write(grid, "Could not rename the pad",
-                      lambda: soundpad.set_pad_name(grid, name),
+                      lambda: soundpad.set_pad_property(grid, "padName", name),
                       invalid=None if name else "Enter a name for the pad.")
 
 
 def action_set_pad_loop(grid: int, on: bool) -> dict:
     """Toggle loop (padLoop) on an existing sound pad. Read-back verifiable."""
     return _pad_write(grid, "Could not change the pad's loop setting",
-                      lambda: soundpad.set_pad_loop(grid, on))
+                      lambda: soundpad.set_pad_property(grid, "padLoop", on))
 
 
 def action_set_play_mode(grid: int, mode: int) -> dict:
@@ -9923,7 +9923,7 @@ def action_set_back_channel(grid: int, source: str, on: bool) -> dict:
 def action_set_pad_colour(grid: int, colour: int) -> dict:
     """Set a pad's display colour index (padColourIndex 0-11). Read-back verifiable."""
     return _pad_write(grid, "Could not change the pad's colour",
-                      lambda: soundpad.set_pad_colour(grid, colour))
+                      lambda: soundpad.set_pad_property(grid, "padColourIndex", colour))
 
 
 def action_clear_pad(grid: int) -> dict:
@@ -10221,7 +10221,13 @@ def _cleanup_preview_on_exit() -> None:
 # hotkey is by definition pressable by accident, from any application, with no dialog in the way.
 # ----------------------------------------------------------------------------
 
-def _hk_announcer() -> str:
+def _hk_said(message: str, ok: bool = True) -> dict:
+    """A shortcut's result, in the shape every action returns. One whose `ok` is False is spoken
+    even when its shortcut is set to be silent (hotkeys.HotkeyManager._run)."""
+    return {"ok": ok, "message": message}
+
+
+def _hk_announcer() -> dict:
     """Toggle the spoken announcer, and the case the whole shortcut layer exists for: the announcer
     talking over a guest is something you fix NOW, not after finding the window and the tab.
 
@@ -10236,10 +10242,10 @@ def _hk_announcer() -> str:
     only when "Start with announcements the way I left them" is ticked."""
     on = not _announce_on.is_set()
     res = action_set_announce(on)
-    return res.get("message", "") if on else ""
+    return res if on or not res.get("ok") else _hk_said("")
 
 
-def _hk_record() -> str:
+def _hk_record() -> dict:
     """Start or stop the recording. Reads the live state first (free: the watcher's last push, no
     device read) so one key both starts and stops, and a PAUSED take is stopped rather than
     restarted. action_record reads the state back before it reports, so what this speaks is what the
@@ -10247,15 +10253,14 @@ def _hk_record() -> str:
     live = read_recorder_live()
     state = live.get("state")
     going = state in (recorder.RECORDING, recorder.PAUSED)
-    res = action_record("stop" if going else "start")
-    return res.get("message", "")
+    return action_record("stop" if going else "start")
 
 
 # The mics THIS shortcut muted, held so the second press can undo exactly that set - see _hk_mics.
 _hk_muted_mics = []
 
 
-def _hk_mics() -> str:
+def _hk_mics() -> dict:
     """The cough key: mute every mic that is open, and on the next press open again ONLY those.
 
     IT UNDOES ITSELF RATHER THAN UNMUTING EVERYTHING, and the difference is not cosmetic. Tested on
@@ -10276,16 +10281,16 @@ def _hk_mics() -> str:
     global _hk_muted_mics
     mics = [c for c in channels.active_ui_channels() if c.get("kind") == "mic"]
     if not mics:
-        return "This unit has no mic channels."
+        return _hk_said("This unit has no mic channels.", ok=False)
     if _hk_muted_mics:
         names, _hk_muted_mics = _hk_muted_mics, []
         opened = []
         for name in names:
             res = action_set_channel_mute(name, False)
             if not res.get("ok"):
-                return res.get("message", "The mics could not be opened.")
+                return _hk_said(res.get("message", "The mics could not be opened."), ok=False)
             opened.append(name)
-        return f"{wording.count(len(opened), 'mic')} open again."
+        return _hk_said(f"{wording.count(len(opened), 'mic')} open again.")
     st = _ann_live_state
     muted_now = dict((st or {}).get("muted") or {})
     if not muted_now:
@@ -10295,23 +10300,23 @@ def _hk_mics() -> str:
             muted_now = {i: bool(v) for i, v
                          in enumerate(v for v in rcp_read.values(blob, "channelOutputMute"))}
         except Exception as exc:
-            return f"Could not read the mics: {exc}"
+            return _hk_said(f"Could not read the mics: {exc}", ok=False)
     open_mics = [c for c in mics
                  if not muted_now.get(channels.channel_strip_index(c["name"]), False)]
     if not open_mics:
-        return "Every mic is already muted."
+        return _hk_said("Every mic is already muted.")
     done = []
     for c in open_mics:
         res = action_set_channel_mute(c["name"], True)
         if not res.get("ok"):
             _hk_muted_mics = done          # keep what DID land, so the undo is still exact
-            return res.get("message", "The mics could not be muted.")
+            return _hk_said(res.get("message", "The mics could not be muted."), ok=False)
         done.append(c["name"])
     _hk_muted_mics = done
-    return f"{wording.count(len(done), 'mic')} muted."
+    return _hk_said(f"{wording.count(len(done), 'mic')} muted.")
 
 
-def _hk_state() -> str:
+def _hk_state() -> dict:
     """Speak the short version of the Device page's current-state report, from anywhere.
 
     Costs a model read, so it speaks "Reading the unit" first: a key that appears to do nothing for
@@ -10321,7 +10326,7 @@ def _hk_state() -> str:
     _ann_say("Reading the unit.")   # silent whenever the announcer is
     ov = device_overview()
     if not ov.get("ok"):
-        return ov.get("message", "The unit could not be read.")
+        return _hk_said(ov.get("message", "The unit could not be read."), ok=False)
     bits = []
     rec = ov.get("recording")
     if rec:
@@ -10346,8 +10351,8 @@ def _hk_state() -> str:
     if isinstance(mon, int):
         bits.append(f"Monitor {mon} percent.")
     if not bits:
-        return "Nothing to report: nothing muted or soloed, and not recording."
-    return " ".join(bits)
+        return _hk_said("Nothing to report: nothing muted or soloed, and not recording.")
+    return _hk_said(" ".join(bits))
 
 
 # WHERE EACH PAD SITS IN THE POOL, cached, because firing a pad has to be INSTANT.
@@ -10642,8 +10647,8 @@ def _hk_pad_verify(pad_idx: int, want_on: bool) -> None:
                     soundpad.unlatch_pad(entry[0])
                 _ann_say(f"That fired the wrong pad, {entry[1]}, and it has been switched off "
                          f"again. The pad list was out of date and has been read again.")
-    except Exception:
-        pass                    # a verification that cannot run must not break the press
+    except Exception as exc:    # a verification that cannot run must not break the press
+        diagnostics.event("hotkeys.pad_verify_failed", str(exc))
 
 
 # TWO TRANSPORTS, AND THEY COVER DIFFERENT PAD TYPES. Dispatch is PER PAD and never per bank,
@@ -10660,19 +10665,20 @@ def _hk_pad_verify(pad_idx: int, want_on: bool) -> None:
 # So one key says "Megaphone on" for one pad and "Airhorn playing" for the next. Do not collapse
 # them into one word: "on" for a sound that has already finished would be a lie, and "playing" for a
 # voice effect that is sitting on a live mic hides the thing you most need to know.
-def _hk_fire_pad(pad_idx: int) -> str:
+def _hk_fire_pad(pad_idx: int) -> dict:
     """Fire ONE pad by its padIdx, choosing the transport from its type. The spoken result says
     which of the two things happened."""
     entry = _hk_pad_entry(pad_idx)
     if entry is None:
-        return "That pad is empty now. Choose another on the Keyboard shortcuts tab."
+        return _hk_said("That pad is empty now. Choose another on the Keyboard shortcuts tab.",
+                        ok=False)
     position, name, pad_type, play_mode = entry
     if pad_type == soundpad.PAD_TYPE_SOUND:
         return _hk_pad_play(pad_idx, position, name, play_mode)
     return _hk_pad_toggle(pad_idx, position, name)
 
 
-def _hk_pad_play(pad_idx: int, position: int, name: str, play_mode) -> str:
+def _hk_pad_play(pad_idx: int, position: int, name: str, play_mode) -> dict:
     """Play a SOUND pad over MIDI, selecting its bank first if the desk is on another one.
 
     A STALE PAD MAP CANNOT FIRE THE WRONG SOUND HERE, which is why there is no verification pass
@@ -10698,26 +10704,26 @@ def _hk_pad_play(pad_idx: int, position: int, name: str, play_mode) -> str:
             if pad_idx in _hk_pads_held:
                 midi_out.release_pad(slot)
                 _hk_pads_held.discard(pad_idx)
-                return f"{name} released."
+                return _hk_said(f"{name} released.")
             midi_out.press_pad(slot)
             _hk_pads_held.add(pad_idx)
-            return f"{name} playing. It is set to Hold, so press again to stop it."
+            return _hk_said(f"{name} playing. It is set to Hold, so press again to stop it.")
         was_playing = position in _hk_play_snapshot()
         midi_out.play_pad(slot)
     except _DeskBusy as exc:
-        return str(exc)
+        return _hk_said(str(exc), ok=False)
     except Exception as exc:
         _hk_pads_held.discard(pad_idx)
-        return f"{name} would not play: {exc}"
+        return _hk_said(f"{name} would not play: {exc}", ok=False)
     _hk_maybe_refresh_pads()
     if was_playing and play_mode == soundpad.PLAY_MODE_TOGGLE:
-        return f"{name} stopped."
+        return _hk_said(f"{name} stopped.")
     if was_playing and play_mode == soundpad.PLAY_MODE_ONE_SHOT:
-        return f"{name} playing from the start."
-    return f"{name} playing."
+        return _hk_said(f"{name} playing from the start.")
+    return _hk_said(f"{name} playing.")
 
 
-def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
+def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> dict:
     """Switch a VOICE-FX or MIXER pad on, and off again on the next press.
 
     Writing `padActive` at a pad's position ENGAGES it, and that is the same mechanism a latched
@@ -10736,7 +10742,7 @@ def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
     pad that is somehow already latched must always be possible."""
     on = pad_idx not in _hk_pads_on
     if on and pad_idx in _hk_fx_missing:
-        return _HK_FX_EMPTY.format(name=name)
+        return _hk_said(_HK_FX_EMPTY.format(name=name), ok=False)
     try:
         with _hk_desk():
             if on:
@@ -10748,12 +10754,12 @@ def _hk_pad_toggle(pad_idx: int, position: int, name: str) -> str:
         else:
             _hk_pads_on.discard(pad_idx)
     except _DeskBusy as exc:
-        return str(exc)            # nothing was written, so the pad is as it was
+        return _hk_said(str(exc), ok=False)     # nothing was written, so the pad is as it was
     except Exception as exc:
         _hk_pads_on.discard(pad_idx)
-        return f"{name} would not respond: {exc}"
+        return _hk_said(f"{name} would not respond: {exc}", ok=False)
     threading.Thread(target=_hk_pad_verify, args=(pad_idx, on), daemon=True).start()
-    return f"{name} on." if on else f"{name} off."
+    return _hk_said(f"{name} on." if on else f"{name} off.")
 
 
 def _hk_release_held_pads() -> None:
@@ -10781,16 +10787,17 @@ def _hk_release_held() -> None:
         pass
 
 
-def _hk_pad(target: str) -> str:
+def _hk_pad(target: str) -> dict:
     """Fire the pad this shortcut names. The target is a padIdx: the pad's FIXED place in the grid,
     so the shortcut keeps pointing at the same sound however the pool is rearranged."""
     target = (target or "").strip()
     if not target:
-        return "No pad is assigned to this shortcut yet. Choose one on the Keyboard shortcuts tab."
+        return _hk_said("No pad is assigned to this shortcut yet. Choose one on the Keyboard "
+                        "shortcuts tab.", ok=False)
     try:
         pad_idx = int(target)
     except ValueError:
-        return f"{target} is not a pad."
+        return _hk_said(f"{target} is not a pad.", ok=False)
     return _hk_fire_pad(pad_idx)
 
 
@@ -10798,9 +10805,10 @@ def _hk_pad(target: str) -> str:
 # acknowledgement, and a press that arrives first plays the pad in the OLD bank - which is a
 # stranger's sound, not a missing one, so this is a correctness dwell rather than a politeness one.
 _HK_BANK_SETTLE_S = 0.25
+_HK_BANK_UNKNOWN = "I cannot tell which pad bank the desk is on. Is it plugged in?"
 
 
-def _hk_pad_slot(target: str) -> str:
+def _hk_pad_slot(target: str) -> dict:
     """Fire pad N of whatever bank the desk is on. The number-row half of the pad scheme.
 
     NOT the same command as `pad.fire`, and the difference is the whole point: `pad.fire` is pinned
@@ -10810,17 +10818,18 @@ def _hk_pad_slot(target: str) -> str:
     try:
         slot = int((target or "").strip())
     except ValueError:
-        return f"{target} is not a pad number."
+        return _hk_said(f"{target} is not a pad number.", ok=False)
     per_bank = devices.get_active_device().pad.pads_per_bank
     if not 1 <= slot <= per_bank:
-        return f"This desk has {per_bank} pads in a bank, so there is no pad {slot}."
+        return _hk_said(f"This desk has {per_bank} pads in a bank, so there is no pad {slot}.",
+                        ok=False)
     bank = _hk_current_bank()
     if bank is None:
-        return "I cannot tell which pad bank the desk is on. Is it plugged in?"
+        return _hk_said(_HK_BANK_UNKNOWN, ok=False)
     return _hk_fire_pad(bank * per_bank + slot - 1)
 
 
-def _hk_bank_step(target: str) -> str:
+def _hk_bank_step(target: str) -> dict:
     """Move down or up a pad bank, and say where you have landed.
 
     CLAMPS AT THE ENDS RATHER THAN WRAPPING. Wrapping from the last bank to the first is silent and
@@ -10830,30 +10839,30 @@ def _hk_bank_step(target: str) -> str:
     banks = devices.get_active_device().pad.system_bank
     bank = _hk_current_bank()
     if bank is None:
-        return "I cannot tell which pad bank the desk is on. Is it plugged in?"
+        return _hk_said(_HK_BANK_UNKNOWN, ok=False)
     want = max(0, min(banks - 1, bank + step))
     if want == bank:
-        return (f"Bank {bank + 1} already, and that is the "
-                f"{'first' if step < 0 else 'last'} bank.")
+        return _hk_said(f"Bank {bank + 1} already, and that is the "
+                        f"{'first' if step < 0 else 'last'} bank.")
     _hk_release_held_pads()
     try:
         with _hk_desk():
             soundpad.select_bank(want)
     except _DeskBusy as exc:
-        return str(exc)
+        return _hk_said(str(exc), ok=False)
     except Exception as exc:
-        return f"The bank would not change: {exc}"
+        return _hk_said(f"The bank would not change: {exc}", ok=False)
     _hk_note_bank(want)
     _hk_maybe_refresh_pads()
     # The system bank is the video switching pads for a paired RODECaster Video, not sounds anyone
     # assigned, so say so: the number keys still work there and would otherwise fire "Scene A" with
     # no warning.
     if want == banks - 1:
-        return f"Bank {want + 1}, the video switching pads."
-    return f"Bank {want + 1}."
+        return _hk_said(f"Bank {want + 1}, the video switching pads.")
+    return _hk_said(f"Bank {want + 1}.")
 
 
-def _hk_playing_now(_target: str = "") -> str:
+def _hk_playing_now(_target: str = "") -> dict:
     """Say what is playing, on demand.
 
     ON DEMAND AND NEVER ON PRESS, or it talks over the pad it is describing. Reads the state the
@@ -10893,7 +10902,7 @@ def _hk_playing_now(_target: str = "") -> str:
         if entry:
             said[entry[0]] = f"{entry[1]} is being held down."
     bits = [said[p] for p in sorted(said)]
-    return " ".join(bits) if bits else "Nothing is playing."
+    return _hk_said(" ".join(bits) if bits else "Nothing is playing.")
 
 
 def _hk_playing_from_model() -> dict:
@@ -10919,17 +10928,17 @@ def _hk_playing_from_model() -> dict:
     return out
 
 
-def _hk_window() -> str:
+def _hk_window() -> dict:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
     # SILENT ON SUCCESS: Windows announces the raised window and the page moves focus to the current
     # section's heading, so speaking here would talk over the screen reader in a second voice. A
     # real activation is `_focus_app_window`'s problem and is documented there.
     if _focus_app_window():
-        return ""
+        return _hk_said("")
     # A refused raise must say so, rather than leave the window sitting unseen behind everything.
     open_ui(f"http://localhost:{HTTP_PORT}/")
-    return "Opening AccessCaster."
+    return _hk_said("Opening AccessCaster.")
 
 
 # WHICH PAD TYPES A SHORTCUT MAY BE POINTED AT lives in `commands.PAD_TYPES`: sound, voice FX and
@@ -11033,11 +11042,20 @@ _hotkey_labels = {}
 
 
 def _hotkey_label(command_id: str) -> str:
+    """The label a stored command id shows. A miss fills the cache from ONE catalogue, so a list of
+    uncached shortcuts costs one build rather than one each.
+
+    A shortcut bound to something that no longer exists (a deleted mix scheme, a cleared pad) keeps
+    its place in the list and SAYS so, rather than vanishing and leaving a key mysteriously taken."""
     label = _hotkey_labels.get(command_id)
     if label is None:
         try:
-            label = commands.label_for(command_id)
-        except Exception:
+            for c in commands.catalogue(include_device=True):
+                _hotkey_labels[c["id"]] = c["label"]
+            label = _hotkey_labels.get(command_id, f"{command_id} (not available now)")
+        except Exception as exc:
+            diagnostics.event("hotkeys.labels_unread", "shortcut labels could not be built",
+                              error=str(exc))
             label = command_id
         _hotkey_labels[command_id] = label
     return label
@@ -11551,7 +11569,7 @@ POST_ROUTES = {
     "/api/backup": (action_backup_now, [(str, "name", "")]),
     "/api/backup/restore": (action_restore_backup, [(str, "name", ""), (bool, "clean", False)]),
     "/api/backup/plan": (backup_restore_plan, [(str, "name", "")]),
-    "/api/backup/delete": (action_delete_backup, [(str, "name", "")]),
+    "/api/backup/delete": (action_delete_backup, [(str, "name", ""), (bool, "force", False)]),
     # Manual recovery for the silent-channel fault, for the times it happens with no restore
     # involved. Safe to press at any time: it nudges each mic gain and puts it straight back.
     "/api/channels/wake": (wake_channels, []),
@@ -11867,27 +11885,11 @@ class Handler(BaseHTTPRequestHandler):
             self._server_error(exc)
 
 
-def _browser_exe():
-    """Locate a Chromium browser (Edge or Chrome) for 'app mode'. Edge ships with
-    Windows 11 so it is the reliable default; Chrome is used if it is found first."""
-    names = []
-    for env in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-        base = os.environ.get(env)
-        if not base:
-            continue
-        names.append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-        names.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-    for path in names:
-        if os.path.isfile(path):
-            return path
-    return shutil.which("msedge") or shutil.which("chrome")
-
-
 def open_ui(url: str) -> None:
     """Open the UI in a Chromium 'app mode' window (no tabs, address bar or toolbar)
     so keyboard focus stays inside the page and Tab never lands on browser chrome.
     Falls back to the default browser if no Chromium browser is found."""
-    exe = _browser_exe()
+    exe = browser.find_browser()
     if exe:
         try:
             subprocess.Popen([exe, f"--app={url}"])
@@ -12285,19 +12287,27 @@ def start_server_managed(announcer=True, shortcuts=True, open_browser=True):
     return server
 
 
-def stop_server():
-    """Stop the server cleanly (used by the tray's Quit). Shuts down serve_forever, then clears
-    any live preview still engaged on a mic. Safe to call more than once."""
-    diagnostics.event("app.stopping", "stop_server called")
-    if _httpd is not None:
-        _httpd.shutdown()
-    # Let go of the global shortcuts before we go: a quit that left them registered would keep
-    # taking those keys from every other program with nothing left running to act on them.
+def _shut_down(reason: str) -> None:
+    """What the app lets go of on the way out, whichever way it stops (the tray's Quit, the
+    watchdog, Ctrl+C). Safe to call more than once.
+
+    The global shortcuts go first: left registered, they keep taking those keys from every other
+    program with nothing left running to act on them. Then any Hold-mode pad a shortcut is holding,
+    which would otherwise keep playing with nothing left to release it, and any live preview still
+    engaged on a mic."""
     if _hotkeys is not None:
         _hotkeys.stop()
     _hk_release_held()
     _cleanup_preview_on_exit()
-    diagnostics.stop("quit from the tray")
+    diagnostics.stop(reason)
+
+
+def stop_server():
+    """Stop the server cleanly (used by the tray's Quit). Safe to call more than once."""
+    diagnostics.event("app.stopping", "stop_server called")
+    if _httpd is not None:
+        _httpd.shutdown()
+    _shut_down("quit from the tray")
 
 
 def main():
@@ -12317,9 +12327,7 @@ def main():
         print("\nStopping.")
         server.shutdown()
     finally:
-        # If a live preview was still engaged when the server stops, clear it off the mic.
-        _cleanup_preview_on_exit()
-        diagnostics.stop("serve_forever returned")
+        _shut_down("serve_forever returned")
 
 
 if __name__ == "__main__":

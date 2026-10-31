@@ -52,8 +52,6 @@ Usage, with the app or `DevTools/run_dev_server.py` already serving:
     python DevTools/probe_import_drop.py --backup NAME --delta 7 --trials 10 --via profile
     python DevTools/probe_import_drop.py --backup NAME --delta 0     # a true no-op, for comparison
 """
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import argparse
 import json
 import subprocess
@@ -62,6 +60,7 @@ import time
 import urllib.error
 import urllib.request
 
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import diagnostics
 
 BASE = "http://127.0.0.1:8770"

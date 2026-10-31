@@ -23,6 +23,7 @@ WHAT TO LISTEN FOR / LOOK FOR, in order:
   4. Stop talking for five seconds and check it notices the silence.
 """
 from __future__ import annotations
+
 import argparse
 import subprocess
 import sys
@@ -31,7 +32,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import meters
 from paths import resource_path
 
@@ -47,7 +47,8 @@ def speaker(enabled: bool):
 
     def say(text):
         try:
-            subprocess.Popen(["powershell", "-NoProfile", "-File", script, "-Text", text],
+            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                              script, "-Text", text],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass

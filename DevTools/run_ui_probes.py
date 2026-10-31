@@ -4,69 +4,68 @@ Needs the service on port 8770 with the watchdog off (DevTools/run_dev_server.py
 that proves anything, a desk attached: the probe fills the page from the real desk's reads. A
 suite that needs a stub file is skipped when the file is not there, and said to be.
 
+Each suite says how it is run in its first line, which this reads, so there is no second copy of
+it to drift:
+    // probe: route=<hash route, or - for none> timeout=<seconds> [stub=<file>] [offer-baseline]
+
 Usage:
     python DevTools/run_ui_probes.py            # every suite
     python DevTools/run_ui_probes.py routing    # only the suites named
 Each suite's output goes to %TEMP%\\ui_probe_<suite>.out.
 """
+import glob
 import os
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PREFIX = "ui_checks_"
 
-# (suite, route, timeout in seconds, stub file or None), from each checks file's "Run with" line.
-SUITES = [
-    ("about", "about", 90, None),
-    ("appsettings", "profiles", 90, None),
-    ("backups", "profiles", 90, "_probe_stub_backups.json"),
-    ("baseline", "", 90, "_probe_stub_baseline.json"),
-    ("boundary", "about", 90, None),
-    ("callme", "callme", 240, None),
-    ("callme_ready", "callme", 240, "_probe_stub_callme_unready.json"),
-    ("chantabs", "channels", 90, None),
-    ("device", "status", 600, None),
-    ("levelcheck", "channels", 240, None),
-    ("lifecycle", "device", 90, None),
-    ("network", "status", 240, None),
-    ("pads", "pads", 600, None),
-    ("padsbus", "channels", 90, None),
-    ("readonly", "routing", 90, "_probe_stub_readonly.json"),
-    ("recording", "recording", 240, None),
-    ("routing", "routing", 90, None),
-    ("shell", "status", 90, None),
-    ("solo", "channels", 240, None),
-    ("staged", "routing", 90, None),
-    ("stereopan", "channels", 240, None),
-    ("storage", "recording", 240, None),
-    ("wireless", "channels", 90, None),
-]
+
+def probe_settings(path: str) -> dict:
+    """The suite's `// probe:` line as {route, timeout, stub, offer_baseline}."""
+    with open(path, encoding="utf-8") as fh:
+        first = fh.readline().strip()
+    if not first.startswith("// probe:"):
+        raise SystemExit(f"{os.path.basename(path)} has no '// probe:' first line")
+    words = first[len("// probe:"):].split()
+    fields = dict(w.split("=", 1) for w in words if "=" in w)
+    return {"route": "" if fields.get("route", "-") == "-" else fields["route"],
+            "timeout": int(fields.get("timeout", 90)),
+            "stub": fields.get("stub"),
+            "offer_baseline": "offer-baseline" in words}
+
+
+def suites() -> list:
+    paths = sorted(glob.glob(os.path.join(HERE, PREFIX + "*.js")))
+    return [(os.path.basename(p)[len(PREFIX):-3], p) for p in paths]
 
 
 def main(names):
     failed, skipped = [], []
-    for suite, route, timeout, stub in SUITES:
+    for suite, path in suites():
         if names and suite not in names:
             continue
+        cfg = probe_settings(path)
         cmd = [sys.executable, os.path.join(HERE, "ui_probe.py"),
-               "--checks", os.path.join(HERE, f"ui_checks_{suite}.js"), "--timeout", str(timeout)]
-        if route:
-            cmd += ["--route", route]
-        if suite == "baseline":
+               "--checks", path, "--timeout", str(cfg["timeout"])]
+        if cfg["route"]:
+            cmd += ["--route", cfg["route"]]
+        if cfg["offer_baseline"]:
             cmd.append("--offer-baseline")   # every other suite has the dialog quietened
-        if stub:
-            path = os.path.join(HERE, stub)
-            if not os.path.isfile(path):
+        if cfg["stub"]:
+            stub = os.path.join(HERE, cfg["stub"])
+            if not os.path.isfile(stub):
                 skipped.append(suite)
-                print(f"  skip {suite}: no {stub}")
+                print(f"  skip {suite}: no {cfg['stub']}")
                 continue
-            cmd += ["--stub", path]
+            cmd += ["--stub", stub]
         out = os.path.join(tempfile.gettempdir(), f"ui_probe_{suite}.out")
         with open(out, "w", encoding="utf-8") as fh:
             try:
                 code = subprocess.call(cmd, stdout=fh, stderr=subprocess.STDOUT,
-                                       timeout=timeout + 60)
+                                       timeout=cfg["timeout"] + 60)
             except subprocess.TimeoutExpired:
                 code = 1
         print(f"  {'ok  ' if code == 0 else 'FAIL'} {suite}")

@@ -20,6 +20,7 @@ Two things it works out per property:
      confirm or overturn them; when one is settled, edit the rule and regenerate.
 """
 from __future__ import annotations
+
 import os
 import re
 import sys

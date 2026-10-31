@@ -13,11 +13,12 @@ never outrank the unit's own marker.
 Run: python DevTools/test_preset_now.py
 """
 from __future__ import annotations
+
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import server
 import channels
+import server
 
 FAILED = 0
 

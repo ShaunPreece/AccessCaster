@@ -24,6 +24,7 @@ to be self-moving so a real change is not buried; the dropped keys are counted, 
     python DevTools/model_diff.py watch during.json --seconds 20   # snap repeatedly, keep them all
 """
 from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -32,7 +33,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 
 # Properties that move by themselves, so a difference in them means nothing. Kept as a prefix/

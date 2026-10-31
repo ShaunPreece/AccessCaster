@@ -19,7 +19,6 @@ Usage:
 import argparse
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import soundpad
 
 

@@ -39,7 +39,7 @@ import diagnostics
 import rcp_hid
 import rcp_read
 import rcp_transfer
-from wording import describe_duration
+from wording import describe_duration, spoken_datetime
 
 # RECORDER block. Read straight off the wire (recordState and requestRecordState both
 # arrived carrying this selector), so it is a confirmed address, not a derived one.
@@ -368,7 +368,8 @@ def parse_recording(uid, content: str) -> dict:
     """
     parts = str(content).split("|")
     if len(parts) < 5:
-        return {"uid": uid, "name": str(content), "seconds": None, "when": "", "path": ""}
+        return {"uid": uid, "name": str(content), "seconds": None, "when": "", "path": "",
+                "duration": describe_duration(None)}
     # A millisecond epoch has 13 digits until the year 2286; nothing else in the record is that long.
     at = next((i for i in range(3, len(parts) - 1)
                if parts[i].isdigit() and len(parts[i]) >= 12), None)
@@ -383,7 +384,7 @@ def parse_recording(uid, content: str) -> dict:
             # Local time on THIS computer (no tz argument = the system zone), so the time shown is
             # the wall clock the person remembers making the recording at. See the docstring.
             stamp = datetime.fromtimestamp(int(parts[at]) / 1000.0)
-            when = stamp.strftime("%d %B %Y at %H:%M")
+            when = spoken_datetime(stamp)
         except (ValueError, OSError, OverflowError):
             pass
     return {"uid": uid, "name": parts[0], "path": parts[2], "when": when, "seconds": seconds,
@@ -548,7 +549,7 @@ class Watcher(threading.Thread):
     def _elapsed_locked(self):
         if self._state not in (RECORDING, PAUSED) or not self._timed:
             return None
-        run = (time.time() - self._since) if (self._state == RECORDING and self._since) else 0.0
+        run = (time.monotonic() - self._since) if (self._state == RECORDING and self._since) else 0.0
         return round(self._banked + run, 1)
 
     def note_state(self, state, timed: bool = True) -> None:
@@ -562,10 +563,10 @@ class Watcher(threading.Thread):
             return
         with self._lock:
             if state == self._state:
-                self._seen_at = time.time()
+                self._seen_at = time.monotonic()
                 return
             was = self._state
-            now = time.time()
+            now = time.monotonic()
             if was == RECORDING and self._since:
                 self._banked += now - self._since
                 self._since = None
@@ -579,8 +580,8 @@ class Watcher(threading.Thread):
         if speak and self._on_change:
             try:
                 self._on_change(was, state)
-            except Exception:
-                pass          # a failed announcement must never take the listener down
+            except Exception as exc:    # a failed announcement must never take the listener down
+                diagnostics.event("recorder.announce_failed", str(exc))
 
     # -- the thread -------------------------------------------------------
     def run(self) -> None:
@@ -617,8 +618,8 @@ class Watcher(threading.Thread):
                 state = _state_from_push(bytes(rep))
                 if state is not None:
                     self._apply(state)
-            except Exception:
-                pass          # one undecodable packet costs one update, never the thread
+            except Exception as exc:    # one undecodable packet costs one update, never the thread
+                diagnostics.event("recorder.push_undecoded", str(exc))
         if dev is not None:
             rcp_hid.close_handle(dev, "recorder watcher")
 

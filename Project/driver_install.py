@@ -27,6 +27,7 @@ way round it. The two routes are independent, so RODE moving either one leaves t
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -42,9 +43,11 @@ ZIP_URL = "https://update.rode.com/virtual_dev_driver/RODECasterDriver_WIN.zip"
 # route above is the one that is verified. That is the point of having both.
 PAGE_URL = "https://rode.com/en/software"
 
-# The signer to insist on. Freedman Electronics Pty Ltd is RODE's legal entity and is what signs
-# the MSI; matching on that rather than on "RODE" is what makes the check mean anything.
-SIGNER = "Freedman Electronics"
+# The signer to insist on: the certificate's organisation (O=), compared whole. Freedman Electronics
+# Pty Ltd is RODE's legal entity and is what signs the MSI; matching on that rather than on "RODE"
+# is what makes the check mean anything, and comparing the field whole rather than searching the
+# subject is what stops any certificate whose subject merely contains the name from passing.
+SIGNER = "Freedman Electronics Pty Ltd"
 
 DOWNLOAD_TIMEOUT_S = 60
 # The zip is about 1.1 MB. The cap is not a guess at its size, it is a refusal to write an
@@ -119,6 +122,16 @@ def _extract_msi(zip_path: str, into: str, on_step=_no_step) -> str:
         raise DriverInstallError(f"RODE's download could not be unpacked ({exc}).")
 
 
+def subject_organisation(subject: str) -> str:
+    """The O= field of a certificate subject as Windows writes it ("CN=x, O=y, C=AU"), or "" when
+    there is none. A value holding a comma is quoted, with any quote inside it doubled."""
+    for m in re.finditer(r'(?:^|,)\s*([\w.]+)=("(?:[^"]|"")*"|[^,]*)', subject):
+        if m.group(1).upper() == "O":
+            value = m.group(2).strip()
+            return value[1:-1].replace('""', '"') if value.startswith('"') else value
+    return ""
+
+
 def verify_signature(msi_path: str) -> str:
     """The MSI's Authenticode signer, or raise. Returns the signer subject for the log.
 
@@ -147,7 +160,7 @@ def verify_signature(msi_path: str) -> str:
         raise DriverInstallError(
             f"The file downloaded from RODE is not validly signed (Windows reports "
             f"{status or 'no signature'}), so it has NOT been installed.")
-    if SIGNER.lower() not in subject.lower():
+    if subject_organisation(subject).casefold() != SIGNER.casefold():
         raise DriverInstallError(
             f"The file downloaded from RODE is signed by someone else ({subject or 'unknown'}), so "
             f"it has NOT been installed.")

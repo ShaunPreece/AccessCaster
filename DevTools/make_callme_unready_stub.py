@@ -10,11 +10,11 @@ itself, so the page is checked against the server's own sentences.
         --stub DevTools/_probe_stub_callme_unready.json --timeout 240
 """
 from __future__ import annotations
+
 import json
 import urllib.request
 
 import _bootstrap  # noqa: F401
-
 import callme
 
 BASE = "http://127.0.0.1:8770"

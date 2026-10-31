@@ -1,5 +1,6 @@
+// probe: route=status timeout=90
 /* THE APP SHELL: the header heading, where focus starts, and the desk line beneath it.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_shell.js --route status
+   Run with: python DevTools/run_ui_probes.py shell
 
    WHAT IT PINS, and why each one is worth a check rather than a comment:
 
@@ -15,15 +16,6 @@
      heading is not. */
 
 const el = (id) => document.getElementById(id);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 15000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function run() {
   await waitFor(() => el("app-title"), 20000);
@@ -98,7 +90,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

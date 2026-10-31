@@ -31,6 +31,7 @@ backup it was asked to delete did not exist. The show branch passed regardless, 
 lives on the desk rather than in that folder, which is what made the failure look selective.
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -38,7 +39,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import profiles
 import rcp_read
 import recorder

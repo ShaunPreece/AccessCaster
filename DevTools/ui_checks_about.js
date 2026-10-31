@@ -1,5 +1,6 @@
+// probe: route=about timeout=90
 /* Machine checks for the About page's tab strip.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_about.js --route about
+   Run with: python DevTools/run_ui_probes.py about
    Same shape as ui_checks_device.js. NOT a screen-reader pass: it pins the things a screen reader
    depends on and the eye cannot see (roles, states, one tab stop, what is exposed, heading order),
    so the NVDA run is about how it sounds.
@@ -34,34 +35,6 @@ const visiblePanes = () => panes().filter((p) => !p.hidden);
 const panel = () => document.getElementById("about-panel");
 const key = (ev, target) => target.dispatchEvent(
   new KeyboardEvent("keydown", { key: ev, bubbles: true, cancelable: true }));
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-async function apiLog() {
-  const log = await probeLog();
-  return log.filter((e) => e.path.indexOf("/api/") === 0 && e.path.indexOf("/api/ping") < 0);
-}
-
-/* Wait for the traffic the app's own startup fires to stop, so a "nothing was read" check cannot
-   pass by looking too early or fail by catching a startup load. */
-async function quiet(ms) {
-  let last = (await apiLog()).length;
-  let lastChange = Date.now();
-  const until = Date.now() + 20000;
-  while (Date.now() < until) {
-    await sleep(150);
-    const n = (await apiLog()).length;
-    if (n !== last) { last = n; lastChange = Date.now(); }
-    else if (Date.now() - lastChange > (ms || 1200)) return;
-  }
-}
 
 function openTab(k) {
   document.getElementById(tabId(k)).click();
@@ -247,17 +220,11 @@ async function run() {
     window.localStorage.getItem("accesscaster.groups"));
 
   // ---- nothing was written --------------------------------------------
-  const HOUSEKEEPING = ["/api/ping", "/api/focus", "/api/quit"];
-  const all = await probeLog();
-  const writes = all.filter((e) => e.method === "POST" && e.path.indexOf("/api/") === 0
-                                   && HOUSEKEEPING.indexOf(e.path) < 0);
+  const writes = await probeWrites();
   check("nothing in the run tried to write to the device", writes.length === 0,
     writes.map((e) => e.path).join(" "));
 
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

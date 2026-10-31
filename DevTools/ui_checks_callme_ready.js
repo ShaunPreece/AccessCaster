@@ -1,8 +1,8 @@
+// probe: route=callme timeout=240 stub=_probe_stub_callme_unready.json
 /* The CallMe page with NOTHING ready: offline, CallMe 1 on no fader, hosting off. Build the stub
    that says so, then run with it:
      python DevTools/make_callme_unready_stub.py
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_callme_ready.js --route callme \
-         --stub DevTools/_probe_stub_callme_unready.json --timeout 240
+     python DevTools/run_ui_probes.py callme_ready
 
    WHAT IS WORTH ASSERTING: the page is the Not ready section alone, each problem is listed with
    its fix beside it, hosting off is not one of them (a call out still works), the fix posts
@@ -10,17 +10,6 @@
    own control has gone. The probe stubs every POST, so nothing here reaches the desk. */
 
 const el = (id) => document.getElementById(id);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
 
 async function run() {
   await waitFor(() => el("sec-callme") && !el("sec-callme").hidden, 20000);
@@ -66,10 +55,10 @@ async function run() {
   sel.dispatchEvent(new Event("change", { bubbles: true }));
   await sleep(600);
   check("choosing a fader from the keyboard posts nothing yet",
-    posts(await probeLog()).length === 0);
+    pagePosts(await probeLog()).length === 0);
   sel.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  await waitFor(async () => posts(await probeLog()).length > 0, 10000);
-  let log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 10000);
+  let log = pagePosts(await probeLog());
   check("Enter posts CallMe 1's code to the chosen fader",
     log.length === 1 && log[0].path === "/api/faders/set"
       && JSON.stringify(log[0].body) === JSON.stringify({ fader: last, code: 16 }),
@@ -85,7 +74,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

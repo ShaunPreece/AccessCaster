@@ -1,3 +1,4 @@
+// probe: route=profiles timeout=90
 /* THIS APP's OWN SETTINGS, the export/import section on the Profiles page (built).
 
    It sits on the Profiles page and NOT inside a profile, and the first check here is that the two
@@ -8,28 +9,9 @@
 
    POSTs are stubbed by the probe, so nothing here writes a file or touches settings.
 
-   Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_appsettings.js --route profiles */
+   Run: python DevTools/run_ui_probes.py appsettings */
 
 const el = (id) => document.getElementById(id);
-const flat = (n) => (n ? (n.textContent || "").replace(/\s+/g, " ").trim() : "");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 10000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-function labelFor(input) {
-  if (!input) return "";
-  const lab = document.querySelector("label[for='" + input.id + "']") || input.closest("label");
-  return flat(lab);
-}
-
-const writes = async () => (await probeLog()).filter(
-  (e) => e.method === "POST" && e.path.indexOf("/api/ping") < 0);
 
 async function run() {
   await waitFor(() => el("sec-profiles") && !el("sec-profiles").hidden, 20000);
@@ -47,7 +29,7 @@ async function run() {
   while (noteEl && !(noteEl.tagName === "P" && noteEl.getAttribute("role") === "note")) {
     noteEl = noteEl.nextElementSibling;
   }
-  const note = flat(noteEl);
+  const note = flatText(noteEl);
   check("the note says these are the APP's settings, not the desk's",
     /no profile carries them|belong to AccessCaster/i.test(note), note);
   check("and it says outright that no desk settings are in the file",
@@ -63,19 +45,19 @@ async function run() {
     check(id + " is a real button", !!b && b.tagName === "BUTTON" && b.type === "button",
       b && b.tagName);
     check(id + " is not natively disabled", !!b && !b.disabled && !b.hasAttribute("disabled"));
-    check(id + " has a name that says what it does", flat(b).length > 6, flat(b));
+    check(id + " has a name that says what it does", flatText(b).length > 6, flatText(b));
   });
   check("the export button says WHAT it saves, not just 'Export'",
-    /settings/i.test(flat(el("appsettings-export-btn"))), flat(el("appsettings-export-btn")));
+    /settings/i.test(flatText(el("appsettings-export-btn"))), flatText(el("appsettings-export-btn")));
 
   const picker = el("appsettings-file");
   check("the file picker exists", !!picker && picker.type === "file");
-  check("and it has a real label", labelFor(picker).length > 0, labelFor(picker));
+  check("and it has a real label", accessibleName(picker).length > 0, accessibleName(picker));
   const described = picker && el(picker.getAttribute("aria-describedby"));
   check("and an explanation attached with aria-describedby", !!described,
     picker && picker.getAttribute("aria-describedby"));
   check("which warns that an unavailable device is left alone",
-    /not got|left alone/i.test(flat(described)), flat(described));
+    /not got|left alone/i.test(flatText(described)), flatText(described));
 
   // ---- The result line is READ, and announce() is the one voice ---------------------------
   // A live region here as well as announce() would speak every result twice (index.html says why).
@@ -89,9 +71,9 @@ async function run() {
   await probeClear();
   el("appsettings-import-btn").click();
   await sleep(700);
-  check("restoring with no file chosen writes nothing", (await writes()).length === 0);
-  check("and it says to choose a file first", /choose a settings file/i.test(flat(state)),
-    flat(state));
+  check("restoring with no file chosen writes nothing", pagePosts(await probeLog()).length === 0);
+  check("and it says to choose a file first", /choose a settings file/i.test(flatText(state)),
+    flatText(state));
   check("and focus goes to the picker so you can", document.activeElement === picker,
     document.activeElement && document.activeElement.id);
 
@@ -102,14 +84,11 @@ async function run() {
   const dlg = document.querySelector("dialog[open]");
   check("saving does not stop to confirm, because it only writes a file", !dlg,
     dlg && dlg.id);
-  const posted = (await writes()).map((p) => p.path);
+  const posted = pagePosts(await probeLog()).map((p) => p.path);
   check("and it posts to the export endpoint",
     posted.indexOf("/api/appsettings/export") >= 0, posted.join(","));
 
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

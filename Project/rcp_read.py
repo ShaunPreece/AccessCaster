@@ -11,15 +11,16 @@ read here is served from that parse. A dump that will not parse raises
 ModelUnreadable rather than being guessed at.
 """
 from __future__ import annotations
+
 import queue
 import threading
 import time
 
-import model_tree            # THE parser: the dump is a tree, and this reads it
-import diagnostics           # the app's own account of what it read and how long it took
-import rcp_hid   # write-generation counter, so a write invalidates the cached dump below
+import devices  # device model table (matrix shape, channel order) keyed by product id
+import diagnostics  # the app's own account of what it read and how long it took
+import model_tree  # THE parser: the dump is a tree, and this reads it
+import rcp_hid  # write-generation counter, so a write invalidates the cached dump below
 from rcp_hid import find_control_interface
-import devices   # device model table (matrix shape, channel order) keyed by product id
 
 BULK_LEN = 256
 # The dump trigger: report 0x03, payload-len 4, payload ad10a7b0 = "dump full device model".
@@ -119,7 +120,7 @@ def _cache_get(need_stable: bool):
         c = _cache
         if c["blob"] is None or c["gen"] != rcp_hid.write_generation():
             return None
-        if time.time() - c["at"] > CACHE_TTL_S:
+        if time.monotonic() - c["at"] > CACHE_TTL_S:
             return None
         if need_stable and not c["stable"]:
             return None
@@ -128,7 +129,7 @@ def _cache_get(need_stable: bool):
 
 def _cache_put(blob: bytes, stable: bool) -> None:
     with _cache_lock:
-        _cache.update(blob=blob, at=time.time(), gen=rcp_hid.write_generation(), stable=stable)
+        _cache.update(blob=blob, at=time.monotonic(), gen=rcp_hid.write_generation(), stable=stable)
 
 
 def read_model(settle_ms: int = 1500, max_reads: int = 4000, fresh: bool = False) -> bytes:
@@ -215,8 +216,9 @@ class PushListener:
 
     DUMP FRAMES ARE FILTERED OUT STRUCTURALLY by `parse_push`, because a model dump arrives on
     report 04 as well and any dump triggered anywhere in the app is delivered to this handle too.
-    The same test also drops the occasional frame that is not one complete record for other reasons;
-    see `not_a_record`, which is counted separately rather than assumed to be a dump.
+    The same test also drops a frame that is not one complete record for other reasons (a record
+    over PUSH_MAX_RECORD, or one that will not parse): 74 of the 3267 frames in a reset burst, with
+    no dump running anywhere.
     """
 
     def __init__(self):
@@ -224,12 +226,6 @@ class PushListener:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._error: BaseException | None = None
-        self.frames = 0            # report-04 frames seen
-        self.pushes = 0            # of those, ones that were a complete addressed record
-        # Not "dump frames": 74 of 3267 frames in a reset burst land here with no dump running
-        # anywhere, so they are mostly pushes the structural test rejected (a record over
-        # PUSH_MAX_RECORD, or one that would not parse) rather than slices of somebody's model.
-        self.not_a_record = 0
 
     def __enter__(self) -> "PushListener":
         self.start()
@@ -272,13 +268,10 @@ class PushListener:
                     return
                 if not rep or rep[0] != 0x04:
                     continue
-                self.frames += 1
                 rec = parse_push(bytes(rep))
                 if rec is None:
-                    self.not_a_record += 1
                     continue
                 path, name, val, kind = rec
-                self.pushes += 1
                 self._q.put((tuple(path), name, val, kind))
         finally:
             rcp_hid.close_handle(dev, "push listener")
@@ -294,12 +287,16 @@ class PushListener:
         or a desk that pushed its answer and then fell off the bus would be reported as a failure
         having actually succeeded.
         """
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         while True:
+            # The wait for each push ends at the deadline, so a steady stream of other pushes (a
+            # playing pad sends padProgress about 20 times a second) cannot hold the wait open.
+            # Past the deadline it takes only what is already queued, then gives up.
             try:
-                _path, got, val, _kind = self._q.get(timeout=0.1)
+                _path, got, val, _kind = self._q.get(
+                    timeout=max(0.0, min(0.1, deadline - time.monotonic())))
             except queue.Empty:
-                if self.lost or time.time() >= deadline:
+                if self.lost or time.monotonic() >= deadline:
                     return None
                 continue
             if got != name:
@@ -320,15 +317,15 @@ class PushListener:
         `idle` is comfortably above the burst's own internal gaps: measured over 3267 frames, not one
         gap reached half a second.
         """
-        started = time.time()
+        started = time.monotonic()
         deadline = started + timeout
         while True:
             try:
                 self._q.get(timeout=idle)
             except queue.Empty:
-                return time.time() - started        # nothing for `idle` seconds: it has stopped
-            if self.lost or time.time() >= deadline:
-                return time.time() - started
+                return time.monotonic() - started        # nothing for `idle` seconds: it has stopped
+            if self.lost or time.monotonic() >= deadline:
+                return time.monotonic() - started
 
     def stop(self) -> None:
         """Ask the reader to finish and WAIT for it, so the handle is closed by its own thread."""
@@ -363,13 +360,13 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     buf = bytearray()
     need = None        # 4 + the declared length, once the dump's first frame has told us
     frames = pushes = declared = 0
-    started = time.time()
+    started = time.monotonic()
     try:
         dev.set_nonblocking(False)
         dev.write(TRIGGER)
-        deadline = time.time() + settle_ms / 1000.0
+        deadline = time.monotonic() + settle_ms / 1000.0
         reads = 0
-        while time.time() < deadline and reads < max_reads:
+        while time.monotonic() < deadline and reads < max_reads:
             chunk = dev.read(BULK_LEN, timeout_ms=READ_TIMEOUT_MS)
             reads += 1
             if not chunk:
@@ -390,7 +387,7 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
                     need = 4 + declared
             if need is not None and len(buf) >= need:
                 break
-            deadline = time.time() + QUIET_S  # extend while data keeps flowing
+            deadline = time.monotonic() + QUIET_S  # extend while data keeps flowing
     finally:
         rcp_hid.close_handle(dev, "model dump")
     _last_read.update(bytes=len(buf), frames=frames, pushes_skipped=pushes, declared=declared,
@@ -401,7 +398,7 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     # it looks at it, and it is the line that dates a dropout without inferring it from outside.
     diagnostics.event("model.read", bounded_by="length" if need is not None else "silence",
                       bytes=len(buf), frames=frames, pushes_skipped=pushes,
-                      took=f"{time.time() - started:.2f}s")
+                      took=f"{time.monotonic() - started:.2f}s")
     blob = bytes(buf)
     # LEARN WHICH DESK THIS IS, from the desk's own word for it. Only when the product id names no
     # desk, which happens whenever `outputMultiMode` is not the default: the id encodes the audio
@@ -410,8 +407,8 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     if devices.unidentified(iface):
         try:
             devices.note_system_name(iface, first(blob, "systemName", "str"))
-        except Exception:
-            pass                    # naming the desk is never worth failing a dump for
+        except Exception as exc:    # naming the desk is never worth failing a dump for
+            diagnostics.event("device.name_unread", str(exc))
     return blob
 
 

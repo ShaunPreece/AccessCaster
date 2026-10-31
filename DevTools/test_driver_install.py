@@ -9,6 +9,7 @@ mode worth testing for.
 Run: python DevTools/test_driver_install.py
 """
 from __future__ import annotations
+
 import io
 import os
 import tempfile
@@ -82,7 +83,14 @@ with open(unsigned, "wb") as f:
 refuses("an unsigned file is refused and NOT installed",
         lambda: di.verify_signature(unsigned), "not validly signed")
 check("the signer insisted on is RODE's legal entity, not the brand name",
-      di.SIGNER, "Freedman Electronics")
+      di.SIGNER, "Freedman Electronics Pty Ltd")
+check("the organisation is read from its own field",
+      di.subject_organisation("CN=Freedman Electronics Pty Ltd, O=Freedman Electronics Pty Ltd, "
+                              "L=Silverwater, S=New South Wales, C=AU"),
+      "Freedman Electronics Pty Ltd")
+check("a subject that only CONTAINS the name is not RODE's",
+      di.subject_organisation('CN=Freedman Electronics Pty Ltd, O="Not Freedman Electronics Pty '
+                              'Ltd, Honest", C=US').casefold() == di.SIGNER.casefold(), False)
 
 print("\nTHE REAL MSI, if a copy is on this machine")
 local = None
@@ -93,14 +101,15 @@ for root, _dirs, files in os.walk(os.path.join(os.path.dirname(_bootstrap.__file
             local = os.path.join(root, f)
 if local:
     subject = di.verify_signature(local)
-    check("RODE's own MSI passes", di.SIGNER.lower() in subject.lower(), True)
+    check("RODE's own MSI passes", di.subject_organisation(subject), di.SIGNER)
     print(f"       signed by: {subject[:72]}")
 else:
     print("  SKIP no local copy in _driver/ to check against")
 
 print("\nTHE REFUSAL TO INSTALL OVER ONE THAT IS ALREADY THERE")
-import server                                              # noqa: E402  (after _bootstrap)
-import virtual_devices                                     # noqa: E402
+import server  # noqa: E402  (after _bootstrap)
+import virtual_devices  # noqa: E402
+
 _real = virtual_devices.read_status
 try:
     class _St:
@@ -117,8 +126,9 @@ print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
 # The claim the README and Help both make, asserted rather than trusted: no other module reaches
 # the network. `urllib`/`socket` appear elsewhere for the LAN server and for reading this machine's
 # own address, so match on the ACT of fetching a URL rather than on the import.
-import glob                                                # noqa: E402
-import re                                                  # noqa: E402
+import glob  # noqa: E402
+import re  # noqa: E402
+
 proj = os.path.join(os.path.dirname(os.path.abspath(_bootstrap.__file__)), "..", "Project")
 callers = []
 for path in glob.glob(os.path.join(proj, "*.py")):

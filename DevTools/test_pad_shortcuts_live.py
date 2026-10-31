@@ -16,6 +16,7 @@ under test lives there. Restores the bank and leaves nothing engaged or held.
     python DevTools/test_pad_shortcuts_live.py
 """
 from __future__ import annotations
+
 import sys
 import threading
 import time
@@ -23,7 +24,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import devices
 import server
 import soundpad
@@ -32,6 +32,8 @@ FAILURES = []
 
 
 def check(what: str, got, want=None, contains=None) -> None:
+    if isinstance(got, dict):                  # a shortcut's {ok, message}: the sentence is checked
+        got = got.get("message")
     ok = (want is not None and got == want) or (contains is not None and contains in str(got))
     print(f"  {'PASS' if ok else 'FAIL'}  {what}: {got!r}")
     if not ok:

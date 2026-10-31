@@ -19,6 +19,7 @@ desk's own pads back with the show import.
 Usage: python DevTools/test_clean_restore_live.py --yes [--keep-profile]
 """
 from __future__ import annotations
+
 import argparse
 import json
 import subprocess
@@ -29,9 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
-from analyse_clean_restore import snap, compare, show
+from analyse_clean_restore import compare, show, snap
 
 BASE = "http://127.0.0.1:8770"
 CAP = Path(__file__).resolve().parent / "captures"
@@ -41,9 +41,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def say(text: str) -> None:
-    """Speak a one-line status. say.ps1 self-gates on the foreground window, so this is safe."""
+    """Speak a one-line status, unless the Claude GUI has the focus (DevTools/say_gated.ps1)."""
     try:
-        subprocess.run(["powershell", "-File", str(ROOT / "Project" / "say.ps1"), "-Text", text],
+        subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File",
+                        str(ROOT / "DevTools" / "say_gated.ps1"), "-Text", text],
                        capture_output=True, timeout=30)
     except Exception:
         pass

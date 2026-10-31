@@ -1,3 +1,4 @@
+// probe: route=profiles timeout=90
 /* AccessCaster - browser checks for the BACKUPS page (Alt+5).
  *
  * ONE page, ONE list. The shape this replaces - two headings, two lists and two "back up" buttons,
@@ -5,28 +6,15 @@
  * in the user's face and still could not answer which of them would actually put the desk back.
  *
  * WHAT IS PINNED HERE IS THE PROMISE, not the plumbing: one list, one save, one restore, one
- * delete, and a page that never makes the user learn the word "show". Run with a stub for
- * /api/backups when the attached build predates the endpoint:
+ * delete, and a page that never makes the user learn the word "show". The list is the desk's and
+ * this computer's real backups, read through the running server; every POST is stubbed.
  *
- *   python DevTools/ui_probe.py --checks DevTools/ui_checks_backups.js --route profiles \
- *       --stub <a file mapping /api/backups to a payload>
+ *   python DevTools/run_ui_probes.py backups
  */
-(async function () {
-  const el = (id) => document.getElementById(id);
-  const textOf = (id) => (el(id) ? el(id).textContent.trim() : "");
-  const labelFor = (node) => {
-    const l = node && document.querySelector(`label[for='${node.id}']`);
-    return l ? l.textContent.trim() : "";
-  };
-  const waitFor = async (fn, ms) => {
-    const end = Date.now() + (ms || 5000);
-    while (Date.now() < end) {
-      try { if (fn()) return true; } catch { /* not built yet */ }
-      await sleep(80);
-    }
-    return false;
-  };
+const el = (id) => document.getElementById(id);
+const textOf = (id) => (el(id) ? el(id).textContent.trim() : "");
 
+async function run() {
   await waitFor(() => el("profile-select"), 30000);
   await waitFor(() => el("profile-select").options.length > 0, 8000);
   await waitFor(() => textOf("backup-state") !== "Checking.", 8000);
@@ -37,8 +25,8 @@
     document.querySelectorAll("#sec-profiles select").length + " selects in the section");
   check("the old separate Shows list is gone", !el("show-select"));
   check("and so is its own back-up button", !el("show-export-btn"));
-  check("the list has a real label", labelFor(el("profile-select")).length > 0,
-    labelFor(el("profile-select")));
+  check("the list has a real label", accessibleName(el("profile-select")).length > 0,
+    accessibleName(el("profile-select")));
   check("one button backs the unit up", !!el("profile-save-open"),
     el("profile-save-open") && el("profile-save-open").textContent.trim());
   ["profile-restore-open", "profile-rename-open", "profile-delete-open"].forEach((id) => {
@@ -77,7 +65,7 @@
     check("and renaming it is refused rather than half-working",
       !document.querySelector("#rename-dialog[open]"));
   } else {
-    check("a unit-made backup was in the list to test", false, "none in the stub");
+    check("a unit-made backup was in the list to test", false, "none on this desk");
   }
 
   const profOpt = opts.find((o) => /^profile:/.test(o.value));
@@ -87,6 +75,34 @@
     await sleep(150);
     check("choosing one held on this computer says where it is held",
       /this computer/i.test(textOf("backup-detail")), textOf("backup-detail"));
+
+    // RENAME AND DELETE NAME THE BACKUP AS THE SERVER KNOWS IT: its name, never the list key,
+    // which the server's name rule refuses. Both POSTs are stubbed, so nothing is renamed.
+    const name = profOpt.value.slice("profile:".length);
+    await probeClear();
+    el("profile-rename-open").click();
+    await waitFor(() => document.querySelector("#rename-dialog[open]"), 3000);
+    el("profile-new-name").value = name + " renamed";
+    el("profile-rename-form").requestSubmit();
+    await waitFor(async () => pagePosts(await probeLog()).length > 0, 5000);
+    const renamed = pagePosts(await probeLog()).find((e) => e.path === "/api/profiles/rename");
+    checkEqual("rename sends the backup's name", renamed && renamed.body && renamed.body.name,
+      name);
+    const renameDlg = document.querySelector("#rename-dialog[open]");
+    if (renameDlg) renameDlg.close();
+
+    el("profile-select").value = profOpt.value;
+    el("profile-select").dispatchEvent(new Event("change", { bubbles: true }));
+    await probeClear();
+    el("profile-delete-open").click();
+    await waitFor(() => document.querySelector("#delete-dialog[open]"), 3000);
+    el("delete-confirm-btn").click();
+    await waitFor(async () => pagePosts(await probeLog()).length > 0, 5000);
+    const deleted = pagePosts(await probeLog()).find((e) => e.path === "/api/backup/delete");
+    checkEqual("delete sends the backup's name", deleted && deleted.body && deleted.body.name,
+      name);
+    const deleteDlg = document.querySelector("#delete-dialog[open]");
+    if (deleteDlg) deleteDlg.close();
   }
 
   // ---- the state line is about the half the user can change --------------
@@ -98,11 +114,15 @@
   check("and it still says whether it can be undone",
     textOf("reset-undo-note").length > 0, textOf("reset-undo-note"));
 
-  // ---- nothing was written to the device by any of this ------------------
-  const log = await probeLog();
-  const writes = log.filter((r) => r.method === "POST" && !/\/api\/(ping|backup\/plan)$/.test(r.path));
+  // ---- nothing else was written, in the whole run ------------------------
+  // /api/backup/plan is a read made by POST, and the rename and delete are the stubbed presses
+  // above.
+  const pressed = /\/api\/(backup\/plan|profiles\/rename|backup\/delete)$/;
+  const writes = (await probeWrites()).filter((r) => !pressed.test(r.path));
   check("reading the page writes nothing to the unit", writes.length === 0,
     writes.map((w) => w.path).join(","));
 
-  probeDone();
-})();
+  await probeDone();
+}
+
+probeRun(run);

@@ -26,7 +26,6 @@ import time
 from ctypes import wintypes
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path)
-
 import virtual_devices
 
 # The interface classes an audio device publishes. The service wants the audio one; Windows

@@ -37,7 +37,11 @@ try {
     $cw = [Cap.ConHide]::GetConsoleWindow()
     if ($cw -ne [System.IntPtr]::Zero) { [Cap.ConHide]::ShowWindow($cw, 0) | Out-Null }
     [Cap.ConHide]::FreeConsole() | Out-Null
-} catch {}
+} catch {
+    # Written to the boot file below, once it exists: a console that stays attached brings the
+    # UIPI block back, and this is where that would be seen.
+    $hideError = $_.Exception.Message
+}
 
 # Proof-of-life: write a boot marker immediately so we can tell, from the normal
 # session, whether this elevated script actually started and where it thinks it
@@ -45,6 +49,10 @@ try {
 $bootFile = "$env:USERPROFILE\cap_server_boot.txt"
 "BOOT $(Get-Date -Format s) PSScriptRoot=[$PSScriptRoot] CommandPath=[$PSCommandPath] CWD=[$((Get-Location).Path)] User=[$env:USERNAME]" | Out-File -FilePath $bootFile -Encoding utf8
 trap { "TRAP $(Get-Date -Format s): $_" | Out-File -FilePath $bootFile -Append -Encoding utf8 }
+if ($hideError) {
+    "CONSOLE NOT HIDDEN, so app-driven captures may be blocked: $hideError" |
+        Out-File -FilePath $bootFile -Append -Encoding utf8
+}
 
 # Resolve the project dir robustly even if $PSScriptRoot is empty.
 $base = $PSScriptRoot

@@ -18,31 +18,14 @@ from __future__ import annotations
 
 import ctypes
 import math
-import os
 import threading
 import time
 from ctypes import POINTER, c_float, c_int32, c_uint32, c_void_p, c_wchar_p
 
 import comtypes
 import comtypes.client
+import write_guard
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
-
-# An offline test never changes Windows' audio: the same rule, under the same two flags, that
-# rcp_hid applies to desk writes (DevTools/_bootstrap sets them by script name). Moving the default
-# output, enabling an endpoint or setting a level or mute moves the screen reader's speech on the
-# machine running the test.
-_NO_AUDIO_CHANGE = bool(os.environ.get("ACCESSCASTER_NO_DEVICE_WRITE")) and not os.environ.get(
-    "ACCESSCASTER_ALLOW_DEVICE_WRITE")
-
-
-def refuse_audio_change_in_tests() -> None:
-    """Raise if this process is an offline test. Called before every Windows audio write."""
-    if _NO_AUDIO_CHANGE:
-        raise RuntimeError(
-            "REFUSING TO CHANGE WINDOWS AUDIO: this is an offline test "
-            "(ACCESSCASTER_NO_DEVICE_WRITE). Stub the call, or set ACCESSCASTER_ALLOW_DEVICE_WRITE "
-            "if it is a live suite.")
-
 
 CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
 
@@ -464,10 +447,9 @@ class Meter:
         return self.ceiling
 
     def peak(self) -> float:
-        try:
-            return float(self._meter.GetPeakValue())
-        except Exception:
-            return 0.0
+        """The current peak, 0 to 1. Raises when the endpoint has gone (the desk unplugged), which
+        a caller must not read as silence."""
+        return float(self._meter.GetPeakValue())
 
     def close(self):
         self._vol = None
@@ -493,7 +475,7 @@ def cue(kind: str) -> None:
     if not tones:
         return
     try:
-        import winsound              # noqa: PLC0415  (Windows only, and only when it fires)
+        import winsound  # noqa: PLC0415  (Windows only, and only when it fires)
         for freq, ms in tones:
             winsound.Beep(freq, ms)
     except Exception:
@@ -508,7 +490,7 @@ def clip_alert() -> None:
     recording it lands in the take; the page says so."""
     def _beep():
         try:
-            import winsound            # noqa: PLC0415  (Windows only, and only when it fires)
+            import winsound  # noqa: PLC0415  (Windows only, and only when it fires)
             winsound.Beep(320, 110)
             winsound.Beep(240, 160)
         except Exception:
@@ -640,7 +622,7 @@ def set_endpoint_mute(endpoint_id: str, muted: bool) -> dict:
     A Windows-muted input reads exactly like a dead microphone."""
     comtypes.CoInitialize()
     try:
-        refuse_audio_change_in_tests()
+        write_guard.refuse_in_tests("change Windows audio")
         _dev, vol = _volume_interface(endpoint_id)
         vol.SetMute(1 if muted else 0, None)
         got = bool(vol.GetMute())
@@ -659,7 +641,7 @@ def set_endpoint_volume_db(endpoint_id: str, db: float) -> dict:
     input silently stays at -1.08 dB whatever is written, by dB or by scalar."""
     comtypes.CoInitialize()
     try:
-        refuse_audio_change_in_tests()
+        write_guard.refuse_in_tests("change Windows audio")
         _dev, vol = _volume_interface(endpoint_id)
         lo, hi, _step, fixed = _offered_range(vol)
         if fixed:
@@ -778,6 +760,7 @@ class Watcher:
         self.speak_every = float(speak_every)
         self.poll = float(poll)
         self._stop = threading.Event()
+        self._opened = threading.Event()     # set once the meter is open, or has failed to open
         self._thread = None
         self.error = ""
         # Live readings for the page. peak_hold decays like a real meter; peak_max is the true
@@ -796,10 +779,10 @@ class Watcher:
         if self._thread and self._thread.is_alive():
             return True
         self._stop.clear()
+        self._opened.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        # Long enough for an open failure (bad endpoint id, no audio service) to land in self.error.
-        time.sleep(0.3)
+        self._opened.wait(timeout=5.0)
         return not self.error
 
     def stop(self):
@@ -823,13 +806,15 @@ class Watcher:
             self.volume_db = m.volume_db
             self.muted = m.muted
             clip_level = self.clip_at * trusted_ceiling(m.ceiling)
-            last_ceiling = time.time()
+            last_ceiling = time.monotonic()
         except Exception as exc:
             self.error = f"Could not open that stream: {exc}"
             return
-        last_clip = 0.0
-        last_level = time.time()
-        last_sound = time.time()
+        finally:
+            self._opened.set()
+        last_clip = float("-inf")
+        last_level = time.monotonic()
+        last_sound = time.monotonic()
         was_silent = False
         try:
             while not self._stop.is_set():
@@ -839,7 +824,7 @@ class Watcher:
                 self.peak = v
                 self.peak_hold = max(self.peak_hold * 0.995, v)   # a slow decay, like a real meter
                 self.peak_max = max(self.peak_max, v)
-                now = time.time()
+                now = time.monotonic()
 
                 if (now - last_ceiling) >= CEILING_REFRESH_S:
                     last_ceiling = now

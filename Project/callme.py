@@ -437,7 +437,7 @@ def call_details(d: dict, now: float | None = None) -> list:
     """Each connected call's length and technical side, as (label, value) pairs. Empty with no call
     up. `sipSlotCallQuality` is left out: its scale is unknown, and 2 is the only value ever seen.
     The desk publishes no start time, so the length is the Watcher's own count from Active."""
-    now = time.time() if now is None else now
+    now = time.monotonic() if now is None else now
     out = []
     live = [s for s in _live(d) if s.get("state") in CONNECTED]
     for s in live:
@@ -551,7 +551,8 @@ class Watcher(threading.Thread):
     def seed(self, blob: bytes) -> None:
         try:
             d, ctl, slots = read_all(blob)
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("callme.seed_failed", str(exc))
             return
         if not d.get("ok"):
             return
@@ -562,7 +563,7 @@ class Watcher(threading.Thread):
             # A call already up when first seen started at some unknown earlier time.
             for s in d.get("slots", []):
                 if s.get("state") in CONNECTED and s.get("uuid") and s["uuid"] not in self._since:
-                    self._since[s["uuid"]] = (time.time(), False)
+                    self._since[s["uuid"]] = (time.monotonic(), False)
             self.version += 1
 
     def quiet_connect(self, slot_index: int, on: bool) -> None:
@@ -736,7 +737,7 @@ class Watcher(threading.Thread):
                     say.append(f"Call with {who} extended.")
             elif state == "Active" and was not in CONNECTED:
                 if s.get("uuid"):
-                    self._since[s["uuid"]] = (time.time(), True)
+                    self._since[s["uuid"]] = (time.monotonic(), True)
                 if i in self._quiet:
                     self._quiet.discard(i)
                 else:

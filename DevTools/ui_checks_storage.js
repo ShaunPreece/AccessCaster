@@ -1,22 +1,12 @@
+// probe: route=recording timeout=240
 /* The card and drive section of the Recording page. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_storage.js --route recording --timeout 240
+     python DevTools/run_ui_probes.py storage
 
    Needs a server with /api/storage/*. What matters here: the unit's INTERNAL storage, which holds
    the pad sounds, is never offered; the eject button's label names what it will do; and erase never
    posts without the confirmation. POSTs are stubbed, so nothing reaches the desk. */
 
 const el = (id) => document.getElementById(id);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
 
 async function run() {
   await waitFor(() => !/Reading the unit/i.test(el("rec-state").textContent), 25000);
@@ -50,13 +40,10 @@ async function run() {
       .find((b) => /cancel|no|keep/i.test(b.textContent));
     if (cancel) cancel.click();
     await sleep(600);
-    const log = posts(await probeLog());
+    const log = pagePosts(await probeLog());
     check("cancelling posts nothing", log.length === 0, JSON.stringify(log.map((r) => r.path)));
   }
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

@@ -253,7 +253,7 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
 
 3.1 READ  rcp_read.read_model() / read_model_stable() (strips the per-frame 0x04 report id, the old
     framing bug that made counts drift). DevTools/decode_effects.py dumps every effect-object.
-3.2 CREATE SOUND  soundpad.create_sound / assign_create (CLI `soundpad.py create <grid> <folder> <wav>
+3.2 CREATE SOUND  soundpad.create_sound / assign_create (CLI `soundpad.py create <grid> <wav>
     [name] [colour]`). handoff + phase1 + sync +
     commit(padType=1) + file write mid-sequence + remount + padFilePath. handle=free_handle(count). NO
     region-B/EFFECTS block (see section 2).
@@ -280,8 +280,8 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     pad's 0-based stream position, write ONE FRAME_PAD (0x9a) record in transfer mode, exit. No
     clear/create, no region-B touch -> pool-safe + silent. A PAD_PROP registry lists the SAFE,
     value-confirmed properties (each with kind/label/min-max/applies_to) and is what a future
-    "Advanced per-pad" UI renders, so the layout is decoupled from the code. Named wrappers:
-    set_pad_gain / set_pad_name / set_pad_colour / set_pad_loop. CLI: `soundpad.py set <grid> <prop>
+    "Advanced per-pad" UI renders, so the layout is decoupled from the code. Every edit goes
+    through set_pad_property (or set_pad_properties for several). CLI: `soundpad.py set <grid> <prop>
     <value>`. PROVEN by read-back on a throwaway pad (padName, padColourIndex, padGain -12->-20,
     padLoop all wrote + read back, pool stayed 7). padPlayMode, padEnv* and the mixer sub-params are
     settled since (section 1d, and the pad-firing entries in PROJECT_GUIDE part 2). Record-to-pad is

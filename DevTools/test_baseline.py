@@ -13,6 +13,7 @@ deletes any other profile.
 Run: python DevTools/test_baseline.py
 """
 from __future__ import annotations
+
 import datetime
 import os
 import shutil

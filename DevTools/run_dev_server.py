@@ -19,7 +19,6 @@ Usage:
 Run it with the Bash/PowerShell tool's background flag to leave it serving.
 """
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import server
 
 

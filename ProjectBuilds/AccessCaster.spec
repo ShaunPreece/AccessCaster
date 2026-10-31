@@ -85,8 +85,7 @@ datas = [
     # different question, and they are what the effects and mixer restore is built from.
     (os.path.join(_ASSETS, 'mic_presets.json'), '.'),          # factory mic-processing presets
     (os.path.join(_ASSETS, 'fx_recipes.json'), '.'),           # factory voice-FX recipes
-    (os.path.join(_PROJ, 'say.ps1'), '.'),                     # SAPI speech helper (one-shot fallback)
-    (os.path.join(_PROJ, 'say_worker.ps1'), '.'),              # persistent speech worker (announcer)
+    (os.path.join(_PROJ, 'say.ps1'), '.'),                     # SAPI speech: the worker and the one-shot
     (os.path.join(_PROJ, 'assets', 'icon.ico'), 'assets'),     # tray / window / exe icon
 ]
 

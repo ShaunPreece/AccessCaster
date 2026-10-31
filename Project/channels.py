@@ -15,13 +15,13 @@ the channel currently sits on, keyed by its position in the live fader vector.
 """
 
 import contextlib as _contextlib
-import json as _json        # the off-fader chain store only
-import time as _time        # strip-vector cache expiry only
-import paths as _paths      # writable data dir for the off-fader chain store
-import rcp_transfer as _t   # low-level byte builders + send layer (build_*, send_record, send_records_paced)
-import rcp_read as _r        # low-level model reader (values, first, read_model, read_model_stable)
-import devices               # per-device model (mic selectors, channel order) keyed by product id
+import time as _time  # strip-vector cache expiry only
 
+import devices  # per-device model (mic selectors, channel order) keyed by product id
+import diagnostics
+import paths as _paths  # writable data dir for the off-fader chain store
+import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
+import rcp_transfer as _t  # low-level byte builders + send layer (build_*, send_record, send_records_paced)
 
 # ============================================================================
 # MIC INPUT CHANNELS (gain / phantom / polarity / type) - the XLR preamp block
@@ -158,7 +158,6 @@ def set_instrument_gain(channel: int, value: int) -> int:
 # the parameter and the SELECTOR selects the channel. Float params use value-type 0x04 (normalised 0..1).
 #   01 01 01 01 <sel>  <propName> 00  01 09 04  <float64 LE>
 # ============================================================================
-SEL_CHANNEL_PROC = 0x1C     # the selected channel's processing block (selector base)
 
 # The names behind a 1-based channel NUMBER (1-4 = Mic 1-4, then the Pro II's factory order), so a
 # caller may pass either. A number only names a channel here; its strip always comes from the live
@@ -232,7 +231,7 @@ def publish_strip_vector(vec) -> None:
     """Cache a channelInputSource vector we have just read as part of some other read."""
     if vec:
         _strip_vec["vec"] = list(vec)
-        _strip_vec["at"] = _time.time()
+        _strip_vec["at"] = _time.monotonic()
         _strip_vec_last["vec"] = list(vec)
 
 
@@ -269,7 +268,7 @@ def invalidate_strip_vector() -> None:
 def strip_vector() -> list:
     """The live channelInputSource vector (position = strip/fader, value = source code)."""
     vec = _strip_vec["vec"]
-    if vec is not None and (_time.time() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
+    if vec is not None and (_time.monotonic() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
         return vec
     vec = [v for v in _r.values(_r.read_model(), "channelInputSource")]
     publish_strip_vector(vec)
@@ -283,7 +282,7 @@ def cached_strip_vector():
     announcer runs in its own thread off a read-only handle, so it uses this to name a channel and
     falls back to 'Channel N' when the cache is cold, rather than dumping from the listener thread."""
     vec = _strip_vec["vec"]
-    if vec is not None and (_time.time() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
+    if vec is not None and (_time.monotonic() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
         return vec
     return None
 
@@ -315,19 +314,19 @@ def _channel_strip(channel) -> int:
 
 
 def proc_selector(channel) -> int:
-    """Map a channel to its processing selector (SEL_CHANNEL_PROC + strip index), DEVICE-AWARE.
+    """Map a channel to its processing selector (SEL_CHANNEL + strip index), DEVICE-AWARE.
 
     `channel` may be a device ui-channel name ("Mic1", "Bluetooth", "Headset", ...), a 1-based
     PROC_CHANNEL_ORDER index, or a 1-based mic number. The strip is the channel's LIVE fader
     position, matching the read path.
     """
-    return SEL_CHANNEL_PROC + _channel_strip(channel)
+    return _t.SEL_CHANNEL + _channel_strip(channel)
 
 
 def fx_selector(channel) -> int:
     """Effects selector (SEL_CHANNEL_FX + strip index), using the SAME strip resolution as
     proc_selector so effects and processing always agree. Confirmed on the Duo: Mic2 -> 0x27."""
-    return SEL_CHANNEL_FX + _channel_strip(channel)
+    return _t.SEL_CHANNEL_FX + _channel_strip(channel)
 
 
 # Whitelist of processing parameters we have decoded (all float64, normalised 0..1). Only names the RODE
@@ -495,7 +494,7 @@ def set_processing_enabled(channel: int, on: bool) -> int:
 
 
 # CHANNEL MUTE. `channelOutputMute` is a compact bool on the channel's own processing selector
-# (SEL_CHANNEL_PROC + strip), i.e. byte-for-byte the same record shape as any module toggle above.
+# (SEL_CHANNEL + strip), i.e. byte-for-byte the same record shape as any module toggle above.
 # The firmware PROPAGATES it into the mix matrix (every mixMute cell for that source follows), so
 # it is a REAL mute, not a stored flag, and clearing it puts everything back. It does NOT take the
 # input-address format: written there it looks unwritable.
@@ -519,7 +518,7 @@ def set_channel_mute(channel, on: bool) -> int:
 
 # CHANNEL SOLO / LISTEN. `channelCueEnable` is the desk's Solo (RODE call it "Listen"): it replaces
 # the headphone feed with just the soloed channels. Same record shape and same selector family as the
-# mute above - a compact bool on SEL_CHANNEL_PROC + strip. The RODE app has no control for it, which
+# mute above - a compact bool on SEL_CHANNEL + strip. The RODE app has no control for it, which
 # means no capture route, never that it is unwritable.
 #
 # A write moves channelCueEnable for that strip and nothing else in the model, and appends no
@@ -604,7 +603,6 @@ def channel_strip_index(channel) -> int:
 # Per-channel "always on" EFFECTS (Echo + Reverb) live on a SEPARATE selector base from the processing
 # modules: fx base 0x26 + STRIP index, resolved by fx_selector exactly as processing is. Mic
 # channels only in the app's UI. Confirmed strip-indexed on the Duo: Mic 2's echoOn on 0x27.
-SEL_CHANNEL_FX = 0x26
 CHANNEL_FX_ON = {"echo": "echoOn", "reverb": "reverbOn"}
 
 
@@ -824,12 +822,12 @@ def _float_write_order(props) -> list:
 
 def proc_selector_for_strip(strip_idx: int) -> int:
     """Processing selector for a STRIP index (0-based), not a channel."""
-    return SEL_CHANNEL_PROC + int(strip_idx)
+    return _t.SEL_CHANNEL + int(strip_idx)
 
 
 def fx_selector_for_strip(strip_idx: int) -> int:
     """Effects selector for a STRIP index (0-based), not a channel."""
-    return SEL_CHANNEL_FX + int(strip_idx)
+    return _t.SEL_CHANNEL_FX + int(strip_idx)
 
 
 def read_chains(blob: bytes | None = None, strips: int | None = None) -> list:
@@ -954,13 +952,13 @@ _ORPHAN_FILE = "off_fader_chains.json"
 
 
 def _orphan_load() -> dict:
-    """The whole store: {device hardware id: {channel code as str: chain}}. {} if absent/corrupt -
-    a lost parked chain is a channel that comes back with the wrong voicing, never a crash."""
+    """The whole store: {device hardware id: {channel code as str: chain}}. {} if absent or corrupt
+    (see `paths.read_json`), or if it cannot be opened: a lost parked chain is a channel that comes
+    back with the wrong voicing, never a crash."""
     try:
-        with open(_paths.data_path(_ORPHAN_FILE), "r", encoding="utf-8") as fh:
-            data = _json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except Exception:
+        return _paths.read_json(_paths.data_path(_ORPHAN_FILE), {})
+    except OSError as exc:
+        diagnostics.event("chain.park_unreadable", str(exc))
         return {}
 
 

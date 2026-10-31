@@ -10,12 +10,12 @@ Offline: the scan and the device class are stubbed, so no unit is needed.
     python DevTools/test_iface_cache.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_hid
 
 FAILS = []

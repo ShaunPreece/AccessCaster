@@ -4,7 +4,7 @@ message in plain English, so a blind user can confirm a MIDI Trigger pad actuall
 The RODECaster Pro II appears to the PC as a USB MIDI input port ("MIDI function 0"). When you
 press a Trigger-type SMART pad (padType 4) it sends a MIDI message out of that port. This script
 opens the port, decodes each incoming message, prints it, and (with --speak) says it aloud via
-say.ps1 (SAPI) so you hear it at the device without reading the terminal.
+Project/say.ps1 (SAPI) so you hear it at the device without reading the terminal.
 
 Usage:
   python midi_monitor.py                # print each message; run until Ctrl+C
@@ -16,8 +16,11 @@ Every decoded line is also appended to midi_monitor.log so a background run can 
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import rtmidi
+
+SAY_PS1 = str(Path(__file__).resolve().parent.parent / "Project" / "say.ps1")
 
 LOG = "midi_monitor.log"
 
@@ -51,11 +54,10 @@ def describe(msg):
 
 
 def speak(text):
-    # Match the project's working SAPI pattern (announce_controls.py / server.py): this system's
-    # PowerShell execution policy blocks .ps1 files, so say.ps1 must be invoked with the bypass.
+    # The execution policy blocks .ps1 files, so say.ps1 is invoked with the bypass.
     try:
         subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                          "-File", "say.ps1", "-Text", text],
+                          "-File", SAY_PS1, "-Text", text],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass

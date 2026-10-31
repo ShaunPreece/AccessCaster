@@ -54,3 +54,8 @@ def spoken_date(d: datetime.date, year: bool = True) -> str:
     n = d.day
     suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix} {d.strftime('%B')}" + (f" {d.year}" if year else "")
+
+
+def spoken_datetime(t: datetime.datetime) -> str:
+    """A date and time as a person says it: "3rd October 2026 at 14:03"."""
+    return spoken_date(t.date()) + t.strftime(" at %H:%M")

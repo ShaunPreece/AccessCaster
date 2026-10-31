@@ -20,12 +20,15 @@ no announcer thread is started.
     python DevTools/test_announcer_suspend.py
 """
 from __future__ import annotations
+
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import recorder
 import server
 
@@ -218,7 +221,6 @@ check("the first state we ever see is announced as nothing at all", SAID, [])
 server._note_recorder_context({})
 
 print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
-import threading, time, types
 reset(announcing=False)
 t0 = time.time()
 server._ann_say_and_wait("Resuming")

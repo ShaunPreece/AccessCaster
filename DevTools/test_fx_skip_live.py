@@ -20,7 +20,6 @@ Usage:
 import argparse
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import rcp_read as rr
 import soundpad
 

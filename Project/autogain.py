@@ -70,10 +70,11 @@ def verdict(result: dict) -> dict:
     """Turn a measurement into a decision: how many dB to move, or why we are not moving anything."""
     loud_db = result["loud_db"]
     if loud_db < MIN_USABLE_DBFS:
-        # Nothing usable. Say WHICH kind of nothing, because the two have different fixes.
-        if result["mix_max_db"] > MIN_USABLE_DBFS:
-            why = ("The unit heard something, but not on that channel. Check the microphone is "
-                   "plugged into that input and that the channel is not muted.")
+        # Nothing usable. Say WHICH kind of nothing, because the two have different fixes. The
+        # mix is isolated to this one channel, so a loud peak with a quiet take is a short sound.
+        if result["max_db"] > MIN_USABLE_DBFS:
+            why = ("Only a short sound came through, not enough to set a gain from. Talk for the "
+                   "whole take.")
         else:
             why = ("Nothing came through at all. Check the microphone is plugged in, and that you "
                    "were talking into the right one.")
@@ -99,8 +100,8 @@ def measure_endpoint(endpoint_id: str, seconds: float, poll: float = 0.05,
     m = meters.Meter(endpoint_id)
     samples = []
     try:
-        end = time.time() + seconds
-        while time.time() < end:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
             if should_stop is not None and should_stop():
                 break
             samples.append(m.peak())
@@ -112,9 +113,7 @@ def measure_endpoint(endpoint_id: str, seconds: float, poll: float = 0.05,
     top = max(samples) if samples else 0.0
     return {"seconds": round(len(samples) * poll, 1), "samples": len(samples),
             "loud": loud, "loud_db": to_db(loud), "max": top, "max_db": to_db(top),
-            # No separate mix pair here: the isolated mix IS the channel, so "the unit heard
-            # something else" is not a distinction this route can make.
-            "mix_max_db": to_db(top), "muted": muted, "ceiling": ceiling}
+            "muted": muted, "ceiling": ceiling}
 
 
 def correct_for_level(result: dict, level: float) -> dict:
@@ -129,7 +128,7 @@ def correct_for_level(result: dict, level: float) -> dict:
     offset = to_db(level)
     out = dict(result)
     out["crosspoint_db"] = offset
-    for key in ("loud_db", "max_db", "mix_max_db"):
+    for key in ("loud_db", "max_db"):
         out[key] = result[key] - offset
     out["loud"] = from_db(out["loud_db"])
     out["max"] = from_db(out["max_db"])

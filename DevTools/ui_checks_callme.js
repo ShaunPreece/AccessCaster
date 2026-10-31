@@ -1,5 +1,6 @@
+// probe: route=callme timeout=240
 /* The CallMe page. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_callme.js --route callme --timeout 240
+     python DevTools/run_ui_probes.py callme
 
    IT NEEDS A SERVER THAT HAS /api/callme, so start DevTools/run_dev_server.py first.
 
@@ -16,24 +17,7 @@
 const el = (id) => document.getElementById(id);
 const sec = () => el("sec-callme");
 
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
 const gets = (log, path) => log.filter((r) => r.method === "GET" && r.path.split("?")[0] === path);
-
-function nameOf(node) {
-  if (!node) return "";
-  if (node.getAttribute("aria-label")) return node.getAttribute("aria-label");
-  const lab = node.closest("label") || document.querySelector(`label[for='${node.id}']`);
-  return lab ? lab.textContent.trim() : node.textContent.trim();
-}
 
 async function run() {
   await waitFor(() => sec() && !sec().hidden, 20000);
@@ -95,16 +79,16 @@ async function run() {
     el("callme-details").hidden === (el("callme-details").children.length === 0));
   const host = el("callme-hosting");
   check("hosting is a labelled checkbox",
-    host && host.type === "checkbox" && /accept incoming calls/i.test(nameOf(host)), nameOf(host));
+    host && host.type === "checkbox" && /accept incoming calls/i.test(accessibleName(host)), accessibleName(host));
   check("hosting says what switching it costs",
     /new code/i.test((el(host.getAttribute("aria-describedby")) || {}).textContent || ""));
   const ring = el("callme-ringtone");
   check("there is a ringtone switch, named for what it does",
-    ring && ring.type === "checkbox" && /ring for incoming calls/i.test(nameOf(ring)), nameOf(ring));
+    ring && ring.type === "checkbox" && /ring for incoming calls/i.test(accessibleName(ring)), accessibleName(ring));
   for (const id of ["callme-code", "callme-link"]) {
     const box = el(id);
-    check(`${id} is labelled and read-only`, box && box.readOnly && nameOf(box).length > 0,
-      nameOf(box));
+    check(`${id} is labelled and read-only`, box && box.readOnly && accessibleName(box).length > 0,
+      accessibleName(box));
   }
   check("the plan line is filled in", /CallMe/.test(el("callme-plan").textContent),
     el("callme-plan").textContent);
@@ -112,7 +96,7 @@ async function run() {
     el("callme-plan").children.length);
   const code = el("callme-dial-code");
   check("the code to call is a labelled text box",
-    code && code.type === "text" && /code/i.test(nameOf(code)), nameOf(code));
+    code && code.type === "text" && /code/i.test(accessibleName(code)), accessibleName(code));
   const call = el("callme-dial");
   check("Call is the form's submit button, so Enter places the call",
     call && call.type === "submit" && call.form && call.form.id === "callme-dial-form");
@@ -123,7 +107,7 @@ async function run() {
     await probeClear();
     answer.click();
     await sleep(700);
-    let log = posts(await probeLog());
+    let log = pagePosts(await probeLog());
     check("pressing it posts nothing", log.length === 0, JSON.stringify(log.map((r) => r.path)));
     await waitFor(() => /no call is ringing/i.test(el("callme-state").textContent), 2000);
     check("and says why, in the page's own live region",
@@ -135,7 +119,7 @@ async function run() {
   check("the contacts list is named by its heading",
     list && list.getAttribute("aria-labelledby") === "callme-h-contacts");
   for (const id of ["callme-contact-name", "callme-contact-code"]) {
-    check(`${id} is a labelled text box`, el(id) && nameOf(el(id)).length > 0, nameOf(el(id)));
+    check(`${id} is a labelled text box`, el(id) && accessibleName(el(id)).length > 0, accessibleName(el(id)));
   }
   check("Add contact is the form's submit button",
     el("callme-contact-save").type === "submit"
@@ -164,7 +148,7 @@ async function run() {
   await probeClear();
   el("callme-contact-call-ZZ9QQ9").click();
   await sleep(700);
-  const dials = posts(await probeLog());
+  const dials = pagePosts(await probeLog());
   check("Call posts a dial with the contact's code",
     dials.length === 1 && dials[0].path === "/api/callme/dial"
       && JSON.stringify(dials[0].body || "").includes("ZZ9QQ9"), JSON.stringify(dials));
@@ -181,7 +165,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

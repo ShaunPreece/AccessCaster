@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import channels
 import devices
+import diagnostics
 import recorder
 import soundpad
 
@@ -86,26 +87,20 @@ def catalogue(include_device: bool = True) -> list:
     return out
 
 
-def label_for(command_id: str) -> str:
-    """The label a stored id should show. Builds the whole catalogue, device commands included.
-
-    A shortcut bound to something that no longer exists (a deleted mix scheme, a cleared pad) keeps
-    its place in the list and SAYS so, rather than vanishing and leaving a key mysteriously taken."""
-    for c in catalogue(include_device=True):
-        if c["id"] == command_id:
-            return c["label"]
-    return f"{command_id} (not available now)"
+def _fail(message: str) -> dict:
+    return {"ok": False, "message": message}
 
 
-def run(command_id: str) -> str:
-    """Carry out a command and return the sentence to speak. Never raises for an unknown id."""
+def run(command_id: str) -> dict:
+    """Carry out a command. Returns {ok, message} as every server action does, `message` being the
+    sentence to speak. Never raises for an unknown id."""
     # The namespace is up to the FIRST DOT; everything after it belongs to that namespace's own
     # parser. Colons separate a command from what it acts on ("chan.mute:Mic1"), so splitting on a
     # colon here would leave "app.announcer" unmatched.
     head, _, arg = (command_id or "").partition(".")
     fn = _DISPATCH.get(head)
     if fn is None:
-        return f"{command_id} is not something this app can do."
+        return _fail(f"{command_id} is not something this app can do.")
     return fn(arg)
 
 
@@ -128,7 +123,7 @@ def _app_commands() -> list:
     ]
 
 
-def _run_app(arg: str) -> str:
+def _run_app(arg: str) -> dict:
     import server
     if arg == "announcer":
         return server._hk_announcer()
@@ -143,8 +138,8 @@ def _run_app(arg: str) -> str:
         res = server.action_set_announce_volume(server._ann_volume + step)
         # The confirmation is spoken by the action itself, at the new level, which is the point of
         # it: you hear what you have chosen. Saying it twice would talk over that.
-        return "" if res.get("ok") else res.get("message", "")
-    return f"Unknown app command {arg}."
+        return {**res, "message": ""} if res.get("ok") else res
+    return _fail(f"Unknown app command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -188,29 +183,29 @@ def _channel_read(name: str) -> dict:
     return {}
 
 
-def _run_chan(arg: str) -> str:
+def _run_chan(arg: str) -> dict:
     import server
     what, _, name = arg.partition(":")
     if what == "solos.clear":
-        return server.action_clear_solos().get("message", "")
+        return server.action_clear_solos()
     ch = channels.ui_channel_map().get(name)
     if ch is None:
-        return f"This unit has no channel called {name}."
+        return _fail(f"This unit has no channel called {name}.")
     if what == "mute":
-        return server.action_set_channel_mute(name, not _muted_now(name)).get("message", "")
+        return server.action_set_channel_mute(name, not _muted_now(name))
     # Solo, processing and phantom have no push-fed cache, so each reads the channel first. About a
     # second and a half, and worth it: a shortcut that guesses the current state and writes the
     # opposite is a shortcut that does the wrong thing every other press.
     full = _channel_read(name)
     if what == "solo":
-        return server.action_set_channel_solo(name, not full.get("solo", False)).get("message", "")
+        return server.action_set_channel_solo(name, not full.get("solo", False))
     if what == "proc":
         return server.action_set_processing_enabled(
-            name, not full.get("processing_on", False)).get("message", "")
+            name, not full.get("processing_on", False))
     if what == "phantom":
         mic = channels.mic_channel_number(ch)
-        return server.action_set_phantom(mic, not full.get("phantom", False)).get("message", "")
-    return f"Unknown channel command {what}."
+        return server.action_set_phantom(mic, not full.get("phantom", False))
+    return _fail(f"Unknown channel command {what}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -239,7 +234,7 @@ def _known_level(kind: str, idx: int):
     return known.get((kind, idx))
 
 
-def _run_level(arg: str) -> str:
+def _run_level(arg: str) -> dict:
     import server
     parts = arg.split(".")
     what = parts[0]
@@ -252,15 +247,15 @@ def _run_level(arg: str) -> str:
             pct = live.get("monitor_percent")
             now = (pct / 100.0) if isinstance(pct, int) else None
         if now is None:
-            return "The monitor level could not be read."
+            return _fail("The monitor level could not be read.")
         return server.action_set_monitor_speaker_level(
-            max(0, min(100, int(round(now * 100)) + step))).get("message", "")
+            max(0, min(100, int(round(now * 100)) + step)))
     if what == "fader":
         _dir, _, num = direction.partition(":")
         try:
             fader = int(num)
         except ValueError:
-            return f"{num} is not a fader."
+            return _fail(f"{num} is not a fader.")
         now = _known_level("fader", fader - 1)
         if now is None:
             live = server.fader_levels_live()
@@ -268,10 +263,10 @@ def _run_level(arg: str) -> str:
                 if f.get("fader") == fader and isinstance(f.get("percent"), int):
                     now = f["percent"] / 100.0
         if now is None:
-            return f"Fader {fader}'s level could not be read."
+            return _fail(f"Fader {fader}'s level could not be read.")
         return server.action_set_fader_level(
-            fader, max(0, min(100, int(round(now * 100)) + step))).get("message", "")
-    return f"Unknown level command {arg}."
+            fader, max(0, min(100, int(round(now * 100)) + step)))
+    return _fail(f"Unknown level command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -286,17 +281,17 @@ def _recording_commands() -> list:
     ]
 
 
-def _run_rec(arg: str) -> str:
+def _run_rec(arg: str) -> dict:
     import server
     if arg == "toggle":
         return server._hk_record()
     if arg == "marker":
-        return server.action_drop_marker().get("message", "")
+        return server.action_drop_marker()
     if arg == "pause":
         live = server.read_recorder_live()
         paused = live.get("state") == recorder.PAUSED
-        return server.action_record("resume" if paused else "pause").get("message", "")
-    return f"Unknown recording command {arg}."
+        return server.action_record("resume" if paused else "pause")
+    return _fail(f"Unknown recording command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -323,30 +318,30 @@ def _callme_contact_commands() -> list:
             for c in server._callme_contacts()]
 
 
-def _run_callme(arg: str) -> str:
+def _run_callme(arg: str) -> dict:
     import server
     if arg.startswith("contact:"):
         name = arg.partition(":")[2]
         c = next((c for c in server._callme_contacts() if c["name"].lower() == name.lower()), None)
         if c is None:
-            return f"There is no contact called {name} any more."
-        return server.action_callme_dial(c["code"]).get("message", "")
+            return _fail(f"There is no contact called {name} any more.")
+        return server.action_callme_dial(c["code"])
     if arg == "answer":
-        return server.action_callme_answer().get("message", "")
+        return server.action_callme_answer()
     if arg == "decline":
-        return server.action_callme_decline().get("message", "")
+        return server.action_callme_decline()
     if arg == "hangup":
-        return server.action_callme_hangup().get("message", "")
+        return server.action_callme_hangup()
     if arg == "end":
-        return server.action_callme_end().get("message", "")
+        return server.action_callme_end()
     if arg == "extend":
-        return server.action_callme_extend().get("message", "")
+        return server.action_callme_extend()
     if arg == "status":
-        return server.callme_status_sentence()
+        return server.callme_status()
     if arg == "hosting":
         now, _path = server._callme_state_now()
-        return server.action_callme_hosting(not now.get("hosting")).get("message", "")
-    return f"Unknown CallMe command {arg}."
+        return server.action_callme_hosting(not now.get("hosting"))
+    return _fail(f"Unknown CallMe command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -362,7 +357,7 @@ def _output_commands() -> list:
     ]
 
 
-def _run_out(arg: str) -> str:
+def _run_out(arg: str) -> dict:
     import server
     what, _, which = arg.partition(":")
     if what == "mute":
@@ -373,12 +368,12 @@ def _run_out(arg: str) -> str:
         for s in server.read_unit_settings().get("settings", []):
             if s.get("prop") == prop:
                 now = bool(s.get("value"))
-        return server.action_set_output_mute(which, not now).get("message", "")
+        return server.action_set_output_mute(which, not now)
     if what == "automute":
         live = server.read_routing_live()
         key = "monitor_auto_mute" if which == "monitor" else "bt_auto_mute"
-        return server.action_set_auto_mute(which, not bool(live.get(key))).get("message", "")
-    return f"Unknown output command {what}."
+        return server.action_set_auto_mute(which, not bool(live.get(key)))
+    return _fail(f"Unknown output command {what}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -393,19 +388,19 @@ def _unit_commands() -> list:
     ]
 
 
-def _run_unit(arg: str) -> str:
+def _run_unit(arg: str) -> dict:
     import server
     if arg == "midi":
         now = bool(server.read_unit_settings().get("midi"))
-        return server.action_set_midi(not now).get("message", "")
+        return server.action_set_midi(not now)
     net = server.read_network_status()
     if arg == "wifi":
         now = bool((net.get("wifi") or {}).get("on"))
-        return server.action_set_wifi(not now).get("message", "")
+        return server.action_set_wifi(not now)
     if arg == "bt":
         now = bool((net.get("bluetooth") or {}).get("visible"))
-        return server.action_set_bt_visible(not now).get("message", "")
-    return f"Unknown unit command {arg}."
+        return server.action_set_bt_visible(not now)
+    return _fail(f"Unknown unit command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -417,7 +412,8 @@ def _scheme_commands() -> list:
     out = []
     try:
         schemes = server.read_routing_schemes()
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("hotkeys.catalogue_partial", "mix schemes not listed", error=str(exc))
         return out
     # A BUILT-IN IS APPLIED BY ITS id, a saved one by its name: that is the split
     # `action_apply_routing_scheme` already takes, and it is why the two are separate namespaces
@@ -433,11 +429,10 @@ def _scheme_commands() -> list:
     return out
 
 
-def _run_scheme(arg: str) -> str:
+def _run_scheme(arg: str) -> dict:
     import server
     kind, _, name = arg.partition(":")
-    res = server.action_apply_routing_scheme(name, builtin=(kind == "builtin"))
-    return res.get("message", "")
+    return server.action_apply_routing_scheme(name, builtin=(kind == "builtin"))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -477,7 +472,8 @@ def _pad_commands() -> list:
     per_bank = devices.get_active_device().pad.pads_per_bank
     try:
         pads = server._hk_refresh_pads()
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("hotkeys.catalogue_partial", "pads not listed", error=str(exc))
         return out
     for pad_idx in sorted(pads):
         _pos, name, pad_type, _mode = pads[pad_idx]
@@ -490,7 +486,7 @@ def _pad_commands() -> list:
     return out
 
 
-def _run_pad(arg: str) -> str:
+def _run_pad(arg: str) -> dict:
     import server
     what, _, target = arg.partition(":")
     if what == "slot":
@@ -511,7 +507,8 @@ def _preset_commands() -> list:
     out = []
     try:
         presets = server.preset_list()
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("hotkeys.catalogue_partial", "presets not listed", error=str(exc))
         return out
     mics = [c for c in channels.active_ui_channels() if c.get("kind") == "mic"]
     for p in presets:
@@ -521,14 +518,14 @@ def _preset_commands() -> list:
     return out
 
 
-def _run_preset(arg: str) -> str:
+def _run_preset(arg: str) -> dict:
     import server
     _what, _, rest = arg.partition(":")
     name, _, preset = rest.partition(":")
     ch = channels.ui_channel_map().get(name)
     if ch is None or ch.get("kind") != "mic":
-        return f"{name} is not a microphone channel on this unit."
-    return server.action_apply_mic_preset(channels.mic_channel_number(ch), preset).get("message", "")
+        return _fail(f"{name} is not a microphone channel on this unit.")
+    return server.action_apply_mic_preset(channels.mic_channel_number(ch), preset)
 
 
 _DISPATCH = {

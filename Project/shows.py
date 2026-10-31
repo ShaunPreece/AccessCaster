@@ -80,10 +80,13 @@ offering either must warn first; see docs/PROJECT_GUIDE.md.
 """
 from __future__ import annotations
 
+import datetime
 import time
 
+import diagnostics
 import rcp_read
 import rcp_transfer
+import wording
 
 # The two blocks. SHOWS holds one SHOW node per exported file; SHOWCONTROL holds the commands.
 # Both are past what the one-byte global address can carry, so writes use the two-byte channel form
@@ -198,8 +201,7 @@ def _describe_modified(value) -> str:
             seconds = value / 1000.0 if value > 10_000_000_000 else float(value)
             if not (946_684_800 < seconds < 4_102_444_800):     # 2000 to 2100
                 return str(value)
-            stamp = time.localtime(seconds)
-            return time.strftime("%d %B %Y at %H:%M", stamp)
+            return wording.spoken_datetime(datetime.datetime.fromtimestamp(seconds))
         except (ValueError, OSError, OverflowError):
             return str(value)
     return str(value)
@@ -214,9 +216,9 @@ def read_current(blob: bytes) -> dict:
     """
     return {
         "name": str(rcp_read.block_value(blob, "CURRENTSHOW", "currentShowName")
-                    or _first(blob, "currentShowName") or "").strip(),
+                    or rcp_read.first(blob, "currentShowName") or "").strip(),
         "uuid": str(rcp_read.block_value(blob, "CURRENTSHOW", "currentShowUUID")
-                    or _first(blob, "currentShowUUID") or ""),
+                    or rcp_read.first(blob, "currentShowUUID") or ""),
     }
 
 
@@ -249,14 +251,6 @@ def read_last_error(blob: bytes):
     """`showControlLastError`, or None. Read BY BLOCK: a stray of the same name costs nothing to
     ignore that way and cannot fool the read."""
     return rcp_read.block_value(blob, "SHOWCONTROL", "showControlLastError")
-
-
-def _first(blob: bytes, name: str):
-    """First meaningful value anywhere in the dump, for the names that are not block-duplicated."""
-    for v in rcp_read.values(blob, name):
-        if v is not None and v != "":
-            return v
-    return None
 
 
 def describe(blob: bytes) -> dict:
@@ -332,13 +326,14 @@ def wait_for(check, timeout: float | None = None, read=None):
     # change to COMMAND_TIMEOUT_S (the simulation suite tunes it).
     read = read or (lambda: rcp_read.read_model_stable(fresh=True))
     timeout = COMMAND_TIMEOUT_S if timeout is None else timeout
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     blob = None
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         time.sleep(POLL_S)
         try:
             fresh_blob = read()
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("shows.read_failed", "still waiting", error=str(exc))
             continue
         # A NON-DUMP IS NOT AN ANSWER, and `check` must never see one. A desk that has stopped
         # answering returns zero bytes rather than raising, and every check here asks whether

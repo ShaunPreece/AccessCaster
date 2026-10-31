@@ -23,7 +23,6 @@ Run: python DevTools/test_pad_actions.py
 from __future__ import annotations
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import server
 import soundpad
 

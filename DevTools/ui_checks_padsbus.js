@@ -1,3 +1,4 @@
+// probe: route=channels timeout=90
 /* The SMART pads bus on the Channels page: it is a channel, and it must not offer controls it does
    not have. It has MUTE and SOLO and nothing else. NO level (that is its fader), no mic voicing, no
    preamp, and NO PROCESSING either: on both desks none of the chain reaches the audio. The strip
@@ -5,21 +6,12 @@
    an equaliser here; RODE's own guide and their app both say the SMART pads take no processing. A
    dead control is worse than a missing one for a screen reader: it is read out, focused, operated,
    and nothing happens.
-   Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_padsbus.js --route channels */
+   Run: python DevTools/run_ui_probes.py padsbus */
 
 const el = (id) => document.getElementById(id);
 const strip = () => document.querySelector("#channel-panel [role='tablist']");
 const buttons = () => Array.from(strip().querySelectorAll("[role='tab']"));
 const titles = () => buttons().map((b) => b.textContent.trim());
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function pick(name) {
   const sel = el("channel-select");
@@ -97,7 +89,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

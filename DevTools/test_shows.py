@@ -4,7 +4,6 @@ parser. No device needed: everything here works on a synthetic model blob or a p
 Run: python DevTools/test_shows.py
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import fake_model
 import server
 import shows
@@ -135,6 +134,7 @@ check("restore takes clean", [f[1] for f in server.POST_ROUTES["/api/profiles/re
 
 print("the write gate")
 import devices
+
 check("Pro II may write shows", "shows" in devices.PRO2.caps, True)
 # The Duo MAY TOO. The address carries a factory reset, so it needed settling rather than guessing:
 # root child 0x28E on a live Duo IS SHOWCONTROL in the tree, and the engine then proved the address

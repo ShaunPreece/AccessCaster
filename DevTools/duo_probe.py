@@ -33,10 +33,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import _bootstrap  # noqa: E402,F401  (puts Project/ on sys.path)
-
 import rcp_hid  # noqa: E402
 import rcp_read  # noqa: E402
-
 
 # Property names we care about for a shape read. All read-only lookups.
 _COUNT_PROPS = [

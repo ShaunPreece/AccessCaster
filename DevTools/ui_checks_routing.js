@@ -1,5 +1,6 @@
+// probe: route=routing timeout=90
 /* Machine checks for the Routing page's tab strip.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_routing.js --route routing
+   Run with: python DevTools/run_ui_probes.py routing
    This is NOT a screen-reader pass. It pins the things a screen reader depends on and the eye cannot
    see (roles, states, one tab stop, what is exposed, what a tab reads from the device), so the
    screen-reader run is about how it SOUNDS rather than hunting for a broken attribute. */
@@ -23,15 +24,6 @@ const key = (ev, target) => target.dispatchEvent(
 const paths = (log) => log.map((e) => e.method + " " + e.path);
 const hit = (log, needle) => paths(log).some((p) => p.indexOf(needle) >= 0);
 
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
-
 /* What each tab reads from the device when it is opened. The reads are real device dumps behind a
    debounce, so nothing here may assume a fixed delay: wait for the read to actually land, then wait
    for the traffic to go quiet, and only then assert what did NOT happen. */
@@ -43,37 +35,6 @@ const TAB_READS = {
   levels: ["/api/faders/levels", "/api/monitormix/live", "/api/routing/live"],
   master: ["/api/routing/live"],
 };
-
-async function apiLog() {
-  const log = await probeLog();
-  return log.filter((e) => e.path.indexOf("/api/") === 0 && e.path.indexOf("/api/ping") < 0);
-}
-
-/* Wait until every one of these endpoints has been asked for. Returns false on timeout, which is
-   what makes "opening this tab reads that" a real check rather than a sleep. */
-async function waitForApi(wanted, ms) {
-  const until = Date.now() + (ms || 20000);
-  while (Date.now() < until) {
-    const seen = (await apiLog()).map((e) => e.path);
-    if (wanted.every((w) => seen.some((p) => p.indexOf(w) >= 0))) return true;
-    await sleep(120);
-  }
-  return false;
-}
-
-/* Wait for the device traffic to stop, so a "nothing else was read" check cannot pass simply by
-   looking too early. */
-async function quiet(ms) {
-  let last = (await apiLog()).length;
-  let lastChange = Date.now();
-  const until = Date.now() + 15000;
-  while (Date.now() < until) {
-    await sleep(150);
-    const n = (await apiLog()).length;
-    if (n !== last) { last = n; lastChange = Date.now(); }
-    else if (Date.now() - lastChange > (ms || 1200)) return;
-  }
-}
 
 /* Open a tab the way a mouse user does, and do not come back until its reads have landed. */
 async function openTab(k) {
@@ -472,17 +433,11 @@ async function run() {
   // ---- nothing was written --------------------------------------------
   // Writes are stubbed by the probe anyway, but a check that tried to write is a check that would
   // have moved the desk in a live app, so it is worth failing on. Housekeeping calls are exempt.
-  const HOUSEKEEPING = ["/api/ping", "/api/focus", "/api/quit"];
-  const all = await probeLog();
-  const writes = all.filter((e) => e.method === "POST" && e.path.indexOf("/api/") === 0
-                                   && HOUSEKEEPING.indexOf(e.path) < 0);
+  const writes = await probeWrites();
   check("nothing in the run tried to write to the device", writes.length === 0,
     writes.map((e) => e.path).join(" "));
 
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

@@ -1,7 +1,8 @@
+// probe: route=status timeout=240
 /* The Wireless connections tab's WRITABLE controls. The tab's KEY, its route and this file's name
    all say "network" instead, deliberately: renaming them would break the remembered tab and the
    API path for nothing. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_network.js --route status --timeout 240
+     python DevTools/run_ui_probes.py network
 
    Three things on this tab are writable (the wifi radio, joining a network, and Bluetooth
    discoverability), and the checks here are mostly about the PASSWORD and about honesty:
@@ -19,32 +20,6 @@
 
 const el = (id) => document.getElementById(id);
 const pane = () => document.querySelector("#device-panel > .cat-tab[data-tab-key='network']");
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-function nameOf(node) {
-  if (!node) return "";
-  if (node.getAttribute("aria-label")) return node.getAttribute("aria-label");
-  const lab = node.closest("label") || document.querySelector(`label[for='${node.id}']`);
-  return lab ? lab.textContent.trim() : node.textContent.trim();
-}
-
-function flatText(node) {
-  return node ? node.textContent.replace(/\s+/g, " ").trim() : "";
-}
-
-function described(node) {
-  const id = node && node.getAttribute("aria-describedby");
-  return id ? el(id) : null;
-}
 
 async function run() {
   await waitFor(() => el("sec-status") && !el("sec-status").hidden, 20000);
@@ -70,18 +45,18 @@ async function run() {
   check("THE PASSWORD IS A PASSWORD FIELD, not a text box",
     psk && psk.type === "password", psk && psk.type);
 
-  check("the wifi switch says what it switches", /wifi/i.test(nameOf(wifi)), nameOf(wifi));
+  check("the wifi switch says what it switches", /wifi/i.test(accessibleName(wifi)), accessibleName(wifi));
   check("the Bluetooth switch is named for what it DOES, not for the property",
-    /find this unit/i.test(nameOf(bt)), nameOf(bt));
-  check("the name box has a label", /network name/i.test(nameOf(ssid)), nameOf(ssid));
-  check("the password box has a label", /password/i.test(nameOf(psk)), nameOf(psk));
+    /find this unit/i.test(accessibleName(bt)), accessibleName(bt));
+  check("the name box has a label", /network name/i.test(accessibleName(ssid)), accessibleName(ssid));
+  check("the password box has a label", /password/i.test(accessibleName(psk)), accessibleName(psk));
   // THE JOIN HINT IS DELIBERATELY NOT ATTACHED TO ANYTHING. Describing the name box, the password
   // box AND the Join button with one paragraph reads four sentences three times over while moving
   // through three controls. It sits in normal reading order instead and is read ONCE; the labels
   // say what each box is, which is what a label is for.
   [["network name", ssid], ["password", psk], ["Join button", join]].forEach(([n, c]) => {
-    check(`the ${n} does NOT repeat the join hint at the user`, !described(c),
-      described(c) && described(c).id);
+    check(`the ${n} does NOT repeat the join hint at the user`, !describedText(c),
+      c.getAttribute("aria-describedby"));
   });
 
   // ---- what the hints have to say ----------------------------------------
@@ -98,7 +73,7 @@ async function run() {
   // that explains a refusal from a phone. The reasoning behind each lives in the code.
   check("and it stays short: the reasoning is in the code, not on the page",
     jhint.length < 280, jhint.length);
-  const bhint = flatText(described(bt));
+  const bhint = describedText(bt);
   check("the Bluetooth hint gives the route that actually works: pair from the phone",
     /pair from the phone/i.test(bhint), bhint);
   check("and warns that discoverability times out on its own",
@@ -136,7 +111,7 @@ async function run() {
   ssid.value = "";
   join.click();
   await sleep(700);
-  let log = posts(await probeLog());
+  let log = pagePosts(await probeLog());
   check("Join with no network name posts NOTHING", log.length === 0,
     JSON.stringify(log.map((r) => r.path)));
   check("and it says what is missing", /type the name/i.test(status.textContent),
@@ -148,8 +123,8 @@ async function run() {
   ssid.value = "A Test Network";
   psk.value = "not-a-real-password";
   join.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 10000);
-  log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 10000);
+  log = pagePosts(await probeLog());
   check("Join posts to /api/network/wifi/join, once",
     log.length === 1 && log[0].path === "/api/network/wifi/join",
     JSON.stringify(log.map((r) => r.path)));
@@ -161,8 +136,8 @@ async function run() {
   await sleep(2500);
   await probeClear();
   wifi.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 10000);
-  log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 10000);
+  log = pagePosts(await probeLog());
   check("the wifi switch posts to /api/network/wifi",
     log.length === 1 && log[0].path === "/api/network/wifi",
     JSON.stringify(log.map((r) => r.path)));
@@ -179,8 +154,8 @@ async function run() {
 
   await probeClear();
   bt.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 10000);
-  log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 10000);
+  log = pagePosts(await probeLog());
   check("the Bluetooth switch posts to /api/network/bt-visible",
     log.length === 1 && log[0].path === "/api/network/bt-visible",
     JSON.stringify(log.map((r) => r.path)));
@@ -188,7 +163,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

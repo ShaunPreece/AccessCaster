@@ -1,5 +1,6 @@
+// probe: route=recording timeout=240
 /* The Recording page. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_recording.js --route recording --timeout 240
+     python DevTools/run_ui_probes.py recording
 
    IT NEEDS A SERVER THAT HAS /api/recorder. The probe proxies reads to whatever is on 8770, so if
    the installed build predates this page, start DevTools/run_dev_server.py first.
@@ -27,44 +28,6 @@
 
 const el = (id) => document.getElementById(id);
 const sec = () => el("sec-recording");
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path !== "/api/ping");
-
-function nameOf(node) {
-  if (!node) return "";
-  if (node.getAttribute("aria-label")) return node.getAttribute("aria-label");
-  const lab = node.closest("label") || document.querySelector(`label[for='${node.id}']`);
-  return lab ? lab.textContent.trim() : node.textContent.trim();
-}
-
-/* The hints are wrapped source, so a check must match across whitespace rather than on an exact
-   phrase, or a line break fails wording that is correct. */
-function flatText(node) {
-  return node ? node.textContent.replace(/\s+/g, " ").trim() : "";
-}
-
-/* aria-describedby may name SEVERAL elements, and the multitrack dropdown does exactly that: its
-   standing explanation of the modes, plus the "not applied yet" hint the staged-select helper
-   adds. Reading only the first id silently loses one of them. */
-function described(node) {
-  const ids = ((node && node.getAttribute("aria-describedby")) || "").split(/\s+/).filter(Boolean);
-  if (!ids.length) return null;
-  const box = document.createElement("div");
-  ids.forEach((id) => {
-    const found = el(id);
-    if (found) box.appendChild(found.cloneNode(true));
-  });
-  return box;
-}
 
 /* THE PRECONDITION THIS SUITE HAS, and it is a real one: THERE HAS TO BE SOMEWHERE TO RECORD TO.
    With no card and no USB drive the unit reports state 3, and the page then deliberately marks the
@@ -160,29 +123,29 @@ async function run() {
     check(`the ${n} button is reachable by keyboard`, b && b.tabIndex >= 0);
   });
   check("the status button is named for what it reports",
-    /recording status/i.test(nameOf(chk)), nameOf(chk));
+    /recording status/i.test(accessibleName(chk)), accessibleName(chk));
   check("the record button names the action, not a symbol",
-    /recording|pause|resume/i.test(nameOf(start)), nameOf(start));
-  check("Stop says what it stops", /stop recording/i.test(nameOf(stop)), nameOf(stop));
+    /recording|pause|resume/i.test(accessibleName(start)), accessibleName(start));
+  check("Stop says what it stops", /stop recording/i.test(accessibleName(stop)), accessibleName(stop));
   check("the button carries the command it is currently labelled with",
     !!start.dataset.command, start.dataset.command);
   check("with nothing recording, it offers to start",
-    /start recording/i.test(nameOf(start)) && start.dataset.command === "start",
-    nameOf(start) + " / " + start.dataset.command);
+    /start recording/i.test(accessibleName(start)) && start.dataset.command === "start",
+    accessibleName(start) + " / " + start.dataset.command);
 
   // The label follows the STATE, wherever the state came from - including a press of the unit's
   // own REC button, which arrives as a push rather than as anything this page did.
   applyTransportLabels(2);
   check("while recording, the same button offers Pause",
-    /^pause$/i.test(nameOf(start)) && start.dataset.command === "pause",
-    nameOf(start) + " / " + start.dataset.command);
+    /^pause$/i.test(accessibleName(start)) && start.dataset.command === "pause",
+    accessibleName(start) + " / " + start.dataset.command);
   applyTransportLabels(1);
   check("while paused, it offers Resume rather than Start",
-    /resume/i.test(nameOf(start)) && start.dataset.command === "start",
-    nameOf(start) + " / " + start.dataset.command);
+    /resume/i.test(accessibleName(start)) && start.dataset.command === "start",
+    accessibleName(start) + " / " + start.dataset.command);
   applyTransportLabels(0);
   check("stopped, it is back to Start recording",
-    /start recording/i.test(nameOf(start)), nameOf(start));
+    /start recording/i.test(accessibleName(start)), accessibleName(start));
 
   // ---- what is USABLE right now -----------------------------------------
   // aria-disabled, never the `disabled` attribute: a natively disabled button leaves the tab order
@@ -230,7 +193,7 @@ async function run() {
   stop.click();
   await sleep(600);
   check("pressing an unavailable Stop posts NOTHING",
-    posts(await probeLog()).length === 0);
+    pagePosts(await probeLog()).length === 0);
   check("and says why, rather than doing nothing at all",
     /nothing is recording/i.test(el("rec-state").textContent), el("rec-state").textContent);
 
@@ -238,15 +201,15 @@ async function run() {
   marker.click();
   await sleep(600);
   check("the same goes for an unavailable marker: nothing posted",
-    posts(await probeLog()).length === 0);
+    pagePosts(await probeLog()).length === 0);
   check("and it says markers need something to be recording",
     /only be dropped while/i.test(el("rec-state").textContent), el("rec-state").textContent);
 
   await probeClear();
   applyTransportLabels(2);
   marker.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-  const mlog = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+  const mlog = pagePosts(await probeLog());
   check("while recording it posts to /api/recorder/marker, once",
     mlog.length === 1 && mlog[0].path === "/api/recorder/marker",
     JSON.stringify(mlog.map((r) => r.path)));
@@ -266,13 +229,13 @@ async function run() {
   const mute = el("rec-mute-announcer");
   check("there is a switch for it, so it is a CHOICE and not a policy",
     !!mute && mute.type === "checkbox", mute && mute.type);
-  check("its label says what it does", /announcements off while recording/i.test(nameOf(mute)),
-    nameOf(mute));
+  check("its label says what it does", /announcements off while recording/i.test(accessibleName(mute)),
+    accessibleName(mute));
   // The MECHANISM is where announcements are ROUTED, which covers a microphone in the room and a
   // feed into the mix over USB alike. Naming headphones instead names only one way of it.
   check("its hint names the mechanism, ROUTING, not one example of it",
-    /routed/i.test(flatText(described(mute))) && !/headphones/i.test(flatText(described(mute))),
-    flatText(described(mute)));
+    /routed/i.test(describedText(mute)) && !/headphones/i.test(describedText(mute)),
+    describedText(mute));
   check("there is a place for the statement of what will happen", !!warn);
   check("it is a note, NOT a second live region talking over the state line",
     warn.getAttribute("role") === "note" && !warn.hasAttribute("aria-live"));
@@ -286,8 +249,8 @@ async function run() {
   check("no move-the-output button on this page", !el("rec-announcer-btn"));
   await probeClear();
   mute.click();
-  await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-  const alog = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+  const alog = pagePosts(await probeLog());
   check("the switch posts to /api/recorder/announcer-mute, once",
     alog.length === 1 && alog[0].path === "/api/recorder/announcer-mute",
     JSON.stringify(alog.map((r) => r.path)));
@@ -296,9 +259,9 @@ async function run() {
   const mt = el("rec-multitrack-mode");
   check("multitrack lives on THIS page now", !!mt);
   check("it is a native select", mt && mt.tagName === "SELECT", mt && mt.tagName);
-  check("it has a label", nameOf(mt).length > 3, nameOf(mt));
+  check("it has a label", accessibleName(mt).length > 3, accessibleName(mt));
   check("its hint explains pre-fader versus post-fader in plain words",
-    /pre-fader/i.test(flatText(described(mt))));
+    /pre-fader/i.test(describedText(mt)));
   // EVERY OPTION NAMES THE RESULT. The unit's own words ("Off", "Pre-Fader", "Post-Fader") never
   // say whether you are getting multitrack at all, so "does post-fader mean multi-track?" goes
   // unanswered - and answering it is the label's job.
@@ -367,14 +330,14 @@ async function run() {
   const fmt = el("rec-format-mode");
   check("the recording format control is on this page", !!fmt);
   check("it is a native select", fmt && fmt.tagName === "SELECT", fmt && fmt.tagName);
-  check("it has a label", nameOf(fmt).length > 3, nameOf(fmt));
+  check("it has a label", accessibleName(fmt).length > 3, accessibleName(fmt));
   const fopts = fmt ? Array.from(fmt.options).map((o) => o.textContent.trim()) : [];
   check("EXACTLY TWO options: the desk has no third format", fopts.length === 2, fopts.join(" | "));
   check("one names WAV and one names MP3",
     fopts.some((o) => /\bWAV\b/.test(o)) && fopts.some((o) => /\bMP3\b/.test(o)),
     fopts.join(" | "));
   check("its hint gives the trade in plain words (size against quality)",
-    /size|smaller|uncompressed/i.test(flatText(described(fmt))), flatText(described(fmt)));
+    /size|smaller|uncompressed/i.test(describedText(fmt)), describedText(fmt));
 
   // ARROWING IT MUST SEND NOTHING. Same rule as every other audio-changing dropdown, and
   // this one decides a whole take's format, so a stray arrow press would be expensive.
@@ -383,7 +346,7 @@ async function run() {
     arrowToIndex(fmt, (fmt.selectedIndex + 1) % fmt.options.length);
     await sleep(900);
   }
-  const fPosts = posts(await probeLog()).filter((r) => r.path.indexOf("/api/recorder/format") === 0);
+  const fPosts = pagePosts(await probeLog()).filter((r) => r.path.indexOf("/api/recorder/format") === 0);
   check("arrowing the format dropdown writes NOTHING until Enter", fPosts.length === 0,
     JSON.stringify(fPosts.map((r) => r.path)));
   if (fmt) fmt.dispatchEvent(new FocusEvent("blur"));   // leaving puts it back
@@ -471,7 +434,7 @@ async function run() {
     await probeClear();
     start.click();
     await sleep(800);
-    log = posts(await probeLog());
+    log = pagePosts(await probeLog());
     check("with nowhere to record to, pressing Record sends NOTHING",
       log.length === 0, JSON.stringify(log.map((r) => r.path)));
     check("and it says why instead of failing silently",
@@ -482,8 +445,8 @@ async function run() {
   } else {
     await probeClear();
     start.click();
-    await waitFor(async () => posts(await probeLog()).length > 0, 8000);
-    log = posts(await probeLog());
+    await waitFor(async () => pagePosts(await probeLog()).length > 0, 8000);
+    log = pagePosts(await probeLog());
     check("Start posts to /api/recorder/command and nothing else",
       log.length === 1 && log[0].path === "/api/recorder/command",
       JSON.stringify(log.map((r) => r.path)));
@@ -493,14 +456,11 @@ async function run() {
   await probeClear();
   chk.click();
   await sleep(1200);
-  log = posts(await probeLog());
+  log = pagePosts(await probeLog());
   check("Check the recorder WRITES NOTHING: it only asks", log.length === 0,
     JSON.stringify(log.map((r) => r.path)));
 
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

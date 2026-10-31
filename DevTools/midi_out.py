@@ -9,13 +9,13 @@ cannot import from DevTools. This is the command line around it and nothing else
     python DevTools/midi_out.py --ports              # list MIDI outs
 """
 from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import midi_out
 
 

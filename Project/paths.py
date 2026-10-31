@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -72,6 +73,46 @@ def data_path(*parts: str) -> str:
     """Absolute path to a writable user-data file/dir, creating the data dir on first use."""
     os.makedirs(DATA_DIR, exist_ok=True)
     return os.path.join(DATA_DIR, *parts)
+
+
+def safe_name(name: str) -> str | None:
+    """A name the user chose, trimmed, if it can be a file or folder name in the data dir, else
+    None. Letters, digits, spaces, hyphens and underscores, 1 to 40 of them: no separator and no
+    dot, so a name can never climb out of its folder. Saved profiles and saved mix schemes share
+    this rule, so the two stores cannot disagree about what is nameable."""
+    name = (name or "").strip()
+    return name if re.fullmatch(r"[A-Za-z0-9 _-]{1,40}", name) else None
+
+
+def read_json(path: str, default):
+    """Read a JSON file the app writes with `write_json`. Returns `default` when there is no file.
+
+    A file that does not parse, or holds a value of another type than `default`, is renamed to
+    `<path>.bad` and logged, and `default` is returned. Returning `default` while leaving the file
+    in place would let the next save replace it with only the new entry, losing every other one;
+    the `.bad` copy keeps them for recovery by hand. Raises OSError when the file exists but cannot
+    be opened, or cannot be moved aside, so a caller does not save over a file it could not read."""
+    import diagnostics  # imported here: diagnostics imports this module
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return default
+    except ValueError as exc:
+        reason = str(exc)
+    else:
+        if isinstance(data, type(default)):
+            return data
+        reason = f"holds {type(data).__name__}, not {type(default).__name__}"
+    name = os.path.basename(path)
+    try:
+        os.replace(path, path + ".bad")
+    except OSError as exc:
+        diagnostics.event("json.corrupt", f"{name} did not parse and could not be moved aside",
+                          reason=reason, error=str(exc))
+        raise
+    diagnostics.event("json.corrupt", f"{name} did not parse; kept as {name}.bad", reason=reason)
+    return default
 
 
 def write_json(path: str, data, indent: int | None = 2) -> None:

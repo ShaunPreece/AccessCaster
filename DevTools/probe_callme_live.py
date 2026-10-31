@@ -16,6 +16,7 @@ switched back on, so a link shared earlier stops working after an off/on.
     python DevTools/probe_callme_live.py dial <dest> <false|true|str>  place an outgoing call
 """
 from __future__ import annotations
+
 import json
 import subprocess
 import sys
@@ -24,7 +25,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import model_tree
 import rcp_hid
 import rcp_read
@@ -88,7 +88,8 @@ SAY = Path(__file__).resolve().parent.parent / "Project" / "say.ps1"
 
 
 def say(text: str):
-    subprocess.Popen(["powershell", "-NoProfile", "-File", str(SAY), "-Text", text, "-Force"])
+    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SAY),
+                      "-Text", text])
 
 
 def announce(name, val):

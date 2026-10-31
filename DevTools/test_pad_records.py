@@ -9,10 +9,9 @@ The structural checks are the rules a create depends on: the target padIdx is st
 padTriggerControl and effectsIdx, and only a voice-FX create writes the 0x9d effects block. Run:
     python DevTools/test_pad_records.py
 """
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import hashlib
 
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import pad_records as pr
 
 FAILED = []

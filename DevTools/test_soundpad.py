@@ -6,6 +6,7 @@ Every device call is stubbed; nothing here reaches a desk.
 Run: python DevTools/test_soundpad.py
 """
 from __future__ import annotations
+
 import io
 import sys
 from contextlib import redirect_stdout
@@ -13,7 +14,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import soundpad
 
 FAILED = 0
@@ -68,8 +68,8 @@ def restore(create_result, colour_result, present=True):
     with Stubs(soundpad,
                create_mixer=lambda grid, mode: create_result,
                wait_for_pad_present=lambda idx: present,
-               set_pad_colour=lambda grid, colour: colour_result,
-               set_pad_name=lambda grid, name: {"ok": True},
+               set_pad_property=lambda grid, name, value: (
+                   colour_result if name == "padColourIndex" else {"ok": True}),
                pool_health=lambda blob=None: CLEAN):
         return soundpad.restore_pads([dict(MIXER_PAD)], "unused", verify_first=False)
 

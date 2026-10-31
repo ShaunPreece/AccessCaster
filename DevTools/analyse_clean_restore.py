@@ -21,13 +21,13 @@ Differences that are BY DESIGN are counted and named, never silently dropped:
     python DevTools/analyse_clean_restore.py BEFORE AFTER [FACTORY]
 """
 from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 from model_tree import parse, walk
 
 CAP = Path(__file__).resolve().parent / "captures"

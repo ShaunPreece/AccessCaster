@@ -15,6 +15,7 @@ offline half of Duo support; the rest needs a Duo (`test_duo_caps_live.py`).
 Run: python DevTools/test_duo_parity.py
 """
 from __future__ import annotations
+
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -72,7 +73,7 @@ def push(path, name: str, value_block: bytes) -> bytes:
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
     """A pushed STATE property: sel = 0x1C + strip index."""
-    return push([channels.SEL_CHANNEL_PROC + strip_idx], prop,
+    return push([rcp_transfer.SEL_CHANNEL + strip_idx], prop,
                 bytes([0x01, 0x01, 0x02 if on else 0x03]))
 
 
@@ -225,9 +226,6 @@ check("Duo pads are 6 per bank", devices.DUO.pad.pads_per_bank, 6)
 # stream, so an unscoped read returned the two concatenated - and 1.7.6 changed that total again.
 check("Duo matrix guard counts the MIX block alone",
       (devices.DUO.matrix.cell_count, devices.DUO.matrix.row_stride), (390, 13))
-check("processing/effects bases shared with the Pro II",
-      (devices.DUO.proc_sel_base, devices.DUO.fx_sel_base),
-      (devices.PRO2.proc_sel_base, devices.PRO2.fx_sel_base))
 for cap in ("input_mic_write", "processing", "channel_read", "matrix_read", "matrix_write",
             "output_write", "pad_write", "fader_write", "unit_settings", "level_write",
             "chain_follow", "stereo_link", "network_write", "recorder", "shows"):

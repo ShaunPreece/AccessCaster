@@ -44,10 +44,10 @@ from typing import Optional
 
 import comtypes
 import comtypes.client
-from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
-
 import diagnostics
 import meters
+import write_guard
+from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
 from paths import data_path
 
 # Names the service creates. The status block is what its tray icon reads (readable by everyone);
@@ -290,8 +290,8 @@ CLSID_PolicyConfigClient = GUID("{870af99c-171d-4f9e-af0d-e63df40c2bc9}")
 
 def _policy():
     """The object every Windows endpoint change goes through: the default device and enabling or
-    disabling an endpoint. An offline test is refused here (meters.refuse_audio_change_in_tests)."""
-    meters.refuse_audio_change_in_tests()
+    disabling an endpoint. An offline test is refused here (write_guard.refuse_in_tests)."""
+    write_guard.refuse_in_tests("change Windows audio")
     return comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
 
 
@@ -370,7 +370,6 @@ class Outcome:
     enabled: list = field(default_factory=list)      # names switched on
     disabled: list = field(default_factory=list)     # names switched off
     faders_ready: int = 0                            # Fader endpoints active once this is done
-    system_ready: bool = False                       # the System playback endpoint is active
     faders_missing: bool = False                     # connected, yet the service made no Faders
     default_moved_to: str = ""                       # new default playback name, if it moved
     error: str = ""
@@ -541,8 +540,6 @@ def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
         # longer occurs here because it was just switched on.
         faders = [e for e in eps if _is_fader(e)]
         out.faders_ready = len(faders)
-        out.system_ready = any(e.virtual and e.flow == "playback" and e.name.startswith("System")
-                               and e.state in ("active", "disabled") for e in eps)
         out.faders_missing = bool(expect_connected and status.connected and not faders)
     if move_default:
         out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
@@ -644,7 +641,8 @@ def keep_parked(parking: Parking) -> bool:
             policy.SetDefaultEndpoint(parking.id, E_CONSOLE)
             policy.SetDefaultEndpoint(parking.id, E_MULTIMEDIA)
             return True
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("virtual_devices.park_failed", str(exc))
         return False
 
 
@@ -665,7 +663,8 @@ def default_to_system(timeout_s: float) -> str:
                     return system.name
                 time.sleep(0.1)
             return ""
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("virtual_devices.default_failed", str(exc))
         return ""
 
 
@@ -697,8 +696,8 @@ def describe(expanded: Optional[bool] = None) -> dict:
             # channel does.
             virtual = [e for e in _endpoints(enum)
                        if e.virtual and e.state in ("active", "disabled")]
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("virtual_devices.endpoints_unread", str(exc))
     active = sum(1 for e in virtual if e.state == "active")
     text = st.phrase()
     if st.connected:

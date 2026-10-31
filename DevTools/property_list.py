@@ -34,10 +34,10 @@ import re
 from collections import Counter, defaultdict
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import devices
 import model_tree
 import rcp_read
+
 
 def out_path(dev) -> pathlib.Path:
     """DEVICE-SCOPED output: PROPERTY_LIST_PRO2.md / PROPERTY_LIST_DUO.md.

@@ -19,6 +19,7 @@ the BLOCK names, the enum values and the unpublished properties as well.
     python DevTools/app_name_table.py --grep time,date
 """
 from __future__ import annotations
+
 import argparse
 import re
 import sys
@@ -26,7 +27,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 from model_tree import parse, walk
 

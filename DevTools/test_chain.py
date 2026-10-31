@@ -8,6 +8,7 @@ while every write reports success. These tests pin the rules down:
 Run: python DevTools/test_chain.py
 """
 from __future__ import annotations
+
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -121,10 +122,10 @@ check("all three Q values ARE in the chain, because Q is independent and writabl
 # chain on its old strip and hands USB 1 a mic voicing with the gate on. No device: the layout read,
 # the chain read/write and the fader write are all stubbed.
 # ---------------------------------------------------------------------------------------------
-import devices                                                        # noqa: E402
-import rcp_read                                                       # noqa: E402
-import rcp_transfer                                                   # noqa: E402
-import server                                                         # noqa: E402
+import devices  # noqa: E402
+import rcp_read  # noqa: E402
+import rcp_transfer  # noqa: E402
+import server  # noqa: E402
 
 PRO2_DEFAULT = list(devices.PRO2_FADERS.default_vector)   # (0,1,2,3,10,11,7,8,9)
 # The layout Shaun actually ran: USB 1 (code 7) pulled onto strip 1 so a real fader controls his PC

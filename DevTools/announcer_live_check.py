@@ -4,14 +4,14 @@ Opens its own read-only HID handle (exactly as server._announce_loop does), feed
 packet through the REAL decoder (server._ann_handle_report) with _ann_say captured instead of
 spoken, and prints what the announcer WOULD have said, with the raw prefix bytes beside it.
 
-Why not just run the app and listen: say.ps1 self-gates when the Claude GUI has focus, so the
-announcements are silent while Shaun is reading chat. This prints them instead, and it needs no
-server restart (no fighting the installed build for port 8770).
+Why not just run the app and listen: this prints what would be said, so it can be read rather
+than heard, and it needs no server restart (no fighting the installed build for port 8770).
 
 Usage: python DevTools/announcer_live_check.py [seconds] [--speak]
        --speak also SPEAKS the instructions (use when Shaun is at the desk, not reading chat).
 """
 from __future__ import annotations
+
 import subprocess
 import sys
 import time
@@ -19,12 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
-import hid
-import server
 import channels
+import hid
 import rcp_read
 import rcp_transfer
+import server
 
 SAID: list[tuple[float, str]] = []
 _t0 = time.time()
@@ -37,7 +36,7 @@ def speak(text: str, enabled: bool) -> None:
     print(f"[say] {text}")
     if enabled:
         subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", SAY_PS1,
-                        "-Text", text, "-Force"], capture_output=True)
+                        "-Text", text], capture_output=True)
 
 
 def main() -> int:

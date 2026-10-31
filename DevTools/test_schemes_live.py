@@ -22,13 +22,13 @@ THE SERVER MUST BE STOPPED FIRST: it owns the HID handle. Restart it afterwards
 Usage: python DevTools/test_schemes_live.py
 """
 from __future__ import annotations
+
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import devices
 import rcp_read
 import routing_schemes

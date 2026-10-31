@@ -11,19 +11,20 @@ Usage:
     python DevTools/tree_tool.py --anchors        # score the confirmed selectors against the tree
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
+
 # THE PARSER LIVES IN Project/model_tree.py: it is the app's reader now, not a probing tool.
 # THIS FILE IS DELIBERATELY NOT CALLED model_tree.py. It was, for about an hour, and that put TWO
 # importable modules of that name on the path - so `import model_tree` inside rcp_transfer picked
 # up whichever came first, and this file ended up importing itself. Two modules must never share a
 # name; the app's module owns it.
-from model_tree import Node, parse, walk, instances, find_property  # noqa: F401
+from model_tree import Node, find_property, instances, parse, walk  # noqa: F401
 
 # Every block-level selector known from the wire or from hardware, as (block, instance, selector,
 # where it came from), so the tree can be SCORED against ground truth rather than admired.

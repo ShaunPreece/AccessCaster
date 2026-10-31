@@ -32,6 +32,7 @@ of a few seconds. It is put back to whatever it was found on.
 Run: python DevTools/duo_network_probe.py [--skip-radio]
 """
 from __future__ import annotations
+
 import sys
 import time
 

@@ -22,6 +22,7 @@ Usage:
     python DevTools/probe_path_write.py --block TEST --prop toneGeneration --kind int --value 0 --yes
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -30,7 +31,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import model_tree as mt
 import rcp_read
 import rcp_transfer

@@ -1,8 +1,9 @@
+// probe: route=channels timeout=90
 /* Where focus goes while arrowing along a channel's tab strip. Tab into the strip on Mic 2, arrow
    right to Presets, arrow LEFT back to tab 1, then right again: focus must stay on a tab each time.
    If a pane is rebuilt under it, a screen reader reads a control from inside the panel instead
    ("Line-in, 1 of 11", the mic type list, or the preset list).
-   Run: python DevTools/ui_probe.py --checks DevTools/ui_checks_chantabs.js --route channels */
+   Run: python DevTools/run_ui_probes.py chantabs */
 
 const el = (id) => document.getElementById(id);
 const strip = () => document.querySelector("#channel-panel [role='tablist']");
@@ -19,15 +20,6 @@ function where() {
   if (!a) return "none";
   return (a.id || a.tagName) + " [" + (a.getAttribute("role") || a.tagName.toLowerCase()) + "]"
     + (a.isConnected ? "" : " DETACHED");
-}
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
 }
 
 async function run() {
@@ -124,7 +116,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

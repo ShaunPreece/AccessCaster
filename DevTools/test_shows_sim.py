@@ -15,13 +15,12 @@ never be cited as though it had. It proves the decisions.
 
 Run: python DevTools/test_shows_sim.py
 """
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import threading
 import time
 
-import fake_model
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import devices
+import fake_model
 import rcp_read
 import server
 import shows
@@ -30,6 +29,7 @@ import shows
 # a legitimate refusal and look like a regression. Offline tests must not depend on what happens to
 # be plugged into the machine running them.
 devices.force_device(devices.PRO2)
+REAL_LISTENER = rcp_read.PushListener      # before the stub below replaces it
 
 PASSED = []
 
@@ -451,7 +451,9 @@ print("the write gate")
 # fail on correct behaviour the day that desk turns the cap on.
 reset_desk()
 import dataclasses
+
 import devices
+
 CAPLESS = dataclasses.replace(devices.DUO, name="RODECaster Nocaps",
                               caps=devices.DUO.caps - {"shows"})
 check("the synthetic desk really lacks the cap", "shows" in CAPLESS.caps, False)
@@ -499,6 +501,7 @@ finally:
 print("a CLEAN restore, end to end")
 reset_desk()
 import profiles as profiles_mod
+
 real_load = profiles_mod.load
 profiles_mod.load = lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}
 try:
@@ -548,6 +551,23 @@ reset_desk()
 check("import with no handle is refused", server.action_show_import(None)["ok"], False)
 check("delete with no handle is refused", server.action_show_delete("abc")["ok"], False)
 check("nothing was sent", DESK.calls, [])
+
+print("a wait for one push ends on time while other pushes keep arriving")
+listener = REAL_LISTENER()                 # never started: the pushes are queued by hand
+playing = threading.Event()
+
+
+def _pad_progress():
+    while not playing.is_set():
+        listener._q.put(((666, 19), "padProgress", 0.5, "float"))
+        time.sleep(0.05)
+
+
+threading.Thread(target=_pad_progress, daemon=True).start()
+began = time.monotonic()
+check("nothing matching arrived", listener.wait_for("showControlExport", 0.5), None)
+playing.set()
+check("and the wait ended at its timeout", time.monotonic() - began < 1.0, True)
 
 print(f"\nALL {len(PASSED)} SIMULATED-DESK CHECKS PASSED")
 print("REMEMBER: this proves the decisions, not the bytes. All four commands are hardware-proven "

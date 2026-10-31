@@ -4,7 +4,6 @@ reads it, and the spoken outcomes say the right thing. No desk, no driver, no CO
     python DevTools/test_virtual_devices.py
 """
 import _bootstrap  # noqa: F401
-
 import virtual_devices as vd
 
 
@@ -65,17 +64,17 @@ check(st.installed and not st.running and "service is not running" in st.phrase(
 # Wording.
 # The bind and the release are RODE's notification to say, never ours.
 o = vd.Outcome(status=vd.DriverStatus(), enabled=["Fader1", "Fader2", "System"],
-               faders_ready=9, system_ready=True)
+               faders_ready=9)
 check(o.sentence() == "", o.sentence())
 o = vd.Outcome(status=vd.DriverStatus(), disabled=["System"])
 check(o.sentence() == "", o.sentence())
-o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9, system_ready=True,
+o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9,
                default_moved_to="System (RØDECaster)")
 check(o.sentence() == "Windows sound is on System.", o.sentence())
 o = vd.Outcome(status=vd.DriverStatus(),
                default_moved_to="Speakers (RODECaster Pro II Main Stereo)")
 check(o.sentence() == "Windows sound is back on the unit.", o.sentence())
-o = vd.Outcome(status=vd.DriverStatus(), system_ready=True, faders_missing=True)
+o = vd.Outcome(status=vd.DriverStatus(), faders_missing=True)
 check(o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."),
       o.sentence())
 

@@ -1,5 +1,6 @@
+// probe: route=status timeout=90
 /* The page watching its server. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_lifecycle.js --route device
+     python DevTools/run_ui_probes.py lifecycle
 
    Drives `noteServer` with made-up heartbeat replies rather than stopping a real server, so it
    proves the page's side: a blip is not an outage, an outage opens ONE modal, the same version
@@ -61,7 +62,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

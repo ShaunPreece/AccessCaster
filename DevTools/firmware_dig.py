@@ -28,15 +28,15 @@ Usage:
     python DevTools/firmware_dig.py --names                    # the property-name table it carries
 """
 from __future__ import annotations
+
 import argparse
-import re
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 from model_tree import parse, walk
 

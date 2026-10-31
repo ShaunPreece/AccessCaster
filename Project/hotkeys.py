@@ -213,7 +213,7 @@ class HotkeyManager:
 
     def __init__(self, speak=None, runner=None, labeller=None):
         self._speak = speak or (lambda text: None)
-        self._runner = runner or (lambda command: "")
+        self._runner = runner or (lambda command: {"ok": True, "message": ""})
         self._labeller = labeller or (lambda command: command)
         self._shortcuts = []          # ordered [{id, command, mods, key, enabled, speak}]
         self._status = {}             # shortcut id -> "" (registered) or why it is not
@@ -636,9 +636,11 @@ class HotkeyManager:
 
     def _run(self, row: dict) -> None:
         try:
-            said = self._runner(row["command"])
-            if said and row.get("speak", True):
-                self._speak(str(said))
+            said = self._runner(row["command"]) or {}
+            message = str(said.get("message") or "")
+            # A failure is spoken whatever `speak` says, for the reason given below.
+            if message and (row.get("speak", True) or not said.get("ok", True)):
+                self._speak(message)
         except Exception as exc:
             # ALWAYS spoken, whatever the flag says: silencing a shortcut means "I know what this
             # does, do not narrate it", not "hide it when it breaks".

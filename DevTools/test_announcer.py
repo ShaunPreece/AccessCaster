@@ -7,16 +7,18 @@ _ann_say stubbed, and asserts what would be SPOKEN.
 Run: python DevTools/test_announcer.py
 """
 from __future__ import annotations
+
 import struct
 import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import channels
 import devices
 import model_tree
 import rcp_read
+import rcp_transfer
 import server
-import channels
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # failed on the Duo's different channel set and looked like a regression. Offline tests must not
@@ -70,9 +72,9 @@ def v_str(text: str) -> bytes:
 
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property at SEL_CHANNEL_PROC + strip index, exactly as observed on hardware
+    """A pushed STATE property at SEL_CHANNEL + strip index, exactly as observed on hardware
     (mute on channel 2 -> 0x1D)."""
-    return push([channels.SEL_CHANNEL_PROC + strip_idx], prop, v_bool(on))
+    return push([rcp_transfer.SEL_CHANNEL + strip_idx], prop, v_bool(on))
 
 
 def press_packet(name: str, down: bool = True, button: int = 1) -> bytes:
@@ -166,7 +168,7 @@ server._hk_mixer_pos = frozenset()
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # channelInputSource is pushed with the same 0x1C+strip selector; value = the new source code.
-said, _ = run([push([channels.SEL_CHANNEL_PROC + 1], "channelInputSource", v_int(10))],
+said, _ = run([push([rcp_transfer.SEL_CHANNEL + 1], "channelInputSource", v_int(10))],
               cold_cache=False)
 check("the layout change itself is silent", said, [])
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
@@ -223,7 +225,6 @@ said, _ = run([dump_slice], cold_cache=False)
 check("a model-dump slice is ignored", said, [])
 
 print("\nSPOKEN POSITIONS: IMMEDIATE, INTERRUPTING, NEVER STACKING")
-import rcp_transfer
 
 
 def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
@@ -833,7 +834,7 @@ try:
     channels.set_channel_mute("Mic2", True)
     rec = RECORDS[0] if RECORDS else b""
     # The record shape is the module-toggle shape: global address, compact bool, selector
-    # SEL_CHANNEL_PROC + strip. Mic 2 is on strip 1 in this layout, so 0x1D - the exact selector the
+    # SEL_CHANNEL + strip. Mic 2 is on strip 1 in this layout, so 0x1D - the exact selector the
     # hardware test used.
     check("one record sent", len(RECORDS), 1)
     check_true("addressed as a global property on 0x1C + strip (Mic 2 -> 0x1D)",

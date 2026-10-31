@@ -34,7 +34,7 @@ import rcp_read
 import rcp_transfer
 import recorder
 import routing_schemes
-from paths import data_path, write_json
+from paths import data_path, safe_name, write_json
 from wording import count
 
 # Saved profiles are user data, kept in the writable %LOCALAPPDATA%\AccessCaster\profiles so they
@@ -121,13 +121,6 @@ def _unit_settings(props: dict) -> dict:
 
 
 # ---- naming + listing (pure file ops) ------------------------------------------------------
-
-def safe_name(name: str):
-    name = (name or "").strip()
-    if not re.match(r"^[A-Za-z0-9 _-]{1,40}$", name):
-        return None
-    return name
-
 
 def _list_profile_names() -> list:
     """Every saved profile: new-format folders (containing profile.json) and legacy flat
@@ -641,9 +634,9 @@ def _apply_v2(prof, *, fader_count, fader_code_set, mic_channels, progress=None)
     def _await_voicing(name, timeout=8.0):
         """Block until two consecutive dumps show the strip's params unchanged, so the chain lands
         on a settled voicing."""
-        end = time.time() + timeout
+        end = time.monotonic() + timeout
         prev = _chain_of(name)
-        while time.time() < end:
+        while time.monotonic() < end:
             cur = _chain_of(name)
             if cur is not None and cur == prev:
                 return

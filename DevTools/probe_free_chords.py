@@ -19,6 +19,7 @@ Registers and immediately unregisters, so nothing is taken from anything while t
     python DevTools/probe_free_chords.py
 """
 from __future__ import annotations
+
 import ctypes
 import sys
 from ctypes import wintypes
@@ -26,7 +27,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hotkeys
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)

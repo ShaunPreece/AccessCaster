@@ -23,8 +23,10 @@ Run: python DevTools/test_fader_chains.py
 """
 from __future__ import annotations
 
-import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import os
+import tempfile
 
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import channels
 import server
 
@@ -54,7 +56,6 @@ def chain(tag):
 
 # --- the store, on its own -----------------------------------------------------------------
 # Redirected to a scratch file so a test run never touches the user's real parked chains.
-import tempfile, os                                                        # noqa: E402
 _scratch = os.path.join(tempfile.mkdtemp(prefix="ac_chaintest_"), "off_fader_chains.json")
 channels._paths.data_path = lambda *parts: _scratch                        # noqa: SLF001
 

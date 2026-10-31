@@ -29,13 +29,13 @@ on the live tree and refuses rather than trusting this docstring.
     python DevTools/duo_gain_probe.py probe      # run the differential, then restore
 """
 from __future__ import annotations
+
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import devices
 import model_tree
 import rcp_hid

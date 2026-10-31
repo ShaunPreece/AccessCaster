@@ -4,6 +4,11 @@ THE RULES THIS PINS:
   * /static/ serves only files inside static/, so an absolute or climbing path is refused;
   * a request body that is not a JSON object is refused rather than read as {};
   * settings.json is replaced whole, and one that will not parse is kept as settings.json.bad;
+  * a saved presets file that will not parse is kept as .bad, so the next save cannot replace it;
+  * a fader level write names its channel from the layout held, and reads the desk only under the
+    HID lock;
+  * the level watch, with no stream chosen, takes a capture stream rather than playback;
+  * however the app stops, a Hold-mode pad a shortcut is holding is released;
   * a Chat isolation whose setup fails part way puts back what it had already changed;
   * an announcer loop that is no longer the newest leaves without touching the live state.
 
@@ -21,7 +26,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import server
 
 FAILS = []
@@ -76,6 +80,89 @@ server.update_settings(x=1)
 check("a fresh file is started", server.load_settings(), {"x": 1})
 with open(server._SETTINGS_FILE + ".bad", encoding="utf-8") as f:
     check("and the one that would not parse is kept", f.read(), '{"hotkeys": {"enabled": tr')
+
+
+print("\nSAVED PRESETS")
+server._USER_PRESET_FILE = os.path.join(folder, "presets.json")
+with open(server._USER_PRESET_FILE, "w", encoding="utf-8") as f:
+    f.write('{"Morning": {"eqLowGain": 0.5}, "Ev')
+check("a file that will not parse reads as no presets", server._load_user_presets(), {})
+with open(server._USER_PRESET_FILE + ".bad", encoding="utf-8") as f:
+    check("and is kept as .bad, so a save cannot overwrite it", f.read(),
+          '{"Morning": {"eqLowGain": 0.5}, "Ev')
+with open(server._USER_PRESET_FILE, "w", encoding="utf-8") as f:
+    f.write("[1, 2]")
+check("a file holding a list reads as no presets", server._load_user_presets(), {})
+
+
+print("\nFADER LEVEL")
+pinned = server.devices.force_device(server.devices.PRO2)
+real_fader = (server.rcp_read.read_model, server.rcp_transfer.set_fader_level,
+              server._ann_publish_level)
+reads = []
+server.rcp_read.read_model = lambda *a, **k: reads.append(server._hid_lock.locked()) or b""
+server.rcp_transfer.set_fader_level = lambda sel, value: None
+server._ann_publish_level = lambda *a: None
+try:
+    server.channels.publish_strip_vector([0, 1, 2, 3, 4, 5, 6, 7, 8])
+    res = server.action_set_fader_level(6, 50)
+    check("the level is set", res.get("ok"), True)
+    check("with a layout held, the reply names the channel without a read", reads, [])
+    server.channels._strip_vec["vec"] = None
+    server.channels._strip_vec_last["vec"] = None
+    server.action_set_fader_level(6, 40)
+    check("with none held, the read is made under the HID lock", reads, [True])
+finally:
+    (server.rcp_read.read_model, server.rcp_transfer.set_fader_level,
+     server._ann_publish_level) = real_fader
+    server.devices.force_device(pinned)
+
+
+print("\nLEVEL WATCH")
+real_meter = (server.meters.desk_streams, server.meters.default_recording_name,
+              server.meters.Watcher, server._meter_prefs)
+built = []
+
+
+class _Watcher:
+    def __init__(self, stream, *a, **k):
+        built.append(stream)
+        self.name, self.running, self.error = stream, True, None
+
+    def start(self):
+        return True
+
+    def stop(self):
+        self.running = False
+
+
+server.meters.desk_streams = lambda: {"ok": True, "streams": [
+    {"id": "out", "name": "Speakers (RODECaster Main Stereo)", "flow": "playback"},
+    {"id": "in", "name": "Microphone (RODECaster Main Stereo)", "flow": "recording"}]}
+server.meters.default_recording_name = lambda: ""
+server.meters.Watcher = _Watcher
+server._meter_prefs = lambda: {**real_meter[3](), "stream": ""}
+try:
+    server.action_meter_watch(True)
+    check("with no stream chosen, the watch takes the capture stream", built, ["in"])
+    server.action_meter_watch(False)
+finally:
+    (server.meters.desk_streams, server.meters.default_recording_name,
+     server.meters.Watcher, server._meter_prefs) = real_meter
+
+
+print("\nSHUTTING DOWN")
+real_midi = (server.midi_out.release_pad, server.midi_out.close)
+released = []
+server.midi_out.release_pad = released.append
+server.midi_out.close = lambda: None
+try:
+    server._hk_pads_held.add(2)            # a Hold-mode pad a shortcut is holding: pad 3 of bank 1
+    server._shut_down("test")
+    check("a held pad is released however the app stops", released, [3])
+    check("and is no longer held", server._hk_pads_held, set())
+finally:
+    server.midi_out.release_pad, server.midi_out.close = real_midi
 
 
 print("\nCHAT ISOLATION")

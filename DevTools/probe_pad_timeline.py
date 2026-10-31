@@ -14,6 +14,7 @@ to fall into.
     python DevTools/probe_pad_timeline.py [padIdx] [gap seconds...]
 """
 from __future__ import annotations
+
 import sys
 import threading
 import time
@@ -21,7 +22,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hid
 import midi_out
 import model_tree

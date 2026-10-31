@@ -25,7 +25,6 @@ Offline: the device reads are replaced, so this needs no desk and asserts the DE
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-
 import devices
 import rcp_read
 import server

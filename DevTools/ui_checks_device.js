@@ -1,5 +1,6 @@
+// probe: route=status timeout=600
 /* Machine checks for the Device page's tab strip.
-   Run with: python DevTools/ui_probe.py --checks DevTools/ui_checks_device.js --route status --timeout 600
+   Run with: python DevTools/run_ui_probes.py device
    (127 checks; the default 90, and even 240, run out before the page reports back.)
    Same shape as ui_checks_routing.js: this is NOT a screen-reader pass, it pins the things a screen
    reader depends on and the eye cannot see (roles, states, one tab stop, what is exposed, and which
@@ -53,46 +54,6 @@ const key = (ev, target) => target.dispatchEvent(
   new KeyboardEvent("keydown", { key: ev, bubbles: true, cancelable: true }));
 const paths = (log) => log.map((e) => e.method + " " + e.path);
 const hit = (log, needle) => paths(log).some((p) => p.indexOf(needle) >= 0);
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready */ }
-    await sleep(80);
-  }
-  return false;
-}
-
-async function apiLog() {
-  const log = await probeLog();
-  return log.filter((e) => e.path.indexOf("/api/") === 0 && e.path.indexOf("/api/ping") < 0);
-}
-
-/* Wait until every one of these endpoints has been asked for. Returns false on timeout, which is
-   what makes "opening this tab reads that" a real check rather than a sleep. */
-async function waitForApi(wanted, ms) {
-  const until = Date.now() + (ms || 25000);
-  while (Date.now() < until) {
-    const seen = (await apiLog()).map((e) => e.path);
-    if (wanted.every((w) => seen.some((p) => p.indexOf(w) >= 0))) return true;
-    await sleep(120);
-  }
-  return false;
-}
-
-/* Wait for the device traffic to stop, so a "nothing else was read" check cannot pass by looking
-   too early. */
-async function quiet(ms) {
-  let last = (await apiLog()).length;
-  let lastChange = Date.now();
-  const until = Date.now() + 20000;
-  while (Date.now() < until) {
-    await sleep(150);
-    const n = (await apiLog()).length;
-    if (n !== last) { last = n; lastChange = Date.now(); }
-    else if (Date.now() - lastChange > (ms || 1200)) return;
-  }
-}
 
 async function openTab(k) {
   document.getElementById(tabId(k)).click();
@@ -401,9 +362,6 @@ async function run() {
     window.localStorage.getItem("accesscaster.groups") === null,
     window.localStorage.getItem("accesscaster.groups"));
 
-  // ---- nothing was written --------------------------------------------
-  const HOUSEKEEPING = ["/api/ping", "/api/focus", "/api/quit"];
-  const all = await probeLog();
   // ---- the LEVELS tab -------------------------------------------------------------
   // What is worth pinning here is not the controls, it is the HONEST DEGRADATION. This is the only
   // part of the app that cannot work over Remote Desktop, so its failure path must explain itself
@@ -682,15 +640,12 @@ async function run() {
   check("the tab says a shortcut needs Ctrl, Alt or Windows in it",
     /ctrl, alt or windows/i.test(hkNote), hkNote.replace(/\s+/g, " ").trim().slice(0, 120));
 
-  const writes = all.filter((e) => e.method === "POST" && e.path.indexOf("/api/") === 0
-                                   && HOUSEKEEPING.indexOf(e.path) < 0);
+  // ---- nothing was written, in the whole run --------------------------------------
+  const writes = await probeWrites();
   check("nothing in the run tried to write to the device", writes.length === 0,
     writes.map((e) => e.path).join(" "));
 
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

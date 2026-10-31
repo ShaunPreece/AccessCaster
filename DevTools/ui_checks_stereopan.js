@@ -1,5 +1,6 @@
+// probe: route=channels timeout=240
 /* Pan on the Channels page, mono and stereo. Run:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_stereopan.js --route channels --timeout 240
+     python DevTools/run_ui_probes.py stereopan
 
    A stereo channel pans with channelPanL / channelPanR, one per leg; channelPan only pans a mono
    one and does nothing on a stereo source. So:
@@ -10,16 +11,6 @@
 
 const el = (id) => document.getElementById(id);
 const strip = () => document.querySelector("#channel-panel [role='tablist']");
-const posts = (log) => log.filter((r) => r.method === "POST" && r.path.startsWith("/api/"));
-
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (await fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
 
 async function openChannelTab(name, tabText) {
   const sel = el("channel-select");
@@ -80,8 +71,8 @@ async function run() {
   one.value = "-30";
   one.dispatchEvent(new Event("input", { bubbles: true }));
   one.dispatchEvent(new Event("change", { bubbles: true }));
-  await waitFor(async () => posts(await probeLog()).length >= 2, 8000);
-  const log = posts(await probeLog());
+  await waitFor(async () => pagePosts(await probeLog()).length >= 2, 8000);
+  const log = pagePosts(await probeLog());
   const sent = Object.fromEntries(log.map((r) => [r.body && r.body.prop, r.body && r.body.value]));
   check("moving it writes both legs and nothing else",
     log.length === 2 && "channelPanL" in sent && "channelPanR" in sent, JSON.stringify(log));
@@ -102,7 +93,4 @@ async function run() {
   await probeDone();
 }
 
-run().catch(async (e) => {
-  check("the checks ran to the end", false, String((e && e.stack) || e));
-  await probeDone();
-});
+probeRun(run);

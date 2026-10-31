@@ -34,6 +34,7 @@ Usage:
     python DevTools/test_read_under_push_live.py --pad 3 --runs 5
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -41,7 +42,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import hid
 import midi_out
 import model_tree

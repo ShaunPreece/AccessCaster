@@ -23,6 +23,7 @@ be stopped first (it owns the HID handle).
 Usage: python DevTools/test_flush_verify_live.py [--slot N]
 """
 from __future__ import annotations
+
 import argparse
 import hashlib
 import os
@@ -34,7 +35,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_transfer as t
 import soundpad
 

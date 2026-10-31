@@ -45,7 +45,7 @@ import sys
 import threading
 import time
 
-import model_tree                  # to decode a sent record into property = value
+import model_tree  # to decode a sent record into property = value
 from paths import data_path
 
 LOG_NAME = "diagnostic.log"
@@ -231,7 +231,7 @@ class phase:
         self.result = ""
 
     def __enter__(self) -> "phase":
-        self.at = time.time()
+        self.at = time.monotonic()
         event(self.kind + ".start", self.detail, **self.fields)
         return self
 
@@ -240,7 +240,7 @@ class phase:
         self.fields.update(fields)
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        took = f"{time.time() - self.at:.2f}s"
+        took = f"{time.monotonic() - self.at:.2f}s"
         if exc is not None:
             event(self.kind + ".failed", self.detail, took=took, error=f"{exc}")
         else:
@@ -358,9 +358,15 @@ def _install_hooks() -> None:
 
     sys.excepthook = _excepthook
 
+    previous_thread_hook = threading.excepthook
+
     def _thread_hook(args):
         event("crash", f"{args.exc_type.__name__}: {args.exc_value}",
               thread=getattr(args.thread, "name", "?"))
+        try:
+            previous_thread_hook(args)      # the traceback, on stderr, which the tee logs
+        except Exception as exc:            # the crash event above is still the record
+            event("crash.hook_failed", str(exc))
 
     threading.excepthook = _thread_hook
     _bind_faulthandler()

@@ -20,6 +20,7 @@ Every value is restored and the model's node, property and name counts are compa
     python DevTools/probe_unclaimed_props.py
 """
 from __future__ import annotations
+
 import sys
 import threading
 import time
@@ -27,7 +28,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import model_tree
 import rcp_hid
 import rcp_read

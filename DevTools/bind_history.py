@@ -25,7 +25,6 @@ import json
 import os
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path)
-
 import virtual_devices
 from paths import data_path
 

@@ -17,6 +17,7 @@ wifi PSK, and a synthetic tree can put a value in exactly the awkward place that
 Run: python DevTools/test_input_read.py
 """
 from __future__ import annotations
+
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -37,7 +38,7 @@ def check(label, got, want):
         print(f"  FAIL {label}: got {got!r}, want {want!r}")
 
 
-from fake_model import node   # the model grammar's encoder, shared by the offline suites
+from fake_model import node  # the model grammar's encoder, shared by the offline suites
 
 
 def dump(children: dict, n_children: int) -> bytes:

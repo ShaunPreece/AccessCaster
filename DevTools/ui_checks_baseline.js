@@ -1,9 +1,9 @@
+// probe: route=- timeout=90 stub=_probe_stub_baseline.json offer-baseline
 /* Machine checks for the two features: the first-run AS-FOUND backup dialog, and the
    "which preset is this channel on" answer riding on the Preset control's own label.
 
    Run with:
-     python DevTools/ui_probe.py --checks DevTools/ui_checks_baseline.js \
-            --stub DevTools/_probe_stub_baseline.json
+     python DevTools/run_ui_probes.py baseline
 
    The stub file is generated from the REAL desk by hand (ui_probe.py has no --write-stub), so the
    checks run against fixed data rather than whatever build is on 8770. The channel data in it is
@@ -14,27 +14,10 @@
    useful and is trapped, and that the preset answer is on the LABEL rather than in a paragraph
    nobody tabs to. The screen-reader run is then about how it sounds. */
 
-async function waitFor(fn, ms) {
-  const until = Date.now() + (ms || 8000);
-  while (Date.now() < until) {
-    try { if (fn()) return true; } catch { /* not ready yet */ }
-    await sleep(80);
-  }
-  return false;
-}
-
 const $ = (id) => document.getElementById(id);
 const textOf = (id) => (($(id) || {}).textContent || "").trim();
 
-/* The accessible description of a dialog, as an AT would assemble it from aria-describedby. */
-function describedBy(el) {
-  return (el.getAttribute("aria-describedby") || "")
-    .split(/\s+/).filter(Boolean)
-    .map((id) => (($(id) || {}).textContent || "").trim())
-    .join(" ");
-}
-
-(async function () {
+async function run() {
   /* ---- 1. The first-run offer ------------------------------------------------------------- */
   const dlg = $("baseline-dialog");
   check("the as-found dialog exists in the page", !!dlg);
@@ -42,12 +25,12 @@ function describedBy(el) {
   check("it opens by itself on first run", opened);
   check("as a MODAL, so nothing behind it can be reached",
         opened && dlg.matches(":modal"), opened ? String(dlg.matches(":modal")) : "never opened");
-  check("with role alertdialog: a decision that interrupts, not a passive notice",
-        dlg.getAttribute("role"), dlg.getAttribute("role") === "alertdialog");
+  checkEqual("with role alertdialog: a decision that interrupts, not a passive notice",
+        dlg.getAttribute("role"), "alertdialog");
   check("it has an accessible NAME", textOf("baseline-dialog-title").length > 5,
         textOf("baseline-dialog-title"));
 
-  const desc = describedBy(dlg);
+  const desc = describedText(dlg);
   check("and an accessible DESCRIPTION that is actually read out", desc.length > 80);
   check("naming the unit it found", desc.indexOf("RODECaster") >= 0, desc.slice(0, 60));
   check("and the name it will save under",
@@ -58,7 +41,7 @@ function describedBy(el) {
   check("it says why this matters (a reset only reaches factory, not how you found it)",
         desc.indexOf("not the same as how it came to you") >= 0, desc.slice(-160));
 
-  check("focus is on the recommended action, not lost in the page",
+  checkEqual("focus is on the recommended action, not lost in the page",
         document.activeElement && document.activeElement.id, "baseline-save-btn");
   check("the pad checkbox defaults ON here (the only copy of the pads as they came)",
         $("baseline-include-pads").checked, true);
@@ -71,13 +54,17 @@ function describedBy(el) {
      page has to get right is that there IS a way out that does not need the mouse. */
   const focusables = Array.from(dlg.querySelectorAll("button, input"))
     .filter((el) => !el.disabled && !el.hidden);
-  check("every control in it is keyboard reachable", focusables.length, 3);
+  checkEqual("every control in it is keyboard reachable", focusables.length, 3);
   check("including a decline", !!$("baseline-skip-btn"));
   $("baseline-skip-btn").focus();
-  check("which can take focus", document.activeElement.id, "baseline-skip-btn");
+  checkEqual("which can take focus", document.activeElement.id, "baseline-skip-btn");
 
-  // Escape must work here: no job is running, so there is nothing that cannot be abandoned.
-  dlg.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  // Escape must work here: no job is running, so there is nothing that cannot be abandoned. A
+  // synthetic Escape does not reach the browser's own close, so what is checked is the page's half:
+  // the `cancel` that Escape fires is not prevented.
+  const cancel = new Event("cancel", { cancelable: true });
+  dlg.dispatchEvent(cancel);
+  check("Escape is not blocked while no job runs", !cancel.defaultPrevented);
   $("baseline-skip-btn").click();
   const closed = await waitFor(() => !dlg.open, 5000);
   check("declining closes it", closed);
@@ -144,4 +131,6 @@ function describedBy(el) {
   }
 
   await probeDone();
-})();
+}
+
+probeRun(run);

@@ -25,7 +25,7 @@ CLI:
   python soundpad.py clean                     # remove orphan effect objects
   python soundpad.py positions                 # raw stream positions
   python soundpad.py clear <grid>              # clear grid pad (1-based)
-  python soundpad.py create <grid> <folder> <wav> [name] [colour]   # create sound (clear+create)
+  python soundpad.py create <grid> <wav> [name] [colour]   # create sound (clear+create)
   python soundpad.py fx <grid> <recipe-name>   # assign a voice-FX recipe
   python soundpad.py mixer <grid> <mode> [name]   # create a mixer-action pad
   python soundpad.py trigger <grid> [name]     # create a MIDI trigger pad (default mapping)
@@ -47,15 +47,14 @@ import time
 from collections import Counter
 from typing import NamedTuple
 
-import diagnostics      # the app's own account: why a pad is being rebuilt, and why not
-import rcp_hid          # open_handle / write_report: every handle and every write is logged
+import devices
+import diagnostics  # the app's own account: why a pad is being rebuilt, and why not
+import pad_records as pr
+import rcp_hid  # open_handle / write_report: every handle and every write is logged
 import rcp_read as rr
 import rcp_transfer as t
-import pad_records as pr
-import devices
-from paths import resource_path, data_path, write_json
+from paths import data_path, read_json, resource_path, write_json
 from wording import count, plural
-
 
 # ----------------------------------------------------------------------------------------------
 # DEVICE AWARENESS - pad grid geometry + the pad-write safety gate
@@ -133,12 +132,7 @@ FX_ENGINE_PARAMS = {
 
 def load_user_fx_presets() -> dict:
     """The user's saved custom voice-FX presets (same shape as RECIPES entries)."""
-    try:
-        with open(FX_USER_FILE, encoding="utf-8") as f:
-            d = json.load(f)
-            return d if isinstance(d, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return read_json(FX_USER_FILE, {})
 
 
 def _save_user_fx_presets(d: dict) -> None:
@@ -334,11 +328,6 @@ SYSTEM_PAD_TYPE = 6
 
 # The one non-pad region-B effect-object present on a clean table (SOUNDPADS.md section 2).
 SPECIAL_EFFECTS_IDX = 65
-
-# Clear addressing: selector = the pad's 0-based stream position + OFFSET. On a CLEAN table the
-# 0-based padName position equals the device selector (verified on clean bank-1). Keep 0.
-SELECTOR_OFFSET = 0
-
 
 # ----------------------------------------------------------------------------------------------
 # READ / STREAM POSITIONS
@@ -686,8 +675,8 @@ def wait_for_pad_present(target_idx: int, timeout: float = 6.0, poll: float = 0.
     which copies no file) can finish before the model reflects the new pad, so the NEXT create
     would read a stale, too-low pad count and reuse the same free handle, OVERWRITING the pad just
     made. Waiting for the pad to actually register means the next create reads a settled count."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if any(pi == target_idx for _p, pi, _ty, _n in pad_positions()):
             return True
         time.sleep(poll)
@@ -742,7 +731,7 @@ def build_select_begin_cursor() -> bytes:
 
 
 def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
-                     sync_marker=b"padRCVSyncPadType", sync_timeout=6.0, debug=False):
+                     sync_marker=b"padRCVSyncPadType", debug=False):
     """One held-open HID session: pre -> (drain sync) -> mid -> file write -> post.
 
     The device emits padRCVSyncPadType DURING the effects block, so it is buffered by the OS by
@@ -795,7 +784,8 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
             n += rcp_hid.write_report(dev, r); time.sleep(delay)
         drain(acc, True)
         if debug:
-            print(f"    [create] saw_sync={saw}; report-4 names: {sorted(set(seen))}")
+            diagnostics.event("pad.create",
+                              f"[create] saw_sync={saw}; report-4 names: {sorted(set(seen))}")
     finally:
         rcp_hid.close_handle(dev, "pad create")
     return n, saw
@@ -842,7 +832,7 @@ def clear_pad(position: int, debug: bool = False) -> str:
                 seq = [build_pad_bool_cursor("padActive", False), build_select_begin_cursor()]
                 how = "cursor (mode 0x00, dump-parked)"
             else:
-                sel = position + SELECTOR_OFFSET
+                sel = position
                 seq = [build_pad_bool("padActive", True, sel),    # select
                        build_pad_bool("padActive", False, sel),   # confirm-clear part 1
                        build_select_begin(sel)]                   # confirm-clear part 2
@@ -1034,37 +1024,32 @@ def pad_colours() -> list[dict]:
 PAD_PROP = {
     "padName": {
         "kind": "str", "label": "Pad name", "said": "name", "applies_to": None,
-        "help": "The on-screen name of the pad.",
     },
     "padColourIndex": {
         "kind": "int", "label": "Pad colour", "said": "colour", "applies_to": None,
         "min": 0, "max": 11,
-        "help": "The pad's display colour (0-11; the app's fixed palette, see PAD_COLOUR_NAME).",
     },
     "padGain": {
+        # Factory pads sit at -12.0 dB. The range is provisional.
         "kind": "float", "label": "Pad volume (dB)", "said": "volume", "applies_to": None,
         "min": -60.0, "max": 12.0,
-        "help": "Per-pad output level in dB. Factory pads sit at -12.0. (Range provisional.)",
     },
     "padReplay": {
         "kind": "bool", "label": "Restart on re-press", "said": "restart on re-press",
         "applies_to": (1,),
-        "help": "Sound pads: a second press restarts the sound; off, it pauses and resumes.",
     },
     "padLoop": {
         "kind": "bool", "label": "Loop", "said": "loop", "applies_to": (1,),
-        "help": "Sound pads: play repeatedly until stopped (not available in One-Shot mode).",
     },
     "padPlayMode": {
         "kind": "int", "label": "How the pad plays", "said": "play mode", "applies_to": (1,),
         "min": 0, "max": 2,
-        "help": "Sound pads: 0 Toggle, 1 Hold, 2 One Shot (see PLAY_MODE_LABEL).",
     },
+    # 0 Momentary (only while held), 1 Latching: the factory Censor pad is Momentary, Ducking
+    # Latching.
     "padMixerTriggerMode": {
         "kind": "int", "label": "Trigger mode", "said": "trigger mode", "applies_to": (3,),
         "min": 0, "max": 1,
-        "help": "Mixer pads: 0 Momentary (only while held), 1 Latching (press on, press again off). "
-                "Confirmed from the factory pads (Censor = Momentary, Ducking = Latching).",
     },
 }
 
@@ -1221,7 +1206,6 @@ for _bc in BACK_CHANNEL_SOURCES:
     PAD_PROP[_bc["prop"]] = {
         "kind": "bool", "label": "Back Channel member: " + _bc["label"],
         "said": _bc["label"] + " in the Back Channel", "applies_to": (3,),
-        "help": f"Back Channel pads: include {_bc['label']} in the off-air talkback room.",
     }
 del _bc
 
@@ -1232,7 +1216,6 @@ for _tf in TRIGGER_EDIT:
     PAD_PROP[_tf["prop"]] = {
         "kind": _tf["kind"], "label": _tf["label"], "said": _tf.get("said"), "applies_to": (4,),
         "min": _tf["min"], "max": _tf["max"],
-        "help": "MIDI trigger pads: " + _tf["help"],
     }
 del _tf
 # The envelope, fade and censor settings. The envelope is 0.0-1.0 (see ENV_FIELD),
@@ -1241,34 +1224,26 @@ for _e in ENV_EDIT:
     PAD_PROP[ENV_FIELD[_e["key"]]] = {
         "kind": "float", "label": _e["label"], "said": _e["said"], "applies_to": (1,),
         "min": 0.0, "max": 1.0,
-        "help": "Sound pads: " + _e["help"] + " Stored as a fraction of the whole sound.",
     }
 del _e
 for _f in FADE_EDIT:
     PAD_PROP[FADE_FIELD[_f["key"]]] = {
         "kind": "float", "label": _f["label"], "said": _f["said"], "applies_to": (3,),
         "min": 0.0, "max": FADE_MAX_SECONDS,
-        "help": "Fade mixer pads: " + _f["help"],
     }
 del _f
 PAD_PROP[FADE_FIELD["exclude_host"]] = {
     "kind": "bool", "label": "Fade excludes the host", "said": "leaving the host out of the fade",
     "applies_to": (3,),
-    "help": "Fade mixer pads: leave the host's own mic out of the fade, so you can still be heard "
-            "while everything else fades.",
 }
 PAD_PROP[CENSOR_FIELD["custom"]] = {
     "kind": "bool", "label": "Censor uses your own sound", "said": "your own censor sound",
     "applies_to": (3,),
-    "help": "Censor pads: lay your own sound over the mix instead of the factory beep. The sound "
-            "file itself has to already be on the unit.",
 }
 
 PAD_PROP["padTriggerCustom"] = {
     "kind": "bool", "label": "Custom MIDI mapping", "said": "custom MIDI mapping",
     "applies_to": (4,),
-    "help": "MIDI trigger pads: send the mapping set here rather than the firmware's default "
-            "(a Control Change on the pad's own number, channel 1, 127 on and 0 off).",
 }
 
 
@@ -1381,23 +1356,6 @@ def set_pad_property(grid: int, name: str, value, kind: str | None = None, blob=
     """Set ONE pad-level property in place (see set_pad_properties, which does the work)."""
     return set_pad_properties(grid, [(name, value)],
                               kinds={name: kind} if kind else None, blob=blob)
-
-
-# Thin, named convenience wrappers over set_pad_property (ergonomics + CLI; the UI can call either).
-def set_pad_gain(grid: int, db: float) -> dict:
-    return set_pad_property(grid, "padGain", db)
-
-
-def set_pad_name(grid: int, name: str) -> dict:
-    return set_pad_property(grid, "padName", name)
-
-
-def set_pad_colour(grid: int, colour: int) -> dict:
-    return set_pad_property(grid, "padColourIndex", colour)
-
-
-def set_pad_loop(grid: int, on: bool) -> dict:
-    return set_pad_property(grid, "padLoop", on)
 
 
 def set_play_mode(grid: int, mode: int) -> dict:
@@ -1608,10 +1566,12 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
     on_device = safe_dest_filename(src_wav, dest_filename)
     pre, mid, post = pr.build_sound_create(target_idx, folder, name, colour, handle=handle,
                                            replay=replay, filename=on_device)
-    print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  folder={folder}  "
-          f"handle=0x{handle:02x}  name={name!r}")
-    print(f"  records: {len(pre)} pre (handoff+phase1, NO region-B for a sound pad) -> sync -> "
-          f"{len(mid)} phase2A -> FILE -> {len(post)} phase2B")
+    diagnostics.event("pad.create",
+                      f"target padIdx={target_idx} (grid pad {target_idx + 1})  folder={folder}  "
+                      f"handle=0x{handle:02x}  name={name!r}")
+    diagnostics.event("pad.create",
+                      f"records: {len(pre)} pre (handoff+phase1, NO region-B for a sound pad) "
+                      f"-> sync -> {len(mid)} phase2A -> FILE -> {len(post)} phase2B")
 
     def file_copy():
         dst_dir = os.path.join(root, "pads", str(folder)); os.makedirs(dst_dir, exist_ok=True)
@@ -1624,12 +1584,15 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
                 break
             except OSError as exc:
                 last = exc
-                print(f"    copy attempt {attempt + 1} failed ({exc}); retrying")
+                diagnostics.event("pad.create",
+                                  f"copy attempt {attempt + 1} failed ({exc}); retrying")
                 time.sleep(1.0)
         if last is not None:
             raise last
         t.flush_volume(root)
-        print(f"  wrote {os.path.basename(src_wav)} -> pads/{folder}/{on_device} (mid-sequence)")
+        diagnostics.event("pad.create",
+                          f"wrote {os.path.basename(src_wav)} -> pads/{folder}/{on_device} "
+                          "(mid-sequence)")
 
     with _transfer_mode(1.0):
         t.remount_pad_storage()
@@ -1637,21 +1600,22 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
         if root is None:
             raise RuntimeError("volume did not mount")
         n, saw = send_create_full(pre, mid, file_copy, post, debug=debug)
-        print(f"  sent {n} bytes; saw device sync = {saw}")
+        diagnostics.event("pad.create", f"sent {n} bytes; saw device sync = {saw}")
         time.sleep(0.4)
         # Remove the audio this pad USED to play, before the session closes. Free, because the
         # volume is already mounted and we know exactly which file to keep: the one just written.
         # `post` has already written padFilePath, so the pad is pointing at the keeper by now.
         stale = tidy_pad_folder(root, folder, on_device)
         if stale:
-            print(f"  removed the previous audio for pad {folder}: {', '.join(stale)}")
+            diagnostics.event("pad.create",
+                              f"removed the previous audio for pad {folder}: {', '.join(stale)}")
             t.flush_volume(root)
     # Report the REAL on-device filename (on_device), NOT os.path.basename(src_wav): the server
     # uploads via a tempfile (accesscaster_*.wav), so the source basename is the temp name.
     return f"created grid pad {target_idx + 1} -> {on_device}"
 
 
-def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
+def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
                  replay=True, debug=False, dest_filename=None) -> dict:
     """High-level: put a sound on grid pad `grid` (1-based) via the PROVEN clear+create path
     (NEVER overwrite-in-place). This is what the website calls.
@@ -1660,14 +1624,14 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5, folder=None,
     (SOUNDPADS section 2), so it cannot collide with an effect-object orphan.
 
     If the grid pad is already occupied it is cleared first (app-style), then a fresh sound pad is
-    created at padIdx = grid-1, writing pads/<folder>/<real name> (factory convention - see
-    safe_dest_filename). `folder` defaults to the grid number, matching the app's FAT layout
-    (grid pad N -> pads/N/). `dest_filename` (e.g. the original upload name) sets the on-device
+    created at padIdx = grid-1, writing pads/<grid>/<real name> (factory convention - see
+    safe_dest_filename). The folder is always the grid number, the app's FAT layout (grid pad N ->
+    pads/N/), because the audio tidy keeps only what is in a pad's own folder. `dest_filename` (e.g. the original upload name) sets the on-device
     filename; without it the source basename is used. `replay` True = re-press restarts from the
     start (factory behaviour); False = pause/resume.
     """
     return _replace_slot(grid, "sound", lambda: assign_create(
-        grid - 1, grid if folder is None else folder, src_wav, name=name, colour=colour,
+        grid - 1, grid, src_wav, name=name, colour=colour,
         replay=replay, debug=debug, dest_filename=dest_filename))
 
 
@@ -1697,7 +1661,7 @@ def _send_create(pre, mid, post, debug=False) -> None:
     """One create session for a pad with no file to copy (voice FX, mixer action, MIDI trigger)."""
     with _transfer_mode(1.2):
         n, saw = send_create_full(pre, mid, lambda: None, post, debug=debug)
-        print(f"  sent {n} bytes; saw device sync = {saw}")
+        diagnostics.event("pad.create", f"sent {n} bytes; saw device sync = {saw}")
         time.sleep(0.4)
 
 
@@ -1715,9 +1679,12 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
     pre, mid, post = pr.build_fx_create_recipe(target_idx, name, colour, recipe,
                                                handle=handle, fx_subhandle=fx_sub, active=active)
     stack = " + ".join(recipe.keys())
-    print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
-          f"recipe=[{stack}]  handle=0x{handle:02x}  fx_sub=0x{fx_sub:02x} (region-B reuse/append)")
-    print(f"  {len(pre)} pre -> sync -> {len(mid)} commit -> {len(post)} effect-on")
+    diagnostics.event("pad.create",
+                      f"target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
+                      f"recipe=[{stack}]  handle=0x{handle:02x}  fx_sub=0x{fx_sub:02x} "
+                      "(region-B reuse/append)")
+    diagnostics.event("pad.create",
+                      f"{len(pre)} pre -> sync -> {len(mid)} commit -> {len(post)} effect-on")
     _send_create(pre, mid, post, debug=debug)
     return f"created FX (recipe [{stack}]) on grid pad {target_idx + 1}"
 
@@ -1949,10 +1916,11 @@ def assign_create_mixer(target_idx: int, mode, name="Mixer", colour=None,
     handle = pr.free_handle(current_pad_count())
     pre, mid, post = pr.build_mixer_create(target_idx, name, colour, mode,
                                            trigger_mode=trigger_mode, handle=handle)
-    print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
-          f"mode={mode} ({MIXER_MODE_LABEL[mode]})  trigger={trigger_mode}  handle=0x{handle:02x}  "
-          f"[no file, no region B]")
-    print(f"  {len(pre)} pre -> sync -> {len(mid)} commit")
+    diagnostics.event("pad.create",
+                      f"target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
+                      f"mode={mode} ({MIXER_MODE_LABEL[mode]})  trigger={trigger_mode}  "
+                      f"handle=0x{handle:02x}  [no file, no region B]")
+    diagnostics.event("pad.create", f"{len(pre)} pre -> sync -> {len(mid)} commit")
     _send_create(pre, mid, post, debug=debug)
     return f"created mixer action ({MIXER_MODE_LABEL[mode]}) on grid pad {target_idx + 1}"
 
@@ -1999,9 +1967,10 @@ def assign_create_trigger(target_idx: int, name="Trigger", colour=5, custom=Fals
                                              on_val=on_val, off_val=off_val)
     kind = (f"custom {TRIGGER_TYPE_LABEL.get(trigger_type, trigger_type)} ctrl="
             f"{control if control is not None else target_idx} ch={channel}") if custom else "default CC"
-    print(f"  target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
-          f"MIDI trigger ({kind})  handle=0x{handle:02x}  [no file, no region B]")
-    print(f"  {len(pre)} pre -> sync -> {len(mid)} commit")
+    diagnostics.event("pad.create",
+                      f"target padIdx={target_idx} (grid pad {target_idx + 1})  name={name!r}  "
+                      f"MIDI trigger ({kind})  handle=0x{handle:02x}  [no file, no region B]")
+    diagnostics.event("pad.create", f"{len(pre)} pre -> sync -> {len(mid)} commit")
     _send_create(pre, mid, post, debug=debug)
     return f"created MIDI trigger on grid pad {target_idx + 1}"
 
@@ -2041,36 +2010,41 @@ def restore_one(pad_name: str, live: bool):
     padidx, colour, recipe = spec["padIdx"], spec["colour"], spec["stack"]
     stack = " + ".join(recipe)
     pos, ptype, nm = _position_of(padidx)
-    print(f"\n{pad_name}  padIdx {padidx} (grid pad {padidx + 1})  colour {colour}")
-    print(f"  recipe: {stack}")
-    print(f"  current slot: pos={pos} type={ptype} name={nm!r}")
+    diagnostics.event("pad.restore_fx",
+                      f"{pad_name}  padIdx {padidx} (grid pad {padidx + 1})  colour {colour}")
+    diagnostics.event("pad.restore_fx", f"recipe: {stack}")
+    diagnostics.event("pad.restore_fx", f"current slot: pos={pos} type={ptype} name={nm!r}")
     if not live:
-        print("  [dry-run] would clear (if present) then create the factory recipe")
+        diagnostics.event("pad.restore_fx",
+                          "[dry-run] would clear (if present) then create the factory recipe")
         return
     if pos is not None:
-        print("  clearing existing pad...")
-        print("   ", clear_slot(pos, ptype))
+        diagnostics.event("pad.restore_fx", "clearing existing pad...")
+        diagnostics.event("pad.restore_fx", str(clear_slot(pos, ptype)))
         time.sleep(1.2)
-    print("  creating factory recipe...")
+    diagnostics.event("pad.restore_fx", "creating factory recipe...")
     # active=False IS LOAD-BEARING: assign_create_fx_recipe defaults to active=True (for the live
     # preview), which ENGAGES the effect on the live mic the moment the pad is made. A restored
     # factory pad must be AT REST. In a run of restores each clear switches the previous pad off,
     # so only the last one would stay latched, and nothing on the grid shows it.
-    print("   ", assign_create_fx_recipe(padidx, pad_name, recipe, colour=colour, active=False))
+    diagnostics.event("pad.restore_fx",
+                      str(assign_create_fx_recipe(padidx, pad_name, recipe, colour=colour,
+                                                  active=False)))
     time.sleep(1.0)
 
 
-def restore_factory_fx(name: str = "all", live: bool = True):
-    """Restore one named factory FX pad, or 'all' six. Returns nothing (prints progress)."""
+def restore_factory_fx(name: str = "all", live: bool = True) -> list:
+    """Restore one named factory FX pad, or 'all' six. Returns the names restored."""
     if name == "all":
         # Only the real factory PADS have a padIdx; shipped extra presets (Reverb/Echo,
         # padIdx null) are offered in the dropdown but are not part of the factory pad set.
         factory = [nm for nm in RECIPES if RECIPES[nm].get("padIdx") is not None]
         for nm in factory:
             restore_one(nm, live=live)
-        print(f"\nAll {len(factory)} factory FX pads restored. Ear-check each.")
-        return
-    restore_one(_match_recipe(name), live=live)
+        return factory
+    one = _match_recipe(name)
+    restore_one(one, live=live)
+    return [one]
 
 
 def factory_fx_names() -> list:
@@ -2085,7 +2059,7 @@ def factory_fx_names() -> list:
 def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
     """Restore the factory VOICE EFFECTS and the two factory MIXER pads, and RETURN a result.
 
-    `restore_factory_fx` above is the CLI shape - it prints and returns nothing - so the web UI
+    `restore_factory_fx` above is the CLI shape - it reports nothing as it goes - so the web UI
     cannot use it. Same work, wrapped: this reports each step through `progress` and hands back what
     was done.
 
@@ -2275,7 +2249,7 @@ def engage_pad(position: int) -> None:
         for _ in range(20):
             if not dev.read(256, timeout_ms=10):
                 break
-        rcp_hid.write_report(dev, build_pad_bool("padActive", True, position + SELECTOR_OFFSET))
+        rcp_hid.write_report(dev, build_pad_bool("padActive", True, position))
         time.sleep(0.3)
     finally:
         rcp_hid.close_handle(dev, "pad engage")
@@ -2299,7 +2273,7 @@ def unlatch_pad(position: int) -> None:
             if not dev.read(256, timeout_ms=10):
                 break
         rcp_hid.write_report(dev, build_pad_bool("padActive", False,
-                                                 position + SELECTOR_OFFSET))
+                                                 position))
         time.sleep(0.3)
     finally:
         rcp_hid.close_handle(dev, "pad unlatch")
@@ -2959,18 +2933,18 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                 raise RuntimeError("the pad did not appear on the unit after it was created")
             # Re-apply the saved cosmetics/behaviour the create path does not already set.
             if e.get("colour") is not None:
-                check(set_pad_colour(grid, int(e["colour"])), "colour")
+                check(set_pad_property(grid, "padColourIndex", int(e["colour"])), "colour")
             if ptype != PAD_TYPE_SOUND and label:     # sound create already set the name
-                check(set_pad_name(grid, label), "name")
+                check(set_pad_property(grid, "padName", label), "name")
             if e.get("gain") is not None and ptype in (PAD_TYPE_SOUND, PAD_TYPE_VOICE_FX):
-                check(set_pad_gain(grid, float(e["gain"])), "volume")
+                check(set_pad_property(grid, "padGain", float(e["gain"])), "volume")
             # PLAY MODE before loop: set_play_mode turns padLoop off when it selects One Shot
             # (loop is meaningless there), so restoring loop afterwards keeps the saved pair
             # consistent instead of having the play-mode write clear a loop just restored.
             if ptype == PAD_TYPE_SOUND and e.get("play_mode") is not None:
                 check(set_play_mode(grid, int(e["play_mode"])), "play mode")
             if ptype == PAD_TYPE_SOUND and e.get("loop") is not None:
-                check(set_pad_loop(grid, bool(e["loop"])), "loop")
+                check(set_pad_property(grid, "padLoop", bool(e["loop"])), "loop")
             if ptype == PAD_TYPE_MIXER and e.get("mixer_trigger") is not None:
                 check(set_mixer_trigger(grid, int(e["mixer_trigger"])), "trigger mode")
             # A MIDI trigger's mapping. Written in ONE session, and only when the saved pad actually
@@ -3050,11 +3024,10 @@ def _cli():
     elif cmd == "clear":
         print(json.dumps(clear_grid_pad(int(sys.argv[2])), indent=2))
     elif cmd == "create":
-        grid = int(sys.argv[2]); folder = int(sys.argv[3]); wav = sys.argv[4]
-        name = sys.argv[5] if len(sys.argv) > 5 else "Sound"
-        colour = int(sys.argv[6]) if len(sys.argv) > 6 else 5
-        print(json.dumps(create_sound(grid, wav, name=name, colour=colour, folder=folder,
-                                       debug=dbg), indent=2))
+        grid = int(sys.argv[2]); wav = sys.argv[3]
+        name = sys.argv[4] if len(sys.argv) > 4 else "Sound"
+        colour = int(sys.argv[5]) if len(sys.argv) > 5 else 5
+        print(json.dumps(create_sound(grid, wav, name=name, colour=colour, debug=dbg), indent=2))
     elif cmd == "fx":
         print(json.dumps(assign_fx_to_grid(int(sys.argv[2]), sys.argv[3]), indent=2))
     elif cmd == "mixer":
@@ -3079,7 +3052,8 @@ def _cli():
                 print(f"  {nm:16} grid {where}  colour {v['colour']:2}  "
                       f"{' + '.join(v['stack'])}")
         else:
-            restore_factory_fx(arg, live=True)
+            done = restore_factory_fx(arg, live=True)
+            print(f"{len(done)} factory FX pad(s) restored: {', '.join(done)}. Ear-check each.")
     else:
         print(__doc__)
 

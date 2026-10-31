@@ -15,7 +15,6 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
-
 import server
 
 

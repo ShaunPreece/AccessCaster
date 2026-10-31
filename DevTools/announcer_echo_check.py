@@ -39,6 +39,7 @@ source tree (DevTools/run_dev_server.py). Against an older installed build they 
 rather than guessing, because a missing endpoint looks exactly like perfect suppression.
 """
 from __future__ import annotations
+
 import json
 import sys
 import time
@@ -48,12 +49,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
-import hid
-import server
 import channels
+import hid
 import rcp_read
 import rcp_transfer
+import server
 
 BASE = "http://127.0.0.1:8770"
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)

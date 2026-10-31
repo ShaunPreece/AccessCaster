@@ -20,34 +20,13 @@ documented in docs/RODECASTER_PROTOCOL.txt.
 from __future__ import annotations
 
 import contextlib
-import os
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
 
-import diagnostics            # the app's own account of what it did; silent until started
-
-# AN OFFLINE TEST MUST NOT BE ABLE TO WRITE TO SOMEBODY'S DESK, and a docstring saying so is not a
-# guard. `DevTools/_bootstrap` sets this for any script named `test_*`, exactly as it redirects the
-# data dir and silences the announcer, so the rule holds for a suite that never thought about it.
-#
-# THE FAILURE IT PREVENTS IS SILENT AND AUDIBLE AT THE SAME TIME: a suite that reaches a real write
-# fires a pad, engages a voice effect or drops the audio on a desk somebody is working on, and the
-# test still passes. Raising is the only honest answer - a write that is quietly swallowed would
-# make the test prove something it never did.
-#
-# Set ACCESSCASTER_ALLOW_DEVICE_WRITE to override it for a `test_*_live` suite that means it.
-_NO_WRITE = bool(os.environ.get("ACCESSCASTER_NO_DEVICE_WRITE")) and not os.environ.get(
-    "ACCESSCASTER_ALLOW_DEVICE_WRITE")
-
-
-def refuse_write_in_tests(what: str = "write to the device") -> None:
-    """Raise if this process is an offline test. Called from every device-write choke point."""
-    if _NO_WRITE:
-        raise RuntimeError(
-            f"REFUSING TO {what.upper()}: this is an offline test (ACCESSCASTER_NO_DEVICE_WRITE). "
-            f"Stub the device call, or set ACCESSCASTER_ALLOW_DEVICE_WRITE if it is a live suite.")
+import diagnostics  # the app's own account of what it did; silent until started
+import write_guard
 
 try:
     import hid
@@ -87,7 +66,7 @@ def write_report(dev, record: bytes) -> int:
     not bump the generation leaves the cached model dump looking valid, so a read-back straight
     afterwards returns the PRE-write state and a working write looks like a no-op.
     """
-    refuse_write_in_tests()
+    write_guard.refuse_in_tests("write to the device")
     n = dev.write(record)
     bump_write_generation()
     diagnostics.command(record, "write_report")

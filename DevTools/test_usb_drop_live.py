@@ -57,6 +57,7 @@ Run: python DevTools/test_usb_drop.py [--layers handles2,poll] [--trials N] [--q
      python DevTools/test_usb_drop.py --layers app --trials 5
 """
 from __future__ import annotations
+
 import json
 import subprocess
 import sys

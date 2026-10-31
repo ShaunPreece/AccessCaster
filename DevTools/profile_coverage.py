@@ -28,6 +28,7 @@ what stops the audit going stale:
     Adding a new writable setting forces a decision about backing it up.
 """
 from __future__ import annotations
+
 import inspect
 import os
 import sys
@@ -35,10 +36,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import property_coverage as pc
-
 import channels
 import profiles
+import property_coverage as pc
 import rcp_read
 import rcp_transfer
 

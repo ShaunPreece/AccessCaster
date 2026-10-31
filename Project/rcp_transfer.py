@@ -31,15 +31,14 @@ import struct
 import subprocess
 import time
 
-import model_tree                    # the tree grammar, and with it the ONE address format
-import devices                       # per-device matrix and fader shape
-import diagnostics                   # the app's own account of every record it sends
-import rcp_hid                       # write-generation counter (invalidates cached model reads)
+import devices  # per-device matrix and fader shape
+import diagnostics  # the app's own account of every record it sends
+import model_tree  # the tree grammar, and with it the ONE address format
+import rcp_hid  # write-generation counter (invalidates cached model reads)
+import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
 
 BULK_LEN = 256
-
-SEL_TRANSFER_MODE = 0x0F
 
 
 def _frame(payload: bytes) -> bytes:
@@ -96,8 +95,8 @@ INPUT_SOURCE_CODE = {
     "Bluetooth": 10, "SMARTpads": 11, "USB1": 7, "Chat": 8, "USB2": 9,
     "CallMe1": 16,
 }
-# The three legal stereo-link pairs: {pair code: (lower mic code, upper mic code)}. Only ADJACENT
-# inputs can link (RODE's own restriction: 1+2, 2+3, 3+4).
+# STEREO LINK. The legal pairs, per desk, are devices.FaderSpec.stereo_pairs. Only ADJACENT inputs
+# can link (RODE's own restriction: 1+2, 2+3, 3+4).
 #
 # A link is ONE property write per fader, nothing more. The RODE app also sends inputMicrophoneType
 # and inputColour on a nested path, but those are housekeeping: writing the pair code alone leaves
@@ -107,7 +106,6 @@ INPUT_SOURCE_CODE = {
 # and that is the desk's behaviour, not ours: it returns only the lower mic, leaving the upper one
 # off-fader. The upper mic's processing survives that round trip only because channels.park_chain
 # holds it (see server._follow_chains).
-STEREO_LINK_PAIRS = {4: (0, 1), 5: (1, 2), 6: (2, 3)}
 
 
 # ---- PAD-ADDRESSED RECORDS ---------------------------------------------------
@@ -374,8 +372,11 @@ def set_cross_point_level(output_index: int, source_index: int, level: float,
 # CODE on that fader. The app reorders by writing channelInputSource on a per-FADER selector,
 # 0x1c + fader index; no systemChannelSelected pre-write is needed. The mic faders are writable
 # too. See RODECASTER_PROTOCOL.txt section 6.
-FADER_SELECTOR_BASE = 0x1C   # channelInputSource selector for fader 1; + index for the rest
-FADER_COUNT = 9              # Pro II fallback when no device is known; see set_fader_source
+# THE CHANNEL BLOCK, CHANNEL[strip] at SEL_CHANNEL + strip index. A fader IS a strip, so a fader's
+# channelInputSource and a strip's processing chain are on the same selector. The channel EFFECTS
+# (echo and reverb) are a separate block at SEL_CHANNEL_FX + strip index. Both desks.
+SEL_CHANNEL = 0x1C
+SEL_CHANNEL_FX = 0x26
 
 
 def set_fader_source(fader_index: int, source_code: int) -> int:
@@ -385,14 +386,11 @@ def set_fader_source(fader_index: int, source_code: int) -> int:
     fader `count`. The two differ only on the Duo, which exposes 9 faders but whose factory default
     layout occupies all ten slots, so the fader reset and a profile restore both walk index 9.
     Writing slot 9 is proven safe on hardware (set, vacate and restore, byte-clean)."""
-    try:
-        count = devices.get_active_device().fader.vector_length
-    except Exception:
-        count = FADER_COUNT
+    count = devices.get_active_device().fader.vector_length
     if not 0 <= fader_index < count:
         raise ValueError(f"fader_index must be 0-{count - 1}, got {fader_index}")
     return send_record(build_global_prop_int(
-        "channelInputSource", FADER_SELECTOR_BASE + fader_index, int(source_code)))
+        "channelInputSource", SEL_CHANNEL + fader_index, int(source_code)))
 
 
 def set_multitrack_mode(mode: int) -> int:
@@ -507,7 +505,6 @@ def set_output_delay(on: bool, seconds: float | None = None) -> int:
 # are analog pots). They live per-device in devices.FaderSpec.level_selectors, all observed on the
 # wire; server.py resolves them, so no caller passes a guessed selector here.
 FADER_LEVEL_MAX = 127            # faderMax; faderLevel / 127 IS that source's cross-point level
-SEL_MONITOR_LEVEL = 0x0D         # outputMonLevel, an ordinary global float on the OUTPUT block
 
 
 def build_fader_level(selector: int, value: int) -> bytes:
@@ -528,7 +525,7 @@ def set_monitor_level(level01: float) -> int:
     """Set the monitor speaker level, 0.0..1.0 (outputMonLevel), the property the desk's own
     encoder writes."""
     v = max(0.0, min(1.0, float(level01)))
-    return send_record(build_global_prop_float("outputMonLevel", SEL_MONITOR_LEVEL, v))
+    return send_record(build_global_prop_float("outputMonLevel", SEL_OUTPUT_GLOBAL, v))
 
 
 def set_headphone_type(value: int, selector: int = SEL_HEADPHONE_TYPE) -> int:
@@ -616,7 +613,7 @@ def set_unit_setting(prop: str, value) -> int:
 def _write_records(records, purpose: str, delay: float = 0.0) -> int:
     """Write `records` on ONE open connection to the control interface, `delay` seconds apart.
     Returns bytes written. Every write to the desk passes through here."""
-    rcp_hid.refuse_write_in_tests()
+    write_guard.refuse_in_tests("write to the device")
     iface = find_control_interface()
     if iface is None:
         raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
@@ -698,7 +695,12 @@ class transfer_session:
 
 def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
-    rec = build_global_prop_int("transferModeType", SEL_TRANSFER_MODE, 2 if on else 0)
+    global _session_pad_root
+    if on:
+        _note_volumes_before_entry()
+    else:
+        _session_pad_root = None
+    rec = build_global_prop_int("transferModeType", SEL_SYSTEM, 2 if on else 0)
     # Logged as its own event as well as the record below it: entering transfer mode
     # re-presents a USB mass-storage gadget, so it is the one write whose
     # position in the timeline is worth being able to find without decoding anything.
@@ -752,8 +754,8 @@ def flush_volume(root: str) -> None:
                     return
             finally:
                 k32.CloseHandle(handle)
-    except Exception:
-        pass          # fall through to the slow but proven path
+    except Exception as exc:
+        diagnostics.event("transfer.flush_fallback", str(exc))   # the slow but proven path follows
     _flush_volume_powershell(root)
 
 
@@ -830,41 +832,94 @@ def pad_volume_readable(root: str) -> bool:
         return False
 
 
-def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0):
-    """Wait for the pad-storage FAT volume to mount; return its root path (e.g. 'F:\\'), or None
-    if it never appears within timeout_s.
+def _drive_roots() -> list[str]:
+    """Every drive root from D to Z. A and B are floppy letters and C is the system drive."""
+    return [f"{letter}:\\" for letter in string.ascii_uppercase[3:]]
 
-    The re-arm can be slow (over 8 s after a fresh enter), so the timeout is generous and
-    remountPadStorage is re-issued periodically in case the first one was swallowed.
 
-    A volume counts only when it passes THREE checks, because each weaker one has been passed by a
-    volume that then failed:
+def _is_pad_volume(root: str) -> bool:
+    """Does `root` hold a pad folder that can be read right now?
+
+    THREE checks, because each weaker one has been passed by a volume that then failed:
       * isdir(<root>\\pads) - passed by a size-0 PHANTOM letter left after a stuck transfer, which
         fails every write with EINVAL;
       * shutil.disk_usage(root).total > 0 - passed by the first entry after the desk has been idle,
         which then fails the first file read with EINVAL;
       * pad_volume_readable(root) - reads bytes, which is what the caller does next.
-    A not-yet-ready volume just keeps the wait loop going.
     """
-    deadline = time.time() + timeout_s
-    next_remount = time.time() + reissue_remount_every
-    while time.time() < deadline:
-        for letter in string.ascii_uppercase[3:]:  # skip A-C
-            root = f"{letter}:\\"
-            if os.path.isdir(os.path.join(root, "pads")):
-                try:
-                    with quiet_drive_errors():
-                        ready = shutil.disk_usage(root).total > 0
-                    if ready and pad_volume_readable(root):
-                        return root
-                except OSError:
-                    pass  # phantom/size-0 mount, keep waiting
-        if time.time() >= next_remount:
+    if not os.path.isdir(os.path.join(root, "pads")):
+        return False
+    try:
+        with quiet_drive_errors():
+            ready = shutil.disk_usage(root).total > 0
+        return ready and pad_volume_readable(root)
+    except OSError:
+        return False
+
+
+def _volume_serial(root: str) -> int | None:
+    """The volume serial number of `root`, or None when Windows does not give one."""
+    serial = ctypes.c_uint(0)
+    try:
+        with quiet_drive_errors():
+            ok = ctypes.WinDLL("kernel32").GetVolumeInformationW(
+                root, None, 0, ctypes.byref(serial), None, None, None, 0)
+    except (AttributeError, OSError):
+        return None
+    return serial.value if ok else None
+
+
+# THE DESK'S VOLUME IS THE ONE THAT APPEARS AFTER TRANSFER MODE IS ENTERED. Any other drive with a
+# `pads` folder, such as a USB stick holding a copy of the pad folder, is already there before entry,
+# and taking it for the desk sends uploads to it and lets the tidy delete its files. So the pad
+# volumes present before entry are noted and refused, except one whose serial is the desk volume's
+# own from an earlier find: a quick exit and re-enter can find the desk's volume still mounted.
+_volumes_before_entry: set[str] = set()
+_desk_volume_serial: int | None = None
+# The root found during a held transfer_session. Every find in the session returns this one, so the
+# batch cannot move to another volume part way through.
+_session_pad_root: str | None = None
+
+
+def _note_volumes_before_entry() -> None:
+    global _volumes_before_entry
+    _volumes_before_entry = {root for root in _drive_roots() if _is_pad_volume(root)
+                             and (_desk_volume_serial is None
+                                  or _volume_serial(root) != _desk_volume_serial)}
+    if _volumes_before_entry:
+        diagnostics.event("transfer.other_pad_volumes", "refused as the pad volume",
+                          roots=" ".join(sorted(_volumes_before_entry)))
+
+
+def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0):
+    """Wait for the pad-storage FAT volume to mount; return its root path (e.g. 'F:\\'), or None
+    if it never appears within timeout_s.
+
+    The re-arm can be slow (over 8 s after a fresh enter), so the timeout is generous and
+    remountPadStorage is re-issued periodically in case the first one was swallowed. A volume
+    counts only when `_is_pad_volume` passes and it was not there before transfer mode was entered
+    (see `_volumes_before_entry`). A not-yet-ready volume just keeps the wait loop going.
+    """
+    global _desk_volume_serial, _session_pad_root
+    deadline = time.monotonic() + timeout_s
+    next_remount = time.monotonic() + reissue_remount_every
+    while time.monotonic() < deadline:
+        if _transfer_hold > 0 and _session_pad_root:
+            candidates = [_session_pad_root]
+        else:
+            candidates = [r for r in _drive_roots() if r not in _volumes_before_entry]
+        for root in candidates:
+            if _is_pad_volume(root):
+                _desk_volume_serial = _volume_serial(root) or _desk_volume_serial
+                if _transfer_hold > 0:
+                    _session_pad_root = root
+                return root
+        if time.monotonic() >= next_remount:
             try:
                 remount_pad_storage()
-            except Exception:
-                pass
-            next_remount = time.time() + reissue_remount_every
+            except Exception as exc:
+                diagnostics.event("transfer.remount_failed", str(exc))
+            next_remount = time.monotonic() + reissue_remount_every
         time.sleep(0.5)
     return None
 
@@ -966,7 +1021,7 @@ def _selftest() -> None:
     assert build_global_prop_bool("channelBypassProcessing", True, 0x1C) == exp_duo_bypass, \
         "duo channelBypassProcessing mismatch"
     # DUO: NON-Mic1 processing selectors.
-    # channelBypassProcessing rides the GLOBAL/processing form at sel = proc_sel_base (0x1C)
+    # channelBypassProcessing rides the GLOBAL/processing form at sel = SEL_CHANNEL (0x1C)
     # + STRIP index, where strip index = channelInputSource.index(source_code), not the
     # channel's carousel position:
     #   Mic1 s0->0x1C, USB1 s1->0x1D, Chat s2->0x1E, USB2 s3->0x1F, Headset s6->0x22,
@@ -984,7 +1039,7 @@ def _selftest() -> None:
     assert build_global_prop_int("channelCurrentFxPreset", 0x1C, 1) == exp_duo_preset, \
         "duo channelCurrentFxPreset mismatch"
     # DUO: EFFECTS on a NON-Mic1 strip. echoOn rides the
-    # GLOBAL/effects form at sel = fx_sel_base (0x26) + STRIP index; Mic2 sits on strip 1 -> 0x27.
+    # GLOBAL/effects form at sel = SEL_CHANNEL_FX (0x26) + STRIP index; Mic2 sits on strip 1 -> 0x27.
     exp_duo_fx_on = bytes.fromhex(
         "030f000000" + "01010101" + "27" + "6563686f4f6e" + "00010102"    # echoOn=True, sel 0x27
     ).ljust(BULK_LEN, b"\x00")

@@ -14,6 +14,7 @@ import sys
 import zlib
 from pathlib import Path
 
+
 # A PDF string literal: balanced-free scan that respects backslash escapes, which is why this is a
 # hand-rolled loop rather than a regex - a character class for "not a paren or backslash" trips over
 # the escapes that legitimately contain both.

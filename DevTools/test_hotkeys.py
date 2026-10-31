@@ -47,7 +47,9 @@ def _run_checks():
         fired.append(command)
         if command == "boom":
             raise RuntimeError("nope")
-        return f"ran {command}"
+        if command == "refused":
+            return {"ok": False, "message": "the desk said no"}
+        return {"ok": True, "message": f"ran {command}"}
 
     labels = {"one": "Test one", "two": "Test two", "boom": "Broken"}
     mgr = hotkeys.HotkeyManager(speak=said.append, runner=runner,
@@ -146,6 +148,9 @@ def _run_checks():
     mgr._run(mgr.get(boom["id"]))
     check("a silenced shortcut still speaks a FAILURE",
           any("nope" in s for s in said), str(said))
+    said.clear()
+    mgr._run({"id": "x", "command": "refused", "speak": False})
+    check("and a refusal the command reports", said == ["the desk said no"], str(said))
 
     # --- deleting --------------------------------------------------------------------------------
     before = len(mgr.state()["shortcuts"])

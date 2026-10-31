@@ -22,12 +22,12 @@ Offline: the interface list is stubbed, so no unit is needed and no cable has to
     python DevTools/test_half_connected.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_hid
 import server
 

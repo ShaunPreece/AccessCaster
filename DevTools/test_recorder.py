@@ -7,6 +7,7 @@ DevTools/test_recorder_live.py; this is what stops the parsing regressing.
     python DevTools/test_recorder.py
 """
 from __future__ import annotations
+
 import sys
 import time
 from pathlib import Path
@@ -15,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from datetime import datetime, timezone
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-
 import recorder
+from wording import spoken_datetime
 
 FAILS = []
 
@@ -60,8 +61,8 @@ check("duration in words", r["duration"], "11 seconds")
 # one timezone.
 stamp_ms = 1787914947088
 local = datetime.fromtimestamp(stamp_ms / 1000.0)
-check("timestamp is shown in local time", r["when"], local.strftime("%d %B %Y at %H:%M"))
-utc_render = datetime.fromtimestamp(stamp_ms / 1000.0, tz=timezone.utc).strftime("%d %B %Y at %H:%M")
+check("timestamp is shown in local time", r["when"], spoken_datetime(local))
+utc_render = spoken_datetime(datetime.fromtimestamp(stamp_ms / 1000.0, tz=timezone.utc))
 if utc_render != r["when"]:
     check("and it is NOT the raw UTC rendering, which was the bug", r["when"] != utc_render, True)
 else:
@@ -74,9 +75,11 @@ CONTENT_176 = ("Recording 27|c9f82780f0fb47e694b408e95ed52616|"
 r = recorder.parse_recording(27, CONTENT_176)
 check("1.7.6 seconds", r["seconds"], 9.4)
 check("1.7.6 timestamp", r["when"],
-      datetime.fromtimestamp(1791121655376 / 1000.0).strftime("%d %B %Y at %H:%M"))
+      spoken_datetime(datetime.fromtimestamp(1791121655376 / 1000.0)))
 check("a malformed record does not raise",
       recorder.parse_recording(1, "nonsense")["seconds"], None)
+check("and still says how long it is", recorder.parse_recording(1, "nonsense")["duration"],
+      "length unknown")
 
 print("\nLENGTHS IN WORDS (never punctuation: a reader says '0:07.3' as literal colons)")
 check("under a minute", recorder.describe_duration(7), "7 seconds")

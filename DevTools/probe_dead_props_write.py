@@ -22,6 +22,7 @@ Restoring is per property and happens even when the run stops, so a desk is neve
     python DevTools/probe_dead_props_write.py --yes
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -30,12 +31,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
+import devices
 import model_tree as mt
+import property_list
 import rcp_read
 import rcp_transfer
-import devices
-import property_list
 
 SETTLE = 1.5
 

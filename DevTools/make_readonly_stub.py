@@ -16,6 +16,7 @@ payload a capless desk would send is the only way left.
         --stub DevTools/_probe_stub_readonly.json --route routing
 """
 from __future__ import annotations
+
 import json
 import urllib.request
 

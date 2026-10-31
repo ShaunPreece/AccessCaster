@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import diagnostics
 import rcp_hid
 
 # Known RODECaster USB product ids on the vendor control interface (MI_09).
@@ -92,12 +93,6 @@ class MatrixSpec:
         """The codes of `all_sources`, for the grid read."""
         return tuple(s["index"] for s in self.all_sources) if self.sources \
             else tuple(self.source_indices)
-
-    def source_indices_for(self, expanded: bool) -> tuple:
-        """The codes behind `sources_for`. The DISPLAY set, so it is a subset of
-        `all_source_indices`; a reader wants that one."""
-        return tuple(self.source_indices) + (
-            tuple(s["index"] for s in self.expanded_sources) if expanded else ())
 
     def sources_for(self, expanded: bool) -> tuple:
         """The matrix rows to SHOW. Expanded adds Game, Music, A and B and renames USB 1; they are
@@ -692,11 +687,6 @@ class DeviceModel:
     #   "unit_settings"   - display/haptics/REC-button/listen (rcp_transfer.UNIT_SETTING_SEL)
     #   The rest are explained where each desk's set is built.
     caps: frozenset
-    # Per-channel PROCESSING and EFFECTS selector BASES (global form 01 01 01 01 <sel>). A channel's
-    # processing selector is proc_sel_base + strip index and its effects selector fx_sel_base + strip
-    # index, the strip being its live fader position. Same on both desks.
-    proc_sel_base: int = 0x1C
-    fx_sel_base: int = 0x26
     # Root-child index of INPUTSOURCE[0]: a 30-entry table, indexed by SOURCE CODE, that both desks
     # publish and that holds EVERY input value for EVERY channel. 0x26E on each, read off a live dump
     # of each desk rather than assumed shared. See input_path.
@@ -893,8 +883,6 @@ PRO2 = DeviceModel(
                     "channel_read", "output_write", "pad_write", "fader_write", "chain_follow",
                     "level_write", "unit_settings", "recorder", "network_write", "shows",
                     "stereo_link", "callme", "storage_write"}),
-    proc_sel_base=0x1C,
-    fx_sel_base=0x26,
     ui_channels=PRO2_UI_CHANNELS,
     expanded_ui_channels=EXPANDED_UI_CHANNELS,
     pad=PadSpec(pads_per_bank=8),   # 8 pads/bank x 8 banks = 64 slots; system pads 56-63
@@ -951,8 +939,6 @@ DUO = DeviceModel(
                     "matrix_write", "output_write", "pad_write", "fader_write",
                     "level_write", "chain_follow", "unit_settings", "stereo_link",
                     "network_write", "recorder", "shows", "callme"}),
-    proc_sel_base=0x1C,
-    fx_sel_base=0x26,
     ui_channels=DUO_UI_CHANNELS,
     expanded_ui_channels=EXPANDED_UI_CHANNELS,
     # 6 pads/bank x 8 banks = 48 slots; system pads at padIdx 42-47 (bank 8).
@@ -1098,6 +1084,6 @@ def get_active_device() -> DeviceModel:
             learned = _LEARNED.get(iface.serial_number)
             if learned is not None:
                 return learned
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("device.identify_failed", "taken as the default desk", error=str(exc))
     return DEFAULT

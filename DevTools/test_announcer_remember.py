@@ -12,12 +12,12 @@ No device and no speech: settings live in a dict and the announcer thread is stu
     python DevTools/test_announcer_remember.py
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import server
 
 FAILS = []

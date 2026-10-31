@@ -29,6 +29,7 @@ Usage:
     python DevTools/probe_derived_write.py --group output     # a whole vetted batch
 """
 from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -36,7 +37,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-
 import rcp_read
 import rcp_transfer as _t
 import selector_map

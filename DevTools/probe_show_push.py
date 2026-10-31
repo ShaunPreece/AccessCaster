@@ -29,6 +29,7 @@ Run: python DevTools/probe_show_push.py [--export | --reset] [--seconds N]
 `--reset` is a REAL UNBACKED FACTORY RESET. Expendable desks only.
 """
 from __future__ import annotations
+
 import re
 import sys
 import threading

@@ -19,6 +19,7 @@ DevTools/captures/<name>.pcap. The control channel is interrupt EP 0x05 OUT / 0x
 property write decodes as 01 01 01 01 <selector> + name + value block.
 """
 from __future__ import annotations
+
 import os
 import subprocess
 import sys

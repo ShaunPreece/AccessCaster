@@ -9,11 +9,17 @@ then stopped. Each trial reports whether the service bound before the hold (it w
 during it, or after release. Every trial is two USB arrivals, so audio through the desk drops out
 each time. Needs the app's server running. Restores Standard, mix only.
 """
-import json, sys, threading, time, urllib.request
+import json
+import sys
+import threading
+import time
+import urllib.request
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path)
-
-import comtypes, comtypes.client, meters, virtual_devices as vd
+import comtypes
+import comtypes.client
+import meters
+import virtual_devices as vd
 
 B = "http://127.0.0.1:8770"
 HOLD_S = 10.0

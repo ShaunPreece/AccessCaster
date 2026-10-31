@@ -7,6 +7,7 @@ such cache and must read the channel, even when the mute cache is populated.
 Run: python DevTools/test_commands.py
 """
 from __future__ import annotations
+
 import sys
 import types
 
