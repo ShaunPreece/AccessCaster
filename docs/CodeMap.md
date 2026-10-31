@@ -308,13 +308,13 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (154 files; the ones worth knowing)
+## DevTools/ (155 files; the ones worth knowing)
 
 **Browser checks.** `ui_probe.py` (the harness: proxies GETs to the live server, stubs POSTs; it
 gives the page `check()`, `sleep()`, `probeLog()`, `probeClear()` and `probeDone()` and nothing
 else) plus `ui_checks_<page>.js`: about, appsettings, backups, baseline, boundary, callme, lifecycle,
 chantabs, device, levelcheck, network, pads, padsbus, readonly, recording, routing, shell, solo,
-**staged**, stereopan, wireless.
+**staged**, stereopan, wireless. `run_ui_probes.py` runs every suite with its route and timeout.
 `ui_checks_stereopan.js` covers pan: one direction-spoken Pan slider on a mic, two leg sliders and
 a Link switch on a stereo channel (`devices.Channel.stereo`), and the linked slider writing both
 legs. The panel side is `fillStereoPan` in `app.js`.
