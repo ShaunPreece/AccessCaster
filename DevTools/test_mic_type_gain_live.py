@@ -8,7 +8,9 @@ already on the saved type writes the type as a no-op, which is why only the clea
 This measures it directly, and records what gain each voicing sets.
 
 REVERSIBLE. Runs on Mic 3 (nothing plugged into it, and the standing rule keeps Mic 1 out of
-tests), records the channel's gain and type first, and puts both back at the end, read-back verified.
+tests), records the whole input node and the processing chain first, and puts them back at the
+end: a voicing sets the gain, the instrument gain, phantom power and the whole chain, and writing
+the old type back undoes none of them. The read-back compares every one.
 
 Usage: python DevTools/test_mic_type_gain_live.py [--channel 3]
 """
@@ -22,18 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import channels
-import rcp_read
-from model_tree import parse, walk
+from _desk import advanced_processing, put_chain_back, read_input, settled_chain
 
 SETTLE = 0.9        # the desk needs a moment before a fresh dump shows the write
 PROBE_GAIN = 47     # a value that is nobody's default, so a default overwriting it is obvious
-
-
-def read_input(slot: int) -> dict:
-    """Every property of one INPUTSOURCE node, by input slot (Mic 1 = 0)."""
-    root, _, _ = parse(rcp_read.read_model_stable(fresh=True))
-    nodes = [n for n in walk(root) if n.name == "INPUTSOURCE"]
-    return {p: v for p, v, _k in nodes[slot].props}
 
 
 def main() -> int:
@@ -44,6 +38,8 @@ def main() -> int:
     slot = ch - 1
 
     before = read_input(slot)
+    chain_before = settled_chain(ch)
+    advanced_before = advanced_processing(ch)
     base_gain, base_type = before["inputMicrophoneGain"], before["inputMicrophoneType"]
     print(f"Mic {ch} as found: gain {base_gain}, type {base_type} "
           f"({channels.MIC_TYPE.get(base_type, '?')})")
@@ -51,7 +47,7 @@ def main() -> int:
     fail = 0
     try:
         # THE ONE QUESTION: set a known gain, then change the voicing, and see if the gain survives.
-        print(f"\n-- does a type change move the gain? --")
+        print("\n-- does a type change move the gain? --")
         table = {}
         for tv in sorted(channels.MIC_TYPE):
             channels.set_mic_gain(ch, PROBE_GAIN)
@@ -99,24 +95,23 @@ def main() -> int:
         # (that is exactly why profiles restore it), so putting back only the type and gain leaves
         # the channel changed.
         channels.set_mic_type(ch, base_type)
-        time.sleep(SETTLE)
+        put_chain_back(ch, chain_before, advanced_before)
         channels.set_mic_gain(ch, base_gain)
         time.sleep(SETTLE)
         channels.set_instrument_gain(ch, int(before["inputInstrumentGain"]))
         time.sleep(SETTLE)
+        channels.set_phantom(ch, bool(before["inputPower"]))
+        time.sleep(SETTLE)
         after = read_input(slot)
-        ok = (after["inputMicrophoneGain"] == base_gain
-              and after["inputMicrophoneType"] == base_type
-              and after["inputInstrumentGain"] == before["inputInstrumentGain"]
-              and after["inputType"] == before["inputType"])
-        print(f"  gain {after['inputMicrophoneGain']} (was {base_gain}), "
-              f"type {after['inputMicrophoneType']} (was {base_type}), "
-              f"instrument gain {after['inputInstrumentGain']} "
-              f"(was {before['inputInstrumentGain']}), "
-              f"inputType {after['inputType']} (was {before['inputType']})")
-        print("  RESTORED CLEAN" if ok else "  *** NOT FULLY RESTORED - check Mic %d ***" % ch)
-        if not ok:
+        chain_after = settled_chain(ch)
+        left = [f"{k} {after.get(k)!r} (was {v!r})" for k, v in before.items() if after.get(k) != v]
+        left += [f"chain {k} {chain_after.get(k)!r} (was {v!r})"
+                 for k, v in chain_before.items() if chain_after.get(k) != v]
+        if left:
+            print(f"  *** NOT FULLY RESTORED - check Mic {ch}: " + "; ".join(left))
             fail += 1
+        else:
+            print("  RESTORED CLEAN: the input node and the chain are as found")
     return 1 if fail else 0
 
 

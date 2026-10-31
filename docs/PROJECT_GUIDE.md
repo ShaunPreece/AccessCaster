@@ -758,7 +758,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (`Failed to instantiate Capture Pin`).
 - **THE BIND IS NOT A RACE BETWEEN THE HID INTERFACE AND THE AUDIO INTERFACES.** That is the
   obvious reading of "DeviceInterfaceAlias disabled" and it is wrong here: sampled at 120 ms
-  across four arrivals (`DevTools/bind_timeline.py`), the desk's KSCATEGORY_AUDIO, CAPTURE, RENDER
+  across four arrivals, the desk's KSCATEGORY_AUDIO, CAPTURE, RENDER
   and TOPOLOGY interfaces and its HID interface go ACTIVE within 0.15 s of each other, and the
   audio ones sometimes go first. There is no window in which HID is up and audio is not.
 - **THE SERVICE'S OWN TRACE IS COMPILED OUT, SO DEBUGVIEW WILL NEVER SHOW A BIND.** The binary
@@ -795,7 +795,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   desk stays on the bus, so the service has nothing to bind to. `_write_usb_mode` reports an
   arrival only when the product id changes, and only arrivals go into the bind history.
 - **THE DIAGNOSTIC TOOLS ARE NOT THE CAUSE, and it was worth asking.** Every failure of that
-  afternoon fell inside a window where `bind_timeline.py` or a DBWIN listener was running, which
+  afternoon fell inside a window where a device-interface sampler or a DBWIN listener was running, which
   reads as an observer effect: the first enumerates five device-interface classes eight times a
   second, and the second throttles `audiodg` by making it wait on a Python reader for 330 debug
   lines a second. The test is to run the flips WITH the observer on purpose, and that gives 6
@@ -2779,9 +2779,10 @@ shared one; a new copy is how they drifted apart the first time.
   ends up disagreeing with, which is why the history became data. HTML rather than text because a
   screen reader can jump heading to heading through it and cannot through Notepad.
 - **A SCRIPT THAT FACTORY-RESETS A DESK MUST CALL `_bootstrap.require_expendable_desk` AND REFUSE
-  WITHOUT `--expendable-desk`.** Two do: `test_usb_drop_live.py` (one reset per trial) and
-  `probe_show_push.py --reset`. A capitalised warning in the docstring is NOT the guard, and this is
-  measured, not theoretical: `test_usb_drop_live.py` opened with "EXPENDABLE DESKS ONLY" and was still run
+  WITHOUT `--expendable-desk`.** One does: `test_usb_drop_live.py` (one reset per trial). The
+  exception is `test_clean_restore_live.py`, which restores itself: it takes `--yes`, and once its
+  clean restore has started it imports the backup that restore took, however the run ends. A
+  capitalised warning in the docstring is NOT the guard, and this is measured, not theoretical: `test_usb_drop_live.py` opened with "EXPENDABLE DESKS ONLY" and was still run
   over Shaun's working Pro II on 16th September 2026 by a sweep that selected tests by filename. The
   reader it warned was not the thing that ran it.
 - **A `test_*.py` SCRIPT GETS A THROWAWAY DATA DIR, AUTOMATICALLY.** `_bootstrap` sets

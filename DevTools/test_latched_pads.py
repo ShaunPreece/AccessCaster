@@ -22,9 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check, patched
 import server
 import soundpad
+from _testkit import check, patched
 
 
 def with_pads(positions, active_flags):

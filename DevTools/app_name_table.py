@@ -57,13 +57,17 @@ def table_names(raw: bytes) -> list:
 
 
 def dump_names() -> set:
-    """Every property name the DESK publishes, from a live read or the newest capture."""
+    """Every property name the DESK publishes, from a live read or, with no desk attached, the
+    newest capture, which is named."""
     try:
         blob = rcp_read.read_model_stable(fresh=True)
-    except Exception:
-        newest = max(CAP.glob("*-raw.bin"), key=lambda p: p.stat().st_mtime)
-        print(f"(no device; using {newest.name})")
-        blob = newest.read_bytes()
+    except RuntimeError as e:         # no control interface: no desk attached
+        captures = sorted(CAP.glob("*-raw.bin"), key=lambda p: p.stat().st_mtime)
+        if not captures:
+            raise SystemExit(f"No desk attached ({e}) and no *-raw.bin capture in {CAP}, so there "
+                             "is nothing to compare the table against.") from None
+        print(f"(no desk attached; using the capture {captures[-1].name})")
+        blob = captures[-1].read_bytes()
     root, _, _ = parse(blob)
     return {p for n in walk(root) for p, _v, _k in n.props}
 

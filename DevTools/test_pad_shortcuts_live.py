@@ -25,10 +25,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_in
 import devices
 import server
 import soundpad
+from _testkit import check, check_in
 
 
 def check_said(what: str, got, want=None, contains=None) -> bool:
@@ -105,7 +105,7 @@ def main() -> int:
             time.sleep(0.4)
 
             check_said("pad.fire on a sound pad says playing",
-                  server._hk_pad(str(sound)), contains="playing")
+                       server._hk_pad(str(sound)), contains="playing")
             check_said("it selected the pad's own bank", server._hk_current_bank(), want=bank)
             time.sleep(0.6)
             playing = server._hk_play_snapshot()
@@ -116,7 +116,7 @@ def main() -> int:
             # is on its bank. A One Shot restarts, a Toggle stops: both are "the pad's own setting".
             said = server._hk_pad_slot(str(slot))
             check_said("pad.slot on the same pad", said,
-                  contains="stopped" if mode == soundpad.PLAY_MODE_TOGGLE else "playing")
+                       contains="stopped" if mode == soundpad.PLAY_MODE_TOGGLE else "playing")
             # AND THE DESK HAS TO AGREE. Asserting our own sentence proves only that the branch
             # ran: the word "stopped" comes from the pad's stored play mode, which is a read-back.
             # The engine is the judge - a stopped pad stops pushing progress, so it falls out of
@@ -126,7 +126,7 @@ def main() -> int:
             if mode == soundpad.PLAY_MODE_TOGGLE:
                 time.sleep(1.5)
                 check_said("and the desk really did stop it",
-                      server._hk_playing_now(), want="Nothing is playing.")
+                           server._hk_playing_now(), want="Nothing is playing.")
             else:
                 time.sleep(1.0)
 
@@ -136,24 +136,24 @@ def main() -> int:
             pos, name, _pt, _mode = pads[fx]
             print(f"\nVOICE-FX pad {name!r}: padIdx {fx}, position {pos}")
             check_said("pad.fire on a voice-FX pad switches it on",
-                  server._hk_pad(str(fx)), want=f"{name} on.")
+                       server._hk_pad(str(fx)), want=f"{name} on.")
             check_said("what is playing says it is switched on",
-                  server._hk_playing_now(), contains="switched on")
+                       server._hk_playing_now(), contains="switched on")
             check_said("a second press switches it off",
-                  server._hk_pad(str(fx)), want=f"{name} off.")
+                       server._hk_pad(str(fx)), want=f"{name} off.")
 
         print("\nBANK STEPPING")
         server._hk_note_bank(0)
         soundpad.select_bank(0)
         time.sleep(0.4)
         check_said("bank down at the first bank refuses",
-              server._hk_bank_step("down"), contains="first bank")
+                   server._hk_bank_step("down"), contains="first bank")
         check_said("bank up moves", server._hk_bank_step("up"), want="Bank 2.")
         check_said("and the cache followed it", server._hk_current_bank(), want=1)
 
         print("\nREFUSALS")
         check_said("a slot the desk does not have",
-              server._hk_pad_slot(str(per_bank + 1)), contains=f"{per_bank} pads in a bank")
+                   server._hk_pad_slot(str(per_bank + 1)), contains=f"{per_bank} pads in a bank")
         check_said("a pad that is not a number", server._hk_pad("banana"), contains="not a pad")
     finally:
         # Silence BEFORE the announcer goes: the tracking that says what is still playing is its

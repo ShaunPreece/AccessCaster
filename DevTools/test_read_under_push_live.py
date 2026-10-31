@@ -43,11 +43,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check_true
 import hid
 import midi_out
 import model_tree
 import rcp_read
+from _testkit import check_true
 from rcp_hid import find_control_interface
 
 SLOW_S = 3.0        # a healthy dump is well under a second; one run to its ceiling takes minutes
@@ -84,8 +84,8 @@ def progress_count(dev, secs: float) -> int:
     press that stopped it. A pad that is PLAYING pushes at about 20 a second, so the two states are
     far apart on a count and adjacent on a boolean.
     """
-    n, until = 0, time.time() + secs
-    while time.time() < until:
+    n, until = 0, time.monotonic() + secs
+    while time.monotonic() < until:
         chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
         if not chunk:
             continue
@@ -133,9 +133,9 @@ def structure(blob: bytes):
 
 
 def timed_read():
-    t0 = time.time()
+    t0 = time.monotonic()
     blob = rcp_read.read_model_raw()
-    return blob, time.time() - t0
+    return blob, time.monotonic() - t0
 
 
 def main() -> int:
@@ -143,7 +143,6 @@ def main() -> int:
     ap.add_argument("--pad", type=int, default=1, help="pad to play, 1-based, in the current bank")
     ap.add_argument("--runs", type=int, default=3)
     args = ap.parse_args()
-    ok = True
 
     print("QUIET BASELINE")
     quiet, quiet_s = timed_read()
@@ -151,56 +150,60 @@ def main() -> int:
     stats = dict(rcp_read._last_read)
     print(f"  {len(quiet)} bytes in {quiet_s:.2f} s, {len(quiet_struct)} properties, "
           f"{stats['frames']} frames, declared {stats['declared']}")
-    ok &= check_true("bounded by the declared length, not by silence",
-                stats["bounded_by"] == "length", f"({stats['bounded_by']})")
-    ok &= check_true("declared length accounts for the blob",
-                len(quiet) >= 4 + stats["declared"] > len(quiet) - 255)
+    check_true("bounded by the declared length, not by silence",
+               stats["bounded_by"] == "length", f"({stats['bounded_by']})")
+    check_true("declared length accounts for the blob",
+               len(quiet) >= 4 + stats["declared"] > len(quiet) - 255)
 
     print("\nTHE PUSH FILTER ON REAL DUMP CONTENT (every frame of the quiet dump)")
     misread = [i for i in range(0, len(quiet), 255)
                if rcp_read._push_record_len(b"\x04" + quiet[i:i + 255]) is not None]
-    ok &= check_true("no dump frame is mistaken for a push", not misread,
-                f"({len(misread)} of {len(quiet) // 255} misread: {misread[:5]})")
+    check_true("no dump frame is mistaken for a push", not misread,
+               f"({len(misread)} of {len(quiet) // 255} misread: {misread[:5]})")
 
     print("\nREADS WHILE A PAD IS PLAYING")
     with midi_out.midi_enabled() as was_on:
         print(f"  systemMidiControl was {'ON' if was_on else 'OFF'}")
-        watch = open_watcher()
+        # Every block below presses a latching pad, so the stop runs however they end: a pad
+        # left latched keeps a music bed playing through the desk.
         try:
-            with midi_out.MidiOut() as m:
-                for run in range(args.runs):
-                    playing = start_playing(watch, m, args.pad)
-                    blob, secs = timed_read()
-                    stats = dict(rcp_read._last_read)
-                    got = structure(blob)
-                    diffs = sum(1 for a, b in zip(blob, quiet) if a != b)
-                    print(f"\n  RUN {run + 1}: {len(blob)} bytes in {secs:.2f} s, "
-                          f"{stats['pushes_skipped']} pushes skipped, {diffs} bytes differ")
-                    ok &= check_true(f"run {run + 1} pad confirmed playing", playing)
-                    ok &= check_true(f"run {run + 1} finished promptly", secs < SLOW_S, f"({secs:.2f} s)")
-                    ok &= check_true(f"run {run + 1} same length as the quiet read",
-                                len(blob) == len(quiet), f"({len(blob)} vs {len(quiet)})")
-                    ok &= check_true(f"run {run + 1} same tree structure", got == quiet_struct,
-                                "" if got == quiet_struct else
-                                f"({len(got)} properties vs {len(quiet_struct)})")
-                    ok &= check_true(f"run {run + 1} bounded by length",
-                                stats["bounded_by"] == "length", f"({stats['bounded_by']})")
+            watch = open_watcher()
+            try:
+                with midi_out.MidiOut() as m:
+                    for run in range(args.runs):
+                        playing = start_playing(watch, m, args.pad)
+                        blob, secs = timed_read()
+                        stats = dict(rcp_read._last_read)
+                        got = structure(blob)
+                        diffs = sum(1 for a, b in zip(blob, quiet) if a != b)
+                        print(f"\n  RUN {run + 1}: {len(blob)} bytes in {secs:.2f} s, "
+                              f"{stats['pushes_skipped']} pushes skipped, {diffs} bytes differ")
+                        check_true(f"run {run + 1} pad confirmed playing", playing)
+                        check_true(f"run {run + 1} finished promptly", secs < SLOW_S,
+                                   f"({secs:.2f} s)")
+                        check_true(f"run {run + 1} same length as the quiet read",
+                                   len(blob) == len(quiet), f"({len(blob)} vs {len(quiet)})")
+                        check_true(f"run {run + 1} same tree structure", got == quiet_struct,
+                                   "" if got == quiet_struct else
+                                   f"({len(got)} properties vs {len(quiet_struct)})")
+                        check_true(f"run {run + 1} bounded by length",
+                                   stats["bounded_by"] == "length", f"({stats['bounded_by']})")
+            finally:
+                watch.close()
+
+            print("\nREAL PUSHES OFF THE WIRE, AND WHAT THE OLD LOOP FACED")
+            tail_checks(args.pad)
+
+            print("\nTHE PRE-FIX LOOP, RUN ON PURPOSE (quiet detection, no push filter)")
+            old_loop_check(args.pad, len(quiet))
         finally:
-            watch.close()
-
-        print("\nREAL PUSHES OFF THE WIRE, AND WHAT THE OLD LOOP FACED")
-        ok &= tail_checks(args.pad)
-
-        print("\nTHE PRE-FIX LOOP, RUN ON PURPOSE (quiet detection, no push filter)")
-        ok &= old_loop_check(args.pad, len(quiet))
-
-        print("\nPUTTING THE DESK BACK")
-        watch = open_watcher()
-        try:
-            with midi_out.MidiOut() as m:
-                ok &= check_true("the pad is stopped again", stop_playing(watch, m, args.pad))
-        finally:
-            watch.close()
+            print("\nPUTTING THE DESK BACK")
+            watch = open_watcher()
+            try:
+                with midi_out.MidiOut() as m:
+                    check_true("the pad is stopped again", stop_playing(watch, m, args.pad))
+            finally:
+                watch.close()
 
     return _testkit.finish()
 
@@ -220,8 +223,8 @@ def tail_checks(pad: int) -> bool:
             ok &= check_true("pad confirmed playing", start_playing(dev, midi, pad))
             dev.write(rcp_read.TRIGGER)
             need, got = None, 0
-            t0 = time.time()
-            while time.time() - t0 < TAIL_S + 4:
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < TAIL_S + 4:
                 chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
                 done = need is not None and got >= need
                 if not chunk:
@@ -235,16 +238,16 @@ def tail_checks(pad: int) -> bool:
                     if need is None:
                         declared = int.from_bytes(b[1:5], "little")
                         need = (4 + declared if declared >= rcp_read.MODEL_MIN_DECLARED else None)
-                if done and time.time() - t0 > TAIL_S + 1:
+                if done and time.monotonic() - t0 > TAIL_S + 1:
                     break
     finally:
         dev.close()
 
     pushes = [b for b in tail if rcp_read._push_record_len(b) is not None]
     ok &= check_true("frames keep arriving after the burst, so silence was never coming",
-                len(tail) > 0, f"({len(tail)} frames in the tail)")
+                     len(tail) > 0, f"({len(tail)} frames in the tail)")
     ok &= check_true("every tail frame is recognised as a push", len(pushes) == len(tail),
-                f"({len(pushes)} of {len(tail)})")
+                     f"({len(pushes)} of {len(tail)})")
     names = {model_tree.parse_record(b[5:5 + rcp_read._push_record_len(b)])[1] for b in pushes}
     print(f"    pushed properties: {sorted(names)}")
     return ok
@@ -271,10 +274,10 @@ def old_loop_check(pad: int, healthy_bytes: int) -> bool:
         with midi_out.MidiOut() as midi:
             playing = start_playing(dev, midi, pad)
             dev.write(rcp_read.TRIGGER)
-            t0 = time.time()
+            t0 = time.monotonic()
             deadline = t0 + 1.5
             reads = 0
-            while time.time() < deadline and reads < OLD_LOOP_CEILING:
+            while time.monotonic() < deadline and reads < OLD_LOOP_CEILING:
                 chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
                 reads += 1
                 if not chunk:
@@ -282,17 +285,17 @@ def old_loop_check(pad: int, healthy_bytes: int) -> bool:
                 b = bytes(chunk)
                 if b and b[0] == 0x04:
                     buf.extend(b[1:])
-                    deadline = time.time() + rcp_read.QUIET_S
-            secs = time.time() - t0
+                    deadline = time.monotonic() + rcp_read.QUIET_S
+            secs = time.monotonic() - t0
     finally:
         dev.close()
 
     print(f"  the old loop: {len(buf)} bytes in {secs:.1f} s, {reads} reads")
     ok = check_true("pad confirmed playing", playing)
     ok &= check_true("the old loop ran to its ceiling rather than finishing",
-                reads >= OLD_LOOP_CEILING, f"({reads} reads, ceiling {OLD_LOOP_CEILING})")
+                     reads >= OLD_LOOP_CEILING, f"({reads} reads, ceiling {OLD_LOOP_CEILING})")
     ok &= check_true("the old loop's blob is contaminated, not merely late",
-                len(buf) > healthy_bytes, f"({len(buf)} bytes vs a healthy {healthy_bytes})")
+                     len(buf) > healthy_bytes, f"({len(buf)} bytes vs a healthy {healthy_bytes})")
     return ok
 
 

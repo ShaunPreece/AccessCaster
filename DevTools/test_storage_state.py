@@ -21,9 +21,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check
 import rcp_read
 import server
+from _testkit import check
 
 GB = 1024 * 1024 * 1024
 

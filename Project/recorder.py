@@ -6,7 +6,7 @@ or a drive with no room) are only visible on the touchscreen. So an operator cou
 into a unit that never started. This module makes the transport writable from software and the state
 readable, and the state arrives as a PUSH, so a press on the unit itself is caught too.
 
-WHAT THE DESK DOES (DevTools/test_recorder_live.py checks it):
+WHAT THE DESK DOES:
   * `requestRecordState` on RECORDER selector 0x03 is the command. 2 = record, 1 = pause, 0 = stop.
     It is a REQUEST: the firmware consumes it and resets it to 3, so reading it back tells you
     nothing about whether you are recording. Read `recordState` for that.

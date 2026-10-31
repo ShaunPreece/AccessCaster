@@ -46,6 +46,7 @@ args = ap.parse_args()
 records = []          # (path, name, value, kind)
 odd = []              # frames shaped like a push that are not exactly one record
 stop = threading.Event()
+listen_error = {}     # why and when the listener stopped early, if it did
 
 
 def push_shaped(frame: bytes) -> bool:
@@ -56,12 +57,16 @@ def push_shaped(frame: bytes) -> bool:
 
 
 def listen(dev):
+    started = time.monotonic()
     try:
         dev.set_nonblocking(False)
         while not stop.is_set():
             try:
                 rep = dev.read(rcp_read.BULK_LEN, timeout_ms=400)
-            except Exception:
+            except Exception as e:
+                # Recorded, so the report cannot read a dead listener as "the desk never pushed it".
+                listen_error.update(error=f"{type(e).__name__}: {e}",
+                                    after=time.monotonic() - started)
                 return
             if not rep or rep[0] != 0x04:
                 continue
@@ -89,6 +94,9 @@ stop.set()
 time.sleep(0.6)
 
 print(f"\n{len(records)} push record(s)\n")
+if listen_error:
+    print(f"  THE LISTENER STOPPED {listen_error['after']:.1f}s IN: {listen_error['error']}")
+    print("  This report is PARTIAL: nothing after that moment was heard.\n")
 rows = defaultdict(lambda: {"n": 0, "kinds": set(), "vals": []})
 for path, name, val, kind in records:
     r = rows[name]
@@ -115,7 +123,7 @@ for name in sorted(rows):
 
 missing = [w for w in WANTED if w not in rows]
 if missing:
-    print(f"\n  never pushed: {', '.join(missing)}")
+    print(f"\n  never {'heard' if listen_error else 'pushed'}: {', '.join(missing)}")
 
 print("\n=== QUESTION 1: does the DUMP agree with what is held on? ===")
 for prop in ("channelOutputMute", "channelCueEnable", "mutePressed", "soloPressed",

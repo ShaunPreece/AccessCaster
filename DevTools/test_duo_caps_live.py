@@ -26,13 +26,13 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401
+import _testkit
 import channels as c
 import devices
-import model_tree
 import rcp_read as rr
 import rcp_transfer
+from _testkit import check_true
 
-FAILED = 0
 NOTES: list[str] = []
 ONLY = None
 if "--only" in sys.argv:
@@ -40,14 +40,9 @@ if "--only" in sys.argv:
 
 
 def snapshot():
+    """A fresh stable dump, and every property in it keyed (path, block, name)."""
     blob = rr.read_model_stable(fresh=True)
-    root, _u, _t = model_tree.parse(blob)
-    out = {}
-    for n in model_tree.walk(root):
-        p = tuple(n.path())
-        for name, val, _k in n.props:
-            out[(p, n.name, name)] = val
-    return blob, out
+    return blob, _testkit.snapshot(blob)
 
 
 def settled(timeout=12.0):
@@ -61,9 +56,9 @@ def settled(timeout=12.0):
     own and fails about one run in three in sequence, always somewhere different. Polling until two
     consecutive snapshots agree is deterministic AND usually faster than the worst-case sleep.
     """
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     blob, prev = snapshot()
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         blob, cur = snapshot()
         if cur == prev:
             return blob, cur
@@ -128,20 +123,46 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
     audio engine never reads passes it while changing no audio. Where the desk DERIVES something
     from a write, assert the derived thing: it is the only part a wrong address cannot fake.
     """
-    global FAILED
     if ONLY and ONLY not in label:
         return
     print(f"\n=== {label} ===")
-    b0, before = snapshot()
+    _b0, before = snapshot()
     print(f"  baseline {_fmt(expect_at) if expect_at else '(no single address)'}"
           f" = {before.get(expect_at)!r}" if expect_at else "  baseline taken")
     try:
         write(test_val)
     except Exception as e:
-        FAILED += 1
-        print(f"  FAIL the write raised: {type(e).__name__}: {e}")
+        check_true("the write", False, f"raised {type(e).__name__}: {e}")
         return
-    b1, after = settled()
+    # The test value is on the desk from here, so the restore runs however the checks end: a dump
+    # that fails part way must not leave it there.
+    try:
+        _check_write(label, before, test_val, expect_at, expect_extra, ignore, after_write)
+    finally:
+        restored = _put_back(write, restore_val, restore_extra, before)
+    if not restored:
+        return
+    b2, back = settled()
+    a2, r2, c2 = diff(before, back, ignore)
+    if not (a2 or r2 or c2):
+        print(f"  ok   restored, tree identical ({len(b2)} bytes)")
+    elif not c2 and not r2:
+        # Properties that did not exist before and now do, at their original values: the Duo's
+        # create-on-first-write. Behaviour is restored even though the tree is one property longer.
+        print(f"  ok   restored; {len(a2)} property(ies) newly EXIST (create-on-first-write):")
+        for k in a2:
+            print(f"         {_fmt(k)} = {back[k]!r}")
+    else:
+        check_true("restored", False, f"{len(c2)} changed, {len(r2)} removed")
+        for k in c2:
+            print(f"         CHANGED {_fmt(k)}: {before[k]!r} -> {back[k]!r}")
+        for k in r2:
+            print(f"         REMOVED {_fmt(k)} = {before[k]!r}")
+
+
+def _check_write(label, before, test_val, expect_at, expect_extra, ignore, after_write):
+    """`probe`'s checks on the settled tree after the test write."""
+    _b1, after = settled()
     added, removed, changed = diff(before, after, ignore)
     # An ignored property is REPORTED, never hidden: the whole point of diffing the whole tree is
     # that a write which touches something says so. `ignore` only stops it FAILING the restore.
@@ -157,11 +178,8 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
 
     if expect_at is not None:
         got = after.get(expect_at)
-        if got == test_val:
-            print(f"  ok   the value landed at its own address")
-        else:
-            FAILED += 1
-            print(f"  FAIL expected {test_val!r} at {_fmt(expect_at)}, got {got!r}")
+        check_true("the value landed at its own address", got == test_val,
+                   f"expected {test_val!r} at {_fmt(expect_at)}, got {got!r}")
         touched = len(added) + len(removed) + len(changed)
         if touched > 1 + expect_extra:
             NOTES.append(f"{label}: touched {touched} properties, expected {1 + expect_extra}")
@@ -170,31 +188,17 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
     if after_write is not None:
         after_write(after)
 
+
+def _put_back(write, restore_val, restore_extra, before) -> bool:
+    """Write the original value back, and whatever the write dragged with it. False if it raised."""
     try:
         write(restore_val)
+        if restore_extra is not None:
+            restore_extra(before)
     except Exception as e:
-        FAILED += 1
-        print(f"  FAIL the RESTORE raised: {type(e).__name__}: {e}")
-        return
-    if restore_extra is not None:
-        restore_extra(before)
-    b2, back = settled()
-    a2, r2, c2 = diff(before, back, ignore)
-    if not (a2 or r2 or c2):
-        print(f"  ok   restored, tree identical ({len(b2)} bytes)")
-    elif not c2 and not r2:
-        # Properties that did not exist before and now do, at their original values: the Duo's
-        # create-on-first-write. Behaviour is restored even though the tree is one property longer.
-        print(f"  ok   restored; {len(a2)} property(ies) newly EXIST (create-on-first-write):")
-        for k in a2:
-            print(f"         {_fmt(k)} = {back[k]!r}")
-    else:
-        FAILED += 1
-        print(f"  FAIL not restored:")
-        for k in c2:
-            print(f"         CHANGED {_fmt(k)}: {before[k]!r} -> {back[k]!r}")
-        for k in r2:
-            print(f"         REMOVED {_fmt(k)} = {before[k]!r}")
+        check_true("the RESTORE", False, f"raised {type(e).__name__}: {e}")
+        return False
+    return True
 
 
 dev = devices.get_active_device()
@@ -267,20 +271,16 @@ if "processing" in dev.caps:
     # from a PHYSICAL fader, and it is easy to leave out of the Duo's read map.
     pads = next((e for e in dev.ui_channels if e.get("kind") == "bus"), None)
     if pads is not None:
-        import rcp_transfer as _rt
         pads_strip = c._strip_index(pads)
         pads_path = (rcp_transfer.SEL_CHANNEL + pads_strip,)
-        pads_row = [(_rt.cross_point_selector(o, pads["source_code"]),)
+        pads_row = [(rcp_transfer.cross_point_selector(o, pads["source_code"]),)
                     for o in range(dev.matrix.output_count)]
         cur = snap.get((pads_path, "CHANNEL", c.MUTE_PROP))
 
         def pads_engine(after, _want=not bool(cur)):
-            global FAILED
             got = [after.get((p, "MIX", "mixMute")) for p in pads_row]
-            ok = all(v is _want for v in got)
-            print(f"  {'ok  ' if ok else 'FAIL'} the desk moved all {len(pads_row)} cross-points of "
-                  f"source {pads['source_code']} to {_want}: {got}")
-            FAILED += 0 if ok else 1
+            check_true(f"the desk moved all {len(pads_row)} cross-points of source "
+                       f"{pads['source_code']} to {_want}", all(v is _want for v in got), str(got))
 
         # An already-muted bus would make the assertion meaningless: the cross-points UNmuting back
         # to their resting state is what they do anyway, so it would pass on a dead address too.
@@ -330,7 +330,6 @@ if "processing" in dev.caps:
 
 # ---- fader_write -------------------------------------------------------------------------------
 if "fader_write" in dev.caps:
-    import rcp_transfer as t
     blob, _snap = snapshot()
     vec = rr.values(blob, "channelInputSource")
     print(f"\n=== fader_write: strip sources ===\n  layout now: {vec}")
@@ -342,9 +341,9 @@ if "fader_write" in dev.caps:
 
         def swap(swapped):
             lo, hi = (orig_b, orig_a) if swapped else (orig_a, orig_b)
-            t.set_fader_source(a_i, lo)
+            rcp_transfer.set_fader_source(a_i, lo)
             time.sleep(0.25)
-            t.set_fader_source(b_i, hi)
+            rcp_transfer.set_fader_source(b_i, hi)
 
         # sipSlotCallDisconnect DOES NOT COME BACK INSIDE THE RUN, and it is the desk, not us.
         # On a Pro II a fader-source write flips the second
@@ -363,15 +362,10 @@ if "fader_write" in dev.caps:
         probe(f"fader_write: swap strip {a_i} ({orig_a}) and strip {b_i} ({orig_b})",
               None, swap, True, False, ignore={"sipSlotCallDisconnect"})
         after = rr.values(rr.read_model_stable(fresh=True), "channelInputSource")
-        if after == vec:
-            print(f"  ok   the fader layout is exactly as it was: {after}")
-        else:
-            FAILED += 1
-            print(f"  FAIL layout not restored: {after} != {vec}")
+        check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- stereo_link -------------------------------------------------------------------------------
 if "stereo_link" in dev.caps and dev.fader.stereo_pairs:
-    import rcp_transfer as t
     code, lower, upper, label = dev.fader.stereo_pairs[0]
     vec = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
     print(f"\n=== stereo_link: {label} ===\n  layout now: {vec}")
@@ -389,16 +383,16 @@ if "stereo_link" in dev.caps and dev.fader.stereo_pairs:
             round trip rather than the RODE app's one-way behaviour."""
             if on:
                 if up_at is not None:
-                    t.set_fader_source(up_at, -1)
+                    rcp_transfer.set_fader_source(up_at, -1)
                     time.sleep(0.25)
-                t.set_fader_source(seat, -1)
+                rcp_transfer.set_fader_source(seat, -1)
                 time.sleep(0.25)
-                t.set_fader_source(seat, code)
+                rcp_transfer.set_fader_source(seat, code)
             else:
-                t.set_fader_source(seat, lower)
+                rcp_transfer.set_fader_source(seat, lower)
                 time.sleep(0.25)
                 if up_at is not None:
-                    t.set_fader_source(up_at, upper)
+                    rcp_transfer.set_fader_source(up_at, upper)
 
         # WHAT THIS DOES AND DOES NOT PROVE. It proves the desk ACCEPTS the pair code and gives the
         # layout back byte-clean, which is what a user's undo depends on. It does NOT prove the two
@@ -407,15 +401,10 @@ if "stereo_link" in dev.caps and dev.fader.stereo_pairs:
         probe(f"stereo_link: link and unlink {label}",
               None, link, True, False, ignore={"sipSlotCallDisconnect"})
         after = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
-        if after == vec:
-            print(f"  ok   the fader layout is exactly as it was: {after}")
-        else:
-            FAILED += 1
-            print(f"  FAIL layout not restored: {after} != {vec}")
+        check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- level_write -------------------------------------------------------------------------------
 if "level_write" in dev.caps:
-    import rcp_transfer as t
     blob, _snap = snapshot()
     vec = rr.values(blob, "channelInputSource")
 
@@ -434,23 +423,20 @@ if "level_write" in dev.caps:
         # THE ENGINE IS THE WITNESS, not the read-back. A fader's level IS its source's cross-point
         # level, so the desk recomputes all 13 cells of that source's routing row by itself, to
         # value/127 exactly. That is the difference between "the byte landed" and "the audio moved".
-        want = f"{target / t.FADER_LEVEL_MAX:.6f}"
-        row = [t.cross_point_selector(out, source) for out in range(dev.matrix.output_count)]
+        want = f"{target / rcp_transfer.FADER_LEVEL_MAX:.6f}"
+        row = [rcp_transfer.cross_point_selector(out, source)
+               for out in range(dev.matrix.output_count)]
 
         def check_row(after):
             bad = [p for p in row
                    if not str(after.get(((p,), "MIX", "mixLevelWithAnchor"), "")).startswith(want)]
-            if bad:
-                globals()["FAILED"] += 1
-                print(f"  FAIL the engine moved only {len(row) - len(bad)} of {len(row)} "
-                      f"cross-points to {want}")
-            else:
-                print(f"  ok   the ENGINE moved all {len(row)} of source {source}'s cross-points "
-                      f"to {want} ({target}/127) on its own")
+            check_true(f"the ENGINE moved all {len(row)} of source {source}'s cross-points to "
+                       f"{want} ({target}/127) on its own", not bad,
+                       f"it moved only {len(row) - len(bad)}")
 
         probe(f"level_write: virtual fader {idx} (source {source}) at [0,0x{sel:02x}]",
               (node, "FADER", "faderLevel"),
-              lambda v: t.set_fader_level(sel, v), target, cur,
+              lambda v: rcp_transfer.set_fader_level(sel, v), target, cur,
               expect_extra=dev.matrix.output_count, after_write=check_row)
 
     mon = [v for v in rr.values(rr.read_model_stable(fresh=True), "outputMonLevel")
@@ -459,34 +445,32 @@ if "level_write" in dev.caps:
         cur = mon[0]
         probe("level_write: monitor speaker level (outputMonLevel on OUTPUT 0x0d)",
               ((0x0D,), "OUTPUT", "outputMonLevel"),
-              lambda v: t.set_monitor_level(v), 0.25 if abs(cur - 0.25) > 0.01 else 0.5, cur)
+              rcp_transfer.set_monitor_level, 0.25 if abs(cur - 0.25) > 0.01 else 0.5, cur)
 
 # ---- matrix_write ------------------------------------------------------------------------------
 if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
-    import rcp_transfer as t
     # THE OUTPUT MUST BE IN CUSTOM MODE or the cross-point write stores a value that changes no
     # routing. Output 1 is Headphone 2, which has nothing plugged into it on this desk.
     src_i, out_i = mic["source_code"], 1
-    sel = t.cross_point_selector(out_i, src_i)
+    sel = rcp_transfer.cross_point_selector(out_i, src_i)
     print(f"\n=== matrix_write: source {src_i} -> output {out_i}, selector {sel:#04x} ===")
     b0, base = snapshot()
     mode0 = rr.read_output_modes(b0)[out_i]
     print(f"  output mode was {mode0} (0 Main Mix, 1 Mix Minus, 2 Custom)")
     try:
-        t.set_output_routing(out_i, 2)
+        rcp_transfer.set_output_routing(out_i, 2)
         time.sleep(0.8)
-        t.set_cross_point_excluded(out_i, src_i, True)
+        rcp_transfer.set_cross_point_excluded(out_i, src_i, True)
         time.sleep(0.8)
         _b, s = settled()
-        ok = (s.get(((sel,), "MIX", "mixDisabled")) is True
-              and s.get(((sel,), "MIX", "mixLink")) is False
-              and s.get(((sel,), "MIX", "mixMute")) is True)
-        print(f"  {'ok  ' if ok else 'FAIL'} excluding sets mixDisabled, clears mixLink, sets mixMute")
-        FAILED += 0 if ok else 1
-        t.set_cross_point_excluded(out_i, src_i, False)
+        check_true("excluding sets mixDisabled, clears mixLink, sets mixMute",
+                   s.get(((sel,), "MIX", "mixDisabled")) is True
+                   and s.get(((sel,), "MIX", "mixLink")) is False
+                   and s.get(((sel,), "MIX", "mixMute")) is True)
+        rcp_transfer.set_cross_point_excluded(out_i, src_i, False)
         time.sleep(0.8)
     finally:
-        t.set_output_routing(out_i, mode0)
+        rcp_transfer.set_output_routing(out_i, mode0)
     _b, back = settled()
     added, removed, changed = diff(base, back)
     # THE TWO REQUEST TRIGGERS DO NOT COME BACK, and that is the desk, not us. mixLinkRequest and
@@ -497,12 +481,10 @@ if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
     # that means something (mixDisabled, mixLink, mixMute, the level) restores exactly.
     triggers = {k for k in changed if k[2] in ("mixLinkRequest", "mixUnlinkRequest")}
     real = [k for k in changed if k not in triggers]
-    if not added and not removed and not real:
-        print(f"  ok   every routing value restored; {len(triggers)} request trigger(s) left as a "
-              f"cleared composite, which is the desk's own bookkeeping")
-    else:
-        FAILED += 1
-        print("  FAIL something other than the request triggers did not restore:")
+    if not check_true(f"every routing value restored; {len(triggers)} request trigger(s) left as "
+                      f"a cleared composite, which is the desk's own bookkeeping",
+                      not added and not removed and not real,
+                      "something other than the request triggers did not restore"):
         for k in real:
             print(f"         CHANGED {_fmt(k)}: {base[k]!r} -> {back[k]!r}")
         for k in added:
@@ -512,9 +494,8 @@ if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
 
 # ---- matrix_write: the cross-point LEVEL ------------------------------------------------------
 if "matrix_write" in dev.caps and (not ONLY or "level" in ONLY):
-    import rcp_transfer as t
     src_i, out_i = mic["source_code"], 1
-    sel = t.cross_point_selector(out_i, src_i)
+    sel = rcp_transfer.cross_point_selector(out_i, src_i)
     key = ((sel,), "MIX", "mixLevelWithAnchor")
     print(f"\n=== matrix_write: cross-point LEVEL, selector {sel:#04x} ===")
     b0, base = snapshot()
@@ -522,35 +503,31 @@ if "matrix_write" in dev.caps and (not ONLY or "level" in ONLY):
     # A level is only writable on an UNLINKED cross-point in a CUSTOM output. Relinking afterwards
     # is what restores it: a linked cell follows the fader, and reads back level == anchor.
     try:
-        t.set_output_routing(out_i, 2)
+        rcp_transfer.set_output_routing(out_i, 2)
         time.sleep(0.8)
-        t.send_record(t.build_mix_link_request(sel, link=False))
+        rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=False))
         time.sleep(0.8)
-        t.set_cross_point_level(out_i, src_i, 0.25)
+        rcp_transfer.set_cross_point_level(out_i, src_i, 0.25)
         time.sleep(0.8)
         _b, s = settled()
         got = s.get(key)
-        ok = bool(got) and got.startswith("0.25")
-        print(f"  {'ok  ' if ok else 'FAIL'} the level landed: {got!r}")
-        FAILED += 0 if ok else 1
+        check_true("the level landed", bool(got) and got.startswith("0.25"), repr(got))
         lv = rr.read_matrix_levels()
         cellv = ((lv.get("levels") or {}).get(out_i) or {}).get(src_i) or {}
-        ok2 = abs((cellv.get("level") or 0) - 0.25) < 0.01 and cellv.get("linked") is False
-        print(f"  {'ok  ' if ok2 else 'FAIL'} the app's own reader agrees: {cellv}")
-        FAILED += 0 if ok2 else 1
+        check_true("the app's own reader agrees",
+                   abs((cellv.get("level") or 0) - 0.25) < 0.01 and cellv.get("linked") is False,
+                   str(cellv))
     finally:
-        t.send_record(t.build_mix_link_request(sel, link=True))
+        rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=True))
         time.sleep(0.8)
-        t.set_output_routing(out_i, mode0)
+        rcp_transfer.set_output_routing(out_i, mode0)
     _b, back = settled()
     added, removed, changed = diff(base, back)
     real = [k for k in changed if k[2] not in ("mixLinkRequest", "mixUnlinkRequest")]
-    if not added and not removed and not real:
-        print("  ok   relinking restored the level exactly")
-    else:
-        FAILED += 1
+    if not check_true("relinking restored the level exactly",
+                      not added and not removed and not real):
         for k in real:
-            print(f"  FAIL {_fmt(k)}: {base[k]!r} -> {back[k]!r}")
+            print(f"         {_fmt(k)}: {base[k]!r} -> {back[k]!r}")
 
 # ---- pad_write ---------------------------------------------------------------------------------
 if "pad_write" in dev.caps and (not ONLY or "pad" in ONLY):
@@ -567,29 +544,28 @@ if "pad_write" in dev.caps and (not ONLY or "pad" in ONLY):
     if grid is None:
         print("  skipped: no empty grid slot")
     else:
-        res = sp.create_trigger(grid, name="A5 Test")
-        b1, s1 = settled()
-        pos1 = sp.pad_positions(b1)
-        made = [p for p in pos1 if p not in pos0]
-        ok = res.get("ok") and len(pos1) == len(pos0) + 1 and len(made) == 1
-        print(f"  {'ok  ' if ok else 'FAIL'} created: {made}")
-        FAILED += 0 if ok else 1
-        added = [k for k in s1 if k not in base]
-        node = {k[0] for k in added}
-        print(f"  the new pad added {len(added)} properties on {len(node)} node(s): "
-              f"{[','.join(hex(i) for i in p) for p in node]}")
-
-        res = sp.clear_grid_pad(grid)
+        # The pad is on the desk from the create, so it is cleared however the checks end.
+        try:
+            res = sp.create_trigger(grid, name="Caps Test")
+            b1, s1 = settled()
+            pos1 = sp.pad_positions(b1)
+            made = [p for p in pos1 if p not in pos0]
+            check_true("created", res.get("ok") and len(pos1) == len(pos0) + 1 and len(made) == 1,
+                       str(made))
+            added = [k for k in s1 if k not in base]
+            node = {k[0] for k in added}
+            print(f"  the new pad added {len(added)} properties on {len(node)} node(s): "
+                  f"{[','.join(hex(i) for i in p) for p in node]}")
+        finally:
+            sp.clear_grid_pad(grid)
         b2, back = settled()
         pos2 = sp.pad_positions(b2)
         health1 = sp.pool_health()
         a2, r2, c2 = diff(base, back)
-        if not (a2 or r2 or c2) and pos2 == pos0 and health1["clean"]:
-            print(f"  ok   cleared; tree identical, {len(pos2)} records, pool clean")
-        else:
-            FAILED += 1
-            print(f"  FAIL after clear: +{len(a2)} -{len(r2)} ~{len(c2)}, "
-                  f"records {len(pos0)}->{len(pos2)}, pool clean = {health1['clean']}")
+        if not check_true(f"cleared; tree identical, {len(pos2)} records, pool clean",
+                          not (a2 or r2 or c2) and pos2 == pos0 and health1["clean"],
+                          f"+{len(a2)} -{len(r2)} ~{len(c2)}, records {len(pos0)}->{len(pos2)}, "
+                          f"pool clean = {health1['clean']}"):
             # WITH VALUES, always. A property name on its own says nothing about WHICH WAY a value
             # moved, and the direction is usually the only thing that identifies what happened.
             for k in a2[:10]:
@@ -601,43 +577,39 @@ if "pad_write" in dev.caps and (not ONLY or "pad" in ONLY):
 
 # ---- output_write ----------------------------------------------------------------------------
 if "output_write" in dev.caps:
-    import rcp_transfer as t
     blob, snap = snapshot()
-    key = ((t.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
+    key = ((rcp_transfer.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
     cur = snap.get(key)
     if cur is not None:
         probe("output_write: monitor speaker mute",
-              key, lambda v: t.set_unit_setting("outputMonMute", v), not bool(cur), bool(cur))
+              key, lambda v: rcp_transfer.set_unit_setting("outputMonMute", v),
+              not bool(cur), bool(cur))
     else:
         print("\n=== output_write: monitor speaker mute ===\n  skipped: outputMonMute not in this dump")
 
 # ---- unit_settings -----------------------------------------------------------------------------
 if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
-    import rcp_transfer as t
     # EVERY address here is confirmed by the desk's OWN TREE, not derived: the check below fails the
     # run if any selector stops resolving to a node that carries its property. That is what made this
     # safe to enable on a Duo without a capture. The three writes then cover all three blocks.
     print("\n=== unit_settings: every address resolves on this desk ===")
     b0, _ = snapshot()
     bad = []
-    for prop, (sel, _kind) in sorted(t.UNIT_SETTING_SEL.items()):
+    for prop, (sel, _kind) in sorted(rcp_transfer.UNIT_SETTING_SEL.items()):
         if rr.path_value(b0, [sel], prop, rr.MISSING) is rr.MISSING:
             bad.append(f"{prop} (sel {sel:#04x})")
-    if bad:
-        FAILED += 1
-        print(f"  FAIL {len(bad)} setting(s) are NOT on this desk: {', '.join(bad)}")
-    else:
-        print(f"  ok   all {len(t.UNIT_SETTING_SEL)} resolve to a node that carries them")
+    check_true(f"all {len(rcp_transfer.UNIT_SETTING_SEL)} resolve to a node that carries them",
+               not bad, f"{len(bad)} setting(s) are NOT on this desk: {', '.join(bad)}")
 
     # outputMonFixed UNMUTES THE MONITOR SPEAKERS, and writing it back does not re-mute, on a Pro
     # II. It is the audible half of what the DERIVED note already says about
     # this property taking the encoder's job away, and it matters to a user, not just to this suite:
     # switching the monitor output to fixed level opens the speakers up. Put the mute back by name.
     def restore_mon_mute(before):
-        key = ((t.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
+        key = ((rcp_transfer.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
         want = before.get(key)
         if want is not None:
-            t.set_unit_setting("outputMonMute", want)
+            rcp_transfer.set_unit_setting("outputMonMute", want)
 
     # One from each block. NEVER the disableAll* trio: they take the desk's buttons or outputs away
     # and there is nobody there to undo it by hand.
@@ -650,7 +622,7 @@ if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
             print(f"\n=== unit_settings: {prop} ===\n  skipped: not present")
             continue
         probe(f"unit_settings: {prop} ({block} block, selector {sel:#04x})",
-              ((sel,), block, prop), lambda v, p=prop: t.set_unit_setting(p, v),
+              ((sel,), block, prop), lambda v, p=prop: rcp_transfer.set_unit_setting(p, v),
               newval if newval != cur else (0 if newval else 1), cur, restore_extra=fixup)
 
 # ---- recorder ----------------------------------------------------------------------------------
@@ -669,12 +641,8 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
     missing += [f"{p} (RECORDINGS {rec.SEL_RECORDINGS:#04x})"
                 for p in ("requestDeleteUID", "recordingTotalCount")
                 if rr.path_value(b0, [rec.SEL_RECORDINGS], p, rr.MISSING) is rr.MISSING]
-    if missing:
-        FAILED += 1
-        print(f"  FAIL not on this desk: {', '.join(missing)}")
-    else:
-        print(f"  ok   RECORDER {rec.SEL_RECORDER:#04x} and RECORDINGS "
-              f"{rec.SEL_RECORDINGS:#04x} both carry their properties")
+    check_true(f"RECORDER {rec.SEL_RECORDER:#04x} and RECORDINGS {rec.SEL_RECORDINGS:#04x} both "
+               f"carry their properties", not missing, f"not on this desk: {', '.join(missing)}")
 
     state = rec.read_state(b0)
     print("\n=== recorder: the engine consumes a record request ===")
@@ -696,13 +664,11 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
         consumed = bool(req) and req[0] == 3
         still_idle = rec.read_state(b1) == rec.NO_DESTINATION
         added = [k for k in snap1 if k not in snap0]
-        if consumed and still_idle and not added:
-            print("  ok   the request was consumed (parked at 3, and we sent 2), the desk still "
-                  "reports no destination, and nothing was appended")
-        else:
-            FAILED += 1
-            print(f"  FAIL consumed={consumed} (requestRecordState now {req}), "
-                  f"still_idle={still_idle}, {len(added)} property(s) appended")
+        if not check_true("the request was consumed (parked at 3, and we sent 2), the desk still "
+                          "reports no destination, and nothing was appended",
+                          consumed and still_idle and not added,
+                          f"consumed={consumed} (requestRecordState now {req}), "
+                          f"still_idle={still_idle}, {len(added)} property(s) appended"):
             for k in added[:10]:
                 print(f"         ADDED   {_fmt(k)} = {snap1[k]!r}")
         # Leave nothing pending either way, whatever the desk made of the first request.
@@ -717,8 +683,7 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
             # record request since boot, and it cannot be put back. It is the firmware's idle value.
             real = [k for k in changed if k[2] != "requestRecordState"]
             if real:
-                FAILED += 1
-                print(f"  FAIL {len(real)} property(s) did not come back")
+                check_true("byte-clean", False, f"{len(real)} property(s) did not come back")
                 for k in real[:10]:
                     print(f"         CHANGED {_fmt(k)}: {snap0[k]!r} -> {snap2[k]!r}")
             else:
@@ -738,12 +703,8 @@ if "shows" in dev.caps and (not ONLY or "show" in ONLY):
             "showControlDelete", "showControlLastError")
     gone = [p for p in want
             if rr.path_value(b0, [sh.SEL_SHOWCONTROL], p, rr.MISSING) is rr.MISSING]
-    if gone:
-        FAILED += 1
-        print(f"  FAIL not on this desk: {', '.join(gone)}")
-    else:
-        print(f"  ok   SHOWCONTROL {sh.SEL_SHOWCONTROL:#04x} carries all "
-              f"{len(want)} commands and the error field")
+    check_true(f"SHOWCONTROL {sh.SEL_SHOWCONTROL:#04x} carries all {len(want)} commands and the "
+               f"error field", not gone, f"not on this desk: {', '.join(gone)}")
 
     print("\n=== shows: the engine answers an export it cannot do ===")
     vols = [v for v in rec.read_volumes(b0) if v["can_record"] and v["inserted"]]
@@ -776,27 +737,22 @@ if "shows" in dev.caps and (not ONLY or "show" in ONLY):
                 NOTES.append(f"shows: a card-less export reported error {err}, not 8. The address "
                              f"is still proven live, but shows.ERROR_NO_STORAGE may need company.")
         else:
-            FAILED += 1
-            print(f"  FAIL lastError {before_err} -> {err}, shows {before_n} -> "
-                  f"{len(sh.read_shows(b1))}, {len(added)} property(s) appended")
+            check_true("the desk answered the export", False,
+                       f"lastError {before_err} -> {err}, shows {before_n} -> "
+                       f"{len(sh.read_shows(b1))}, {len(added)} property(s) appended")
             for k in added[:10]:
                 print(f"         ADDED   {_fmt(k)} = {snap1[k]!r}")
         changed = [k for k in snap1 if k in snap0 and snap1[k] != snap0[k]
                    and k[2] not in ("showControlLastError", "showControlExport")]
-        if changed:
-            FAILED += 1
-            print(f"  FAIL {len(changed)} property(s) moved that had no business moving")
+        if not check_true("only the error and the request flag moved, both the desk's own fields",
+                          not changed,
+                          f"{len(changed)} property(s) moved that had no business moving"):
             for k in changed[:10]:
                 print(f"         CHANGED {_fmt(k)}: {snap0[k]!r} -> {snap1[k]!r}")
-        else:
-            print("  ok   only the error and the request flag moved, both the desk's own fields")
 
 print("\n" + "=" * 70)
 if NOTES:
     print("NOTES (not failures, but worth a look):")
     for n in NOTES:
         print(f"  - {n}")
-if FAILED:
-    print(f"{FAILED} CHECK(S) FAILED")
-    sys.exit(1)
-print("ALL CHECKS PASSED")
+sys.exit(_testkit.finish())

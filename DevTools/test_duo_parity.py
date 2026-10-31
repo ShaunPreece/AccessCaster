@@ -20,13 +20,13 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_true, as_device
 import channels
 import devices
 import model_tree
 import rcp_read
 import rcp_transfer
 import server
+from _testkit import as_device, check, check_true
 
 SPOKEN: list[str] = []
 server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak

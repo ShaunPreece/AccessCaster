@@ -26,8 +26,7 @@ import _bootstrap  # noqa: F401
 import channels
 import devices
 import profiles
-import rcp_read
-from model_tree import parse, walk
+from _desk import advanced_processing, put_chain_back, read_input, settled_chain
 
 SETTLE = 0.9
 FACTORY_TYPE = 4      # PodMic: what a software factory reset leaves on every mic
@@ -40,28 +39,6 @@ CHAIN_PROP = "eqLowGain"
 WANT_CHAIN = 0.3125
 
 
-def read_input(slot: int) -> dict:
-    root, _, _ = parse(rcp_read.read_model_stable(fresh=True))
-    return {p: v for p, v, _k in [x for x in walk(root) if x.name == "INPUTSOURCE"][slot].props}
-
-
-def chain_of(ch: int) -> dict:
-    rec = next((r for r in channels.read_channels() if r.get("name") == f"Mic{ch}"), None)
-    return {} if rec is None else dict(rec.get("params") or {})
-
-
-def settled_chain(ch: int, timeout: float = 8.0) -> dict:
-    """The chain once the desk has finished applying a voicing, not after a fixed sleep."""
-    end = time.time() + timeout
-    prev = chain_of(ch)
-    while time.time() < end:
-        cur = chain_of(ch)
-        if cur == prev:
-            return cur
-        prev = cur
-    return prev
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", type=int, default=3)
@@ -69,10 +46,7 @@ def main() -> int:
     ch, slot = args.channel, args.channel - 1
 
     before = read_input(slot)
-    entry = next(e for e in channels.active_ui_channels()
-                 if e.get("kind") == "mic" and channels.mic_channel_number(e) == ch)
-    advanced_before = bool(rcp_read.values(rcp_read.read_model_stable(fresh=True),
-                                           channels.CHAIN_ADVANCED_PROP)[channels._strip_index(entry)])
+    advanced_before = advanced_processing(ch)
     chain_before = settled_chain(ch)
     print(f"Mic {ch} as found: gain {before['inputMicrophoneGain']}, "
           f"type {before['inputMicrophoneType']}, instrument gain {before['inputInstrumentGain']}, "
@@ -119,10 +93,7 @@ def main() -> int:
     finally:
         print("\n-- restoring --")
         channels.set_mic_type(ch, int(before["inputMicrophoneType"]))
-        settled_chain(ch)          # the voicing has to finish before the chain goes back on top
-        channels.apply_processing_preset(
-            ch, dict(chain_before, **{channels.CHAIN_ADVANCED_PROP: advanced_before}))
-        settled_chain(ch)
+        put_chain_back(ch, chain_before, advanced_before)
         channels.set_mic_gain(ch, int(before["inputMicrophoneGain"]))
         time.sleep(SETTLE)
         channels.set_instrument_gain(ch, int(before["inputInstrumentGain"]))

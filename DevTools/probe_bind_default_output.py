@@ -12,34 +12,95 @@ the rate against the same count with the default left on `System`.
     python DevTools/probe_bind_default_output.py --cycles 6
     python DevTools/probe_bind_default_output.py --cycles 6 --keep-default
 
-It restores the default output it found, whatever happens, and every flip is a mode the desk
-already supports. The app's server must be running: the flips go through its API so that one
-process keeps the HID handle.
+It restores the default output and the USB output mode it found, whatever happens, and every flip
+is a mode the desk already supports. The app's server must be running: the flips go through its
+API so that one process keeps the HID handle.
 """
 from __future__ import annotations
 
 import argparse
-import json
+import ctypes
 import threading
 import time
-import urllib.request
+from ctypes import wintypes
 
 import _bootstrap  # noqa: F401
 import comtypes
 import comtypes.client
 import meters
 import virtual_devices as vd
-from bind_timeline import interfaces
+from _desk import api
 
-API = "http://127.0.0.1:8770/api/routing/usb-multitrack"
 EXPANDED_PID = "pid_0094"       # post-fader multitrack AND Expanded: the mode with fader inputs
+HID_INTERFACE_CLASS = "{4D1E55B2-F16F-11CF-88CB-001111000030}"
+DIGCF_DEVICEINTERFACE = 0x10        # no DIGCF_PRESENT: inactive interfaces are the point
+SPINT_ACTIVE = 0x01
+
+_setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
 
 
-def post_mode(mode: int, timeout: float = 150.0) -> str:
-    body = json.dumps({"mode": mode}).encode()
-    req = urllib.request.Request(API, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode()).get("ok")
+class GUID(ctypes.Structure):
+    _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD), ("Data4", ctypes.c_ubyte * 8)]
+
+
+class SP_DEVICE_INTERFACE_DATA(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("InterfaceClassGuid", GUID),
+                ("Flags", wintypes.DWORD), ("Reserved", ctypes.POINTER(ctypes.c_ulonglong))]
+
+
+_setupapi.SetupDiGetClassDevsW.restype = wintypes.HANDLE
+_setupapi.SetupDiGetClassDevsW.argtypes = (ctypes.POINTER(GUID), wintypes.LPCWSTR,
+                                           wintypes.HWND, wintypes.DWORD)
+_setupapi.SetupDiEnumDeviceInterfaces.argtypes = (
+    wintypes.HANDLE, ctypes.c_void_p, ctypes.POINTER(GUID), wintypes.DWORD,
+    ctypes.POINTER(SP_DEVICE_INTERFACE_DATA))
+_setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = (
+    wintypes.HANDLE, ctypes.POINTER(SP_DEVICE_INTERFACE_DATA), ctypes.c_void_p,
+    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p)
+_setupapi.SetupDiDestroyDeviceInfoList.argtypes = (wintypes.HANDLE,)
+
+_ole32 = ctypes.WinDLL("ole32")
+_ole32.CLSIDFromString.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(GUID))
+
+
+def hid_interfaces(match: str = "vid_19f7") -> dict:
+    """Every HID interface whose path holds `match`, mapped to whether it is ACTIVE.
+
+    The detail struct's cbSize is the size of the FIXED part, 8 on x64 (a DWORD plus one WCHAR,
+    padded), never the size of the buffer: Windows rejects anything else."""
+    guid = GUID()
+    _ole32.CLSIDFromString(HID_INTERFACE_CLASS, ctypes.byref(guid))
+    h = _setupapi.SetupDiGetClassDevsW(ctypes.byref(guid), None, None, DIGCF_DEVICEINTERFACE)
+    if h == wintypes.HANDLE(-1).value:
+        return {}
+    found = {}
+    try:
+        data = SP_DEVICE_INTERFACE_DATA()
+        data.cbSize = ctypes.sizeof(SP_DEVICE_INTERFACE_DATA)
+        index = 0
+        buf = ctypes.create_string_buffer(2048)
+        while _setupapi.SetupDiEnumDeviceInterfaces(h, None, ctypes.byref(guid), index,
+                                                    ctypes.byref(data)):
+            index += 1
+            ctypes.memset(buf, 0, ctypes.sizeof(buf))
+            ctypes.cast(buf, ctypes.POINTER(wintypes.DWORD))[0] = 8
+            need = wintypes.DWORD()
+            if _setupapi.SetupDiGetDeviceInterfaceDetailW(h, ctypes.byref(data), buf,
+                                                          ctypes.sizeof(buf),
+                                                          ctypes.byref(need), None):
+                path = ctypes.wstring_at(ctypes.addressof(buf) + 4)
+                if match in path.lower():
+                    found[path.lower()] = bool(data.Flags & SPINT_ACTIVE)
+    finally:
+        _setupapi.SetupDiDestroyDeviceInfoList(h)
+    return found
+
+
+def post_mode(mode: int) -> dict:
+    """Set the desk's USB output mode through the running server. The desk re-enumerates, so the
+    reply can take a while."""
+    return api("/api/routing/usb-multitrack", post={"mode": mode}, timeout=150.0)
 
 
 class Sampler(threading.Thread):
@@ -62,7 +123,7 @@ class Sampler(threading.Thread):
         was_bound = vd.read_status().connected
         while not self.stop.is_set():
             here = any(EXPANDED_PID in path and active
-                       for path, active in interfaces("hid").items())
+                       for path, active in hid_interfaces().items())
             bound = vd.read_status().connected
             now = time.monotonic() - at
             if here and not was_here:
@@ -106,6 +167,11 @@ def main() -> None:
     if target is None:
         print("No playback device outside the desk and the driver. Nothing to move to.")
         return
+    # Every cycle ends in post-fader multitrack, so the mode found here is put back at the end.
+    mode_before = api("/api/routing/live").get("usb_multitrack")
+    if mode_before is None:
+        print("Could not read the desk's USB output mode, so it could not be put back. Stopping.")
+        return
     print(f"default was : {was_default.name if was_default else '?'}")
     if args.control:
         print("control run : the default output is not moved")
@@ -133,6 +199,9 @@ def main() -> None:
     finally:
         sampler.stop.set()
         sampler.join(timeout=3)
+        res = post_mode(mode_before)
+        print(f"USB output mode restored to {mode_before}" if res.get("ok") else
+              f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {res.get('message')}")
         if not args.control and not args.keep_default and was_default is not None:
             policy.SetDefaultEndpoint(was_default_id, vd.E_CONSOLE)
             policy.SetDefaultEndpoint(was_default_id, vd.E_MULTIMEDIA)

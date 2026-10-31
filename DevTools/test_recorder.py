@@ -1,8 +1,8 @@
 """Offline checks for the recorder: parsing, wording, storage labels and the elapsed-time count.
 
 NO DEVICE NEEDED, and that is the point - every fact these pin came off the hardware and is
-expensive to re-establish, since it needs a drive in the unit and a real take. The live driving is
-DevTools/test_recorder_live.py; this is what stops the parsing regressing.
+expensive to re-establish, since it needs a drive in the unit and a real take. This is what stops
+the parsing regressing.
 
     python DevTools/test_recorder.py
 """
@@ -17,10 +17,9 @@ from datetime import datetime, timezone
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_in
 import recorder
+from _testkit import check, check_in
 from wording import spoken_datetime
-
 
 # A real recordingContent string, copied off the unit. The trailing six fields are unmapped.
 CONTENT = ("Recording 4|94486d8a68da47c7a516e1400a3279dc|"

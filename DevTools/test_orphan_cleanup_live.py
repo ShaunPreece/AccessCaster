@@ -20,12 +20,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check
 import model_tree as mt
 import pad_records as pr
 import rcp_read as rr
 import rcp_transfer as t
 import soundpad as sp
+from _testkit import check
 
 SLOT = 16
 

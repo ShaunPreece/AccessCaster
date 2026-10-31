@@ -14,9 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, decode_record
 import callme
-
+from _testkit import check, decode_record
 
 CTL = [664]
 SLOTS = [[659], [660], [661]]

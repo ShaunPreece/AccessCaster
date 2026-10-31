@@ -53,47 +53,18 @@ Usage, with the app or `DevTools/run_dev_server.py` already serving:
     python DevTools/probe_import_drop.py --backup NAME --delta 0     # a true no-op, for comparison
 """
 import argparse
-import json
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 
 import _bootstrap  # puts Project/ on the path; import FIRST
 import diagnostics
+from _desk import api, rode_devices_present
 
-BASE = "http://127.0.0.1:8770"
 SETTLE_S = 6.0          # between trials, so one import is not still landing when the next starts
 STATUS_POLL_S = 2.0
 JOB_CEILING_S = 240.0   # a job that outlives this is itself the finding
 NOOP_S = 8.0            # a job quicker than this did essentially nothing, whatever we asked for
-
-
-def present() -> int:
-    """How many VID_19F7 devices Windows has present, WITHOUT opening any of them."""
-    out = subprocess.run(
-        ["powershell", "-NoProfile", "-Command",
-         "@(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | "
-         "Where-Object { $_.InstanceId -match 'VID_19F7' }).Count"],
-        capture_output=True, text=True)
-    try:
-        return int(out.stdout.strip())
-    except ValueError:
-        return -1
-
-
-def api(path: str, timeout: float = 90.0, post: dict | None = None) -> dict:
-    """GET, or POST with a JSON body when `post` is given. Action routes take their arguments in a
-    JSON BODY and `do_POST` matches the path EXACTLY, so a query string makes it miss and 404."""
-    data = json.dumps(post).encode() if post is not None else None
-    req = urllib.request.Request(BASE + path, data=data,
-                                 headers={"Content-Type": "application/json"} if data else {})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return {"ok": False, "message": f"{type(e).__name__}: {e}"}
 
 
 # ---- what we disturb, and how we read it back ----------------------------------------------
@@ -149,6 +120,19 @@ def nudge(value: int) -> int:
     return value - 12 if value >= 25 else value + 12
 
 
+def put_back(chosen: list, originals: dict) -> list:
+    """Write each knob's original value back. Returns the labels that did not read back."""
+    left = []
+    for label, read, write in chosen:
+        want = originals.get(label)
+        if not isinstance(want, int):
+            continue
+        write(want)
+        if read() != want:
+            left.append(label)
+    return left
+
+
 # ---- restarting the server over the top of itself -------------------------------------------
 # THIS IS A FAULT CONDITION, NOT A CONVENIENCE. `server._close_previous_instances` taskkills
 # whatever is holding port 8770, and the incumbent is holding TWO open HID handles on MI_09 - the
@@ -178,9 +162,9 @@ def restart_over_the_top() -> bool:
     """
     was = listening_pid()
     subprocess.Popen([sys.executable, _bootstrap.devtools_path("run_dev_server.py")],
-                     cwd=_bootstrap.REPO, creationflags=0x08000000)   # CREATE_NO_WINDOW
-    deadline = time.time() + 90.0
-    while time.time() < deadline:
+                     cwd=_bootstrap.REPO, creationflags=subprocess.CREATE_NO_WINDOW)
+    deadline = time.monotonic() + 90.0
+    while time.monotonic() < deadline:
         time.sleep(2.0)
         now = listening_pid()
         if now and now != was:
@@ -220,18 +204,18 @@ def run_restore(name: str, via: str) -> dict:
                   else "/api/profiles/restore/status")
     if not started.get("ok"):
         return {"ok": False, "message": started.get("message") or "the restore did not start"}
-    at = time.time()
+    at = time.monotonic()
     deadline = at + JOB_CEILING_S
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         time.sleep(STATUS_POLL_S)
         st = api(status, timeout=15.0)
         if st.get("running"):
             continue
         if st.get("done"):
-            st["seconds"] = time.time() - at
+            st["seconds"] = time.monotonic() - at
             st["ran_via"] = started.get("via")
             return st
-    return {"ok": False, "seconds": time.time() - at, "ran_via": started.get("via"),
+    return {"ok": False, "seconds": time.monotonic() - at, "ran_via": started.get("via"),
             "message": f"the job was still running after {JOB_CEILING_S:.0f}s"}
 
 
@@ -262,7 +246,7 @@ def main() -> int:
     if not args.backup:
         ap.error("--backup is required (use --list to see them)")
 
-    baseline_devices = present()
+    baseline_devices = rode_devices_present()
     if baseline_devices <= 0:
         print(f"REFUSING TO START: Windows has {baseline_devices} RODE devices present.")
         return 2
@@ -271,6 +255,9 @@ def main() -> int:
     chosen = all_knobs[:max(0, args.delta)]
     if args.delta > len(all_knobs):
         print(f"Only {len(all_knobs)} knobs exist on this desk; using all of them.")
+    # EVERY TRIAL NUDGES FROM THESE, not from whatever the desk holds when it starts, so a restore
+    # that falls short cannot walk the settings further from the owner's own with each trial.
+    originals = {label: read() for label, read, _w in chosen}
 
     print(f"{args.trials} x restore of {args.backup!r} via={args.via}, "
           f"delta={len(chosen)} settings, restart={args.restart}, "
@@ -285,7 +272,7 @@ def main() -> int:
             if not restart_over_the_top():
                 print(f"  trial {n}: the replacement server never took the port. Stopping.")
                 return 1
-            if present() < baseline_devices:
+            if rode_devices_present() < baseline_devices:
                 print(f"\nDROPPED ON THE RESTART ITSELF, before trial {n}'s import. That would be "
                       f"a bigger finding than the import: the kill alone did it.")
                 return 1
@@ -294,7 +281,7 @@ def main() -> int:
         # that runs, and passes, without changing anything on the desk.
         moved = 0
         for label, read, write in chosen:
-            was = read()
+            was = originals[label]
             if not isinstance(was, int):
                 continue
             write(nudge(was))
@@ -305,7 +292,7 @@ def main() -> int:
             return 1
 
         res = run_restore(args.backup, args.via)
-        after = present()
+        after = rode_devices_present()
         secs = res.get("seconds") or 0.0
         verdict = "ok" if res.get("ok") else "FAILED"
         flag = "  <- NO-OP" if secs < NOOP_S and chosen else ""
@@ -328,12 +315,21 @@ def main() -> int:
             print("  Get-WinEvent -FilterHashtable @{LogName=")
             print("    'Microsoft-Windows-Kernel-PnP/Device Management'; "
                   "StartTime=(Get-Date).AddMinutes(-10)}")
-            print("\nReplug the desk before running anything else.")
+            print("\nReplug the desk before running anything else. The settings this run nudged "
+                  "may still be off: their values as found were")
+            for label, value in originals.items():
+                print(f"  {label}: {value}")
+            return 1
+        if not res.get("ok"):
+            left = put_back(chosen, originals)
+            print("\nTHE RESTORE FAILED, so the settings it was to put back were written back "
+                  "directly." + (f" These did not read back: {', '.join(left)}." if left else ""))
+            print("Stopping, so the next trial does not start from a desk the restore left wrong.")
             return 1
         time.sleep(SETTLE_S)
 
     print(f"\n{args.trials} trials at delta={len(chosen)}, no drop, "
-          f"{present()} devices still present.")
+          f"{rode_devices_present()} devices still present.")
     if noops:
         print(f"WARNING: {noops} of them ran in under {NOOP_S:.0f}s, so the desk was not really "
               f"rewriting anything. Those trials prove nothing; raise --delta.")

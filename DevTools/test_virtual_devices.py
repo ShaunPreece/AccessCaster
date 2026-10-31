@@ -5,8 +5,8 @@ reads it, and the spoken outcomes say the right thing. No desk, no driver, no CO
 """
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check_true, patched
 import virtual_devices as vd
+from _testkit import check_true, patched
 
 
 def block(connected: int, enabled: int, desk: str, tail: str = "") -> bytes:

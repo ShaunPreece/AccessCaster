@@ -18,10 +18,10 @@ import zipfile
 
 import _bootstrap  # puts Project/ on sys.path
 import _testkit
-from _testkit import check, check_true, patched
 import driver_install as di
 import server
 import virtual_devices
+from _testkit import check, check_true, patched
 
 
 def refuses(label, fn, must_say):

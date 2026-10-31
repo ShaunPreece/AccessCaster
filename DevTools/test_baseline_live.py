@@ -23,10 +23,10 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_true
 import profiles
 import server
 import wording
+from _testkit import check, check_true
 
 
 def wait_for_job(timeout=180):

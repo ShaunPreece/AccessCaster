@@ -30,10 +30,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check
 import devices
 import rcp_read
 import routing_schemes
+from _testkit import check
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
 

@@ -34,8 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap
-import rcp_read
-from model_tree import parse, walk
+from app_name_table import dump_names, table_names
 
 # The unpacked firmware, which is RODE's and is never in this repo. Point ACCESSCASTER_FIRMWARE at
 # the `usr/bin` inside an unpacked app image; otherwise the newest `app-*` under either of the two
@@ -55,40 +54,25 @@ def _newest_image() -> Path:
 FW = Path(os.environ["ACCESSCASTER_FIRMWARE"]) if os.environ.get("ACCESSCASTER_FIRMWARE") \
     else _newest_image()
 BINARIES = ("rc_audio_mixer", "rc_gui_juce")
-IDENT = re.compile(rb"[a-zA-Z][A-Za-z0-9]{3,44}")
-PAD = 12000
-# Names the desk publishes, spread across blocks, used to find the name table by anchoring.
-ANCHORS = ("systemDateTimezone", "channelCurrentFxPreset", "showControlExport",
-           "inputMicrophoneGain", "padTriggerControl", "wifiSSID", "outputMonMute",
-           "mixLevelWithAnchor", "systemHapticSetting", "recordingContent")
 
 
 def printable(b: bytes) -> str:
     return re.sub(rb"[^\x20-\x7e]+", b" | ", b).decode("ascii").strip()
 
 
-def dump_names() -> set:
-    try:
-        blob = rcp_read.read_model_stable(fresh=True)
-    except Exception:
-        caps = Path(__file__).resolve().parent / "captures"
-        blob = max(caps.glob("*-raw.bin"), key=lambda p: p.stat().st_mtime).read_bytes()
-    root, _, _ = parse(blob)
-    return {p for n in walk(root) for p, _v, _k in n.props}
-
-
-def name_table(raw: bytes) -> list:
-    offs = [i for i in (raw.find(a.encode()) for a in ANCHORS) if i > 0]
-    if len(offs) < 3:
-        return []
-    lo, hi = max(0, min(offs) - PAD), min(len(raw), max(offs) + PAD)
-    out, seen = [], set()
-    for m in IDENT.finditer(raw[lo:hi]):
-        n = m.group().decode("ascii")
-        if n not in seen:
-            seen.add(n)
-            out.append(n)
-    return out
+def print_name_tables(root: Path) -> None:
+    """Each binary's property-name table, less the names the desk publishes."""
+    known = dump_names()
+    for name in BINARIES:
+        try:
+            names = table_names((root / name).read_bytes())
+        except RuntimeError:
+            print(f"\n{name}: no property-name table found")
+            continue
+        un = [n for n in names if n not in known]
+        print(f"\n{name}: {len(names)} names in the table region, {len(un)} the desk does NOT "
+              f"publish")
+        print("  " + "  ".join(un))
 
 
 def main() -> int:
@@ -106,13 +90,7 @@ def main() -> int:
         return 2
 
     if args.names:
-        known = dump_names()
-        for name in BINARIES:
-            names = name_table((root / name).read_bytes())
-            un = [n for n in names if n not in known]
-            print(f"\n{name}: {len(names)} names in the table region, {len(un)} the desk does NOT "
-                  f"publish")
-            print("  " + "  ".join(un))
+        print_name_tables(root)
         return 0
 
     if not args.needles:

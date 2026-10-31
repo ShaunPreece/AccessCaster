@@ -308,7 +308,16 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (149 files; the ones worth knowing)
+## DevTools/ (147 files; the ones worth knowing)
+
+**Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
+throwaway data dir, silence and the device-write refusal, and resolves `docs/` and the notes),
+`_testkit.py` (the offline harness, below) and `_desk.py`, for the scripts that drive a real desk:
+`api` (the running server, a failure returned as `{"ok": False}`), `rode_devices_present` (raises
+rather than counting zero when it cannot tell), `push_handle` and `pushes` (a handle of the
+script's own and every push on it, decoded by `rcp_read.parse_push`), and `read_input`,
+`mic_chain`, `settled_chain`, `advanced_processing` and `put_chain_back` (one mic's input node
+and chain, and the chain put back once a voicing has finished applying).
 
 **Browser checks.** `ui_probe.py` (proxies GETs to the live server, stubs POSTs) and its
 `HARNESS`, which gives every suite its helpers so none keeps a copy: `check`, `checkEqual` (actual,
@@ -390,7 +399,7 @@ left over makes the next run's first press a stop rather than a start.
 timestamps every push while the main thread presses at known times, so nothing is inferred from a
 rate measured in a gap. Three earlier probes were deleted for getting that wrong.
 
-**Offline Python suites, no device - 35 of them, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `decode_record` and `snapshot` read the desk's record and dump formats): `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state), `test_announcer_suspend`,
+**Offline Python suites, no device - 36 of them, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `decode_record` and `snapshot` read the desk's record and dump formats): `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state), `test_announcer_suspend`,
 `test_announcer_remember` (start-up is on unless the remember option holds it off; a take's switch-back is never saved), `test_announcer_reconnect` (the announcer keeps listening across a re-enumeration: it must resolve
 the interface again rather than reopen a remembered path, because the desk returns under a
 different product id),
@@ -400,7 +409,7 @@ different product id),
 file**, and that an import merges rather than replacing this machine's own token),
 `test_pad_actions`, `test_pad_records`, `test_pad_volume` (a drive holding a `pads` folder before transfer mode is never taken for the desk's volume), `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
 `test_restore_warnings`, `test_server_safety` (static files, request bodies, the `.bad` copy of a JSON file that will not parse, and Chat isolation's put-back), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
-`test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
+`test_devtools_helpers` (`_desk`'s device count and settled chain, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
 did not take),
 `test_virtual_devices` (RODE's driver status block parsed as its tray reads it, and the spoken
 outcomes). `watch_vad_endpoints.ps1` is the live companion: it prints a line whenever the set of
@@ -447,11 +456,6 @@ reading the new show uuid, so "no drop" can never be "no reset", and it stops de
 **EACH TRIAL IS AN UNBACKED FACTORY RESET, so expendable desks only.** Result 3rd September 2026: 45
 resets, every layer clean.
 
-**`probe_show_push.py` answers what the desk PUSHES for a show command**, which is what the listening
-design was built on. `--export` or `--reset`, and it prints the frame timings, the name histogram, and
-a whole-tree diff either side. It never listens across its own dumps (536 frames of model would read
-as a flood of pushes), so the order is snapshot, listen, send, capture, stop, snapshot.
-
 **`test_fader_chains.py` covers the off-fader chain store and all three `_follow_chains` cases**
 (moved / left / returned), including a return that does not land being parked again. It mocks
 `channels.write_chain` and points `_paths.data_path` at a scratch file, so it never touches the
@@ -491,7 +495,7 @@ checking the effect pool is untouched), `test_clear_all_live` (backs up every pa
 checks no partial object survives, restores and compares), `test_fx_skip_live` (every voice-FX pad
 must match its recipe, a one-param edit must be caught, then put back byte-clean),
 `test_orphan_cleanup_live` (makes an attached orphan, then a partial object, on padIdx 16 and
-17, and checks each is removed and the whole tree returns to where it started), `test_recorder_live`,
+17, and checks each is removed and the whole tree returns to where it started),
 `test_player_live` (loads a file into the unit's own player and watches for movement),
 `test_eq_q_live`, `test_meters_live`, `test_network_scan_live` (needs `--wifi` / `--bt` and exits 2
 without them),
@@ -512,7 +516,7 @@ the table behind the restore's write order. Restores gain, type AND instrument g
 factory reset leaves, so the ordering fix is proven through the real code without a reset),
 `test_clean_restore_live` (**FACTORY-RESETS THE DESK**, refuses without `--yes`: the whole clean
 restore through the HTTP API with a 6467-property diff, then imports the backup it took to put the
-desk back and diffs that too),
+desk back and diffs that too; once the restore has started, the put-back runs however the run ends),
 `test_hotkey_actions_live` (the shortcut ACTIONS against the desk; stop the service first, and
 `--record` to include the recording pair),
 `test_read_under_push_live` (**the model read against a desk that is deliberately pushing**: fires a
@@ -586,7 +590,8 @@ This is what found `btDoScan` alive.
 
 **`probe_callme_live.py`** drives CallMe on a live desk: `state` reads every `sip*` property,
 `host on|off` switches hosting and prints the guest link, `watch` / `speak` log (and speak) every
-call push, and `answer [slot]` answers the next incoming call with the touchscreen's composite.
+call push, `answer [slot]` answers the next incoming call, `hangup <slot>` ends one and `dial
+<code>` places one, every record built by `callme`.
 
 **`ui_checks_storage.js`** pins the Recording page's card and drive section: the internal pad storage never offered, Eject named for what it will do, erase asking first.
 
@@ -608,12 +613,6 @@ the status does not carry reads as None, so a wait returns at once and the read-
 the job is still going: that is what made `action_delete_backup` look as though it left the
 computer's copy behind when it had simply not finished.
 
-**`bind_timeline.py`** watches RODE's virtual-device service, which binds to the desk on some
-arrivals and not others. It samples, several times a second, which
-of the desk's device interfaces exist and which are ACTIVE, alongside the service's own connected
-flag, and prints every change with a millisecond offset; `--snapshot` reads the current state and
-exits. Read-only, no elevation, and it makes no arrival itself: use the app's USB mode control or
-the cable. See `PROJECT_GUIDE.md` part 2 under Expanded for what it measured.
 **`bind_history.py`** reads the per-attempt history the app itself records and compares bound
 attempts with missed ones field by field; `--last N` limits the table.
 
@@ -626,7 +625,7 @@ off and back through the app's API and counts binds per ARRIVAL, not per flip, b
 follow-up makes extra arrivals whenever it misses and each is another trial. `--control` runs the
 same cycles changing nothing, and **any run without it is worthless**, because the rate swings with
 whatever is playing to the desk's Main output. Needs the server running; restores the default
-output it found.
+output and the USB output mode it found.
 
 **`check_notes.py` enforces the private notes' own rules, the ones a script can settle**: an entry that is
 really a cleanup, a status column creeping back into `PARITY.md`, `Now / Next` past 250 lines, a
@@ -661,7 +660,7 @@ function" port through winmm/ctypes, no package. `midi_enabled()` turns `systemM
 puts it back, `MidiOut().play_pad(n)` fires one. CC number is the FUNCTION, MIDI channel is WHICH
 pad. Run it directly to list ports or fire a pad), `state_observatory.py`
 (`listen` takes no `--raw`), `gui_drive.py` +
-`ui_map.json` (drive the RODE app), `duo_probe.py` (read-only bring-up probe for any new desk),
+`ui_map.json` (drive the RODE app),
 `announcer_echo_check.py`, `announcer_live_check.py` (prints what the announcer would say for
 each control moved at the desk, read-only; `--speak` says it aloud), `list_pads.py` (the pad table
 in stream order, with each pad's bank and number), `watch_backchannel.py` (samples Mic 1 and USB 2's mute

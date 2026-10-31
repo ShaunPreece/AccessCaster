@@ -13,16 +13,15 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import model_tree
-import rcp_hid
 import rcp_read
 import rcp_transfer
 import recorder
+from _desk import push_handle, pushes
 
 PROP = {"eject": "storageVolumeEject", "erase": "storageVolumeErase"}
 
@@ -56,27 +55,11 @@ def act(what: str, index: int, seconds: float) -> int:
     prop = PROP[what]
     print(f"{what} {vol['label']} at {node.path()} ({vol['free_mb']} MB free)")
     show()
-    dev = rcp_hid.open_handle(rcp_hid.find_control_interface(), f"storage {what} probe")
-    t0 = time.time()
-    try:
-        dev.set_nonblocking(False)
+    with push_handle(f"storage {what} probe") as dev:
         rcp_transfer.send_record(rcp_transfer.build_path_prop_bool(prop, True, node.path()))
-        while time.time() - t0 < seconds:
-            rep = dev.read(rcp_read.BULK_LEN, timeout_ms=400)
-            if not rep or rep[0] != 0x04:
-                continue
-            frame = bytes(rep)
-            n = rcp_read._push_record_len(frame)
-            if n is None:
-                continue
-            try:
-                p, name, val, _k, _e = model_tree.parse_record(frame[5:5 + n])
-            except ValueError:
-                continue
+        for at, p, name, val in pushes(dev, seconds):
             if name.startswith(("storage", "record", "show")):
-                print(f"  +{time.time() - t0:5.1f}s {p} {name} = {val!r}", flush=True)
-    finally:
-        rcp_hid.close_handle(dev, f"storage {what} probe")
+                print(f"  +{at:5.1f}s {p} {name} = {val!r}", flush=True)
     print("after:")
     show()
     return 0

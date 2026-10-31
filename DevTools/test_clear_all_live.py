@@ -30,9 +30,9 @@ import tempfile
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
 import _testkit
-from _testkit import check_true
 import rcp_transfer
 import soundpad
+from _testkit import check_true
 
 BACKUP_DIR = os.path.join(tempfile.gettempdir(), "accesscaster_clear_all_backup")
 VERIFY_DIR = BACKUP_DIR + "_verify"
@@ -94,7 +94,7 @@ def main() -> int:
             if p["present"] and p["type"] != soundpad.SYSTEM_PAD_TYPE]
     h = res["health"]
     check_true("every user pad cleared", res["cleared"] == len(pads) and not left,
-          f"cleared {res['cleared']} of {len(pads)}, left {left}")
+               f"cleared {res['cleared']} of {len(pads)}, left {left}")
     check_true("pool clean", h["clean"], h)
     check_true("no partial object left", h["partial"] == [], h["partial"])
     check_true("region B is down to the special object", h["region_b_count"] == 1, h["region_b_count"])

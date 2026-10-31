@@ -26,10 +26,10 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import check
 import devices
 import rcp_read
 import server
+from _testkit import check
 
 devices.force_device(devices.PRO2)      # or the answer comes from whatever is on the USB port
 

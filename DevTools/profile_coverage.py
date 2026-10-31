@@ -18,7 +18,7 @@ So the question is answered MECHANICALLY, from the code, three ways:
      source tree (the same scan that produces the property-coverage report).
   3. THE GAP is (2) minus (1): a setting the app can change but a profile would not bring back.
      Every one is judged in NOT_SAVED below, as either "ok" (a command, editor state or live
-     state) or "GAP" (real work to do), and the report lists the GAPs first.
+     state) or "GAP" (real work to do), and the report lists the GAPs first. There are none now.
 
 TWO HAND-WRITTEN TABLES, and the script FAILS (exit 1) if either falls behind the code, which is
 what stops the audit going stale:
@@ -364,38 +364,19 @@ NOT_SAVED = {
     # ---- SIP / CallMe: only meaningful during a call, and several hold credentials ---------
     "padSIPCallSlot": ("ok", "CallMe pad plumbing; set by the create path from the pad's type."),
     "padSIPPhoneBookEntry": ("ok", "CallMe phone-book link; SIP-only and credential-adjacent."),
-    # ---- per-channel registry entries with no UI and unconfirmed semantics -----------------
-    "inputInstrumentGain": ("GAP", "Instrument input gain. A real per-channel setting, writable "
-                                   "through channels.CHANNEL_PROP, but with no control in our UI "
-                                   "and never read back, so a profile does not carry it."),
-    "inputColour": ("GAP", "Channel strip colour. Writable through CHANNEL_PROP but its ENCODING "
-                           "is unconfirmed, so it is neither exposed nor saved. Worth SAVING for "
-                           "reference even before we dare write it."),
-    "inputType": ("GAP", "Per-channel input type. Same position as inputColour: writable in the "
-                         "registry, values unconfirmed, not saved."),
+    "sipCallHostingEnabled": ("ok", "Whether CallMe hosting is on. Switching it on issues a NEW "
+                                    "guest code, so restoring it would break every guest link "
+                                    "already shared. Switched from the CallMe page when wanted."),
+    "sipIncomingCallAccept": ("ok", "A COMMAND: answer or decline the call ringing now. Restoring "
+                                    "it would act on whoever happened to be calling."),
+    "sipOutgoingCallDetails": ("ok", "A COMMAND: place a call. Restoring it would dial somebody."),
+    # ---- storage and firmware: commands ------------------------------------------------------
+    "storageVolumeEject": ("ok", "A COMMAND: eject a card or drive. Nothing to put back."),
+    "storageVolumeErase": ("ok", "A COMMAND, and it ERASES a card or drive. Restoring it would "
+                                 "wipe somebody's recordings."),
+    "updateCheckRequested": ("ok", "A COMMAND: ask the desk to check for a firmware update."),
     "channelWirelessMute": ("ok", "Mute for a wireless mic on the channel: live state, and it "
                                   "belongs to a mic that may not be paired at restore time."),
-    # ---- SMART pad settings the backup does not keep ---------------------------------------
-    # ---- pad sub-settings our CREATE path writes from defaults ------------------------------
-    "padEnvStart": ("GAP", "Pad trim IN point. Our create path writes a default, so a trimmed pad "
-                           "loses its trim on restore. Settable on the desk, not in our UI."),
-    "padEnvStop": ("GAP", "Pad trim OUT point, as above."),
-    "padEnvFadeIn": ("GAP", "Pad fade-in, as above."),
-    "padEnvFadeOut": ("GAP", "Pad fade-out, as above."),
-    "padMixerFadeInSeconds": ("GAP", "Fade time for a fade/ducking pad; create-path default."),
-    "padMixerFadeOutSeconds": ("GAP", "Fade time for a fade/ducking pad; create-path default."),
-    "padMixerFadeExcludeHost": ("GAP", "Whether a fade pad excludes the host; create-path default."),
-    "padMixerCensorCustom": ("GAP", "Whether a Censor pad uses a custom sound; create-path default."),
-    "padMixerCensorFilePath": ("GAP", "The custom Censor sound's file; create-path default."),
-    "padTriggerMode": ("GAP", "Per-pad MIDI/trigger mapping. PARITY.md lists MIDI mapping "
-                              "as part of a full pad backup; the backup does not keep it."),
-    "padTriggerType": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerSend": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerCustom": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerControl": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerChannel": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerOn": ("GAP", "Per-pad trigger mapping, as above."),
-    "padTriggerOff": ("GAP", "Per-pad trigger mapping, as above."),
     "padEffectInput": ("ok", "Which mic a voice-FX pad processes; written by the create path from "
                              "the recipe. Carried by fx_stack, not as a property."),
     "padEffectTriggerMode": ("ok", "Voice-FX trigger mode; written by the create path from the "
@@ -418,6 +399,16 @@ NOT_SAVED = {
 # ---------------------------------------------------------------------------
 # 3. Report
 # ---------------------------------------------------------------------------
+def _gap_summary(gaps: list) -> str:
+    """The summary's sentence on what a profile drops, from the gaps themselves."""
+    if not gaps:
+        return ("- **No writable setting is dropped**: everything the app can change is either saved "
+                "or deliberately left out (next section).")
+    pad_gaps = sum(1 for r in gaps if r["name"].startswith("pad"))
+    return (f"- **{len(gaps)} writable settings are dropped** (next section), {pad_gaps} of them "
+            f"in the SMART pad backup.")
+
+
 def build() -> tuple[str, dict]:
     props = pc.read_appendix()
     names = [n for n, _t, _c in props]
@@ -471,9 +462,7 @@ def build() -> tuple[str, dict]:
     w(f"- The app can WRITE {len(writable)} properties. {len(writable) - len(unsaved_writable)} of "
       f"those are saved; **{len(gaps)} are a real gap** and {len(fine)} are correctly left out "
       f"(commands, editor state, live state, or carried some other way).")
-    w("- The SETTINGS half of a profile (channels, processing, routing, master outputs) is "
-      "complete. **Every gap below is in the SMART PAD backup**, bar three per-channel registry "
-      "entries with no UI.")
+    w(_gap_summary(gaps))
     w("- **THIS FILE COUNTS PROPERTY NAMES, NOT OCCURRENCES, so a per-STRIP gap can hide in it.** "
       "Channel processing is per fader strip and the desk has 10 of them; a profile carries the "
       "channels the UI exposes, and a strip left out would still show every one of its properties "

@@ -20,9 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check
 import rcp_transfer as t
-
+from _testkit import check
 
 mounted: set[str] = set()
 SERIALS = {"E:\\": 0x1111, "F:\\": 0x2222, "G:\\": 0x3333}

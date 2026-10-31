@@ -14,13 +14,13 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_true
 import channels
 import devices
 import model_tree
 import rcp_read
 import rcp_transfer
 import server
+from _testkit import check, check_true
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # failed on the Duo's different channel set and looked like a regression. Offline tests must not

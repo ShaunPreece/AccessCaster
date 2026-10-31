@@ -13,10 +13,10 @@ import types
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check
 import channels
 import commands
 import devices
+from _testkit import check
 
 devices.force_device(devices.PRO2)
 # The factory layout, held as if read, so the channel lookups make no read of the desk.

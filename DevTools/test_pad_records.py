@@ -13,8 +13,8 @@ import hashlib
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import check_true
 import pad_records as pr
+from _testkit import check_true
 
 
 def digest(recs):
@@ -40,11 +40,11 @@ captured_path = bytes.fromhex(
     "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
     "7600").ljust(256, b"\x00")
 check_true("write_record reproduces the captured padFilePath record",
-      pr.write_record("padFilePath", "str", pr.PAD_FILE_PATH_FMT.format(n=2, name="sound.wav"),
+           pr.write_record("padFilePath", "str", pr.PAD_FILE_PATH_FMT.format(n=2, name="sound.wav"),
                       1) == captured_path)
 check_true("the remount record is the captured one, framed to 256 bytes",
-      len(pr.REMOUNT_PAD_STORAGE) == 256
-      and pr.REMOUNT_PAD_STORAGE[10:27] == b"remountPadStorage")
+           len(pr.REMOUNT_PAD_STORAGE) == 256
+           and pr.REMOUNT_PAD_STORAGE[10:27] == b"remountPadStorage")
 
 print("Frozen output")
 sound = pr.build_sound_create(8, 9, "Chimes", 8, handle=0x12)
@@ -69,33 +69,33 @@ for label, recs, want in (
 
 print("Structure")
 check_true("phase 1 is 45 records with its handoff, 66 with the effects block",
-      (len(pr.build_blank(3, 0x10)), len(pr.build_blank(3, 0x10, 0x04))) == (45, 66))
+           (len(pr.build_blank(3, 0x10)), len(pr.build_blank(3, 0x10, 0x04))) == (45, 66))
 phase1 = pr.build_phase1(12, 0x10)
 check_true("phase 1 stamps padTriggerControl and padIdx with the target",
-      [int_after(r, n) for n in ("padTriggerControl", "padIdx")
-       for r in phase1 if f"{n}\0".encode() in r] == [12, 12])
+           [int_after(r, n) for n in ("padTriggerControl", "padIdx")
+           for r in phase1 if f"{n}\0".encode() in r] == [12, 12])
 effects = pr.build_effects(12, 0x04, {"reverbMix": 0.25})
 check_true("the effects block stamps effectsIdx with the target",
-      [int_after(r, "effectsIdx") for r in effects if b"effectsIdx" in r] == [12])
+           [int_after(r, "effectsIdx") for r in effects if b"effectsIdx" in r] == [12])
 check_true("a param override lands in the effects block",
-      any(b"reverbMix" in r and r.find(bytes([0x01, 0x09, 0x04])) > 0 for r in effects)
-      and effects != pr.build_effects(12, 0x04))
+           any(b"reverbMix" in r and r.find(bytes([0x01, 0x09, 0x04])) > 0 for r in effects)
+           and effects != pr.build_effects(12, 0x04))
 for label, parts in (("sound", sound), ("mixer", mixer), ("trigger", trig)):
     check_true(f"a {label} create writes nothing to the effects node",
-          fx_records(sum(parts, [])) == [])
+               fx_records(sum(parts, [])) == [])
 check_true("a voice-FX create turns each engine on in post, on the sub-handle",
-      [r[13:13 + r[13:].index(0)] for r in fx_records(monster[2])]
-      == [b"reverbOn", b"pitchShiftOn"]
-      and all(r[12] == 0x05 for r in fx_records(monster[2])))
+           [r[13:13 + r[13:].index(0)] for r in fx_records(monster[2])]
+           == [b"reverbOn", b"pitchShiftOn"]
+           and all(r[12] == 0x05 for r in fx_records(monster[2])))
 try:
     pr.build_fx_create_recipe(1, "x", 1, {"flanger": {}}, handle=1, fx_subhandle=1)
     check_true("an unknown effect engine is refused", False, "no error raised")
 except ValueError:
     check_true("an unknown effect engine is refused", True)
 check_true("the custom trigger mapping writes the explicit control number",
-      [int_after(r, "padTriggerControl") for r in trig_custom[1] if b"padTriggerControl" in r]
-      == [60])
+           [int_after(r, "padTriggerControl") for r in trig_custom[1] if b"padTriggerControl" in r]
+           == [60])
 check_true("free_handle is the record count: the first free stream position",
-      pr.free_handle(23) == 23)
+           pr.free_handle(23) == 23)
 
 raise SystemExit(_testkit.finish())

@@ -218,7 +218,11 @@ def main() -> int:
 
     text = render(props, blocks, dev.name, fw, dead)
 
-    if args.check and out.exists():
+    if args.check and not out.exists():
+        print(f"--check: there is no {out.name} to compare against, so nothing was checked. "
+              f"Run without --check to write it.")
+        return 1
+    if args.check:
         old = name_set(out.read_text(encoding="utf-8"))
         new = name_set(text)
         added, gone = sorted(new - old), sorted(old - new)

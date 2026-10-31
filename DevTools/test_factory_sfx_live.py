@@ -45,7 +45,7 @@ def main() -> int:
     print("Reading the pad table (no transfer mode yet)...")
     blob = rcp_read.read_model_stable(fresh=True)
     live = {}
-    for pos, pidx, ptype, name in soundpad.pad_positions(blob):
+    for _pos, pidx, ptype, name in soundpad.pad_positions(blob):
         if ptype == soundpad.PAD_TYPE_SOUND and pidx is not None:
             live[pidx + 1] = name
     paths = [p for p in rcp_read.values(blob, "padFilePath") if p]

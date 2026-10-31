@@ -28,9 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import as_device, check, patched
 import server
-
+from _testkit import as_device, check, patched
 
 print("STATIC FILES")
 check("a file in static/ is served", server._static_file("app.js"),

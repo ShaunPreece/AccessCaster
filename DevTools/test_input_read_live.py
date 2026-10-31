@@ -17,10 +17,10 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check
 import channels as c
 import devices
 import rcp_read as rr
+from _testkit import check
 
 SETTLE_S = 0.6          # the desk needs a moment before the next dump shows the write
 

@@ -41,30 +41,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import hid
 import model_tree
-import rcp_hid
 import rcp_read
+from _desk import push_handle, pushes
 
 OUT_DIR = Path(__file__).resolve().parent / "captures" / "observatory"
 
 # Any property whose NAME matches this never has its value printed or saved.
 SECRET_NAME = re.compile(r"psk|password|paircode|rodecode|authusername|username|ssid|serial",
                          re.IGNORECASE)
-def push_record(payload: bytes):
-    """(name, path, value, address hex) for a report-04 frame that is ONE pushed record, else None
-    (a slice of a model dump). `payload` is the frame without its report id: a 4-byte length, then
-    the addressed record, which model_tree.parse_record decodes structurally."""
-    n = int.from_bytes(payload[:4], "little")
-    if not 0 < n <= len(payload) - 4:
-        return None
-    rec = payload[4:4 + n]
-    try:
-        path, name, value, _kind, end = model_tree.parse_record(rec)
-    except ValueError:
-        return None
-    addr_end = rec.index(name.encode()) if name.encode() in rec else 0
-    return name, tuple(path), value, rec[:addr_end].hex()
+
+
+def address_hex(path) -> str:
+    """The address bytes a record for `path` carries in front of its property name."""
+    return model_tree.encode_path(list(path)).hex()
 
 
 def redact(name: str, value):
@@ -134,36 +124,17 @@ def print_diff(changes, title: str) -> None:
 def listen(seconds: float, label: str) -> None:
     """Log the unsolicited report-04 stream. No trigger is sent: whatever arrives, the desk sent
     of its own accord."""
-    iface = rcp_hid.find_control_interface()
-    if iface is None:
-        raise SystemExit("no control interface (is the unit connected?)")
-    dev = hid.device()
-    dev.open_path(iface.path)
     seen: dict[str, list] = {}
-    packets, first_at, last_at = 0, None, None
-    t_end = time.time() + seconds
-    try:
-        while time.time() < t_end:
-            rep = dev.read(256, timeout_ms=200)
-            if not rep:
-                continue
-            b = bytes(rep)
-            if b[0] != 0x04:
-                continue
-            now = time.time()
-            packets += 1
-            first_at = first_at or now
-            last_at = now
-            rec = push_record(b[1:])
-            if rec is not None:
-                name, path, value, _addr = rec
-                key = f"{name} @{list(path)}"
-                seen.setdefault(key, []).append((round(now - (first_at or now), 2),
-                                                 redact(name, value)))
-    finally:
-        dev.close()
-    span = (last_at - first_at) if (first_at and last_at) else 0.0
-    print(f"\n=== listen [{label}] {seconds:.0f}s: {packets} report-04 packets"
+    first_at = last_at = None
+    with push_handle("observatory listen") as dev:
+        for at, path, name, value in pushes(dev, seconds, poll_ms=200):
+            first_at = at if first_at is None else first_at
+            last_at = at
+            seen.setdefault(f"{name} @{list(path)}", []).append(
+                (round(at - first_at, 2), redact(name, value)))
+    count = sum(len(hits) for hits in seen.values())
+    span = (last_at - first_at) if first_at is not None else 0.0
+    print(f"\n=== listen [{label}] {seconds:.0f}s: {count} pushes"
           f"{f' over {span:.1f}s' if span else ''}, {len(seen)} distinct properties ===")
     if not seen:
         print("  NOTHING was pushed. This desk only speaks when asked, so live state must be polled.")
@@ -200,11 +171,6 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     STOP_FILE.unlink(missing_ok=True)  # a stale one would close the capture instantly
-    iface = rcp_hid.find_control_interface()
-    if iface is None:
-        raise SystemExit("no control interface (is the unit connected?)")
-    dev = hid.device()
-    dev.open_path(iface.path)
 
     # DELIBERATELY SILENT by default. The operator relays the instruction by voice anyway, so
     # speaking it here reaches nobody who needs it AND talks over the app's own announcer, which is
@@ -213,45 +179,33 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
         _say(label)
     print(f"CAPTURE OPEN: {label}", flush=True)
     print(f"  close it by creating {STOP_FILE}  (or wait {timeout:.0f}s)", flush=True)
-    events, packets, t0 = [], 0, time.time()
-    stopped_by = "timeout"
+    events: list[tuple[float, str, tuple, object, str]] = []   # (t, name, path, value, address)
+    t0 = time.monotonic()
     try:
-        while time.time() - t0 < timeout:
-            if STOP_FILE.exists():
-                stopped_by = "operator"
-                break
-            rep = dev.read(256, timeout_ms=100)
-            if not rep:
-                continue
-            b = bytes(rep)
-            if b[0] != 0x04:
-                continue
-            packets += 1
-            rec = push_record(b[1:])
-            if rec is not None:
-                name, path, value, addr = rec
-                events.append((round(time.time() - t0, 2), name, path,
-                               redact(name, value), addr if raw else ""))
+        with push_handle("observatory step") as dev:
+            for at, path, name, value in pushes(dev, timeout, stop=STOP_FILE.exists, poll_ms=100):
+                events.append((round(at, 2), name, tuple(path), redact(name, value),
+                               address_hex(path) if raw else ""))
+        stopped_by = "operator" if STOP_FILE.exists() else "timeout"
     finally:
-        dev.close()
         STOP_FILE.unlink(missing_ok=True)
 
-    took = time.time() - t0
+    took = time.monotonic() - t0
     print(f"\n=== {label} === closed by {stopped_by} after {took:.1f}s: "
-          f"{packets} report-04 packets, {len(events)} decoded values", flush=True)
+          f"{len(events)} pushes", flush=True)
     if not events:
         print("  NOTHING pushed. Either the desk stays silent for this control, or the action "
               "never happened inside the capture.", flush=True)
         return
-    # Group by (name, selector): the selector is what tells "channel 1 muted" from "channel 2".
-    by_key: dict[tuple[str, int | None], list] = {}
-    for t, name, sel, value, pre in events:
-        by_key.setdefault((name, sel), []).append((t, value, pre))
-    for (name, sel), hits in sorted(by_key.items(), key=lambda kv: -len(kv[1])):
+    # Group by (name, path): the path is what tells "channel 1 muted" from "channel 2".
+    by_key: dict[tuple[str, tuple], list] = {}
+    for t, name, path, value, pre in events:
+        by_key.setdefault((name, path), []).append((t, value, pre))
+    for (name, path), hits in sorted(by_key.items(), key=lambda kv: -len(kv[1])):
         vals = [v for _t, v, _p in hits]
         span = hits[-1][0] - hits[0][0]
         rate = f"{len(hits) / span:.1f}/s" if span > 0.2 else "-"
-        addr = str(list(sel))
+        addr = str(list(path))
         print(f"  {addr}  {name:28} {len(hits):4} x {rate:>8}  "
               f"{len({repr(v) for v in vals})} distinct  first={vals[0]!r} last={vals[-1]!r}",
               flush=True)
@@ -297,43 +251,23 @@ def _say(text: str) -> None:
 def guided(steps=None, raw: bool = False) -> None:
     """Run the spoken step list while passively logging the report-04 stream.
 
-    raw=True also keeps the 8 bytes in front of each property name. A pushed record carries its
-    SELECTOR there, which is how we tell "channel 1 muted" from "channel 2 muted" - the summary
-    alone only shows the value.
+    raw=True also keeps each push's address bytes, which is how we tell "channel 1 muted" from
+    "channel 2 muted" - the summary alone only shows the value.
     """
     steps = steps or DEFAULT_STEPS
-    iface = rcp_hid.find_control_interface()
-    if iface is None:
-        raise SystemExit("no control interface (is the unit connected?)")
-    dev = hid.device()
-    dev.open_path(iface.path)
-    events: list[tuple[float, str, str, object]] = []   # (t, step, name, value)
-    packets = 0
-    _say("Starting the listen now")
-    time.sleep(2.5)
-    t0 = time.time()
-    try:
+    events: list[tuple[float, str, str, object, str]] = []   # (t, step, name, value, address)
+    with push_handle("observatory guided") as dev:
+        _say("Starting the listen now")
+        time.sleep(2.5)
+        t0 = time.monotonic()
         for prompt, secs in steps:
             _say(prompt)
-            print(f"[{time.time() - t0:5.1f}s] STEP: {prompt}  ({secs}s)")
-            t_end = time.time() + secs
-            while time.time() < t_end:
-                rep = dev.read(256, timeout_ms=100)
-                if not rep:
-                    continue
-                b = bytes(rep)
-                if b[0] != 0x04:
-                    continue
-                packets += 1
-                rec = push_record(b[1:])
-                if rec is not None:
-                    name, _path, value, addr = rec
-                    events.append((round(time.time() - t0, 2), prompt, name,
-                                   redact(name, value), addr if raw else ""))
-    finally:
-        dev.close()
+            print(f"[{time.monotonic() - t0:5.1f}s] STEP: {prompt}  ({secs}s)")
+            for _at, path, name, value in pushes(dev, secs, poll_ms=100):
+                events.append((round(time.monotonic() - t0, 2), prompt, name,
+                               redact(name, value), address_hex(path) if raw else ""))
 
-    print(f"\n=== guided session: {packets} report-04 packets, {len(events)} decoded values, "
+    print(f"\n=== guided session: {len(events)} pushes, "
           f"{len({e[2] for e in events})} distinct properties ===")
     for prompt, _secs in steps:
         rows = [e for e in events if e[1] == prompt]
@@ -366,16 +300,16 @@ def guided(steps=None, raw: bool = False) -> None:
 def watch(dumps: int, gap: float, label: str) -> None:
     prev, prev_t = None, None
     for n in range(dumps):
-        t0 = time.time()
+        t0 = time.monotonic()
         cur = snapshot()
-        took = time.time() - t0
+        took = time.monotonic() - t0
         if prev is not None:
             print_diff(diff(prev, cur), f"{label} dump {n} (dump took {took:.2f}s, "
-                                        f"{time.time() - prev_t:.2f}s since the last)")
+                                        f"{time.monotonic() - prev_t:.2f}s since the last)")
         else:
             print(f"=== {label}: baseline dump, {sum(len(v) for v in cur.values())} values "
                   f"across {len(cur)} properties in {took:.2f}s ===")
-        prev, prev_t = cur, time.time()
+        prev, prev_t = cur, time.monotonic()
         if n < dumps - 1:
             time.sleep(gap)
 
@@ -383,9 +317,9 @@ def watch(dumps: int, gap: float, label: str) -> None:
 def cost(n: int) -> None:
     times = []
     for _ in range(n):
-        t0 = time.time()
+        t0 = time.monotonic()
         blob = rcp_read.read_model(fresh=True)
-        times.append(time.time() - t0)
+        times.append(time.monotonic() - t0)
         print(f"  dump {len(blob)} bytes in {times[-1]:.3f}s")
     print(f"=== {n} dumps: best {min(times):.3f}s, worst {max(times):.3f}s, "
           f"mean {sum(times) / len(times):.3f}s ===")
@@ -410,13 +344,13 @@ def main() -> None:
     p = sub.add_parser("cost"); p.add_argument("--n", type=int, default=3)
 
     p = sub.add_parser("guided", help="speak the step list aloud and log what the desk pushes")
-    p.add_argument("--raw", action="store_true", help="also show the 8 bytes before each name")
+    p.add_argument("--raw", action="store_true", help="also show each push's address bytes")
     p.add_argument("--steps", default="", help='"prompt:secs;prompt:secs" to override the script')
 
     p = sub.add_parser("step", help="ONE action, closed on the operator's word, not on a clock")
     p.add_argument("label")
     p.add_argument("--timeout", type=float, default=180.0, help="safety net for an abandoned capture")
-    p.add_argument("--raw", action="store_true", help="also show the 8 bytes before each name")
+    p.add_argument("--raw", action="store_true", help="also show each push's address bytes")
     p.add_argument("--speak", action="store_true",
                    help="speak the label too; off by default, it fights the app's announcer")
 

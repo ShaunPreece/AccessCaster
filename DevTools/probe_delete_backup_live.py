@@ -40,11 +40,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-from _testkit import check
 import profiles
 import rcp_read
 import recorder
 import server
+from _testkit import check
 
 
 def names():
@@ -85,7 +85,7 @@ ap.add_argument("--profile", help="name of a paired backup to delete, both halve
 args = ap.parse_args()
 
 before, raw = names()
-print(f"=== action_delete_backup, against a real desk ===")
+print("=== action_delete_backup, against a real desk ===")
 print(f"  {len(before)} backup(s) listed, drive free {free_mb()} MB\n")
 
 if args.show is not None:
@@ -128,7 +128,7 @@ if args.profile:
         before = after
 
 print("\n3. NOTHING ELSE WENT WITH IT")
-after, raw4 = names()
+after, _raw = names()
 print(f"   {len(after)} backup(s) left")
 check("the as-found baseline is still there",
       any(n.startswith("As found") for n in after), True)

@@ -30,9 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # puts Project/ on sys.path, and finds docs/ and the notes
 
 REPO = Path(__file__).resolve().parent.parent
-# The spec stays in THIS repo (it is written for anyone building their own controller); the reports
-# below are notes, so they are written to the private sibling repo instead.
-PROTOCOL = REPO / "docs" / "RODECASTER_PROTOCOL.txt"
+# The property list is read from docs/ in THIS repo; the reports below are notes, so they are written
+# to the private sibling repo instead.
 
 # DEVICE-SCOPED, because this report consumes the OCCURRENCE COUNTS and those genuinely differ
 # between the desks (Duo PAD x22 vs Pro II x24, PADBUTTON x48 vs x64 - the physical shape), and so
@@ -72,7 +71,7 @@ def read_appendix() -> list[tuple[str, str, int]]:
     """(name, type, occurrences) for every property the desk publishes."""
     path = list_path()
     if not path.exists():
-        raise SystemExit(f"ProjectMemory/{path.name} is missing. "
+        raise SystemExit(f"docs/{path.name} is missing. "
                          "Regenerate it with: python DevTools/property_list.py")
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -281,70 +280,18 @@ RULES: list[tuple[str, str, str, str]] = [
      "the property whose 316-byte length proved the model needs a real string-length reader "
      "(model_tree)."),
     # ---- blind spot 1: per-strip properties missing from our chain set -------------------
-    (r"^eq(Low|Mid|High)Q$", "internal/derived", "-",
-     "Per-strip EQ Q, and RESOLVED: the USB capture of a preset apply shows the RODE app "
-     "NEVER writes these - the device recomputes them from the EQ params, and they follow a channel "
-     "across a fader move for the same reason. So they need no writer and no place in our chain set."),
-    (r"^(channelPanL|channelPanR)$", "chain gap", "med",
-     "Per-strip. The pan of a STEREO source (where each leg sits); channelPan only pans a mono one."),
     (r"^hpf(Higher|Lower)On$", "chain gap", "med",
      "Per-strip HPF variants with no app control found yet. Confirm before including in the chain set."),
-    (r"^channelAdvancedProcessing$", "candidate feature", "med",
-     "CONFIRMED phase 2 + BUILT: the app's advanced-vs-simple processing mode, per strip. "
-     "Now read, written, carried in presets/profiles and moved by a fader swap "
-     "(channels.CHAIN_ADVANCED_PROP). Still no UI control of its own - that is the remaining work."),
-    (r"^channelCurrentFxPreset$", "candidate feature", "med",
-     "The marker deciding which preset NAME a strip shows. BUILT into the chain set, "
-     "written LAST (the device blanks it to -1 on any parameter write). Remaining work: show the "
-     "preset name in our UI, with the caveat that it is a NAME only - the values may not match it."),
-    (r"^channelWirelessMute$", "live state", "med",
-     "BUILT: mutes a paired RODE wireless transmitter at the mic, per strip. Read "
-     "onto the mic channel panel and written by channels.set_channel_wireless_mute, a compact bool on "
-     "0x1C + strip - the SAME CHANNEL node the mute and the solo sit on, read off a live tree rather "
-     "than captured. It is NOT in the chain set and must not join it: a mute is live state, so a "
-     "fader move carrying it would silence a mic somebody had not muted. Never ear-proven; nobody "
-     "here owns a wireless mic."),
     (r"^streamerXPreset(Created|Name)$", "chain gap", "low",
      "Per-strip but Streamer X naming; expected irrelevant to Pro II/Duo, confirm and dismiss."),
-    (r"^channelCueEnable$", "live state", "high",
-     "PHASE 1 CONFIRMED: this is the desk's SOLO/cue state, per strip, PUSHED on report-04 when a "
-     "solo button is pressed (selector 0x1C + strip). Overturns the backlog claim that solo state is "
-     "unreadable. AND IT IS WRITABLE: proven on hardware (compact bool on 0x1C + strip, "
-     "the same shape as the mute below), so Listen/solo from software is a shipped feature "
-     "(channels.set_channel_solo, plus clear_all_solos as the way out). It had been filed "
-     "'physical/MIDI only' for a year purely because the RODE app has no control for it - which "
-     "means no CAPTURE ROUTE, never unwritable. Per-strip live state, not chain, and deliberately "
-     "never restored by a profile (see the profile-coverage report)."),
     (r"^(channelListenSource|channelTalkbackEnable)$", "live state", "med",
      "Per-strip LIVE STATE, not chain. Phase 2 shows whether the RODE app moves it on a fader drag; "
      "do not guess."),
 
-    (r"^channelOutputMute$", "live state", "high",
-     "Per-strip MUTE state, x10. PUSHED on report-04 the moment a mute changes, with selector "
-     "0x1C + strip, so the announcer decodes it from the stream it already reads - no polling. AND "
-     "IT IS WRITABLE: proven on hardware (compact bool on 0x1C + strip, the module-toggle shape), "
-     "so mute/unmute from software is a shipped feature (channels.set_channel_mute). A scan that "
-     "calls it unsettable over report-3 is using the mic-preamp channel-address format, which is "
-     "not this property's."),
-    (r"^systemChannelSelected$", "live state", "med",
-     "Which channel the desk itself has selected. Mentioned in our comments as NOT needed before a "
-     "write; as a READ it would let us announce what the encoder is about to change."),
     (r"^duckerDepth$", "candidate feature", "med",
      "Auto-duck depth. Read ad hoc during the bed-gating investigation, never exposed as a control."),
-    (r"^encoderColour$", "internal/derived", "-",
-     "Encoder ring colour; appearance only."),
 
     # ---- metering and physical control position: the accessibility headline --------------
-    # `metering` IDENTIFIED (phase 2): it is the touchscreen METER STYLE, not a data
-    # subscription. The app's Display > Metering screen offers Default (0) and Broadcast (1), and
-    # switching to Broadcast pushed NOTHING and left the meter arrays frozen. So it is a display
-    # setting, and one worth exposing for a sighted co-host, not a route to meter values.
-    (r"^metering$", "candidate feature", "low",
-     "Touchscreen METER STYLE: 0 = Default (markers + unity), 1 = Broadcast (dBFS markers + gain "
-     "reduction). Confirmed by driving the app's Display > Metering screen. NOT a "
-     "metering-data subscription - Broadcast mode pushed nothing. EXPOSED: selector "
-     "captured (0x07, the GUI block) and read-back verified, so a sighted co-host's meter style can "
-     "be set from the Device page."),
     (r"^(meterLevel[LR]|meterPeak[LR]|meterStereo|broadcastMeters|assignableMeterSource)$",
      "live state", "-",
      "METER VALUES: CLOSED as unavailable over the control protocol. Phase 1 saw nothing "
@@ -387,19 +334,6 @@ RULES: list[tuple[str, str, str, str]] = [
      "auto-mute toggles but never the level or the mute itself. HIGH because outputMonLevel is what "
      "the encoder actually moves, it is PUSHED live, and a blind operator who nudges the encoder "
      "has no other way to put the monitor level back from software."),
-    # outputPrefader IS NOT MULTITRACK-RELATED, whatever the name beside it suggests. It is the
-    # app's Output > Listen choice, i.e. what SOLO plays in the headphones - False = After-fader
-    # Listen (the channel at its fader level), True = Pre-fader Listen (at unity regardless of the
-    # fader). Identified by driving that screen: one clean diff, nothing else moved. HIGH because it
-    # is a real device setting a blind operator cannot otherwise reach, and it is one bit. Needs ONE
-    # capture for its write selector.
-    (r"^outputPrefader$", "candidate feature", "high",
-     "SOLO/Listen mode: False = After-fader Listen (solo plays the channel at its fader level), "
-     "True = Pre-fader Listen (at unity). Confirmed by driving the app's Output > Listen screen. "
-     "Selector not captured, so it is read-only for us."),
-    (r"^disableAll", "candidate feature", "med",
-     "Lockouts: all headphone outputs, all line outs, all physical buttons. Useful for a locked-down "
-     "venue setup."),
     (r"^(showControl|currentShow)", "candidate feature", "med",
      "The device's own Shows: export, import, new-from-default, delete, lockout, progress, plus the "
      "current show's name/UUID/icon. Compare against our home-grown Profiles BEFORE duplicating work."),
@@ -413,21 +347,6 @@ RULES: list[tuple[str, str, str, str]] = [
     (r"^(ipAddress|subnetMask|primaryDns|secondaryDns|staticIpSet|wiredConnected|nonHTTPSInterface)$",
      "candidate feature", "low",
      "Network status and static IP configuration."),
-    (r"^systemDateTime|^systemDateTimezone$", "candidate feature", "med",
-     "Clock, 24h, timezone, daylight saving, show-on-home. Touchscreen-only setup today."),
-    # VALUES CONFIRMED by driving the app's Display and System tabs.
-    # SELECTORS CAPTURED, so these three are now WRITTEN, not candidates: they are on the
-    # Device page and in a profile (server.UNIT_SETTINGS). The notes are kept for their value
-    # rankings and their decoded value tables.
-    (r"^systemRecButtonSetting$", "candidate feature", "med",
-     "REC button behaviour: 0 = Press to Pause (hold to stop), 1 = Press to Stop (hold to pause). "
-     "Confirmed on the app's Display > REC Button screen. EXPOSED (selector 0x0F, the "
-     "SYSTEM block, captured + read-back verified)."),
-    (r"^systemHapticSetting$", "candidate feature", "med",
-     "Touchscreen haptics: 0 = none, 1 = on hold, 2 = always on. Confirmed on the app's Display > "
-     "Haptics screen. Haptics are one of the few non-visual confirmations the desk itself gives. "
-     "EXPOSED (selector 0x0F). STILL OPEN: whether the physical buttons buzz or only the "
-     "touchscreen does - the clean test is to write 2 and press a button."),
     (r"^(systemName|systemMainMode|systemMixSelected)$", "candidate feature", "low",
      "Device name and current screen/mix selection: touchscreen settings."),
     (r"^(screenBrightness|hwScreenBrightness|autoBrightness|screenDimAfterSeconds|"
@@ -494,6 +413,23 @@ RULES: list[tuple[str, str, str, str]] = [
      "Per-pad SIP call-slot flash/lock state; SIP-only."),
     (r"^systemBetaMode$|^systemSerialNumber$", "internal/derived", "-",
      "Beta flag and serial number; identity/diagnostics."),
+    (r"^icecast", "candidate feature", "med",
+     "Streaming the mix to an Icecast server: address, port, mountpoint, username, password, "
+     "bitrate, TLS, a connect command and its state. Not decoded or exercised. The password, like "
+     "the wifi key, must never reach a profile, a log or the browser."),
+    (r"^proxy", "candidate feature", "low",
+     "The desk's network proxy: on/off, address, port and credentials. Not decoded; a set-up step "
+     "few desks need, and the password must never reach a profile, a log or the browser."),
+    (r"^(requestSignIn|requestSignOut|hasValidToken|userCode|userName|verificationURL|"
+     r"verificationURLBare|responsePending|errorMessage)$", "candidate feature", "low",
+     "The desk's RODE account sign-in: the commands, the code and address the touchscreen shows "
+     "for finishing a sign-in in a browser, and the outcome. Not decoded; a one-off set-up step."),
+    (r"^cloudUpload(Request|Cancel)UID$", "internal/derived", "-",
+     "Commands to upload a recording to RODE's cloud or cancel one, which need the account above. "
+     "Out of scope with it."),
+    (r"^show(Icon|StorageType)$", "internal/derived", "-",
+     "Per-show metadata in the desk's show list. The app lists and restores shows by name and "
+     "snapshot and needs neither."),
 ]
 _RULES = [(re.compile(p), t, v, n) for p, t, v, n in RULES]
 
@@ -568,12 +504,12 @@ def build() -> tuple[str, dict]:
     w("This is the THIRD yardstick, alongside the user guide")
     w("(`PARITY.md`) and the RODE app's UI. It answers the question neither of those can: which")
     w("device properties exist that no control of ours, and sometimes no control of RODE's, exposes.")
-    w("Source of the property list: the appendix in `RODECASTER_PROTOCOL.txt` (a Duo fw 1.7.3 model")
-    w("dump; the Pro II schema is essentially the same, occurrence counts differ).")
+    w(f"Source of the property list: `docs/{list_path().name}`, generated from this desk's own")
+    w("model dump by `DevTools/property_list.py`.")
     w("")
     w("## Summary")
     w("")
-    w(f"- **{len(rows)} properties** in the appendix.")
+    w(f"- **{len(rows)} properties** in the list.")
     w(f"- **{touched} touched by the app** "
       f"(read {counts.get('read', 0)}, write {counts.get('write', 0)}, "
       f"read+write {counts.get('read+write', 0)}, referenced {counts.get('referenced', 0)}).")

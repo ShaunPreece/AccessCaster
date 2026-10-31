@@ -15,11 +15,11 @@ import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_true, as_device
 import devices
 import fake_model
 import rcp_transfer
 import routing_schemes
+from _testkit import as_device, check, check_true
 
 routing_schemes.WRITE_PACE = 0        # nothing leaves the process, so nothing needs pacing
 

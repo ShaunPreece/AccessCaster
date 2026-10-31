@@ -40,8 +40,6 @@ import sys
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-RODE_VENDOR_ID = 0x19F7
-
 # pcap/pcapng link-layer type for USBPcap captures.
 LINKTYPE_USBPCAP = 249
 
@@ -214,15 +212,6 @@ def read_tshark_json(path: str) -> list[UsbPacket]:
             endpoint = int(str(endpoint_raw), 0)
         except ValueError:
             endpoint = 0
-        src = str(usb.get("usb.src", ""))
-        from_device = bool(endpoint & 0x80) or src.endswith(".0") is False and "host" not in src.lower()
-        # usb.endpoint_address.direction is the reliable field when present.
-        d = usb.get("usb.endpoint_address.direction") or usb.get("usb.dst")
-        if d is not None:
-            try:
-                from_device = bool(int(str(d), 0)) if str(d) in ("0", "1") else from_device
-            except ValueError:
-                pass
         packets.append(
             UsbPacket(
                 frame=i,

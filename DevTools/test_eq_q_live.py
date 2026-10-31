@@ -38,7 +38,8 @@ FREQ_PROPS = ("eqLowShelf", "eqMidBell", "eqHighBell")
 SETTLE = 0.9        # the desk needs a moment before a fresh dump shows the write
 
 
-def read_strip(strip: int, props) -> dict:
+def read_strip(strip: int, props) -> tuple[dict, bytes]:
+    """Each of `props` on one strip, and the fresh dump they came from."""
     blob = rcp_read.read_model_stable(fresh=True)
     out = {}
     for p in props:
@@ -70,8 +71,8 @@ def main() -> int:
         return 0.2 if (v or 0) > 0.5 else 0.8
 
     try:
-        # --- 1. does Q follow a GAIN write? -------------------------------------------------
-        for prop in GAIN_PROPS:
+        # --- 1 and 2. does Q follow a GAIN or a FREQUENCY write? ------------------------------
+        for prop in GAIN_PROPS + FREQ_PROPS:
             channels.set_channel_processing(ch, prop, flip(base[prop]))
             time.sleep(SETTLE)
             now, _ = read_strip(strip, Q_PROPS)
@@ -80,18 +81,6 @@ def main() -> int:
             if moved:
                 fails.append(f"{prop} moved Q {moved}: Q may be derived after all, which would make "
                              f"it wrong to carry in presets and profiles")
-            channels.set_channel_processing(ch, prop, base[prop])
-            time.sleep(0.4)
-
-        # --- 2. does Q follow a FREQUENCY write? --------------------------------------------
-        for prop in FREQ_PROPS:
-            channels.set_channel_processing(ch, prop, flip(base[prop]))
-            time.sleep(SETTLE)
-            now, _ = read_strip(strip, Q_PROPS)
-            moved = {p: (base[p], now[p]) for p in Q_PROPS if now[p] != base[p]}
-            print(f"after writing {prop:12} -> Q moved: {moved or 'no'}")
-            if moved:
-                fails.append(f"{prop} moved Q {moved}: see above")
             channels.set_channel_processing(ch, prop, base[prop])
             time.sleep(0.4)
 

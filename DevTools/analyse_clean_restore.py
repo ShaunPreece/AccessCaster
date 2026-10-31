@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
-from model_tree import parse, walk
+import _testkit
 
 CAP = Path(__file__).resolve().parent / "captures"
 
@@ -48,16 +48,10 @@ def noisy(prop: str) -> bool:
     return any(s in prop for s in NOISY)
 
 
-def snap(path) -> dict:
-    """{(block, tree path, prop): value} for every property in a dump."""
-    blob = Path(path).read_bytes() if not isinstance(path, (bytes, bytearray)) else path
-    root, _, _ = parse(blob)
-    out = {}
-    for n in walk(root):
-        key_path = tuple(n.path())
-        for p, v, k in n.props:
-            out[(n.name, key_path, p)] = repr(v) if k == "bytes" else v
-    return out
+def snap(source) -> dict:
+    """{(tree path, block, prop): value} for every property in a dump, from its bytes or its file."""
+    blob = source if isinstance(source, (bytes, bytearray)) else Path(source).read_bytes()
+    return _testkit.snapshot(blob)
 
 
 def _is_pad(key) -> bool:
@@ -66,7 +60,7 @@ def _is_pad(key) -> bool:
     The pad effect pool is EFFECTS_PARAMETERS nested one level down (path length 2, under
     SOUNDPADS); the ten CHANNEL effect blocks of the same name are root children (length 1). So the
     depth tells them apart without hardcoding a node index."""
-    block, path, _prop = key
+    path, block, _prop = key
     return block == "PAD" or (block == "EFFECTS_PARAMETERS" and len(path) == 2)
 
 
@@ -79,10 +73,10 @@ def _cross_point_is_not_ours(key, before: dict) -> bool:
         a restore fail its own read-back.
       * LINKED (`mixLink`): a linked cross-point has no level of its own, it follows the channel
         fader. A float residue such as -1.04e-07 on one of them is zero."""
-    block, path, prop = key
+    path, block, prop = key
     if block != "MIX" or prop != "mixLevelWithAnchor":
         return False
-    return bool(before.get(("MIX", path, "mixDisabled"))) or bool(before.get(("MIX", path,
+    return bool(before.get((path, "MIX", "mixDisabled"))) or bool(before.get((path, "MIX",
                                                                               "mixLink")))
 
 
@@ -91,7 +85,7 @@ def compare(before: dict, after: dict, factory: dict | None = None,
     """Split every difference into by-design, pads, factory-valued and real."""
     res = {"by_design": [], "pads": [], "factory": [], "real": [], "gone": [], "new": []}
     for key, was in before.items():
-        block, _path, prop = key
+        _path, block, prop = key
         # The SHOWS LIST is not desk state: every export renumbers it and adds a node, so a clean
         # restore (which backs up first) is EXPECTED to leave one more backup than it found.
         if noisy(prop) or block == "SHOW":
@@ -114,7 +108,7 @@ def compare(before: dict, after: dict, factory: dict | None = None,
         else:
             res["real"].append(row)
     for key in after:
-        if key in before or noisy(key[2]) or key[0] == "SHOW":
+        if key in before or noisy(key[2]) or key[1] == "SHOW":
             continue
         (res["pads"] if (_is_pad(key) and not pads_restored) else res["new"]).append(
             (key, None, after[key], None))
@@ -124,7 +118,7 @@ def compare(before: dict, after: dict, factory: dict | None = None,
 def show(res: dict, factory: bool) -> int:
     """Print the verdict. Returns the number of unexplained differences."""
     def line(row):
-        (block, path, prop), was, now, fac = row
+        (path, block, prop), was, now, fac = row
         tail = f" (factory {fac!r})" if factory and fac is not None else ""
         return f"  {block}{list(path)}.{prop}: {was!r} -> {now!r}{tail}"
 

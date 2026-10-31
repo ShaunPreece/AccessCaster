@@ -170,8 +170,10 @@ def probe(prop: str, forced=None) -> dict:
                             and len(rcp_read.find_all(blob0, prop))
                             == len(rcp_read.find_all(blob2, prop)))
         except Exception as exc:
+            # No return here: one inside `finally` would swallow a Ctrl+C on its way out.
             res["note"] = f"RESTORE FAILED ({exc}) - check {prop} on the desk by hand"
-            return res
+    if res["note"].startswith("RESTORE FAILED"):
+        return res
 
     res["ok"] = bool(res.get("took")) and res.get("restored") and res.get("clean")
     if not res["ok"] and not res["note"]:

@@ -5,11 +5,11 @@ Run: python DevTools/test_shows.py
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import check
 import devices
 import fake_model
 import server
 import shows
+from _testkit import check
 
 
 def fake_blob(entries):

@@ -18,10 +18,9 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check
 import channels
 import server
-
+from _testkit import check
 
 # A preset as the files store it: normalised floats, the module flags, the mode, and the marker.
 PRESET = {

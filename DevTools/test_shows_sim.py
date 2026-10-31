@@ -20,13 +20,13 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import as_device, check, check_in, patched
 import devices
 import fake_model
 import profiles as profiles_mod
 import rcp_read
 import server
 import shows
+from _testkit import as_device, check, check_in, patched
 
 # PIN THE DESK. This suite simulates Pro II show behaviour, so with a Duo attached it would fail on
 # a legitimate refusal and look like a regression. Offline tests must not depend on what happens to

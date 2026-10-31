@@ -21,11 +21,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_in, check_not_in
 import autogain
 import devices
 import meters
 import server
+from _testkit import check, check_in, check_not_in
 
 # PIN THE DESK. This suite asserts Pro II channel LABELS ("USB 2 (Secondary)"), so with a Duo
 # attached the Duo's shorter names would read as a regression. Offline tests must not depend on

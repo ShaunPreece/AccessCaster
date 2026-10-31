@@ -40,11 +40,8 @@ rather than guessing, because a missing endpoint looks exactly like perfect supp
 """
 from __future__ import annotations
 
-import json
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,8 +51,8 @@ import hid
 import rcp_read
 import rcp_transfer
 import server
+from _desk import api
 
-BASE = "http://127.0.0.1:8770"
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
 MUTE_CHAN = "Mic3"  # nothing is plugged into Mic 3, and the standing rule keeps Mic 1 unwritten
 GAIN_CHAN = 3       # same reason: Mic 1 carries a live microphone and is never written by a test
@@ -67,24 +64,6 @@ server._ann_say = lambda text: SAID.append((time.time() - _t0, text))
 # never speaks, so forcing it on cannot make the real announcer chattier - but leaving it off would
 # make the unmarked control halves silent and report a false pass.
 server._ann_levels_on = True
-
-
-def post(path: str, payload: dict) -> dict:
-    """POST and return the JSON. A 404 comes back as a RESULT rather than an exception, because a
-    missing endpoint is the one failure that would otherwise read as flawless suppression."""
-    req = urllib.request.Request(BASE + path, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as exc:
-        return {"ok": False, "http_status": exc.code,
-                "message": f"{path} returned HTTP {exc.code}"}
-
-
-def get(path: str) -> dict:
-    with urllib.request.urlopen(BASE + path, timeout=10) as r:
-        return json.loads(r.read().decode())
 
 
 def listen(dev, st: dict, secs: float) -> list[str]:
@@ -111,7 +90,7 @@ def phase(dev, st, label: str, mark, path: str, payload: dict, expect_speech, fa
     because the desk does not echo this path - report it, do not judge it)."""
     if mark is not None:
         mark()
-    res = post(path, payload)
+    res = api(path, post=payload)
     if res.get("http_status") == 404:
         failures.append(f"{label}: {res['message']} - run the server from THIS source tree "
                         f"(python DevTools/run_dev_server.py)")
@@ -134,7 +113,7 @@ def phase(dev, st, label: str, mark, path: str, payload: dict, expect_speech, fa
 
 
 def main() -> int:
-    levels = get("/api/faders/levels")
+    levels = api("/api/faders/levels")
     original = next((f["percent"] for f in levels["faders"] if f["index"] == FADER), None)
     if original is None:
         print(f"fader index {FADER} has no level control here; nothing to test")
@@ -150,7 +129,7 @@ def main() -> int:
     if iface is None:
         print("no device")
         return 1
-    chans = {c["name"]: c for c in get("/api/channels")["channels"]}
+    chans = {c["name"]: c for c in api("/api/channels")["channels"]}
     mute_was = bool(chans[MUTE_CHAN]["muted"])
     strip = channels.channel_strip_index(MUTE_CHAN)
     # The channels list carries mute but not gain (gain is a mixer read), so take it from the desk.
@@ -197,19 +176,19 @@ def main() -> int:
               "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_b}, None, failures, notes)
     finally:
         dev.close()
-        post("/api/faders/level", {"fader": FADER, "percent": original})
-        post("/api/channels/mute", {"name": MUTE_CHAN, "on": mute_was})
+        api("/api/faders/level", post={"fader": FADER, "percent": original})
+        api("/api/channels/mute", post={"name": MUTE_CHAN, "on": mute_was})
         if isinstance(gain_was, int):
-            post("/api/channel/gain", {"channel": GAIN_CHAN, "db": gain_was})
-        back = get("/api/faders/levels")
+            api("/api/channel/gain", post={"channel": GAIN_CHAN, "db": gain_was})
+        back = api("/api/faders/levels")
         now = next((f["percent"] for f in back["faders"] if f["index"] == FADER), None)
-        chans2 = {c["name"]: c for c in get("/api/channels")["channels"]}
+        chans2 = {c["name"]: c for c in api("/api/channels")["channels"]}
         mute_now = bool(chans2[MUTE_CHAN]["muted"])
         gain_now = channels.read_mixer()["mics"][GAIN_CHAN]["gain_db"]
         for what, before, after in (("fader level", original, now),
                                     (f"{MUTE_CHAN} mute", mute_was, mute_now),
                                     (f"Mic {GAIN_CHAN} gain", gain_was, gain_now)):
-            ok = (before == after) or after is None and before is None
+            ok = before == after
             print(f"restored: {what} {before} -> {after} "
                   f"({'ok' if ok else 'MISMATCH, check the desk'})")
             if not ok:

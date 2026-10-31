@@ -21,9 +21,8 @@ import sys
 
 import _bootstrap
 import _testkit
-from _testkit import check
 import app_settings as a
-
+from _testkit import check
 
 # Every key the app WRITES to settings.json, read off the source rather than listed by hand: a hand
 # list misses exactly the new preference this check exists to catch. Three shapes cover every

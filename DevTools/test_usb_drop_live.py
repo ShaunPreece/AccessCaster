@@ -61,55 +61,21 @@ Run: python DevTools/test_usb_drop_live.py --expendable-desk [--layers handles2,
 """
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 
 import _bootstrap
 import hid
 import rcp_hid
 import rcp_read
 import shows
+from _desk import BASE, api, rode_devices_present
 
 QUIET_SECONDS = 20.0
 POLL_S = 1.5                    # shows.POLL_S, so `poll` polls exactly as the app does
 SAMPLE_AT = (3.0, 10.0, 20.0)
-BASE = "http://127.0.0.1:8770"
 LAYERS = ("handles1", "handles2", "poll", "export", "exportonly", "app")
-
-
-def present() -> int:
-    """How many VID_19F7 devices Windows has present, WITHOUT opening any of them."""
-    out = subprocess.run(
-        ["powershell", "-NoProfile", "-Command",
-         "@(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | "
-         "Where-Object { $_.InstanceId -match 'VID_19F7' }).Count"],
-        capture_output=True, text=True)
-    try:
-        return int(out.stdout.strip())
-    except ValueError:
-        return -1
-
-
-def api(path: str, timeout: float = 90.0, post: dict | None = None) -> dict:
-    """GET, or POST with a JSON body when `post` is given.
-
-    ACTION ROUTES TAKE THEIR ARGUMENTS IN A JSON BODY, NOT THE QUERY STRING, and `do_POST` matches
-    `self.path` EXACTLY - so `?backup_first=false` does not merely get ignored, it makes the path
-    miss the table and return 404.
-    """
-    data = json.dumps(post).encode() if post is not None else None
-    req = urllib.request.Request(BASE + path, data=data,
-                                 headers={"Content-Type": "application/json"} if data else {})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return {"ok": False, "message": f"{type(e).__name__}: {e}"}
 
 
 def uuid_direct() -> str | None:
@@ -137,6 +103,7 @@ class Load:
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
         self.dumps = 0
+        self.dump_errors: list[str] = []
         self.read_errors = 0
 
     def start(self) -> None:
@@ -174,7 +141,7 @@ class Load:
             try:
                 dev.close()
             except Exception:
-                pass
+                pass      # the desk has usually gone by now, and a close has nothing to report
 
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
@@ -184,8 +151,9 @@ class Load:
             try:
                 rcp_read.read_model_stable(fresh=True)
                 self.dumps += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # Counted, so a quiet window can be told from one whose dumps were all failing.
+                self.dump_errors.append(f"{type(e).__name__}: {e}")
 
     def stop(self) -> None:
         """Ask the threads to finish and WAIT for them, so each handle is closed by its own reader.
@@ -249,7 +217,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
     """One reset under the chosen layers. Returns (status, uuid) with status
     clean / void / dropped / abort."""
     use_app = "app" in layers
-    before = present()
+    before = rode_devices_present()
     print(f"\n--- trial {n} --- present={before} baseline={baseline}")
     if before <= 0:
         print("  ABORT: the desk is not on the bus before we even start.")
@@ -274,7 +242,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
             break
         while time.time() - sent_at < at:
             time.sleep(0.2)
-        now = present()
+        now = rode_devices_present()
         print(f"  t+{at:>4.0f}s present={now}")
         if now <= 0 and dropped_at is None:
             dropped_at = at
@@ -282,6 +250,8 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
     if load is not None:
         if load.poll:
             print(f"  {load.dumps} dumps landed across the window")
+            if load.dump_errors:
+                print(f"  {len(load.dump_errors)} dump(s) failed, the first: {load.dump_errors[0]}")
         if load.read_errors:
             print(f"  {load.read_errors} read handle(s) errored out during it")
         load.stop()
@@ -290,7 +260,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
 
     if dropped_at is not None:
         time.sleep(10.0)                  # a merely slow re-enumeration is not the fault
-        if present() <= 0:
+        if rode_devices_present() <= 0:
             print(f"  *** DROPPED at t+{dropped_at:.0f}s, still gone 10s later.")
             print("  *** THE DESK NEEDS A PHYSICAL REPLUG. Stopping.")
             return "dropped", baseline

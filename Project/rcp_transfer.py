@@ -896,7 +896,7 @@ def _leave_stale_transfer_mode(timeout_s: float = 8.0) -> None:
     """
     try:
         mode = _desk_transfer_mode()
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:   # no desk, a failed read, an unreadable dump
         diagnostics.event("transfer.mode_unread", str(exc))
         return
     if not mode:

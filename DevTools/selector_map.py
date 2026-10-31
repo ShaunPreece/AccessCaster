@@ -76,7 +76,8 @@ def sections(blob: bytes) -> tuple[dict, Counter]:
 
 def main() -> None:
     if len(sys.argv) > 1:
-        blob = open(sys.argv[1], "rb").read()
+        with open(sys.argv[1], "rb") as f:
+            blob = f.read()
     else:
         blob = rcp_read.read_model_stable()
     where, count = sections(blob)

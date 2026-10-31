@@ -28,9 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import check, check_true
 import autostart
-
+from _testkit import check, check_true
 
 ISS = Path(__file__).resolve().parent.parent / "ProjectBuilds" / "installer.iss"
 iss = io.open(ISS, encoding="utf-8").read()

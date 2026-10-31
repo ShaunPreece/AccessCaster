@@ -24,12 +24,12 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-from _testkit import check, check_true, as_device
 import channels
 import devices
 import fake_model
 import profiles
 import rcp_transfer
+from _testkit import as_device, check, check_true
 
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
 

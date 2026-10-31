@@ -298,6 +298,18 @@ def check_codemap_lines() -> None:
                            f"Run python DevTools/codemap_lines.py to correct them.")
 
 
+# profile_coverage.py's drift guard: a property a profile saves with no restore verdict, or one the
+# app can write with no verdict on whether a profile carries it. Run here because nothing else runs it.
+def check_profile_coverage() -> None:
+    import profile_coverage
+    _text, s = profile_coverage.build()
+    if s["undeclared"]:
+        fail("profile_coverage.py", "saved with no entry in RESTORED_BY: " + ", ".join(s["undeclared"]))
+    if s["unjudged"]:
+        fail("profile_coverage.py", "writable and unsaved with no entry in NOT_SAVED: "
+                                    + ", ".join(s["unjudged"]))
+
+
 def main() -> int:
     check_completed()
     check_no_status()
@@ -308,6 +320,7 @@ def main() -> int:
     check_code_comments()
     check_private_citations()
     check_codemap_lines()
+    check_profile_coverage()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

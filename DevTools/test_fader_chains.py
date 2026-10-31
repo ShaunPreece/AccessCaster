@@ -28,9 +28,9 @@ import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
-from _testkit import check, check_in
 import channels
 import server
+from _testkit import check, check_in
 
 
 def chain(tag):
