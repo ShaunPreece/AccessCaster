@@ -665,8 +665,9 @@ SOURCE INDICES (channelInputSource source codes, NOT fader display order):
                         level == anchor means LINKED (the cell follows the fader).
                         A source the desk does not fill reads "-1|0", a placeholder.
                         A stereo-pair code's 13 cells (sources 4-6) stay "-1|0"
-                        until the pair is first linked; the desk then fills them
-                        and keeps them after the unlink. Writing "-1|0" back does
+                        until the pair is first linked. Every link sets them from
+                        the lower mic's fader, and the unlink leaves them as they
+                        are. Writing "-1|0" back does
                         not restore a placeholder: the desk stores the level
                         relative to the anchor ("-0.149606|0.850394"). Measured on
                         the Pro II, fw 1.7.6, 31st October 2026.

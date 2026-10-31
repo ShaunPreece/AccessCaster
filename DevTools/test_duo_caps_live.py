@@ -18,7 +18,8 @@ NOTHING HERE WAITS A FIXED TIME FOR THE DESK. See `settled`.
 NEVER add disableAllPhysicalButtons, disableAllHeadphoneOutputs or disableAllLineoutOutputs. They
 take the desk's buttons or its outputs away, and this suite is meant to run with nobody there.
 
-Run: python DevTools/test_duo_caps_live.py [--only NAME]
+Run: python DevTools/test_duo_caps_live.py [--only NAME] [--mic1-pair]
+`--mic1-pair` links the pair holding Mic 1 instead, and only with the owner's say-so.
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ NOTES: list[str] = []
 ONLY = None
 if "--only" in sys.argv:
     ONLY = sys.argv[sys.argv.index("--only") + 1]
+MIC1_PAIR = "--mic1-pair" in sys.argv
 
 
 def snapshot():
@@ -388,10 +390,12 @@ if "fader_write" in dev.caps:
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- stereo_link -------------------------------------------------------------------------------
-# Never a pair holding Mic 1 (source 0), which a test never writes. The Duo's only pair is Mic 1 + 2.
-pair = next((p for p in dev.fader.stereo_pairs if 0 not in p[1:3]), None)
+# Never a pair holding Mic 1 (source 0) unless --mic1-pair asks for one: a test does not write
+# Mic 1. The Duo's only pair is Mic 1 + 2.
+pair = next((p for p in dev.fader.stereo_pairs if (0 in p[1:3]) == MIC1_PAIR), None)
 if "stereo_link" in dev.caps and pair is None:
-    print("\n=== stereo_link: skipped, every pair on this desk holds Mic 1 ===")
+    print("\n=== stereo_link: skipped, no pair on this desk "
+          f"{'holds' if MIC1_PAIR else 'leaves out'} Mic 1 ===")
 elif "stereo_link" in dev.caps:
     code, lower, upper, label = pair
     vec = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
@@ -437,18 +441,18 @@ elif "stereo_link" in dev.caps:
                         rcp_transfer.build_global_prop_bool(c.MUTE_PROP, bool(was), sel))
                     time.sleep(0.25)
 
-        # The pair code's own cross-points are '-1|0' placeholders until it is first linked; the
-        # desk then fills them and keeps them. Writing '-1|0' back does not restore a placeholder:
-        # the desk reads the level relative to the anchor and stores -0.149606.
-        _b, snap_now = snapshot()
+        # The pair code's own cross-point levels belong to the desk: each link sets them from the
+        # lower mic's fader and the unlink leaves them, '-1|0' placeholders included. Writing a
+        # value back is no restore: '-1|0' is stored relative to the anchor, as -0.149606.
         pair_cells = {rcp_transfer.cross_point_selector(o, code)
                       for o in range(rcp_transfer.CROSS_POINT_SOURCE_STRIDE)}
-        placeholders = {k for k, v in snap_now.items()
-                        if k[1] == "MIX" and k[2] == "mixLevelWithAnchor"
-                        and len(k[0]) == 1 and k[0][0] in pair_cells and v == "-1|0"}
+        _b, snap_now = snapshot()
+        pair_levels = {k for k in snap_now
+                       if k[1] == "MIX" and k[2] == "mixLevelWithAnchor"
+                       and len(k[0]) == 1 and k[0][0] in pair_cells}
         probe(f"stereo_link: link and unlink {label}",
               None, link, True, False, ignore={"sipSlotCallDisconnect"},
-              restore_extra=restore_mutes, one_way=placeholders)
+              restore_extra=restore_mutes, one_way=pair_levels)
         after = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
