@@ -5,6 +5,7 @@ THE RULES THIS PINS:
     read it as the desk dropping off the bus;
   * a mic's chain counts as settled only once two fresh reads agree, so a voicing still applying
     is not taken for the finished chain;
+  * the live schemes test applies its saved scheme even when a read part way through fails;
   * `property_list.py --check` with no list to compare against says so and writes nothing.
 
 No device: the PowerShell call, the chain reads and the output path are stubbed.
@@ -21,9 +22,11 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
 import _testkit
+import devices
 import fake_model
 import property_list
-from _testkit import check, check_true, patched
+import test_schemes_live
+from _testkit import as_device, check, check_true, patched
 
 print("A FAILED DEVICE COUNT RAISES")
 empty = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="no PnP module")
@@ -43,6 +46,25 @@ reads = iter([{"eqLowGain": 0.1}, {"eqLowGain": 0.2}, {"eqLowGain": 0.3}, {"eqLo
 with patched((_desk, {"mic_chain": lambda ch: next(reads)}), (_desk.time, {"sleep": lambda s: None})):
     check("the steady chain is returned, not the first read", _desk.settled_chain(3),
           {"eqLowGain": 0.3})
+
+print("\nTHE SCHEMES TEST PUTS THE MIXES BACK WHEN A READ FAILS PART WAY")
+baseline = {"outputs": {"Chat": {"mode": 1, "sources": {}}}}
+reads = iter([({"ok": True, "scheme": baseline}, b""),
+              ({"ok": False, "message": "the desk stopped answering"}, b""),
+              ({"ok": True, "scheme": baseline}, b"")])
+applied = []
+print("  (the suite's own output follows, and its failed read is the point)")
+own_failures = list(_testkit.FAILURES)     # the suite's own checks fail on purpose here
+with as_device(devices.PRO2), patched(
+        (_testkit, {"finish": lambda: 0}),
+        (test_schemes_live, {"read_matrix": lambda: next(reads), "counts": lambda blob: {},
+                             "on_faders": lambda blob: set()}),
+        (test_schemes_live.routing_schemes, {"apply": lambda scheme: applied.append(scheme) or {
+            "ok": True, "outputs": list(scheme["outputs"]), "skipped": []}}),
+        (test_schemes_live.time, {"sleep": lambda s: None})):
+    test_schemes_live.main()
+_testkit.FAILURES[:] = own_failures
+check_true("the saved scheme is applied after the failed read", applied and applied[-1] is baseline)
 
 print("\nproperty_list --check WITH NOTHING TO COMPARE AGAINST")
 with tempfile.TemporaryDirectory(prefix="ac_property_list_") as tmp:

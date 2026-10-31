@@ -33,7 +33,7 @@ import _testkit
 import devices
 import rcp_read
 import routing_schemes
-from _testkit import check
+from _testkit import check, check_true
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
 
@@ -69,6 +69,61 @@ def counts(blob):
     return {n: len(v) for n, v in rcp_read.snapshot_properties(blob).items()}
 
 
+def chat_now(step: str):
+    """The Chat output as the desk reads it back, or None, with a failed check, when it will not."""
+    after, _b = read_matrix()
+    if not check_true(f"{step}: the matrix reads back", after.get("ok"), after.get("message", "")):
+        return None
+    return after["scheme"]["outputs"]["Chat"]
+
+
+def drive_chat(src_code: dict, faders: set) -> None:
+    """Steps 2 to 4: two built-in schemes and a manual level on the Chat output, each read back."""
+    builtins = {b["id"]: b for b in routing_schemes.builtins()}
+
+    print("\n2. APPLY the built-in 'Chat = my mic only'")
+    res = routing_schemes.apply(builtins[routing_schemes.BUILTIN_CHAT_MIC_ONLY]["scheme"])
+    check("apply reports ok", res["ok"], True)
+    check("and touched the Chat output only", res["outputs"], ["Chat"])
+    time.sleep(SETTLE)
+    chat = chat_now("mic only")
+    if chat is None:
+        return
+    check("the desk reads back Custom mode", chat["mode"], 2)
+    check("carrying Mic 1 and nothing else",
+          sorted(k for k, c in chat["sources"].items() if not c["excluded"]), ["Mic1"])
+
+    print("\n3. APPLY the built-in 'Chat back to normal'")
+    res = routing_schemes.apply(builtins[routing_schemes.BUILTIN_CHAT_NORMAL]["scheme"])
+    check("apply reports ok", res["ok"], True)
+    time.sleep(SETTLE)
+    chat = chat_now("back to normal")
+    if chat is None:
+        return
+    check("the desk reads back MIX MINUS, not Main Mix", chat["mode"], 1)
+    check("with every source back in", all(not c["excluded"] for c in chat["sources"].values()),
+          True)
+    check("and every one on a fader following it",
+          all(c["linked"] for k, c in chat["sources"].items() if src_code.get(k) in faders), True)
+
+    print("\n4. A MANUAL LEVEL round-trips (the half a flags-only scheme loses)")
+    level_scheme = {"outputs": {"Chat": {"mode": 2, "sources": dict(
+        {k: {"excluded": False, "linked": True} for k in chat["sources"]},
+        Mic1={"excluded": False, "linked": False, "level": 0.42})}}}
+    res = routing_schemes.apply(level_scheme)
+    check("apply reports ok", res["ok"], True)
+    time.sleep(SETTLE)
+    chat = chat_now("manual level")
+    if chat is None:
+        return
+    cell = chat["sources"]["Mic1"]
+    check("the cross-point reads back UNLINKED", cell.get("linked"), False)
+    check("at the level the scheme asked for", round(cell.get("level", -1), 2), 0.42)
+    check("and its neighbours are still linked",
+          all(c["linked"] for k, c in chat["sources"].items()
+              if k != "Mic1" and src_code.get(k) in faders), True)
+
+
 def main() -> int:
     dev = devices.get_active_device()
     print(f"Device: {dev.name} (product id {dev.product_id:#06x})")
@@ -98,53 +153,20 @@ def main() -> int:
     print(f"  model {len(blob0)} bytes, {len(n0)} distinct properties, "
           f"{sum(n0.values())} occurrences")
 
-    builtins = {b["id"]: b for b in routing_schemes.builtins()}
-
-    print("\n2. APPLY the built-in 'Chat = my mic only'")
-    res = routing_schemes.apply(builtins[routing_schemes.BUILTIN_CHAT_MIC_ONLY]["scheme"])
-    check("apply reports ok", res["ok"], True)
-    check("and touched the Chat output only", res["outputs"], ["Chat"])
-    time.sleep(SETTLE)
-    after, _b = read_matrix()
-    chat = after["scheme"]["outputs"]["Chat"]
-    check("the desk reads back Custom mode", chat["mode"], 2)
-    check("carrying Mic 1 and nothing else",
-          sorted(k for k, c in chat["sources"].items() if not c["excluded"]), ["Mic1"])
-
-    print("\n3. APPLY the built-in 'Chat back to normal'")
-    res = routing_schemes.apply(builtins[routing_schemes.BUILTIN_CHAT_NORMAL]["scheme"])
-    check("apply reports ok", res["ok"], True)
-    time.sleep(SETTLE)
-    after, _b = read_matrix()
-    chat = after["scheme"]["outputs"]["Chat"]
-    check("the desk reads back MIX MINUS, not Main Mix", chat["mode"], 1)
-    check("with every source back in", all(not c["excluded"] for c in chat["sources"].values()),
-          True)
-    check("and every one on a fader following it",
-          all(c["linked"] for k, c in chat["sources"].items() if src_code.get(k) in faders), True)
-
-    print("\n4. A MANUAL LEVEL round-trips (the half a flags-only scheme loses)")
-    level_scheme = {"outputs": {"Chat": {"mode": 2, "sources": dict(
-        {k: {"excluded": False, "linked": True} for k in chat["sources"]},
-        Mic1={"excluded": False, "linked": False, "level": 0.42})}}}
-    res = routing_schemes.apply(level_scheme)
-    check("apply reports ok", res["ok"], True)
-    time.sleep(SETTLE)
-    after, _b = read_matrix()
-    cell = after["scheme"]["outputs"]["Chat"]["sources"]["Mic1"]
-    check("the cross-point reads back UNLINKED", cell.get("linked"), False)
-    check("at the level the scheme asked for", round(cell.get("level", -1), 2), 0.42)
-    check("and its neighbours are still linked",
-          all(c["linked"] for k, c in after["scheme"]["outputs"]["Chat"]["sources"].items()
-              if k != "Mic1" and src_code.get(k) in faders), True)
-
-    print("\n5. AND THE SAVED SCHEME PUTS IT ALL BACK")
-    res = routing_schemes.apply(baseline)
+    # From the first apply on, the Chat output is not as found, so the saved scheme goes back on
+    # however the steps in between end.
+    try:
+        drive_chat(src_code, faders)
+    finally:
+        print("\n5. AND THE SAVED SCHEME PUTS IT ALL BACK")
+        res = routing_schemes.apply(baseline)
     check("apply reports ok", res["ok"], True)
     check("every output was written", len(res["outputs"]), len(baseline["outputs"]))
     check("nothing was skipped", res["skipped"], [])
     time.sleep(SETTLE)
     final, blob1 = read_matrix()
+    if not check_true("the matrix reads back", final.get("ok"), final.get("message", "")):
+        return _testkit.finish()
     check("the matrix reads back EXACTLY as it was found",
           final["scheme"]["outputs"] == baseline["outputs"], True)
     if final["scheme"]["outputs"] != baseline["outputs"]:

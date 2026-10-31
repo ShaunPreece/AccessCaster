@@ -409,7 +409,7 @@ different product id),
 file**, and that an import merges rather than replacing this machine's own token),
 `test_pad_actions`, `test_pad_records`, `test_pad_volume` (a drive holding a `pads` folder before transfer mode is never taken for the desk's volume), `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
 `test_restore_warnings`, `test_server_safety` (static files, request bodies, the `.bad` copy of a JSON file that will not parse, and Chat isolation's put-back), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
-`test_devtools_helpers` (`_desk`'s device count and settled chain, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
+`test_devtools_helpers` (`_desk`'s device count and settled chain, the live schemes test putting the mixes back after a failed read, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
 did not take),
 `test_virtual_devices` (RODE's driver status block parsed as its tray reads it, and the spoken
 outcomes). `watch_vad_endpoints.ps1` is the live companion: it prints a line whenever the set of
