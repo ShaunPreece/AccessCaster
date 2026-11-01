@@ -1,8 +1,7 @@
 """Unit tests for the control announcer's report-04 decoder. NO DEVICE, no HID, no writes.
 
-Feeds synthetic report-04 packets (built to the shapes recorded on hardware,
-including the exact selector bytes captured on hardware) into server._ann_handle_report with
-_ann_say stubbed, and asserts what would be SPOKEN.
+Feeds synthetic report-04 packets (built to the desk's own frame shapes and selector bytes) into
+server._ann_handle_report with _ann_say stubbed, and asserts what would be SPOKEN.
 
 Run: python DevTools/test_announcer.py
 """
@@ -23,7 +22,7 @@ import server
 from _testkit import check, check_true
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
-# failed on the Duo's different channel set and looked like a regression. Offline tests must not
+# would fail on the Duo's different channel set and look like a regression. Offline tests must not
 # depend on what happens to be plugged into the machine running them. The Duo's own announcer
 # expectations live in DevTools/test_duo_parity.py.
 devices.force_device(devices.PRO2)
@@ -59,8 +58,8 @@ def v_str(text: str) -> bytes:
 
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property at SEL_CHANNEL + strip index, exactly as observed on hardware
-    (mute on channel 2 -> 0x1D)."""
+    """A pushed STATE property at SEL_CHANNEL + strip index, as the desk pushes it (mute on
+    channel 2 is selector 0x1D)."""
     return push([rcp_transfer.SEL_CHANNEL + strip_idx], prop, v_bool(on))
 
 
@@ -296,9 +295,9 @@ server._ann_handle_report(state_packet("channelOutputMute", 1, True), fresh_st()
 check("a mute still gets through", SPOKEN, ["USB 1 (Main Stereo) muted"])
 
 print("\nAFTER AN ENCODER PRESS, ONE CLICK NAMES WHAT YOU ARE HOLDING")
-# The press is detected (it always was) but says nothing about WHICH channel it selected, so the
-# first movement must name it straight away - otherwise you nudge blind and wait for each settle.
-# Addressed at 0x06, as captured off the desk.
+# The press is detected but says nothing about WHICH channel it selected, so the first movement
+# must name it straight away - otherwise you nudge blind and wait for each settle.
+# Addressed at 0x06.
 enc_press = push([0x06], "encoderPressed", v_bool(True))
 # The RELEASE edge, which the desk does push. Announcing happens here rather than on the press,
 # because a HOLD is the desk's own mute gesture and must not advance our ring - see _ANN_ENC_HOLD_S.
@@ -344,8 +343,8 @@ server._ann_handle_report(xpoint_packet(9, 0, 0.9), st)      # source 9 = USB 2
 check("second press re-arms the naming", SPOKEN, ["Select", "90 percent, USB 2 (Secondary)"])
 
 print("\nPRESS AND HOLD IS THE DESK'S MUTE, NOT A RING STEP")
-# Measured on hardware: holding pushes channelOutputMute ~765 ms in, while still held,
-# and mutes the channel selected BEFORE the press. Announcing the next ring position on the press
+# Holding pushes channelOutputMute about 765 ms in (a measured figure), while still held, and
+# mutes the channel selected BEFORE the press. Announcing the next ring position on the press
 # edge would name the wrong channel AND leave our ring one step out.
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
 st = fresh_st()
@@ -405,7 +404,7 @@ print("\nA TURN THAT MOVES NOTHING SAYS SO")
 
 
 def encsig_packet(delta: int = 1) -> bytes:
-    """THE SHAPE THE DESK ACTUALLY SENDS, hexdumped from the wire:
+    """THE SHAPE THE DESK SENDS:
 
         ... encoderSignal | 00 | 01 0b 08 | 01 05 01 <int32 LE> | 01 ...
 
@@ -468,8 +467,8 @@ server._ann_flush_pending(st)
 check("a selected MIC is described by its gain", SPOKEN[0].startswith("Mic 1 selected"), True)
 check("and is never told it has nothing to adjust", "nothing" in SPOKEN[0].lower(), False)
 
-# AN ENCODER PRESS DOES NOT TAKE THE ENCODER BACK OFF A SELECTED CHANNEL, measured on the desk:
-# systemChannelSelected stays at 0 across two presses. Advancing our ring here would announce USB 1
+# AN ENCODER PRESS DOES NOT TAKE THE ENCODER BACK OFF A SELECTED CHANNEL: systemChannelSelected
+# stays at 0 across presses. Advancing our ring here would announce USB 1
 # and then Chat while the desk never leaves Mic 1, and leave enc_pos pointing at an entry the
 # encoder is not on - the same value _ann_at_limit reads to decide "is this against a stop".
 st = fresh_st()
@@ -517,7 +516,7 @@ check("silent when levels are off", SPOKEN, [])
 server._ann_levels_on = True
 
 print("\nTHE ENCODER RING: PREDICT WHAT A PRESS SELECTED")
-# Hardware-observed order: fader 7 -> fader 8 -> fader 9 -> monitor -> round again. Once a real
+# The desk's order: fader 7 -> fader 8 -> fader 9 -> monitor -> round again. Once a real
 # movement has seated us, every later press can be announced BEFORE it is turned.
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
 
@@ -669,14 +668,13 @@ server._ann_handle_report(chansel_packet(-1), st)
 check("and deselecting says the encoder is back on levels",
       SPOKEN, ["Levels. Encoder sets fader and monitor levels"])
 
-# THE PHANTOM "LEVELS" ANNOUNCEMENT: "Levels. Encoder sets fader and monitor levels" spoken a while
-# after startup with nobody touching anything. The pushed stream reports CHANGES, so an ABSENT
+# A PHANTOM "LEVELS" ANNOUNCEMENT AT STARTUP. The pushed stream reports CHANGES, so an ABSENT
 # st["chan_sel"] makes the desk's first push of the resting value (-1, nothing selected) read as
-# one. _ann_seed_layout seeds it for exactly this reason: seeded state must stay SILENT for an
-# unchanged value.
+# one, and "Levels. Encoder sets fader and monitor levels" is spoken with nobody touching anything.
+# _ann_seed_layout seeds it for this reason: seeded state stays SILENT for an unchanged value.
 SPOKEN.clear()
 seeded = fresh_st()
-seeded["chan_sel"] = -1                      # what _ann_seed_layout now reads from the startup dump
+seeded["chan_sel"] = -1                      # what _ann_seed_layout reads from the startup dump
 server._ann_handle_report(chansel_packet(-1), seeded)
 check("a resting push of 'nothing selected' after startup says NOTHING", SPOKEN, [])
 SPOKEN.clear()
@@ -819,8 +817,7 @@ try:
     channels.set_channel_mute("Mic2", True)
     rec = RECORDS[0] if RECORDS else b""
     # The record shape is the module-toggle shape: global address, compact bool, selector
-    # SEL_CHANNEL + strip. Mic 2 is on strip 1 in this layout, so 0x1D - the exact selector the
-    # hardware test used.
+    # SEL_CHANNEL + strip. Mic 2 is on strip 1 in this layout, so 0x1D.
     check("one record sent", len(RECORDS), 1)
     check_true("addressed as a global property on 0x1C + strip (Mic 2 -> 0x1D)",
                b"\x01\x01\x01\x01\x1d" + b"channelOutputMute\x00\x01\x01\x02" in rec)
@@ -884,9 +881,8 @@ try:
     # ---- ECHO SUPPRESSION: our own writes are not read back at us ----
     # The checks above only prove the WRITE itself is silent. The desk then PUSHES the change back,
     # and that echo lands on top of the screen reader reading the UI's own live region, so every
-    # change is announced twice. Hardware-proven for levels by announcer_echo_check.py: a marked
-    # write is silent, the same write unmarked comes back as "90 percent, USB 2". These pin the
-    # behaviour, including that it is SUPPRESSION and not deafness.
+    # change is announced twice: an unmarked level write comes back as "90 percent, USB 2". These
+    # pin the behaviour, including that it is SUPPRESSION and not deafness.
     print("\n-- echo suppression (our own writes are not spoken back)")
     channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
     st = fresh_st()

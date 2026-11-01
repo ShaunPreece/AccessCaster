@@ -65,7 +65,7 @@ def run(pkts):
 # ---------------------------------------------------------------------------------------------
 print("ENCODER RING IS DERIVED FROM THE DEVICE, NOT HARDCODED")
 # The ring is the faders with no physical pot, then the monitor. Pro II: 6 physical of 9, so
-# faders 7/8/9 + monitor - which must still match the ring OBSERVED on hardware byte for byte.
+# faders 7/8/9 + monitor - which must match the desk's own ring order exactly.
 with as_device(devices.PRO2):
     check("Pro II ring unchanged", server._ann_encoder_ring(), server._ANN_ENCODER_RING_PRO2)
 with as_device(devices.DUO):
@@ -177,10 +177,9 @@ check("Duo fader count", (devices.DUO.fader.count, devices.DUO.fader.physical), 
 check("Duo writes 10 vector slots", devices.DUO.fader.vector_length, 10)
 check("Duo default layout confirmed", devices.DUO.fader.default_vector is not None, True)
 check("Duo default layout fills all 10 slots", len(devices.DUO.fader.default_vector), 10)
-# THE BOUND IN set_fader_source IS vector_length, NOT count, and this pins it because reading
-# `count` broke RESET FADERS and PROFILE RESTORE on a Duo while fader_write was already on: both
-# walk all ten slots, and slot 9 met a bound of 9. Asserted by the REFUSAL at index 10, which
-# raises before anything is sent, so this stays an offline test.
+# THE BOUND IN set_fader_source IS vector_length, NOT count. RESET FADERS and PROFILE RESTORE both
+# walk all ten slots, so a bound of `count` (9) refuses slot 9 on a Duo. Asserted by the REFUSAL at
+# index 10, which raises before anything is sent, so this stays an offline test.
 with as_device(devices.DUO):
     try:
         rcp_transfer.set_fader_source(10, 0)

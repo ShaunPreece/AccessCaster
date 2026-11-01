@@ -1,8 +1,8 @@
 """Offline checks for the recorder: parsing, wording, storage labels and the elapsed-time count.
 
-NO DEVICE NEEDED, and that is the point - every fact these pin came off the hardware and is
-expensive to re-establish, since it needs a drive in the unit and a real take. This is what stops
-the parsing regressing.
+NO DEVICE NEEDED, and that is the point - every fact these pin is expensive to re-establish on a
+desk, since it needs a drive in the unit and a real take. This is what stops the parsing
+regressing.
 
     python DevTools/test_recorder.py
 """
@@ -21,12 +21,12 @@ import recorder
 from _testkit import check, check_in
 from wording import spoken_datetime
 
-# A real recordingContent string, copied off the unit. The trailing six fields are unmapped.
+# A recordingContent string as the unit sends it. The trailing six fields are unmapped.
 CONTENT = ("Recording 4|94486d8a68da47c7a516e1400a3279dc|"
            "/Application/ssd-mount/RODECaster/4 - 28 Aug 2026/Stereo Mix.wav|"
            "1787914947088|10.8173|0|0|1|0|0|1|1")
 
-# A real report-04 push, captured on the wire while a recording started (state 2) and stopped (0).
+# The report-04 pushes the desk sends when a recording starts (state 2) and stops (0).
 PUSH_RECORDING = bytes.fromhex(
     "041800000001010101037265636f7264537461746500010501020000000000000000000000000000")
 PUSH_STOPPED = bytes.fromhex(
@@ -102,7 +102,7 @@ print("\nHOW LONG WILL IT FIT (the figure a bar gives a sighted operator)")
 check("no destination, no claim",
       recorder.room_left(b"", None)["seconds"], None)
 
-print("\nDECODING THE PUSH (real packets, captured on the wire)")
+print("\nDECODING THE PUSH (the desk's own packets)")
 check("a start push reads as recording", recorder._state_from_push(PUSH_RECORDING), 2)
 check("a stop push reads as ready", recorder._state_from_push(PUSH_STOPPED), 0)
 check("a report that is not 04 is ignored",

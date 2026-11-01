@@ -191,7 +191,7 @@ server._note_recorder_context({"destination": {"spoken": "USB drive", "low": Fal
                                "room": {"words": "3 hours"}})
 reset(announcing=True)
 server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
-check("putting it IN no longer says a recording stopped", SAID, ["Recording now available."])
+check("putting it IN does not say a recording stopped", SAID, ["Recording now available."])
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.NO_DESTINATION)
 check("taking it out while idle names the drive that left",

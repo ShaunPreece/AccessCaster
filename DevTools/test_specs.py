@@ -139,10 +139,9 @@ except AssertionError as e:
 check_true("the builders reproduce every captured record (rcp_transfer._selftest)",
            _selftest_error == "", _selftest_error)
 
-# ZERO INDEX: we emit `01 00`, NOT the zero-length form. Both are legal by the grammar and the desk
-# takes both, but our pad writes have always used `01 00` and are proven on hardware. Changing
-# working write bytes to match an untested capture is risk for nothing, on the one address family
-# where a bad write appends a stray that only a factory reset clears.
+# ZERO INDEX: the builders emit `01 00`, NOT the zero-length form. Both are legal by the grammar and
+# the desk takes both, but pad writes are confirmed only with `01 00`, and pads are the address
+# family where a bad write appends a stray that only a factory reset clears. Do not switch forms.
 check_true("index zero is emitted as one byte, as our proven pad writes do",
            model_tree.encode_path([0x29A, 0]).hex() == "010102029a020100",
            model_tree.encode_path([0x29A, 0]).hex())
@@ -160,7 +159,7 @@ check_true("an index over 255 takes two bytes",
 
 print("\nunit settings: what a profile does with them")
 
-# The four that drifted are all SAVED by a profile; two are deliberately never written back. Assert
+# Every unit setting is SAVED by a profile; the two mutes are deliberately never written back. Assert
 # that pairing, because "saved but never restored" is the failure mode that looks like a backup and
 # is not one, and the reason it is acceptable here (a restored mute silences someone mid-show) has
 # to stay attached to the decision.
@@ -289,7 +288,7 @@ finally:
 
 
 # --- EXPANDED'S FOUR SOURCES: NAMED ALWAYS, ASSIGNABLE ONLY IN EXPANDED ----------------------
-# Codes 12-15 are RODE's Virtual Devices, measured on hardware. The split matters both ways:
+# Codes 12-15 are RODE's Virtual Devices. The split matters both ways:
 # offering them in Standard puts a permanently silent input on a fader, and refusing to NAME them
 # there leaves the announcer saying "0 percent, Source 12" about a fader that still holds one.
 print("\nTHE EXPANDED-ONLY SOURCES")
@@ -349,7 +348,7 @@ for dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices
     check_true(f"{_n}: every assignable code comes from the table",
                set(dev.fader.code_set)
                == {c.code for c in _table if c.on_faders and not c.expanded_only})
-    # The four reach ALL THREE in Expanded, which is the failure that prompted the table.
+    # The four reach ALL THREE in Expanded.
     _virtual = {c.code for c in _table if c.expanded_only}
     check_true(f"{_n}: Expanded's four reach the faders",
                _virtual <= set(dev.fader.code_set_for(True)))
@@ -358,14 +357,14 @@ for dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices
     check_true(f"{_n}: ...and the routing matrix",
                _virtual <= {s["index"] for s in dev.matrix.sources_for(True)})
     # THE ROWS THE GRID READS AND THE ROWS THE PAGE OFFERS. The read must never be the narrower of
-    # the two, which is how the four came to be offered as rows with no state behind them.
+    # the two, or a row is offered with no state behind it.
     for _exp in (False, True):
         check_true(f"{_n}: the grid read covers every row offered (expanded={_exp})",
                set(s["index"] for s in dev.matrix.sources_for(_exp))
                <= set(dev.matrix.all_source_indices))
     # A SCHEME'S SHAPE MUST NOT DEPEND ON THE MODE, so what is read and stored is the wide set in
-    # both: a scheme saved in Standard carrying no Virtual A cell left one behind when applied in
-    # Expanded, and "Everything normal" could not reset it.
+    # both: a scheme saved in Standard with no Virtual A cell leaves that cell as it is when applied
+    # in Expanded, and "Everything normal" cannot reset it.
     check_true(f"{_n}: the read set is mode-independent and covers Expanded's four",
                _virtual <= set(dev.matrix.all_source_indices))
     check_true(f"{_n}: a scheme covers every row the grid reads",

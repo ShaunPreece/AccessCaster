@@ -1,7 +1,8 @@
 """The show commands driven against a SIMULATED desk, faults included.
 
-WHY THIS EXISTS. All four commands are confirmed on a desk, but the FAULTS cannot be staged on one: a desk that takes a command and silently does nothing, a delete that does not
-delete, an error code nobody has seen. Those are the branches that decide whether the app tells the
+WHY THIS EXISTS. All four commands are confirmed on a desk, but the FAULTS cannot be staged on
+one: a desk that takes a command and silently does nothing, a delete that does not delete, an
+error code nobody has seen. Those are the branches that decide whether the app tells the
 truth. This drives the REAL `server.action_*` functions
 against a fake desk so the logic, the verification and above all the REFUSALS are exercised.
 
@@ -69,11 +70,9 @@ class FakeDesk:
         # so this is the fault that reads as a cheerful success unless something checks for it.
         self.goes_quiet_on_import = False   # take the command, then stop answering entirely
         self.quiet = False
-        # SOMEWHERE TO WRITE, which is now part of every export decision rather than a detail of the
-        # page: `_export_and_wait` refuses before sending anything if there is no card or drive in.
-        # Defaulting this to False models a desk with no storage, which is the state a Duo is
-        # always in and the state the clean-restore bug hides in - so the DEFAULT is True and the
-        # no-storage case is asked for explicitly.
+        # SOMEWHERE TO WRITE. `_export_and_wait` refuses before sending anything if there is no
+        # card or drive in. False models a desk with no storage, the state a Duo is always in, so
+        # the DEFAULT is True and the no-storage case is asked for explicitly.
         self.storage = True
 
     def blob(self):

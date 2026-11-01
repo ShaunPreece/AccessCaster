@@ -29,6 +29,7 @@ import devices
 import fake_model
 import profiles
 import rcp_transfer
+import soundpad
 from _testkit import as_device, check, check_true
 
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
@@ -224,7 +225,6 @@ finally:
 # CAUGHT, one field at a time.
 
 print("\nPAD VERIFY: metadata comparison (a false match leaves a pad silently wrong)")
-import soundpad
 
 SAVED_SOUND = {"grid": 5, "type": 1, "name": "Airhorn", "colour": 3, "gain": -6.0,
                "loop": False, "replay": True, "play_mode": 0, "mixer_mode": None,
@@ -340,9 +340,8 @@ try:
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "gone.wav")), False)
     check("a grid with no file on the unit is caught",
           a(str(root), 7, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
-    # Leftovers. A pad folder can hold a file from an earlier replacement (measured on the real
-    # desk: pads/1 held a stray wav beside Music_Bed.wav). Which file the pad PLAYS is what matters,
-    # and only the desk can say - padFilePath, passed in as live_file.
+    # Leftovers. A pad folder can hold a file from an earlier replacement. Which file the pad PLAYS
+    # is what matters, and only the desk can say - padFilePath, passed in as live_file.
     (root / "pads" / "5" / "leftover.wav").write_bytes(b"RIFF" + b"	" * 64)
     check("with no word from the desk, two files in a folder is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
@@ -451,7 +450,7 @@ def apply_pro2(prof):
         return list(calls), res
 
 
-print("\nRESTORE on the Pro II: the levels now land")
+print("\nRESTORE on the Pro II: the levels land")
 calls, res = apply_pro2(profile())
 check("one level write per VIRTUAL fader (7, 8, 9)", len(args_of(calls, "set_fader_level")), 3)
 check("each virtual fader's confirmed selector + its saved raw level",
@@ -484,7 +483,7 @@ check_true("and the instrument gain still follows the type, which is what sets i
            < names_of(mic_calls).index("set_instrument_gain"))
 
 print("\nRESTORE: the SMART pads bus is a channel like any other")
-# Its strip carries a full chain and the desk processes pads through it, measured on hardware.
+# Its strip carries a full chain and the desk processes pads through it.
 # Leaving it out of the channel list is what makes a clean restore put its custom chain back at
 # factory values. It has NO level - that is its fader - so no level write may be attempted for it.
 check_true("the Pro II lists the SMART pads bus as a channel",
@@ -592,7 +591,7 @@ with as_device(devices.DUO), recorder() as duo_calls:
 check("the five VIRTUAL faders are written, and only those",
       sorted(a[0] for a in args_of(duo_calls, "set_fader_level")), [0x08, 0x09, 0x0A, 0x0B, 0x0C])
 check_true("the monitor level is written too", args_of(duo_calls, "set_monitor_level"))
-check("levels are no longer reported as unrestorable",
+check("levels are not reported as unrestorable",
       [e for e in duo_res["errs"] if "level" in e], [])
 check("headphone type still restores (both desks share the confirmed selectors)",
       args_of(duo_calls, "set_headphone_type"), [(1, 0x09), (2, 0x0A)])
@@ -632,7 +631,7 @@ check("an older profile writes no unit settings and reports no failure",
 
 print("\nRESTORE on the Duo: the unit settings ARE written")
 # The Duo holds the "unit_settings" cap on all 20 selectors resolving against its OWN TREE plus one
-# write per block proven on hardware, so a profile taken on a Duo restores its Device page rather
+# confirmed write per block, so a profile taken on a Duo restores its Device page rather
 # than skipping it. The mutes are held back, on both desks, because a restore must never silently
 # mute somebody.
 with as_device(devices.DUO), recorder() as duo_unit_calls:
@@ -640,8 +639,8 @@ with as_device(devices.DUO), recorder() as duo_unit_calls:
                                       fader_code_set=devices.DUO.fader.code_set)
     duo_unit_calls = list(duo_unit_calls)
 duo_unit_written = dict(args_of(duo_unit_calls, "set_unit_setting"))
-check_true("the Duo now restores its unit settings", bool(duo_unit_written))
-check_true("and that is no longer reported as a failure",
+check_true("the Duo restores its unit settings", bool(duo_unit_written))
+check_true("and that is not reported as a failure",
            not any("unit settings" in e for e in duo_unit_res["errs"]))
 check("a saved output mute is still NOT written back on the Duo either",
       sorted(p for p in duo_unit_written if "Mute" in p), [])

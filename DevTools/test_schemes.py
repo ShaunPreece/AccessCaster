@@ -115,8 +115,7 @@ check("the Chat output's mode is Custom", scheme["outputs"]["Chat"]["mode"], 2)
 check("Chat carries Mic 1", scheme["outputs"]["Chat"]["sources"]["Mic1"]["excluded"], False)
 check("and excludes the SMART pads (where a screen reader would go down the line)",
       scheme["outputs"]["Chat"]["sources"]["SMARTpads"]["excluded"], True)
-check("an EXCLUDED cross-point records nothing but that (its level is inert and drifts; "
-      "measured on the desk)",
+check("an EXCLUDED cross-point records nothing but that (its level is inert and drifts)",
       scheme["outputs"]["Chat"]["sources"]["Mic2"], {"excluded": True})
 check("a linked cross-point records no level of its own",
       "level" in scheme["outputs"]["Headphone2"]["sources"]["USB1"], False)
