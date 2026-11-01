@@ -1,23 +1,19 @@
 """Can we START a wifi or Bluetooth scan from software, and can we PROVE it ran?
 
-WHY THIS IS WORTH TESTING RATHER THAN ASSUMING. The Network page currently reports what a scan
-"last found" and has to word it carefully - an empty list means "nothing has been scanned for", NOT
-"nothing in range" - precisely because we could not start one. If `wifiScan` and `btDoScan` work,
-that caveat disappears and a blind operator can ask what is in range, which is the first step of
-joining a network you have not typed out by hand.
+A scan that fills its result slots tells the operator what is in range, the first step of joining
+a network without typing its name.
 
-IT IS VERIFIABLE, which is the part that makes it shippable. These are ACTIONS, so a read-back of
+IT IS VERIFIABLE. These are ACTIONS, so a read-back of
 the field itself proves nothing (the firmware consumes and clears it). But the RESULTS are ordinary
 readable properties - wifiScan1..10 and btScan1..10 - so the honest test is: note what is in the
 result slots, fire the scan, wait, and see whether they change.
 
-SAFE: both fields are in NETWORK, selector 0x10, which is proven (btVisible was written there,
-read back, and a phone paired). Neither changes a setting - a scan looks around and fills a list.
+SAFE: both fields are in NETWORK, selector 0x10, a confirmed selector. Neither changes a setting - a scan looks around and fills a list.
 Occurrence counts are diffed at the end so a stray would be caught rather than assumed away.
 
-    python DevTools/test_network_scan.py --wifi
-    python DevTools/test_network_scan.py --bt
-    python DevTools/test_network_scan.py --wifi --bt --wait 20
+    python DevTools/test_network_scan_live.py --wifi
+    python DevTools/test_network_scan_live.py --bt
+    python DevTools/test_network_scan_live.py --wifi --bt --wait 20
 """
 from __future__ import annotations
 

@@ -7,9 +7,9 @@ a check run against it would pass while the real page had moved on. This takes w
 desk really answers and flips only the gates.
 
 WHY A FIXTURE AT ALL. Every one of those gates (`unit_settings`, `pad_write`, `fader_write`,
-`output_write`, `level_write`, `matrix_write`) is now ON for BOTH desks, so no desk in existence
-reaches the read-only branches any more. Driving the app cannot exercise them; feeding the UI the
-payload a capless desk would send is the only way left.
+`output_write`, `level_write`, `matrix_write`) is ON for BOTH desks, so no real desk reaches the
+read-only branches. Driving the app cannot exercise them; feeding the UI the payload a capless desk
+would send can.
 
     python DevTools/make_readonly_stub.py            # writes DevTools/_probe_stub_readonly.json
     python DevTools/ui_probe.py --checks DevTools/ui_checks_readonly.js \
@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import urllib.request
 
-import _bootstrap  # noqa: F401
+import _bootstrap
 
 BASE = "http://127.0.0.1:8770"
 # `_probe_stub_*` is the repo's name for a ui_probe fixture taken off the connected desk, and

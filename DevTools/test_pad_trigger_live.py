@@ -3,10 +3,9 @@
 Proves the padTrigger* properties end to end on one EMPTY pad, then puts the desk back:
   1. create a MIDI trigger pad and READ its mapping (the firmware default);
   2. write a CUSTOM mapping field by field and read every one back;
-  3. optionally flip padTriggerMode (--mode), which is LATCHING versus MOMENTARY: proven by
-     listening to the desk's MIDI output under a press. Mode 1 sends the on value on one press and
-     the off value on the next; mode 0 sends on at press and off at release. Use --mode to hear it
-     for yourself with DevTools/midi_monitor.py;
+  3. optionally flip padTriggerMode (--mode), which is LATCHING versus MOMENTARY: mode 1 sends
+     the on value on one press and the off value on the next; mode 0 sends on at press and off at
+     release. Watch it with DevTools/midi_monitor.py;
   4. turn the custom flag off and assert what the DESK does then, which is discard the numbers;
   5. clear the pad and confirm the grid and the effect pool are back to baseline.
 
@@ -42,7 +41,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pad", type=int, default=17, help="grid pad to test on (MUST be empty)")
     ap.add_argument("--mode", type=int, default=None,
-                    help="also write padTriggerMode (the unknown field) and stop, leaving the pad")
+                    help="write padTriggerMode (0 momentary, 1 latching) and stop, leaving the pad")
     ap.add_argument("--clear", action="store_true", help="only clear the pad and report")
     args = ap.parse_args()
     grid = args.pad
@@ -88,8 +87,8 @@ def main():
     print("  EVERY FIELD READ BACK AS WRITTEN:",
           all(got[k] == v for k, v in CUSTOM.items()) and got["custom"] is True)
 
-    # MEASURED: the desk resets control/channel/on/off to its own defaults when the flag goes off,
-    # and switching it back on does NOT return them. So this asserts the DESTRUCTIVE behaviour on
+    # The desk resets control/channel/on/off to its own defaults when the flag goes off, and
+    # switching it back on does NOT return them. So this asserts the DESTRUCTIVE behaviour on
     # purpose - if a firmware update ever makes "off" park the numbers instead, this check notices.
     print("TURN THE CUSTOM FLAG OFF (the desk discards the numbers)")
     soundpad.set_trigger_mapping(grid, custom=False)

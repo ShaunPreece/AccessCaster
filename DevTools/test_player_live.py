@@ -1,15 +1,12 @@
 """Can the unit's own PLAYER be driven from software? Load a file, press play, watch it move.
 
-WHY THIS IS THE INTERESTING ONE. Playing a recording back is the biggest thing left on the app's
-own Limitations list: today a blind operator can make a recording and has no way to hear it without
-the touchscreen. The PLAYER block holds a file path, a state, a speed and a PROGRESS figure, and
-that last one is what makes this testable with nobody in the room - if the desk is really playing,
-`playerProgress` and `playerCurrentPositionTime` climb. No ears needed for the proof, only for the
-pleasure.
+Playing a recording back without the touchscreen needs the desk's own player. The PLAYER block
+holds a file path, a state, a speed and a PROGRESS figure, and the progress makes this testable
+with nobody listening: if the desk is playing, `playerProgress` and `playerCurrentPositionTime`
+climb.
 
-SELECTOR: PLAYER = 0x04, PROVEN (a read-back-checked write, playerSpeed 0 -> 1 ->
-0, landed in the PLAYER block, no stray, no occurrence count moved anywhere). It was DERIVED before
-that, bracketed between the confirmed RECORDER 0x03 and ENCODER 0x06.
+SELECTOR: PLAYER = 0x04, a confirmed selector: a read-back-checked write lands in the PLAYER block
+with no stray.
 
 WHAT IT PLAYS. With no card or drive in the unit there are no recordings, so this uses one of the
 factory SMART pad WAVs on the unit's own internal storage instead. That is a fair test of the

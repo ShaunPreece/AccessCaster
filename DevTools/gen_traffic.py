@@ -21,7 +21,7 @@ def main(rounds: int = 40) -> int:
         return 1
     print("generating read-only burst...")
     with dev:
-        for n in range(rounds):
+        for _ in range(rounds):
             dev.get_version()
             dev.ping()
             dev.get_info()

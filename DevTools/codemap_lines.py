@@ -3,16 +3,11 @@
     python DevTools/codemap_lines.py            rewrite the file in place
     python DevTools/codemap_lines.py --check    report drift and exit 1, change nothing
 
-WHY THIS EXISTS. CodeMap carries ~100 line references and a line count per file, and they are the
-first thing a session reads to find its way around. Maintained by hand they go stale within the
-DAY - measured at 96 of 96 wrong, drifting by up to 755 lines - because one day's work moves
-server.py and app.js by hundreds of lines. A note that is confidently wrong costs more than no
-note: you jump to line 7724, land in the middle of something else, and have to grep anyway, having
-first been misled.
-
-A derived number has to be DERIVED, not hand-kept. Same shape as the two
-coverage reports (property_coverage.py, profile_coverage.py): regenerable, with a --check mode that
-exits 1 so drift is a thing you are TOLD about rather than something you discover.
+CodeMap carries about 100 line references and a line count per file. One day's work moves
+server.py and app.js by hundreds of lines, so a hand-kept number is wrong within the day, and a
+wrong line reference sends the reader to the middle of something else. A derived number is
+derived: like the two coverage reports (property_coverage.py, profile_coverage.py), this is
+regenerable, with a --check mode that exits 1 on drift.
 
 WHAT IT TOUCHES, and nothing else:
   * `name` (NNN)          a line reference, in whichever section it sits under (see SECTIONS)
@@ -28,7 +23,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import _bootstrap  # noqa: E402  (the notes live in a private sibling repo, not in this one)
+import _bootstrap
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CODEMAP = pathlib.Path(_bootstrap.docs_path("CodeMap.md"))

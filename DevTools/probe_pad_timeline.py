@@ -1,15 +1,10 @@
 """A TIMELINE of what the desk does around two MIDI presses. The definitive pad-timing tool.
 
-WHY A THIRD ONE. Two earlier probes measured the push rate BETWEEN the presses, and both were
-wrong in the same way: neither confirmed that press 1 actually STARTED the sound, so a pass that
-began with a pad already playing (press 1 = stop, press 2 = start) read exactly like a pass where
-the second press was ignored. That is how "a second press within a second is ignored" was concluded
-from a desk that was doing something else entirely.
-
-The fix is to stop measuring in windows. A reader thread timestamps every `padProgress` and
-`padActive` continuously while the main thread presses at known times, and the timeline is read
-afterwards. Nothing is inferred from a rate taken during a gap, and there is no measurement window
-to fall into.
+A push rate measured BETWEEN the presses cannot tell a pass that began with the pad already
+playing (press 1 stops it, press 2 starts it) from one where the second press was ignored. So
+nothing is measured in windows: a reader thread timestamps every `padProgress` and `padActive`
+while the main thread presses at known times, each row first checks that press 1 started the
+sound, and the timeline is read afterwards.
 
     python DevTools/probe_pad_timeline.py [padIdx] [gap seconds...]
 """

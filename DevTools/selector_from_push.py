@@ -6,7 +6,7 @@ was that property at? A pushed record carries its own address path in
 front of the name, so a single push from a block we have never written to hands us its selector for
 free - no write, no stray hazard, no touchscreen.
 
-WHAT IT DECODES. Both framings seen so far, distinguished by the path bytes, not guessed:
+WHAT IT DECODES. Three framings, distinguished by the path bytes, not guessed:
     global property : 01 01 01 01 <sel>   (rcp_transfer.build_global_prop_int)
     device push     : 01 01 02 00 01 <sel> (the fader-level form the desk itself sends)
     pad-addressed   : 01 01 02 02 9a 02 01 <sel>

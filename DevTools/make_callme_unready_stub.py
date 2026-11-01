@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import urllib.request
 
-import _bootstrap  # noqa: F401
+import _bootstrap
 import callme
 
 BASE = "http://127.0.0.1:8770"

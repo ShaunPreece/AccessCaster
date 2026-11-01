@@ -1,7 +1,7 @@
 """Survey the guide's PROVED INACTIVE properties on the ATTACHED desk, read-only.
 
-The dead list was established on one desk and is carried across both, because they run the same
-firmware and publish the same property names. This says what the OTHER desk's tree actually holds
+The dead list was established on one desk and is carried across both, because their firmware
+publishes the same property names (the Duo's a subset). This says what the OTHER desk's tree actually holds
 for each of them: which block carries it, at what address, how many occurrences, and the value it
 is sitting at. That is the half of a re-proof that needs no write and no ears.
 
@@ -33,7 +33,7 @@ import property_list
 def main() -> int:
     dead = property_list.dead_properties()
     if not dead:
-        print("No PROVED INACTIVE list found: PROJECT_GUIDE.md is not beside this repo.")
+        print("No PROVED INACTIVE list found in docs/PROJECT_GUIDE.md.")
         return 1
 
     blob = rcp_read.read_model_raw()

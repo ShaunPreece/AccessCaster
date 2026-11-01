@@ -6,8 +6,7 @@ per-pad effect-objects). Prints each region-B object's full recipe: every on-fla
 param value + effectsIdx.
 Also lists the pad table so each FX pad can be mapped to its effect-object(s).
 
-This is the source-of-truth extractor for factory voice-FX recipes (SOUNDPADS "match
-factory exactly" task). It writes NOTHING to the device.
+It is the extractor for the factory voice-FX recipes, and it writes NOTHING to the device.
 
 Usage:  python decode_effects.py
 """
@@ -98,7 +97,7 @@ def main():
         on = [n for n in ON_FLAGS if r.get(n) is True]
         on_str = "+".join(n[:-2] for n in on) if on else "(none on)"
         print(f"\n  regionB#{r['regionB_index']:2}  effectsIdx={r['effectsIdx']}  ACTIVE: {on_str}")
-        for name, kind in EFFECT_FIELDS:
+        for name, _kind in EFFECT_FIELDS:
             if name == "effectsIdx":
                 continue
             v = r.get(name)

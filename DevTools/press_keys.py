@@ -4,10 +4,9 @@ Why it exists: a shortcut registered with RegisterHotKey can only be proven by a
 Posting WM_HOTKEY at the pump (DevTools/test_hotkeys.py does that) proves the dispatch and the
 action, but not the registration - the part where Windows decides whether we own that combination.
 
-USES keybd_event, NOT SendInput, and that is not laziness. Measured on this
-machine: a correctly formed SendInput call (INPUT 32 bytes, KEYBDINPUT at offset 8, verified against
-the raw bytes) returns 0 with GetLastError 87 and injects nothing, from an RDP session. keybd_event
-fires the same hotkey immediately, every time. Both APIs feed the same input queue, so there is
+USES keybd_event, NOT SendInput. From an RDP session a correctly formed SendInput call (INPUT 32
+bytes, KEYBDINPUT at offset 8) returns 0 with GetLastError 87 and injects nothing, while
+keybd_event fires the same hotkey every time. Both APIs feed the same input queue, so there is
 nothing to gain from the newer one here.
 
 Usage:  python DevTools/press_keys.py ctrl alt F9

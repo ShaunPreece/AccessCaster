@@ -53,9 +53,8 @@ if __name__ == "__main__":
     # honour an explicit argument if it is actually an existing directory; the
     # PowerShell caller can split a space-containing path into broken fragments.
     here = os.path.dirname(os.path.abspath(__file__))
-    # cap_control/scan is where cap_server.ps1 actually puts the hub scan; captures/scan is the
-    # older location. Try both, so a mangled argument degrades to the right directory rather than
-    # to an empty one (which printed NONE on a perfectly good scan).
+    # cap_server.ps1 writes the hub scan to cap_control/scan. Both folders are tried, so a mangled
+    # argument falls back to a folder holding a scan rather than to an empty one, which prints NONE.
     defaults = [os.path.join(here, "cap_control", "scan"), os.path.join(here, "captures", "scan")]
     arg = sys.argv[1] if len(sys.argv) > 1 else None
     scan_dir = arg if (arg and os.path.isdir(arg)) else next(

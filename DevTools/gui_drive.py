@@ -1,5 +1,5 @@
-"""Optimised pure-Python GUI driver for the RODE app (WebView2/Chromium). No PowerShell .ps1,
-no -ExecutionPolicy bypass, no extra deps beyond Pillow (PIL.ImageGrab) + stdlib ctypes.
+"""Pure-Python GUI driver for the RODE app (WebView2/Chromium), on Pillow (PIL.ImageGrab) and
+ctypes alone.
 
 Why this shape: the app is a WebView2 app with NO usable CDP (debug port disabled) and a poor/
 inconsistent UIA tree (unnamed "Custom" elements), so we cannot read it as text or target named
@@ -83,7 +83,7 @@ def load_map():
 
 
 def resolve_target(spec):
-    """'screen.target' -> (x, y) from ui_map.json, or None."""
+    """'screen.target' -> (x, y) from ui_map.json; exits with a message on an unknown target."""
     m = load_map()
     if "." not in spec:
         raise SystemExit(f"target must be screen.target, got {spec!r}")
@@ -167,8 +167,8 @@ def cmd_click(hwnd, wx, wy, double=False, refocus=True):
 
 def cmd_drag(hwnd, x1, y1, x2, y2, steps=24, refocus=True):
     """Left-button click-drag from (x1,y1) to (x2,y2), window-relative. Stepped move so the
-    Chromium layer sees real mousemoves during the drag (same technique as drag.ps1). Used for
-    canvas/carousel swipes that clicks can't do."""
+    Chromium layer sees real mousemoves during the drag. Used for canvas/carousel swipes that
+    clicks can't do."""
     l, t, r, b = get_rect(hwnd)
     if refocus:
         foreground(hwnd)

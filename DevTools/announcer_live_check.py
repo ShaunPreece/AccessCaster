@@ -8,7 +8,7 @@ Why not just run the app and listen: this prints what would be said, so it can b
 than heard, and it needs no server restart (no fighting the installed build for port 8770).
 
 Usage: python DevTools/announcer_live_check.py [seconds] [--speak]
-       --speak also SPEAKS the instructions (use when Shaun is at the desk, not reading chat).
+       --speak also SPEAKS the instructions, for a tester at the desk rather than the screen.
 """
 from __future__ import annotations
 

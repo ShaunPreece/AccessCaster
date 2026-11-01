@@ -1,10 +1,12 @@
 """TEST: inject physical-button events from the host.
 
-The device reports button presses as report-04 named properties. We replay them as
-report-03 (host->device) to emulate the press:
-  mute : 'cmutePressed'  compact-bool  (down=02, up=03) -> device toggles Mic mute
-  solo : 'csoloPressed'  compact-bool  (down=02, up=03) -> device toggles channel cue
+The device reports button presses as report-04 pushes. Replayed as report-03 (host->device), they
+emulate the press:
+  mute : 'mutePressed'   compact-bool  (down=02, up=03) -> device toggles Mic mute
+  solo : 'soloPressed'   compact-bool  (down=02, up=03) -> device toggles channel cue
   bank : 'selectedBank'  global int selector 0x07       -> sets the pad bank
+Both presses sit at path [0, 0x63], the first SOLOMUTEBUTTON. The 0x63 is the last path byte, which
+is why the names below read 'cmutePressed' and 'csoloPressed': there is no property by that name.
 
 Usage:
   python inject_button.py mute
@@ -27,7 +29,8 @@ def rec(payload: bytes) -> bytes:
 
 
 def compact_press(name: str, flag: int) -> bytes:
-    # captured prefix for the press events: 01 01 02 00 01 <name> 00 01 01 <flag>
+    # 01 01 02 00 01 is the path [0, 0x63] up to its last byte (the 0 in its zero-length form),
+    # and that last byte is the name's leading 'c'.
     return bytes([0x01, 0x01, 0x02, 0x00, 0x01]) + name.encode() + b"\x00" + bytes([0x01, 0x01, flag])
 
 
