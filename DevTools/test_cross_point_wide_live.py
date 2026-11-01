@@ -12,8 +12,7 @@ of complaint proves nothing, and this checks three separate things:
      `cross_point_selector(output, source)`. That is the selector CONFIRMED rather than derived
      from the arithmetic that produced it.
   2. The write lands. `mixDisabled` reads back True on that node and False again after the restore.
-  3. Nothing strayed. The MIX instance count, the node count and the property count are all
-     unchanged at the end.
+  3. Nothing strayed. Every property name occurs as many times at the end as at the start.
 
 THE OUTPUT'S MODE IS NEVER TOUCHED, so nothing here is audible. `mixDisabled` only changes routing
 for an output in Custom mode; stored on an output in Main Mix it is inert, which is exactly what
@@ -41,6 +40,7 @@ import _testkit
 import model_tree
 import rcp_read
 import rcp_transfer as t
+from _desk import count_changes, stray_counts
 from _testkit import check
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
@@ -51,16 +51,12 @@ MEANINGFUL = ("mixDisabled", "mixLink", "mixMute", "mixLevelWithAnchor")
 
 
 def snapshot():
-    """(the cross-point's meaningful values, the whole-model counts for the stray check)."""
-    root, _consumed, _tail = model_tree.parse(rcp_read.read_model_stable(fresh=True))
-    nodes = list(model_tree.walk(root))
+    """(the cross-point's meaningful values, the stray check's occurrence counts, its path)."""
+    blob = rcp_read.read_model_stable(fresh=True)
+    root, _consumed, _tail = model_tree.parse(blob)
     cell = model_tree.instances(root, "MIX")[INDEX]
     props = dict((p, v) for p, v, _k in cell.props)
-    return ({p: props.get(p) for p in MEANINGFUL},
-            {"mix": len(model_tree.instances(root, "MIX")),
-             "nodes": len(nodes),
-             "props": sum(len(n.props) for n in nodes)},
-            cell.path())
+    return {p: props.get(p) for p in MEANINGFUL}, stray_counts(blob), cell.path()
 
 
 ap = argparse.ArgumentParser()
@@ -98,7 +94,7 @@ finally:
 
 after, counts_after, _p = snapshot()
 check("every meaningful value is back", after, before)
-check("no stray: the model's node, property and MIX counts are unchanged",
-      counts_after, counts_before)
+check("no stray: no property's occurrence count moved",
+      count_changes(counts_before, counts_after), ([], [], []))
 
 sys.exit(_testkit.finish())

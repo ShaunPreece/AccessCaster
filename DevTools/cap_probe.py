@@ -15,7 +15,8 @@ a factory reset clears.
 The pipeline: the elevated cap_server task (`setup_capture_task.ps1` registers it) polls
 DevTools/cap_control/cmd.txt for START <name> / STOP and writes DevTools/cap_control/status.txt;
 the pcap lands in DevTools/captures/<name>.pcap. The control channel is interrupt EP 0x05 OUT / 0x85 IN, and a
-property write decodes as 01 01 01 01 <selector> + name + value block.
+property write is a report-3 record, decoded by `capture_analyze.host_writes` at any address
+depth: a global selector, a mic's two-byte channel address, a cross-point or a pad.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import capture_analyze as ca
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CTRL = os.path.join(HERE, "cap_control")
@@ -40,7 +42,7 @@ def status() -> str:
     # console raises UnicodeEncodeError - which would abort a probe mid-capture.
     try:
         with open(STATUS, encoding="utf-8-sig", errors="replace") as f:
-            return f.read().strip().lstrip("﻿")
+            return f.read().strip()
     except OSError:
         return "(no status file)"
 
@@ -52,8 +54,8 @@ def send(cmd: str) -> None:
 
 
 def wait_for(prefix: str, timeout: float = 20.0) -> str:
-    end = time.time() + timeout
-    while time.time() < end:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
         s = status()
         if s.startswith(prefix):
             return s
@@ -71,7 +73,6 @@ def drive(action: list[str]) -> None:
 
 def decode(name: str) -> None:
     """Print every property WRITE in the capture, with its selector."""
-    import capture_analyze as ca
     path = os.path.join(CAPTURES, name + ".pcap")
     if not os.path.isfile(path):
         print(f"  no capture at {path}")
@@ -83,38 +84,14 @@ def decode(name: str) -> None:
         return
     # HOST -> DEVICE only. The IN direction carries the desk's own state pushes, which use the same
     # record shape; counting those as writes would invent selectors we never saw the app send.
-    seen = []
-    for p in pkts:
-        if p.from_device or not p.data:
-            continue
-        for rec in _property_writes(bytes(p.data)):
-            if rec not in seen:
-                seen.append(rec)
+    seen = list(ca.host_writes(pkts).values())
     print(f"  ({len(pkts)} packets, {sum(1 for p in pkts if not p.from_device)} host->device)")
     if not seen:
         print("  no property writes found in this capture")
         return
-    for sel, prop, tail in seen:
-        print(f"  selector 0x{sel:02X}  {prop:<28} value block {tail}")
-
-
-def _property_writes(buf: bytes):
-    """Find `01 01 01 01 <selector> <name> 00 <value block>` records in a raw USB payload."""
-    out = []
-    i = 0
-    while True:
-        i = buf.find(b"\x01\x01\x01\x01", i)
-        if i < 0 or i + 6 > len(buf):
-            return out
-        sel = buf[i + 4]
-        j = i + 5
-        k = j
-        while k < len(buf) and 32 <= buf[k] < 127:
-            k += 1
-        name = buf[j:k].decode("latin1")
-        if len(name) >= 3 and name[0].isalpha():
-            out.append((sel, name, buf[k:k + 12].hex()))
-        i += 4
+    for path, prop, value in seen:
+        where = "[" + ", ".join(f"0x{i:02X}" for i in path) + "]"
+        print(f"  path {where:<16} {prop:<28} {value!r}")
 
 
 def main() -> None:

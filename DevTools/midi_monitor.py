@@ -6,6 +6,9 @@ press a Trigger-type SMART pad (padType 4) it sends a MIDI message out of that p
 opens the port, decodes each incoming message, prints it, and (with --speak) says it aloud via
 Project/say.ps1 (SAPI) so you hear it at the device without reading the terminal.
 
+Needs python-rtmidi, which only the DevTools use:
+`python -m pip install -r DevTools/requirements-dev.txt`.
+
 Usage:
   python midi_monitor.py                # print each message; run until Ctrl+C
   python midi_monitor.py --speak        # also say each message aloud (SAPI)
@@ -13,22 +16,22 @@ Usage:
 
 Every decoded line is also appended to midi_monitor.log so a background run can be read back.
 """
-import subprocess
 import sys
 import time
-from pathlib import Path
 
+import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _desk
+import midi_out
 import rtmidi
-
-SAY_PS1 = str(Path(__file__).resolve().parent.parent / "Project" / "say.ps1")
 
 LOG = "midi_monitor.log"
 
 
 def _find_port(midi_in):
-    """Return the index of the RODECaster / MIDI input port, or None."""
+    """The index of the desk's MIDI input port, or None. Matched on the name's prefix, as
+    `midi_out.find_port` matches the output, so another device's MIDI port is never opened."""
     for i, name in enumerate(midi_in.get_ports()):
-        if "RODE" in name or "MIDI" in name:
+        if name.startswith(midi_out.PORT_NAME):
             return i
     return None
 
@@ -53,16 +56,6 @@ def describe(msg):
     return "MIDI message: " + " ".join(f"{b:#04x}" for b in msg)
 
 
-def speak(text):
-    # The execution policy blocks .ps1 files, so say.ps1 is invoked with the bypass.
-    try:
-        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                          "-File", SAY_PS1, "-Text", text],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-
-
 def main():
     do_speak = "--speak" in sys.argv
     seconds = None
@@ -81,11 +74,11 @@ def main():
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(f"\n--- monitor start ({name}) ---\n")
     if do_speak:
-        speak("MIDI monitor ready. Press a trigger pad.")
+        _desk.say("MIDI monitor ready. Press a trigger pad.")
 
-    deadline = (time.time() + seconds) if seconds else None
+    deadline = (time.monotonic() + seconds) if seconds else None
     try:
-        while deadline is None or time.time() < deadline:
+        while deadline is None or time.monotonic() < deadline:
             item = midi_in.get_message()        # (message, delta) or None
             if item:
                 text = describe(item[0])
@@ -101,7 +94,7 @@ def main():
                     with open(LOG, "a", encoding="utf-8") as f:
                         f.write(line + "\n")
                     if do_speak:
-                        speak(text)
+                        _desk.say(text)
             else:
                 time.sleep(0.005)               # poll; rtmidi has no blocking read here
     except KeyboardInterrupt:

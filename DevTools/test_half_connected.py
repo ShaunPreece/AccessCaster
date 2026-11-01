@@ -30,7 +30,7 @@ import _bootstrap  # noqa: F401
 import _testkit
 import rcp_hid
 import server
-from _testkit import check
+from _testkit import check, patched
 
 
 class FakeIface:
@@ -48,12 +48,8 @@ class FakeIface:
 
 def with_interfaces(ifaces):
     """Run a body with the HID interface list stubbed. The FINDER is left real on purpose."""
-    real_enum = rcp_hid.enumerate_interfaces
-    rcp_hid.enumerate_interfaces = lambda *a, **k: list(ifaces)
-    try:
+    with patched((rcp_hid, {"enumerate_interfaces": lambda *a, **k: list(ifaces)})):
         return server.read_device_status(), rcp_hid.find_control_interface()
-    finally:
-        rcp_hid.enumerate_interfaces = real_enum
 
 
 print("\nNOTHING PLUGGED IN AT ALL")
@@ -72,7 +68,7 @@ check("the message says half connected, not 'no unit found'",
 check("it names the CABLE, since that is the fix",
       "cable" in d["message"].lower(), True)
 check("and says WHICH cable, by where it is rather than by a label nobody can read",
-      "nearest the power socket" in d["message"].lower(), True)
+      "nearest the power inlet" in d["message"].lower(), True)
 check("it still names the unit, so it is clearly not a 'device missing' error",
       bool(d.get("device_name")), True)
 check("and the interface it did find is still reported for troubleshooting",

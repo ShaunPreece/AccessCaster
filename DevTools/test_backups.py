@@ -27,7 +27,7 @@ import _bootstrap  # noqa: F401
 import _testkit
 import profiles
 import server
-from _testkit import check
+from _testkit import check, patched
 
 
 def page_name(entry: dict) -> str:
@@ -41,15 +41,10 @@ def write_profile(folder: str, name: str, prof: dict) -> None:
         json.dump(prof, f)
 
 
-print("RENAME AND DELETE TAKE WHAT THE PAGE SENDS")
-tmp = tempfile.mkdtemp(prefix="ac_backups_test_")
-saved_dir = profiles.PROFILES_DIR
-saved_device = server.devices.get_active_device
-profiles.PROFILES_DIR = tmp
-server.devices.get_active_device = lambda: SimpleNamespace(caps=set())
-try:
-    write_profile(tmp, "Tuesday", {"saved_at": "now"})
-    write_profile(tmp, "As found", {"saved_at": "now", profiles.BASELINE_KEY: True})
+def rename_and_delete(folder: str) -> None:
+    """Rename and delete through the page's own names, in a profile store at `folder`."""
+    write_profile(folder, "Tuesday", {"saved_at": "now"})
+    write_profile(folder, "As found", {"saved_at": "now", profiles.BASELINE_KEY: True})
     entries = {e["name"]: e for e in server.read_backups()["backups"]}
     check("both profiles are listed", sorted(entries), ["As found", "Tuesday"])
 
@@ -67,9 +62,15 @@ try:
     res = server.action_delete_backup(page_name(entries["As found"]), True)
     check("the as-found backup is deleted with force", res.get("ok"), True)
     check("the store is empty", server.read_backups()["backups"], [])
+
+
+print("RENAME AND DELETE TAKE WHAT THE PAGE SENDS")
+tmp = tempfile.mkdtemp(prefix="ac_backups_test_")
+try:
+    with patched((profiles, {"PROFILES_DIR": tmp}),
+                 (server.devices, {"get_active_device": lambda: SimpleNamespace(caps=set())})):
+        rename_and_delete(tmp)
 finally:
-    profiles.PROFILES_DIR = saved_dir
-    server.devices.get_active_device = saved_device
     shutil.rmtree(tmp, ignore_errors=True)
 
 

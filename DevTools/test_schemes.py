@@ -19,7 +19,7 @@ import devices
 import fake_model
 import rcp_transfer
 import routing_schemes
-from _testkit import as_device, check, check_true
+from _testkit import as_device, check, check_true, patched
 
 routing_schemes.WRITE_PACE = 0        # nothing leaves the process, so nothing needs pacing
 
@@ -35,20 +35,17 @@ class capture_writes:
         self.log = []
 
     def __enter__(self):
-        self.saved = {n: getattr(rcp_transfer, n) for n in
-                      ("set_output_routing", "set_cross_point_excluded", "set_cross_point_level",
-                       "set_cross_point_linked")}
         log = self.log
-        rcp_transfer.set_output_routing = lambda o, m: log.append(("mode", o, m))
-        rcp_transfer.set_cross_point_excluded = lambda o, s, ex: log.append(("xpt", o, s, ex))
-        rcp_transfer.set_cross_point_level = lambda o, s, v: log.append(("level", o, s, round(v, 3)))
-        rcp_transfer.set_cross_point_linked = lambda o, s, linked: log.append(("link", o, s, linked))
+        self._patch = patched((rcp_transfer, {
+            "set_output_routing": lambda o, m: log.append(("mode", o, m)),
+            "set_cross_point_excluded": lambda o, s, ex: log.append(("xpt", o, s, ex)),
+            "set_cross_point_level": lambda o, s, v: log.append(("level", o, s, round(v, 3))),
+            "set_cross_point_linked": lambda o, s, linked: log.append(("link", o, s, linked))}))
+        self._patch.__enter__()
         return self
 
     def __exit__(self, *exc):
-        for n, fn in self.saved.items():
-            setattr(rcp_transfer, n, fn)
-        return False
+        return self._patch.__exit__(*exc)
 
     def modes(self):
         return [(o, m) for kind, o, m in [e for e in self.log if e[0] == "mode"]]

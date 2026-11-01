@@ -24,34 +24,16 @@ WHAT TO LISTEN FOR / LOOK FOR, in order:
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _desk
 import meters
-from paths import resource_path
 
 BAR = 40
-
-
-def speaker(enabled: bool):
-    """Speak through the same one-shot the app falls back to, so the voice and the output device
-    the user has chosen are honoured rather than bypassed."""
-    if not enabled:
-        return lambda text: None
-    script = resource_path("say.ps1")
-
-    def say(text):
-        try:
-            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                              script, "-Text", text],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-    return say
 
 
 def main() -> int:
@@ -94,7 +76,8 @@ def main() -> int:
     def say(text):
         said.append(text)
         print(f"    >>> SPOKEN: {text}")
-        speaker(args.speak)(text)
+        if args.speak:
+            _desk.say(text)
 
     w = meters.Watcher(chosen["id"], say, silence_after=5.0, speak_every=0.0)
     if not w.start():
@@ -102,8 +85,8 @@ def main() -> int:
         return 1
     peak_seen = 0.0
     try:
-        end = time.time() + args.seconds
-        while time.time() < end:
+        end = time.monotonic() + args.seconds
+        while time.monotonic() < end:
             v = w.peak
             peak_seen = max(peak_seen, v)
             filled = int(v * BAR)

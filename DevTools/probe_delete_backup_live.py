@@ -43,6 +43,7 @@ import profiles
 import rcp_read
 import recorder
 import server
+from _desk import wait_for_job
 from _testkit import check
 
 
@@ -61,23 +62,6 @@ def free_mb():
     return None
 
 
-def wait_for_job(timeout=180.0):
-    """A delete that touches the unit runs as a background job; the reply only says it STARTED.
-
-    THE KEY IS `running`, AND GETTING THAT WRONG LOOKS LIKE A BUG IN THE APP. Polling a key the
-    status does not carry reads as None, so the wait returns at once, the check runs while the
-    profile half is still in flight, and the report says `action_delete_backup` left the computer's
-    copy behind when it had not even finished. `done` is the companion: a job that has run reports
-    running False and done True."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        st = server.show_job_status()
-        if not st.get("running"):
-            return st
-        time.sleep(1.0)
-    return {"timeout": True}
-
-
 ap = argparse.ArgumentParser()
 ap.add_argument("--show", type=int, help="snapshot number of a unit-only backup to delete")
 ap.add_argument("--profile", help="name of a paired backup to delete, both halves")
@@ -93,15 +77,18 @@ if args.show is not None:
     was_free = free_mb()
     res = server.action_delete_backup(target)
     print(f"   reply: ok={res.get('ok')} {res.get('message','')!r}")
-    wait_for_job()
+    # A delete that touches the unit is a background job, and the reply only says it STARTED.
+    wait_for_job(server.show_job_status)
     time.sleep(4.0)
     after, raw2 = names()
     snaps = {b.get("snapshot") for b in raw2["backups"]}
     check("the snapshot is gone from the list", args.show in snaps, False)
+    named = next((b["name"] for b in raw["backups"] if b.get("snapshot") == args.show), None)
+    check("and no other backup went with it", sorted(set(before) - set(after) - {named}), [])
     now_free = free_mb()
     check("and the drive has MORE room than before", (now_free or 0) > (was_free or 0), True)
     print(f"   free {was_free} MB -> {now_free} MB")
-    before = after
+    before, raw = after, raw2
 
 if args.profile:
     print(f"\n2. the BOTH HALVES branch: {args.profile!r}")
@@ -115,10 +102,12 @@ if args.profile:
         was_free = free_mb()
         res = server.action_delete_backup(args.profile)
         print(f"   reply: ok={res.get('ok')} via={res.get('via')!r} {res.get('message','')!r}")
-        wait_for_job()
+        wait_for_job(server.show_job_status)
         time.sleep(4.0)
         after, raw3 = names()
         check("the backup is gone from the list", args.profile in after, False)
+        check("and no other backup went with it",
+              sorted(set(before) - set(after) - {args.profile}), [])
         check("and so is its half on the unit",
               snap in {b.get("snapshot") for b in raw3["backups"]}, False)
         check("this computer's copy is gone too", profiles.load(args.profile).get("ok"), False)

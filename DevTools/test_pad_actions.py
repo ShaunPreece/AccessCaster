@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import devices
 import server
 import soundpad
-from _testkit import check, check_in, check_true
+from _testkit import as_device, check, check_in
 
 TOO_HIGH = server._max_user_pads() + 1
 
@@ -118,8 +119,11 @@ check("an unknown field is a refusal, not a quiet success",
       server.action_set_pad_trigger(1, "nonsense", 1)["ok"], False)
 
 print("\nand the range guard is device-aware, not a hardcoded 56")
-check_true("_max_user_pads comes from the active device's PadSpec",
-           server._max_user_pads() > 0)
+for _dev, _want in ((devices.PRO2, 56), (devices.DUO, 42)):
+    with as_device(_dev):
+        check(f"{_dev.name}: _max_user_pads is its PadSpec's", server._max_user_pads(),
+              _dev.pad.max_user_pads)
+        check(f"{_dev.name}: which is {_want}", server._max_user_pads(), _want)
 
 print()
 raise SystemExit(_testkit.finish())

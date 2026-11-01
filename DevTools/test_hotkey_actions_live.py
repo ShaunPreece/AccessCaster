@@ -5,8 +5,9 @@ actions themselves, which compose the app's own writes and then have to describe
 one spoken line. A wrong field name here does not crash anything - it comes out of the speakers as a
 Python error - so it is worth reading the sentences once.
 
-EXCLUSIVE: stop the running service first (this opens the same USB device). Nothing here is left
-changed: the cough key is pressed twice, and the recording test deletes its own take.
+EXCLUSIVE: stop the running service first (this opens the same USB device). The announcer and
+cough keys are each pressed twice, the second press made however the first part ends, so neither is
+left changed. The recording test leaves a throwaway take to delete from the Recording page.
 
 Run:  python DevTools/test_hotkey_actions_live.py [--record]
 """
@@ -26,16 +27,22 @@ def main():
 
     print("\n--- announcements on/off (twice, so it ends as it started) ---")
     was = server._announce_on.is_set()
-    print(repr(server._hk_announcer()))
-    print(repr(server._hk_announcer()))
+    try:
+        print(repr(server._hk_announcer()))
+    finally:
+        print(repr(server._hk_announcer()))
     print(f"announcer back where it started: {server._announce_on.is_set() == was}")
 
     print("\n--- the cough key (twice: mute what is open, then open exactly those) ---")
     before = _mic_mutes()
     print("before:", before)
     print(repr(server._hk_mics()))
-    print("after press 1:", _mic_mutes())
-    print(repr(server._hk_mics()))
+    try:
+        print("after press 1:", _mic_mutes())
+    finally:
+        # The second press opens exactly the mics the first one muted, which the server holds.
+        if server._hk_muted_mics:
+            print(repr(server._hk_mics()))
     after = _mic_mutes()
     print("after press 2:", after)
     print(f"round trip clean: {before == after}")

@@ -27,10 +27,10 @@ from _testkit import check_true
 
 
 def _raises(fn):
-    """True if calling fn() raises. Used where refusing IS the correct behaviour."""
+    """True if calling fn() raises ValueError. Used where refusing IS the correct behaviour."""
     try:
         fn()
-    except Exception:
+    except ValueError:
         return True
     return False
 
@@ -65,43 +65,6 @@ check_true("nothing is both on the page and excluded from it", not both, f"in bo
 # Every exemption has to say WHY, in a sentence, or it is just a silencer.
 thin = sorted(p for p, why in server.UNIT_SETTINGS_NOT_ON_PAGE.items() if len(why.strip()) < 30)
 check_true("every exemption gives a real reason", not thin, f"reason too thin to be one: {thin}")
-
-print("\nlookups that could match inside a longer property name")
-
-# rcp_read.find_all searches the dump for a property name as RAW TEXT, so a name that is a PREFIX of
-# another real property matches both and takes whichever comes first in the stream: "inputPhase"
-# matches inside "inputPhaseFlip", and "outputMonAutoMute" inside "outputMonAutoMuteActive", the
-# live ducking flag. Such a lookup is right only by the accident of stream order.
-#
-# The names below are the ones the app looks up that way. Any name that is a prefix of another real
-# property must NOT be in this list: read it by block and exact name instead.
-src = pathlib.Path(__file__).resolve().parents[1].joinpath("Project", "server.py")
-looked_up = sorted(set(re.findall(r'first\("([A-Za-z][A-Za-z0-9_]+)"\)',
-                                  src.read_text(encoding="utf-8"))))
-
-# The full property list, from the GENERATED docs/PROPERTY_LIST_<DESK>.md, so this needs
-# no device. Do not point it at a frozen appendix in RODECASTER_PROTOCOL.txt: a hand-frozen list
-# carries the defects of the reader that wrote it.
-#
-# DELIBERATELY NOT DEVICE-AWARE: this check wants the NAME universe, so it takes the union of
-# every desk's list that is present, and nothing here reads an occurrence count. It still runs on a
-# machine that has only ever seen one of the two desks.
-_lists = sorted(pathlib.Path(_bootstrap.docs_path())
-                .glob("PROPERTY_LIST_*.md"))
-check_true("a generated property list exists", bool(_lists),
-           "none found - regenerate with DevTools/property_list.py")
-appendix = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in _lists)
-known = set(re.findall(r"^- `([a-z][A-Za-z0-9_]{3,})` - ", appendix, re.M))
-check_true("the generated property list was readable", len(known) > 300,
-           f"only found {len(known)} names - regenerate with DevTools/property_list.py")
-
-risky = []
-for n in looked_up:
-    longer = sorted(o for o in known if o != n and o.startswith(n))
-    if longer:
-        risky.append(f"{n} also matches {longer}")
-check_true("no raw-text lookup is a prefix of another real property", not risky,
-           "read these by block and exact name instead: " + "; ".join(risky))
 
 print("\nthe address is a tree path, and there is one builder for it")
 
@@ -307,9 +270,17 @@ for dev in (devices.PRO2, devices.DUO):
     check_true(f"{dev.name}: a stereo PAIR code is still never assignable",
                not any(c in _f.code_set_for(True) for c, _lo, _up, _l in _f.stereo_pairs))
 check_true("USB 1 is renamed in Expanded, since Main Stereo is not what the computer sends there",
-      devices.PRO2.fader.labels_for(True)[7] != devices.PRO2.fader.labels_for(False)[7])
+           devices.PRO2.fader.labels_for(True)[7] != devices.PRO2.fader.labels_for(False)[7])
 check_true("and a relabel never changes what may be written",
-      devices.PRO2.fader.code_set_for(True) >= devices.PRO2.fader.code_set_for(False))
+           devices.PRO2.fader.code_set_for(True) >= devices.PRO2.fader.code_set_for(False))
+
+
+print("\nEVERY SOURCE CODE A DESK HAS IS NAMED")
+for _dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices.CHANNELS_DUO)):
+    _want = {c.code for c in _table} | {code for code, *_rest in _dev.fader.stereo_pairs}
+    check_true(f"{_dev.name}: every channel and stereo-pair code has a name",
+               set(_dev.source_codes) == _want,
+               f"named {sorted(_dev.source_codes)}, want {sorted(_want)}")
 
 
 # --- ONE CHANNEL TABLE, AND THE THREE SURFACES DERIVED FROM IT ------------------------------

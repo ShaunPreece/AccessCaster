@@ -87,8 +87,7 @@ check("a subject that only CONTAINS the name is not RODE's",
 
 print("\nTHE REAL MSI, if a copy is on this machine")
 local = None
-for root, _dirs, files in os.walk(os.path.join(os.path.dirname(_bootstrap.__file__), "..",
-                                               "_driver")):
+for root, _dirs, files in os.walk(os.path.join(_bootstrap.REPO, "_driver")):
     for f in files:
         if f.lower().endswith(".msi"):
             local = os.path.join(root, f)
@@ -116,7 +115,7 @@ print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
 # The claim the README and Help both make, asserted rather than trusted: no other module reaches
 # the network. `urllib`/`socket` appear elsewhere for the LAN server and for reading this machine's
 # own address, so match on the ACT of fetching a URL rather than on the import.
-proj = os.path.join(os.path.dirname(os.path.abspath(_bootstrap.__file__)), "..", "Project")
+proj = _bootstrap.PROJECT
 callers = []
 for path in glob.glob(os.path.join(proj, "*.py")):
     with open(path, encoding="utf-8") as source:

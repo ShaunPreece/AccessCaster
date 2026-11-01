@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import rcp_hid
-from _testkit import check
+from _testkit import check, patched
 
 
 def iface(pid, path):
@@ -42,11 +42,7 @@ class DeadDevice:
         raise OSError("open failed")
 
 
-real_enum, real_hid_device, real_ttl = rcp_hid.enumerate_interfaces, rcp_hid.hid.device, \
-    rcp_hid._IFACE_TTL_S
-rcp_hid.enumerate_interfaces = fake_enumerate
-rcp_hid.forget_interfaces()
-try:
+def run() -> None:
     print("\nREUSE")
     first = rcp_hid.find_control_interface()
     second = rcp_hid.find_control_interface()
@@ -69,18 +65,19 @@ try:
 
     print("\nAGE")
     bus[:] = [iface(0x0078, b"c")]
-    rcp_hid._IFACE_TTL_S = 0.0
-    check("a list past its age limit is scanned again",
-          rcp_hid.find_control_interface().path, b"c")
-    rcp_hid._IFACE_TTL_S = real_ttl
+    with patched((rcp_hid, {"_IFACE_TTL_S": 0.0})):
+        check("a list past its age limit is scanned again",
+              rcp_hid.find_control_interface().path, b"c")
 
     print("\nA FAILED OPEN")
-    rcp_hid.hid.device = DeadDevice
-    try:
-        rcp_hid.open_handle(rcp_hid.find_control_interface(), "test")
-    except OSError:
-        pass
-    check("clears the list", rcp_hid._iface_cache, None)
+    raised = False
+    with patched((rcp_hid.hid, {"device": DeadDevice})):
+        try:
+            rcp_hid.open_handle(rcp_hid.find_control_interface(), "test")
+        except OSError:
+            raised = True
+    check("raises", raised, True)
+    check("and clears the list", rcp_hid._iface_cache, None)
 
     print("\nSTATUS SCAN")
     bus[:] = [iface(0x0078, b"d")]
@@ -88,10 +85,13 @@ try:
     rcp_hid.refresh_interfaces()
     rcp_hid.find_control_interface()
     check("a status refresh is one scan the finder then reuses", len(scans) - before, 1)
+
+
+rcp_hid.forget_interfaces()
+try:
+    with patched((rcp_hid, {"enumerate_interfaces": fake_enumerate})):
+        run()
 finally:
-    rcp_hid.enumerate_interfaces = real_enum
-    rcp_hid.hid.device = real_hid_device
-    rcp_hid._IFACE_TTL_S = real_ttl
     rcp_hid.forget_interfaces()
 
 sys.exit(_testkit.finish())

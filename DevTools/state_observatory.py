@@ -15,6 +15,8 @@ Modes
   diff    <nameA> <nameB>         What changed between two snapshots, per property occurrence.
   watch   [--dumps N] [--gap S]   Repeated dumps, diffed against each other as they arrive: for
                                   watching something move (a fader, a meter) with no second call.
+                                  `diff` and `watch` take --quiet, which drops the properties that
+                                  move by themselves (meters, clocks, progress) and counts them.
   cost    [--n N]                 Time a dump, to say whether polling is viable.
   guided  [--steps S] [--raw]     Speak a fixed list of actions aloud, each in a timed window,
                                   and log what the desk pushes during each.
@@ -27,6 +29,10 @@ Usage with a human at the desk (the intended flow):
     python DevTools/state_observatory.py snap before
     ... the operator does ONE thing ...
     python DevTools/state_observatory.py diff before after --take
+
+Snapshots are keyed `BLOCK.name`, because a name can sit in two blocks and only one of them act:
+`btVisible` is in SYSTEM and NETWORK, and only NETWORK's drives the radio, so a diff by bare name
+would point at the wrong write.
 
 SECRETS: a model dump carries plaintext wifi PSK and SIP credentials, so every value written to
 disk or printed is redacted by SECRET_NAME below. Snapshots land in DevTools/captures/ which is
@@ -45,13 +51,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import model_tree
 import rcp_read
-from _desk import push_handle, pushes
+from _desk import push_handle, pushes, say
 
 OUT_DIR = Path(__file__).resolve().parent / "captures" / "observatory"
 
 # Any property whose NAME matches this never has its value printed or saved.
 SECRET_NAME = re.compile(r"psk|password|paircode|rodecode|authusername|username|ssid|serial",
                          re.IGNORECASE)
+
+# Properties that move by themselves, so a change in one means nothing. Matched as substrings,
+# because the meter and clock families are large.
+NOISY = ("Meter", "meter", "Progress", "CurrentPosition", "elapsed", "Elapsed",
+         "systemTime", "systemDate", "recordTime", "recordElapsed", "Rms", "Peak",
+         "batteryLevel", "freeSpace", "FreeSpace", "remaining", "Remaining")
 
 
 def address_hex(path) -> str:
@@ -60,15 +72,31 @@ def address_hex(path) -> str:
 
 
 def redact(name: str, value):
-    return "<redacted>" if SECRET_NAME.search(name) else value
+    """`value`, or "<redacted>" when `name` (a property name or a `BLOCK.name` key) is secret."""
+    return "<redacted>" if SECRET_NAME.search(name.rpartition(".")[2]) else value
+
+
+def redacted(data: dict[str, list]) -> dict[str, list]:
+    """A snapshot with every secret value replaced, as it is saved. A live snapshot goes through
+    this before it is diffed against a saved one, or every secret reads as moved."""
+    return {k: [redact(k, v) for v in vals] for k, vals in data.items()}
+
+
+def is_noisy(key: str) -> bool:
+    name = key.rpartition(".")[2]
+    return any(n in name for n in NOISY)
 
 
 # ---------------------------------------------------------------------------
 # Generic parse: every property in a dump, not just the ones we already know
 # ---------------------------------------------------------------------------
 def parse_all(blob: bytes) -> dict[str, list]:
-    """{name: [value, ...]} in stream order, for EVERY property in the dump (rcp_read's tree)."""
-    return rcp_read.snapshot_properties(blob)
+    """{'BLOCK.name': [value, ...]} in stream order, for EVERY property in the dump."""
+    out: dict[str, list] = {}
+    for block, name, value, kind in rcp_read.iter_block_properties(blob):
+        out.setdefault(f"{block or '?'}.{name}", []).append(
+            repr(value) if kind == "bytes" else value)
+    return out
 
 
 def snapshot(fresh: bool = True) -> dict[str, list]:
@@ -78,8 +106,8 @@ def snapshot(fresh: bool = True) -> dict[str, list]:
 def save(name: str, data: dict[str, list]) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.json"
-    safe = {k: ([redact(k, v) for v in vals]) for k, vals in data.items()}
-    path.write_text(json.dumps({"at": time.time(), "props": safe}, indent=1), encoding="utf-8")
+    path.write_text(json.dumps({"at": time.time(), "props": redacted(data)}, indent=1),
+                    encoding="utf-8")
     return path
 
 
@@ -93,22 +121,30 @@ def load(name: str) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 # Diff
 # ---------------------------------------------------------------------------
-def diff(a: dict[str, list], b: dict[str, list]) -> list[tuple[str, int, object, object]]:
-    """(name, occurrence index, before, after) for every value that moved."""
+def diff(a: dict[str, list], b: dict[str, list],
+         quiet: bool = False) -> tuple[list[tuple[str, int, object, object]], int]:
+    """((key, occurrence index, before, after) for every value that moved, how many moved keys
+    `quiet` dropped as self-moving). A changed occurrence count is reported with index -1."""
     changes = []
+    dropped = 0
     for name in sorted(set(a) | set(b)):
         va, vb = a.get(name, []), b.get(name, [])
+        if quiet and len(va) == len(vb) and va != vb and is_noisy(name):
+            dropped += 1
+            continue
         if len(va) != len(vb):
             changes.append((name, -1, f"{len(va)} occurrences", f"{len(vb)} occurrences"))
             continue
         for i, (x, y) in enumerate(zip(va, vb)):
             if x != y:
                 changes.append((name, i, redact(name, x), redact(name, y)))
-    return changes
+    return changes, dropped
 
 
-def print_diff(changes, title: str) -> None:
-    print(f"\n=== {title}: {len(changes)} value(s) changed ===")
+def print_diff(result, title: str) -> None:
+    changes, dropped = result
+    hidden = f", {dropped} self-moving propert(ies) hidden by --quiet" if dropped else ""
+    print(f"\n=== {title}: {len(changes)} value(s) changed{hidden} ===")
     by_name: dict[str, list] = {}
     for name, i, x, y in changes:
         by_name.setdefault(name, []).append((i, x, y))
@@ -178,7 +214,7 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
     # speaking it here reaches nobody who needs it AND talks over the app's own announcer, which is
     # speaking about the very control under test: its words are often the answer the capture is for.
     if speak:
-        _say(label)
+        say(label)
     print(f"CAPTURE OPEN: {label}", flush=True)
     print(f"  close it by creating {STOP_FILE}  (or wait {timeout:.0f}s)", flush=True)
     events: list[tuple[float, str, tuple, object, str]] = []   # (t, name, path, value, address)
@@ -224,8 +260,8 @@ def step(label: str, timeout: float, raw: bool, speak: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # Guided session: speak each step, listen throughout, tag events by step
 # ---------------------------------------------------------------------------
-# The steps are done at the DESK, not at the keyboard, so they have to be spoken.
-SAY = Path(__file__).resolve().parent.parent / "Project" / "say.ps1"
+# The steps are done at the DESK, not at the keyboard, so they have to be spoken, without waiting:
+# the read loop must not miss packets.
 
 # (spoken prompt, seconds to allow). Kept here so a re-run on the Duo uses the same script.
 DEFAULT_STEPS = [
@@ -239,17 +275,6 @@ DEFAULT_STEPS = [
 ]
 
 
-def _say(text: str) -> None:
-    """Speak without blocking the listener (the read loop must not miss packets)."""
-    import subprocess
-    try:
-        subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-File", str(SAY),
-                          "-Text", text],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as e:
-        print(f"(could not speak: {e})")
-
-
 def guided(steps=None, raw: bool = False) -> None:
     """Run the spoken step list while passively logging the report-04 stream.
 
@@ -259,11 +284,11 @@ def guided(steps=None, raw: bool = False) -> None:
     steps = steps or DEFAULT_STEPS
     events: list[tuple[float, str, str, object, str]] = []   # (t, step, name, value, address)
     with push_handle("observatory guided") as dev:
-        _say("Starting the listen now")
+        say("Starting the listen now")
         time.sleep(2.5)
         t0 = time.monotonic()
         for prompt, secs in steps:
-            _say(prompt)
+            say(prompt)
             print(f"[{time.monotonic() - t0:5.1f}s] STEP: {prompt}  ({secs}s)")
             for _at, path, name, value in pushes(dev, secs, poll_ms=100):
                 events.append((round(time.monotonic() - t0, 2), prompt, name,
@@ -299,14 +324,14 @@ def guided(steps=None, raw: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # Watch + cost
 # ---------------------------------------------------------------------------
-def watch(dumps: int, gap: float, label: str) -> None:
+def watch(dumps: int, gap: float, label: str, quiet: bool = False) -> None:
     prev, prev_t = None, None
     for n in range(dumps):
         t0 = time.monotonic()
         cur = snapshot()
         took = time.monotonic() - t0
         if prev is not None:
-            print_diff(diff(prev, cur), f"{label} dump {n} (dump took {took:.2f}s, "
+            print_diff(diff(prev, cur, quiet), f"{label} dump {n} (dump took {took:.2f}s, "
                                         f"{time.monotonic() - prev_t:.2f}s since the last)")
         else:
             print(f"=== {label}: baseline dump, {sum(len(v) for v in cur.values())} values "
@@ -331,19 +356,29 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Desk state observatory (read only)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("listen"); p.add_argument("seconds", type=float, nargs="?", default=10.0)
+    p = sub.add_parser("listen")
+    p.add_argument("seconds", type=float, nargs="?", default=10.0)
     p.add_argument("--label", default="idle")
 
-    p = sub.add_parser("snap"); p.add_argument("name")
+    p = sub.add_parser("snap")
+    p.add_argument("name")
 
-    p = sub.add_parser("diff"); p.add_argument("a"); p.add_argument("b")
+    quiet_help = "hide the properties that move by themselves (meters, clocks, progress)"
+    p = sub.add_parser("diff")
+    p.add_argument("a")
+    p.add_argument("b")
     p.add_argument("--take", action="store_true",
                    help="take snapshot B live now instead of loading it from disk")
+    p.add_argument("--quiet", action="store_true", help=quiet_help)
 
-    p = sub.add_parser("watch"); p.add_argument("--dumps", type=int, default=3)
-    p.add_argument("--gap", type=float, default=1.0); p.add_argument("--label", default="watch")
+    p = sub.add_parser("watch")
+    p.add_argument("--dumps", type=int, default=3)
+    p.add_argument("--gap", type=float, default=1.0)
+    p.add_argument("--label", default="watch")
+    p.add_argument("--quiet", action="store_true", help=quiet_help)
 
-    p = sub.add_parser("cost"); p.add_argument("--n", type=int, default=3)
+    p = sub.add_parser("cost")
+    p.add_argument("--n", type=int, default=3)
 
     p = sub.add_parser("guided", help="speak the step list aloud and log what the desk pushes")
     p.add_argument("--raw", action="store_true", help="also show each push's address bytes")
@@ -369,13 +404,13 @@ def main() -> None:
     elif args.cmd == "diff":
         a = load(args.a)
         if args.take:
-            b = snapshot()
+            b = redacted(snapshot())
             save(args.b, b)
         else:
             b = load(args.b)
-        print_diff(diff(a, b), f"{args.a} -> {args.b}")
+        print_diff(diff(a, b, args.quiet), f"{args.a} -> {args.b}")
     elif args.cmd == "watch":
-        watch(args.dumps, args.gap, args.label)
+        watch(args.dumps, args.gap, args.label, args.quiet)
     elif args.cmd == "cost":
         cost(args.n)
     elif args.cmd == "guided":

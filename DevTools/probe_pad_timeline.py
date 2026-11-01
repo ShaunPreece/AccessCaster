@@ -17,42 +17,27 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import hid
 import midi_out
-import model_tree
-import rcp_read
-import rcp_transfer
 import soundpad
+from _desk import push_handle, pushes
 
 QUIET_S = 0.5      # no progress for this long = not playing
 
 
 class Reader(threading.Thread):
-    """Timestamps every pad push on its own handle, so the main thread never has to stop and look."""
+    """Timestamps every pad push on its own handle, so the main thread never has to stop and look.
+    Each event is (`time.monotonic()` when it arrived, name, pad index, value)."""
 
-    def __init__(self, path):
+    def __init__(self):
         super().__init__(daemon=True)
-        self.path, self.events, self.stop = path, [], threading.Event()
-        self.t0 = None
+        self.events, self.stop = [], threading.Event()
 
     def run(self):
-        dev = hid.device()
-        dev.open_path(self.path)
-        dev.set_nonblocking(False)
-        try:
-            while not self.stop.is_set():
-                chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=50)
-                if not chunk:
-                    continue
-                b = bytes(chunk)
-                ln = rcp_read._push_record_len(b)
-                if not ln:
-                    continue
-                path, nm, val, _k, _e = model_tree.parse_record(b[5:5 + ln])
+        with push_handle("pad timeline") as dev:
+            for _at, path, nm, val in pushes(dev, float("inf"), stop=self.stop.is_set,
+                                             poll_ms=50):
                 if nm in ("padProgress", "padActive"):
-                    self.events.append((time.time(), nm, path[-1], val))
-        finally:
-            dev.close()
+                    self.events.append((time.monotonic(), nm, path[-1], val))
 
     def playing_at(self, when: float) -> bool:
         """Was progress arriving around `when`? Judged on a push within QUIET_S either side."""
@@ -75,8 +60,7 @@ def main() -> int:
           f"mode {soundpad.PLAY_MODE_LABEL.get(modes.get(pad_idx))}")
 
     was_bank = soundpad.current_bank()
-    iface = rcp_transfer.find_control_interface()
-    reader = Reader(iface.path)
+    reader = Reader()
     reader.start()
     time.sleep(0.3)
     try:
@@ -87,14 +71,14 @@ def main() -> int:
                 for gap in gaps:
                     # Get to silence, whatever it takes, and SAY how many presses that needed.
                     tries = 0
-                    while reader.playing_at(time.time()) and tries < 4:
+                    while reader.playing_at(time.monotonic()) and tries < 4:
                         m.play_pad(slot)
                         tries += 1
                         time.sleep(1.2)
-                    t_start = time.time()
+                    t_start = time.monotonic()
                     m.play_pad(slot)
                     time.sleep(gap)
-                    t_second = time.time()
+                    t_second = time.monotonic()
                     m.play_pad(slot)
                     time.sleep(1.5)
                     started = reader.playing_at(t_start + 0.35)
@@ -110,7 +94,7 @@ def main() -> int:
                     time.sleep(0.5)
                 # Leave it silent.
                 for _ in range(4):
-                    if not reader.playing_at(time.time()):
+                    if not reader.playing_at(time.monotonic()):
                         break
                     m.play_pad(slot)
                     time.sleep(1.2)

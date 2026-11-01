@@ -131,8 +131,10 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
         return
     print(f"\n=== {label} ===")
     _b0, before = snapshot()
-    print(f"  baseline {_fmt(expect_at) if expect_at else '(no single address)'}"
-          f" = {before.get(expect_at)!r}" if expect_at else "  baseline taken")
+    if expect_at:
+        print(f"  baseline {_fmt(expect_at)} = {before.get(expect_at)!r}")
+    else:
+        print("  baseline taken")
     try:
         write(test_val)
     except Exception as e:
@@ -458,7 +460,7 @@ elif "stereo_link" in dev.caps:
 
 # ---- level_write -------------------------------------------------------------------------------
 if "level_write" in dev.caps:
-    blob, _snap = snapshot()
+    blob, levels = snapshot()
     vec = rr.values(blob, "channelInputSource")
 
     # A VIRTUAL fader, and one that actually has a source on it - an empty strip (-1) moves no
@@ -471,7 +473,7 @@ if "level_write" in dev.caps:
         sel = dev.fader.level_selectors[idx]
         source = vec[idx]
         node = (0, sel)
-        cur = _snap.get((node, "FADER", "faderLevel"))
+        cur = levels.get((node, "FADER", "faderLevel"))
         target = 40 if cur != 40 else 60
         # THE ENGINE IS THE WITNESS, not the read-back. A fader's level IS its source's cross-point
         # anchor, so the desk recomputes every cell of that source's routing row by itself, to
@@ -524,9 +526,9 @@ if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
                    s.get(((sel,), "MIX", "mixDisabled")) is True
                    and s.get(((sel,), "MIX", "mixLink")) is False
                    and s.get(((sel,), "MIX", "mixMute")) is True)
+    finally:
         rcp_transfer.set_cross_point_excluded(out_i, src_i, False)
         time.sleep(0.8)
-    finally:
         rcp_transfer.set_output_routing(out_i, mode0)
     _b, back = settled()
     added, removed, changed = diff(base, back)
@@ -680,7 +682,7 @@ if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
             continue
         probe(f"unit_settings: {prop} ({block} block, selector {sel:#04x})",
               ((sel,), block, prop), lambda v, p=prop: rcp_transfer.set_unit_setting(p, v),
-              newval if newval != cur else (0 if newval else 1), cur, restore_extra=fixup)
+              newval if newval != cur else int(not newval), cur, restore_extra=fixup)
 
 # ---- recorder ----------------------------------------------------------------------------------
 # NOT written with probe(): `requestRecordState` is a REQUEST the firmware consumes and parks at 3,

@@ -27,6 +27,7 @@ import profiles as profiles_mod
 import rcp_read
 import server
 import shows
+from _desk import wait_for_job
 from _testkit import as_device, check, check_in, patched
 
 # PIN THE DESK. This suite simulates Pro II show behaviour, so with a Duo attached it would fail on
@@ -182,13 +183,6 @@ def run_job(start_result):
             return st
         time.sleep(0.02)
     raise AssertionError("the job never finished")
-
-
-def wait_for_restore(timeout_s):
-    """Wait for the restore job to stop running, or for the timeout."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline and server._restore_job.busy():
-        time.sleep(0.05)
 
 
 def reset_desk():
@@ -466,7 +460,7 @@ with as_device(CAPLESS):
         # about the reset, not about restoring.
         merged = server.restore_profile("duo-profile", clean=False)
         check("but a merge restore is still allowed", merged.get("ok"), True)
-        wait_for_restore(20)
+        wait_for_job(server._restore_job.status, 20, 0.05)
         check("and it ran to completion", server._restore_job.busy(), False)
 
 ANY_PROFILE = (profiles_mod, {"load": lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}})
@@ -476,7 +470,7 @@ reset_desk()
 with patched(ANY_PROFILE):
     started = server.restore_profile("p", clean=True)
     check("it starts", started.get("ok"), True)
-    wait_for_restore(30)
+    wait_for_job(server._restore_job.status, 30, 0.05)
     final = server._restore_job.status()
     check("it finishes", final["running"], False)
     # ORDER IS THE WHOLE POINT: back up, reset, THEN write the profile. A reset after the writes
@@ -493,7 +487,7 @@ reset_desk()
 DESK.export_does_nothing = True
 with patched(ANY_PROFILE):
     server.restore_profile("p", clean=True)
-    wait_for_restore(30)
+    wait_for_job(server._restore_job.status, 30, 0.05)
     final = server._restore_job.status()
     check("the restore is reported as failed", final["ok"], False)
     check("THE DESK WAS NOT RESET", DESK.current_uuid, "show-A")

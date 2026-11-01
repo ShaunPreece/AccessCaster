@@ -32,12 +32,9 @@ from ctypes import wintypes
 
 u32 = ctypes.windll.user32
 try:
-    u32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
-except Exception:
-    try:
-        u32.SetProcessDPIAware()
-    except Exception:
-        pass
+    u32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))      # per-monitor aware, version 2
+except AttributeError:
+    u32.SetProcessDPIAware()          # a Windows older than 10 1703 has only the system-wide call
 
 SW_RESTORE, SW_MAXIMIZE = 9, 3
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
@@ -96,7 +93,7 @@ def resolve_target(spec):
 
 def _parse_flags(argv):
     """Pull --crop L,T,R,B and --scale N out of argv; return (crop_tuple|None, scale, rest)."""
-    crop, scale, rest = None, 1, []
+    crop, scale, rest = None, 1.0, []
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -122,7 +119,7 @@ def cmd_maximize(hwnd):
     print(f"MAXIMIZED rect L={l} T={t} W={r - l} H={b - t}")
 
 
-def cmd_shot(hwnd, out, crop=None, scale=1, refocus=True):
+def cmd_shot(hwnd, out, crop=None, scale=1.0, refocus=True):
     from PIL import ImageGrab
     if refocus:
         foreground(hwnd)
@@ -232,6 +229,7 @@ def main():
         cmd_shot(hwnd, out, crop, scale, refocus=False)
     else:
         print(f"unknown cmd: {cmd}")
+        return 2
     return 0
 
 

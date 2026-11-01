@@ -23,7 +23,7 @@ import _bootstrap  # noqa: F401
 import _testkit
 import rcp_read
 import server
-from _testkit import check
+from _testkit import check, patched
 
 GB = 1024 * 1024 * 1024
 
@@ -35,12 +35,10 @@ def low_for(states):
     the parser, and the parser is already exercised against the real desk every time the Device page
     is opened. What has never been exercised is the THRESHOLD."""
     real = rcp_read.find_all
-    rcp_read.find_all = lambda blob, name: (
-        [(s, "str") for s in states] if name == "storageVolumeState" else real(blob, name))
-    try:
+    with patched((rcp_read, {"find_all": lambda blob, name: (
+            [(s, "str") for s in states] if name == "storageVolumeState"
+            else real(blob, name))})):
         return server._storage_low(b"")
-    finally:
-        rcp_read.find_all = real
 
 
 def state(capacity, free, inserted=True, mounted=True):

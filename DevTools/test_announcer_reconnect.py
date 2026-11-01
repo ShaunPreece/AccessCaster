@@ -205,9 +205,8 @@ with rig:
     check("but still tidies and follows up", (rig.tidied, rig.followed), ([True], [(2, True)]))
     check("and the mark is used up, so a later touchscreen change is said",
           server._usb_mode_written_by_app(2), False)
-check("a write too old to be this reconnect is not ours",
-      (setattr(server, "_usb_mode_written", (2, time.monotonic() - 60)),
-       server._usb_mode_written_by_app(2))[1], False)
+server._usb_mode_written = (2, time.monotonic() - 60)
+check("a write too old to be this reconnect is not ours", server._usb_mode_written_by_app(2), False)
 
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",

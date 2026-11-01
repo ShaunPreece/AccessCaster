@@ -15,11 +15,10 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels
 import devices
-import model_tree
 import rcp_read
 import rcp_transfer
 import server
-from _testkit import check, check_true
+from _testkit import check, check_true, patched, push
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # would fail on the Duo's different channel set and look like a regression. Offline tests must not
@@ -29,15 +28,6 @@ devices.force_device(devices.PRO2)
 
 SPOKEN: list[str] = []
 server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak
-
-
-def push(path, name: str, value_block: bytes) -> bytes:
-    """A whole report-04 frame as the desk pushes it: `04 <len32> <record> <zeros to 256>`, the
-    record being `<address> <name> 00 <value block>`. The announcer acts only on a frame that is
-    exactly this, so a builder that cuts a corner tests nothing."""
-    rec = model_tree.encode_path(path) + name.encode() + b"\x00" + value_block
-    frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
-    return frame + bytes(256 - len(frame))
 
 
 def v_bool(on: bool) -> bytes:
@@ -775,12 +765,12 @@ NEW_LAYOUT = [0, 1, 2, 3, 10, 11, 7, 8, 9, 9]      # after the reset: USB 1 on f
 channels.publish_strip_vector(list(OLD_LAYOUT))
 check("names the OLD channel before the write", server._ann_fader_label(6), "Mic 2")
 
-_real_find_all, _real_read_model = rcp_read.find_all, rcp_read.read_model
-rcp_read.read_model = lambda *a, **k: b"stub-dump"
-rcp_read.find_all = lambda blob, name: ([(v, "int") for v in NEW_LAYOUT]
+_real_find_all = rcp_read.find_all
+with patched((rcp_read, {
+        "read_model": lambda *a, **k: b"stub-dump",
+        "find_all": lambda blob, name: ([(v, "int") for v in NEW_LAYOUT]
                                         if name == "channelInputSource"
-                                        else _real_find_all(blob, name))
-try:
+                                        else _real_find_all(blob, name))})):
     # This is what every layout write does immediately after writing: re-read to report the result.
     got = server._read_fader_vector()
     check("the re-read reports the new layout", got, NEW_LAYOUT[:9])
@@ -799,8 +789,6 @@ try:
     check("solo on fader 2 names Mic 2 again", said, ["Mic 2 solo on"])
     check("and the channel button agrees", server._ann_selected_phrase(6),
           "USB 1 (Main Stereo) selected. Encoder sets its input level in decibels")
-finally:
-    rcp_read.find_all, rcp_read.read_model = _real_find_all, _real_read_model
 
 print("\nMUTING FROM SOFTWARE KEEPS THE ANNOUNCER'S MUTE CACHE HONEST")
 # THE DESK DOES NOT ECHO OUR OWN WRITES. So a mute set from the web UI never appears on the pushed
@@ -809,9 +797,8 @@ print("\nMUTING FROM SOFTWARE KEEPS THE ANNOUNCER'S MUTE CACHE HONEST")
 # mirror image of quoting a stale level.
 
 RECORDS: list = []
-_real_send = rcp_transfer.send_record
-rcp_transfer.send_record = lambda rec: RECORDS.append(rec) or 1
-try:
+with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1}),
+             (server, {"_ann_live_state": None})):
     channels.publish_strip_vector([0, 1, 2, 3, 10, 11, 7, 8, 9, 9])
     RECORDS.clear()
     channels.set_channel_mute("Mic2", True)
@@ -835,48 +822,48 @@ try:
 
     # The reply reads the mix grid to say what the mute reaches. Every Mic 2 cross-point linked here,
     # so it is silent everywhere; the hand-set case is checked after the cache block.
-    _real_mix_reads = (rcp_read.read_model, rcp_read.read_matrix_levels, rcp_read.read_matrix_state)
     MIX_MODES = {o: 0 for o in range(11)}
     MIX_LEVELS = {o: {1: {"level": 0.8, "linked": True}} for o in range(11)}
-    rcp_read.read_model = lambda *a, **k: b"stub-dump"
-    rcp_read.read_matrix_levels = lambda blob=None: {"ok": True, "modes": MIX_MODES,
-                                                     "levels": MIX_LEVELS}
-    rcp_read.read_matrix_state = lambda blob=None: {"ok": True, "modes": MIX_MODES,
-                                                    "excluded": {o: {1: False} for o in range(11)}}
+    with patched((rcp_read, {
+            "read_model": lambda *a, **k: b"stub-dump",
+            "read_matrix_levels": lambda blob=None: {"ok": True, "modes": MIX_MODES,
+                                                     "levels": MIX_LEVELS},
+            "read_matrix_state": lambda blob=None: {
+                "ok": True, "modes": MIX_MODES,
+                "excluded": {o: {1: False} for o in range(11)}}})):
 
-    # Now the cache. A live announcer state, as _announce_loop publishes it.
-    st = {"bank": None, "pending": None, "at": 0.0, "known": {("fader", 6): 0.9}, "muted": {}}
-    server._ann_live_state = st
-    SPOKEN.clear()
-    res = server.action_set_channel_mute("Mic2", True)
-    check_true("the write reports ok", res.get("ok"))
-    check_true("and says it silences every mix, not just what you hear",
-               "every mix" in res.get("message", ""))
-    check("the announcer does NOT speak our own write (the UI already did)", SPOKEN, [])
-    check("but its mute cache knows, keyed by STRIP", st["muted"], {6: True})
-    check("so an encoder press quotes the mute, not a stale 90 percent",
-          server._ann_ring_phrase(st, 0), "Mic 2, muted")
-    server.action_set_channel_mute("Mic2", False)
-    check("unmuting clears it again", st["muted"], {6: False})
-    check("and the ring goes back to the level", server._ann_ring_phrase(st, 0), "Mic 2 90 percent")
-    server._ann_live_state = None
-    check_true("publishing with the announcer OFF is a safe no-op",
-               server.action_set_channel_mute("Mic2", True).get("ok"))
+        # Now the cache. A live announcer state, as _announce_loop publishes it.
+        st = {"bank": None, "pending": None, "at": 0.0, "known": {("fader", 6): 0.9}, "muted": {}}
+        server._ann_live_state = st
+        SPOKEN.clear()
+        res = server.action_set_channel_mute("Mic2", True)
+        check_true("the write reports ok", res.get("ok"))
+        check_true("and says it silences every mix, not just what you hear",
+                   "every mix" in res.get("message", ""))
+        check("the announcer does NOT speak our own write (the UI already did)", SPOKEN, [])
+        check("but its mute cache knows, keyed by STRIP", st["muted"], {6: True})
+        check("so an encoder press quotes the mute, not a stale 90 percent",
+              server._ann_ring_phrase(st, 0), "Mic 2, muted")
+        server.action_set_channel_mute("Mic2", False)
+        check("unmuting clears it again", st["muted"], {6: False})
+        check("and the ring goes back to the level", server._ann_ring_phrase(st, 0), "Mic 2 90 percent")
+        server._ann_live_state = None
+        check_true("publishing with the announcer OFF is a safe no-op",
+                   server.action_set_channel_mute("Mic2", True).get("ok"))
 
-    # A mute does not reach a cross-point unlinked at a manual level, so the reply must name that
-    # output instead of claiming silence everywhere. Monitor (index 4) in Custom, Mic 2 hand-set.
-    MIX_MODES[4] = 2
-    MIX_LEVELS[4][1] = {"level": 0.5, "linked": False}
-    msg = server.action_set_channel_mute("Mic2", True).get("message", "")
-    check_true("a hand-set level is named as still hearing the muted channel",
-               "Monitor" in msg and "still hears" in msg and "every mix" not in msg)
-    MIX_LEVELS[4][1] = {"level": 0.0, "linked": False}
-    check_true("but a hand-set level of zero is silent anyway",
-               "every mix" in server.action_set_channel_mute("Mic2", True).get("message", ""))
-    rcp_read.read_matrix_levels = lambda blob=None: {"ok": False}
-    check_true("an unreadable grid says so rather than claiming either way",
-               "Could not check" in server.action_set_channel_mute("Mic2", True).get("message", ""))
-    rcp_read.read_model, rcp_read.read_matrix_levels, rcp_read.read_matrix_state = _real_mix_reads
+        # A mute does not reach a cross-point unlinked at a manual level, so the reply must name that
+        # output instead of claiming silence everywhere. Monitor (index 4) in Custom, Mic 2 hand-set.
+        MIX_MODES[4] = 2
+        MIX_LEVELS[4][1] = {"level": 0.5, "linked": False}
+        msg = server.action_set_channel_mute("Mic2", True).get("message", "")
+        check_true("a hand-set level is named as still hearing the muted channel",
+                   "Monitor" in msg and "still hears" in msg and "every mix" not in msg)
+        MIX_LEVELS[4][1] = {"level": 0.0, "linked": False}
+        check_true("but a hand-set level of zero is silent anyway",
+                   "every mix" in server.action_set_channel_mute("Mic2", True).get("message", ""))
+        rcp_read.read_matrix_levels = lambda blob=None: {"ok": False}
+        check_true("an unreadable grid says so rather than claiming either way",
+                   "Could not check" in server.action_set_channel_mute("Mic2", True).get("message", ""))
 
     # ---- ECHO SUPPRESSION: our own writes are not read back at us ----
     # The checks above only prove the WRITE itself is silent. The desk then PUSHES the change back,
@@ -942,16 +929,19 @@ try:
     # worker rather than being applied to a live one, and that the confirmation is spoken so the new
     # voice and output are heard rather than trusted.
     print("\n-- announcer voice and output device")
-    _real_lists, _real_update = server._sapi_lists, server.update_settings
-    _saved = (server._ann_voice, server._ann_say_device, server._ann_worker_gen)
     WROTE: dict = {}
-    server._sapi_lists = lambda refresh=False: {
-        "voices": ["Microsoft Hazel Desktop - English (Great Britain)",
-                   "Microsoft Zira Desktop - English (United States)"],
-        "outputs": ["Speakers (RODECaster Pro II Main Stereo)", "Speakers (Realtek(R) Audio)"],
-    }
-    server.update_settings = lambda **kw: WROTE.update(kw)
-    try:
+    # The voice, output and worker generation are patched with their own values, so whatever the
+    # checks below change is put back.
+    with patched((server, {
+            "_sapi_lists": lambda refresh=False: {
+                "voices": ["Microsoft Hazel Desktop - English (Great Britain)",
+                           "Microsoft Zira Desktop - English (United States)"],
+                "outputs": ["Speakers (RODECaster Pro II Main Stereo)",
+                            "Speakers (Realtek(R) Audio)"]},
+            "update_settings": lambda **kw: WROTE.update(kw),
+            "_ann_voice": server._ann_voice,
+            "_ann_say_device": server._ann_say_device,
+            "_ann_worker_gen": server._ann_worker_gen})):
         SPOKEN.clear()
         gen0 = server._ann_worker_gen
         res = server.action_set_announce_voice(
@@ -1000,12 +990,6 @@ try:
         # here is "Speakers (Realtek(R) Audio)", and PowerShell's -like would read [ ] as wildcards.
         check_true("a name with brackets in it matches literally",
                    server.action_set_announce_output("Realtek(R)").get("ok"))
-    finally:
-        server._sapi_lists, server.update_settings = _real_lists, _real_update
-        (server._ann_voice, server._ann_say_device, server._ann_worker_gen) = _saved
-finally:
-    rcp_transfer.send_record = _real_send
-    server._ann_live_state = None
 
 print("\nONE FORMATTER, TWO WORD ORDERS, AND THEY MUST STAY OPPOSITE")
 # Both announcements come through _ann_level_words. The orders are opposite ON PURPOSE and drifting
@@ -1077,6 +1061,16 @@ check("and so is the one past it",
 # it otherwise.
 print()
 print("The Expanded flag is seeded at startup")
+seed_reads = []
+
+
+def _seed_first(*_a, **_k):
+    seed_reads.append(1)
+    return 5                                            # post-fader + Expanded
+
+
+SEED_READER = type("R", (), {"first": staticmethod(_seed_first),
+                             "read_model_stable": staticmethod(lambda **k: b"")})()
 _saved = channels._usb_expanded["on"]
 try:
     channels._usb_expanded["on"] = None
@@ -1084,27 +1078,21 @@ try:
     check("and an unpublished flag hides Expanded's four from the fader write gate",
           sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}),
           [])
-    server.rcp_read = type("R", (), {
-        "first": staticmethod(lambda *a, **k: 5),          # post-fader + Expanded
-        "read_model_stable": staticmethod(lambda **k: b""),
-    })()
-    server._seed_usb_expanded()
-    check_true("the startup seed publishes it", channels.usb_expanded_known())
-    check("and the desk's real mode is what it publishes", channels.usb_expanded(), True)
-    check("so the four are assignable again",
-          sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}),
-          [12, 13, 14, 15])
-    # Idempotent: a second call must not pay for another dump.
-    server.rcp_read = type("R", (), {
-        "first": staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-read"))),
-        "read_model_stable": staticmethod(lambda **k: b""),
-    })()
-    server._seed_usb_expanded()
-    check_true("a second seed reads nothing, because something has already published", True)
+    with patched((server, {"rcp_read": SEED_READER})):
+        server._seed_usb_expanded()
+        check_true("the startup seed publishes it", channels.usb_expanded_known())
+        check("and the desk's real mode is what it publishes", channels.usb_expanded(), True)
+        check("so the four are assignable again",
+              sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded()))
+                     & {12, 13, 14, 15}),
+              [12, 13, 14, 15])
+        # Idempotent: a second call must not pay for another dump.
+        seed_reads.clear()
+        server._seed_usb_expanded()
+    check("a second seed reads nothing, because something has already published",
+          len(seed_reads), 0)
 finally:
     channels._usb_expanded["on"] = _saved
-    import rcp_read as _rr
-    server.rcp_read = _rr
 
 
 print()

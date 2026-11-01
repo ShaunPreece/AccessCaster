@@ -3,10 +3,10 @@
 THE MODULE ITSELF LIVES AT `Project/midi_out.py`, because the app fires pads over MIDI and a feature
 cannot import from DevTools. This is the command line around it and nothing else.
 
-    python DevTools/midi_out.py --pad 1              # play pad 1 in the current bank
-    python DevTools/midi_out.py --pad 1 --hold 3     # press, wait 3 s, release
-    python DevTools/midi_out.py --pad 1 --bank 2     # select bank 2 first, and put the bank back
-    python DevTools/midi_out.py --ports              # list MIDI outs
+    python DevTools/play_pad.py --pad 1              # play pad 1 in the current bank
+    python DevTools/play_pad.py --pad 1 --hold 3     # press, wait 3 s, release
+    python DevTools/play_pad.py --pad 1 --bank 2     # select bank 2 first, and put the bank back
+    python DevTools/play_pad.py --ports              # list MIDI outs
 """
 from __future__ import annotations
 

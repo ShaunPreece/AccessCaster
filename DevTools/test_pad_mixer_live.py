@@ -30,16 +30,19 @@ def run_mode(grid, mode, pool_before):
     label = soundpad.MIXER_MODE_LABEL[mode]
     want_trigger = soundpad._MIXER_DEFAULTS[mode]["trigger_mode"]
     print("CREATE %s on pad %d" % (label, grid))
-    res = soundpad.create_mixer(grid, mode)
-    print("  " + res.get("message", ""))
-    pad = read_pad(grid)
-    created = bool(pad and pad["present"] and pad["type"] == soundpad.PAD_TYPE_MIXER
-                   and pad["mixer_mode"] == mode and pad["mixer_trigger"] == want_trigger)
-    print("  read back: type=%s mode=%s trigger=%s name=%r  -> %s"
-          % (pad and pad["type_label"], pad and pad["mixer_mode"], pad and pad["mixer_trigger"],
-             pad and pad["name"], "OK" if created else "WRONG"))
-
-    soundpad.clear_grid_pad(grid)
+    created = False
+    try:
+        res = soundpad.create_mixer(grid, mode)
+        print("  " + res.get("message", ""))
+        pad = read_pad(grid)
+        created = bool(pad and pad["present"] and pad["type"] == soundpad.PAD_TYPE_MIXER
+                       and pad["mixer_mode"] == mode and pad["mixer_trigger"] == want_trigger)
+        print("  read back: type=%s mode=%s trigger=%s name=%r  -> %s"
+              % (pad and pad["type_label"], pad and pad["mixer_mode"],
+                 pad and pad["mixer_trigger"], pad and pad["name"], "OK" if created else "WRONG"))
+    finally:
+        if (read_pad(grid) or {}).get("present"):
+            soundpad.clear_grid_pad(grid)
     pad = read_pad(grid)
     pool = soundpad.pool_health()
     cleared = bool(pad and not pad["present"])

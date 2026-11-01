@@ -1,0 +1,3 @@
+# Packages only the DevTools scripts use, pinned, on Python 3.12. The app needs none of them.
+# Install with: python -m pip install -r DevTools/requirements-dev.txt
+python-rtmidi==1.5.8  # MIDI input for midi_monitor.py

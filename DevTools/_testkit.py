@@ -2,7 +2,8 @@
 
 Each check prints one line and records a failure, and `finish` prints the tally and returns the
 script's exit status. `as_device` and `patched` replace something for the length of a block and put
-it back however the block ends. `decode_record` and `snapshot` read the desk's own record format.
+it back however the block ends. `decode_record` and `snapshot` read the desk's own record format,
+and `push` builds the frame the desk pushes.
 
     import _testkit
     from _testkit import check, check_true
@@ -93,6 +94,15 @@ def patched(*targets):
             for name, value in attrs.items():
                 stack.enter_context(mock.patch.object(owner, name, value))
         yield
+
+
+def push(path, name: str, value_block: bytes) -> bytes:
+    """A whole report-04 frame as the desk pushes it: `04 <len32> <record> <zeros to 256>`, the
+    record being `<address> <name> 00 <value block>`. The announcer acts only on a frame that is
+    exactly this, so a builder that cuts a corner tests nothing."""
+    rec = model_tree.encode_path(path) + name.encode() + b"\x00" + value_block
+    frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
+    return frame + bytes(256 - len(frame))
 
 
 def decode_record(rec: bytes):

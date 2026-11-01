@@ -11,6 +11,9 @@ nothing to gain from the newer one here.
 
 Usage:  python DevTools/press_keys.py ctrl alt F9
         python DevTools/press_keys.py ctrl alt win S
+        python DevTools/press_keys.py ctrl alt "Page up"
+
+Any key the app offers (`hotkeys.KEYS`) can be named, in any case, plus the four modifiers.
 
 Prefer a combination WITHOUT the Windows key in a test: a stray Win press can open the Start menu
 and steal focus from whatever is being watched.
@@ -20,24 +23,24 @@ import ctypes
 import sys
 import time
 
+import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import hotkeys
+
 KEYEVENTF_KEYUP = 0x0002
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 
+# Lower-cased names, so "f9" and "F9" both work.
 VK = {"ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B}
-for _c in range(ord("A"), ord("Z") + 1):
-    VK[chr(_c)] = _c
-for _n in range(1, 13):
-    VK[f"F{_n}"] = 0x70 + _n - 1
+VK.update((name.lower(), vk) for name, vk in hotkeys.KEYS)
 
 
 def press(names, gap: float = 0.03) -> None:
     """Hold the keys in the order given and release them in reverse, the way a hand would."""
     vks = []
     for n in names:
-        key = n if n in VK else n.upper()
-        if key not in VK:
+        if n.lower() not in VK:
             raise SystemExit(f"unknown key: {n}")
-        vks.append(VK[key])
+        vks.append(VK[n.lower()])
     # RELEASED IN A finally, AND EVERY KEY, not only those already pressed: a key left down by an
     # interrupted run stays logically held system-wide, and to the user Ctrl or Shift simply stops
     # behaving in every application. A hard kill between the two halves still leaves them down,

@@ -20,7 +20,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-import model_tree as mt
 import pad_records as pr
 import rcp_read as rr
 import rcp_transfer as t
@@ -31,8 +30,7 @@ SLOT = 16
 
 
 def tree_state():
-    root = mt.parse(rr.read_model_stable(fresh=True))[0]
-    return {tuple(n.path()): [(p, v) for p, v, _ in n.props] for n in mt.walk(root)}
+    return _testkit.snapshot(rr.read_model_stable(fresh=True))
 
 
 def make_orphan():
@@ -41,9 +39,11 @@ def make_orphan():
     pre = pr.build_blank(SLOT, handle, sub)
     mid = [pr.write_record("padType", "int", 3, handle, pr.FRAME_PAD),
            pr.write_record("padName", "str", "Orphan test", handle, pr.FRAME_PAD)]
-    t.set_transfer_mode(True); time.sleep(1.2)
-    sp.send_create_full(pre, mid, lambda: None, [])
-    time.sleep(0.4); t.set_transfer_mode(False); time.sleep(0.8)
+    with t.transfer_session():
+        time.sleep(1.2)
+        sp.send_create_full(pre, mid, lambda: None, [])
+        time.sleep(0.4)
+    time.sleep(0.8)
     pos, _, _ = sp._position_of(SLOT)
     sp.clear_pad(pos)
     time.sleep(0.8)
@@ -55,22 +55,28 @@ def main() -> int:
             print(f"padIdx {idx} is not empty; refusing.")
             return 2
     before = tree_state()
-    make_orphan()
-    h = sp.pool_health()
-    check("an attached orphan was made", (h["orphans"], h["detached"]), ([SLOT], []))
-    res = sp.clean_pool()
-    check("clean_pool removed it", res["removed_orphans"], 1)
-    check("the pool is clean", res["health"]["clean"], True)
-    check("the whole tree is as it started", tree_state() == before, True)
+    try:
+        make_orphan()
+        h = sp.pool_health()
+        check("an attached orphan was made", (h["orphans"], h["detached"]), ([SLOT], []))
+        res = sp.clean_pool()
+        check("clean_pool removed it", res["removed_orphans"], 1)
+        check("the pool is clean", res["health"]["clean"], True)
+        check("the whole tree is as it started", tree_state() == before, True)
 
-    print("\nPARTIAL")
-    for idx in (SLOT, SLOT + 1):
-        sp.assign_fx_to_grid(idx + 1, "Megaphone")
-    sp.clear_grid_pad(SLOT + 1)
-    res = sp.clear_grid_pad(SLOT + 2)
-    check("no partial object is left", res["health"]["partial"], [])
-    check("the pool is clean", res["health"]["clean"], True)
-    check("the whole tree is as it started", tree_state() == before, True)
+        print("\nPARTIAL")
+        for idx in (SLOT, SLOT + 1):
+            sp.assign_fx_to_grid(idx + 1, "Megaphone")
+        sp.clear_grid_pad(SLOT + 1)
+        res = sp.clear_grid_pad(SLOT + 2)
+        check("no partial object is left", res["health"]["partial"], [])
+        check("the pool is clean", res["health"]["clean"], True)
+        check("the whole tree is as it started", tree_state() == before, True)
+    finally:
+        for idx in (SLOT, SLOT + 1):
+            if sp._position_of(idx)[0] is not None:
+                print(f"  clearing the pad left on padIdx {idx}")
+                sp.clear_grid_pad(idx + 1)
     return _testkit.finish()
 
 

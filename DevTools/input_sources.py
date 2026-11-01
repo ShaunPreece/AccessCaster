@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import devices
 import model_tree
 import rcp_read
 
@@ -42,10 +43,6 @@ PLACEHOLDER_COLOUR = "ff000000"
 # The gain every input that arrives over USB carries, and no microphone does.
 DIGITAL_FAMILY_GAIN = -12
 
-# What the app already knows. Anything else with a colour is a source we cannot name yet, which is
-# the whole output of this script.
-KNOWN = {0: "Mic 1", 1: "Mic 2", 2: "Mic 3", 3: "Mic 4", 7: "USB 1", 8: "Chat",
-         9: "USB 2", 10: "Bluetooth", 11: "SMART pads"}
 
 
 def read_table(blob=None) -> dict:
@@ -68,22 +65,25 @@ def usable(entry: dict) -> bool:
     return entry.get("colour") not in ("", PLACEHOLDER_COLOUR)
 
 
-def describe(code: int, entry: dict) -> str:
+def describe(code: int, entry: dict, known: dict) -> str:
     if not usable(entry):
         return "reserved slot"
-    if code in KNOWN:
-        return KNOWN[code]
+    if code in known:
+        return known[code]
     return "UNNAMED" + (", arrives over USB" if entry.get("gain") == DIGITAL_FAMILY_GAIN else "")
 
 
 def show(table: dict, mode) -> None:
+    # What the app already knows about the attached desk. Anything else with a colour is a source
+    # it cannot name yet, which is the whole output of this script.
+    known = devices.get_active_device().source_codes
     print(f"outputMultiMode = {mode}")
     print(f"{'code':>4}  {'colour':>8}  {'gain':>4}  {'type':>4}  what")
     for code in sorted(table):
         e = table[code]
         print(f"{code:>4}  {e['colour']:>8}  {str(e['gain']):>4}  {str(e['type']):>4}  "
-              f"{describe(code, e)}")
-    unnamed = [c for c, e in sorted(table.items()) if usable(e) and c not in KNOWN]
+              f"{describe(code, e, known)}")
+    unnamed = [c for c, e in sorted(table.items()) if usable(e) and c not in known]
     print(f"\nusable: {sum(1 for e in table.values() if usable(e))} of {len(table)}"
           f"   unnamed: {unnamed}")
 

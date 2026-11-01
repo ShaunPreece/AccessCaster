@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import channels
-from _desk import advanced_processing, put_chain_back, read_input, settled_chain
+from _desk import advanced_processing, put_mic_back, read_input, settled_chain
 
 SETTLE = 0.9        # the desk needs a moment before a fresh dump shows the write
 PROBE_GAIN = 47     # a value that is nobody's default, so a default overwriting it is obvious
@@ -92,16 +92,8 @@ def main() -> int:
         print("\n-- restoring --")
         # THE INSTRUMENT GAIN NEEDS PUTTING BACK TOO. Stepping through the voicings passes through
         # Instrument, which sets inputInstrumentGain to 20 and leaves it there when you move on
-        # (that is exactly why profiles restore it), so putting back only the type and gain leaves
-        # the channel changed.
-        channels.set_mic_type(ch, base_type)
-        put_chain_back(ch, chain_before, advanced_before)
-        channels.set_mic_gain(ch, base_gain)
-        time.sleep(SETTLE)
-        channels.set_instrument_gain(ch, int(before["inputInstrumentGain"]))
-        time.sleep(SETTLE)
-        channels.set_phantom(ch, bool(before["inputPower"]))
-        time.sleep(SETTLE)
+        # (that is exactly why profiles restore it).
+        put_mic_back(ch, before, chain_before, advanced_before, SETTLE)
         after = read_input(slot)
         chain_after = settled_chain(ch)
         left = [f"{k} {after.get(k)!r} (was {v!r})" for k, v in before.items() if after.get(k) != v]

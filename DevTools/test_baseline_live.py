@@ -19,26 +19,14 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import profiles
 import server
 import wording
+from _desk import wait_for_job
 from _testkit import check, check_true
-
-
-def wait_for_job(timeout=180):
-    """Block until the background save/attach job reports done, as the page's poll would."""
-    end = time.time() + timeout
-    while time.time() < end:
-        st = server.profile_save_status()
-        if st.get("done"):
-            return st
-        time.sleep(0.3)
-    return {"done": False, "ok": False, "message": "timed out"}
-
 
 TMP = tempfile.mkdtemp(prefix="accesscaster-baseline-test-")
 profiles.PROFILES_DIR = os.path.join(TMP, "profiles")
@@ -69,7 +57,7 @@ try:
     print("\nCAPTURE (settings only, no pads: this test writes nothing to the unit)")
     started = server.action_baseline_save(include_pads=False)
     check_true("the capture starts", started.get("ok"), started.get("message"))
-    job = wait_for_job()
+    job = wait_for_job(server.profile_save_status, pause=0.3)
     check_true("and finishes ok", job.get("ok"), job.get("message"))
     name = s["suggested_name"]
     check("the profile is on disk under the auto-name", profiles.list_profiles()["profiles"], [name])

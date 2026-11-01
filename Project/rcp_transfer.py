@@ -83,6 +83,8 @@ def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
 
 
 # Source CODES: the value a channelInputSource write carries, and the row of the routing matrix.
+# Each desk's are `devices.DeviceModel.source_codes`, built from its channel table and its stereo
+# pairs.
 #
 # MIC 4 IS 3, NOT 1027. 1027 is 0x403, Mic 4 with the STEREO-LINK BIT set, which is what a capture
 # records when the desk that produced it happened to have inputs 3+4 linked. Reading 0x400 as part
@@ -90,12 +92,6 @@ def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
 #
 # STEREO-LINKED PAIRS get their own codes, not a bit flag: 4/5/6 fill the exact gap between Mic 4
 # and USB 1, one per legal pair.
-INPUT_SOURCE_CODE = {
-    "Mic1": 0, "Mic2": 1, "Mic3": 2, "Mic4": 3,
-    "Mic1+2": 4, "Mic2+3": 5, "Mic3+4": 6,
-    "Bluetooth": 10, "SMARTpads": 11, "USB1": 7, "Chat": 8, "USB2": 9,
-    "CallMe1": 16,
-}
 # STEREO LINK. The legal pairs, per desk, are devices.FaderSpec.stereo_pairs. Only ADJACENT inputs
 # can link (RODE's own restriction: 1+2, 2+3, 3+4).
 #
@@ -243,7 +239,7 @@ def set_output_routing(output_index: int, mode: int) -> int:
 # Each cross-point (output o, source s) has its own global selector:
 #       selector = CROSS_POINT_BASE + 13*source_index + output_index
 # Output is the fast axis (stride 1); source is the slow axis (stride 13 = 13 destinations). The
-# source index is the channelInputSource source CODE (INPUT_SOURCE_CODE), not the fader order.
+# source index is the channelInputSource source CODE (DeviceModel.source_codes), not the fader order.
 #
 # Three property writes ride that selector:
 #   mixUnlinkRequest / mixLinkRequest : value = CONSTANT compound payload
@@ -381,7 +377,7 @@ SEL_CHANNEL_FX = 0x26
 
 
 def set_fader_source(fader_index: int, source_code: int) -> int:
-    """Put a source CODE (INPUT_SOURCE_CODE) on a fader (0-based), or -1 to VACATE it.
+    """Put a source CODE (DeviceModel.source_codes) on a fader (0-based), or -1 to VACATE it.
 
     The bound is the connected device's fader VECTOR LENGTH (Pro II 9, Duo 10), NOT its exposed
     fader `count`. The two differ only on the Duo, which exposes 9 faders but whose factory default
@@ -802,7 +798,7 @@ class quiet_drive_errors:
             try:
                 self._k32.SetThreadErrorMode(self._old, ctypes.byref(ctypes.c_uint(0)))
             except Exception:
-                pass
+                pass      # must not replace the error the block itself is raising
         return False
 
 

@@ -67,8 +67,9 @@ DEV_GLOBS = ["DevTools/*.py"]
 _LIST_ROW = re.compile(r"^- `([A-Za-z]\w*)` - ([\w/?]+), x(\d+)\s*$")
 
 
-def read_appendix() -> list[tuple[str, str, int]]:
-    """(name, type, occurrences) for every property the desk publishes."""
+def read_property_list() -> list[tuple[str, str, int]]:
+    """(name, type, occurrences) for every property the desk publishes, from the generated
+    `docs/PROPERTY_LIST_<DESK>.md`."""
     path = list_path()
     if not path.exists():
         raise SystemExit(f"docs/{path.name} is missing. "
@@ -127,6 +128,8 @@ NAME_ROLE = {
     "selectedBank": "read", "encoderPressed": "read",
     # a sync marker the device EMITS during a pad create; we wait for it
     "padRCVSyncPadType": "read",
+    # sent as raw record bytes by rcp_transfer.remount_pad_storage, not through a builder
+    "remountPadStorage": "write",
 }
 _TOP = re.compile(r"^(?:const |let |var )?([A-Za-z_][\w]*)\s*[:=]")
 _DEF = re.compile(r"^\s*(?:async\s+)?(?:def|function)\s+([A-Za-z_]\w+)")
@@ -179,26 +182,55 @@ FALSE_POSITIVES = {
 }
 
 
-# Some property names are held in a CONSTANT instead of being repeated as a literal, so scanning for
-# the literal alone finds only the constant's definition and under-reports the property as merely
-# "referenced". Count uses of the constant as uses of the property.
-NAME_ALIASES = {
-    "channelAdvancedProcessing": ("CHAIN_ADVANCED_PROP",),
-    "channelCurrentFxPreset": ("CHAIN_PRESET_MARKER_PROP",),
-}
+# A module-level constant holding a property's name (`WIRELESS_MUTE_PROP = "channelWirelessMute"`).
+# Scanning for the literal alone finds only the constant's definition and under-reports the
+# property as merely "referenced", so a use of the constant counts as a use of the property.
+_NAME_CONSTANT = re.compile(r"""^([A-Z][A-Z0-9_]*)\s*=\s*["']([A-Za-z]\w*)["']\s*(?:#.*)?$""")
 
 
-def _pat(name: str) -> re.Pattern:
-    alts = [re.escape(a) for a in NAME_ALIASES.get(name, ())]
-    if len(name) <= SHORT_NAME:
-        lit = r"""["'`]""" + name + r"""["'`]"""
-        return re.compile("|".join([lit] + [r"\b" + a + r"\b" for a in alts]))
-    return re.compile(r"\b(" + "|".join([name] + alts) + r")\b")
+def name_aliases(names) -> dict[str, list[str]]:
+    """{property: [CONSTANT, ...]} for every module-level constant in Project/*.py that holds one
+    of `names`."""
+    known = set(names)
+    out: dict[str, list[str]] = {}
+    for path in sorted((REPO / "Project").glob("*.py")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = _NAME_CONSTANT.match(line)
+            if m and m.group(2) in known:
+                out.setdefault(m.group(2), []).append(m.group(1))
+    return out
+
+
+_WORD = re.compile(r"\w+")
+_QUOTED = re.compile(r"""["'`](\w+)(?=["'`])""")
+
+
+class NameMatcher:
+    """Which of a list of property names a piece of text references, found in one pass over it.
+
+    A long name counts as a whole word, and so does a constant holding it (`name_aliases`). A
+    SHORT_NAME one counts only as a string literal, because short names collide with ordinary words.
+    """
+
+    def __init__(self, names):
+        self.words: dict[str, str] = {}
+        self.quoted: dict[str, str] = {}
+        for name in names:
+            if name not in FALSE_POSITIVES:
+                (self.quoted if len(name) <= SHORT_NAME else self.words)[name] = name
+        for name, constants in name_aliases(names).items():
+            if name not in FALSE_POSITIVES:
+                self.words.update((c, name) for c in constants)
+
+    def names_in(self, text: str) -> set[str]:
+        found = {self.words[w] for w in _WORD.findall(text) if w in self.words}
+        found.update(self.quoted[q] for q in _QUOTED.findall(text) if q in self.quoted)
+        return found
 
 
 def scan(globs: list[str], names: list[str]) -> dict[str, dict]:
     """{property: {"roles": set, "sites": [(file, line, role)], "code": int, "comment": int}}."""
-    pats = {n: _pat(n) for n in names if n not in FALSE_POSITIVES}
+    matcher = NameMatcher(names)
     found: dict[str, dict] = {}
     for glob in globs:
         for path in sorted(REPO.glob(glob)):
@@ -213,9 +245,7 @@ def scan(globs: list[str], names: list[str]) -> dict[str, dict]:
                 d = _DEF.match(line)
                 if d:
                     scope = d.group(1)
-                for name, pat in pats.items():
-                    if not pat.search(line):
-                        continue
+                for name in sorted(matcher.names_in(line)):
                     e = found.setdefault(name, {"roles": set(), "sites": [], "csites": [],
                                                "code": 0, "comment": 0})
                     if is_comment:
@@ -375,8 +405,6 @@ RULES: list[tuple[str, str, str, str]] = [
      "mixLevelWithAnchor) says 114 linked, agreeing on only 112. So it is some other per-cell flag "
      "(what CAN be linked, or a stereo pairing), and reading it as link state would misreport the "
      "matrix. Keep inferring link from mixLevelWithAnchor, which is ear- and read-back-proven."),
-    (r"^emergencyMuteActive$", "live state", "med",
-     "Emergency mute engaged. Worth announcing; already read ad hoc in one investigation."),
     (r"^audio", "candidate feature", "low",
      "USB audio interface facts: sample rate, channel counts, latency, buffer size. Would enrich the "
      "Device page's existing USB-interfaces section."),
@@ -462,7 +490,7 @@ CHAIN_SET = chain_set()
 
 
 def build() -> tuple[str, dict]:
-    props = read_appendix()
+    props = read_property_list()
     names = [n for n, _t, _c in props]
     app = scan(APP_GLOBS, names)
     dev = scan(DEV_GLOBS, names)

@@ -1302,7 +1302,7 @@ software replaces the operational controls directly, not by puppeteering the kno
   with nobody listening: padButtonPressed goes true, then padActive, then
   padProgress at about 20 a second - the identical signature to a finger press.
 
-  THE TOOL IS DevTools/midi_out.py (written 2026-09-02). `midi_enabled()` turns
+  THE TOOL IS DevTools/play_pad.py (written 2026-09-02). `midi_enabled()` turns
   systemMidiControl on and puts it back; `MidiOut().play_pad(n)` presses and
   releases. Run it directly to list ports or fire a pad.
 

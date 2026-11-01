@@ -3,11 +3,11 @@
 `storageVolumeEject` and `storageVolumeErase` are per-volume switches on the STORAGEVOLUME nodes
 under SYSTEM. THE THIRD VOLUME IS THE UNIT'S INTERNAL STORAGE, WHERE THE PAD SOUNDS LIVE, so this
 refuses any volume `recorder.read_volumes` does not mark `can_record`. Erase deletes everything on
-the chosen volume.
+the chosen volume, so it says what will be lost and writes nothing without `--yes`.
 
     python DevTools/probe_storage_live.py state
     python DevTools/probe_storage_live.py eject <0 card | 1 drive> [seconds]
-    python DevTools/probe_storage_live.py erase <0 card | 1 drive> [seconds]
+    python DevTools/probe_storage_live.py erase <0 card | 1 drive> [seconds] --yes
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def show():
             "storageVolumeEject", "storageVolumeErase", "storageVolumeFormatted")})
 
 
-def act(what: str, index: int, seconds: float) -> int:
+def act(what: str, index: int, seconds: float, yes: bool = False) -> int:
     vols, nodes = volumes()
     vol = next((v for v in vols if v["index"] == index), None)
     if vol is None or not vol.get("can_record"):
@@ -54,6 +54,12 @@ def act(what: str, index: int, seconds: float) -> int:
     node = nodes[index]
     prop = PROP[what]
     print(f"{what} {vol['label']} at {node.path()} ({vol['free_mb']} MB free)")
+    if what == "erase":
+        print(f"ERASE DELETES EVERYTHING ON {vol['label'].upper()}: every recording and every "
+              "backup on it, with no undo.")
+        if not yes:
+            print("--yes not given, so nothing was written.")
+            return 1
     show()
     with push_handle(f"storage {what} probe") as dev:
         rcp_transfer.send_record(rcp_transfer.build_path_prop_bool(prop, True, node.path()))
@@ -66,10 +72,11 @@ def act(what: str, index: int, seconds: float) -> int:
 
 
 if __name__ == "__main__":
-    a = sys.argv[1:]
+    yes = "--yes" in sys.argv
+    a = [arg for arg in sys.argv[1:] if arg != "--yes"]
     if not a or a[0] == "state":
         show()
     elif a[0] in PROP and len(a) >= 2:
-        raise SystemExit(act(a[0], int(a[1]), float(a[2]) if len(a) > 2 else 15))
+        raise SystemExit(act(a[0], int(a[1]), float(a[2]) if len(a) > 2 else 15, yes))
     else:
         print(__doc__)

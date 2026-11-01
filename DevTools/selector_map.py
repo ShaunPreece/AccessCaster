@@ -33,16 +33,19 @@ from collections import Counter
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import rcp_read
+import rcp_transfer
+import recorder
 
-# Header -> selector, each anchored by at least one property whose selector is confirmed.
+# Header -> selector, each anchored by at least one property whose selector is confirmed. A block
+# the app writes takes its selector from the app's own constant, so a correction is made once.
 HEADER_SELECTOR = {
     "RECBUTTON": 0x02,      # recButtonPressed
-    "RECORDER": 0x03,       # recordState / requestRecordState
-    "ENCODER": 0x06,        # encoderColour (a device push; see selector_from_push.py)
-    "GUI": 0x07,            # screenBrightness / metering / screenDimAfterSeconds
-    "OUTPUT": 0x0D,         # recordingMultitrackMode, outputMonLevel, outputPrefader
-    "MASTERCHANNEL": 0x0E,  # masterCompellorOn + its params
-    "SYSTEM": 0x0F,         # systemMidiControl, transferModeType, systemHapticSetting
+    "RECORDER": recorder.SEL_RECORDER,                  # recordState / requestRecordState
+    "ENCODER": 0x06,        # encoderColour (a device push names its own selector)
+    "GUI": rcp_transfer.SEL_GUI,                        # screenBrightness / metering
+    "OUTPUT": rcp_transfer.SEL_OUTPUT_GLOBAL,           # recordingMultitrackMode, outputMonLevel
+    "MASTERCHANNEL": rcp_transfer.SEL_MASTER_PROC,      # masterCompellorOn + its params
+    "SYSTEM": rcp_transfer.SEL_SYSTEM,                  # systemMidiControl, transferModeType
     # NETWORK IS 0x10, NOT 0x13: btVisible written on 0x10 reads back in the NETWORK block (not the
     # SYSTEM duplicate), leaves no stray, and a phone then pairs and plays audio through the desk.
     # 0x13 is STREAMERXMIXPRESET[1], as a btDoScan stray there shows; a flat count of blocks
@@ -53,7 +56,7 @@ HEADER_SELECTOR = {
     #     what the RADIO does, not by the field.
     #   * wifiPSK is a password. It is readable and must never be logged, echoed to the browser, or
     #     put in a profile.
-    "NETWORK": 0x10,
+    "NETWORK": rcp_transfer.SEL_NETWORK,
 }
 # The properties the map is checked against, so a regression shows up as a disagreement.
 ANCHORS = {
@@ -65,6 +68,8 @@ ANCHORS = {
     "systemMidiControl": 0x0F, "systemChannelSelected": 0x0F, "transferModeType": 0x0F,
     "systemHapticSetting": 0x0F, "systemRecButtonSetting": 0x0F,
 }
+
+
 def sections(blob: bytes) -> tuple[dict, Counter]:
     """{property: the block (node name) it first occurs in} and how many times each occurs."""
     where, count = {}, Counter()

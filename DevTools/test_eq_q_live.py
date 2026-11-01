@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import channels
 import rcp_read
+from _desk import count_changes, stray_counts
 
 Q_PROPS = ("eqLowQ", "eqMidQ", "eqHighQ")
 GAIN_PROPS = ("eqLowGain", "eqMidGain", "eqHighGain")
@@ -45,10 +46,6 @@ def read_strip(strip: int, props) -> tuple[dict, bytes]:
     return out, blob
 
 
-def counts(blob, props) -> dict:
-    return {p: len(rcp_read.find_all(blob, p)) for p in props}
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", type=int, default=3, help="mic channel to test on (default 3)")
@@ -59,7 +56,7 @@ def main() -> int:
     fails = []
 
     base, blob0 = read_strip(strip, allp)
-    c0 = counts(blob0, allp)
+    c0 = stray_counts(blob0)
     print(f"Mic {ch} is on strip {strip}")
     print("baseline: " + ", ".join(f"{p}={base[p]}" for p in allp))
 
@@ -105,11 +102,12 @@ def main() -> int:
         print(f"restored: {'byte-identical' if not drift else 'DRIFT ' + str(drift)}")
         if drift:
             fails.append(f"restore left the strip changed: {drift}")
-        if len(blob0) != len(blob3) or c0 != counts(blob3, allp):
-            fails.append(f"model changed shape: len {len(blob0)} -> {len(blob3)}, "
-                         f"counts {c0} -> {counts(blob3, allp)} (a stray may have been appended)")
+        added, gone, moved = count_changes(c0, stray_counts(blob3))
+        if added or gone or moved:
+            fails.append(f"occurrence counts moved, so a stray may have been appended: "
+                         f"added {added}, gone {gone}, moved {moved}")
         else:
-            print(f"no stray: model still {len(blob3)} bytes, occurrence counts unchanged")
+            print("no stray: occurrence counts unchanged")
 
     print("\nRESULT: " + ("PASS - Q is independent of gain and frequency, and directly writable"
                           if not fails else "FAIL\n  " + "\n  ".join(fails)))

@@ -25,7 +25,7 @@ import autogain
 import devices
 import meters
 import server
-from _testkit import check, check_in, check_not_in
+from _testkit import check, check_in, check_not_in, patched
 
 # PIN THE DESK. This suite asserts Pro II channel LABELS ("USB 2 (Secondary)"), so with a Duo
 # attached the Duo's shorter names would read as a regression. Offline tests must not depend on
@@ -62,13 +62,39 @@ check("an absurdly small scale is floored, not honoured",
 check("no scale and no label means no correction and no name",
       (meters.Watcher("", lambda *_a: None).scale, meters.Watcher("", lambda *_a: None).label),
       (1.0, ""))
-# The arithmetic itself, stated as the loop does it: a fader 6 dB down halves the amplitude, and
-# dividing by the cross-point level puts the reading back where the channel actually is.
-raw, level = 0.25, 0.5
+
+
+def one_poll(raw: float, scale: float) -> float:
+    """What a Watcher with `scale` reports after one poll of a meter reading `raw`."""
+    w = meters.Watcher("", lambda *_a: None, scale=scale, label="Mic 2")
+    w.clip_sound = False
+
+    class OnePoll:
+        name, wake_failed, ceiling, volume_db, muted = "stub", False, 1.0, 0.0, False
+
+        def __init__(self, _endpoint_id):
+            pass
+
+        def peak(self):
+            w._stop.set()           # this poll is the last
+            return raw
+
+        def refresh_ceiling(self):
+            return 1.0
+
+        def close(self):
+            pass
+
+    with patched((meters, {"Meter": OnePoll})):
+        w._run()
+    return w.peak
+
+
+# A fader 6 dB down halves the amplitude, and dividing by the cross-point level puts the reading
+# back where the channel actually is.
 check("a channel reading 0.25 through a half-level cross-point is 0.5 at the channel",
-      min(1.0, raw / level), 0.5)
-check("and nothing is ever reported above full scale",
-      min(1.0, 0.9 / 0.5), 1.0)
+      one_poll(0.25, 0.5), 0.5)
+check("and nothing is ever reported above full scale", one_poll(0.9, 0.5), 1.0)
 
 print("\nTHE SUMMARY NAMES THE CHANNEL, AND ENDS WITH ADVICE")
 msg = server._level_check_summary(FakeWatcher(0.35))

@@ -16,31 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import soundpad
-from _testkit import check
-
-
-class Stubs:
-    """Replace module attributes for the length of a `with`, and put them back."""
-
-    def __init__(self, target, **attrs):
-        self.target, self.attrs, self.saved = target, attrs, {}
-
-    def __enter__(self):
-        for k, v in self.attrs.items():
-            self.saved[k] = getattr(self.target, k)
-            setattr(self.target, k, v)
-        return self
-
-    def __exit__(self, *exc):
-        for k, v in self.saved.items():
-            setattr(self.target, k, v)
-        return False
-
+from _testkit import check, patched
 
 print("transfer mode is left even when the work inside fails")
 calls = []
-with Stubs(soundpad.t, set_transfer_mode=lambda on: calls.append(on)), \
-        Stubs(soundpad.time, sleep=lambda s: None):
+with patched((soundpad.t, {"set_transfer_mode": lambda on: calls.append(on)}),
+             (soundpad.time, {"sleep": lambda s: None})):
     try:
         with soundpad._transfer_mode(1.0):
             raise RuntimeError("copy failed")
@@ -56,12 +37,12 @@ MIXER_PAD = {"grid": 12, "type": soundpad.PAD_TYPE_MIXER, "name": "Censor", "col
 
 
 def restore(create_result, colour_result, present=True):
-    with Stubs(soundpad,
-               create_mixer=lambda grid, mode: create_result,
-               wait_for_pad_present=lambda idx: present,
-               set_pad_property=lambda grid, name, value: (
-                   colour_result if name == "padColourIndex" else {"ok": True}),
-               pool_health=lambda blob=None: CLEAN):
+    with patched((soundpad, {
+            "create_mixer": lambda grid, mode: create_result,
+            "wait_for_pad_present": lambda idx: present,
+            "set_pad_property": lambda grid, name, value: (
+                colour_result if name == "padColourIndex" else {"ok": True}),
+            "pool_health": lambda blob=None: CLEAN})):
         return soundpad.restore_pads([dict(MIXER_PAD)], "unused", verify_first=False)
 
 
@@ -88,7 +69,7 @@ check("names the setting", res["results"][0]["message"].endswith(
     "colour: Pad 12 is empty; nothing to edit."), True)
 
 print("the CLI recipe list includes the presets that belong to no pad")
-with Stubs(soundpad.sys, argv=["soundpad.py", "restore", "list"]):
+with patched((soundpad.sys, {"argv": ["soundpad.py", "restore", "list"]})):
     out = io.StringIO()
     with redirect_stdout(out):
         soundpad._cli()

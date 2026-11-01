@@ -22,48 +22,43 @@ Usage: python DevTools/test_clean_restore_live.py --yes [--keep-profile]
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
+import _desk
 import rcp_read
-from _desk import api
+from _desk import api, wait_for_job
 from analyse_clean_restore import compare, show, snap
 
 CAP = Path(__file__).resolve().parent / "captures"
 FACTORY_DUMP = CAP / "post-showreset-raw.bin"     # a real factory dump of THIS desk
 PROFILE = "Clean restore retest"
-ROOT = Path(__file__).resolve().parent.parent
 
 
 def say(text: str) -> None:
-    """Speak a one-line status, unless the Claude GUI has the focus (DevTools/say_gated.ps1)."""
-    try:
-        subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File",
-                        str(ROOT / "DevTools" / "say_gated.ps1"), "-Text", text],
-                       capture_output=True, timeout=30, check=False)
-    except (OSError, subprocess.SubprocessError):
-        pass      # speech is a convenience here; the printed line below is the record
+    """Speak a one-line status, unless Claudio has the focus, and print it as the record."""
+    _desk.say(text, gated=True, wait=True)
     print(f"** {text}")
 
 
-def poll(path: str, label: str, timeout: float = 900.0):
-    """Poll a status endpoint until done, printing each new message."""
-    last = None
-    until = time.monotonic() + timeout
-    while time.monotonic() < until:
-        st = api(path, timeout=120.0)
+def poll(path: str, label: str, timeout: float = 900.0) -> dict:
+    """Wait for the server job behind status route `path`, printing each new message. A job still
+    running at `timeout` comes back as a failure, so the undo still runs."""
+    said = [None]
+
+    def print_new(st: dict) -> None:
         msg = st.get("message") or st.get("label") or ""
-        if msg and msg != last:
+        if msg and msg != said[0]:
             print(f"   {msg}")
-            last = msg
-        if st.get("done") or (st.get("running") is False and st.get("ok") is not None):
-            return st
-        time.sleep(1.5)
-    return {"done": False, "ok": False, "message": f"{label} did not finish within {timeout:.0f}s"}
+            said[0] = msg
+
+    try:
+        return wait_for_job(lambda: api(path, timeout=120.0), timeout, 1.5, print_new)
+    except TimeoutError as e:
+        return {"done": False, "ok": False, "message": f"{label}: {e}"}
 
 
 def dump(name: str) -> Path:
@@ -151,8 +146,9 @@ def main() -> int:
     finally:
         undo_ok = put_desk_back(before_path, shows_before)
         if not args.keep_profile:
-            api("/api/profiles/delete", post={"name": PROFILE, "force": True})
-            print(f"   scratch profile '{PROFILE}' deleted")
+            gone = api("/api/profiles/delete", post={"name": PROFILE, "force": True})
+            print(f"   scratch profile '{PROFILE}' deleted" if gone.get("ok")
+                  else f"   COULD NOT DELETE the scratch profile '{PROFILE}': {gone.get('message')}")
 
     back = (" The desk is back to how it started." if undo_ok
             else " Check the desk: the undo did not come back clean.")

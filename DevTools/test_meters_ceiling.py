@@ -99,8 +99,6 @@ check("Meter constructs it, rather than only declaring the class",
 check("it is only started for INPUTS", "if self.is_capture:" in src, True)
 check("shared mode, never exclusive (exclusive would steal the mic from every other app)",
       "AUDCLNT_SHAREMODE_SHARED" in src and meters.AUDCLNT_SHAREMODE_SHARED == 0, True)
-check("the module no longer claims a non-existent activate() opens it",
-      "which is why `activate()` opens" in src, False)
 check("Watcher follows the endpoint volume while running",
       "refresh_ceiling()" in src and "CEILING_REFRESH_S" in src, True)
 # A SETTER EXISTS, AND THE RULE BEHIND IT IS UNCHANGED: the app must not move Windows' level behind

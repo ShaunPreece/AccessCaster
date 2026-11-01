@@ -8,11 +8,12 @@ Also lists the pad table so each FX pad can be mapped to its effect-object(s).
 
 It is the extractor for the factory voice-FX recipes, and it writes NOTHING to the device.
 
-Usage:  python decode_effects.py
+Usage:  python decode_effects.py [live | <dump.bin>] [--json]
+        --json also writes DevTools/captures/effects_dump.json
 """
 import json
-import pickle
 import sys
+from pathlib import Path
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
 import model_tree
@@ -30,14 +31,10 @@ def _restrip(raw: bytes) -> bytes:
 
 
 def load_stream(path: str) -> bytes:
-    """Load a model stream from a live read, a .bin dump, or a snapshot .pkl dict."""
+    """Load a model stream from a live read or a .bin dump."""
     if path == "live":
         return rr.read_model_stable()
-    if path.endswith(".pkl"):
-        d = pickle.load(open(path, "rb"))
-        raw = d["raw"] if isinstance(d, dict) else d
-        return _restrip(bytes(raw))
-    return _restrip(open(path, "rb").read())
+    return _restrip(Path(path).read_bytes())
 
 # The 20 fields that make up an effect-object (order as written by the app/builder).
 EFFECT_FIELDS = [
@@ -108,9 +105,11 @@ def main():
 
     if "--json" in sys.argv:
         out = {"region_a": region_a, "objects": objs, "pads": pad_table(m)}
-        with open("effects_dump.json", "w") as f:
-            json.dump(out, f, indent=2)
-        print("\nwrote effects_dump.json")
+        # Into the ignored captures folder: a dump of the desk is never left in the repository.
+        path = Path(__file__).resolve().parent / "captures" / "effects_dump.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+        print(f"\nwrote {path}")
 
 
 if __name__ == "__main__":

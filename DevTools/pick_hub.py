@@ -28,7 +28,9 @@ def main(scan_dir: str) -> int:
         hub = int(m.group(1))
         try:
             pkts = ca.load_capture(path)
-        except Exception:
+        except Exception as exc:
+            # To stderr: the caller reads stdout for its one BEST or NONE line.
+            print(f"skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
             continue
         count = ca.rode_signature_count(pkts)
         if count == 0:
@@ -52,11 +54,8 @@ if __name__ == "__main__":
     # what working directory or (space-mangled) argument the caller passes. Only
     # honour an explicit argument if it is actually an existing directory; the
     # PowerShell caller can split a space-containing path into broken fragments.
-    here = os.path.dirname(os.path.abspath(__file__))
-    # cap_server.ps1 writes the hub scan to cap_control/scan. Both folders are tried, so a mangled
-    # argument falls back to a folder holding a scan rather than to an empty one, which prints NONE.
-    defaults = [os.path.join(here, "cap_control", "scan"), os.path.join(here, "captures", "scan")]
+    # cap_server.ps1 writes the hub scan here.
+    default = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cap_control", "scan")
     arg = sys.argv[1] if len(sys.argv) > 1 else None
-    scan_dir = arg if (arg and os.path.isdir(arg)) else next(
-        (d for d in defaults if os.path.isdir(d)), defaults[0])
+    scan_dir = arg if (arg and os.path.isdir(arg)) else default
     raise SystemExit(main(scan_dir))

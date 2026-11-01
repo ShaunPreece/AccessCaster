@@ -43,26 +43,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-import hid
 import midi_out
 import model_tree
 import rcp_read
+from _desk import push_handle
 from _testkit import check_true
-from rcp_hid import find_control_interface
 
 SLOW_S = 3.0        # a healthy dump is well under a second; one run to its ceiling takes minutes
 TAIL_S = 2.0        # how long to watch the line AFTER the burst, for check 6
-
-
-def open_watcher():
-    """A read handle used only to WATCH the push stream, never to trigger a dump."""
-    iface = find_control_interface()
-    if iface is None:
-        raise RuntimeError("no control interface (is the desk connected?)")
-    dev = hid.device()
-    dev.open_path(iface.path)
-    dev.set_nonblocking(False)
-    return dev
 
 
 def drain(dev) -> None:
@@ -167,29 +155,25 @@ def main() -> int:
         # Every block below presses a latching pad, so the stop runs however they end: a pad
         # left latched keeps a music bed playing through the desk.
         try:
-            watch = open_watcher()
-            try:
-                with midi_out.MidiOut() as m:
-                    for run in range(args.runs):
-                        playing = start_playing(watch, m, args.pad)
-                        blob, secs = timed_read()
-                        stats = dict(rcp_read._last_read)
-                        got = structure(blob)
-                        diffs = sum(1 for a, b in zip(blob, quiet) if a != b)
-                        print(f"\n  RUN {run + 1}: {len(blob)} bytes in {secs:.2f} s, "
-                              f"{stats['pushes_skipped']} pushes skipped, {diffs} bytes differ")
-                        check_true(f"run {run + 1} pad confirmed playing", playing)
-                        check_true(f"run {run + 1} finished promptly", secs < SLOW_S,
-                                   f"({secs:.2f} s)")
-                        check_true(f"run {run + 1} same length as the quiet read",
-                                   len(blob) == len(quiet), f"({len(blob)} vs {len(quiet)})")
-                        check_true(f"run {run + 1} same tree structure", got == quiet_struct,
-                                   "" if got == quiet_struct else
-                                   f"({len(got)} properties vs {len(quiet_struct)})")
-                        check_true(f"run {run + 1} bounded by length",
-                                   stats["bounded_by"] == "length", f"({stats['bounded_by']})")
-            finally:
-                watch.close()
+            with push_handle("read under push: watch") as watch, midi_out.MidiOut() as m:
+                for run in range(args.runs):
+                    playing = start_playing(watch, m, args.pad)
+                    blob, secs = timed_read()
+                    stats = dict(rcp_read._last_read)
+                    got = structure(blob)
+                    diffs = sum(1 for a, b in zip(blob, quiet) if a != b)
+                    print(f"\n  RUN {run + 1}: {len(blob)} bytes in {secs:.2f} s, "
+                          f"{stats['pushes_skipped']} pushes skipped, {diffs} bytes differ")
+                    check_true(f"run {run + 1} pad confirmed playing", playing)
+                    check_true(f"run {run + 1} finished promptly", secs < SLOW_S,
+                               f"({secs:.2f} s)")
+                    check_true(f"run {run + 1} same length as the quiet read",
+                               len(blob) == len(quiet), f"({len(blob)} vs {len(quiet)})")
+                    check_true(f"run {run + 1} same tree structure", got == quiet_struct,
+                               "" if got == quiet_struct else
+                               f"({len(got)} properties vs {len(quiet_struct)})")
+                    check_true(f"run {run + 1} bounded by length",
+                               stats["bounded_by"] == "length", f"({stats['bounded_by']})")
 
             print("\nREAL PUSHES OFF THE WIRE, AND THE TAIL A QUIET-DETECTION LOOP FACES")
             tail_checks(args.pad)
@@ -198,65 +182,55 @@ def main() -> int:
             old_loop_check(args.pad, len(quiet))
         finally:
             print("\nPUTTING THE DESK BACK")
-            watch = open_watcher()
-            try:
-                with midi_out.MidiOut() as m:
-                    check_true("the pad is stopped again", stop_playing(watch, m, args.pad))
-            finally:
-                watch.close()
+            with push_handle("read under push: put back") as watch, midi_out.MidiOut() as m:
+                check_true("the pad is stopped again", stop_playing(watch, m, args.pad))
 
     return _testkit.finish()
 
 
-def tail_checks(pad: int) -> bool:
+def tail_checks(pad: int) -> None:
     """Checks 5 and 6, on one raw handle held open across the whole burst and past its end.
 
     Holding the handle is the point: `read_model_raw` closes as soon as the declared length is in,
     so it never sees the tail. The tail is where the pushes are, and where a quiet-detection loop
     runs on to its 4000-read ceiling.
     """
-    ok = True
-    dev = open_watcher()
     burst, tail = [], []
-    try:
-        with midi_out.MidiOut() as midi:
-            ok &= check_true("pad confirmed playing", start_playing(dev, midi, pad))
-            dev.write(rcp_read.TRIGGER)
-            need, got = None, 0
-            t0 = time.monotonic()
-            while time.monotonic() - t0 < TAIL_S + 4:
-                chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
-                done = need is not None and got >= need
-                if not chunk:
-                    if done:
-                        break        # burst finished and the line went quiet: no tail to see
-                    continue
-                b = bytes(chunk)
-                (tail if done else burst).append(b)
-                if not done and rcp_read._push_record_len(b) is None:
-                    got += len(b) - 1
-                    if need is None:
-                        declared = int.from_bytes(b[1:5], "little")
-                        need = (4 + declared if declared >= rcp_read.MODEL_MIN_DECLARED else None)
-                if done and time.monotonic() - t0 > TAIL_S + 1:
-                    break
-    finally:
-        dev.close()
+    with push_handle("read under push: tail") as dev, midi_out.MidiOut() as midi:
+        check_true("pad confirmed playing", start_playing(dev, midi, pad))
+        dev.write(rcp_read.TRIGGER)
+        need, got = None, 0
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < TAIL_S + 4:
+            chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
+            done = need is not None and got >= need
+            if not chunk:
+                if done:
+                    break        # burst finished and the line went quiet: no tail to see
+                continue
+            b = bytes(chunk)
+            (tail if done else burst).append(b)
+            if not done and rcp_read._push_record_len(b) is None:
+                got += len(b) - 1
+                if need is None:
+                    declared = int.from_bytes(b[1:5], "little")
+                    need = (4 + declared if declared >= rcp_read.MODEL_MIN_DECLARED else None)
+            if done and time.monotonic() - t0 > TAIL_S + 1:
+                break
 
     pushes = [b for b in tail if rcp_read._push_record_len(b) is not None]
-    ok &= check_true("frames keep arriving after the burst, so silence was never coming",
-                     len(tail) > 0, f"({len(tail)} frames in the tail)")
-    ok &= check_true("every tail frame is recognised as a push", len(pushes) == len(tail),
-                     f"({len(pushes)} of {len(tail)})")
+    check_true("frames keep arriving after the burst, so silence was never coming",
+               len(tail) > 0, f"({len(tail)} frames in the tail)")
+    check_true("every tail frame is recognised as a push", len(pushes) == len(tail),
+               f"({len(pushes)} of {len(tail)})")
     names = {model_tree.parse_record(b[5:5 + rcp_read._push_record_len(b)])[1] for b in pushes}
     print(f"    pushed properties: {sorted(names)}")
-    return ok
 
 
 OLD_LOOP_CEILING = 700     # the real ceiling is 4000 reads / 240 s; 700 shows the fault in seconds
 
 
-def old_loop_check(pad: int, healthy_bytes: int) -> bool:
+def old_loop_check(pad: int, healthy_bytes: int) -> None:
     """Run a quiet-detection loop with no push filter, and show it does not stop and does not come
     back clean.
 
@@ -267,36 +241,31 @@ def old_loop_check(pad: int, healthy_bytes: int) -> bool:
 
     Read-only: the same trigger the app sends, and one MIDI note. Nothing is written to the model.
     """
-    dev = open_watcher()
     buf = bytearray()
     playing = False
-    try:
-        with midi_out.MidiOut() as midi:
-            playing = start_playing(dev, midi, pad)
-            dev.write(rcp_read.TRIGGER)
-            t0 = time.monotonic()
-            deadline = t0 + 1.5
-            reads = 0
-            while time.monotonic() < deadline and reads < OLD_LOOP_CEILING:
-                chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
-                reads += 1
-                if not chunk:
-                    continue
-                b = bytes(chunk)
-                if b and b[0] == 0x04:
-                    buf.extend(b[1:])
-                    deadline = time.monotonic() + rcp_read.QUIET_S
-            secs = time.monotonic() - t0
-    finally:
-        dev.close()
+    with push_handle("read under push: old loop") as dev, midi_out.MidiOut() as midi:
+        playing = start_playing(dev, midi, pad)
+        dev.write(rcp_read.TRIGGER)
+        t0 = time.monotonic()
+        deadline = t0 + 1.5
+        reads = 0
+        while time.monotonic() < deadline and reads < OLD_LOOP_CEILING:
+            chunk = dev.read(rcp_read.BULK_LEN, timeout_ms=rcp_read.READ_TIMEOUT_MS)
+            reads += 1
+            if not chunk:
+                continue
+            b = bytes(chunk)
+            if b and b[0] == 0x04:
+                buf.extend(b[1:])
+                deadline = time.monotonic() + rcp_read.QUIET_S
+        secs = time.monotonic() - t0
 
     print(f"  the quiet-detection loop: {len(buf)} bytes in {secs:.1f} s, {reads} reads")
-    ok = check_true("pad confirmed playing", playing)
-    ok &= check_true("the quiet-detection loop ran to its ceiling rather than finishing",
-                     reads >= OLD_LOOP_CEILING, f"({reads} reads, ceiling {OLD_LOOP_CEILING})")
-    ok &= check_true("the quiet-detection loop's blob is contaminated, not merely late",
-                     len(buf) > healthy_bytes, f"({len(buf)} bytes vs a healthy {healthy_bytes})")
-    return ok
+    check_true("pad confirmed playing", playing)
+    check_true("the quiet-detection loop ran to its ceiling rather than finishing",
+               reads >= OLD_LOOP_CEILING, f"({reads} reads, ceiling {OLD_LOOP_CEILING})")
+    check_true("the quiet-detection loop's blob is contaminated, not merely late",
+               len(buf) > healthy_bytes, f"({len(buf)} bytes vs a healthy {healthy_bytes})")
 
 
 if __name__ == "__main__":

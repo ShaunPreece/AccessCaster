@@ -12,18 +12,16 @@ itself, so the page is checked against the server's own sentences.
 from __future__ import annotations
 
 import json
-import urllib.request
 
 import _bootstrap
 import callme
+from _desk import api
 
-BASE = "http://127.0.0.1:8770"
 OUT = _bootstrap.devtools_path("_probe_stub_callme_unready.json")
 
 
 def main() -> int:
-    with urllib.request.urlopen(BASE + "/api/callme", timeout=30) as r:
-        d = json.load(r)
+    d = api("/api/callme", timeout=30.0)
     if not d.get("ok"):
         print("The server could not read CallMe:", d.get("message"))
         return 1

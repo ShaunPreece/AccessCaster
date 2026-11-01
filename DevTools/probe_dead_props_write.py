@@ -36,6 +36,7 @@ import model_tree as mt
 import property_list
 import rcp_read
 import rcp_transfer
+from _desk import count_changes, stray_counts
 
 SETTLE = 1.5
 
@@ -49,26 +50,14 @@ WRITABLE_KINDS = {"bool", "int"}
 
 def snapshot():
     """(root, {property name: occurrence count}) from a fresh dump."""
-    root, _used, _tail = mt.parse(rcp_read.read_model_stable(fresh=True))
-    counts = Counter()
-    for n in mt.walk(root):
-        for p, _v, _k in n.props:
-            counts[p] += 1
-    return root, counts
-
-
-def value_block(kind: str, value) -> bytes:
-    if kind == "bool":
-        return bytes([0x01, 0x01, 0x02 if value else 0x03])
-    if kind == "int":
-        return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-    raise ValueError(kind)
+    blob = rcp_read.read_model_stable(fresh=True)
+    return mt.parse(blob)[0], stray_counts(blob)
 
 
 def write(node, prop: str, kind: str, value) -> None:
-    rec = rcp_transfer._frame(node.address() + prop.encode("ascii") + b"\x00"
-                              + value_block(kind, value))
-    rcp_transfer.send_record(rec)
+    build = (rcp_transfer.build_path_prop_bool if kind == "bool"
+             else rcp_transfer.build_path_prop_int)
+    rcp_transfer.send_record(build(prop, value, node.path()))
     time.sleep(SETTLE)
 
 
@@ -92,9 +81,26 @@ def probe(prop: str, reason: str) -> str:
     print(f"{prop} ({kind}) in {node.name}: {resting!r} -> {target!r}")
 
     write(node, prop, kind, target)
-    root2, after = snapshot()
+    try:
+        verdict = classify(prop, root, before)
+    finally:
+        # Written whatever the classification found, so a failed dump or a Ctrl+C still puts the
+        # property back. Writing the resting value over a swallowed write changes nothing.
+        write(node, prop, kind, resting)
+    root3, _ = snapshot()
+    if values_of(root3, prop) != values_of(root, prop):
+        raise RuntimeError(f"{prop} did not read back at {resting!r} after the restore: "
+                           "CHECK THIS DESK. Stopping before the next property.")
+    print("    restored: yes")
+    print(f"    reason on record: {reason or '(none)'}")
+    return verdict
 
-    strays = {p: (before.get(p, 0), n) for p, n in after.items() if n != before.get(p, 0)}
+
+def classify(prop: str, root, before: Counter) -> str:
+    """Re-dump after the write to `prop` and print and return what the desk did."""
+    root2, after = snapshot()
+    added, gone, moved = count_changes(before, after)
+    strays = {p: (before.get(p, 0), after.get(p, 0)) for p in added + gone + moved}
     landed = values_of(root2, prop) != values_of(root, prop)
     others = []
     before_vals = {(tuple(n.path()), p): v for n in mt.walk(root) for p, v, _k in n.props}
@@ -107,28 +113,19 @@ def probe(prop: str, reason: str) -> str:
                 others.append(f"{n2.name}.{p}: {was!r} -> {v!r}")
 
     if strays:
-        verdict = "STRAY"
         print(f"    !!! STRAY: occurrence counts moved: {strays}")
-    elif others:
-        verdict = "SIDE EFFECT"
+        return "STRAY"
+    if others:
         print(f"    SIDE EFFECT, {len(others)} other propert{'y' if len(others) == 1 else 'ies'} "
               f"moved:")
         for line in others[:8]:
             print(f"      {line}")
-    elif landed:
-        verdict = "STORED"
-        print("    STORED: the value landed, nothing else moved.")
-    else:
-        verdict = "SWALLOWED"
-        print("    SWALLOWED: nothing moved anywhere.")
-
+        return "SIDE EFFECT"
     if landed:
-        write(node, prop, kind, resting)
-        root3, _ = snapshot()
-        back = values_of(root3, prop) == values_of(root, prop)
-        print(f"    restored: {'yes' if back else 'NO - CHECK THIS DESK'}")
-    print(f"    reason on record: {reason or '(none)'}")
-    return verdict
+        print("    STORED: the value landed, nothing else moved.")
+        return "STORED"
+    print("    SWALLOWED: nothing moved anywhere.")
+    return "SWALLOWED"
 
 
 def main() -> int:

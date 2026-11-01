@@ -20,7 +20,6 @@ Every write is built by `callme`, the module the app sends them with.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -31,7 +30,7 @@ import callme
 import model_tree
 import rcp_read
 import rcp_transfer
-from _desk import push_handle, pushes
+from _desk import push_handle, pushes, say
 
 SECRET = ("Password",)
 
@@ -42,12 +41,12 @@ def tree():
 
 
 def locate(root, prop):
-    """(path, kind, value) of the first occurrence of `prop`, found by walking the tree."""
-    for n in model_tree.walk(root):
-        for p, v, k in n.props:
-            if p == prop:
-                return n.path(), k, v
-    return None, None, None
+    """(path, kind, value) of the first occurrence of `prop`, or (None, None, None)."""
+    hits = model_tree.find_property(root, prop)
+    if not hits:
+        return None, None, None
+    node, value, kind = hits[0]
+    return node.path(), kind, value
 
 
 def show(name, val):
@@ -86,34 +85,24 @@ def host(on: bool):
     return 0 if got == on else 1
 
 
-SAY = Path(__file__).resolve().parent.parent / "Project" / "say.ps1"
-
-
-def say(text: str):
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SAY),
-                      "-Text", text])
-
-
 def announce(name, val):
-    text = val[0][0] if isinstance(val, list) and val and isinstance(val[0], tuple) else val
+    """Speak a call event, decoded by the app's own `callme` decoders."""
     if name == "sipIncomingCallDetails":
         # The clear arrives in the same instant as an answer or decline, which is announced on its
         # own, so only the arrival is spoken.
-        if text:
-            call = json.loads(text)
-            # The model decoder reads strings as latin-1; the desk sends UTF-8 ("RØDE-CallMe").
-            name_ = (call.get("peername") or "unknown caller").encode("latin1").decode("utf-8", "replace")
-            say(f"Incoming CallMe call from {name_}")
-    elif name == "sipIncomingCallAccept" and text:
-        slot = json.loads(text).get("sip_slot", -1)
-        say("Declined" if slot < 0 else "Answered, stop tapping")
-    elif name == "sipSlotCallState":
-        # Idle when nothing has happened yet, otherwise JSON: {"state": ..., "reason": ...}.
+        call = callme.parse_call(val)
+        if call:
+            say(f"Incoming CallMe call from {call['name']}")
+    elif name == "sipIncomingCallAccept":
         try:
-            st = json.loads(text)
-            say(f"Call {st.get('state', '')}" + (f", {st['reason']}" if st.get("reason") else ""))
-        except (ValueError, TypeError):
-            say(f"Call {text}")
+            accepted = json.loads(callme.composite_text(val) or "{}")
+        except ValueError:
+            return
+        if accepted:
+            say("Declined" if accepted.get("sip_slot", -1) < 0 else "Answered, stop tapping")
+    elif name == "sipSlotCallState":
+        state, reason = callme.parse_slot_state(callme.composite_text(val))
+        say(f"Call {state}" + (f", {reason}" if reason else ""))
 
 
 def watch(seconds: float, speak: bool = False):

@@ -22,11 +22,10 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels
 import devices
-import model_tree
 import rcp_read
 import rcp_transfer
 import server
-from _testkit import as_device, check, check_true
+from _testkit import as_device, check, check_true, push
 
 SPOKEN: list[str] = []
 server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak
@@ -34,13 +33,6 @@ server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of
 # The Duo's CONFIRMED factory layout (devices.DUO_FADERS.default_vector): 10 slots, source 2 =
 # Headset on strip 4, an empty strip at 8 (-1) and USB 2 mirrored into the spare slot 9.
 DUO_VEC = [0, 1, 10, 11, 2, 7, 8, 9, -1, 9]
-
-
-def push(path, name: str, value_block: bytes) -> bytes:
-    """A whole report-04 push frame (see test_announcer.push)."""
-    rec = model_tree.encode_path(path) + name.encode() + b"\x00" + value_block
-    frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
-    return frame + bytes(256 - len(frame))
 
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:

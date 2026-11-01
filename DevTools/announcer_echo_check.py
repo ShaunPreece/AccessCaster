@@ -47,19 +47,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import channels
-import hid
+import rcp_hid
 import rcp_read
-import rcp_transfer
 import server
-from _desk import api
+from _desk import api, push_handle
 
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
 MUTE_CHAN = "Mic3"  # nothing is plugged into Mic 3, and the standing rule keeps Mic 1 unwritten
 GAIN_CHAN = 3       # same reason: Mic 1 carries a live microphone and is never written by a test
 
 SAID: list[tuple[float, str]] = []
-_t0 = time.time()
-server._ann_say = lambda text: SAID.append((time.time() - _t0, text))
+_t0 = time.monotonic()
+server._ann_say = lambda text: SAID.append((time.monotonic() - _t0, text))
 # Level and gain pushes are gated on the "announce levels" setting. This process only DECODES, it
 # never speaks, so forcing it on cannot make the real announcer chattier - but leaving it off would
 # make the unmarked control halves silent and report a false pass.
@@ -69,8 +68,8 @@ server._ann_levels_on = True
 def listen(dev, st: dict, secs: float) -> list[str]:
     """Pump the decoder for `secs` and return everything it would have spoken."""
     before = len(SAID)
-    end = time.time() + secs
-    while time.time() < end:
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
         rep = dev.read(256, timeout_ms=100)
         if rep:
             server._ann_handle_report(bytes(rep), st)
@@ -125,8 +124,7 @@ def main() -> int:
     channels.publish_strip_vector(vec)
     print(f"fader layout: {vec}  -> fader {FADER} carries source code {vec[FADER]}")
 
-    iface = rcp_transfer.find_control_interface()
-    if iface is None:
+    if rcp_hid.find_control_interface() is None:
         print("no device")
         return 1
     chans = {c["name"]: c for c in api("/api/channels")["channels"]}
@@ -137,45 +135,46 @@ def main() -> int:
     print(f"{MUTE_CHAN} starts {'muted' if mute_was else 'unmuted'} on strip {strip}; "
           f"Mic {GAIN_CHAN} gain starts at {gain_was} dB (both restored at the end)")
 
-    dev = hid.device()
-    dev.open_path(iface.path)
     st = {"bank": None, "pending": None, "at": 0.0}
     server._ann_live_state = st
     failures, notes = [], []
     try:
-        listen(dev, st, 2.0)          # let the stream settle, and swallow any startup chatter
+        with push_handle("announcer echo check") as dev:
+            listen(dev, st, 2.0)          # let the stream settle, and swallow any startup chatter
 
-        # ---- LEVEL: the one path the desk really does echo. This is the regression. ----
-        target_a = 60 if original != 60 else 55
-        phase(dev, st, "LEVEL   MARKED",
-              lambda: server._ann_publish_level("fader", FADER, target_a / 100.0),
-              "/api/faders/level", {"fader": FADER, "percent": target_a}, False, failures, notes)
-        phase(dev, st, "LEVEL   UNMARKED", None,
-              "/api/faders/level", {"fader": FADER, "percent": original}, True, failures, notes)
+            # ---- LEVEL: the one path the desk really does echo. This is the regression. ----
+            target_a = 60 if original != 60 else 55
+            phase(dev, st, "LEVEL   MARKED",
+                  lambda: server._ann_publish_level("fader", FADER, target_a / 100.0),
+                  "/api/faders/level", {"fader": FADER, "percent": target_a}, False,
+                  failures, notes)
+            phase(dev, st, "LEVEL   UNMARKED", None,
+                  "/api/faders/level", {"fader": FADER, "percent": original}, True, failures, notes)
 
-        # ---- MUTE: keyed by STRIP index, so no layout translation on either side. ----
-        # Flip AWAY from where it started for the marked half and back for the unmarked one, which
-        # also means the control half doubles as the restore. Both halves are expected SILENT: see
-        # the module docstring - the desk answers a software mute with mixMute matrix records only.
-        phase(dev, st, "MUTE    MARKED",
-              lambda: server._ann_publish_mute(strip, not mute_was),
-              "/api/channels/mute", {"name": MUTE_CHAN, "on": not mute_was}, False, failures, notes)
-        phase(dev, st, "MUTE    UNMARKED", None,
-              "/api/channels/mute", {"name": MUTE_CHAN, "on": mute_was}, None, failures, notes)
+            # ---- MUTE: keyed by STRIP index, so no layout translation on either side. ----
+            # Flip AWAY from where it started for the marked half and back for the unmarked one,
+            # which also means the control half doubles as the restore. Both halves are expected
+            # SILENT: see the module docstring - the desk answers a software mute with mixMute
+            # matrix records only.
+            phase(dev, st, "MUTE    MARKED",
+                  lambda: server._ann_publish_mute(strip, not mute_was),
+                  "/api/channels/mute", {"name": MUTE_CHAN, "on": not mute_was}, False,
+                  failures, notes)
+            phase(dev, st, "MUTE    UNMARKED", None,
+                  "/api/channels/mute", {"name": MUTE_CHAN, "on": mute_was}, None, failures, notes)
 
-        # ---- GAIN: the two sides name a gain differently, which is the whole point of the mark. ----
-        # Two DIFFERENT values, because the push side dedupes on (who, value): repeating a value
-        # would be swallowed by that dedupe and the silence would prove nothing.
-        base = gain_was if isinstance(gain_was, int) else 0
-        g_a = base + 6 if base <= 30 else base - 6
-        g_b = base + 12 if base <= 24 else base - 12
-        phase(dev, st, "GAIN    MARKED",
-              lambda: server._ann_mark_self_gain(GAIN_CHAN, True),
-              "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_a}, False, failures, notes)
-        phase(dev, st, "GAIN    UNMARKED", None,
-              "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_b}, None, failures, notes)
+            # ---- GAIN: the two sides name a gain differently, which is the point of the mark. ----
+            # Two DIFFERENT values, because the push side dedupes on (who, value): repeating a value
+            # would be swallowed by that dedupe and the silence would prove nothing.
+            base = gain_was if isinstance(gain_was, int) else 0
+            g_a = base + 6 if base <= 30 else base - 6
+            g_b = base + 12 if base <= 24 else base - 12
+            phase(dev, st, "GAIN    MARKED",
+                  lambda: server._ann_mark_self_gain(GAIN_CHAN, True),
+                  "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_a}, False, failures, notes)
+            phase(dev, st, "GAIN    UNMARKED", None,
+                  "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_b}, None, failures, notes)
     finally:
-        dev.close()
         api("/api/faders/level", post={"fader": FADER, "percent": original})
         api("/api/channels/mute", post={"name": MUTE_CHAN, "on": mute_was})
         if isinstance(gain_was, int):

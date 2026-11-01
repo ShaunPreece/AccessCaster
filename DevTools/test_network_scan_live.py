@@ -20,13 +20,13 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import rcp_read
 import rcp_transfer
+from _desk import count_changes, stray_counts
 
 SEL = rcp_transfer.SEL_NETWORK
 
@@ -34,13 +34,6 @@ SEL = rcp_transfer.SEL_NETWORK
 def slots(blob, prefix, n=10):
     """The scan-result slots, in order, blanks included so a change of shape is visible."""
     return [rcp_read.block_value(blob, "NETWORK", f"{prefix}{i}") or "" for i in range(1, n + 1)]
-
-
-def occurrences(blob) -> Counter:
-    c = Counter()
-    for _hdr, prop, _v, _k in rcp_read.iter_block_properties(blob):
-        c[prop] += 1
-    return c
 
 
 def run_scan(kind: str, prop: str, prefix: str, wait: float) -> bool:
@@ -52,14 +45,13 @@ def run_scan(kind: str, prop: str, prefix: str, wait: float) -> bool:
     print(f"  writing {prop} = True on selector 0x{SEL:02X}")
     rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(prop, True, SEL))
 
-    deadline = time.time() + wait
-    after, after_blob = before, before_blob
-    while time.time() < deadline:
+    start = time.monotonic()
+    after = before
+    while time.monotonic() - start < wait:
         time.sleep(3.0)
-        after_blob = rcp_read.read_model_stable(fresh=True)
-        after = slots(after_blob, prefix)
+        after = slots(rcp_read.read_model_stable(fresh=True), prefix)
         if after != before:
-            print(f"  the result slots CHANGED after {wait - (deadline - time.time()):.0f}s")
+            print(f"  the result slots CHANGED after {time.monotonic() - start:.0f}s")
             break
     print(f"  after:  {[s for s in after if s] or 'nothing in the result slots'}")
     changed = after != before
@@ -89,14 +81,13 @@ def main() -> int:
         run_scan("bluetooth", "btDoScan", "btScan", args.wait)
     after = rcp_read.read_model_stable(fresh=True)
 
-    ob, oa = occurrences(before), occurrences(after)
-    moved = {p: (ob.get(p, 0), n) for p, n in oa.items() if n != ob.get(p, 0)}
-    moved.update({p: (n, oa.get(p, 0)) for p, n in ob.items() if p not in oa})
+    ob, oa = stray_counts(before), stray_counts(after)
+    moved = sorted(sum(count_changes(ob, oa), []))
     print("\nSTRAY CHECK (per-property occurrence counts)")
     if moved:
         print("  COUNTS MOVED - inspect before writing anything else:")
-        for p, (b, a) in sorted(moved.items()):
-            print(f"    {p}: {b} -> {a}")
+        for p in moved:
+            print(f"    {p}: {ob.get(p, 0)} -> {oa.get(p, 0)}")
     else:
         print("  no occurrence count changed anywhere: no stray.")
     return 0

@@ -14,20 +14,14 @@ Registers and immediately unregisters, so nothing is taken from anything while t
 """
 from __future__ import annotations
 
-import ctypes
 import sys
-from ctypes import wintypes
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import hotkeys
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
-_user32.RegisterHotKey.restype = wintypes.BOOL
-_user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
-_user32.UnregisterHotKey.restype = wintypes.BOOL
+_user32 = hotkeys._user32         # with RegisterHotKey's signature declared
 
 CHORDS = [
     ("ctrl", "alt", "win"),

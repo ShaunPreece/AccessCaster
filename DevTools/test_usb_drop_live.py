@@ -68,7 +68,7 @@ import hid
 import rcp_hid
 import rcp_read
 import shows
-from _desk import BASE, api, rode_devices_present
+from _desk import BASE, api, rode_devices_present, wait_for_job
 
 QUIET_SECONDS = 20.0
 POLL_S = 1.5                    # shows.POLL_S, so `poll` polls exactly as the app does
@@ -199,18 +199,6 @@ def fire_via_app() -> str:
     return f"app: {started.get('message') or started}"
 
 
-def wait_for_app_job(limit: float = 90.0) -> str:
-    end = time.time() + limit
-    last = ""
-    while time.time() < end:
-        st = api("/api/shows/status", timeout=15.0)
-        if not st.get("running", False):
-            return st.get("message") or last or "job finished"
-        last = st.get("message") or last
-        time.sleep(1.0)
-    return f"job still running after {limit:.0f}s (last: {last})"
-
-
 def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str, str | None]:
     """One reset under the chosen layers. Returns (status, uuid) with status
     clean / void / dropped / abort."""
@@ -230,7 +218,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
             time.sleep(POLL_S + 0.5)      # let the handles settle and a dump get in flight
         print(f"  holding: {load.describe()}")
 
-    sent_at = time.time()
+    sent_at = time.monotonic()
     what = fire_via_app() if use_app else fire_in_process(layers)
     print(f"  {time.strftime('%H:%M:%S')} {what}")
 
@@ -238,7 +226,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
     for at in SAMPLE_AT:
         if at > quiet:
             break
-        while time.time() - sent_at < at:
+        while time.monotonic() - sent_at < at:
             time.sleep(0.2)
         now = rode_devices_present()
         print(f"  t+{at:>4.0f}s present={now}")
@@ -254,7 +242,11 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
             print(f"  {load.read_errors} read handle(s) errored out during it")
         load.stop()
     if use_app:
-        print(f"  app job: {wait_for_app_job()}")
+        try:
+            st = wait_for_job(lambda: api("/api/shows/status", timeout=15.0), 90.0)
+            print(f"  app job: {st.get('message') or 'job finished'}")
+        except TimeoutError as e:
+            print(f"  app job: {e}")
 
     if dropped_at is not None:
         time.sleep(10.0)                  # a merely slow re-enumeration is not the fault

@@ -310,7 +310,7 @@ class InputStripSpec:
 
       strips  : (key, vec_index, label) per reassignable strip. `vec_index` is the strip's
                 position in the channelInputSource vector, written with set_fader_source.
-      sources : (code, label) source palette. `code` is an rcp_transfer.INPUT_SOURCE_CODE value.
+      sources : (code, label) source palette. `code` is a source code (DeviceModel.source_codes).
 
     A device that uses ONLY the index-based fader_model leaves this EMPTY (the default). The Duo
     does, because its flexible strips sit at different vector positions. With an empty spec the
@@ -738,6 +738,14 @@ class DeviceModel:
                      if c.get("source_code") == code), None)
 
     @property
+    def source_codes(self) -> dict:
+        """{source code: Standard-mode label} for every source this desk can put on a fader: every
+        channel in either mode, and every stereo pair, which has a code of its own."""
+        out = {c["source_code"]: c["label"] for c in self.every_ui_channel}
+        out.update({code: label for code, _lo, _up, label in self.fader.stereo_pairs})
+        return out
+
+    @property
     def every_ui_channel(self) -> tuple:
         """Every channel this desk can ever carry, whatever mode it is in, WITHOUT any relabel.
 
@@ -809,8 +817,8 @@ DUO_UI_CHANNELS = _ui_channel_view(CHANNELS_DUO)
 
 
 # --- Routing-matrix UI label maps (see MatrixSpec.sources / .outputs) ----------
-# Indices match rcp_transfer.INPUT_SOURCE_CODE / CROSS_POINT_OUTPUT_INDEX; the inferred CallMe 2/3
-# outputs stay unexposed.
+# Indices match the source codes (DeviceModel.source_codes) and CROSS_POINT_OUTPUT_INDEX; the
+# inferred CallMe 2/3 outputs stay unexposed.
 PRO2_MATRIX_SOURCES = _matrix_source_view(CHANNELS_PRO2)
 PRO2_MATRIX_EXPANDED_SOURCES = _expanded_matrix_source_view(CHANNELS_PRO2)
 # "default_mode" (0 Main Mix / 1 Mix Minus / 2 Custom) is the mode "Reset all output mixes" puts

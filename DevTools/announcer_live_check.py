@@ -12,31 +12,27 @@ Usage: python DevTools/announcer_live_check.py [seconds] [--speak]
 """
 from __future__ import annotations
 
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _desk
 import channels
-import hid
+import rcp_hid
 import rcp_read
-import rcp_transfer
 import server
 
 SAID: list[tuple[float, str]] = []
-_t0 = time.time()
-server._ann_say = lambda text: SAID.append((time.time() - _t0, text))
-
-SAY_PS1 = str(Path(__file__).resolve().parent.parent / "Project" / "say.ps1")
+_t0 = time.monotonic()
+server._ann_say = lambda text: SAID.append((time.monotonic() - _t0, text))
 
 
 def speak(text: str, enabled: bool) -> None:
     print(f"[say] {text}")
     if enabled:
-        subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", SAY_PS1,
-                        "-Text", text], capture_output=True)
+        _desk.say(text, wait=True)
 
 
 def main() -> int:
@@ -53,19 +49,16 @@ def main() -> int:
     except Exception as exc:
         print(f"could not warm the layout cache ({exc}); names will fall back to Channel N")
 
-    iface = rcp_transfer.find_control_interface()
-    if iface is None:
+    if rcp_hid.find_control_interface() is None:
         print("no device")
         return 1
-    dev = hid.device()
-    dev.open_path(iface.path)
     st = {"bank": None, "pending": None, "at": 0.0}
     speak(f"Press mute and solo on any channels for the next {int(secs)} seconds.", do_speak)
     print(f"listening {secs:.0f}s ...")
     seen = 0
-    end = time.time() + secs
-    try:
-        while time.time() < end:
+    end = time.monotonic() + secs
+    with _desk.push_handle("announcer live check") as dev:
+        while time.monotonic() < end:
             rep = dev.read(256, timeout_ms=200)
             if rep:
                 seen += 1
@@ -78,8 +71,6 @@ def main() -> int:
             server._ann_flush_pending(st)
             for t, text in SAID[before:]:
                 print(f"  {t:6.2f}s  SPOKEN (press-edge fallback): {text!r}")
-    finally:
-        dev.close()
 
     print(f"\n{seen} report-04 packets, {len(SAID)} announcement(s):")
     for t, text in SAID:

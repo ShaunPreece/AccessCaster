@@ -308,6 +308,8 @@ def check_profile_coverage() -> None:
     if s["unjudged"]:
         fail("profile_coverage.py", "writable and unsaved with no entry in NOT_SAVED: "
                                     + ", ".join(s["unjudged"]))
+    if s["stale"]:
+        fail("profile_coverage.py", "a verdict the scan no longer reaches: " + ", ".join(s["stale"]))
 
 
 def main() -> int:

@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,27 +33,23 @@ import _bootstrap  # noqa: F401
 import model_tree as mt
 import rcp_read
 import rcp_transfer
+from _desk import count_changes, stray_counts
 
 SETTLE = 1.5
 
 
 def snapshot():
     """(root, {property name: occurrence count}) from a fresh dump."""
-    root, _used, _tail = mt.parse(rcp_read.read_model_stable(fresh=True))
-    c = Counter()
-    for n in mt.walk(root):
-        for p, _v, _k in n.props:
-            c[p] += 1
-    return root, c
+    blob = rcp_read.read_model_stable(fresh=True)
+    return mt.parse(blob)[0], stray_counts(blob)
 
 
-def value_block(kind: str, value: str) -> bytes:
+def build(kind: str, prop: str, value: str, path) -> bytes:
+    """The record writing `value` (as typed on the command line) to `prop` at tree `path`."""
     if kind == "bool":
-        return bytes([0x01, 0x01, 0x02 if value.strip().lower() in ("on", "true", "1", "yes")
-                      else 0x03])
-    if kind == "int":
-        return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-    raise ValueError(kind)
+        return rcp_transfer.build_path_prop_bool(
+            prop, value.strip().lower() in ("on", "true", "1", "yes"), path)
+    return rcp_transfer.build_path_prop_int(prop, int(value), path)
 
 
 def main() -> int:
@@ -87,8 +82,7 @@ def main() -> int:
         print("\n  --yes not given, so nothing was written.")
         return 1
 
-    rec = rcp_transfer._frame(node.address() + args.prop.encode("ascii") + b"\x00"
-                              + value_block(args.kind, args.value))
+    rec = build(args.kind, args.prop, args.value, node.path())
     print(f"\nWRITING {args.prop} = {args.value} ({args.kind})")
     print(f"  record: {rec[:32].hex(' ')} ...")
     rcp_transfer.send_record(rec)
@@ -96,12 +90,12 @@ def main() -> int:
 
     root2, after = snapshot()
     print("\nRESULT")
-    moved = {p: (before.get(p, 0), n) for p, n in after.items() if n != before.get(p, 0)}
-    moved.update({p: (n, after.get(p, 0)) for p, n in before.items() if p not in after})
+    added, gone, moved = count_changes(before, after)
+    moved = added + gone + moved
     if moved:
         print("  STRAY / STRUCTURE CHANGE - occurrence counts moved:")
-        for p, (b, a) in moved.items():
-            print(f"    {p}: {b} -> {a}")
+        for p in moved:
+            print(f"    {p}: {before.get(p, 0)} -> {after.get(p, 0)}")
         old = {tuple(n.path()) for n, _v, _k in mt.find_property(root, args.prop)}
         for n, v, _k in mt.find_property(root2, args.prop):
             if tuple(n.path()) not in old:

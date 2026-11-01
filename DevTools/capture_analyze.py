@@ -40,6 +40,9 @@ import sys
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
+import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import model_tree
+
 # pcap/pcapng link-layer type for USBPcap captures.
 LINKTYPE_USBPCAP = 249
 
@@ -185,6 +188,14 @@ def read_pcapng(path: str) -> list[UsbPacket]:
 # tshark JSON reader (optional alternative input)
 # ---------------------------------------------------------------------------
 
+def _int_field(fields: dict, key: str) -> int:
+    """A tshark field as an int, decimal or 0x hex; 0 when it is missing or not a number."""
+    try:
+        return int(str(fields.get(key, "0")), 0)
+    except ValueError:
+        return 0
+
+
 def read_tshark_json(path: str) -> list[UsbPacket]:
     """Read a `tshark -T json` export. Extracts usb.capdata / usbhid.data."""
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -217,10 +228,8 @@ def read_tshark_json(path: str) -> list[UsbPacket]:
                 frame=i,
                 from_device=bool(endpoint & 0x80),
                 endpoint=endpoint,
-                device_addr=int(str(usb.get("usb.device_address", "0")), 0)
-                if str(usb.get("usb.device_address", "0")).isdigit() else 0,
-                transfer_type=int(str(usb.get("usb.transfer_type", "0")), 0)
-                if str(usb.get("usb.transfer_type", "0")).replace("0x", "").isalnum() else 0,
+                device_addr=_int_field(usb, "usb.device_address"),
+                transfer_type=_int_field(usb, "usb.transfer_type"),
                 data=data,
             )
         )
@@ -422,18 +431,43 @@ def _command_set(pkts: list[UsbPacket]) -> dict[str, UsbPacket]:
     return {p.data.hex(): p for p in pkts if not p.from_device and p.report_id == 0x01}
 
 
-def cmd_diff(path_a: str, path_b: str) -> None:
-    """Diff the report-id-1 commands between two captures.
+def host_writes(pkts: list[UsbPacket]) -> dict[str, tuple]:
+    """{key: (path, name, value)} for every report-3 property record the host sent, decoded by
+    `model_tree.parse_record`, so a write at any address depth is found."""
+    out = {}
+    for p in pkts:
+        if p.from_device or p.report_id != 0x03 or len(p.data) < 5:
+            continue
+        n = int.from_bytes(p.data[1:5], "little")
+        try:
+            path, name, value, _kind, _end = model_tree.parse_record(p.data[5:5 + n])
+        except ValueError:
+            continue
+        out.setdefault(f"{list(path)} {name} {value!r}", (tuple(path), name, value))
+    return out
 
-    Capture A and B should differ in exactly one intended action (e.g. assign
-    sound to pad 1 vs pad 2). The commands unique to each capture are the
-    candidates for the action-specific command.
-    """
-    a = _command_set(load_capture(path_a))
-    b = _command_set(load_capture(path_b))
+
+def diff_writes(a: list[UsbPacket], b: list[UsbPacket]) -> tuple[list, list]:
+    """(the property writes only in A, those only in B)."""
+    wa, wb = host_writes(a), host_writes(b)
+    return [wa[k] for k in wa if k not in wb], [wb[k] for k in wb if k not in wa]
+
+
+def cmd_diff(path_a: str, path_b: str) -> None:
+    """Diff two captures that differ in exactly one intended action (e.g. assign sound to pad 1
+    vs pad 2): the property writes unique to each, which is where every write lives, then the
+    report-id-1 commands unique to each."""
+    pkts_a, pkts_b = load_capture(path_a), load_capture(path_b)
+    writes_a, writes_b = diff_writes(pkts_a, pkts_b)
+    for label, writes in (("A", writes_a), ("B", writes_b)):
+        print(f"Property writes only in {label} ({len(writes)}):")
+        for path, name, value in writes:
+            print(f"  {list(path)} {name} = {value!r}")
+    a = _command_set(pkts_a)
+    b = _command_set(pkts_b)
     only_a = [a[k] for k in a if k not in b]
     only_b = [b[k] for k in b if k not in a]
-    print(f"A = {path_a}  ({len(a)} distinct commands)")
+    print(f"\nA = {path_a}  ({len(a)} distinct commands)")
     print(f"B = {path_b}  ({len(b)} distinct commands)")
     print(f"\nCommands only in A ({len(only_a)}):")
     for p in only_a:
@@ -523,9 +557,23 @@ def cmd_selftest() -> None:
         for x in pkts:
             print(f"    frame {x.frame} {x.direction_str} rid=0x{x.report_id:02x} "
                   f"{x.hex(12)} {x.ascii(16)!r}")
-        print("\nSELFTEST PASSED.")
     finally:
         os.remove(p)
+
+    # Two captures that differ by one property write: diff must name it.
+    base = [UsbPacket(0, False, 0x05, 5, 1, _report3(b"\x01\x01\x01\x01\x0dmetering\x00"
+                                                      b"\x01\x05\x01\x00\x00\x00\x00"))]
+    pad = UsbPacket(1, False, 0x05, 5, 1, _report3(
+        model_tree.encode_path([0x29A, 5]) + b"padColourIndex\x00\x01\x05\x01\x03\x00\x00\x00"))
+    only_a, only_b = diff_writes(base, base + [pad])
+    assert (only_a, only_b) == ([], [((0x29A, 5), "padColourIndex", 3)]), (only_a, only_b)
+    print("  diff names the one property write two captures differ by")
+    print("\nSELFTEST PASSED.")
+
+
+def _report3(record: bytes) -> bytes:
+    """A host-to-device report-3 payload around one property record."""
+    return bytes([0x03]) + len(record).to_bytes(4, "little") + record
 
 
 # ---------------------------------------------------------------------------
@@ -538,40 +586,27 @@ Commands:
   bulk     <capture>            summary of the report-id-3 property records sent
   rode     <capture>            does this capture contain RODECaster traffic?
   props    <capture>            distinct ASCII property names, with the bytes around them
-  diff     <captureA> <captureB>  commands unique to each + byte diff
+  diff     <captureA> <captureB>  property writes and commands unique to each + byte diff
   selftest                      verify the pcapng parser on synthetic data
 
 <capture> may be a USBPcap .pcap or .pcapng, or a tshark -T json export (.json).
 """
 
 
+COMMANDS = {"summary": (cmd_summary, 1), "commands": (cmd_commands, 1), "bulk": (cmd_bulk, 1),
+            "rode": (cmd_rode, 1), "props": (cmd_props, 1), "diff": (cmd_diff, 2),
+            "selftest": (cmd_selftest, 0)}
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(USAGE)
         return 0
-    cmd = argv[0]
-    try:
-        if cmd == "summary":
-            cmd_summary(argv[1])
-        elif cmd == "commands":
-            cmd_commands(argv[1])
-        elif cmd == "bulk":
-            cmd_bulk(argv[1])
-        elif cmd == "rode":
-            return cmd_rode(argv[1])
-        elif cmd == "props":
-            cmd_props(argv[1])
-        elif cmd == "diff":
-            cmd_diff(argv[1], argv[2])
-        elif cmd == "selftest":
-            cmd_selftest()
-        else:
-            print(USAGE)
-            return 1
-    except IndexError:
+    func, nargs = COMMANDS.get(argv[0], (None, 0))
+    if func is None or len(argv) - 1 < nargs:
         print(USAGE)
         return 1
-    return 0
+    return func(*argv[1:1 + nargs]) or 0
 
 
 if __name__ == "__main__":

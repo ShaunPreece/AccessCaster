@@ -1,18 +1,21 @@
 """Shared helpers for the DevTools scripts that drive a real desk.
 
-The running server's API, how many RODE devices Windows has present, the desk's pushes on a handle
-of the caller's own, and one mic's input node and processing chain read off a fresh dump.
+The running server's API and its background jobs, how many RODE devices Windows has present, the
+desk's pushes on a handle of the caller's own, one mic's input node and processing chain read off a
+fresh dump and put back, the stray check's occurrence counts, and one-shot speech.
 """
 from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 
-import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _bootstrap
 import channels
 import model_tree
 import rcp_hid
@@ -41,6 +44,68 @@ def api(path: str, post: dict | None = None, timeout: float = 90.0) -> dict:
         return {"ok": False, "http_status": e.code, "message": f"{path} returned HTTP {e.code}"}
     except (urllib.error.URLError, OSError, ValueError) as e:
         return {"ok": False, "message": f"{type(e).__name__}: {e}"}
+
+
+def wait_for_job(read_status, timeout: float = 180.0, pause: float = 1.0,
+                 on_status=None) -> dict:
+    """Poll `read_status()` until the server's background job stops running; return its last status.
+
+    FINISHED IS `running` READING FALSE, the key every job status carries. A status without it (a
+    failed request through `api`) is polled again rather than taken as the end: a wait keyed on a
+    missing key returns at once, while the job is still in flight. `on_status` sees every status
+    read. Raises TimeoutError when the job is still running at `timeout`.
+
+    In process, `read_status` is the server's own status function (`server.show_job_status`);
+    over HTTP, `lambda: api("/api/shows/status")`.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        status = read_status()
+        if on_status is not None:
+            on_status(status)
+        if status.get("running") is False:
+            return status
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"the job did not finish within {timeout:.0f} s "
+                               f"(last: {status.get('message') or 'no message'})")
+        time.sleep(pause)
+
+
+def say(text: str, gated: bool = False, wait: bool = False) -> None:
+    """Speak `text` once through `Project/say.ps1`, the one-shot the app falls back to, so the voice
+    and output device chosen in the app are honoured.
+
+    `gated` goes through `say_gated.ps1`, which stays quiet while Claudio has the focus. `wait`
+    blocks until the line has been spoken; a script that is reading the desk while it speaks leaves
+    it false. Speech is a convenience, so a failure to start PowerShell is ignored.
+    """
+    script = (os.path.join(_bootstrap.DEVTOOLS, "say_gated.ps1") if gated
+              else os.path.join(_bootstrap.PROJECT, "say.ps1"))
+    args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+            "-Text", text]
+    try:
+        if wait:
+            subprocess.run(args, capture_output=True, timeout=30, check=False)
+        else:
+            subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def stray_counts(blob: bytes) -> Counter:
+    """{property name: occurrence count} over a model dump: the stray check's reference.
+
+    A stray copy carries a name that already exists, so only a count shows it was appended."""
+    root, _used, _tail = model_tree.parse(blob)
+    return Counter(name for node in model_tree.walk(root) for name, _v, _k in node.props)
+
+
+def count_changes(before: dict, after: dict) -> tuple[list, list, list]:
+    """(names added, names gone, names whose count moved) between two `stray_counts`."""
+    added = sorted(set(after) - set(before))
+    gone = sorted(set(before) - set(after))
+    moved = sorted(n for n in set(before) & set(after) if before[n] != after[n])
+    return added, gone, moved
 
 
 def rode_devices_present() -> int:
@@ -103,7 +168,8 @@ def mic_chain(ch: int) -> dict:
 
 def settled_chain(ch: int, timeout: float = 8.0, pause: float = 0.3) -> dict:
     """Mic `ch`'s chain once two fresh reads `pause` apart agree: a voicing takes a second or two
-    to apply, so a single read can catch it part way."""
+    to apply, so a single read can catch it part way. Raises TimeoutError when the reads still
+    differ at `timeout`."""
     end = time.monotonic() + timeout
     prev = mic_chain(ch)
     while time.monotonic() < end:
@@ -112,7 +178,7 @@ def settled_chain(ch: int, timeout: float = 8.0, pause: float = 0.3) -> dict:
         if cur == prev:
             return cur
         prev = cur
-    return prev
+    raise TimeoutError(f"Mic {ch}'s chain was still changing after {timeout:.0f} s")
 
 
 def advanced_processing(ch: int) -> bool:
@@ -129,3 +195,22 @@ def put_chain_back(ch: int, chain: dict, advanced: bool) -> None:
     settled_chain(ch)
     channels.apply_processing_preset(ch, dict(chain, **{channels.CHAIN_ADVANCED_PROP: advanced}))
     settled_chain(ch)
+
+
+def put_mic_back(ch: int, before: dict, chain: dict, advanced: bool, settle: float = 0.9) -> None:
+    """Put mic `ch` back as found: `before` is its input node from `read_input`, `chain` and
+    `advanced` its chain and advanced flag.
+
+    The type goes first: a voicing sets the gain, the instrument gain, phantom power and the whole
+    chain, so each of those is written after it. The gains and phantom power are written even when
+    the chain does not settle."""
+    channels.set_mic_type(ch, int(before["inputMicrophoneType"]))
+    try:
+        put_chain_back(ch, chain, advanced)
+    finally:
+        channels.set_mic_gain(ch, int(before["inputMicrophoneGain"]))
+        time.sleep(settle)
+        channels.set_instrument_gain(ch, int(before["inputInstrumentGain"]))
+        time.sleep(settle)
+        channels.set_phantom(ch, bool(before["inputPower"]))
+        time.sleep(settle)

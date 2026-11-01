@@ -15,7 +15,9 @@ unasked, and `_bootstrap` would give a `test_` a throwaway data dir.
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -28,18 +30,19 @@ import driver_install as di
 from _testkit import check
 
 folder = tempfile.mkdtemp(prefix="ac_driver_fetch_")
+atexit.register(shutil.rmtree, folder, True)     # the zip and the MSI go however the run ends
 zip_path = os.path.join(folder, "driver.zip")
 
 print(f"=== fetching {di.ZIP_URL} ===")
 steps = []
-at = time.time()
+at = time.monotonic()
 try:
     di._download(zip_path, steps.append)
 except di.DriverInstallError as exc:
     print(f"  FAIL the download refused: {exc}")
     raise SystemExit(1)
 size = os.path.getsize(zip_path)
-print(f"  ok   downloaded {size} bytes in {time.time() - at:.1f}s")
+print(f"  ok   downloaded {size} bytes in {time.monotonic() - at:.1f}s")
 check("it is a plausible size for one MSI, not a web page", 200_000 < size < 20_000_000, True)
 
 msi = di._extract_msi(zip_path, folder, steps.append)

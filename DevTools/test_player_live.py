@@ -93,9 +93,9 @@ def main() -> int:
 
         print(f"\nPLAY (playerState = {args.state})")
         _t.send_record(_t.build_global_prop_int("playerState", SEL_PLAYER, args.state))
-        deadline = time.time() + args.seconds
+        deadline = time.monotonic() + args.seconds
         seen = []
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             now, _ = read()
             seen.append((now["playerState"], now["playerProgress"],
                          now["playerCurrentPositionTime"]))

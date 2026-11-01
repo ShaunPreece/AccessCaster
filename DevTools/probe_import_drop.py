@@ -8,9 +8,8 @@ would point this at a scratch profiles folder and make every trial a no-op.
 
 RE-IMPORTING THE SAME BACKUP MEASURES NOTHING, and avoiding that is the whole design here. Once the
 first import lands, the desk already matches that backup, so every trial after it is the "nothing
-to do" case - which has never dropped a desk. It shows up as a run of trials all taking the same
-suspiciously short time: 6.3 seconds each, identical to a tenth of a second, against 97 s for a real
-import.
+to do" case. It shows as a run of trials that all take the same few seconds, where a real import
+takes a minute or more.
 
 SO THE DELTA IS THE INDEPENDENT VARIABLE. Before each trial this disturbs `--delta` real settings,
 proves they took, then imports the backup that holds the originals. The desk therefore has a known
@@ -18,9 +17,9 @@ and repeatable amount of rewriting to do, and the question stops being "does it 
 "does dropping track how much the desk has to rewrite". Better than alternating between two whole
 backups: the desk never leaves its owner's own setup, and the size is a dial rather than a switch.
 
-THE JOB DURATION IS THE HONEST WORK PROXY. 6.3 s means the desk did essentially nothing whatever
-the delta claimed; a real import runs far longer. Every trial prints it, so a run that quietly
-degenerated into no-ops cannot be read as a clean result.
+THE JOB DURATION IS THE HONEST WORK PROXY. A job under NOOP_S means the desk did essentially nothing
+whatever the delta claimed. Every trial prints it, so a run that quietly degenerated into no-ops
+cannot be read as a clean result.
 
 IT DRIVES THE RUNNING SERVER OVER HTTP AND OPENS NOTHING ITSELF. The app owns the device, and a
 second process with its own handle would be a variable in the measurement rather than a tool for
@@ -41,9 +40,8 @@ show command, no reload from the desk's own file, no mass-storage gadget. So it 
     nothing while leaving the fault exactly where it is
   * shows drop and profiles do not -> shows are finally implicated, on more than association
 
-The arm is not optional, because the case against shows is association and nothing more: every known
-drop happens around an import, but the dropout predates the shows feature by six weeks and has
-happened with nothing of ours running.
+The arm is not optional, because the case against shows is association and nothing more: the
+dropout also happens with nothing of ours running.
 
 Usage, with the app or `DevTools/run_dev_server.py` already serving:
 
@@ -59,7 +57,7 @@ import time
 
 import _bootstrap  # puts Project/ on the path; import FIRST
 import diagnostics
-from _desk import api, rode_devices_present
+from _desk import api, rode_devices_present, wait_for_job
 
 SETTLE_S = 6.0          # between trials, so one import is not still landing when the next starts
 STATUS_POLL_S = 2.0
@@ -139,8 +137,7 @@ def put_back(chosen: list, originals: dict) -> list:
 # announcer and the recorder watcher, both long-lived read handles. A force-kill tears those down
 # without ever closing them, so the desk is left with handles that were never released.
 #
-# That makes it a candidate in its own right: one recorded drop came two minutes after exactly this,
-# while fifteen clean imports all ran on a server that came up with nobody to kill.
+# That makes it a candidate cause in its own right, which `--restart kill` puts before every import.
 
 def listening_pid() -> int:
     """The PID listening on 8770, or 0. netstat rather than anything that opens the device."""
@@ -205,18 +202,13 @@ def run_restore(name: str, via: str) -> dict:
     if not started.get("ok"):
         return {"ok": False, "message": started.get("message") or "the restore did not start"}
     at = time.monotonic()
-    deadline = at + JOB_CEILING_S
-    while time.monotonic() < deadline:
-        time.sleep(STATUS_POLL_S)
-        st = api(status, timeout=15.0)
-        if st.get("running"):
-            continue
-        if st.get("done"):
-            st["seconds"] = time.monotonic() - at
-            st["ran_via"] = started.get("via")
-            return st
-    return {"ok": False, "seconds": time.monotonic() - at, "ran_via": started.get("via"),
-            "message": f"the job was still running after {JOB_CEILING_S:.0f}s"}
+    try:
+        st = wait_for_job(lambda: api(status, timeout=15.0), JOB_CEILING_S, STATUS_POLL_S)
+    except TimeoutError as e:
+        st = {"ok": False, "message": str(e)}
+    st["seconds"] = time.monotonic() - at
+    st["ran_via"] = started.get("via")
+    return st
 
 
 def main() -> int:
@@ -280,18 +272,23 @@ def main() -> int:
         # DISTURB, AND PROVE IT TOOK. A knob that silently refuses turns the trial into a no-op
         # that runs, and passes, without changing anything on the desk.
         moved = 0
-        for label, read, write in chosen:
-            was = originals[label]
-            if not isinstance(was, int):
-                continue
-            write(nudge(was))
-            if read() != was:
-                moved += 1
-        if chosen and not moved:
-            print(f"  trial {n}: SKIPPED, nothing would move, so there was nothing to import.")
-            return 1
-
-        res = run_restore(args.backup, args.via)
+        try:
+            for label, read, write in chosen:
+                was = originals[label]
+                if not isinstance(was, int):
+                    continue
+                write(nudge(was))
+                if read() != was:
+                    moved += 1
+            if chosen and not moved:
+                print(f"  trial {n}: SKIPPED, nothing would move, so there was nothing to import.")
+                return 1
+            res = run_restore(args.backup, args.via)
+        except BaseException:
+            # Stopped between the nudge and the restore's end (Ctrl+C, a request that raised):
+            # the restore that would have put the knobs back has not, so put them back here.
+            put_back(chosen, originals)
+            raise
         after = rode_devices_present()
         secs = res.get("seconds") or 0.0
         verdict = "ok" if res.get("ok") else "FAILED"
@@ -333,8 +330,8 @@ def main() -> int:
     if noops:
         print(f"WARNING: {noops} of them ran in under {NOOP_S:.0f}s, so the desk was not really "
               f"rewriting anything. Those trials prove nothing; raise --delta.")
-    print("A clean run is NOT proof the fault is gone: the measured rate is about 1 in 6, so a "
-          "run of this size can miss it by luck alone.")
+    print("A clean run is NOT proof the fault is gone: it is intermittent, so a run of this size "
+          "can miss it by luck alone.")
     return 0
 
 

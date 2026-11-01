@@ -24,10 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import devices
 import model_tree as mt
-import rcp_read
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import property_list
+import rcp_read
 
 
 def main() -> int:

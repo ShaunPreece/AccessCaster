@@ -215,9 +215,9 @@ server._note_recorder_context({})
 
 print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
 reset(announcing=False)
-t0 = time.time()
+t0 = time.monotonic()
 server._ann_say_and_wait("Resuming")
-check("with announcements off it does not wait", time.time() - t0 < 0.5, True)
+check("with announcements off it does not wait", time.monotonic() - t0 < 0.5, True)
 
 
 def fake_say_worker_done(text):
@@ -233,9 +233,9 @@ def fake_say_worker_done(text):
 server._ann_say = fake_say_worker_done
 _silent, server._ANN_SILENT = server._ANN_SILENT, False    # the stubbed worker plays nothing
 reset(announcing=True)
-t0 = time.time()
+t0 = time.monotonic()
 server._ann_say_and_wait("Resuming")
-took = time.time() - t0
+took = time.monotonic() - t0
 check("it waits for the worker's DONE", 0.15 < took < 2.0, True)
 check("and the phrase travels as a sync line carrying the words",
       len(SAID) == 1 and SAID[0].endswith(" Resuming"), True)

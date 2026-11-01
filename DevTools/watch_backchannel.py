@@ -8,33 +8,36 @@ the pad while this runs and the hold shows up as a row where the flags differ fr
 Usage:
     python DevTools/watch_backchannel.py [seconds]
 """
-import json
 import sys
 import time
-import urllib.request
+
+import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+from _desk import api
 
 WATCH = ("Mic1", "USB2")
+RETRY_S = 1.0       # after a failed read, so a stopped server is not asked as fast as it refuses
 
 
-def sample():
-    with urllib.request.urlopen("http://127.0.0.1:8770/api/channels", timeout=90) as r:
-        chans = json.load(r)["channels"]
+def sample() -> tuple[dict | None, str]:
+    """({channel: (muted, cue)} for the watched channels, "") or (None, why the read failed)."""
+    d = api("/api/channels")
+    if not d.get("ok"):
+        return None, d.get("message") or "no reply"
     return {c["name"]: (bool(c.get("muted")), bool(c.get("solo")))
-            for c in chans if c["name"] in WATCH}
+            for c in d.get("channels") or [] if c["name"] in WATCH}, ""
 
 
 def main():
     secs = float(sys.argv[1]) if len(sys.argv) > 1 else 30.0
-    end = time.time() + secs
-    start = time.time()
-    while time.time() < end:
-        try:
-            state = sample()
-        except Exception as exc:
-            print(f"{time.time() - start:5.1f}  read failed: {exc}", flush=True)
+    start = time.monotonic()
+    while time.monotonic() - start < secs:
+        state, why = sample()
+        if state is None:
+            print(f"{time.monotonic() - start:5.1f}  read failed: {why}", flush=True)
+            time.sleep(RETRY_S)
             continue
         words = "  ".join(f"{n} mute={m} cue={c}" for n, (m, c) in state.items())
-        print(f"{time.time() - start:5.1f}  {words}", flush=True)
+        print(f"{time.monotonic() - start:5.1f}  {words}", flush=True)
     return 0
 
 

@@ -24,10 +24,10 @@ after a session that moved code.
 |---|---|---|
 | `server.py` | 12257 | HTTP API, every `action_*`, the announcer, the global-shortcut ACTIONS, the tray-facing lifecycle. The big one. |
 | `soundpad.py` | 3062 | Pads: create, clear, reassign, voice FX, envelope, trigger mapping, pool hygiene, pad audio tidy. **Every pad read goes through the tree**: `pad_nodes` (each PAD node as a `Pad`, props by name; `pad_positions` and `_fields_by_padidx` are views of it) and `effect_objects` (each PADEFFECTS child as an `EffectObject`, with `detached` and `partial`). A dump that will not parse raises `rcp_read.ModelUnreadable`; there is no fallback reader. Orphan removal is `remove_orphan_objects` (bare bind + clear for an attached orphan, `_delete_effect_object` for a detached one that is last); `remove_partial_objects` deletes partial ones from the end, and `clear_slot` is the clear every in-use path calls, because an FX clear can leave one. `_sanitise_stack` is the ONE effect-stack cleaner (an empty result is allowed), with `validate_fx_stack` (must not be empty) over it. `_transfer_mode` is how every pad write enters and ALWAYS leaves transfer mode; `_replace_slot` is the clear-then-create every high-level create runs, and its `created` key (not `ok`, which also needs a clean pool) says whether the pad was made. **`engage_pad` / `unlatch_pad` are how a pad is FIRED and released from software** (a bare `padActive` at its position; injecting `padButtonPressed` does nothing). `heal_fx_pool` rebuilds any voice-FX pad whose region-B definition is missing, which is the state a factory reset leaves; `SYSTEM_PAD_TYPE` is the bank-8 filter every pad walker needs. **`unchanged_pads` is a restore's skip check**: `_pad_metadata_matches` for every type, `_pad_audio_matches` for sound pads, `_fx_effect_matches` for voice FX (the whole region-B object against `pad_records.expected_effect_object`). |
-| `rcp_transfer.py` | 1110 | Record BUILDERS, the send layer (`_write_records` under `send_record` / `send_records_paced`) and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. **Every cross-point write goes through `set_cross_point_linked` / `_excluded` / `_level`**, each gated by `_check_cross_point`. Also the pad-volume mount gate: `find_pad_volume` -> `_is_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats), taking only a drive on the desk's own USB device (`desk_drives.on_desk`), and `quiet_drive_errors` (kills Windows' modal drive box). |
+| `rcp_transfer.py` | 1106 | Record BUILDERS, the send layer (`_write_records` under `send_record` / `send_records_paced`) and transfer mode. Every write shape lives here. `build_path_prop_int` / `_bool` address a TREE PATH and are the primitive; the older `build_channel_prop_*` selector-plus-trailer pair is a view onto them. **Every cross-point write goes through `set_cross_point_linked` / `_excluded` / `_level`**, each gated by `_check_cross_point`. Also the pad-volume mount gate: `find_pad_volume` -> `_is_pad_volume` -> `pad_volume_readable` (it READS BYTES, not just stats), taking only a drive on the desk's own USB device (`desk_drives.on_desk`), and `quiet_drive_errors` (kills Windows' modal drive box). |
 | `app_settings.py` | 227 | THIS APP's own settings, export and import: the keyboard shortcuts, announcement preferences and level warnings that NO profile carries. Pure, like `profiles.py`: it never imports the server and never touches a file. **The export is an ALLOW-LIST because `remote_token` lives in the same settings file** - see `EXCLUDED`, and `PROJECT_GUIDE` part 2. `count_shortcuts` exists because the stored `hotkeys` value is `{enabled, shortcuts}`, so `len()` on it is always 2. |
 | `channels.py` | 1117 | Per-channel reads and writes, `CHANNEL_PROP`, strip resolution, the chain set. **`input_value(blob, ch, prop)` is THE reader for every per-input value** (mic gain, phantom, polarity, mic type, instrument gain, line level, input type, colour): one addressed lookup at `devices.input_path`, never positional and never a fallback chain. The five mic setters and `set_channel_level` write to that same address; `line_level_channels` says which channels have a Level at all. `mic_channel_number` = `source_code + 1`. The three per-strip toggles - `set_channel_mute`, `set_channel_solo` and `set_channel_wireless_mute` - are one family on `proc_selector(channel)`, and the wireless one is the mic's OWN mute, not the channel's. Also the OFF-FADER CHAIN STORE (`park_chain` / `take_chain`, `off_fader_chains.json`): a channel with no strip has no processing on the desk, so we hold it. |
-| `devices.py` | 1088 | Device models and caps: **`CHANNELS_PRO2` / `CHANNELS_DUO` are THE channel table, and every channel list is a view over one of them** (`_ui_channel_view`, `_matrix_source_view`, `_assignable_view` and their `_expanded_*` twins): adding an input is one `Channel` entry, and the fader dropdown, the Channels page and the matrix rows cannot disagree. `Channel.key` is STORED USER DATA - rename the label, never the key. `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec` (**its `block` names the dump section the grid lives in and its `cell_count` counts THAT block only** - 390, the MIX section; see the routing-matrix entry in `PROJECT_GUIDE.md` part 2. **`all_sources` / `all_source_indices` is what a READER or a WRITER walks and `sources_for(expanded)` is only what the page OFFERS** - the desk publishes every row in both modes), `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
+| `devices.py` | 1096 | Device models and caps: **`CHANNELS_PRO2` / `CHANNELS_DUO` are THE channel table, and every channel list is a view over one of them** (`_ui_channel_view`, `_matrix_source_view`, `_assignable_view` and their `_expanded_*` twins): adding an input is one `Channel` entry, and the fader dropdown, the Channels page and the matrix rows cannot disagree. `Channel.key` is STORED USER DATA - rename the label, never the key. `FaderSpec` (its `level_selectors` are DERIVED from `count`/`physical` + `FADER_NODE_BASE`, never tabulated), `InputStripSpec`, `MatrixSpec` (**its `block` names the dump section the grid lives in and its `cell_count` counts THAT block only** - 390, the MIX section; see the routing-matrix entry in `PROJECT_GUIDE.md` part 2. **`all_sources` / `all_source_indices` is what a READER or a WRITER walks and `sources_for(expanded)` is only what the page OFFERS** - the desk publishes every row in both modes), `HeadphoneTypeSpec`, `PadSpec`. Pro II and Duo deltas. **`input_path(ch)` is THE address of a channel's input values, on every desk**: INPUTSOURCE[source_code], `input_table_base` 0x26E plus the code. `channel_for_input_path` is its reverse, for naming a change the desk pushed. There are no per-device input selector tables and there must not be again - read that method's comment before adding one. **`force_device` pins the active desk for OFFLINE TESTS ONLY** - never call it from app code. |
 | `autostart.py` | 168 | "Start when you sign in": the HKCU Run value, SHARED WITH `installer.iss` (same key, name and command - `test_autostart.py` asserts it). `state()`, `set_enabled()`, `started_at_login()` (the `--startup` flag `tray.main` reads to come up with no page). Refuses from a source run. **`LEGACY_VALUE_NAME` is the pre-rename value "Access Caster"**: `read_value` falls back to it so a machine that has not been upgraded still reads as ON, and `set_enabled` deletes it whichever way it is called, because two entries naming the same exe start the app twice at sign-in. `installer.iss` deletes it too, ungated by the task. |
 | `profiles.py` | 763 | Save, restore, `device_snapshot`, `UNIT_KEY`, `apply`. The routing matrix is captured as a MIX SCHEME (`routing.mix_scheme`, via `routing_schemes.capture`); the three older matrix keys are written for old builds only. |
 | `tones.py` | 183 | The announcer's non-speech cues: two-note WAVs (falling = muted, rising = unmuted) generated into the user data dir. `tone_path(name)` makes one on demand and replaces any earlier shape, which is what `TONE_VERSION` in the file name is for. `tone_path("ring")` is the CallMe ringtone, one ring per file (`_ring_samples`, `RING_DURATION_S`, `RING_VERSION`), alternated with the caller's name by `server._callme_ring`. Played by the speech worker through SAPI, so they inherit the announcer's output device. |
@@ -309,16 +309,19 @@ Device (route `status`), Alt+8 Help &amp; About (route `about`, section `sec-abo
   region, `callme-state`.
 
 --------------------------------------------------------------------------------
-## DevTools/ (149 files; the ones worth knowing)
+## DevTools/ (142 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, and resolves `docs/` and the notes),
 `_testkit.py` (the offline harness, below) and `_desk.py`, for the scripts that drive a real desk:
-`api` (the running server, a failure returned as `{"ok": False}`), `rode_devices_present` (raises
-rather than counting zero when it cannot tell), `push_handle` and `pushes` (a handle of the
-script's own and every push on it, decoded by `rcp_read.parse_push`), and `read_input`,
-`mic_chain`, `settled_chain`, `advanced_processing` and `put_chain_back` (one mic's input node
-and chain, and the chain put back once a voicing has finished applying).
+`api` (the running server, a failure returned as `{"ok": False}`), `wait_for_job` (a server job,
+finished when `running` reads false, raising at its timeout), `say` (one-shot speech through
+`say.ps1`, or `say_gated.ps1`), `stray_counts` and `count_changes` (the stray check's occurrence
+counts), `rode_devices_present` (raises rather than counting zero when it cannot tell),
+`push_handle` and `pushes` (a handle of the script's own and every push on it, decoded by
+`rcp_read.parse_push`), and `read_input`, `mic_chain`, `settled_chain` (raises when the chain never
+settles), `advanced_processing`, `put_chain_back` and `put_mic_back` (one mic's input node and
+chain, and the whole mic put back after a voicing change).
 
 **Browser checks.** `ui_probe.py` (proxies GETs to the live server, stubs POSTs) and its
 `HARNESS`, which gives every suite its helpers so none keeps a copy: `check`, `checkEqual` (actual,
@@ -400,7 +403,7 @@ left over makes the next run's first press a stop rather than a start.
 timestamps every push while the main thread presses at known times, so nothing is inferred from a
 rate measured in a gap. Three earlier probes were deleted for getting that wrong.
 
-**Offline Python suites, no device - 36 of them, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `decode_record` and `snapshot` read the desk's record and dump formats): `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state), `test_announcer_suspend`,
+**Offline Python suites, no device - 36 of them, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `decode_record` and `snapshot` read the desk's record and dump formats, `push` builds a pushed frame): `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state), `test_announcer_suspend`,
 `test_announcer_remember` (start-up is on unless the remember option holds it off; a take's switch-back is never saved), `test_announcer_reconnect` (the announcer keeps listening across a re-enumeration: it must resolve
 the interface again rather than reopen a remembered path, because the desk returns under a
 different product id),
@@ -410,7 +413,7 @@ different product id),
 file**, and that an import merges rather than replacing this machine's own token),
 `test_pad_actions`, `test_pad_records`, `test_pad_volume` (only a drive on the desk is taken for its pad volume, never a stick holding a `pads` folder, and the desk's letter waits until it reads), `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
 `test_restore_warnings`, `test_server_safety` (static files, request bodies, the `.bad` copy of a JSON file that will not parse, and Chat isolation's put-back), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
-`test_devtools_helpers` (`_desk`'s device count and settled chain, the live schemes test putting the mixes back after a failed read, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
+`test_devtools_helpers` (`_desk`'s device count, settled chain, job wait and stray counts, the live schemes test putting the mixes back after a failed read, the dead-property probe's restore, the bind probe's verdict, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
 did not take),
 `test_virtual_devices` (RODE's driver status block parsed as its tray reads it, and the spoken
 outcomes). `watch_vad_endpoints.ps1` is the live companion: it prints a line whenever the set of
@@ -420,8 +423,8 @@ the desk.
 `devices.force_device(devices.PRO2)` at the top, or it answers from the USB port and fails on the
 wrong machine. `test_announcer`, `test_shows_sim` and `test_level_check` do.
 **`test_input_read.py` covers the ADDRESSED input read** (`channels.input_value`) on both desks,
-including the exact Duo mis-attribution, a falsy override beating the table, and a guard that
-`input_slot` has not come back. It builds synthetic dumps rather than shipping a capture (a real
+including the exact Duo mis-attribution, a falsy override beating the table, a guard that
+`input_slot` has not come back, and that a name lookup is exact rather than a prefix match. It builds synthetic dumps rather than shipping a capture (a real
 dump holds the wifi PSK).
 **`fake_model.py` is THE encoder for synthetic dumps**, in the real tree grammar; every offline
 suite that needs a dump builds it there (`encode` for (block, property, value) rows, `node` for an
@@ -508,13 +511,11 @@ no other),
 property counts are unchanged; needs the server stopped),
 `test_cross_point_wide_live` (a cross-point above source 13, where the selector needs TWO address
 bytes: the tree must put the MIX instance at the selector `cross_point_selector` builds, the write
-must read back, and the node/property/MIX counts must be unchanged. `--source` / `--output`, and it
+must read back, and no property occurrence count may move. `--source` / `--output`, and it
 exits 2 rather than discard a hand-set level on an unlinked cell. Touches no output mode, so
 nothing about it is audible),
-`test_monitor_output_live` (EAR TEST on the rear line outs, `--block on|off`; one block per run and
-it counts down first, and its docstring carries why both of those are non-negotiable),
 `test_mic_type_gain_live` (steps a mic through every voicing and records the gain each one applies:
-the table behind the restore's write order. Restores gain, type AND instrument gain),
+the table behind the restore's write order. Restores type, chain, gain, instrument gain and phantom power through `_desk.put_mic_back`),
 `test_restore_mic_order_live` (drives `profiles.apply` itself on one channel from the state a
 factory reset leaves, so the ordering fix is proven through the real code without a reset),
 `test_clean_restore_live` (**FACTORY-RESETS THE DESK**, refuses without `--yes`: the whole clean
@@ -548,15 +549,15 @@ them expecting a new answer:
 **Address and selector work:** **`tree_tool.py` FIRST - it parses the dump as the tree it actually
 is and gives any node its real address (`--find`, `--prop`, `--anchors`); `probe_path_write.py` is
 the path-addressed probe that goes with it (LANDED / STRAY / NOTHING).** Then
-`selector_map.py` (header to selector, everything derivable), `selector_from_push.py` (a pushed
-record names its own selector),
+`selector_map.py` (header to selector, everything derivable), `state_observatory.py listen` (a
+pushed record names its own path),
 `input_sources.py` (the 30-entry INPUTSOURCE table with the reserved slots marked, `--save` /
 `--diff` two dumps: what a mode switch adds is how Expanded's four source codes were found, and
 it is how to confirm them on a Duo),
 `probe_derived_write.py`, `cap_probe.py` (drive one control with USBPcap running),
-`model_diff.py` (block-aware snapshot / diff of all 6436 property occurrences, `snap` / `diff` /
-`watch`; the tool for "the desk just did something, what changed?"), `transfer_volumes.py` (what
-Transfer Mode actually mounts, per `transferModeType` value),
+`state_observatory.py snap` / `diff` / `watch` (block-aware snapshots of every property
+occurrence, secrets redacted, `--quiet` for the self-moving ones; the tool for "the desk just did
+something, what changed?"),
 **`firmware_dig.py` - THE DESK'S OWN FIRMWARE, and it outranks every other source.** A dump shows
 what the desk PUBLISHES, the RODE app shows what the app KNOWS, the firmware shows what the desk
 DOES. RODE publish it: `update.rode.com/manifest.json` names `rcp2/<version>/app.zip` (the two Linux
@@ -598,7 +599,7 @@ call push, `answer [slot]` answers the next incoming call, `hangup <slot>` ends 
 
 **`ui_checks_storage.js`** pins the Recording page's card and drive section: the internal pad storage never offered, Eject named for what it will do, erase asking first.
 
-**`probe_update_check.py`** asks the desk to check for a firmware update and logs every update push; it never installs. **`probe_storage_live.py`** ejects or erases the card or drive and logs the desk's answer, refusing the internal pad storage (anything `recorder.read_volumes` does not mark `can_record`).
+**`probe_update_check.py`** asks the desk to check for a firmware update and logs every update push; it never installs. **`probe_storage_live.py`** ejects or erases the card or drive and logs the desk's answer, refusing the internal pad storage (anything `recorder.read_volumes` does not mark `can_record`); an erase writes nothing without `--yes`.
 
 **`probe_delete_backup_live.py`** drives `action_delete_backup` down both its branches against a
 real desk: a `show:<snapshot>` with no profile beside it, and a named backup whose two halves must
@@ -652,13 +653,11 @@ notes, and **`codemap_lines.py` -> the NUMBERS IN THIS FILE** (the
 by hand. It touches no prose.
 
 `run_dev_server.py`, `say_gated.ps1` (speaks a status line through `Project/say.ps1` unless the
-Claude GUI has the focus; `-Force` speaks anyway), `wifi_join.py` (password on stdin; strips the BOM
-PowerShell adds on a pipe),
+Claude GUI has the focus; `-Force` speaks anyway),
 `screen_shot.ps1` (**photographs the desk's touchscreen** with the Insta360 webcam; records a
 five-second clip and keeps the LAST frame, because a single-frame grab is always out of focus),
-`check_drive_recordings.py` (WAV cue
-points, and it needs the drive in THIS PC, not the desk), `midi_monitor.py`,
-`midi_out.py` (**the only way to PLAY a pad from software**: the desk's class-compliant "MIDI
+`midi_monitor.py` (needs `DevTools/requirements-dev.txt`),
+`play_pad.py` (**the only way to PLAY a pad from software**: the desk's class-compliant "MIDI
 function" port through winmm/ctypes, no package. `midi_enabled()` turns `systemMidiControl` on and
 puts it back, `MidiOut().play_pad(n)` fires one. CC number is the FUNCTION, MIDI channel is WHICH
 pad. Run it directly to list ports or fire a pad), `state_observatory.py`

@@ -7,10 +7,10 @@ defect on ONE channel instead of the whole desk, so it costs a few seconds rathe
 THE FAILURE IT CATCHES: with the gain written first, the SM7B voicing follows it and the desk keeps
 SM7B's own default of 55. In the right order, 47 survives.
 
-REVERSIBLE. Runs on Mic 3 (nothing plugged into it; Mic 1 stays out of tests), records the
-gain, type and instrument gain first and puts all three back, read-back verified. The profile it
-applies carries NOTHING but that one channel, so no fader, level, master-output or unit-setting
-write is made.
+REVERSIBLE. Runs on Mic 3 (nothing plugged into it; Mic 1 stays out of tests), records the input
+node and the chain first and puts them back with `_desk.put_mic_back`, read-back verified. The
+profile it applies carries NOTHING but that one channel, so no fader, level, master-output or
+unit-setting write is made.
 
 Usage: python DevTools/test_restore_mic_order_live.py [--channel 3]
 """
@@ -26,7 +26,7 @@ import _bootstrap  # noqa: F401
 import channels
 import devices
 import profiles
-from _desk import advanced_processing, put_chain_back, read_input, settled_chain
+from _desk import advanced_processing, put_mic_back, read_input, settled_chain
 
 SETTLE = 0.9
 FACTORY_TYPE = 4      # PodMic: what a software factory reset leaves on every mic
@@ -92,12 +92,7 @@ def main() -> int:
             print("\nTHE RESTORE KEEPS THE GAIN AND THE CHAIN THROUGH A VOICING CHANGE.")
     finally:
         print("\n-- restoring --")
-        channels.set_mic_type(ch, int(before["inputMicrophoneType"]))
-        put_chain_back(ch, chain_before, advanced_before)
-        channels.set_mic_gain(ch, int(before["inputMicrophoneGain"]))
-        time.sleep(SETTLE)
-        channels.set_instrument_gain(ch, int(before["inputInstrumentGain"]))
-        time.sleep(SETTLE)
+        put_mic_back(ch, before, chain_before, advanced_before, SETTLE)
         end = read_input(slot)
         same = [k for k in before if end.get(k) != before[k]]
         chain_end = settled_chain(ch)

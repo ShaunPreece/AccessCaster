@@ -45,7 +45,7 @@ import rcp_transfer
 REPO = Path(__file__).resolve().parent.parent
 
 # DEVICE-SCOPED for the same reason as PROPERTY_COVERAGE: this report is built on
-# pc.read_appendix(), which carries the per-desk occurrence counts. Reuses that module's slug so
+# pc.read_property_list(), which carries the per-desk occurrence counts. Reuses that module's slug so
 # the two reports can never disagree about which desk they describe.
 def out_path() -> Path:
     return Path(_bootstrap.notes_path("ProjectMemory", f"PROFILE_COVERAGE_{pc._slug()}.md"))
@@ -67,6 +67,8 @@ SAVE_FUNCS = [
     # profiles.save, so its source has to be scanned too or all seven read as UNJUDGED - which
     # would report a refactor as a change to what a profile saves.
     (rcp_read.master_processing, "rcp_read.master_processing"),
+    # server._do_snapshot takes the firmware version a profile records from this reader.
+    (channels.read_mixer, "channels.read_mixer"),
 ]
 # PADS ARE DIFFERENT and must be listed by hand. soundpad.read_pads_live reads far MORE than
 # soundpad.backup_pads keeps: the backup builds its own entry dict and quietly drops the rest, so
@@ -115,18 +117,17 @@ PAD_SOURCE = "soundpad.backup_pads"
 def saved_props(names: list[str]) -> dict[str, list[str]]:
     """{property: [where it is read]} for everything the save path touches."""
     found: dict[str, list[str]] = {}
-    pats = {n: pc._pat(n) for n in names if n not in pc.FALSE_POSITIVES}
+    matcher = pc.NameMatcher(names)
+    scanned = {n for n in names if n not in pc.FALSE_POSITIVES}
     for fn, label in SAVE_FUNCS:
-        src = inspect.getsource(fn)
-        for n, pat in pats.items():
-            if pat.search(src):
-                found.setdefault(n, []).append(label)
+        for n in matcher.names_in(inspect.getsource(fn)):
+            found.setdefault(n, []).append(label)
     for label, coll in SAVE_CONSTANTS:
         for n in coll:
-            if n in pats:
+            if n in scanned:
                 found.setdefault(n, []).append(label)
     for n in PAD_SAVED:
-        if n in pats:
+        if n in scanned:
             found.setdefault(n, []).append(PAD_SOURCE)
     return found
 
@@ -264,6 +265,14 @@ RESTORED_BY = {
     "wifiIpAddress": "SAVE ONLY: reference only; the address is assigned by the network.",
     "systemFirmwareVersion": "SAVE ONLY: stamped so a restore can be judged against the firmware "
                              "it was taken from.",
+    # Live state the channel read carries, and the reason each is never written back.
+    "channelOutputMute": "SAVE ONLY: live MUTE state, not a setting. Restoring a saved mute would "
+                         "silence a channel at the worst possible moment.",
+    "channelCueEnable": "SAVE ONLY: live SOLO (Listen) state. A restored solo would leave the "
+                        "headphones carrying one channel with nothing on screen to explain it, "
+                        "the state a blind operator cannot spot.",
+    "channelWirelessMute": "SAVE ONLY: the mute of a wireless mic on the channel, live state of a "
+                           "mic that may not be paired at restore time.",
 }
 
 # Collections restored as a group, so each member does not need its own line above.
@@ -333,19 +342,6 @@ NOT_SAVED = {
     "effectsIdx": ("ok", "Which effect slot the editor is working on; app-side selection."),
     "padActive": ("ok", "Whether a pad is latched RIGHT NOW. Live state - restoring it would fire "
                         "a pad."),
-    "channelOutputMute": ("ok", "Live MUTE state, not a setting. It IS writable (a mute button "
-                                "on every channel), which is exactly why the verdict "
-                                "has to be deliberate: restoring a saved mute would silence a "
-                                "channel at the worst possible moment. Saved in the full snapshot "
-                                "for the record, never written back."),
-    "channelCueEnable": ("ok", "Live SOLO (Listen) state, not a setting. It IS writable, and the "
-                               "reason for NOT restoring it is stronger than the mute's: a "
-                               "restored solo would leave the headphones carrying one channel with "
-                               "nothing on screen to explain it, which is precisely the state a "
-                               "blind operator cannot spot. Saved for the record, never written "
-                               "back."),
-    "systemChannelSelected": ("ok", "Which channel the desk has selected: the operator changes it "
-                                    "with a button. We write it only to FREE the encoder."),
     "requestRecordState": ("ok", "A COMMAND, not state: start / pause / stop the recorder. It is "
                                  "self-clearing and must never be read for status (recordState is "
                                  "the status). Restoring it would start or stop a recording."),
@@ -375,8 +371,6 @@ NOT_SAVED = {
     "storageVolumeErase": ("ok", "A COMMAND, and it ERASES a card or drive. Restoring it would "
                                  "wipe somebody's recordings."),
     "updateCheckRequested": ("ok", "A COMMAND: ask the desk to check for a firmware update."),
-    "channelWirelessMute": ("ok", "Mute for a wireless mic on the channel: live state, and it "
-                                  "belongs to a mic that may not be paired at restore time."),
     "padEffectInput": ("ok", "Which mic a voice-FX pad processes; written by the create path from "
                              "the recipe. Carried by fx_stack, not as a property."),
     "padEffectTriggerMode": ("ok", "Voice-FX trigger mode; written by the create path from the "
@@ -410,7 +404,7 @@ def _gap_summary(gaps: list) -> str:
 
 
 def build() -> tuple[str, dict]:
-    props = pc.read_appendix()
+    props = pc.read_property_list()
     names = [n for n, _t, _c in props]
     app = pc.scan(pc.APP_GLOBS, names)
     saved = saved_props(names)
@@ -434,6 +428,15 @@ def build() -> tuple[str, dict]:
     unsaved_writable = [r for r in writable if not r["saved"]]
     undeclared = [r["name"] for r in saved_rows if not r["restored"]]
     unjudged = [r["name"] for r in unsaved_writable if r["name"] not in NOT_SAVED]
+    # The other direction: a verdict for a property this desk publishes that the scan no longer
+    # puts in the verdict's table, so the verdict describes code that has changed.
+    published = set(names)
+    saved_names = {r["name"] for r in saved_rows}
+    unsaved_writable_names = {r["name"] for r in unsaved_writable}
+    stale = sorted([f"RESTORED_BY[{n}]" for n in RESTORED_BY
+                    if n in published and n not in saved_names]
+                   + [f"NOT_SAVED[{n}]" for n in NOT_SAVED
+                      if n in published and n not in unsaved_writable_names])
     gaps = [r for r in unsaved_writable if NOT_SAVED.get(r["name"], ("", ""))[0] == "GAP"]
     fine = [r for r in unsaved_writable if NOT_SAVED.get(r["name"], ("", ""))[0] == "ok"]
 
@@ -522,7 +525,7 @@ def build() -> tuple[str, dict]:
     w("")
     return "\n".join(out) + "\n", dict(rows=rows, saved=saved_rows, writable=writable,
                                        gaps=gaps, fine=fine, undeclared=undeclared,
-                                       unjudged=unjudged, unwritable=unwritable)
+                                       unjudged=unjudged, unwritable=unwritable, stale=stale)
 
 
 def main() -> None:
@@ -538,13 +541,16 @@ def main() -> None:
         out.write_text(text, encoding="utf-8")
         # relpath, not relative_to: the notes are OUTSIDE this repo, so the answer starts with "..".
         print(f"wrote {Path(os.path.relpath(out, REPO)).as_posix()} ({len(text.splitlines())} lines)")
-    # These two are the drift guards: a property saved with no restore verdict, or writable with
-    # no verdict at all, means someone changed the code without deciding what a profile should do.
+    # The drift guards: a property saved with no restore verdict, writable with no verdict at all,
+    # or a verdict the scan no longer reaches, means someone changed the code without deciding what
+    # a profile should do.
     if s["undeclared"]:
         print(f"UNDECLARED - saved but no entry in RESTORED_BY: {', '.join(s['undeclared'])}")
     if s["unjudged"]:
         print(f"UNJUDGED - writable, unsaved, no entry in NOT_SAVED: {', '.join(s['unjudged'])}")
-    if s["undeclared"] or s["unjudged"]:
+    if s["stale"]:
+        print(f"STALE - a verdict the scan no longer reaches: {', '.join(s['stale'])}")
+    if s["undeclared"] or s["unjudged"] or s["stale"]:
         sys.exit(1)
 
 

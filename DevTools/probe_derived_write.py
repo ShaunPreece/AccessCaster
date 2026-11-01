@@ -196,6 +196,13 @@ def show(r: dict) -> None:
           + (f"\n{'':46}{r['note']}" if r.get("note") else ""))
 
 
+def parse_value(text: str):
+    """--value as typed: true or false, a number with a point as a float, anything else an int."""
+    if text.lower() in ("true", "false"):
+        return text.lower() == "true"
+    return float(text) if "." in text else int(text)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("props", nargs="*", help="property names to probe")
@@ -217,11 +224,7 @@ def main() -> int:
         print("nothing to probe; pass property names, --group, or --list")
         return 2
 
-    forced = None
-    if args.value is not None:
-        v = args.value
-        forced = (True if v.lower() == "true" else False if v.lower() == "false"
-                  else float(v) if "." in v else int(v))
+    forced = None if args.value is None else parse_value(args.value)
 
     results = [probe(p, forced if len(props) == 1 else None) for p in props]
     print()

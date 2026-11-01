@@ -16,6 +16,7 @@ Run: python DevTools/test_profiles.py
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -30,7 +31,7 @@ import fake_model
 import profiles
 import rcp_transfer
 import soundpad
-from _testkit import as_device, check, check_true
+from _testkit import as_device, check, check_true, patched
 
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
 
@@ -342,7 +343,7 @@ try:
           a(str(root), 7, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
     # Leftovers. A pad folder can hold a file from an earlier replacement. Which file the pad PLAYS
     # is what matters, and only the desk can say - padFilePath, passed in as live_file.
-    (root / "pads" / "5" / "leftover.wav").write_bytes(b"RIFF" + b"	" * 64)
+    (root / "pads" / "5" / "leftover.wav").write_bytes(b"RIFF" + b"\t" * 64)
     check("with no word from the desk, two files in a folder is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
     check_true("but told which file the pad plays, a leftover beside it is irrelevant",
@@ -397,33 +398,30 @@ finally:
 CALLS: list = []
 
 
-class recorder:
-    """Replace the device-write functions with recorders for the duration of the block."""
-    _TRANSFER = ("set_midi_control", "set_fader_source", "set_fader_level", "set_monitor_level",
-                 "set_headphone_type", "set_multitrack_mode", "set_monitor_auto_mute",
-                 "set_bt_auto_mute", "set_master_compellor", "set_master_compellor_param",
-                 "set_output_delay", "set_unit_setting",
-                 "set_recording_processing_bypass", "set_usb_multitrack_mode",
-                 "set_usb_multitrack_bypass")
-    _CHANNELS = ("note_strip_source", "invalidate_strip_vector",
-                 "set_mic_gain", "set_mic_type", "set_phantom", "set_polarity",
-                 "set_instrument_gain", "set_channel_level", "set_channel_advanced",
-                 "set_processing_enabled", "set_processing_module", "set_channel_processing",
-                 "set_channel_preset_marker")
+RECORDED_TRANSFER = ("set_midi_control", "set_fader_source", "set_fader_level",
+                     "set_monitor_level", "set_headphone_type", "set_multitrack_mode",
+                     "set_monitor_auto_mute", "set_bt_auto_mute", "set_master_compellor",
+                     "set_master_compellor_param", "set_output_delay", "set_unit_setting",
+                     "set_recording_processing_bypass", "set_usb_multitrack_mode",
+                     "set_usb_multitrack_bypass")
+RECORDED_CHANNELS = ("note_strip_source", "invalidate_strip_vector",
+                     "set_mic_gain", "set_mic_type", "set_phantom", "set_polarity",
+                     "set_instrument_gain", "set_channel_level", "set_channel_advanced",
+                     "set_processing_enabled", "set_processing_module", "set_channel_processing",
+                     "set_channel_preset_marker")
 
-    def __enter__(self):
-        CALLS.clear()
-        self.saved = []
-        for mod, names in ((rcp_transfer, self._TRANSFER), (channels, self._CHANNELS)):
-            for n in names:
-                self.saved.append((mod, n, getattr(mod, n)))
-                setattr(mod, n, (lambda n=n: (lambda *a, **k: CALLS.append((n, a))))())
-        return CALLS
 
-    def __exit__(self, *exc):
-        for mod, n, fn in self.saved:
-            setattr(mod, n, fn)
-        return False
+def _recording(name: str):
+    return lambda *a, **k: CALLS.append((name, a))
+
+
+@contextlib.contextmanager
+def recorder():
+    """Replace the device-write functions with recorders for the block, yielding the call log."""
+    CALLS.clear()
+    with patched((rcp_transfer, {n: _recording(n) for n in RECORDED_TRANSFER}),
+                 (channels, {n: _recording(n) for n in RECORDED_CHANNELS})):
+        yield CALLS
 
 
 def names_of(calls):

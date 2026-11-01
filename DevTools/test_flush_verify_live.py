@@ -49,6 +49,39 @@ def md5(path):
     return h.hexdigest()
 
 
+def copy_off_unit(grid: int, name: str, folder: str) -> str | None:
+    """Copy pad `grid`'s file `name` off the unit into `folder`, or None when the volume does not
+    mount."""
+    with t.transfer_session():
+        time.sleep(1.0)
+        t.remount_pad_storage()
+        root = t.find_pad_volume()
+        if root is None:
+            return None
+        local = os.path.join(folder, name)
+        shutil.copyfile(os.path.join(root, "pads", str(grid), name), local)
+        return local
+
+
+def read_back(slot: int, name: str, size: int) -> str | None:
+    """The md5 of pad `slot`'s file `name` as the unit has it, after a fresh mount, or None."""
+    with t.transfer_session():
+        time.sleep(1.0)
+        t.remount_pad_storage()
+        root = t.find_pad_volume()
+        if root is None:
+            print("  the volume did not come back")
+            return None
+        on_device = os.path.join(root, "pads", str(slot), name)
+        if os.path.isfile(on_device):
+            check("the file is on the unit", os.path.getsize(on_device), size)
+            return md5(on_device)
+        folder = os.path.join(root, "pads", str(slot))
+        listing = os.listdir(folder) if os.path.isdir(folder) else []
+        print(f"  no such file on the unit. pads/{slot}/ holds: {listing}")
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--slot", type=int, default=None)
@@ -75,60 +108,37 @@ def main() -> int:
 
     # Copy the source off the unit first, so the create has a normal local file to work from.
     tmp = tempfile.mkdtemp(prefix="ac_flush_")
-    t.set_transfer_mode(True); time.sleep(1.0)
-    t.remount_pad_storage()
-    root = t.find_pad_volume()
-    if root is None:
-        t.set_transfer_mode(False)
-        print("the pad volume did not mount")
-        return 1
-    src_local = os.path.join(tmp, source[1])
-    shutil.copyfile(os.path.join(root, "pads", str(source[0]), source[1]), src_local)
-    t.set_transfer_mode(False)
-    want = md5(src_local)
-    size = os.path.getsize(src_local)
-    print(f"source: {size / 1024 / 1024:.2f} MB, md5 {want[:12]}")
-
-    started = time.time()
-    res = soundpad.create_sound(slot, src_local, name="FlushTest", colour=5)
-    took = time.time() - started
-    check("the create reported ok", bool(res.get("ok")), True)
-    print(f"  create took {took:.2f}s")
-
-    # THE POINT: leave transfer mode completely, come back, and read what the DESK has.
-    print("\nleaving transfer mode, remounting, and reading the file back off the unit")
-    time.sleep(1.0)
-    t.set_transfer_mode(True); time.sleep(1.0)
-    t.remount_pad_storage()
-    root = t.find_pad_volume()
-    got = None
     try:
-        if root is None:
-            print("  the volume did not come back")
-        else:
-            on_device = os.path.join(root, "pads", str(slot), os.path.basename(src_local))
-            if os.path.isfile(on_device):
-                check("the file is on the unit", os.path.getsize(on_device), size)
-                got = md5(on_device)
-            else:
-                listing = []
-                folder = os.path.join(root, "pads", str(slot))
-                if os.path.isdir(folder):
-                    listing = os.listdir(folder)
-                print(f"  no such file on the unit. pads/{slot}/ holds: {listing}")
-    finally:
-        t.set_transfer_mode(False)
-    check("and it is byte-for-byte the source", got, want)
+        src_local = copy_off_unit(source[0], source[1], tmp)
+        if src_local is None:
+            print("the pad volume did not mount")
+            return 1
+        want = md5(src_local)
+        size = os.path.getsize(src_local)
+        print(f"source: {size / 1024 / 1024:.2f} MB, md5 {want[:12]}")
+        try:
+            started = time.monotonic()
+            res = soundpad.create_sound(slot, src_local, name="FlushTest", colour=5)
+            took = time.monotonic() - started
+            check("the create reported ok", bool(res.get("ok")), True)
+            print(f"  create took {took:.2f}s")
 
-    print("\ntidying up")
-    soundpad.clear_grid_pad(slot)     # by GRID: clear_pad takes a stream POSITION
-    time.sleep(1.0)
-    after = soundpad.read_pads_live()
-    still = next((p for p in after["pads"] if p["grid"] == slot and p["present"]), None)
-    check("the slot is empty again", still is None, True)
-    check("the effect-object pool is unchanged",
-          soundpad.pool_health()["region_b_count"], before_pool["region_b_count"])
-    shutil.rmtree(tmp, ignore_errors=True)
+            # THE POINT: leave transfer mode completely, come back, and read what the DESK has.
+            print("\nleaving transfer mode, remounting, and reading the file back off the unit")
+            time.sleep(1.0)
+            got = read_back(slot, os.path.basename(src_local), size)
+            check("and it is byte-for-byte the source", got, want)
+        finally:
+            print("\ntidying up")
+            soundpad.clear_grid_pad(slot)     # by GRID: clear_pad takes a stream POSITION
+            time.sleep(1.0)
+            after = soundpad.read_pads_live()
+            still = next((p for p in after["pads"] if p["grid"] == slot and p["present"]), None)
+            check("the slot is empty again", still is None, True)
+            check("the effect-object pool is unchanged",
+                  soundpad.pool_health()["region_b_count"], before_pool["region_b_count"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     if _testkit.failed():
         print("PUT THE POWERSHELL FLUSH BACK: rcp_transfer.flush_volume should call "

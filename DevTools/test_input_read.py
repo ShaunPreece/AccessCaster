@@ -23,6 +23,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels as c
 import devices
+import fake_model
 import model_tree
 import rcp_read as rr
 from _testkit import check
@@ -89,9 +90,9 @@ check("Bluetooth reads its own level", c.input_value(blob, ch_of(PRO2, "Bluetoot
 print("\nTHE PRO II'S CONFIRMED SELECTORS, REPRODUCED EXACTLY BY THE DERIVATION")
 # THE PRO II'S CONFIRMED SELECTORS, every value asserted against the derivation, so it cannot move
 # a Pro II write by one byte.
-RETIRED_PRO2 = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,
-                "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}
-for name, sel in RETIRED_PRO2.items():
+PRO2_SELECTORS = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,
+                  "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}
+for name, sel in PRO2_SELECTORS.items():
     check(f"Pro II {name} still addresses 0x{sel:02X} with the 0x02 high byte",
           PRO2.input_path(ch_of(PRO2, name)), [sel | (0x02 << 8)])
 
@@ -155,6 +156,11 @@ for dev in (PRO2, DUO):
           [e["name"] for e in dev.ui_channels])
     check(f"{dev.name}: no entry carries a stale input_slot",
           any("input_slot" in e for e in dev.ui_channels), False)
+
+print("\nA NAME LOOKUP IS EXACT, NOT A PREFIX MATCH")
+# A name that is the prefix of a longer one ("padActive" of "padActiveEdit") must find only itself.
+blob = fake_model.encode([("PAD", "padActive", True), ("PAD", "padActiveEdit", False)])
+check("find_all takes the exact name only", rr.find_all(blob, "padActive"), [(True, "bool")])
 
 print()
 sys.exit(_testkit.finish())

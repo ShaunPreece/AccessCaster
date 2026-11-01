@@ -18,19 +18,22 @@ would send can.
 from __future__ import annotations
 
 import json
-import urllib.request
 
 import _bootstrap
+from _desk import api
 
-BASE = "http://127.0.0.1:8770"
 # `_probe_stub_*` is the repo's name for a ui_probe fixture taken off the connected desk, and
 # it is gitignored: the repo carries the CHECKS, not a snapshot of one machine's desk.
 OUT = _bootstrap.devtools_path("_probe_stub_readonly.json")
 
 
-def get(path: str):
-    with urllib.request.urlopen(BASE + path, timeout=20) as fh:
-        return json.load(fh)
+def get(path: str) -> dict:
+    """GET `path` from the running server, stopping the run when the request fails. A read route
+    that succeeds may carry no `ok` at all, so only an explicit False is a failure."""
+    d = api(path, timeout=20.0)
+    if d.get("ok") is False:
+        raise SystemExit(f"{path}: {d.get('message')}")
+    return d
 
 
 def main() -> None:

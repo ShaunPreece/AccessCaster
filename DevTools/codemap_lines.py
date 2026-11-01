@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -39,6 +40,14 @@ SECTIONS = [
 REF = re.compile(r"(`([A-Za-z_$][\w$]*)`\s*\()(\d{2,5})([,)])")
 TABLE_ROW = re.compile(r"^(\|\s*`([A-Za-z_][\w.]*\.(?:py|js|ps1|html|css))`\s*\|\s*)(\d+)(\s*\|)")
 DEVTOOLS_COUNT = re.compile(r"(## DevTools/ \()(\d+)( files)")
+
+
+def tracked_devtools_files() -> int:
+    """How many files git tracks directly in DevTools/. Files on disk that git ignores (the probe
+    stubs a generator writes) are left out, so the count is the same on every clone."""
+    out = subprocess.run(["git", "ls-files", "DevTools"], cwd=REPO, capture_output=True,
+                         text=True, check=True).stdout
+    return sum(1 for line in out.splitlines() if line.count("/") == 1)
 
 
 def py_defs(path: pathlib.Path) -> dict:
@@ -110,7 +119,7 @@ def rewrite(text: str) -> tuple[str, list]:
         # --- the DevTools file count ---
         c = DEVTOOLS_COUNT.search(line)
         if c:
-            real = sum(1 for p in (REPO / "DevTools").iterdir() if p.is_file())
+            real = tracked_devtools_files()
             if int(c.group(2)) != real:
                 drift.append(f"line {n + 1}: DevTools says {c.group(2)} files, has {real}")
                 lines[n] = DEVTOOLS_COUNT.sub(lambda mm: mm.group(1) + str(real) + mm.group(3),

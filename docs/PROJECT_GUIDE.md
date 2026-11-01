@@ -586,8 +586,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`wifiPSK` WAS READABLE off the desk, and on 1.7.6 reads empty** (10th October 2026, a Pro II
   joined to a password-protected network), so "has a password saved" never shows there. Older
   firmware may still publish it, so keep it out of the API, the browser, profiles and log lines
-  regardless. `wifi_join.py` takes it on stdin, never argv, and its read-back reports only "a
-  password is stored".
+  regardless.
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
   stayed busy (active 0.61) and mode 2's went silent (0.06). Needs a person - the mic faders are
@@ -2621,7 +2620,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
     SOUND PAD SETS THE FLAG AND PLAYS NOTHING** (ear-proven negative, 30th August 2026): a physical
     press pushes `padButtonPressed`, then `padActive`, then a stream of `padProgress`, and this
     reproduces the middle event only, so the engine never starts playback.
-  - **MIDI, CC 35 on the pad's own channel** (`DevTools/midi_out.py`, 2nd September 2026): plays a
+  - **MIDI, CC 35 on the pad's own channel** (`DevTools/play_pad.py`, 2nd September 2026): plays a
     SOUND pad, which is the case HID cannot do. Requires `systemMidiControl` ON, which is an
     ordinary HID write. Reaches only the bank the desk is currently on.
   - **FOR A SOUND PAD, `padActive` IS INERT IN BOTH DIRECTIONS.** It does not start one, and
@@ -2734,7 +2733,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (CC 0 or CC 1, marked "verify" in RODE's spec) never needs answering** - do not spend time on it.
   Banks are 0-indexed here and bank 8 (index 7) is the system pads, which are video switching
   controls for a paired RODECaster Video.
-- **`inject_button.py`'s `cmutePressed` is `mutePressed` at path [0, 0x63].** The 'c' is the address
+- **A captured `cmutePressed` is `mutePressed` at path [0, 0x63].** The 'c' is the address
   byte, not part of the name, and 0x63 is child 99 of PHYSICALINTERFACE - the first SOLOMUTEBUTTON.
   PADBUTTON is children 35 to 98. Do not go looking for a property called `cmutePressed`.
 - **A pad shortcut's target is the padIdx, never the stream position.** padIdx is the pad's fixed
@@ -2873,11 +2872,12 @@ shared one; a new copy is how they drifted apart the first time.
 - **`ui_probe.py`'s default 90 s timeout is not enough.** Pads and Device need 600 s (about nine
   minutes); each suite's `// probe:` first line gives its own, and `run_ui_probes.py` reads it. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
-  a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026
-  (`DevTools/transfer_volumes.py`), so do not reach for transfer mode to get at recordings.
+  a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026, so do not reach for
+  transfer mode to get at recordings.
 - **THE DESK NEVER PUSHES A `STORAGEVOLUME` RECORD.** Neither a record start/stop nor an unplug and
   replug of the drive produces one; you get `recordState` (0x03) and `lastRecordingID` (0x0F) and
-  nothing else. So `selector_from_push.py` cannot learn that block's address, however long it listens.
+  nothing else. So `state_observatory.py listen` cannot learn that block's address, however long
+  it listens.
 - **`storageVolumeState` IS THE LIVE SOURCE, `storageVolumeCapacity` / `Free` / `Inserted` /
   `Mounted` READ STALE ZEROS.** The string is `capacity|free|?|inserted|mounted`. A fourth volume
   appears while recording: it is the unit's live view of the drive being written to, already handled

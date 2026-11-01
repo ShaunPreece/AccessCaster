@@ -2037,7 +2037,7 @@ def read_device_status() -> dict:
                     "headline": f"{device_name} half connected",
                     "message": (f"The {device_name} is half connected: its audio is here but the "
                                 f"connection AccessCaster controls it over is not. That is almost "
-                                f"always the USB cable in the port nearest the power socket, which "
+                                f"always the USB cable in the port nearest the power inlet, which "
                                 f"is the one this app needs. Plug that one back in and everything "
                                 f"comes back straight away."),
                 }
@@ -5561,8 +5561,8 @@ def _check_input_strip_specs():
         for key, idx, _label in spec.strips:
             assert 0 <= idx < dev.fader.vector_length, (
                 f"{dev.name}: input strip '{key}' vec_index {idx} is outside the fader vector")
-        assert set(spec.valid_source_codes) <= set(rcp_transfer.INPUT_SOURCE_CODE.values()), (
-            f"{dev.name}: an input-source palette code is not a known INPUT_SOURCE_CODE value")
+        assert set(spec.valid_source_codes) <= set(dev.source_codes), (
+            f"{dev.name}: an input-source palette code is not one of the desk's source codes")
 
 
 _check_input_strip_specs()

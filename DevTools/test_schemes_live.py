@@ -33,6 +33,7 @@ import _testkit
 import devices
 import rcp_read
 import routing_schemes
+from _desk import count_changes, stray_counts
 from _testkit import check, check_true
 
 SETTLE = 1.0          # the desk needs a moment before a fresh dump shows a write
@@ -59,14 +60,9 @@ def on_faders(blob) -> set:
     return set(rcp_read.values(blob, "channelInputSource")[:dev.fader.count])
 
 
-def counts(blob):
-    """Every property NAME the model reports and how many times it occurs.
-
-    This, not the model's byte length, is the stray test. A stray append shows up as a new name or
-    an extra occurrence; the LENGTH moves on its own whenever a level changes, because
-    mixLevelWithAnchor is an ASCII string and "1|1" is fourteen bytes shorter than
-    "0.551181|0.551181"."""
-    return {n: len(v) for n, v in rcp_read.snapshot_properties(blob).items()}
+# The stray test is occurrence counts (`stray_counts`), not the model's byte length: the LENGTH
+# moves on its own whenever a level changes, because mixLevelWithAnchor is an ASCII string and
+# "1|1" is fourteen bytes shorter than "0.551181|0.551181".
 
 
 def chat_now(step: str):
@@ -138,7 +134,7 @@ def main() -> int:
         print("  (a connected phone caller changes the matrix shape; try again without one)")
         return 1
     baseline = before["scheme"]
-    n0 = counts(blob0)
+    n0 = stray_counts(blob0)
     faders = on_faders(blob0)
     src_code = {s["key"]: s["index"] for s in devices.get_active_device().matrix.all_sources}
     chat0 = baseline["outputs"].get("Chat")
@@ -175,11 +171,9 @@ def main() -> int:
             if got != ospec:
                 print(f"    DIFF {okey}: was {ospec} now {got}")
     print("\n6. NO STRAYS")
-    n1 = counts(blob1)
-    check("no property appeared or vanished",
-          sorted(set(n1) ^ set(n0)), [])
-    check("and every one occurs exactly as many times as before",
-          [n for n in n0 if n1.get(n) != n0[n]], [])
+    added, gone, moved = count_changes(n0, stray_counts(blob1))
+    check("no property appeared or vanished", added + gone, [])
+    check("and every one occurs exactly as many times as before", moved, [])
 
     return _testkit.finish()
 

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
@@ -45,7 +45,7 @@ check("duration in words", r["duration"], "11 seconds")
 stamp_ms = 1787914947088
 local = datetime.fromtimestamp(stamp_ms / 1000.0)
 check("timestamp is shown in local time", r["when"], spoken_datetime(local))
-utc_render = spoken_datetime(datetime.fromtimestamp(stamp_ms / 1000.0, tz=timezone.utc))
+utc_render = spoken_datetime(datetime.fromtimestamp(stamp_ms / 1000.0, tz=UTC))
 if utc_render != r["when"]:
     check("and it is NOT the raw UTC rendering", r["when"] != utc_render, True)
 else:

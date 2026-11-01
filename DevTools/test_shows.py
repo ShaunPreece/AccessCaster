@@ -11,12 +11,6 @@ import server
 import shows
 from _testkit import check
 
-
-def fake_blob(entries):
-    """A model dump from (block, property, value) triples in stream order (see fake_model)."""
-    return fake_model.encode(entries)
-
-
 print("wifi scan slot parsing")
 check("plain", server.parse_scan_slot("MyNet----WPA2")["ssid"], "MyNet")
 check("security kept", server.parse_scan_slot("MyNet----WPA2")["security"], "WPA2")
@@ -32,7 +26,7 @@ check("spoken names the need", "needs a password" in server.parse_scan_slot("A--
       True)
 
 print("show list grouping")
-blob = fake_blob([
+blob = fake_model.encode([
     ("SHOW", "showUID", 0), ("SHOW", "showName", "Newest"), ("SHOW", "showUUID", "uuid-new"),
     ("SHOW", "showSnapshotIndex", 7),
     ("SHOW", "showUID", 1), ("SHOW", "showName", "Older"), ("SHOW", "showUUID", "uuid-old"),
@@ -49,7 +43,7 @@ check("snapshot carried", got[0]["snapshot"], 7)
 # A name must never be paired with another node's uid: grouping is on the block boundary.
 check("no mis-pairing", got[1]["uid"], 1)
 # Sorted, not merely reversed: the same nodes fed in the other order must come out the same way.
-rev = shows.read_shows(fake_blob([
+rev = shows.read_shows(fake_model.encode([
     ("SHOW", "showUID", 1), ("SHOW", "showName", "Older"), ("SHOW", "showUUID", "uuid-old"),
     ("SHOW", "showSnapshotIndex", 6),
     ("SHOW", "showUID", 0), ("SHOW", "showName", "Newest"), ("SHOW", "showUUID", "uuid-new"),
@@ -57,7 +51,7 @@ rev = shows.read_shows(fake_blob([
 ]))
 check("order does not depend on the firmware's", [s["name"] for s in rev], ["Newest", "Older"])
 # A node whose snapshot index did not decode must sort LAST, never claim to be the newest.
-odd = shows.read_shows(fake_blob([
+odd = shows.read_shows(fake_model.encode([
     ("SHOW", "showUID", 0), ("SHOW", "showName", "NoIndex"), ("SHOW", "showUUID", "x"),
     ("SHOW", "showUID", 1), ("SHOW", "showName", "Indexed"), ("SHOW", "showUUID", "y"),
     ("SHOW", "showSnapshotIndex", 5),
@@ -68,7 +62,7 @@ check("unplaceable node sorts last", [s["name"] for s in odd], ["Indexed", "NoIn
 # SHOW nodes with the SAME uuid and the same name, so uuid-keyed code cannot detect a repeat backup
 # and a delete can never verify itself. Only the snapshot index tells these apart.
 print("duplicate uuids: the case a uuid-keyed design cannot see")
-dupes = fake_blob([
+dupes = fake_model.encode([
     ("SHOW", "showUID", 0), ("SHOW", "showName", "Default Show"),
     ("SHOW", "showUUID", "same"), ("SHOW", "showSnapshotIndex", 3),
     ("SHOW", "showUID", 1), ("SHOW", "showName", "Default Show"),
@@ -89,7 +83,7 @@ check("snapshot zero is findable",
 
 print("show list edge cases")
 check("empty dump", shows.read_shows(b""), [])
-blob = fake_blob([("SHOW", "showUID", 0), ("SHOW", "showUUID", "u")])
+blob = fake_model.encode([("SHOW", "showUID", 0), ("SHOW", "showUUID", "u")])
 check("missing name is named", shows.read_shows(blob)[0]["name"], "Unnamed show")
 check("missing snapshot is None", shows.read_shows(blob)[0]["snapshot"], None)
 

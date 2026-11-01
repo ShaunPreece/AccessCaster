@@ -19,7 +19,6 @@ Run: python DevTools/test_autostart.py
 """
 from __future__ import annotations
 
-import io
 import os
 import re
 import sys
@@ -32,7 +31,7 @@ import autostart
 from _testkit import check, check_true
 
 ISS = Path(__file__).resolve().parent.parent / "ProjectBuilds" / "installer.iss"
-iss = io.open(ISS, encoding="utf-8").read()
+iss = ISS.read_text(encoding="utf-8")
 
 print("THE INSTALLER AND THE APP MUST WRITE THE SAME THING")
 # The [Registry] line, joined across its Inno line continuations.

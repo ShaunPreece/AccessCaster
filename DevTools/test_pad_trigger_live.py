@@ -22,15 +22,16 @@ import argparse
 import json
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import _testkit
 import soundpad
+from _testkit import check_true
 
 CUSTOM = {"type": 1, "control": 60, "channel": 2, "on": 100, "off": 0}
 
 
 def mapping(grid):
     pads = soundpad.read_pads_live()["pads"]
-    pad = next((p for p in pads if p["grid"] == grid), None)
-    return pad
+    return next((p for p in pads if p["grid"] == grid), None)
 
 
 def show(label, pad):
@@ -68,14 +69,32 @@ def main():
     print("CREATE a MIDI trigger on pad %d" % grid)
     res = soundpad.create_trigger(grid)
     print("  " + res.get("message", ""))
+    try:
+        if not res.get("ok"):
+            return 1
+        exercise(grid)
+    finally:
+        print("CLEAR the pad and check the baseline")
+        if (mapping(grid) or {}).get("present"):
+            soundpad.clear_grid_pad(grid)
+        pad = mapping(grid)
+        health = soundpad.pool_health()
+        check_true("pad %d empty again" % grid, pad and not pad["present"])
+        print("  pool clean: %s  orphans: %s  duplicates: %s"
+              % (health["clean"], health["orphans"], health["duplicates"]))
+    return _testkit.finish()
+
+
+def exercise(grid):
+    """Read the default mapping, write a custom one, and turn the custom flag off again."""
     pad = mapping(grid)
     show("default mapping", pad)
     padidx = grid - 1
-    ok = (pad and pad["trigger"] and pad["trigger"]["custom"] is False
-          and pad["trigger"]["type"] == 0 and pad["trigger"]["control"] == padidx
-          and pad["trigger"]["channel"] == 1 and pad["trigger"]["on"] == 127
-          and pad["trigger"]["off"] == 0)
-    print("  DEFAULT IS CC ON THE PAD'S OWN NUMBER, channel 1, 127/0:", ok)
+    check_true("DEFAULT IS CC ON THE PAD'S OWN NUMBER, channel 1, 127/0",
+               pad and pad["trigger"] and pad["trigger"]["custom"] is False
+               and pad["trigger"]["type"] == 0 and pad["trigger"]["control"] == padidx
+               and pad["trigger"]["channel"] == 1 and pad["trigger"]["on"] == 127
+               and pad["trigger"]["off"] == 0)
 
     print("WRITE a custom mapping, one field per call")
     for key, value in CUSTOM.items():
@@ -84,8 +103,8 @@ def main():
     pad = mapping(grid)
     show("custom mapping", pad)
     got = pad["trigger"]
-    print("  EVERY FIELD READ BACK AS WRITTEN:",
-          all(got[k] == v for k, v in CUSTOM.items()) and got["custom"] is True)
+    check_true("EVERY FIELD READ BACK AS WRITTEN",
+               all(got[k] == v for k, v in CUSTOM.items()) and got["custom"] is True)
 
     # The desk resets control/channel/on/off to its own defaults when the flag goes off, and
     # switching it back on does NOT return them. So this asserts the DESTRUCTIVE behaviour on
@@ -95,20 +114,11 @@ def main():
     pad = mapping(grid)
     show("custom off", pad)
     got = pad["trigger"]
-    print("  FLAG OFF, AND THE DESK RESET THE NUMBERS TO DEFAULT:",
-          got["custom"] is False and got["control"] == padidx and got["channel"] == 1
-          and got["on"] == 127 and got["off"] == 0)
+    check_true("FLAG OFF, AND THE DESK RESET THE NUMBERS TO DEFAULT",
+               got["custom"] is False and got["control"] == padidx and got["channel"] == 1
+               and got["on"] == 127 and got["off"] == 0)
     print("  (padTriggerType is NOT reset by the desk; it reads %r, which is why the page describes "
           "a default pad from its position, not from this field)" % got["type"])
-
-    print("CLEAR the pad and check the baseline")
-    soundpad.clear_grid_pad(grid)
-    pad = mapping(grid)
-    health = soundpad.pool_health()
-    print("  pad %d empty again: %s" % (grid, not pad["present"]))
-    print("  pool clean: %s  orphans: %s  duplicates: %s"
-          % (health["clean"], health["orphans"], health["duplicates"]))
-    return 0
 
 
 if __name__ == "__main__":
