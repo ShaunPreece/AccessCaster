@@ -52,7 +52,7 @@ print(f"       {subject}")
 print(f"\n  the steps a user would hear: {steps}")
 
 # WORTH KNOWING WHEN IT MOVES, rather than only that it still works. The app does not pin a version
-# and must not, but a session running this should see what RODE are shipping today.
+# and must not, but this shows whether the file RODE ship today is the one in _driver/.
 local = Path(__file__).resolve().parent.parent / "_driver" / "RODECasterDriver_WIN.zip"
 if local.is_file():
     same = local.stat().st_size == size

@@ -16,8 +16,7 @@ WHAT IT CHECKS. That the named backup goes, that the OTHERS do not, that the dri
 goes UP for a show delete (the only direct evidence the 24 MB file actually left), and that the
 as-found baseline is still refused without `force` after all of it.
 
-IRREVERSIBLE, so it takes the names on the command line rather than choosing for you, and it
-refuses anything it can see a reason to keep.
+IRREVERSIBLE, so it takes the names on the command line rather than choosing for you.
 
     python DevTools/probe_delete_backup_live.py --profile "Testing New Backup Flow"
 

@@ -1,4 +1,4 @@
-"""THE WHOLE CLEAN RESTORE, end to end, with a 6467-property diff.
+"""THE WHOLE CLEAN RESTORE, end to end, with a whole-model diff.
 
 WHAT IT DOES, through the app's own HTTP API so it exercises the shipping path:
   1. dumps the desk as it stands,

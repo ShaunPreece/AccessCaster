@@ -1,7 +1,7 @@
 """Compare a desk BEFORE a clean profile restore with the desk AFTER it, property by property.
 
 WHAT IT IS FOR. A clean restore factory-resets the desk and then writes the profile on top, so the
-only honest test of one is a whole-model diff: 6467 properties, before against after, with every
+only honest test of one is a whole-model diff, every property before against after, with every
 difference either explained or a defect.
 
 THE ONE QUESTION THAT SPLITS THE CAUSES, when a FACTORY dump is given as well:

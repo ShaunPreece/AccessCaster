@@ -3,8 +3,8 @@
 THE STATE IT IS ABOUT. The RODECaster has two USB ports and this protocol works over exactly one
 interface, MI_09, on the port nearest the power inlet (USB 1 / Main). Pull that cable with the other
 one still in and the Pro II's second vendor interface (PID 0x0026, MI_03) is still enumerated, and
-it answers nothing: measured on hardware with both cables in, `get_version`
-returned '' and `ping` False. It presents as the app having frozen.
+it answers nothing: `get_version` returns '' and `ping` False. It presents as the app having
+frozen.
 
 TWO THINGS ARE PINNED HERE, and the first is why the second is reachable. `find_control_interface`
 must return None rather than falling back to MI_03, so that every caller's own "no device" path
@@ -12,10 +12,9 @@ runs instead of a silent no-op; and `read_device_status` must then tell a half-c
 no desk at all, since that is the difference between "check the cable" and "check which socket".
 So the finder is NOT stubbed below: only the interface list is, and the real finder runs over it.
 
-WHY IT IS WORTH A TEST. On that exact state produced a whole causal theory - "putting
-storage on USB 2 tears down the control interface" - which fitted every observation and was false;
-the cable had simply been unplugged to free the port. A blind operator gets no warning at all from
-the back of a unit, so the app has to say it.
+WHY IT IS WORTH A TEST. The state looks like a software fault rather than a cable, so it invites a
+wrong diagnosis, and a blind operator gets no warning at all from the back of a unit, so the app
+has to say it.
 
 Offline: the interface list is stubbed, so no unit is needed and no cable has to be pulled.
 

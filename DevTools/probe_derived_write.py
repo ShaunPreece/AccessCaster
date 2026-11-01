@@ -4,7 +4,7 @@ THE POINT. `DevTools/selector_map.py` says which block a property belongs to, an
 selector a write to it would take. What it CANNOT say is whether the field accepts a write at all.
 This file closes that gap the only honest way: write it, read it back off the desk, restore it, and
 check the model came back the same shape it started (a write that lands nowhere can append a stray
-property, and a stray is factory-reset-only - see the STRAYS incident).
+property, and a stray is factory-reset-only: the STRAYS NOTE in docs/RODECASTER_PROTOCOL.txt).
 
 A property with no control in the RODE app has no CAPTURE ROUTE, which does not make it
 unwritable: `outputMonLevel`, `activeButtonsBrightness`, `channelOutputMute`, `channelCueEnable` and
@@ -13,8 +13,8 @@ unwritable: `outputMonLevel`, `activeButtonsBrightness`, `channelOutputMute`, `c
 SAFETY, and it is not decoration:
   * Only properties in a block with a CONFIRMED anchor are allowed. An unknown block is refused,
     not guessed, because a wrong selector is how strays happen.
-  * The value written is deliberately near the current one where the type allows, so a moment spent
-    in the test state is a small change rather than an extreme one.
+  * The value written is never extreme: an int moves by one, and a float goes to 0.3 or 0.7,
+    whichever is further from where it is.
   * The original is restored in a `finally`, and the restore is READ BACK too. A test that leaves the
     desk changed has failed even if the write succeeded.
   * Anything that cannot be undone from here is on DENY below and is refused by name, with the
@@ -55,7 +55,8 @@ DENY = {
     "updateViaUSB": "part of the firmware update path.",
     "downloadInitiateRequested": "starts a firmware download.",
     "systemBetaMode": "changes which firmware track the unit is on.",
-    "remountPadStorage": "remounts the pad volume; the STRAYS incident lives in that area.",
+    "remountPadStorage": "an action the app sends as a fixed raw record "
+                         "(rcp_transfer.REMOUNT_PAD_STORAGE), not a value write.",
     "rcSyncModeRequest": "puts the unit into a sync mode we have not decoded.",
     "systemSerialNumber": "identity, not a setting.",
     "systemFirmwareVersion": "reported by the unit, not ours to set.",

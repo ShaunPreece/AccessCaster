@@ -53,7 +53,8 @@ def main() -> int:
     for grid in sorted(EXPECTED):
         print(f"   grid {grid:2}: record says {live.get(grid, '(not a sound pad)')!r}")
 
-    print("\nMounting the pad volume. The desk's audio will drop for a moment.")
+    print("\nMounting the pad volume. Windows plays its device-connect sound; the desk's audio "
+          "stays.")
     root = None
     t.set_transfer_mode(True)
     try:
@@ -99,7 +100,7 @@ def main() -> int:
         return 0
     finally:
         t.set_transfer_mode(False)
-        print("\nTransfer mode off; the desk's audio is back. Nothing was written.")
+        print("\nTransfer mode off. Nothing was written.")
 
 
 if __name__ == "__main__":

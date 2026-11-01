@@ -1,7 +1,7 @@
 """LIVE round-trip of the addressed input read, on whichever desk is attached.
 
-This is the test that would have caught the Duo mis-attribution: it writes ONE mic's gain and
-asserts the OTHER mics did not move. The offline half is DevTools/test_input_read.py; this one
+It writes ONE mic's gain and asserts the OTHER mics did not move, which catches a read map that
+attributes one mic's value to another. The offline half is DevTools/test_input_read.py; this one
 proves the addresses are right on real hardware, which no synthetic dump can.
 
 SAFE AND REVERSIBLE. Every mic's gain is read first, written, read back, and restored, and the

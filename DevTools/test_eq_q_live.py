@@ -1,14 +1,11 @@
 """Settle - and keep settled - what the three EQ Q values actually are. Reversible, restores itself.
 
-THE TWO WRONG ANSWERS: that Q follows device-side when
-the EQ parameters are written, so no writer is needed; and that Q cannot be written at all, offered
-as the explanation for a 2e-8 float32 residue the RODE app leaves behind.
-
-THE ANSWER, measured and re-measurable by running this file:
+WHAT IT CHECKS, re-measurable by running this file:
   - Q is NOT derived. Writing a band's GAIN moves no Q, and writing a band's FREQUENCY moves no Q.
   - Q IS directly writable, and reads back exactly.
-The derivation theory rests on a true observation ("the app never writes Q, yet Q moved") plus a
-false inference. What the app does or does not send says nothing about what the desk will accept.
+The RODE app never writes Q, which invites two wrong inferences: that Q follows the other EQ writes,
+or that Q cannot be written at all. Neither holds: what the app sends says nothing about what the
+desk will accept.
 
 WHY IT IS WORTH KEEPING. Q is in `channels.PROCESSING_PROPS` on the strength of this test rather
 than of a capture - the RODE app has no Q control, so there is no capture to have. If a firmware

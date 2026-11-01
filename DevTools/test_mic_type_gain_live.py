@@ -1,4 +1,4 @@
-"""Does setting a mic's TYPE also move its GAIN? (the clean-restore defect)
+"""Does setting a mic's TYPE also move its GAIN?
 
 WHY. A voicing carries its own default gain, so a restore that writes the GAIN before the TYPE
 loses the gain whenever the type changes: after a factory reset puts the type back to PodMic (4),
@@ -73,8 +73,8 @@ def main() -> int:
                   ", ".join(f"{channels.MIC_TYPE[t]}={g}" for t, g in sorted(moved.items())))
             print("So a restore MUST write the mic type BEFORE the gain.")
         else:
-            print("The gain survived every voicing change, so the clean-restore defect is "
-                  "something else.")
+            print("The gain survived every voicing change, so a restore's write order does not "
+                  "matter for the gain.")
 
         # And the other way round, because the fix depends on it: with the type already set, does
         # writing the gain stick?

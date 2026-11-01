@@ -110,7 +110,7 @@ print("\nTHE UI AND THE SERVER AGREE ABOUT CHAT")
 app_js = (ROOT / "Project" / "static" / "app.js").read_text(encoding="utf-8")
 check_in("the page does not even build the button for Chat", 'ch.name !== "Chat"', app_js)
 
-print("\nTHE OLD STREAM CHECK IS GONE, NOT JUST HIDDEN")
+print("\nTHE CHECK IS PER CHANNEL ONLY: NO STREAM-WIDE CHECK, NOT EVEN A HIDDEN ONE")
 check("its endpoint is not in the POST routes",
       "/api/meters/check" in server.POST_ROUTES, False)
 check("and there is no action left to call",
@@ -120,7 +120,7 @@ index_html = (ROOT / "Project" / "static" / "index.html").read_text(encoding="ut
 check_not_in("nor any markup for one", 'id="meter-check-btn"', index_html)
 # The stream dropdown STAYS: the background watch still meters one stream.
 check_in("the stream chooser survives, for the watch", 'id="meter-stream"', index_html)
-check_in("and the tab points at where the check went", "Channels page", index_html)
+check_in("and the tab points to the Channels page for the check", "Channels page", index_html)
 
 print("\nA RUN WHOSE WATCHER HAS DIED, AND A STALE TIMER")
 # When a run's watcher thread dies mid-run, the next press must stop that run rather than start a

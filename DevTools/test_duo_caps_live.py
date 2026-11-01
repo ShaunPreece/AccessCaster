@@ -787,7 +787,7 @@ if "shows" in dev.caps and (not ONLY or "show" in ONLY):
         # named, but a different code is still an answer and not a failure of addressing.
         if err and len(sh.read_shows(b1)) == before_n and not added:
             how = ("error 8, nowhere to put it" if err == sh.ERROR_NO_STORAGE
-                   else f"error {err}, which is not the 8 measured on")
+                   else f"error {err}, not the documented 8")
             print(f"  ok   the desk answered in about a second: {how}; the export flag cleared to "
                   f"{flag}, no show was created, nothing appended")
             if err != sh.ERROR_NO_STORAGE:

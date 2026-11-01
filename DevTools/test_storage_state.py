@@ -66,9 +66,8 @@ def main() -> int:
     check("a short state string is skipped too", low_for(["1|2|3"]), [])
     check("a non-numeric capacity is skipped", low_for(["x|y|0|1|1"]), [])
 
-    # SLOT 1 IS THE USB PORT, not a second card slot. Settled with a pendrive in the unit, where
-    # slot 1 reported the drive's capacity byte-for-byte identically to Windows while the card slot
-    # read empty. The names live in recorder.VOLUME_NAMES, keyed on the slot INDEX rather than on
+    # SLOT 1 IS THE USB PORT, not a second card slot: a drive in the USB port reports its capacity
+    # on slot 1 while the card slot reads empty. The names live in recorder.VOLUME_NAMES, keyed on the slot INDEX rather than on
     # the position in the list: the unit adds a fourth volume while it is recording, and a
     # position-keyed lookup renames every slot mid-take.
     print("\nNAMING: slot 0 is the card slot, slot 1 the USB port, slot 2 the unit's pad storage")

@@ -10,9 +10,9 @@ way is writing a guessed name at the desk, which appends a stray that only a fac
 
 HOW IT FINDS THE TABLE, rather than grepping 85 MB and drowning in English words: the protocol's
 names sit in ONE contiguous block. Anchor on a handful of names the desk definitely publishes, take
-the region they span, widen it, and read every identifier in it. Measured: ten
-anchors spanned 7752 bytes, and the region holds 650 names against the desk's 472 - so it carries
-the BLOCK names, the enum values and the unpublished properties as well.
+the region they span, widen it, and read every identifier in it. The region holds more names than
+the desk publishes: it carries the BLOCK names, the enum values and the unpublished properties as
+well.
 
     python DevTools/app_name_table.py                  # names the table has that the desk does not
     python DevTools/app_name_table.py --all            # the whole table

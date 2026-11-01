@@ -191,10 +191,10 @@ def main() -> int:
             finally:
                 watch.close()
 
-            print("\nREAL PUSHES OFF THE WIRE, AND WHAT THE OLD LOOP FACED")
+            print("\nREAL PUSHES OFF THE WIRE, AND THE TAIL A QUIET-DETECTION LOOP FACES")
             tail_checks(args.pad)
 
-            print("\nTHE PRE-FIX LOOP, RUN ON PURPOSE (quiet detection, no push filter)")
+            print("\nA QUIET-DETECTION LOOP WITH NO PUSH FILTER, RUN ON PURPOSE")
             old_loop_check(args.pad, len(quiet))
         finally:
             print("\nPUTTING THE DESK BACK")
@@ -260,10 +260,10 @@ def old_loop_check(pad: int, healthy_bytes: int) -> bool:
     """Run a quiet-detection loop with no push filter, and show it does not stop and does not come
     back clean.
 
-    This is here so the two faults stay demonstrated rather than remembered. Without it, a later
-    session sees a filter with no visible reason and a length bound that "just works", and the
-    cheapest-looking simplification is to take one of them out. The ceiling is cut from 4000 reads
-    to 700 so the demonstration costs seconds instead of the 172 s a full run takes.
+    This keeps the two faults demonstrated. Without it the push filter has no visible reason and
+    the length bound "just works", so taking one of them out looks like a simplification. The
+    ceiling is cut from 4000 reads to 700 so the demonstration costs seconds instead of the 172 s a
+    full run takes.
 
     Read-only: the same trigger the app sends, and one MIDI note. Nothing is written to the model.
     """
@@ -290,11 +290,11 @@ def old_loop_check(pad: int, healthy_bytes: int) -> bool:
     finally:
         dev.close()
 
-    print(f"  the old loop: {len(buf)} bytes in {secs:.1f} s, {reads} reads")
+    print(f"  the quiet-detection loop: {len(buf)} bytes in {secs:.1f} s, {reads} reads")
     ok = check_true("pad confirmed playing", playing)
-    ok &= check_true("the old loop ran to its ceiling rather than finishing",
+    ok &= check_true("the quiet-detection loop ran to its ceiling rather than finishing",
                      reads >= OLD_LOOP_CEILING, f"({reads} reads, ceiling {OLD_LOOP_CEILING})")
-    ok &= check_true("the old loop's blob is contaminated, not merely late",
+    ok &= check_true("the quiet-detection loop's blob is contaminated, not merely late",
                      len(buf) > healthy_bytes, f"({len(buf)} bytes vs a healthy {healthy_bytes})")
     return ok
 
