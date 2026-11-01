@@ -1384,11 +1384,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   comes from the last dump the app took (`server._note_desk_network`), since the page's poll reads
   none. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
   cycle cleared it.
-- **THE RING AND THE CALLER'S NAME TAKE TURNS, NEVER OVERLAP.** The speech worker purges before it
-  speaks, so a name queued while the ring plays cuts it short, or the ring cuts the name off; and a
-  second SpVoice playing the ring on the same output does not mix with the worker's, it holds the
-  name back until the ring ends (measured: three names sent over the ring, none heard). So
-  `_callme_ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
+- **THE RING AND THE CALLER'S NAME TAKE TURNS, NEVER OVERLAP.** The speech thread plays one item at
+  a time and keeps only the newest one waiting, so a name and a ring queued together lose one of
+  them. So `_callme_ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
   `speech.say_and_wait`, and starts again every `_CALLME_RING_CYCLE_S`. It stops when the SAME call id
   is no longer ringing, the ringtone is switched off, or past the desk's 120 s.
 
@@ -1600,7 +1598,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   keys by reading `settings_file.update(...)` calls out of `Project/`, never from a hand list: the hand
   list missed three. A preference the import should apply LIVE also needs a line in
   `speech.apply_settings` or `announcer.apply_settings`, and a voice or output change bumps
-  `speech.worker_gen`.
+  `speech.config_gen`.
 - **IMPORT MERGES, IT NEVER REPLACES.** The excluded keys live in the same file, so a replace would
   delete this machine's remote-access token and its first-run record as a side effect of restoring
   somebody's shortcuts.
@@ -2011,15 +2009,19 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   is not this machine, because a password typed into that page would otherwise cross the very network
   it is for. Keep that refusal.
 
-- **A CUE IS A WAV PLAYED THROUGH SAPI, NEVER A BEEP.** `winsound.Beep` and `[Console]::Beep` go to
-  the SYSTEM default output, which on these machines is the desk, so a cue would go to the callers
-  instead of the operator. `tones.py` generates the WAVs and the speech worker plays them with
-  `SpeakStream` on the SAME SpVoice it speaks with, so they inherit the announcer's chosen device and
-  volume for nothing. The queue carries them as `!wav <path>`; `speech._say_oneshot` must strip that
-  prefix or the fallback path reads a Windows file path aloud.
-- **THE PUMP COALESCES, SO TWO CUES QUEUED TOGETHER BECOME ONE.** Right for speech (the newest state
-  is the only one worth hearing), wrong for a pair, and it silently ate the low half of the mute
-  confirmation until 16th September 2026. Anything that must play two sounds in order has to space
+- **A CUE IS A WAV PLAYED BY THE SPEECH THREAD, NEVER A BEEP.** `winsound.Beep` and
+  `[Console]::Beep` go to the SYSTEM default output, which on these machines is the desk, so a cue would go to the callers
+  instead of the operator. `tones.py` generates the WAVs and `speech._Engine` plays them on the same
+  player as the speech, so they inherit the announcer's chosen device and volume. A cue must be
+  22.05 kHz mono 16-bit, the player's format; any other file is spoken as its name instead.
+- **SAPI RENDERS INTO MEMORY; IT NEVER SPEAKS TO THE DEVICE.** Spoken to the device, SAPI reopens it
+  for every phrase and pads each with silence (80 to 105 ms before the word on Hazel, about 480 ms
+  after), so a moving fader's numbers are cut off before they are heard. `speech._Engine._render`
+  trims both ends and `wave_player` plays the rest on a device held open between phrases. The
+  chosen output is a SAPI token turned into a waveOut id (`SpMMAudioOut.DeviceId`) at every open,
+  because that id is a position in Windows' list and moves when a device is plugged in or removed.
+- **THE SPEECH THREAD KEEPS ONLY THE NEWEST ITEM, SO TWO CUES QUEUED TOGETHER BECOME ONE.** Right
+  for speech (the newest state is the only one worth hearing), wrong for a pair. Anything that must play two sounds in order has to space
   them itself. A real mute press only ever queues one, so this is a confirmation problem, not a
   feature problem.
 - **A TONE FILE'S SHAPE IS PART OF ITS NAME (`muted-v2.wav`), and `TONE_VERSION` is bumped when the
@@ -2307,13 +2309,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   exists, since a solo hijacks the monitor path and would silence anything still going to the desk.
   Shaun set it back to the system default afterwards, so the default remains "announcements go to
   the desk". Do not treat the picker as untested, and do not remove it as unused.
-- **`say.ps1` IS A ONE-SHOT ONLY WITH `-Text`.** Without it, it is the announcer's PERSISTENT
-  worker: it reads one phrase per line on stdin, so the server does not pay 1.3-1.7 s of PowerShell
-  startup per announcement, and a script that runs it with no `-Text` and no stdin exits HAVING
-  SPOKEN NOTHING, with no error. The one-shot speaks SYNCHRONOUSLY, so the process cannot exit
-  mid-phrase. **CHECK ITS OUTPUT FOR "SAY spoken"** rather than assuming, especially in anything
-  that uses sound as evidence. The app's speech has no focus gate: that is
-  `DevTools/say_gated.ps1`, for development sessions only.
+- **`DevTools/say.ps1` IS FOR DEVTOOLS ONLY**; the app's speech is `speech.py`. It speaks
+  SYNCHRONOUSLY, so the process cannot exit mid-phrase. **CHECK ITS OUTPUT FOR "SAY spoken"** rather
+  than assuming, especially in anything that uses sound as evidence. The app's speech has no focus
+  gate: that is `DevTools/say_gated.ps1`, for development sessions only.
 - **`outputMonLevel` AND `outputMonFixed` BOTH WORK, ear-proven 29th August 2026.** Fixed OFF, the
   monitor output follows the level; Fixed ON, six alternations between 10% and 100% produced no
   audible change whatever. The UI copy for Fixed is accurate, so do not soften it to "stored".

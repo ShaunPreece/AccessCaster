@@ -1,8 +1,14 @@
-"""Everything the app says out loud: one persistent SAPI worker (say.ps1) fed a phrase at a time.
+"""Everything the app says out loud, from one speech thread that plays one thing at a time.
 
-`say` queues a phrase and never blocks; `say_and_wait` blocks until the worker has spoken it; `tone`
-plays a cue through the same voice. The voice, output and volume are the user's choice, held here
+`say` queues a phrase and never blocks; `say_and_wait` blocks until the phrase has been spoken;
+`tone` plays a cue on the same output. The voice, output and volume are the user's choice, held here
 and saved in settings.json.
+
+SAPI RENDERS, IT DOES NOT PLAY. A phrase is spoken into memory, its silence trimmed, and the samples
+played by `wave_player` on a device held open between phrases. Spoken straight to the device, SAPI
+opens it for every phrase and its voices pad each one with silence (66 to 86 ms of zeros before the
+word on Hazel, 650 ms after), so in a fast run of phrases, a fader moving, each new number cuts
+off the last before any of it is heard.
 
 `enabled` IS THE ANNOUNCEMENTS SWITCH, and `say` enforces it because every phrase passes through
 `say`: roughly half the speech comes from outside the announcer (the recorder, CallMe, the
@@ -10,62 +16,32 @@ virtual-devices follow-up after a USB mode change). `announcer.py` sets and clea
 """
 from __future__ import annotations
 
+import array
 import os
-import queue
-import subprocess
 import threading
-import time
+import wave
+from dataclasses import dataclass
 
 import diagnostics
 import settings_file
 import tones
+import wave_player
 import wording
-from paths import resource_path
 
 enabled = threading.Event()
 
-# The app runs under pythonw (no console), so a console subprocess would flash a window and steal
-# focus.
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-
-# SPEECH: one PERSISTENT worker process, fed a phrase per line on stdin (say.ps1 run without
-# -Text). NOT one `say.ps1 -Text` process per phrase: that costs 1.3-1.7 s each (PowerShell and
-# speech-stack startup, not the speaking), and since the announcer speaks on every mute/solo press, a few quick
-# presses spawn several such processes all fighting for the audio device, so announcements lag and
-# then appear to stop. With the worker, only the FIRST phrase pays startup. If the worker cannot be
-# started we fall back to the one-shot, so the worst case is slow rather than silent.
-_queue: "queue.Queue[str]" = queue.Queue()
-_SAY_QMAX = 1          # newest wins: the worker purges anyway, so queueing only adds lag
-PACE_S = 0.20         # never hand the worker phrases faster than this (see the pump)
-_pump_thread = None
-_pump_lock = threading.Lock()
-# A phrase somebody waits on (say_and_wait) travels the same queue as "!sync <id> <text>". The
-# worker speaks it synchronously and replies "DONE <id>" on stdout. A sync phrase that is dropped
-# or superseded before it is spoken must still release its waiter (_release).
-SYNC_PREFIX = "!sync "
-_SYNC_TIMEOUT_S = 4.0  # longest anyone is held up if the worker never answers
-_sync_waiters = {}
-_sync_lock = threading.Lock()
-_sync_next = 0
-# Which Windows output device announcements go to (a name from sapi_lists(), matched by the
-# worker); "" = the system default. When the default output is the RODECaster, speech arrives on
+# Which Windows output device announcements go to (a name from sapi_lists()); "" = the system
+# default. When the default output is the RODECaster, speech arrives on
 # USB 1 and is inaudible while another channel is SOLOed (the cue bus replaces the headphone feed)
 # or while USB 1 is muted. Pointing announcements at another device makes them survive both.
-# IT IS OUR SPEECH OBJECT'S OWN OUTPUT (SAPI SpVoice.AudioOutput), NOT a Windows setting: it does not
-# move the system default device, and it does not touch the screen reader, which has its own.
+# IT IS THE DEVICE OUR OWN PLAYER OPENS, NOT a Windows setting: it does not move the system default
+# device, and it does not touch the screen reader, which has its own.
 chosen_output = str(settings_file.load().get("announcer_output", "") or "")
 
-# Which voice speaks them ("" = whatever SAPI's default is). Matched by name in the worker.
+# Which voice speaks them ("" = whatever SAPI's default is).
 chosen_voice = str(settings_file.load().get("announcer_voice", "") or "")
 
-# Bumped whenever the voice or the output device changes. The pump owns the worker process and is the
-# only thread allowed to touch it, so a change cannot restart the worker directly: it raises this
-# counter and the pump respawns before the next phrase. Volume does NOT need this (the worker takes
-# a "!vol N" control line in place), but voice and device are set when the SpVoice is created.
-worker_gen = 0
-
-# How loud announcements are, 0-100. This is SAPI's own stream volume, so it scales ONLY our speech:
+# How loud announcements are, 0-100. It scales our own samples, so it changes ONLY our speech:
 # Windows system volume, other apps and the desk's own audio are untouched. It exists because at
 # full volume the announcer talks over what you are actually listening to while riding the faders.
 # Persisted, because a level you have to set again every launch is no use.
@@ -84,9 +60,9 @@ def clamp_volume(value) -> int:
 volume = clamp_volume(settings_file.load().get("announcer_volume", _VOLUME_DEFAULT))
 
 
-# WHAT SPEECH IS AVAILABLE. Both lists come from SAPI itself (the same engine the worker speaks
-# through), so what the page offers is exactly what can be chosen - no guessing from the registry,
-# and nothing offered that the worker would then fail to find.
+# WHAT SPEECH IS AVAILABLE. Both lists come from SAPI itself (the engine the speech thread renders
+# with, and whose output tokens it opens), so what the page offers is exactly what can be chosen:
+# no guessing from the registry, and nothing offered that the speech thread would then fail to find.
 # The lists are CACHED because reading them costs a COM round trip, and re-read on demand: plugging
 # in headphones adds an output, and installing a voice adds a voice, without restarting the app.
 _lists_cache = {"voices": None, "outputs": None}
@@ -127,13 +103,8 @@ def sapi_lists(refresh: bool = False) -> dict:
         return dict(_lists_cache)
 
 
-# The queue between say and the speech worker carries plain phrases. A line starting with this
-# prefix is a CUE instead: the worker plays the named WAV through the same SpVoice (see
-# say.ps1), so it lands on the announcer's chosen output rather than the system default.
-WAV_PREFIX = "!wav "
-
 # NOTHING IS EVER PLAYED OUT LOUD UNDER THIS FLAG, set by `DevTools/_bootstrap` for any script
-# named `test_*`. The announcer speaks through SAPI to the default output, which on the machines
+# named `test_*`. The announcer speaks to the default output, which on the machines
 # this app is built for IS THE DESK - so an offline test that happens to exercise an announcing
 # path plays tones and speech into the user's monitoring, possibly mid-recording, with nothing on
 # screen to explain it. Phrases are still LOGGED (see say), so a test can still be
@@ -141,247 +112,282 @@ WAV_PREFIX = "!wav "
 SILENT = bool(os.environ.get("ACCESSCASTER_SILENT"))
 
 
-def _wav_spoken_form(wav_path: str) -> str:
-    """What a cue would have SAID, for the paths that cannot play it. Derived from the file name so
-    a new cue cannot forget to add itself here and end up silent."""
-    name = os.path.splitext(os.path.basename(wav_path or ""))[0]
-    return {"muted": "muted", "unmuted": "unmuted"}.get(name, name or "")
+# A phrase plays for at least this long before a newer one may cut it off, so a moving fader is
+# heard as a run of numbers rather than a run of syllables. Cues and say_and_wait phrases are never
+# cut off.
+PACE_S = 0.20
+_SAY_AND_WAIT_TIMEOUT_S = 4.0  # longest anyone is held up if the phrase is never played
+
+# Bumped whenever the voice or the output device changes. The speech thread owns the voice and the
+# open device, so a change cannot be applied from here: the thread sees the new generation and
+# takes up the new pair before its next phrase.
+config_gen = 0
 
 
-def tone(name: str) -> bool:
-    """Queue the named tone instead of a phrase. True if it was queued, False if we have no such
-    tone, in which case the caller must speak - a cue that silently does nothing is worse than the
-    sentence it was replacing."""
-    try:
-        path = tones.tone_path(name)
-    except Exception:
-        return False
-    if not path:
-        return False
-    say(WAV_PREFIX + path)
-    return True
+@dataclass
+class _Item:
+    """One thing for the speech thread to play: a phrase, or a cue WAV with the words it stands for,
+    which are spoken instead if the file cannot be played."""
+    text: str
+    cue_path: str = ""
+    # Set once a say_and_wait phrase has played, been superseded, or failed.
+    done: threading.Event | None = None
+
+    @property
+    def interruptible(self) -> bool:
+        return not self.cue_path and self.done is None
 
 
-def _say_oneshot(text: str) -> None:
-    """One process per phrase, used only when the worker cannot take it (see _pump).
-    Carries the same volume, VOICE and OUTPUT DEVICE as the worker, so degrading to this path does
-    not suddenly get loud again, change voice, or (worst of the three) start speaking into the
-    desk."""
-    sync_id = None
-    if text.startswith(SYNC_PREFIX):
-        sync_id, _, text = text[len(SYNC_PREFIX):].partition(" ")
-    try:
-        # A CUE IS NOT A PHRASE. The queue carries "!wav <path>" for the mute tones (see tone),
-        # and without this the fallback path would cheerfully read a Windows file path aloud.
-        wav = ""
-        if text.startswith(WAV_PREFIX):
-            wav = text[len(WAV_PREFIX):]
-            text = _wav_spoken_form(wav)
-        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
-               resource_path("say.ps1"), "-Text", text,
-               "-Volume", str(volume)]
-        if wav:
-            cmd += ["-Wav", wav]
-        if chosen_voice:
-            cmd += ["-Voice", chosen_voice]
-        if chosen_output:
-            cmd += ["-Device", chosen_output]
-        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=_NO_WINDOW)
-        if sync_id is not None:
-            p.wait(timeout=_SYNC_TIMEOUT_S)    # say.ps1 exits when it has finished speaking
-    except Exception as exc:
-        diagnostics.event("announcer.oneshot_failed", str(exc))
-    if sync_id is not None:
-        _sync_done(sync_id)
+# ONE SLOT, NEWEST WINS. A burst of presses lands on the latest state instead of playing out a
+# backlog seconds behind the operator's fingers, which is how a screen reader behaves too.
+_pending: _Item | None = None
+_pending_lock = threading.Lock()
+_wake = threading.Event()
+# Signalled with every new item, to cut off the interruptible phrase being played.
+_interrupt = wave_player.Signal()
+_thread = None
+_thread_lock = threading.Lock()
 
 
-def _sync_done(sync_id: str) -> None:
-    with _sync_lock:
-        ev = _sync_waiters.pop(sync_id, None)
-    if ev is not None:
-        ev.set()
+def _release(item: _Item | None) -> None:
+    """Free whoever waits on `item`, whether it was played, superseded or failed."""
+    if item is not None and item.done is not None:
+        item.done.set()
 
 
-def _release(text) -> None:
-    """Free whoever waits on `text` if it is a sync phrase that will now never be spoken."""
-    if isinstance(text, str) and text.startswith(SYNC_PREFIX):
-        _sync_done(text[len(SYNC_PREFIX):].partition(" ")[0])
+class _Engine:
+    """SAPI rendering into memory and a held-open player, both owned by the speech thread."""
+
+    SAMPLE_RATE = tones.SAMPLE_RATE
+    _RATE = 3                       # SAPI rate, -10 (slow) .. 10 (fast)
+    # SpeechAudioFormatType SAFT22kHz16BitMono.
+    _FORMAT_22K_16BIT_MONO = 22
+    # Speak flag: never parse the text as SAPI XML, so a channel name containing "<" is read as
+    # written.
+    _IS_NOT_XML = 16
+    # Peak sample level, of 32767, where a word starts (about -42 dBFS). A word opening on a plosive
+    # carries 140 to 170 ms of near-silence peaking near 100 before the burst, while soft sounds
+    # (the "f" of "fader", the "s" of "solo") reach several hundred.
+    _ONSET = 256
+    # The trailing padding is exact zeros, so any sample above this is still speech.
+    _SILENCE = 16
+    # Kept either side of the speech, so a soft first or last sound is not clipped.
+    _LEAD_IN = SAMPLE_RATE * 20 // 1000
+    _TAIL = SAMPLE_RATE * 20 // 1000
+
+    def __init__(self):
+        self._voice = None
+        self._format = None
+        self._gen = None
+        self._output = ""
+        self._device_id = wave_player.DEFAULT_DEVICE
+        self._player = wave_player.Player(self.SAMPLE_RATE)
+        self._cues: dict = {}
+
+    def play(self, item: _Item) -> None:
+        self._configure()
+        pcm = self._cue(item.cue_path) if item.cue_path else None
+        if pcm is None:
+            pcm = self._render(item.text)
+        pcm = _scaled(pcm, volume)
+        if not pcm:
+            return
+        if not self._player.is_open:
+            self._device_id = self._resolve_output()
+        self._player.play(pcm, self._device_id,
+                          _interrupt if item.interruptible else None, int(PACE_S * 1000))
+
+    def idle(self) -> None:
+        self._player.idle()
+
+    def reset(self) -> None:
+        """Drop the voice and the device after a failure, so the next phrase starts afresh."""
+        self._voice = None
+        self._gen = None
+        self._player.close()
+
+    def _configure(self) -> None:
+        """Take up a changed voice or output before the next phrase."""
+        gen = config_gen
+        if self._voice is not None and self._gen == gen:
+            return
+        import win32com.client  # noqa: PLC0415  (pywin32, Windows only)
+        voice, self._output = chosen_voice, chosen_output
+        spv = win32com.client.Dispatch("SAPI.SpVoice")
+        spv.Rate = self._RATE
+        if voice:
+            token = _token(spv.GetVoices(), voice)
+            if token is not None:
+                spv.Voice = token
+            else:
+                diagnostics.event("announcer.voice_missing", voice, using="the default voice")
+        self._format = win32com.client.Dispatch("SAPI.SpAudioFormat")
+        self._format.Type = self._FORMAT_22K_16BIT_MONO
+        self._voice = spv
+        self._gen = gen
+        self._player.close()            # the next phrase opens the output now chosen
+
+    def _resolve_output(self) -> int:
+        """The waveOut id of the chosen output. Resolved at every open, because the id is a position
+        in Windows' current device list and moves when a device is plugged in or removed. SAPI's
+        output token creates an SpMMAudioOut, whose DeviceId is that waveOut id."""
+        if not self._output:
+            return wave_player.DEFAULT_DEVICE
+        token = _token(self._voice.GetAudioOutputs(), self._output)
+        if token is None:
+            diagnostics.event("announcer.output_missing", self._output, using="the system default")
+            return wave_player.DEFAULT_DEVICE
+        return int(token.CreateInstance().DeviceId)
+
+    def _render(self, text: str) -> bytes:
+        """`text` spoken into memory, with the voice's silence trimmed from both ends."""
+        import win32com.client  # noqa: PLC0415
+        stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
+        stream.Format = self._format
+        self._voice.AudioOutputStream = stream
+        self._voice.Speak(text, self._IS_NOT_XML)
+        samples = array.array("h", bytes(stream.GetData()))
+        first = next((i for i, s in enumerate(samples) if abs(s) > self._ONSET), None)
+        if first is None:
+            return b""
+        last = next(i for i in range(len(samples) - 1, first - 1, -1)
+                    if abs(samples[i]) > self._SILENCE)
+        start = max(0, first - self._LEAD_IN)
+        end = min(len(samples), last + 1 + self._TAIL)
+        return samples[start:end].tobytes()
+
+    def _cue(self, path: str) -> bytes | None:
+        """A cue's samples, or None if the file cannot be played, in which case its words are spoken
+        instead. Played untrimmed: the ring's leading silence lets the output settle before the
+        sound starts."""
+        if path not in self._cues:
+            try:
+                with wave.open(path, "rb") as w:
+                    ok = (w.getframerate() == self.SAMPLE_RATE and w.getnchannels() == 1
+                          and w.getsampwidth() == 2)
+                    self._cues[path] = w.readframes(w.getnframes()) if ok else None
+            except (OSError, wave.Error):
+                return None
+        return self._cues[path]
 
 
-def _worker_replies(proc) -> None:
-    """Read the speech worker's stdout until it exits, releasing each finished sync phrase."""
-    try:
-        for line in proc.stdout:
-            if line.startswith("DONE "):
-                _sync_done(line[5:].strip())
-    except Exception as exc:
-        diagnostics.event("announcer.worker_replies_lost", str(exc))
+def _token(tokens, wanted: str):
+    """The SAPI token whose name is `wanted`: an exact match wins, otherwise the first
+    case-insensitive substring, as `_pick` accepts."""
+    tokens = list(tokens)
+    for t in tokens:
+        if t.GetDescription() == wanted:
+            return t
+    low = wanted.lower()
+    for t in tokens:
+        if low in t.GetDescription().lower():
+            return t
+    return None
 
 
-def say_and_wait(text: str) -> None:
-    """Speak `text` and return once it has finished playing, so the caller can act after it: the
-    words "Resuming" must be over before the desk starts recording again. Returns at once when
-    announcements are off, and after _SYNC_TIMEOUT_S at worst."""
-    global _sync_next
-    if not enabled.is_set() or SILENT:
-        say(text)                     # logged, and suppressed or silent there
-        return
-    ev = threading.Event()
-    with _sync_lock:
-        _sync_next += 1
-        sync_id = str(_sync_next)
-        _sync_waiters[sync_id] = ev
-    say(f"{SYNC_PREFIX}{sync_id} {text}")
-    ev.wait(_SYNC_TIMEOUT_S)
-    with _sync_lock:
-        _sync_waiters.pop(sync_id, None)
+def _scaled(pcm: bytes, percent: int) -> bytes:
+    """16-bit samples at `percent` of their level."""
+    if percent >= 100 or not pcm:
+        return pcm
+    if percent <= 0:
+        return b""
+    gain = percent / 100
+    samples = array.array("h")
+    samples.frombytes(pcm)
+    return array.array("h", (int(s * gain) for s in samples)).tobytes()
 
 
-def _pump() -> None:
-    """Own the speech worker: start it, feed it phrases, restart it if it dies.
-
-    COALESCE AND PACE. The worker speaks with purge-before-speak, so if we hand it five phrases it
-    dutifully starts and cancels five utterances, and each stop-and-restart costs real time, which is
-    heard as the announcer pausing for a second before it says anything. So: whenever more than one
-    phrase is waiting, only the NEWEST is sent (older ones are already obsolete by definition),
-    and we never hand over faster than PACE_S. A moving fader then speaks about five times a
-    second, every phrase audible, none of them queued behind a cancelled one."""
-    proc = None
-    last_sent = 0.0
-    sent_vol = None          # the volume the LIVE worker was last told, so a change is sent once
-    spawned_gen = -1         # the voice/device generation the LIVE worker was started with
+def _speech_thread() -> None:
+    """Play whatever is newest, one item at a time, and close the device once speech goes quiet."""
+    import pythoncom  # noqa: PLC0415
+    global _pending
+    pythoncom.CoInitialize()
+    engine = _Engine()
     while True:
-        text = _queue.get()
-        if text is None:                                   # shutdown sentinel
-            break
-        # Anything already waiting supersedes what we just took.
-        while True:
-            try:
-                newer = _queue.get_nowait()
-            except queue.Empty:
-                break
-            if newer is None:
-                return
-            _release(text)
-            text = newer
-        # Pace the hand-off, preferring anything that arrives while we wait.
-        gap = PACE_S - (time.monotonic() - last_sent)
-        while gap > 0:
-            try:
-                newer = _queue.get(timeout=gap)
-            except queue.Empty:
-                break
-            if newer is None:
-                return
-            _release(text)
-            text = newer
-            gap = PACE_S - (time.monotonic() - last_sent)
-        last_sent = time.monotonic()
-        if proc is not None and proc.poll() is not None:    # worker died; drop it and respawn
-            proc = None
-        gen = worker_gen                               # read once, with the values below
-        voice, device = chosen_voice, chosen_output
-        if proc is not None and spawned_gen != gen:
-            # The voice or the output device changed. Both are fixed when the worker creates its
-            # SpVoice, so the running one has to go; the replacement is started immediately below and
-            # speaks the confirmation the action queued, which is how you hear the new voice.
-            try:
-                proc.stdin.write("__QUIT__\n"); proc.stdin.flush()
-            except Exception:
-                try: proc.kill()
-                except Exception: pass
-            proc = None
-        vol = volume                                   # read once; it can change under us
-        if proc is None:
-            cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
-                   resource_path("say.ps1"), "-Volume", str(vol)]
-            if voice:
-                cmd += ["-Voice", voice]
-            if device:
-                cmd += ["-Device", device]
-            try:
-                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
-                                        text=True, bufsize=1)
-                # Drained for as long as the worker lives: it writes a line per phrase, and an
-                # unread pipe fills and blocks it mid-sentence.
-                threading.Thread(target=_worker_replies, args=(proc,), daemon=True).start()
-                sent_vol = vol
-                spawned_gen = gen
-            except Exception:
-                _say_oneshot(text)                      # no worker: degrade, do not go silent
-                continue
+        if not _wake.wait(1.0):
+            engine.idle()
+            continue
+        with _pending_lock:
+            item, _pending = _pending, None
+            _wake.clear()
+            _interrupt.clear()
+        if item is None:
+            continue
         try:
-            # A volume change rides in front of the next phrase rather than being pushed to the
-            # worker the moment the slider moves: the pump is the only thread that owns proc, so
-            # nothing else may write to its stdin. Nothing is lost by waiting, since volume only
-            # matters when something is about to be spoken.
-            if sent_vol != vol:
-                proc.stdin.write(f"!vol {vol}\n")
-                sent_vol = vol
-            proc.stdin.write(text + "\n")
-            proc.stdin.flush()
-        except Exception:
-            try: proc.kill()
-            except Exception: pass
-            proc = None
-            _say_oneshot(text)
-    if proc is not None:
-        try:
-            proc.stdin.write("__QUIT__\n"); proc.stdin.flush()
-        except Exception:
-            try: proc.kill()
-            except Exception: pass
+            engine.play(item)
+        except Exception as exc:
+            diagnostics.event("announcer.speech_failed", str(exc), text=item.text[:90])
+            engine.reset()
+        finally:
+            _release(item)
 
 
-def say(text: str) -> None:
-    """Queue one phrase for the speech worker. Never blocks the caller (the announcer's read loop
-    must keep draining the HID queue), and never lets a burst build a backlog: past _SAY_QMAX
-    the OLDEST pending phrase is dropped, because the newest state is the one worth hearing.
+def _submit(item: _Item, logged: str) -> None:
+    """Log `item`, then hand it to the speech thread unless announcements are off or this is a test.
+    Never blocks: a newer item replaces one still waiting, and cuts off a phrase already playing.
 
     LOGGED, BECAUSE SPEECH IS THIS APP'S MAIN OUTPUT. Without this line, everything sent to the
     desk is traceable and nothing said to the USER is, which is the wrong way round for an app
-    whose whole purpose is telling a blind operator what the desk just did: a burst of repeating
-    cues then arrives with the log silent either side, and nothing says what fired them or how many
-    there were. A cue is logged by NAME rather than as a file path, so a run of them reads as a run
-    of them. A SUPPRESSED phrase is logged too, marked: "it said nothing" and "it was never asked
-    to" are different faults and the log has to tell them apart.
+    whose whole purpose is telling a blind operator what the desk just did. A SUPPRESSED item is
+    logged too, marked: "it said nothing" and "it was never asked to" are different faults.
 
     THE ANNOUNCER SWITCH IS ENFORCED HERE, because it is the only place every phrase passes
     through: roughly half the speech comes from outside the announcer's read loop (the
     virtual-devices follow-up after a USB mode change, the recorder watcher). The phrases
     announcing that speech is BACK are safe: each one sets the flag before it speaks.
     """
-    if text.startswith(WAV_PREFIX):
-        what = "cue " + os.path.basename(text[len(WAV_PREFIX):]).split("-")[0]
-    elif text.startswith(SYNC_PREFIX):
-        what = text[len(SYNC_PREFIX):].partition(" ")[2][:90]
-    else:
-        what = text[:90]
+    global _pending, _thread
     if not enabled.is_set():
-        diagnostics.event("say", what + "  [suppressed: announcements off]")
-        _release(text)
+        diagnostics.event("say", logged + "  [suppressed: announcements off]")
+        _release(item)
         return
-    diagnostics.event("say", what)
+    diagnostics.event("say", logged)
     if SILENT:
-        _release(text)
+        _release(item)
         return                  # a test run: recorded above, never played. See SILENT.
-    global _pump_thread
-    with _pump_lock:
-        if _pump_thread is None or not _pump_thread.is_alive():
-            _pump_thread = threading.Thread(target=_pump, daemon=True)
-            _pump_thread.start()
-    while _queue.qsize() >= _SAY_QMAX:
-        try:
-            _release(_queue.get_nowait())
-        except queue.Empty:
-            break
-    _queue.put_nowait(text)
+    with _thread_lock:
+        if _thread is None or not _thread.is_alive():
+            _thread = threading.Thread(target=_speech_thread, name="speech", daemon=True)
+            _thread.start()
+    with _pending_lock:
+        _release(_pending)
+        _pending = item
+        _wake.set()
+        _interrupt.set()
+
+
+def say(text: str) -> None:
+    """Speak one phrase. Never blocks the caller: the announcer's read loop must keep draining the
+    HID queue."""
+    _submit(_Item(text), text[:90])
+
+
+def say_and_wait(text: str) -> None:
+    """Speak `text` and return once it has finished playing, so the caller can act after it: the
+    words "Resuming" must be over before the desk starts recording again. Nothing cuts it off once
+    it starts, but a newer item queued before then replaces it. Returns at once when announcements
+    are off, and after _SAY_AND_WAIT_TIMEOUT_S at worst."""
+    done = threading.Event()
+    _submit(_Item(text, done=done), text[:90])
+    done.wait(_SAY_AND_WAIT_TIMEOUT_S)
+
+
+def tone(name: str) -> bool:
+    """Play the named cue instead of a phrase. True if it was queued, False if we have no such
+    tone, in which case the caller must speak: a cue that silently does nothing is worse than the
+    sentence it was replacing. Nothing cuts a cue off."""
+    try:
+        path = tones.tone_path(name)
+    except Exception:
+        return False
+    if not path:
+        return False
+    _submit(_Item(name, cue_path=path), "cue " + name)
+    return True
 
 
 def action_set_announce_volume(percent: int) -> dict:
-    """How loud announcements are. SAPI stream volume, so this changes OUR speech only and never
+    """How loud announcements are. It scales our own samples, so this changes OUR speech only and never
     Windows volume, another app, or the desk's audio. The confirmation is spoken, which is the
     point: it arrives at the new level, so you hear what you have chosen straight away."""
     global volume
@@ -390,7 +396,7 @@ def action_set_announce_volume(percent: int) -> dict:
     msg = (f"Announcement volume {volume} percent." if volume
            else "Announcements are silenced.")
     if volume:
-        say(msg)                     # rides in behind the new volume; see _pump
+        say(msg)                     # played at the new volume
     return {"ok": True, "volume": volume, "message": msg}
 
 
@@ -398,8 +404,8 @@ def _pick(value: str, offered: list) -> str | None:
     """Resolve what the page sent against what SAPI actually offers. An exact name wins; failing
     that a case-insensitive substring is accepted, so a shortened name ("Zira", "Realtek") still
     works from a script or an older saved setting. Anything else is rejected rather than passed to
-    the worker, where it would silently fall back to the default and look like the setting was
-    ignored. "" means "leave it to Windows"."""
+    the speech thread, where it would silently fall back to the default and look like the setting
+    was ignored. "" means "leave it to Windows"."""
     value = (value or "").strip()
     if not value:
         return ""
@@ -415,22 +421,22 @@ def _pick(value: str, offered: list) -> str | None:
 
 def action_set_announce_voice(voice: str) -> dict:
     """Which voice speaks announcements. The confirmation is spoken IN THE NEW VOICE, which is the
-    point: the worker is restarted with it and the sample is the first thing it says."""
+    point: the sample is the first thing the new voice says."""
     return _choose("voice", voice)
 
 
 def action_set_announce_output(output: str) -> dict:
-    """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it sets the audio
-    output on our own SAPI voice, so it does not move the system default device, and it does not
+    """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it is the device our
+    own player opens, so it does not move the system default device, and it does not
     touch the screen reader or any other program. It exists because the default output is often
     the RODECaster itself, and then announcements vanish the moment another channel is soloed."""
     return _choose("output", output)
 
 
 def _choose(kind: str, wanted: str) -> dict:
-    """Set the announcer's "voice" or "output" to one this computer offers, restart the speech
-    worker with it, save it, and confirm through the restarted worker. "" is the default."""
-    global chosen_voice, chosen_output, worker_gen
+    """Set the announcer's "voice" or "output" to one this computer offers, save it, and confirm in
+    the new voice on the new output. "" is the default."""
+    global chosen_voice, chosen_output, config_gen
     voice = kind == "voice"
     picked = _pick(wanted, sapi_lists()["voices" if voice else "outputs"])
     if picked is None:
@@ -447,7 +453,7 @@ def _choose(kind: str, wanted: str) -> dict:
         settings_file.update(announcer_output=picked)
         msg = (f"Announcements will now play through {picked}." if picked
                else "Announcements will now play through the computer's default output.")
-    worker_gen += 1
+    config_gen += 1
     say(msg)
     return {"ok": True, kind: picked, "message": msg}
 
@@ -462,15 +468,14 @@ def action_refresh_speech_devices() -> dict:
 
 
 def apply_settings(changes: dict) -> None:
-    """Push restored speech preferences into the running worker, not just the file. The voice and
-    the output are fixed when the worker starts, so a change bumps `worker_gen` and the pump
-    restarts it before the next phrase."""
-    global volume, chosen_voice, chosen_output, worker_gen
+    """Push restored speech preferences into the running speech thread, not just the file. A voice
+    or output change bumps `config_gen`, which the thread takes up before its next phrase."""
+    global volume, chosen_voice, chosen_output, config_gen
     if "announcer_volume" in changes:
         volume = clamp_volume(changes["announcer_volume"])
     if "announcer_voice" in changes:
         chosen_voice = str(changes["announcer_voice"] or "")
-        worker_gen += 1
+        config_gen += 1
     if "announcer_output" in changes:
         chosen_output = str(changes["announcer_output"] or "")
-        worker_gen += 1
+        config_gen += 1

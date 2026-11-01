@@ -8,9 +8,8 @@ muted for. Speech stays the default and stays available; this is an option, not 
 WHY WAV FILES RATHER THAN A BEEP. `winsound.Beep` and `[Console]::Beep` play on the SYSTEM default
 output, and on the machines this app runs on the system default IS the RODECaster. A cue that goes
 down the desk is a cue your callers hear and you might not, which is the exact fault the announcer's
-own output picker exists to avoid. A WAV can be played through SAPI's `SpeakStream` on the SAME
-SpVoice the speech worker already owns, so it inherits the chosen output device and the announcer's
-volume for free, and nothing new has to learn about audio endpoints.
+own output picker exists to avoid. A WAV is played by the speech thread on the same player as the
+speech, so it inherits the chosen output device and the announcer's volume.
 
 WHY GENERATED RATHER THAN SHIPPED. They are two sine waves; generating them is a dozen lines and
 removes two binaries from the repo, the installer and the bundle. They are written once into the
@@ -32,7 +31,7 @@ import wave
 
 from paths import data_path
 
-# 22.05 kHz is SAPI's native rate. A preference, not a requirement: 44.1 kHz plays as well.
+# The speech thread's player runs at this rate and plays a cue only at this rate, mono, 16-bit.
 SAMPLE_RATE = 22050
 PEAK = 0.35                # conservative: this plays on whatever the announcer is pointed at
 FADE_S = 0.008             # a click at either end is louder than the tone; this removes both
@@ -58,7 +57,7 @@ TONES = {
 # it replaces, and the pair still lands in well under a fifth of a second.
 NOTE_S = 0.07
 GAP_S = 0.025
-# The whole cue, for callers that need to know how long it occupies the speech worker (see
+# The whole cue, for callers that need to know how long it occupies the speech thread (see
 # announcer.action_set_announce_mute_tones, which plays both cues in turn). TWO notes: this timing is
 # quoted for the mute pair, and the three-note job cues are not on anyone's critical path.
 DURATION_S = 2 * NOTE_S + GAP_S

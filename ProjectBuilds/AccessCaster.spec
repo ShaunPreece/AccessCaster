@@ -17,7 +17,7 @@
 import os
 import re
 _ROOT = os.path.dirname(SPECPATH)
-_PROJ = os.path.join(_ROOT, 'Project')          # the app code + static/ + say.ps1 + assets/
+_PROJ = os.path.join(_ROOT, 'Project')          # the app code + static/ + assets/
 _ASSETS = os.path.join(_ROOT, 'ProjectAssets')  # device data: fx_recipes, mic_presets
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,6 @@ datas = [
     # different question, and they are what the effects and mixer restore is built from.
     (os.path.join(_ASSETS, 'mic_presets.json'), '.'),          # factory mic-processing presets
     (os.path.join(_ASSETS, 'fx_recipes.json'), '.'),           # factory voice-FX recipes
-    (os.path.join(_PROJ, 'say.ps1'), '.'),                     # SAPI speech: the worker and the one-shot
     (os.path.join(_PROJ, 'assets', 'icon.ico'), 'assets'),     # tray / window / exe icon
 ]
 

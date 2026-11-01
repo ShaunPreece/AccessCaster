@@ -18,8 +18,9 @@ if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out -Force | Ou
 $clip = Join-Path $out "_warm.mkv"
 $png  = Join-Path $out "$Name.png"
 
-ffmpeg -hide_banner -loglevel error -y -f dshow -video_size 1920x1080 -framerate 30 `
-    -rtbufsize 200M -i "video=$Device" -t $Seconds $clip
+# No -video_size or -framerate: the camera offers one mode (1920x1080 at 60 fps), and asking for any
+# other, or naming that one, fails with "Could not set video options".
+ffmpeg -hide_banner -loglevel error -y -f dshow -rtbufsize 200M -i "video=$Device" -t $Seconds $clip
 ffmpeg -hide_banner -loglevel error -y -sseof -0.5 -i $clip -frames:v 1 $png
 Remove-Item $clip -ErrorAction SilentlyContinue
 

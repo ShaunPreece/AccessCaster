@@ -1,4 +1,4 @@
-# say_gated.ps1 - speak a status line through Project/say.ps1, unless the Claude GUI has the focus.
+# say_gated.ps1 - speak a status line through say.ps1, unless the Claude GUI has the focus.
 #
 # For a development session driven through Claudio: while Claudio is the foreground window, the
 # screen reader is already reading the chat, so speaking would talk over it. When another app has
@@ -39,4 +39,4 @@ if (-not $Force) {
 
 $pass = @{} + $PSBoundParameters
 $pass.Remove('Force')
-& (Join-Path $PSScriptRoot '..\Project\say.ps1') @pass
+& (Join-Path $PSScriptRoot 'say.ps1') @pass

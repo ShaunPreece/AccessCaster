@@ -4,7 +4,7 @@ message in plain English, so a blind user can confirm a MIDI Trigger pad actuall
 The RODECaster Pro II appears to the PC as a USB MIDI input port ("MIDI function 0"). When you
 press a Trigger-type SMART pad (padType 4) it sends a MIDI message out of that port. This script
 opens the port, decodes each incoming message, prints it, and (with --speak) says it aloud via
-Project/say.ps1 (SAPI) so you hear it at the device without reading the terminal.
+DevTools/say.ps1 (SAPI) so you hear it at the device without reading the terminal.
 
 Needs python-rtmidi, which only the DevTools use:
 `python -m pip install -r DevTools/requirements-dev.txt`.

@@ -1754,9 +1754,9 @@ function fillSpeechChoices(data) {
   fill("announce-output", data.outputs, data.output || "", "Windows default output", "outputs");
 }
 
-/* Both of these restart the speech worker on the server, and the confirmation is spoken THROUGH the
-   new voice and the new output, which is the real test: if you cannot hear it, that output is not
-   the one you are listening to. The written status says the same thing for the record. */
+/* Both of these change the server's speech before its next phrase, and the confirmation is spoken
+   THROUGH the new voice and the new output, which is the real test: if you cannot hear it, that
+   output is not the one you are listening to. The written status says the same thing for the record. */
 function onAnnounceSpeechChange(kind) {
   return async (ev) => {
     const sel = ev.target;
@@ -1787,7 +1787,7 @@ async function onAnnounceDevicesRefresh(ev) {
   }
 }
 
-/* Announcement volume. SAPI stream volume on the server side, so it scales our speech ONLY and
+/* Announcement volume. The server scales its own speech samples, so it changes our speech ONLY and
    never Windows volume or the desk's audio. Debounced like the pad volume slider: dragging a range
    input fires on every step, and each commit speaks a confirmation, so writing per step would talk
    over itself the whole way along. */

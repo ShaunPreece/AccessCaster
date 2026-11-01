@@ -1,7 +1,7 @@
 """The control announcer: speaks the desk's own button presses aloud (an accessibility aid).
 
 A background thread listens to report-04 HID events and speaks bank changes / mute / solo /
-encoder presses via SAPI (say.ps1), so a screen-reader user knows what a physical press did
+encoder presses through `speech`, so a screen-reader user knows what a physical press did
 without seeing the touchscreen.
 
 DEVICE-AGNOSTIC: the decoder keys off the report-04 PROPERTY NAMES
@@ -210,6 +210,10 @@ _POT_COUNT = 4
 # by no level change, announce that it is not linked. `encoderColour` corroborates it - it read 7 while
 # the encoder was driving a fader and -1 once it went inert - so we use that when the desk offers it.
 _ENC_DEAD_S = 0.45     # a turn with no level change within this was a turn against nothing
+# WHAT THE ENCODER IS BOUND TO is touchscreen state with no property of its own, and the desk can
+# leave it bound to nothing with `systemChannelSelected` still at -1. These pushes are the candidates
+# for that state, so each change is logged as `desk.state` to line up against a dead turn.
+_TRACED_STATE = ("systemChannelSelected", "systemMixSelected", "padActiveEdit", "encoderColour")
 _ENC_DEAD_GAP_S = 4.0  # and do not repeat that message more often than this
 # A pushed cross-point selector is CROSS_POINT_BASE + 13*source + output (rcp_transfer), and the
 # matrix row IS the source code, so one selector gives the source directly.
@@ -274,6 +278,11 @@ def handle_report(b: bytes, st: dict) -> None:
     strip = path[0] - rcp_transfer.SEL_CHANNEL if len(path) == 1 else -1
     if not 0 <= strip < 16:
         strip = -1
+    if name in _TRACED_STATE:
+        traced = st.setdefault("traced", {})
+        if traced.get(name, object()) != val:
+            traced[name] = val
+            diagnostics.event("desk.state", name, value=val)
 
     if name == "selectedBank":
         if ival is None:
@@ -516,6 +525,11 @@ def seed_layout(st: dict) -> None:
         sel = rcp_read.values(blob, "systemChannelSelected")
         if sel and isinstance(sel[0], int):
             st["chan_sel"] = sel[0]
+        for name in _TRACED_STATE:
+            v = rcp_read.values(blob, name)
+            if v:
+                st.setdefault("traced", {})[name] = v[0]
+                diagnostics.event("desk.state", name, value=v[0], at="start")
         # Stored RAW (the desk numbers banks from 0); the announcement adds 1.
         bank = [v for v in rcp_read.values(blob, "selectedBank") if isinstance(v, int)]
         if bank:
@@ -630,8 +644,8 @@ def _level_words(name: str, level: float, *, name_first: bool, say_percent: bool
     functions that drifted apart:
 
       * A LEVEL MOVED -> number first. Speaking the name first is what makes a turn feel laggy:
-        "USB 2 (Main Stereo)" takes about a second, and each new update purges and restarts the
-        speech, so the number never arrives until the movement stops. Number-first means the
+        "USB 2 (Main Stereo)" takes about a second, and each new update cuts off the phrase before
+        it, so the number never arrives until the movement stops. Number-first means the
         changing fact lands even when the next update cuts the phrase mid-word, and the name
         completes on the first pause.
       * SOMETHING WAS SELECTED -> name first. Nothing has moved yet; the question the press asks is
@@ -1193,11 +1207,10 @@ def action_set_announce_mute_tones(on: bool) -> dict:
     mute_tones = bool(on)
     settings_file.update(announcer_mute_tones=mute_tones)
     if on:
-        # PLAYED WITH A GAP. The pump coalesces whatever is waiting down to the newest item, so two
-        # cues queued back to back play only the second. Long enough for the first tone to play and
-        # to clear the pump's own pacing.
+        # PLAYED WITH A GAP. The speech thread keeps only the newest item waiting, so two cues
+        # queued back to back play only the second. The gap also keeps them apart as two cues.
         speech.tone("muted")
-        time.sleep(max(0.45, speech.PACE_S * 2 + tones.DURATION_S))
+        time.sleep(tones.DURATION_S + 0.4)
         speech.tone("unmuted")
     return {"ok": True, "mute_tones": mute_tones,
             "message": ("Mutes will play a tone instead of being spoken: two notes falling means "

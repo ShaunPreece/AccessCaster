@@ -1491,12 +1491,10 @@ def _callme_ring(call_id, sentence: str) -> None:
     """Ring until that call stops ringing (answered, declined, given up or timed out): one ring,
     then who is calling, again every _CALLME_RING_CYCLE_S.
 
-    IN TURN, NEVER TOGETHER, both through the speech worker: it purges before it speaks, so
-    anything queued while the ring plays cuts it short, and a second SpVoice on the same output
-    waits for the first rather than mixing with it. So the ring is queued and given its own length
-    to play, and the name is spoken with speech.say_and_wait. Nothing plays between turns, so the call
+    IN TURN, NEVER TOGETHER: the speech thread plays one item at a time and keeps only the newest
+    waiting, so a name queued while the ring plays would replace the next ring. So the ring is
+    queued and given its own length to play, and the name is spoken with speech.say_and_wait. Nothing plays between turns, so the call
     and the ringtone switch are checked only before each one. The announcer switch silences both."""
-    path = tones.tone_path("ring")
     start = time.monotonic()
 
     def still_ringing() -> bool:
@@ -1508,8 +1506,7 @@ def _callme_ring(call_id, sentence: str) -> None:
 
     while still_ringing():
         cycle = time.monotonic()
-        if path:
-            speech.say(speech.WAV_PREFIX + path)
+        if speech.tone("ring"):
             time.sleep(tones.RING_DURATION_S + 0.15)
         if not still_ringing():
             return
@@ -2637,7 +2634,7 @@ def action_set_midi(on: bool) -> dict:
     return {"ok": True, "message": f"MIDI control turned {'on' if on else 'off'}."}
 
 
-# The control announcer and the speech worker are announcer.py and speech.py. This is the server's
+# The control announcer and the speech thread are announcer.py and speech.py. This is the server's
 # side of the announcer's interface.
 class _AnnouncerHooks(announcer.Hooks):
     """The device lock, the shortcut layer's pad tracking, and what a reconnect means for the USB

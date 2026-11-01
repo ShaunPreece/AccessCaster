@@ -23,7 +23,6 @@ from __future__ import annotations
 import sys
 import threading
 import time
-import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -223,31 +222,22 @@ speech.say_and_wait("Resuming")
 check("with announcements off it does not wait", time.monotonic() - t0 < 0.5, True)
 
 
-def fake_say_worker_done(text):
-    """The worker's side: speak, then answer DONE for a sync phrase."""
-    SAID.append(text)
-    if text.startswith(speech.SYNC_PREFIX):
-        sid = text[len(speech.SYNC_PREFIX):].partition(" ")[0]
-        threading.Timer(0.2, speech._worker_replies,
-                        args=(types.SimpleNamespace(stdout=iter(["SAID x\n", f"DONE {sid}\n"])),)
-                        ).start()
+def fake_submit_played(item, logged):
+    """The speech thread's side: play the phrase, then release whoever waits on it."""
+    SAID.append(item.text)
+    threading.Timer(0.2, speech._release, args=(item,)).start()
 
 
-speech.say = fake_say_worker_done
-_silent, speech.SILENT = speech.SILENT, False    # the stubbed worker plays nothing
+_submit, speech._submit = speech._submit, fake_submit_played
 reset(announcing=True)
 t0 = time.monotonic()
 speech.say_and_wait("Resuming")
 took = time.monotonic() - t0
-check("it waits for the worker's DONE", 0.15 < took < 2.0, True)
-check("and the phrase travels as a sync line carrying the words",
-      len(SAID) == 1 and SAID[0].endswith(" Resuming"), True)
-check("no waiter is left behind", speech._sync_waiters, {})
-ev = threading.Event()
-speech._sync_waiters["99"] = ev
-speech._release(speech.SYNC_PREFIX + "99 Resuming")
-check("a sync phrase that is dropped releases its waiter", ev.is_set(), True)
-speech.say = fake_say
-speech.SILENT = _silent
+check("it waits until the phrase has played", 0.15 < took < 2.0, True)
+check("and the phrase carries the words", SAID, ["Resuming"])
+dropped = speech._Item("Resuming", done=threading.Event())
+speech._release(dropped)
+check("a phrase that is dropped releases its waiter", dropped.done.is_set(), True)
+speech._submit = _submit
 
 sys.exit(_testkit.finish())

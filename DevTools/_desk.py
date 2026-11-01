@@ -72,15 +72,14 @@ def wait_for_job(read_status, timeout: float = 180.0, pause: float = 1.0,
 
 
 def say(text: str, gated: bool = False, wait: bool = False) -> None:
-    """Speak `text` once through `Project/say.ps1`, the one-shot the app falls back to, so the voice
-    and output device chosen in the app are honoured.
+    """Speak `text` once through `DevTools/say.ps1`, on Windows' default voice and output.
 
     `gated` goes through `say_gated.ps1`, which stays quiet while Claudio has the focus. `wait`
     blocks until the line has been spoken; a script that is reading the desk while it speaks leaves
     it false. Speech is a convenience, so a failure to start PowerShell is ignored.
     """
     script = (os.path.join(_bootstrap.DEVTOOLS, "say_gated.ps1") if gated
-              else os.path.join(_bootstrap.PROJECT, "say.ps1"))
+              else os.path.join(_bootstrap.DEVTOOLS, "say.ps1"))
     args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
             "-Text", text]
     try:

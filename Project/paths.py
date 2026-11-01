@@ -54,7 +54,7 @@ def resource_path(*parts: str) -> str:
     """Absolute path to a read-only bundled asset (e.g. resource_path('static', 'index.html')).
 
     When frozen, every bundled asset sits flat under RESOURCE_DIR (sys._MEIPASS). Running from
-    source the assets are split across the repo: the app's own files (static/, say.ps1,
+    source the assets are split across the repo: the app's own files (static/,
     assets/icon.ico) live alongside the code in Project/, while the device data (fx_recipes.json,
     mic_presets.json) lives in the sibling ProjectAssets/ folder. So in source mode we look in both
     Project/ and ../ProjectAssets/ and return the first match.

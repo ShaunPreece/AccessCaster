@@ -929,12 +929,12 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
     # ---- the announcer's VOICE and OUTPUT DEVICE ----------------
     # No sound is made here and no setting is left changed: SAPI's two lists are stubbed, the
     # settings writer is stubbed, and the originals go back at the end. What is under test is the
-    # matching (exact wins, substring accepted, nonsense refused), that a change RESTARTS the speech
-    # worker rather than being applied to a live one, and that the confirmation is spoken so the new
+    # matching (exact wins, substring accepted, nonsense refused), that a change moves the speech
+    # thread's configuration generation, and that the confirmation is spoken so the new
     # voice and output are heard rather than trusted.
     print("\n-- announcer voice and output device")
     WROTE: dict = {}
-    # The voice, output and worker generation are patched with their own values, so whatever the
+    # The voice, output and configuration generation are patched with their own values, so whatever the
     # checks below change is put back.
     with patched((speech, {
             "sapi_lists": lambda refresh=False: {
@@ -944,17 +944,16 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
                             "Speakers (Realtek(R) Audio)"]},
             "chosen_voice": speech.chosen_voice,
             "chosen_output": speech.chosen_output,
-            "worker_gen": speech.worker_gen}),
+            "config_gen": speech.config_gen}),
             (settings_file, {"update": lambda **kw: WROTE.update(kw)})):
         SPOKEN.clear()
-        gen0 = speech.worker_gen
+        gen0 = speech.config_gen
         res = speech.action_set_announce_voice(
             "Microsoft Zira Desktop - English (United States)")
         check_true("an exact voice name is accepted", res.get("ok"))
-        check("and it is what the worker will be started with", speech.chosen_voice,
+        check("and it is what the speech thread will take up", speech.chosen_voice,
               "Microsoft Zira Desktop - English (United States)")
-        check_true("the change restarts the worker (voice is fixed when the SpVoice is made)",
-                   speech.worker_gen > gen0)
+        check_true("the change is handed to the speech thread", speech.config_gen > gen0)
         check("it is remembered between sessions", WROTE.get("announcer_voice"),
               "Microsoft Zira Desktop - English (United States)")
         check_true("and a sample is SPOKEN, so the new voice is heard not assumed",
@@ -966,17 +965,17 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
               "Microsoft Hazel Desktop - English (Great Britain)")
 
         SPOKEN.clear()
-        gen1 = speech.worker_gen
+        gen1 = speech.config_gen
         res = speech.action_set_announce_voice("Microsoft Aria (Natural)")
         check_true("a voice this computer does not have is REFUSED", not res.get("ok"))
         check("the setting is left alone", speech.chosen_voice,
               "Microsoft Hazel Desktop - English (Great Britain)")
-        check("the worker is not restarted for a refused change", speech.worker_gen, gen1)
+        check("a refused change is not handed on", speech.config_gen, gen1)
         check("and nothing is spoken", SPOKEN, [])
 
         res = speech.action_set_announce_voice("")
         check_true("empty means the Windows default, which is a real choice", res.get("ok"))
-        check("so the worker is started with no -Voice at all", speech.chosen_voice, "")
+        check("so the default voice is used", speech.chosen_voice, "")
 
         SPOKEN.clear()
         res = speech.action_set_announce_output("Realtek")
