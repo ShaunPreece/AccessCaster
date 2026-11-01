@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import pad_shortcuts
 import server
 import soundpad
 from _testkit import check, patched
@@ -76,7 +77,7 @@ def main() -> int:
     # Their padActive is the desk showing which input and scene it has selected. Treated as latched
     # pads, unlatch_all switches off the desk's own state to "make it safe", and a factory-FX rebuild
     # ends by announcing it switched off Input 1 and Scene A. The detection is shared, so the same
-    # mistake would make _hk_pad_verify unlatch Input 1 whenever a shortcut press did not take.
+    # mistake would make pad_shortcuts._pad_verify unlatch Input 1 whenever a shortcut press did not take.
     latched, engaged = with_pads(PADS_WITH_SYSTEM, [False, False, False, True, True])
     check("Input 1 and Scene A being on is not a latched pad", latched, [])
     check("and the overview does not report them either", engaged, [])
@@ -103,13 +104,13 @@ def main() -> int:
     # and colour with no region-B object bound to it, so `padActive` latches and processes nothing.
     # A shortcut that wrote the flag and said "on" would be telling the operator their voice is
     # disguised when the mic is untouched - see soundpad.heal_fx_pool for how a desk gets there.
-    with patched((server, {"_hk_fx_missing": frozenset({14}), "_hk_pads_on": set()})):
-        said = server._hk_pad_toggle(14, 23, "Small Robot")
+    with patched((pad_shortcuts, {"_fx_missing": frozenset({14}), "_pads_on": set()})):
+        said = pad_shortcuts._pad_toggle(14, 23, "Small Robot")
         check("it says the pad has nothing behind it",
               "no effect behind it" in said["message"], True)
         check("it names the way out", "Restore the factory voice effects" in said["message"], True)
         check("and reports it as a failure, so a silent shortcut still speaks it", said["ok"], False)
-        check("and it does NOT record the pad as engaged", 14 in server._hk_pads_on, False)
+        check("and it does NOT record the pad as engaged", 14 in pad_shortcuts._pads_on, False)
 
         # Turning OFF is never blocked: a pad that is somehow already latched must always be
         # releasable, which is the whole point of the read-out that finds it.
@@ -119,15 +120,15 @@ def main() -> int:
         # test - which segfaults the interpreter on exit (closing a handle while a read is in flight
         # on another thread). Stubbing keeps the assertion about the GUARD, which is what is on
         # trial here.
-        # `_hk_pad_verify` goes too, and for a sharper reason than tidiness: it runs on a BACKGROUND
+        # `_pad_verify` goes too, and for a sharper reason than tidiness: it runs on a BACKGROUND
         # THREAD that reads the desk, so the interpreter exits with a HID read in flight and
         # segfaults (exit 139) after every check has already printed "ok". A suite that passes and
         # then crashes is worse than one that fails.
         released = []
         with patched((soundpad, {"unlatch_pad": lambda pos: released.append(pos)}),
-                     (server, {"_hk_pad_verify": lambda *a, **k: None})):
-            server._hk_pads_on.add(14)
-            off = server._hk_pad_toggle(14, 23, "Small Robot")
+                     (pad_shortcuts, {"_pad_verify": lambda *a, **k: None})):
+            pad_shortcuts._pads_on.add(14)
+            off = pad_shortcuts._pad_toggle(14, 23, "Small Robot")
         check("releasing one is not blocked by the same guard",
               "no effect behind it" in off["message"], False)
         check("and the release really was sent", released, [23])

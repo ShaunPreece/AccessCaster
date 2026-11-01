@@ -469,10 +469,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   suite opts back in automatically, because driving the desk is what it is for.
   **WHY IT RAISES RATHER THAN SWALLOWING THE WRITE:** a silently dropped write leaves the test
   passing while proving nothing. Earned on 21st September 2026, when a new check in
-  `test_latched_pads` called the real `_hk_pad_toggle` and disengaged a voice-FX pad on Shaun's
+  `test_latched_pads` called the real `pad_shortcuts._pad_toggle` and disengaged a voice-FX pad on Shaun's
   live desk twice - he heard the tone and the audio drop from another room, and the suite reported
   ALL CHECKS PASSED both times.
-  **THE SECOND HALF IS THE BACKGROUND THREAD.** `_hk_pad_toggle` starts `_hk_pad_verify` on its own
+  **THE SECOND HALF IS THE BACKGROUND THREAD.** `_pad_toggle` starts `_pad_verify` on its own
   thread, which READS the desk, so stubbing only the write still left the interpreter exiting with a
   HID read in flight: every check printed ok and the process then segfaulted (exit 139). Stub the
   verify too. A suite that passes and then crashes is worse than one that fails.
@@ -1274,7 +1274,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **SYSTEM PADS (padType 6, bank 8: Input 1-4, Scene A/B, Auto, Cut) ARE NOT LATCHED PADS.** Their
   `padActive` is the desk showing which input and scene it has selected. `latched_pads` walked every
   record without filtering, so `unlatch_all` "made safe" by switching off the desk's own Input 1 and
-  Scene A (seen 4th September 2026 at the end of a factory-FX rebuild), and `_hk_pad_verify` would
+  Scene A (seen 4th September 2026 at the end of a factory-FX rebuild), and `pad_shortcuts._pad_verify` would
   unlatch Input 1 and announce it had fired the wrong pad. Filter on `SYSTEM_PAD_TYPE`, and note the
   flag vector still carries one entry per pad INCLUDING them, so skipping must not shift the index.
 
@@ -2549,15 +2549,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Global keyboard shortcuts
 
-- **A PAD SHORTCUT WRITES TO THE DESK UNDER `_hid_lock`, THROUGH `_hk_desk`**, which gives up after
-  `_HK_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
+- **A PAD SHORTCUT WRITES TO THE DESK UNDER `_hid_lock`, THROUGH `pad_shortcuts._desk`**, which gives
+  up after `_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
   restore has the desk in transfer mode lands inside the transfer.
   **A SOUND PAD PLAYS THROUGH A RESTORE, BY DESIGN.** Once MIDI is armed and the bank is cached, a
   sound-pad press is a MIDI note and touches no HID, so it neither waits nor is refused: measured on
   the Pro II, 31st October 2026, pads played during a profile restore with a second or two of lag at
   most. The restore re-arms MIDI when it ends, so the first press after it writes
   `systemMidiControl` again. Only voice-FX and mixer pads, a bank change and the arming write go
-  through `_hk_desk`.
+  through `_desk`.
 
 - **THE WINDOW SHORTCUT MUST RUN ON THE PUMP THREAD, AND THAT IS THE WHOLE FIX. DO NOT ADD A
   WORKAROUND TO THE RAISE.** Windows grants a process the right to set the foreground while it is
@@ -2609,7 +2609,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   A). A hotkey takes that key from every program on the machine, screen reader included, so
   `parse_binding` refuses the rest rather than letting someone break their own typing. MOD_NOREPEAT
   is always set, or a held key fires the action over and over.
-- **The cough key (`_hk_mics`) OPENS ONLY THE MICS IT MUTED.** It keeps `_hk_muted_mics`. A plain
+- **The cough key (`commands._cough_key`) OPENS ONLY THE MICS IT MUTED.** It keeps `_muted_mics`. A plain
   "any open? mute all, else unmute all" toggle silently opens channels somebody deliberately shut:
   measured 30th August 2026, one open mic and three muted went to four OPEN after two presses.
   A mic on no fader has no strip and so no mute: it is SKIPPED (`channels.strip_on_fader`), not
@@ -2671,7 +2671,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
     behind that negative is settled, so it is real and not a wrong address.
   - **`commands.PAD_TYPES` NOW OFFERS ALL THREE** (sound, voice FX, mixer). It encoded the HID-only
     limit, and widening it was the whole pad-shortcut job of 2nd September 2026. The dispatch is
-    `server._hk_fire_pad`, per pad and never per bank: the kinds are mixed inside a bank.
+    `pad_shortcuts.fire_pad`, per pad and never per bank: the kinds are mixed inside a bank.
 - **THERE IS NO REFRACTORY WINDOW ON A SECOND PRESS, and two probes "proved" one that was not
   there.** A second press stops a Toggle sound pad at every gap down to 0.3 s (measured 2nd
   September 2026, `DevTools/probe_pad_timeline.py`). The two probes that found a one-second dead
@@ -2686,14 +2686,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   on a factory Pro II every user pad sits at exactly that (the 8 system pads hold positions 0-7),
   so the two agree there and only disagree where it matters. **Only SOUND pads publish progress**,
   and **a HID-engaged pad pushes nothing at all** - the desk does not echo our own write, so a
-  voice effect switched on from software is knowable only from `_hk_pads_on`.
+  voice effect switched on from software is knowable only from `pad_shortcuts._pads_on`.
 - **A PAD SHORTCUT MUST NOT REFRESH THE PAD MAP ON EVERY PRESS, and doing so is what made pad
   firing flaky** (Shaun, 2nd September 2026: "sound pad playback and stopping is flakey"). A
   refresh is a FULL MODEL DUMP, 1.5 to 3 seconds holding `_hid_lock`, so a row of number keys at
   performance speed queued one per press - and `HotkeyManager._fire` DROPS a re-press while the
   last one is still running, so presses went missing rather than merely arriving late. It is a TTL
-  now (`_HK_PAD_CACHE_S`) plus an explicit `_hk_pads_stale()` from `_pad_write` and from a profile
-  restore. It was never needed on the MIDI path anyway: MIDI addresses a pad by bank and slot,
+  now (`pad_shortcuts._PAD_CACHE_S`) plus an explicit `pads_stale()` from `_pad_write` and from a
+  profile restore. It was never needed on the MIDI path anyway: MIDI addresses a pad by bank and slot,
   which does not move.
 - **FIRING A PAD IS THE ONE SHORTCUT THAT DOES NOT SPEAK** (Shaun, 2nd September 2026:
   "announcements for each pad has to go"). The pad is its own feedback, it is loud, and it is often
@@ -2744,8 +2744,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   byte, not part of the name, and 0x63 is child 99 of PHYSICALINTERFACE - the first SOLOMUTEBUTTON.
   PADBUTTON is children 35 to 98. Do not go looking for a property called `cmutePressed`.
 - **A pad shortcut's target is the padIdx, never the stream position.** padIdx is the pad's fixed
-  place in the grid; position moves when any pad is created or cleared. `_hk_pad_map` caches
-  padIdx -> position so a press is instant, refreshes in the background after every press, and
+  place in the grid; position moves when any pad is created or cleared. `pad_shortcuts._pad_map`
+  caches padIdx -> position so a press is instant, refreshes in the background once it is stale, and
   CHECKS that the pad that engaged is the one that was asked for. Keep that check: without it a
   stale map silently fires a stranger's voice effect onto a live mic.
 - **`hotkey_manager()` is LAZY.** Importing `server` must never register a system-wide hotkey: every
@@ -2786,12 +2786,15 @@ shared one; a new copy is how they drifted apart the first time.
   Routing page and a profile. They were built twice, so a property added to one and not the other
   would have been a setting the page could change and a profile could not put back.
 
-## The announcer and speech modules
+## The announcer, speech and pad-shortcut modules
 
-- **THE ANNOUNCER AND SPEECH NEVER IMPORT THE SERVER.** `announcer.Hooks` is everything the
-  announcer needs from the app (the device lock, pad tracking, what a reconnect means), and the
-  server installs `_AnnouncerHooks`, whose methods look the server's state up when called, so a
-  test that patches `server._hk_mixer_pos` still reaches the decoder. Call them as `speech.say(...)`
+- **THE ANNOUNCER, SPEECH AND THE PAD SHORTCUTS NEVER IMPORT THE SERVER.** `announcer.Hooks` is
+  everything the announcer needs from the app (the device lock, pad tracking, what a reconnect
+  means), and the server installs `_AnnouncerHooks`, whose methods look the state up when called,
+  so a test that patches `pad_shortcuts.mixer_positions` still reaches the decoder. The pad
+  shortcuts need only the device lock, which the server installs as `pad_shortcuts.lock` straight
+  after creating `_hid_lock`; a module that took its own lock would let a pad press write in the
+  middle of a restore. Call them as `speech.say(...)`
   and read `announcer.live_state`, never `from speech import say`: the tests patch the module
   attribute, and a name imported into another module keeps the original.
 

@@ -16,6 +16,7 @@ import _testkit
 import announcer
 import channels
 import devices
+import pad_shortcuts
 import rcp_read
 import rcp_transfer
 import server
@@ -117,7 +118,7 @@ def pad_active(position: int, on: bool) -> bytes:
     return push([position], "padActive", v_bool(on))
 
 MIXER_POS, SOUND_POS = 5, 6
-server._hk_mixer_pos = frozenset({MIXER_POS})
+pad_shortcuts.mixer_positions = frozenset({MIXER_POS})
 # One Back Channel press: the pad, then the four state pushes it moves. Nothing is worth saying.
 said, _ = run([pad_active(MIXER_POS, True),
                state_packet("channelOutputMute", 0, True), state_packet("channelCueEnable", 0, True),
@@ -142,7 +143,7 @@ check("a non-mixer pad suppresses nothing", said, ["USB 1 (Main Stereo) muted"])
 announcer._mixer_quiet_until = 0.0
 said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
 check("a real mute once the window passes", said, ["USB 1 (Main Stereo) unmuted"])
-server._hk_mixer_pos = frozenset()
+pad_shortcuts.mixer_positions = frozenset()
 
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])

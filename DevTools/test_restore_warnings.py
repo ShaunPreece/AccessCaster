@@ -27,6 +27,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import devices
+import pad_shortcuts
 import rcp_read
 import server
 from _testkit import check
@@ -89,8 +90,8 @@ server._follow_levels = lambda old, new, before, spec: CALLS.append((list(old), 
 server._level_write_gate = lambda: None
 server.profiles.apply = lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}
 server._apply_matrix = lambda routing: {"ok": True, "applied": 0, "message": ""}
-server._hk_rearm_midi = lambda: None
-server._hk_pads_stale = lambda: None
+pad_shortcuts.rearm_midi = lambda: None
+pad_shortcuts.pads_stale = lambda: None
 rcp_read.read_model = lambda *a, **k: b"blob"
 
 _seq = [list(NORMAL), list(SWAPPED)]          # before the write, then after it

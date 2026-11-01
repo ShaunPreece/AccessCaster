@@ -1,4 +1,4 @@
-"""Offline test of the COUGH KEY (server._hk_mics). NO DEVICE: the layout and mutes are held.
+"""Offline test of the COUGH KEY (commands._cough_key). NO DEVICE: the layout and mutes are held.
 
 What it pins down: a mic on no fader is left out, not refused. The cough key walks every mic, and a
 mic taken off its fader has no strip and so no mute, so one such mic must not stop the key working
@@ -15,6 +15,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import announcer
 import channels
+import commands
 import devices
 import server
 from _testkit import as_device, check, patched
@@ -33,12 +34,12 @@ def press(muted: dict) -> tuple[str, list]:
 
     with patched((announcer, {"live_state": {"muted": muted}}),
                  (server, {"action_set_channel_mute": set_mute})):
-        said = server._hk_mics()["message"]
+        said = commands._cough_key()["message"]
     return said, writes
 
 
 def main() -> int:
-    with as_device(devices.PRO2), patched((server, {"_hk_muted_mics": []})):
+    with as_device(devices.PRO2), patched((commands, {"_muted_mics": []})):
         channels.publish_strip_vector(NO_MIC4)
 
         print("A MIC ON NO FADER IS LEFT OUT")

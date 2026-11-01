@@ -32,9 +32,12 @@ import announcer
 import channels
 import devices
 import diagnostics
+import pad_shortcuts
+import rcp_read
 import recorder
 import soundpad
 import speech
+import wording
 
 # How far one press moves a level, as a percentage of full scale. Five is a real step you can hear
 # without being a jump, and four presses make a fifth of the range.
@@ -89,7 +92,13 @@ def catalogue(include_device: bool = True) -> list:
     return out
 
 
+def _said(message: str) -> dict:
+    return {"ok": True, "message": message}
+
+
 def _fail(message: str) -> dict:
+    """A failed command. It is spoken even when its shortcut is set to be silent
+    (hotkeys.HotkeyManager._run)."""
     return {"ok": False, "message": message}
 
 
@@ -126,15 +135,14 @@ def _app_commands() -> list:
 
 
 def _run_app(arg: str) -> dict:
-    import server
     if arg == "announcer":
-        return server._hk_announcer()
+        return _toggle_announcer()
     if arg == "mics":
-        return server._hk_mics()
+        return _cough_key()
     if arg == "state":
-        return server._hk_state()
+        return _say_state()
     if arg == "window":
-        return server._hk_window()
+        return _open_window()
     if arg in ("volume.up", "volume.down"):
         step = LEVEL_STEP if arg.endswith("up") else -LEVEL_STEP
         res = speech.action_set_announce_volume(speech.volume + step)
@@ -142,6 +150,141 @@ def _run_app(arg: str) -> dict:
         # it: you hear what you have chosen. Saying it twice would talk over that.
         return {**res, "message": ""} if res.get("ok") else res
     return _fail(f"Unknown app command {arg}.")
+
+
+def _toggle_announcer() -> dict:
+    """Toggle the spoken announcer, and the case the whole shortcut layer exists for: the announcer
+    talking over a guest is something you fix NOW, not after finding the window and the tab.
+
+    TURNING IT OFF IS SILENT, ON PURPOSE. The case this shortcut exists for is realising mid-take
+    that announcements are going into the mix, and "announcements off" spoken into that mix is the
+    exact thing the key was pressed to stop. Turning them back ON still speaks, so the pair always
+    leaves you knowing where you are. The silence is safe here in a way it would not be elsewhere:
+    what the shortcut did is immediately audible as the announcer going quiet. Every OTHER shortcut
+    can be silenced too, per shortcut, on the Keyboard shortcuts tab.
+
+    The same toggle as the Announcements tab's switch and the tray's, with the same lifetime: saved
+    only when "Start with announcements the way I left them" is ticked."""
+    on = not speech.enabled.is_set()
+    res = announcer.action_set_announce(on)
+    return res if on or not res.get("ok") else _said("")
+
+
+# The mics THIS shortcut muted, held so the second press can undo exactly that set - see _cough_key.
+_muted_mics = []
+
+
+def _cough_key() -> dict:
+    """The cough key: mute every mic that is open, and on the next press open again ONLY those.
+
+    IT UNDOES ITSELF RATHER THAN UNMUTING EVERYTHING, and the difference is not cosmetic. Tested on
+    hardware with Mic 1 open and Mics 2-4 muted, an "if any is open, mute all, else unmute all"
+    toggle leaves all four OPEN after two presses, having silently un-muted three channels somebody
+    deliberately shut. A cough key that puts a guest's mic live is worse than no cough key.
+    Remembering what it muted makes the pair of presses a true round trip whatever mixture the desk
+    is in.
+
+    THE STATE COMES FROM THE ANNOUNCER'S LIVE CACHE, seeded from one dump when the announcer starts
+    and kept current by the desk's own pushes (announcer.seed_layout, announcer.publish_mute). That
+    matters: reading the mutes off the desk costs about 1.5 seconds, and a cough key that takes 1.5
+    seconds is not a cough key. With the announcer off there is no cache, so it falls back to the
+    dump: still correct, just slower, and only on the FIRST press of a pair.
+
+    With nothing latched and every mic already muted it says so and writes nothing, rather than
+    treating "all muted" as an invitation to open them."""
+    import server
+    global _muted_mics
+    mics = [c for c in channels.active_ui_channels() if c.get("kind") == "mic"]
+    if not mics:
+        return _fail("This unit has no mic channels.")
+    if _muted_mics:
+        names, _muted_mics = _muted_mics, []
+        opened = []
+        for name in names:
+            res = server.action_set_channel_mute(name, False)
+            if not res.get("ok"):
+                return _fail(res.get("message", "The mics could not be opened."))
+            opened.append(name)
+        return _said(f"{wording.count(len(opened), 'mic')} open again.")
+    st = announcer.live_state
+    muted_now = dict((st or {}).get("muted") or {})
+    try:
+        if not muted_now:
+            with server._hid_lock:
+                blob = rcp_read.read_model_stable()
+            muted_now = {i: bool(v) for i, v
+                         in enumerate(v for v in rcp_read.values(blob, "channelOutputMute"))}
+        # A mic on no fader has no mute to press, so it is left out rather than refused.
+        strips = {c["name"]: channels.strip_on_fader(c["name"]) for c in mics}
+    except Exception as exc:
+        return _fail(f"Could not read the mics: {exc}")
+    open_mics = [name for name, strip in strips.items()
+                 if strip is not None and not muted_now.get(strip, False)]
+    if not open_mics:
+        return _said("Every mic is already muted.")
+    done = []
+    for name in open_mics:
+        res = server.action_set_channel_mute(name, True)
+        if not res.get("ok"):
+            _muted_mics = done          # keep what DID land, so the undo is still exact
+            return _fail(res.get("message", "The mics could not be muted."))
+        done.append(name)
+    _muted_mics = done
+    return _said(f"{wording.count(len(done), 'mic')} muted.")
+
+
+def _say_state() -> dict:
+    """Speak the short version of the Device page's current-state report, from anywhere.
+
+    Costs a model read, so it speaks "Reading the unit" first: a key that appears to do nothing for
+    a second and a half is a key you press again. By exception like the page's own report - what is
+    muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
+    is itself the answer and takes one sentence to hear."""
+    import server
+    speech.say("Reading the unit.")   # silent whenever the announcer is
+    ov = server.device_overview()
+    if not ov.get("ok"):
+        return _fail(ov.get("message", "The unit could not be read."))
+    bits = []
+    rec = ov.get("recording")
+    if rec:
+        bits.append(f"{rec.get('label', 'Recording')}.")
+    muted = [m["label"] for m in ov.get("muted") or []]
+    if muted:
+        bits.append(f"Muted: {wording.join_and(muted)}.")
+    soloed = [s["label"] for s in ov.get("soloed") or []]
+    if soloed:
+        bits.append(f"Soloed: {wording.join_and(soloed)}.")
+    latched = [p["name"] for p in ov.get("pads_engaged") or []]
+    if latched:
+        bits.append(f"Still switched on: {wording.join_and(latched)}.")
+    for vol in ov.get("storage_low") or []:
+        bits.append(f"{vol['label']} is nearly full, {vol['free_pct']} percent free.")
+    # ROUTING, by exception like everything else here, and the reason it is worth the words: an
+    # output left on a scheme you have forgotten about is exactly the fault this read-out is for:
+    # it sounds like a dead channel and there is nothing to see.
+    for note in ((ov.get("routing") or {}).get("notes") or []):
+        bits.append(str(note))
+    mon = ov.get("monitor_percent")
+    if isinstance(mon, int):
+        bits.append(f"Monitor {mon} percent.")
+    if not bits:
+        return _said("Nothing to report: nothing muted or soloed, and not recording.")
+    return _said(" ".join(bits))
+
+
+def _open_window() -> dict:
+    """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
+    to everything that is deliberately NOT on a hotkey."""
+    import server
+    # SILENT ON SUCCESS: Windows announces the raised window and the page moves focus to the current
+    # section's heading, so speaking here would talk over the screen reader in a second voice. A
+    # real activation is `server._focus_app_window`'s problem and is documented there.
+    if server._focus_app_window():
+        return _said("")
+    # A refused raise must say so, rather than leave the window sitting unseen behind everything.
+    server.open_ui(f"http://localhost:{server.HTTP_PORT}/")
+    return _said("Opening AccessCaster.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -284,7 +427,12 @@ def _recording_commands() -> list:
 def _run_rec(arg: str) -> dict:
     import server
     if arg == "toggle":
-        return server._hk_record()
+        # One key both starts and stops: a PAUSED take is stopped rather than restarted. The live
+        # state is the watcher's last push, so this costs no device read, and action_record reads
+        # the state back before it reports, so what is spoken is what the unit is really doing.
+        state = server.read_recorder_live().get("state")
+        going = state in (recorder.RECORDING, recorder.PAUSED)
+        return server.action_record("stop" if going else "start")
     if arg == "marker":
         return server.action_drop_marker()
     if arg == "pause":
@@ -441,7 +589,7 @@ def _run_scheme(arg: str) -> dict:
 # SOUND PADS ARE HERE BECAUSE OF MIDI, NOT BECAUSE HID CAN FIRE THEM. Writing `padActive` switches
 # a sound pad's flag and the unit plays nothing. MIDI
 # lifts that limit. Voice-effect and mixer pads go over HID, where the flag IS the state; the
-# dispatch is per pad in server._hk_fire_pad.
+# dispatch is per pad in pad_shortcuts.fire_pad.
 PAD_TYPES = (soundpad.PAD_TYPE_SOUND, soundpad.PAD_TYPE_VOICE_FX, soundpad.PAD_TYPE_MIXER)
 
 
@@ -467,11 +615,10 @@ def _pad_control_commands() -> list:
 
 def _pad_commands() -> list:
     """One command per assigned pad, pinned to that pad for ever. Needs a model dump."""
-    import server
     out = []
     per_bank = devices.get_active_device().pad.pads_per_bank
     try:
-        pads = server._hk_refresh_pads()
+        pads = pad_shortcuts.refresh_pads()
     except Exception as exc:
         diagnostics.event("hotkeys.catalogue_partial", "pads not listed", error=str(exc))
         return out
@@ -487,15 +634,14 @@ def _pad_commands() -> list:
 
 
 def _run_pad(arg: str) -> dict:
-    import server
     what, _, target = arg.partition(":")
     if what == "slot":
-        return server._hk_pad_slot(target)
+        return pad_shortcuts.slot(target)
     if what == "bank":
-        return server._hk_bank_step(target)
+        return pad_shortcuts.bank_step(target)
     if what == "playing":
-        return server._hk_playing_now(target)
-    return server._hk_pad(target)
+        return pad_shortcuts.playing_now(target)
+    return pad_shortcuts.fire(target)
 
 
 # ---------------------------------------------------------------------------------------------

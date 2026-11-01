@@ -27,7 +27,8 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import announcer
 import devices
-import server
+import pad_shortcuts
+import server  # noqa: F401  (installs the device lock and the announcer's pad hooks)
 import soundpad
 import speech
 from _testkit import check, check_in
@@ -62,14 +63,14 @@ def silence(pads, why: str) -> None:
     probe, and it looks nothing like its cause: the MIDI is perfectly correct throughout."""
     by_position = {entry[0]: pad_idx for pad_idx, entry in pads.items()}
     for _ in range(4):
-        playing = server._hk_play_snapshot()
+        playing = pad_shortcuts.play_snapshot()
         if not playing:
             return
         for position in playing:
             pad_idx = by_position.get(position)
             if pad_idx is not None:
                 print(f"  ({why}: stopping {pads[pad_idx][1]})")
-                server._hk_fire_pad(pad_idx)
+                pad_shortcuts.fire_pad(pad_idx)
         time.sleep(1.2)
     print(f"  WARNING ({why}): something is still playing and will not stop")
 
@@ -77,8 +78,8 @@ def silence(pads, why: str) -> None:
 def main() -> int:
     dev = devices.get_active_device()
     per_bank = dev.pad.pads_per_bank
-    pads = server._hk_refresh_pads()
-    was_bank = server._hk_current_bank()
+    pads = pad_shortcuts.refresh_pads()
+    was_bank = pad_shortcuts.current_bank()
     print(f"{dev.name}: {len(pads)} pads, {per_bank} per bank, on bank {was_bank + 1}")
 
     # The announcer owns the pushed stream, and the play tracking under test lives in its handler.
@@ -103,20 +104,20 @@ def main() -> int:
             # read-back can never check and the one a wrong bank silently breaks.
             other = 1 if bank == 0 else 0
             soundpad.select_bank(other)
-            server._hk_note_bank(other)
+            pad_shortcuts.note_bank(other)
             time.sleep(0.4)
 
             check_said("pad.fire on a sound pad says playing",
-                       server._hk_pad(str(sound)), contains="playing")
-            check_said("it selected the pad's own bank", server._hk_current_bank(), want=bank)
+                       pad_shortcuts.fire(str(sound)), contains="playing")
+            check_said("it selected the pad's own bank", pad_shortcuts.current_bank(), want=bank)
             time.sleep(0.6)
-            playing = server._hk_play_snapshot()
+            playing = pad_shortcuts.play_snapshot()
             check_said("the desk is pushing progress for it", pos in playing, want=True)
-            check_said("what is playing names it", server._hk_playing_now(), contains=name)
+            check_said("what is playing names it", pad_shortcuts.playing_now(), contains=name)
 
             # pad.slot fires by PLACE, so the same pad answers to its slot number now that the desk
             # is on its bank. A One Shot restarts, a Toggle stops: both are "the pad's own setting".
-            said = server._hk_pad_slot(str(slot))
+            said = pad_shortcuts.slot(str(slot))
             check_said("pad.slot on the same pad", said,
                        contains="stopped" if mode == soundpad.PLAY_MODE_TOGGLE else "playing")
             # AND THE DESK HAS TO AGREE. Asserting our own sentence proves only that the branch
@@ -128,7 +129,7 @@ def main() -> int:
             if mode == soundpad.PLAY_MODE_TOGGLE:
                 time.sleep(1.5)
                 check_said("and the desk really did stop it",
-                           server._hk_playing_now(), want="Nothing is playing.")
+                           pad_shortcuts.playing_now(), want="Nothing is playing.")
             else:
                 time.sleep(1.0)
 
@@ -138,31 +139,31 @@ def main() -> int:
             pos, name, _pt, _mode = pads[fx]
             print(f"\nVOICE-FX pad {name!r}: padIdx {fx}, position {pos}")
             check_said("pad.fire on a voice-FX pad switches it on",
-                       server._hk_pad(str(fx)), want=f"{name} on.")
+                       pad_shortcuts.fire(str(fx)), want=f"{name} on.")
             check_said("what is playing says it is switched on",
-                       server._hk_playing_now(), contains="switched on")
+                       pad_shortcuts.playing_now(), contains="switched on")
             check_said("a second press switches it off",
-                       server._hk_pad(str(fx)), want=f"{name} off.")
+                       pad_shortcuts.fire(str(fx)), want=f"{name} off.")
 
         print("\nBANK STEPPING")
-        server._hk_note_bank(0)
+        pad_shortcuts.note_bank(0)
         soundpad.select_bank(0)
         time.sleep(0.4)
         check_said("bank down at the first bank refuses",
-                   server._hk_bank_step("down"), contains="first bank")
-        check_said("bank up moves", server._hk_bank_step("up"), want="Bank 2.")
-        check_said("and the cache followed it", server._hk_current_bank(), want=1)
+                   pad_shortcuts.bank_step("down"), contains="first bank")
+        check_said("bank up moves", pad_shortcuts.bank_step("up"), want="Bank 2.")
+        check_said("and the cache followed it", pad_shortcuts.current_bank(), want=1)
 
         print("\nREFUSALS")
         check_said("a slot the desk does not have",
-                   server._hk_pad_slot(str(per_bank + 1)), contains=f"{per_bank} pads in a bank")
-        check_said("a pad that is not a number", server._hk_pad("banana"), contains="not a pad")
+                   pad_shortcuts.slot(str(per_bank + 1)), contains=f"{per_bank} pads in a bank")
+        check_said("a pad that is not a number", pad_shortcuts.fire("banana"), contains="not a pad")
     finally:
         # Silence BEFORE the announcer goes: the tracking that says what is still playing is its
         # read loop, and without it this can only guess.
         silence(pads, "left playing by this run")
         speech.enabled.clear()
-        server._hk_release_held()
+        pad_shortcuts.release_held()
         for pos, _pi, _nm in soundpad.latched_pads():
             soundpad.unlatch_pad(pos)
         if was_bank is not None:

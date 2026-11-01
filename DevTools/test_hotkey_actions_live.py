@@ -16,6 +16,7 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
+import commands
 import server
 import speech
 
@@ -24,26 +25,26 @@ def main():
     do_record = "--record" in sys.argv
 
     print("--- say what the unit is doing ---")
-    print(repr(server._hk_state()))
+    print(repr(commands._say_state()))
 
     print("\n--- announcements on/off (twice, so it ends as it started) ---")
     was = speech.enabled.is_set()
     try:
-        print(repr(server._hk_announcer()))
+        print(repr(commands._toggle_announcer()))
     finally:
-        print(repr(server._hk_announcer()))
+        print(repr(commands._toggle_announcer()))
     print(f"announcer back where it started: {speech.enabled.is_set() == was}")
 
     print("\n--- the cough key (twice: mute what is open, then open exactly those) ---")
     before = _mic_mutes()
     print("before:", before)
-    print(repr(server._hk_mics()))
+    print(repr(commands._cough_key()))
     try:
         print("after press 1:", _mic_mutes())
     finally:
-        # The second press opens exactly the mics the first one muted, which the server holds.
-        if server._hk_muted_mics:
-            print(repr(server._hk_mics()))
+        # The second press opens exactly the mics the first one muted, which commands holds.
+        if commands._muted_mics:
+            print(repr(commands._cough_key()))
     after = _mic_mutes()
     print("after press 2:", after)
     print(f"round trip clean: {before == after}")
@@ -52,9 +53,9 @@ def main():
         print("\n--- start and stop a recording ---")
         server._recorder_watcher()
         time.sleep(2.0)                       # let the watcher hear the current state
-        print(repr(server._hk_record()))
+        print(repr(commands.run("rec.toggle")))
         time.sleep(4.0)
-        print(repr(server._hk_record()))
+        print(repr(commands.run("rec.toggle")))
         print("delete the take from the Recording page: it is a throwaway.")
     else:
         print("\n(recording not tested; pass --record to include it)")
