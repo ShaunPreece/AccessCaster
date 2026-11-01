@@ -47,7 +47,10 @@ NOISY = ("Meter", "meter", "Progress", "CurrentPosition", "elapsed", "Elapsed", 
 
 # Differences a correct clean restore is EXPECTED to produce. Named, counted, and reported as a
 # total rather than hidden: each one is a decision written down elsewhere.
-BY_DESIGN = ("channelOutputMute", "mixMute", "channelCueEnable", "outputMonMute", "outputBTMute")
+# `outputMonAutoMuteActive` is a status, not a setting: True while auto-mute holds the monitor
+# speakers down for a live mic, so it follows the mutes.
+BY_DESIGN = ("channelOutputMute", "mixMute", "channelCueEnable", "outputMonMute", "outputBTMute",
+             "outputMonAutoMuteActive")
 
 # The SMART pads bus publishes a full chain that never reaches the audio, so a profile does not
 # carry it (channels.read_channels) and whatever the reset leaves there stays.
@@ -143,7 +146,9 @@ def show(res: dict, factory: bool) -> int:
         return f"  {block}{list(path)}.{prop}: {was!r} -> {now!r}{tail}"
 
     print(f"BY DESIGN (mutes, solo and the pads bus chain, never restored): {len(res['by_design'])}")
-    print(f"PADS (the profile carried none, so the reset's factory pads stayed): {len(res['pads'])}")
+    if res["pads"]:
+        print(f"PADS (the profile carried none, so the reset's factory pads stayed): "
+              f"{len(res['pads'])}")
     if res["gone"]:
         print(f"PRESENT BEFORE, ABSENT AFTER: {len(res['gone'])}")
         for row in res["gone"][:10]:

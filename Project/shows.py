@@ -100,6 +100,12 @@ BLOCK_SHOW = "SHOW"
 # (trap 3). So its wording says the unit refused it and claims no cause. Anything with no entry here
 # is reported by NUMBER rather than guessed at, because inventing wording for an unknown error is
 # how a user chases the wrong problem.
+#
+# A REFUSAL STICKS UNTIL THE DESK IS POWER-CYCLED (Pro II, fw 1.7.6). After one, every import is
+# refused, a fresh backup of the loaded state included, and restoring a different backup does not
+# clear it; after a power cycle the same import restores. The CODE outlives the power cycle too: it
+# reads 1 until the next import succeeds, which clears it to 0. So a non-zero code read BEFORE an
+# import is not evidence about that import (see server.action_show_import).
 ERROR_REFUSED = 1
 
 # CODE 8 IS "NOWHERE TO PUT IT", provoked on purpose: an export asked of a Duo with no card and no
@@ -109,8 +115,10 @@ ERROR_REFUSED = 1
 # plausibly report the same code, so the wording covers that too.
 ERROR_NO_STORAGE = 8
 ERROR_TEXT = {
-    ERROR_REFUSED: ("The unit refused to restore that backup. It does not say why, and the one "
-                    "thing that reliably clears it is restoring a different backup."),
+    ERROR_REFUSED: ("The unit refused to restore that backup, and does not say why. Once it has "
+                    "refused one, it refuses every restore until it is restarted: switch it off "
+                    "and on again with a firm press of the red button on the back, then try "
+                    "again."),
     ERROR_NO_STORAGE: ("The unit has nowhere to put a backup. Put a memory card in, or a USB drive "
                        "in the second USB port, and try again. If storage IS in, it may be full or "
                        "the unit may not be able to write to it."),

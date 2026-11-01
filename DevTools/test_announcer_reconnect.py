@@ -140,16 +140,16 @@ class Rig:
 print("\nTHE DESK RETURNS AS A DIFFERENT USB DEVICE")
 with Rig(speak_after=0.05) as rig:
     check("it opens the desk that is actually there", rig.opened, [STANDARD])
-    check("and greets once", rig.said, ["Control announcer is on."])
+    check("and greets once", rig.said, ["Announcements on."])
     rig.re_enumerate(EXPANDED, gap=0.3)
     time.sleep(0.5)
     check("it reopens on the NEW interface, not the remembered one",
           rig.opened[-1], EXPANDED)
     check("exactly two opens: it does not thrash", len(rig.opened), 2)
     check("it says it is back, because silence cannot be interpreted",
-          rig.said[-1], "Control announcer reconnected.")
+          rig.said[-1], f"{server.devices.get_active_device().name} reconnected.")
     check("it does not greet a second time, which would read as a restart",
-          rig.said.count("Control announcer is on."), 1)
+          rig.said.count("Announcements on."), 1)
     check("and it re-seeds, since mutes and levels can move while it is deaf",
           rig.seeded, 2)
 
@@ -162,7 +162,7 @@ with Rig(speak_after=5.0) as rig:
     rig.re_enumerate(EXPANDED, gap=0.05)
     time.sleep(0.4)
     check("it still reconnects", rig.opened[-1], EXPANDED)
-    check("but says nothing about it", rig.said, ["Control announcer is on."])
+    check("but says nothing about it", rig.said, ["Announcements on."])
     check("and does not pay for a re-seed", rig.seeded, 1)
 
 print("\nA DESK THAT NEVER COMES BACK DOES NOT SPIN")

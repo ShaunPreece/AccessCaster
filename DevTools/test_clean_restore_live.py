@@ -1,21 +1,21 @@
 """THE WHOLE CLEAN RESTORE, end to end, with a whole-model diff.
 
 WHAT IT DOES, through the app's own HTTP API so it exercises the shipping path:
-  1. dumps the desk as it stands,
-  2. saves a profile of it,
+  1. dumps the desk as it stands, and notes every mute and solo,
+  2. saves a profile of it, pads included,
   3. runs a CLEAN restore (which exports a backup, software-factory-resets the desk, then writes the
      profile back on top) and polls its progress,
-  4. dumps the desk again and diffs the two, splitting every difference into by-design, pads,
+  4. dumps the desk again and diffs the two, splitting every difference into by-design,
      back-at-the-factory-value and REAL,
-  5. puts the desk back by importing the backup the restore took, and diffs THAT against the
-     starting dump too, so the undo is proven rather than assumed.
+  5. puts back what a restore deliberately never writes (mutes and solos), first re-running the
+     profile as an ordinary restore if the clean one failed, and diffs THAT against the starting
+     dump too, so the undo is proven rather than assumed.
 
-**IT FACTORY-RESETS THE DESK**, so it refuses without --yes. The undo is the show backup taken in
-step 3, which is exactly the state the desk was in when it started. Once the restore has started the
-undo runs however the run ends, a failed restore or an error included, and the run reports whether
-it came back clean. The profile is saved WITHOUT pads (a pad backup is minutes of file copying), so the
-reset's factory pads stay through step 4 and pad differences there are expected - step 5 puts the
-desk's own pads back with the show import.
+**IT FACTORY-RESETS THE DESK**, so it refuses without --yes. The undo is the profile, not the show
+backup the restore takes: a show import straight after a reset is the pair that leaves a mic silent,
+and a desk that has refused one import refuses every later one until it is power-cycled. Once the
+restore has started the undo runs however the run ends, and the run reports whether it came back
+clean. The show backup stays on the drive as the last resort.
 
 Usage: python DevTools/test_clean_restore_live.py --yes [--keep-profile]
 """
@@ -36,6 +36,7 @@ from analyse_clean_restore import compare, show, snap
 CAP = Path(__file__).resolve().parent / "captures"
 FACTORY_DUMP = CAP / "post-showreset-raw.bin"     # a real factory dump of THIS desk
 PROFILE = "Clean restore retest"
+OUTPUT_MUTES = (("monitor", "outputMonMute"), ("bluetooth", "outputBTMute"))
 
 
 def say(text: str) -> None:
@@ -61,44 +62,60 @@ def poll(path: str, label: str, timeout: float = 900.0) -> dict:
         return {"done": False, "ok": False, "message": f"{label}: {e}"}
 
 
-def dump(name: str) -> Path:
+def dump(name: str) -> tuple[Path, bytes]:
     path = CAP / f"{name}.bin"
-    path.write_bytes(rcp_read.read_model_stable(fresh=True))
-    print(f"   dumped {path.name} ({path.stat().st_size} bytes)")
-    return path
+    blob = rcp_read.read_model_stable(fresh=True)
+    path.write_bytes(blob)
+    print(f"   dumped {path.name} ({len(blob)} bytes)")
+    return path, blob
 
 
-def put_desk_back(before_path: Path, shows_before: set) -> bool:
-    """Import the show backup the clean restore took, and diff the desk against the starting dump.
-    True when it came back with nothing unexplained."""
-    say("Putting the desk back now, by importing the backup the restore took.")
-    new_backups = [s for s in api("/api/shows", timeout=120.0).get("shows") or []
-                   if s["snapshot"] not in shows_before]
-    if not new_backups:
-        say("I cannot find the backup the restore took. The desk may be at factory settings.")
-        print("*** no new show backup found; restore the desk by hand from the Shows list ***")
-        return False
-    # Newest first, so the first new one is the backup taken moments ago.
-    target = new_backups[0]
-    print(f"   importing \"{target['name']}\" (snapshot {target['snapshot']})")
-    res = api("/api/shows/import", post={"snapshot": int(target["snapshot"])}, timeout=600.0)
-    if not res.get("ok"):
-        say(f"The import was refused. The desk may be at factory settings: import the backup "
-            f"called {target['name']} from the Shows list.")
-        print(f"   import refused: {res.get('message')}")
-        return False
-    st = poll("/api/shows/status", "the show import")
-    print(f"   import finished: ok={st.get('ok')} - {st.get('message')}")
+def live_state(blob: bytes) -> dict:
+    """Every mute and solo, the state a restore never writes. A channel the page reports neither
+    for (one on no fader) is left out: the app has no route to it either."""
+    chans = [(c["name"], c.get("muted"), c.get("solo"))
+             for c in api("/api/channels", timeout=120.0).get("channels") or []]
+    return {
+        "mute": {n: m for n, m, _s in chans if m is not None},
+        "solo": {n: s for n, _m, s in chans if s is not None},
+        "output": {w: rcp_read.block_value(blob, "OUTPUT", prop) for w, prop in OUTPUT_MUTES},
+    }
+
+
+def put_live_state_back(state: dict) -> None:
+    for name, on in state["mute"].items():
+        api("/api/channels/mute", post={"name": name, "on": bool(on)})
+    for name, on in state["solo"].items():
+        api("/api/channels/solo", post={"name": name, "on": bool(on)})
+    for which, on in state["output"].items():
+        if on is not None:
+            api("/api/output/mute", post={"which": which, "on": bool(on)})
+
+
+def put_desk_back(before_path: Path, state: dict, restored: bool) -> bool:
+    """Put the desk back as it started, and diff it against the starting dump. True when it came
+    back with nothing unexplained."""
+    if not restored:
+        say("The clean restore did not finish, so I am restoring the profile again, without the "
+            "reset.")
+        res = api("/api/profiles/restore", post={"name": PROFILE, "clean": False}, timeout=600.0)
+        if not res.get("ok"):
+            say(f"That restore would not start. Restore the profile called {PROFILE} by hand.")
+            print(f"   restore refused: {res.get('message')}")
+            return False
+        st = poll("/api/profiles/restore/status", "the ordinary restore")
+        print(f"   ordinary restore finished: ok={st.get('ok')} - {st.get('message')}")
+    say("Putting the mutes and solos back as they were.")
+    put_live_state_back(state)
     time.sleep(2.0)
-    undo_path = dump("post-cleanretest-undo-raw")
+    undo_path, _blob = dump("post-cleanretest-undo-raw")
     undo = compare(snap(before_path), snap(undo_path), None, pads_restored=True)
-    left = (len(undo["real"]) + len(undo["gone"]) + len(undo["new"]))
-    print(f"\nTHE UNDO: {left} unexplained differences against the starting dump "
+    left = undo["real"] + undo["gone"] + undo["new"]
+    print(f"\nTHE UNDO: {len(left)} unexplained differences against the starting dump "
           f"({len(undo['by_design'])} by design)")
-    for row in undo["real"][:20]:
-        (path, block, prop), was, now, _f = row
+    for (path, block, prop), was, now, _f in left[:20]:
         print(f"  {block}{list(path)}.{prop}: {was!r} -> {now!r}")
-    return left == 0
+    return not left
 
 
 def main() -> int:
@@ -110,16 +127,19 @@ def main() -> int:
         print("This FACTORY-RESETS the desk (and puts it back afterwards). Re-run with --yes.")
         return 2
 
-    say("Starting the clean restore retest. I am dumping the desk, then saving a profile of it.")
-    before_path = dump("pre-cleanretest-raw")
-    shows_before = {s["snapshot"] for s in api("/api/shows", timeout=120.0).get("shows") or []}
+    say("Starting the clean restore retest. I am dumping the desk, then saving a profile of it "
+        "with its pads, which takes a few minutes.")
+    before_path, before_blob = dump("pre-cleanretest-raw")
+    state = live_state(before_blob)
 
-    res = api("/api/profiles/save", post={"name": PROFILE, "include_pads": False}, timeout=600.0)
+    res = api("/api/profiles/save", post={"name": PROFILE, "include_pads": True}, timeout=600.0)
     if not res.get("ok"):
         print(f"could not save the profile: {res.get('message')}")
         return 1
     st = poll("/api/profiles/save/status", "the profile save")
     print(f"   profile saved: {st.get('message')}")
+    if not st.get("ok"):
+        return 1
 
     say("Now the clean restore. It backs the desk up, factory resets it, and writes the profile "
         "back on top.")
@@ -130,28 +150,32 @@ def main() -> int:
     # FROM HERE THE DESK MAY BE AT FACTORY SETTINGS, so the undo runs however this ends.
     unexplained = None
     undo_ok = False
+    restored = False
     try:
         st = poll("/api/profiles/restore/status", "the clean restore")
         print(f"   restore finished: ok={st.get('ok')} - {st.get('message')}")
-        if not st.get("ok"):
+        restored = bool(st.get("ok"))
+        if not restored:
             say("The clean restore reported a failure, so there is nothing to diff.")
         else:
             time.sleep(2.0)
             say("Restore done. Dumping the desk and diffing every property against how it started.")
-            after_path = dump("post-cleanretest-raw")
+            after_path, _blob = dump("post-cleanretest-raw")
             factory = snap(FACTORY_DUMP) if FACTORY_DUMP.is_file() else None
-            diff = compare(snap(before_path), snap(after_path), factory)
+            diff = compare(snap(before_path), snap(after_path), factory, pads_restored=True)
             print()
             unexplained = show(diff, factory is not None)
     finally:
-        undo_ok = put_desk_back(before_path, shows_before)
-        if not args.keep_profile:
+        undo_ok = put_desk_back(before_path, state, restored)
+        # The profile is the undo, so it is kept whenever the undo did not come back clean.
+        if undo_ok and not args.keep_profile:
             gone = api("/api/profiles/delete", post={"name": PROFILE, "force": True})
             print(f"   scratch profile '{PROFILE}' deleted" if gone.get("ok")
                   else f"   COULD NOT DELETE the scratch profile '{PROFILE}': {gone.get('message')}")
 
     back = (" The desk is back to how it started." if undo_ok
-            else " Check the desk: the undo did not come back clean.")
+            else f" Check the desk: the undo did not come back clean. The profile {PROFILE} is "
+                 f"kept to restore it from.")
     if unexplained is None:
         say("THE CLEAN RESTORE FAILED." + back)
         return 1

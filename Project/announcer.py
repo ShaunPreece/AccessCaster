@@ -968,7 +968,7 @@ def usb_mode_change(was, now) -> str:
 
 # The first thing said once the desk is open: the app's own start-up names the app, a person
 # switching announcements back on hears that they are on.
-GREETING_ON = "Control announcer is on."
+GREETING_ON = "Announcements on."
 GREETING_STARTED = "AccessCaster started."
 
 

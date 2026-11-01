@@ -119,6 +119,7 @@ class FakeDesk:
         if 0 <= uid < len(self.backups):
             self.current_uuid = self.backups[uid]["uuid"]
             self.gain = self.backups[uid].get("gain", self.gain)
+            self.last_error = 0                   # a success clears a latched code
 
     def new_from_default(self):
         self.calls.append("reset")
@@ -282,6 +283,26 @@ DESK.import_sets_error = 42                       # a code nobody has ever seen
 res = run_job(server.action_show_import(9))
 check("an unknown error code is not given invented wording", res["ok"], False)
 check_in("it says so plainly", "has not seen before", res["message"])
+
+print("a code latched by an earlier refusal")
+# THE CODE OUTLIVES ITS REFUSAL, a power cycle included, so it reads non-zero before the import is
+# sent. Taken as this import's answer, it fails a restore that worked.
+reset_desk()
+DESK.last_error = shows.ERROR_REFUSED
+DESK.gain = 99
+res = run_job(server.action_show_import(2))
+check("a restore that works is not failed on an old code", res["ok"], True)
+check("and the desk was put back", DESK.gain, 50)
+check("and the code cleared", DESK.last_error, 0)
+
+reset_desk()
+DESK.last_error = shows.ERROR_REFUSED
+DESK.import_sets_error = shows.ERROR_REFUSED      # still refusing: nothing moves, the code stands
+DESK.gain = 99
+res = run_job(server.action_show_import(2))
+check("a refusal under an old code is still reported", res["ok"], False)
+check_in("saying the unit refused it", "refused", res["message"])
+check_in("and that restarting it is the remedy", "restarted", res["message"])
 
 print("the desk leaves the bus part way through an import")
 reset_desk()

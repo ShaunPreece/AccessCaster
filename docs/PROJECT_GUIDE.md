@@ -643,7 +643,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   announcer go silent for good after a USB setting was changed in the app itself: the read failed,
   the reopen was tried on the old path for ever, and to a screen-reader user that is
   indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
-  "Control announcer reconnected", because silence is the one thing that cannot be interpreted.
+  "<desk name> reconnected", because silence is the one thing that cannot be interpreted.
   **The exception is a mode the app's own switch has just written** (`_usb_mode_written_by_app`):
   the page's reply has said it, and a second line lands on top of Windows and RODE's driver
   announcing the same arrival. The tidy and the follow-up still run.
@@ -2137,6 +2137,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the loaded uuid put Mic 4's gain back from 30 to 50, and again from 42 to 50, inside four seconds,
   `showControlLastError` staying 0. **`showControlLastError` = 1 is real (seen twice, 29th August
   2026) but its cause is UNKNOWN.** Send the write and report the unit's refusal; never predict it.
+- **A REFUSED IMPORT STICKS UNTIL A POWER CYCLE, AND ITS CODE OUTLIVES THAT** (Pro II, fw 1.7.6,
+  1st November 2026). The first refusal came importing a backup of the pre-reset show straight
+  after a clean restore. After it, five imports across four backups were refused, a backup exported
+  minutes earlier of the loaded state included (Mic 4 drifted 50 to 40 stayed at 40), and importing
+  a different backup did not clear it. After a power cycle the same drift test restored inside 3 s.
+  `showControlLastError` read 1 through the power cycle and went to 0 on that success. So
+  `action_show_import` counts only a code that CHANGED as the import's answer, and reads one still
+  standing at the timeout as a refusal; its wording says to restart the desk.
 - **THE SUCCESS TEST FOR AN IMPORT MUST WATCH THE DESK STATE, not the uuid and not the command
   field.** Both fail, in opposite directions: the uuid already equals the target in the ordinary
   case, so a uuid test reports success before anything happens (it shipped that way); the command
@@ -2816,7 +2824,7 @@ shared one; a new copy is how they drifted apart the first time.
 - **A SCRIPT THAT FACTORY-RESETS A DESK MUST CALL `_bootstrap.require_expendable_desk` AND REFUSE
   WITHOUT `--expendable-desk`.** One does: `test_usb_drop_live.py` (one reset per trial). The
   exception is `test_clean_restore_live.py`, which restores itself: it takes `--yes`, and once its
-  clean restore has started it imports the backup that restore took, however the run ends. A
+  clean restore has started it puts the desk back from its own profile, however the run ends. A
   capitalised warning in the docstring is NOT the guard, and this is measured, not theoretical: `test_usb_drop_live.py` opened with "EXPENDABLE DESKS ONLY" and was still run
   over Shaun's working Pro II on 16th September 2026 by a sweep that selected tests by filename. The
   reader it warned was not the thing that ran it.

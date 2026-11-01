@@ -2657,7 +2657,7 @@ class _AnnouncerHooks(announcer.Hooks):
         # A mode the app's own switch wrote has been said by the page's reply.
         if not _usb_mode_written_by_app(now_usb):
             speech.say(announcer.usb_mode_change(was_usb, now_usb)
-                       or "Control announcer reconnected.")
+                       or f"{devices.get_active_device().name} reconnected.")
         # Out of Expanded with nobody using the app's switch (the touchscreen tidies its own faders;
         # the desk dropping out on its own does not).
         if (was_usb is not None and now_usb is not None
@@ -7537,6 +7537,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # it back - and leaves shows usable only straight after a reset. The unit's own refusal
             # (error 1) is reported below; we simply never guess it in advance.
             before = shows.restore_fingerprint(blob)
+            err_before = shows.read_last_error(blob)
             shown = as_name or match["name"]     # see the docstring: the user's name wins
             step(f"Restoring \"{shown}\". This also moves the monitor level.")
             shows.send_import(match["uid"])
@@ -7546,9 +7547,12 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
         # THE EVIDENCE IS THE STATE MOVING, not the uuid: see shows.restore_fingerprint for why
         # every other signal fails. The uuid test is kept as a second route because it is the one
         # that fires when the backup IS a different show (the undo for a factory reset).
+        # ONLY A CODE THAT CHANGED IS THIS IMPORT'S ANSWER. The code latches, so one left by an
+        # earlier refusal reads non-zero from the start; a refusal then shows as nothing moving, and
+        # the timeout branch below reports it from the code still standing.
         def settled(blob):
             err = shows.read_last_error(blob)
-            if err:
+            if err and err != err_before:
                 return {"error": err}
             if target_uuid != loaded_uuid and shows.read_current(blob).get("uuid") == target_uuid:
                 return {"done": True}
@@ -7576,7 +7580,11 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # failure - saying "it did not work" would send someone hunting a problem that is not
             # there. For a DIFFERENT show it is a genuine failure, because a successful import
             # would have changed the loaded uuid and it did not.
-            if (target_uuid == loaded_uuid and shows.read_last_error(blob_after) in (None, 0)):
+            # A success clears the code to 0, so one still standing is a refusal.
+            err_after = shows.read_last_error(blob_after)
+            if err_after:
+                return {"ok": False, "message": shows.error_message(err_after)}
+            if target_uuid == loaded_uuid:
                 return {"ok": True,
                         "message": (f"The unit already matched \"{shown}\", so nothing "
                                     f"needed to change.")}
