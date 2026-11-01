@@ -9,8 +9,8 @@ changes none of those. The thing that changes is `padActive`, and this file pins
 that reads it.
 
 So what is pinned here is the DETECTION, not the create. It cannot be exercised on the real desk
-without deliberately putting an effect on a live mic, which is the thing we are trying never to do
-again, so it is driven from synthetic dumps instead.
+without deliberately putting an effect on a live mic, which is what the detection exists to
+prevent, so it is driven from synthetic dumps instead.
 
 Run: python DevTools/test_latched_pads.py
 """

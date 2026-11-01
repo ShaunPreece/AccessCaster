@@ -16,6 +16,8 @@ Modes
   watch   [--dumps N] [--gap S]   Repeated dumps, diffed against each other as they arrive: for
                                   watching something move (a fader, a meter) with no second call.
   cost    [--n N]                 Time a dump, to say whether polling is viable.
+  guided  [--steps S] [--raw]     Speak a fixed list of actions aloud, each in a timed window,
+                                  and log what the desk pushes during each.
   step    <label> [--raw]         ONE action, and the capture closes when the operator creates
                                   STOP_FILE, not when a clock expires. Use this, not `guided`,
                                   whenever the prompt has to be RELAYED to whoever is at the desk:
@@ -326,7 +328,7 @@ def cost(n: int) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Phase 1 state observatory (read only)")
+    ap = argparse.ArgumentParser(description="Desk state observatory (read only)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("listen"); p.add_argument("seconds", type=float, nargs="?", default=10.0)

@@ -1,4 +1,4 @@
-"""Phase 0 of the coverage audit: classify EVERY device property against our code.
+"""Classify EVERY device property against the app's code.
 
 Generates ProjectMemory/PROPERTY_COVERAGE_<DESK>.md - the THIRD yardstick alongside the user guide
 (PARITY.md) and the RODE app's own screens.
@@ -16,8 +16,8 @@ Two things it works out per property:
      or function (CONTEXT_ROLE below), else "referenced".
   2. CLASSIFICATION - for everything we never touch: internal/derived, live state, or candidate
      feature, plus an accessibility VALUE ranking. Those are JUDGEMENTS, hand-written in RULES
-     below with a one-line reason each, not something a script can infer. Phases 1-3 of the plan
-     confirm or overturn them; when one is settled, edit the rule and regenerate.
+     below with a one-line reason each, not something a script can infer. When one is settled,
+     edit the rule and regenerate.
 """
 from __future__ import annotations
 
@@ -370,7 +370,7 @@ RULES: list[tuple[str, str, str, str]] = [
 
     # ---- smaller candidates -------------------------------------------------------------
     (r"^mixLink$", "internal/derived", "-",
-     "NOT the per-cross-point link state, despite what this file said before: MEASURED it "
+     "NOT the per-cross-point link state: it "
      "reads True on 508 of the 516 cells while the proven link inference (level == anchor in "
      "mixLevelWithAnchor) says 114 linked, agreeing on only 112. So it is some other per-cell flag "
      "(what CAN be linked, or a stereo pairing), and reading it as link state would misreport the "
@@ -552,7 +552,7 @@ def build() -> tuple[str, dict]:
     w("## Blind spot 1: the per-strip census")
     w("")
     w("Every x10 (per fader strip) property, checked against the chain set our three chain features")
-    w("share - mic presets, profile snapshots and the coming chain-follows-channel swap. Computed")
+    w("share - mic presets, profile snapshots and the chain-follows-channel swap. Computed")
     w("from `channels.PROCESSING_READ_PROPS`, `PRESET_FLOAT_PROPS`, `PROCESSING_MODULE_BOOLS` and")
     w("`channelBypassProcessing`, so it cannot drift from the code the way a hand-written list does.")
     w("`channelInputSource` is excluded: it IS the layout, not a thing carried by it.")

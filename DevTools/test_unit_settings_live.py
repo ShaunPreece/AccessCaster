@@ -3,11 +3,11 @@
 WHY THIS EXISTS. Both are ordinary global property writes on selectors that were captured and
 read-back verified, so the risk is not the protocol: it is the PAIRING. A record whose
 selector-plus-property pairing is wrong does not simply miss, it can land on some other object and
-append a stray occurrence that only a factory reset clears (btDoScan on a predicted
+append a stray occurrence that only a factory reset clears (as btDoScan does on a predicted
 NETWORK selector). So every write here is read back, and the run ends with the check that actually
 catches a stray: OCCURRENCE COUNTS per property, diffed against a pre-test snapshot. Counting
-distinct NAMES is not enough - the stray copy carries a name that already existed, which is exactly
-why the earlier scan test looked clean while a stray had just been appended.
+distinct NAMES is not enough - the stray copy carries a name that already exists, so a scan of
+names looks clean while a stray has just been appended.
 
 HOW IT DRIVES. Our own service on 127.0.0.1:8770, over HTTP. No GUI, no RODE app, and it never opens
 the HID device itself, so it cannot fight the running server for the control interface.
@@ -82,9 +82,8 @@ def profile_snapshot(name):
     """Save a profile and return (its unit block, {prop: occurrence count}, {prop: values}).
 
     WAITS FOR THE JOB. /api/profiles/save STARTS a background save and answers immediately, so
-    reading the file straight afterwards is a race: it passed for as long as the save happened to
-    win, then began failing with FileNotFoundError. The save's own status endpoint is the answer,
-    and it is what the browser polls too.
+    the file may not exist yet when the reply arrives. The save's own status endpoint says when it
+    does, and it is what the browser polls too.
     """
     res = post("/api/profiles/save", {"name": name, "include_pads": False})
     if not res.get("ok"):
@@ -193,7 +192,7 @@ check("unmuted again", channel_state(CHAN).get("muted"), was_muted)
 
 # --- the check that catches a stray -------------------------------------------------------------
 
-print("\nSTRAY CHECK: occurrence counts, not names (the check that would have caught btDoScan)")
+print("\nSTRAY CHECK: occurrence counts, not names (the check that catches a stray like btDoScan's)")
 post_unit, post_counts, post_props = profile_snapshot(POST)
 added = sorted(set(post_counts) - set(pre_counts))
 lost = sorted(set(pre_counts) - set(post_counts))

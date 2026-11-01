@@ -1,9 +1,8 @@
 """WHICH LAYER takes the desk off the USB bus during a show factory reset?
 
-THE FAULT. A show command has dropped a desk off USB three times, on a Pro II and a Duo.
-Windows ends up with ZERO devices carrying RODE's vendor id, so the
-desk is off the bus rather than a handle being lost, and only a PHYSICAL REPLUG brings it back. All
-three were through the running app.
+THE FAULT. A show command can drop a desk off USB, on a Pro II or a Duo. Windows ends up with
+ZERO devices carrying RODE's vendor id, so the desk is off the bus rather than a handle being lost,
+and only a PHYSICAL REPLUG brings it back. Every known drop came through the running app.
 
 THE METHOD: ONE VARIABLE AT A TIME, EACH SELECTABLE ON ITS OWN. `--layers` takes any combination, so
 each factor can be run alone before anything is stacked. The first combination that drops the desk
@@ -11,8 +10,8 @@ names the cause; a factor that never drops it alone is not thereby innocent, whi
 stack.
 
   (none)     THE COMMAND ALONE. One open, one write, one close, then total silence.
-             SETTLED: 11 trials, 11 clean, every one confirmed applied. So the
-             firmware's own re-enumeration is NOT sufficient, and the cause is somewhere above.
+             SETTLED: it does not drop the desk, so the firmware's own re-enumeration is NOT
+             sufficient, and the cause is somewhere above.
   handles1   one persistent read handle open across the write.
   handles2   two, which is what the app really holds: recorder.Watcher keeps one and the announcer
              keeps another, on separate handles on purpose, and NEITHER takes the HID lock. So at the
@@ -46,9 +45,8 @@ IT STOPS DEAD ON THE FIRST DROP. Sending more resets at a desk that is off the b
 would queue commands to land at whatever moment somebody replugs it.
 
 A SHORT BLIP IS NOT MEASURED and is not the fault being chased. `Get-PnpDevice` takes about a second,
-so a one-to-two-second re-enumeration can fall between samples. A full-config write is expected to
-re-enumerate USB by design, yet across 11 bare trials nothing was ever missing at t+3s, t+10s or
-t+20s.
+so a one-to-two-second re-enumeration can fall between samples. A full-config write re-enumerates
+USB by design, yet after a bare reset nothing is missing at t+3s, t+10s or t+20s.
 
 EXPENDABLE DESKS ONLY. Every trial is an UNBACKED factory reset: settings and pads go to factory with
 no undo. Right for the Duo test desk, wrong for a desk somebody works on. It also leaves mic channels

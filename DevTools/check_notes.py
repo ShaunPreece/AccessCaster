@@ -19,7 +19,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import _bootstrap  # noqa: E402  (finds the notes, which live outside this repo)
+import _bootstrap  # finds the notes, which live outside this repo
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # THE NOTES ARE IN THE PRIVATE SIBLING REPO, `_Notes\Access Caster\`, so this one can be public.
@@ -107,8 +107,8 @@ def check_projectnotes() -> None:
     body = read(p)
     lines = body.splitlines()
     # A long Now / Next is the symptom of finished work piling up in it. The threshold is a smell
-    # test, not a budget: this project legitimately carries several open items that each need a
-    # mechanism written out, so it sits higher than the 150 the rule was first measured at.
+    # test, not a budget: this project carries several open items that each need a mechanism
+    # written out, so it sits above the 150 the general rule gives.
     try:
         a = next(i for i, l in enumerate(lines) if l.startswith("## Now / Next"))
         b = next(i for i, l in enumerate(lines[a + 1:], a + 1) if l.startswith("## "))

@@ -86,11 +86,11 @@ for name, want in [("Mic1", 41), ("Mic2", 42), ("Mic3", 43), ("Mic4", 44)]:
     check(f"{name} reads its own gain", c.input_value(blob, ch_of(PRO2, name), "inputMicrophoneGain", PRO2), want)
 check("USB1 reads its own level", c.input_value(blob, ch_of(PRO2, "USB1"), "inputDigitalGain", PRO2), -7)
 check("Bluetooth reads its own level", c.input_value(blob, ch_of(PRO2, "Bluetooth"), "inputDigitalGain", PRO2), -10)
-print("\nTHE RETIRED PRO II SELECTORS, REPRODUCED EXACTLY BY THE DERIVATION")
+print("\nTHE PRO II'S CONFIRMED SELECTORS, REPRODUCED EXACTLY BY THE DERIVATION")
 # THE PRO II'S CONFIRMED SELECTORS, every value asserted against the derivation, so it cannot move
 # a Pro II write by one byte.
-RETIRED_PRO2 = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,       # mic_channel_sel
-                "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}  # digital_gain_sel
+RETIRED_PRO2 = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,
+                "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}
 for name, sel in RETIRED_PRO2.items():
     check(f"Pro II {name} still addresses 0x{sel:02X} with the 0x02 high byte",
           PRO2.input_path(ch_of(PRO2, name)), [sel | (0x02 << 8)])

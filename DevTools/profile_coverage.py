@@ -18,7 +18,7 @@ So the question is answered MECHANICALLY, from the code, three ways:
      source tree (the same scan that produces the property-coverage report).
   3. THE GAP is (2) minus (1): a setting the app can change but a profile would not bring back.
      Every one is judged in NOT_SAVED below, as either "ok" (a command, editor state or live
-     state) or "GAP" (real work to do), and the report lists the GAPs first. There are none now.
+     state) or "GAP" (real work to do), and the report lists the GAPs first.
 
 TWO HAND-WRITTEN TABLES, and the script FAILS (exit 1) if either falls behind the code, which is
 what stops the audit going stale:
@@ -333,7 +333,7 @@ NOT_SAVED = {
     "effectsIdx": ("ok", "Which effect slot the editor is working on; app-side selection."),
     "padActive": ("ok", "Whether a pad is latched RIGHT NOW. Live state - restoring it would fire "
                         "a pad."),
-    "channelOutputMute": ("ok", "Live MUTE state, not a setting. We CAN write it now (a mute button "
+    "channelOutputMute": ("ok", "Live MUTE state, not a setting. It IS writable (a mute button "
                                 "on every channel), which is exactly why the verdict "
                                 "has to be deliberate: restoring a saved mute would silence a "
                                 "channel at the worst possible moment. Saved in the full snapshot "
@@ -466,10 +466,9 @@ def build() -> tuple[str, dict]:
     w("- **THIS FILE COUNTS PROPERTY NAMES, NOT OCCURRENCES, so a per-STRIP gap can hide in it.** "
       "Channel processing is per fader strip and the desk has 10 of them; a profile carries the "
       "channels the UI exposes, and a strip left out would still show every one of its properties "
-      "ticked as saved, because the same NAME is saved for the other strips. That is how the SMART "
-      "pads bus hid as unsaved, until a clean restore left its custom chain at factory values. It "
-      "is a channel now (9 on the Pro II). **CallMe1 is the one still "
-      "out**: the tenth strip resolves to source 9, which USB 2 already claims, so it needs a "
+      "ticked as saved, because the same NAME is saved for the other strips. The SMART pads bus "
+      "is carried as a channel (9 on the Pro II). **CallMe1 is not "
+      "carried**: the tenth strip resolves to source 9, which USB 2 already claims, so it needs a "
       "capture before it can be addressed.")
     w("- **Every property below, gap or not, is nonetheless RECORDED**: a profile also carries a "
       "snapshot of the whole model dump (`device_snapshot`, ~55 KB, secrets "

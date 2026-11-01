@@ -377,11 +377,10 @@ def cmd_rode(path: str) -> int:
 def cmd_props(path: str) -> None:
     """Extract ASCII property names and the bytes around them.
 
-    The RODECaster config protocol (Transfer Mode) carries named properties in
-    plain ASCII inside its bulk reports, e.g. 'encoderColour', 'transferModeType'.
-    This prints each distinct name with the report id, direction, and a window of
-    bytes from the name onward (the value usually follows the name + a small
-    header), so we can map the config vocabulary and start decoding values.
+    A property record carries its property's name in plain ASCII, e.g.
+    'encoderColour', 'transferModeType'. This prints each distinct name with its
+    report id, direction and frame, and the bytes from just before the name to
+    20 bytes after it, where the value follows the name and a short header.
     """
     import re as _re
     pkts = load_capture(path)
