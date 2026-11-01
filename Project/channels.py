@@ -602,6 +602,16 @@ def channel_strip_index(channel) -> int:
     return _channel_strip(channel)
 
 
+def strip_on_fader(channel) -> int | None:
+    """channel_strip_index, or None for a channel this desk carries but no fader holds. For a walk
+    over every channel, where a channel taken off its fader is skipped rather than refused: it has
+    no strip, so no mute, solo or processing to address."""
+    try:
+        return _channel_strip(channel)
+    except RuntimeError:
+        return None
+
+
 # Per-channel "always on" EFFECTS (Echo + Reverb) live on a SEPARATE selector base from the processing
 # modules: fx base 0x26 + STRIP index, resolved by fx_selector exactly as processing is. Mic
 # channels only in the app's UI. Confirmed strip-indexed on the Duo: Mic 2's echoOn on 0x27.

@@ -70,8 +70,9 @@ def _mic_mutes() -> dict:
     for c in channels.active_ui_channels():
         if c.get("kind") != "mic":
             continue
-        strip = channels.channel_strip_index(c["name"])
-        out[c["name"]] = bool(mutes[strip]) if strip < len(mutes) else None
+        strip = channels.strip_on_fader(c["name"])
+        if strip is not None:
+            out[c["name"]] = bool(mutes[strip]) if strip < len(mutes) else None
     return out
 
 

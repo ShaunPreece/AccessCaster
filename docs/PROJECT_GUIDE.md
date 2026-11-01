@@ -2607,6 +2607,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **The cough key (`_hk_mics`) OPENS ONLY THE MICS IT MUTED.** It keeps `_hk_muted_mics`. A plain
   "any open? mute all, else unmute all" toggle silently opens channels somebody deliberately shut:
   measured 30th August 2026, one open mic and three muted went to four OPEN after two presses.
+  A mic on no fader has no strip and so no mute: it is SKIPPED (`channels.strip_on_fader`), not
+  refused, or one mic taken off its fader stops the key for every other (`test_cough_key`).
 - **Hotkey actions must speak their result**, via `_ann_say`, which is independent of whether the
   announcer is on. The window is not in front of you when a shortcut fires; the speech is the only
   feedback. Silence is what a broken shortcut sounds like. **EXCEPT where the user has silenced that

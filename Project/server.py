@@ -10247,25 +10247,27 @@ def _hk_mics() -> dict:
         return _hk_said(f"{wording.count(len(opened), 'mic')} open again.")
     st = _ann_live_state
     muted_now = dict((st or {}).get("muted") or {})
-    if not muted_now:
-        try:
+    try:
+        if not muted_now:
             with _hid_lock:
                 blob = rcp_read.read_model_stable()
             muted_now = {i: bool(v) for i, v
                          in enumerate(v for v in rcp_read.values(blob, "channelOutputMute"))}
-        except Exception as exc:
-            return _hk_said(f"Could not read the mics: {exc}", ok=False)
-    open_mics = [c for c in mics
-                 if not muted_now.get(channels.channel_strip_index(c["name"]), False)]
+        # A mic on no fader has no mute to press, so it is left out rather than refused.
+        strips = {c["name"]: channels.strip_on_fader(c["name"]) for c in mics}
+    except Exception as exc:
+        return _hk_said(f"Could not read the mics: {exc}", ok=False)
+    open_mics = [name for name, strip in strips.items()
+                 if strip is not None and not muted_now.get(strip, False)]
     if not open_mics:
         return _hk_said("Every mic is already muted.")
     done = []
-    for c in open_mics:
-        res = action_set_channel_mute(c["name"], True)
+    for name in open_mics:
+        res = action_set_channel_mute(name, True)
         if not res.get("ok"):
             _hk_muted_mics = done          # keep what DID land, so the undo is still exact
             return _hk_said(res.get("message", "The mics could not be muted."), ok=False)
-        done.append(c["name"])
+        done.append(name)
     _hk_muted_mics = done
     return _hk_said(f"{wording.count(len(done), 'mic')} muted.")
 
