@@ -86,4 +86,5 @@ _driver/
 
 # Generated at build time from Project/version.py HISTORY
 /Project/ReleaseNotes.html
+/ProjectBuilds/release-notes.txt
 .ruff_cache/

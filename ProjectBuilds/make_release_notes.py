@@ -32,7 +32,13 @@ destination, and a quick start has to stay reachable long after this page is rea
 in the app's Help & About, which is also the only copy of it - a fact written in two places here
 disagrees with itself within two releases.
 
-    python ProjectBuilds/make_release_notes.py [output.html]
+    python ProjectBuilds/make_release_notes.py [output.html [release-notes.txt]]
+
+THE TEXT FILE IS FOR THE UPDATE PUBLISHER, not for the installer. The update dialog reads the newest
+release's notes aloud before the user decides, and the publishing tool fills its notes box from
+this file instead of having them typed a second time. Its first line names the version, which the
+tool checks against the installer it is publishing: the file is rewritten by every build, and the
+output folder keeps older installers.
 
 Run by ProjectBuilds/build_installer.ps1, which then copies the page BESIDE the exe rather than
 letting the spec bundle it: PyInstaller 6 puts datas in an _internal folder, and the
@@ -134,6 +140,21 @@ def render(history=HISTORY, current: str = __version__) -> str:
     return "\n".join(parts)
 
 
+def text_notes(history=HISTORY) -> str:
+    """The newest release as plain text: a line naming the version, then each change as its heading
+    on one line and its body on the next, with a blank line between changes. No bullet markers, which
+    a screen reader reads aloud at the start of every line."""
+    version, paragraphs = history[0]
+    lines = [f"What is new in AccessCaster {version}"]
+    for para in paragraphs:
+        heading, body = para if isinstance(para, (tuple, list)) else ("", para)
+        lines.append("")
+        if heading:
+            lines.append(heading)
+        lines.append(body)
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     # DEFAULTS TO THE REAL TARGET, not to the current directory. Writing "ReleaseNotes.html"
     # wherever the script is run from drops an untracked copy in the repo root whenever it is run
@@ -146,6 +167,14 @@ def main() -> int:
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
     print(f"Wrote {out} ({len(page)} bytes, {len(HISTORY)} releases, current {__version__})")
+    if len(sys.argv) > 2:
+        if HISTORY[0][0] != __version__:
+            # The publisher would refuse the file, rightly: these would be another release's notes.
+            print(f"HISTORY starts at {HISTORY[0][0]}, not {__version__}: no release-notes text written")
+            return 1
+        with open(sys.argv[2], "w", encoding="utf-8") as f:
+            f.write(text_notes())
+        print(f"Wrote {sys.argv[2]}")
     return 0
 
 

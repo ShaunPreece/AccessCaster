@@ -1,4 +1,4 @@
-﻿<!-- AccessCaster - the Help & About page (Alt+8).
+﻿<!-- AccessCaster - the Help & About page (Alt+9).
 
      A FRAGMENT, NOT A PAGE: no <html>, <head> or <body>. It is spliced into index.html where the
      INCLUDE marker sits, by page.render_index, which both server.py and DevTools/ui_probe.py serve
@@ -561,16 +561,15 @@
           the RODECaster ASIO driver stops working, which matters only if you use a program that
           asks for ASIO.
         </dd>
-        <dt>Getting the driver, and the one time this app uses the internet</dt>
+        <dt>Getting the driver</dt>
         <dd>
           If the driver is missing, a button appears beside that line to fetch it. It downloads
           RODE's own file, checks it really is signed by RODE, and then runs RODE's installer, which
           asks Windows for permission in the usual way and may want to restart the computer. It
           never installs anything behind your back.
-          <strong>This is the only thing in AccessCaster that connects to the internet</strong>,
-          and it only happens when you press that button: never when the app starts, never on a
-          timer, and never to check whether a newer version exists. Everything else the app does
-          stays between this computer and the USB cable.
+          It connects to RODE's website only when you press that button: never when the app starts
+          and never on a timer. The only other thing in AccessCaster that uses the internet is its
+          own check for a newer version, described under Updates on the App settings page.
           There is a second button beside it that just opens RODE's software page in your browser,
           so you can always do it by hand instead. That one stays on the page even once the driver
           is in, because it is also how you repair or reinstall it.
@@ -642,7 +641,7 @@
         The SMART pads across the banks: what each pad does, plus a custom effect builder. This page
         sets pads up rather than playing them. To PRESS a pad, use a keyboard shortcut: the number
         row plays the pads of the bank the unit is on, and every kind of pad works, sound pads
-        included. See Keyboard shortcuts on the Device page.
+        included. See Keyboard shortcuts on the App settings page.
       </p>
       <dl class="help-list">
         <dt>Tabs</dt>
@@ -813,7 +812,8 @@
           nothing changes either way. Your
           screen reader is separate and keeps talking, so if it is playing through the unit it goes
           into the recording: the usual answer is a second pair of headphones or earbuds on your
-          computer's own output, with the announcement output on the Device page set to match.</dd>
+          computer's own output, with the announcement output on the App settings page set to
+          match.</dd>
         <dt>Drop a marker</dt>
         <dd>Puts a marker at the point you are at, so you can find that moment again when you edit.
           It goes into the recording as a standard marker, which editors show as a label or cue.
@@ -1008,30 +1008,18 @@
           on the Backups page after you close it. If the app loses contact with the device service,
           or the unit reports nothing new for over two minutes, the dialog gives up waiting and lets
           you close it rather than holding you there.</dd>
-        <dt>This app's own settings</dt>
-        <dd>
-          Last on the page, and the one part of it that is about AccessCaster rather than the unit.
-          Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong to
-          the app, so no backup of the desk carries them and reinstalling would lose them: "Save this app's
-          settings to a file" writes them all into one small file you can keep somewhere safe or
-          copy to another computer, and "Restore these settings" reads one back, with your shortcuts
-          working again straight away and no restart. The file holds nothing about the desk and no
-          access link, so it is safe to email to yourself. Anything in it naming a voice or an audio
-          output this computer has not got is left alone and said out loud rather than applied to
-          nothing. There is also a switch here to start AccessCaster when you sign in to Windows,
-          which is the same thing the installer offered to set up, for your own Windows account
-          only: it starts in the system tray without opening this page, so your shortcut keys work
-          from the moment you sign in.
-        </dd>
+        <dt>Your shortcuts and other app settings</dt>
+        <dd>Not part of a backup of the unit, because they belong to AccessCaster rather than to
+          the desk. They are saved to a file of their own from the General tab of App settings.</dd>
       </dl>
 
       <h3>Device (Alt+7)</h3>
-      <p>The unit's current state, its hardware status, its own settings, and the global switches.</p>
+      <p>The unit's current state, its hardware status, its own settings and its wireless
+        connections. Everything about AccessCaster itself is on App settings instead.</p>
       <dl class="help-list">
         <dt>Tabs</dt>
-        <dd>This page is a tab strip of eight: Current state, Hardware, Unit settings,
-          Announcements, Keyboard shortcuts, Level warnings, Wireless connections and Remote
-          access. Arrow left and right along the strip, Home and
+        <dd>This page is a tab strip of four: Current state, Hardware, Unit settings and Wireless
+          connections. Arrow left and right along the strip, Home and
           End for the ends, and only the tab you are on is on the page. Opening a tab reads that part
           of the unit, so the values are always current, and the tab you leave off on is remembered.</dd>
         <dt>Current state</dt>
@@ -1051,19 +1039,6 @@
           together. Last on this tab, under its own heading, is a technical section for
           troubleshooting: whether the unit is found, its hardware id and status bytes, and a
           low-level list of the USB interfaces seen.</dd>
-        <dt>Remote access from another device</dt>
-        <dd>The last tab, and the one thing on this page that is about the app rather than the
-          unit. AccessCaster
-          serves its page to your whole network so you can control the desk from a phone in another
-          room, which is genuinely useful and stays. The access link is what stops that being open
-          to anyone else on the network: open it once on the phone and that device is remembered,
-          so reloading and coming back later both work. This computer never needs the link and is
-          unaffected by it. Treat the link like a password, because anyone who has it has full
-          control of the desk. "Make a new link" stops the old one working everywhere you have sent
-          it, which is what you want if you shared it at a venue. Two honest limits: the link can
-          only be read on this computer, not from the phone itself, and it travels unencrypted, so
-          it protects you from a stranger finding the address rather than from someone who can
-          already read your network's traffic.</dd>
         <dt>Unit settings</dt>
         <dd>The settings the unit otherwise offers only on its touchscreen: screen brightness and
           whether the unit sets it itself, how long before the screen dims, how brightly the buttons
@@ -1082,6 +1057,33 @@
           both units. Last on the tab is the MIDI switch:
           turning it on lets an external MIDI app or controller handle mute, faders, listen and
           record over MIDI, without RODE Central. That one works on both units.</dd>
+        <dt>Wireless connections</dt>
+        <dd>Every radio link the unit can make, in one place. "Scan for networks" takes a few
+          seconds and then offers what it found in a list, saying for each whether it needs a
+          password and which one the unit is already set to; picking one fills in the network name
+          below, which you can also just type. The unit reports ten networks at most and never
+          reports hidden ones, so typing the name is sometimes the only way. Joining takes up to 45
+          seconds and can only be done at the computer the unit is plugged into. Bluetooth has one
+          switch, which makes the unit discoverable so you can pair from the phone's own Bluetooth
+          screen; the unit stops being discoverable again after a few minutes. Then the wireless
+          mics the unit can see and their battery levels, and under those, what the unit reports:
+          the network it is on, its address, what a scan last found, and which Bluetooth devices are
+          paired. Two things are missing here: searching for Bluetooth devices, and starting a pairing
+          from this end. A fixed IP address is not offered either, and that one is the unit's own limitation: it
+          reports its address but gives nothing to set it with. The Bluetooth CHANNEL, meaning what you hear from a
+          paired phone, is on the Channels page, and what the phone hears back from the desk is the
+          Bluetooth output on the Routing page.</dd>
+      </dl>
+
+      <h3>App settings (Alt+8)</h3>
+      <p>Everything about AccessCaster itself rather than the unit: how it speaks, its keys, its
+        level warnings, reaching it from another device, starting it, saving these settings, and
+        its own updates. None of it is in a backup of the unit.</p>
+      <dl class="help-list">
+        <dt>Tabs</dt>
+        <dd>Six: Announcements, Keyboard shortcuts, Level warnings, Remote access, General and
+          Updates. Arrow left and right along the strip, Home and End for the ends. Nothing here
+          reads the unit, and the tab you leave off on is remembered.</dd>
         <dt>Announcements</dt>
         <dd>Headed "Announce Interactions on Mixer" once you are on the tab. It speaks each
           physical control aloud as you use it, so you know what it did without the
@@ -1142,7 +1144,7 @@
           "Use the SMART pad keys" adds or removes the pad keys as a set, and "Restore default
           shortcuts" puts the whole list back as a new install has it, after asking, because
           anything you have added or changed is lost. To copy your shortcuts to another computer,
-          save this app's settings on the Backups page.
+          save them from the General tab.
           A shortcut has to include Ctrl, Alt or Windows, so
           it cannot take a plain key away from your screen reader; if another program already owns
           the combination you pick, this page says so rather than leaving you with a key that does
@@ -1180,8 +1182,8 @@
           again, exactly as it does on the unit.
           The first time you play a sound pad in a session the app switches the unit's MIDI control
           on and says so once. That is the only way to make the unit play a sound, and it is the
-          same switch as the one on the Device page, so you can turn it off there when you are
-          done. Restoring a backup can switch it off again, and the next pad you press turns it
+          same switch as the one on the Device page under Unit settings, so you can turn it off
+          there when you are done. Restoring a backup can switch it off again, and the next pad you press turns it
           back on.</dd>
         <dt>Level warnings</dt>
         <dd>The watch that speaks up while you work, and the Windows level it depends on. If you
@@ -1197,25 +1199,54 @@
           exactly. And it is the only part of this app that does not work over Remote Desktop:
           Windows gives each session its own audio devices, so from a remote session the unit's
           streams are not there to read. The page says so when that happens.</dd>
-        <dt>Wireless connections</dt>
-        <dd>Every radio link the unit can make, in one place. "Scan for networks" takes a few
-          seconds and then offers what it found in a list, saying for each whether it needs a
-          password and which one the unit is already set to; picking one fills in the network name
-          below, which you can also just type. The unit reports ten networks at most and never
-          reports hidden ones, so typing the name is sometimes the only way. Joining takes up to 45
-          seconds and can only be done at the computer the unit is plugged into. Bluetooth has one
-          switch, which makes the unit discoverable so you can pair from the phone's own Bluetooth
-          screen; the unit stops being discoverable again after a few minutes. Then the wireless
-          mics the unit can see and their battery levels, and under those, what the unit reports:
-          the network it is on, its address, what a scan last found, and which Bluetooth devices are
-          paired. Two things are missing here: searching for Bluetooth devices, and starting a pairing
-          from this end. A fixed IP address is not offered either, and that one is the unit's own limitation: it
-          reports its address but gives nothing to set it with. The Bluetooth CHANNEL, meaning what you hear from a
-          paired phone, is on the Channels page, and what the phone hears back from the desk is the
-          Bluetooth output on the Routing page.</dd>
+        <dt>Remote access</dt>
+        <dd>AccessCaster serves its page to your whole network so you can control the desk from a phone in another
+          room, which is genuinely useful and stays. The access link is what stops that being open
+          to anyone else on the network: open it once on the phone and that device is remembered,
+          so reloading and coming back later both work. This computer never needs the link and is
+          unaffected by it. Treat the link like a password, because anyone who has it has full
+          control of the desk. "Make a new link" stops the old one working everywhere you have sent
+          it, which is what you want if you shared it at a venue. Two honest limits: the link can
+          only be read on this computer, not from the phone itself, and it travels unencrypted, so
+          it protects you from a stranger finding the address rather than from someone who can
+          already read your network's traffic.</dd>
+        <dt>General</dt>
+        <dd>
+          Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong to
+          the app, so no backup of the desk carries them and reinstalling would lose them: "Save this app's
+          settings to a file" writes them all into one small file you can keep somewhere safe or
+          copy to another computer, and "Restore these settings" reads one back, with your shortcuts
+          working again straight away and no restart. The file holds nothing about the desk and no
+          access link, so it is safe to email to yourself. Anything in it naming a voice or an audio
+          output this computer has not got is left alone and said out loud rather than applied to
+          nothing. There is also a switch here to start AccessCaster when you sign in to Windows,
+          which is the same thing the installer offered to set up, for your own Windows account
+          only: it starts in the system tray without opening this window, so your shortcut keys work
+          from the moment you sign in.
+        </dd>
+        <dt>Updates</dt>
+        <dd>
+          AccessCaster looks for a newer version of itself once a day, and never installs one
+          without asking. When it finds one, Windows shows a notification from its tray icon, which
+          your screen reader reads without moving your focus. Press F12 anywhere in this window, or
+          choose Install update from the tray menu, to hear which version you are on, which is on
+          offer and what changed, then choose Install now, Skip this version or Later. Skip means
+          that version is not mentioned again, though F12 still offers it; the next one is offered
+          as usual.
+          Installing downloads the new version, checks that it is genuinely ours, and then says
+          AccessCaster is about to close. It installs and starts again by itself, usually within
+          half a minute, while this window stays open and reloads itself on the new version. Your
+          shortcut keys and announcements pause until it is back. If anything goes wrong, nothing
+          changes, and you are told what happened and where the downloaded installer is if you want
+          to run it yourself.
+          The Check for updates dropdown sets how often it looks, from once a day to only when you
+          ask, and Check for updates now, or F12, looks straight away whatever it is set to. To do
+          this it contacts updates.slightperception.com and nothing else; the file it reads there
+          is signed, so a version that did not come from us is refused.
+        </dd>
       </dl>
 
-      <h3>Help &amp; About (Alt+8)</h3>
+      <h3>Help &amp; About (Alt+9)</h3>
       <p>
         This page. Above the tabs is what the app is and who wrote it, with a short list of what it
         still cannot do. Then four tabs: What it can control, Help, which is this guide, Known
@@ -1237,10 +1268,11 @@
       </p>
       <p>
         Reach the icon with the Windows key and B, then arrow to AccessCaster and press the
-        applications key or Enter. Its menu holds four things: Open AccessCaster, which brings this
+        applications key or Enter. Its menu holds five things: Open AccessCaster, which brings this
         page back, Announcer, which switches spoken announcements off and on and is ticked while
         they are on, Diagnostic log, which opens the app's own record of what it sent to the unit,
-        and Quit, which stops the program properly, shortcut keys and all.
+        Check for updates, which becomes Install update once a newer version has been found, and
+        Quit, which stops the program properly, shortcut keys and all.
       </p>
       <p>
         If the program stops while this window is open, because it was quit, updated or crashed,

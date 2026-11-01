@@ -67,7 +67,11 @@ if (-not (Test-Path "Project\assets\icon.ico")) {
 # Written into Project/ (gitignored) on every build, then copied beside the exe after the freeze
 # (see below).
 Write-Host "==> 2/4  Generating release notes from version.py..."
-Invoke-Native "release notes" { python ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html }
+# The same notes as text, for the update publisher (UpdateKit), which reads the newest release
+# from it rather than having the notes typed again.
+Invoke-Native "release notes" {
+    python ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html ProjectBuilds\release-notes.txt
+}
 
 Write-Host "==> 3/4  Freezing app with PyInstaller..."
 # Delete prior output first so a PyInstaller failure cannot be masked by a stale dist\ exe.

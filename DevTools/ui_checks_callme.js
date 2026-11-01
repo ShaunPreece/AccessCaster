@@ -27,7 +27,7 @@ async function run() {
 
   // ---- the nav --------------------------------------------------------------
   const link = document.querySelector("a[data-route='callme']");
-  // The link also carries a hidden "5 of 8" position (applyItemPositions), so match the start.
+  // The link also carries a hidden "5 of 9" position (applyItemPositions), so match the start.
   check("CallMe is its own main menu item", !!link && /^CallMe\b/.test(link.textContent.trim()),
     link && link.textContent);
   check("on Alt+5", link && link.getAttribute("aria-keyshortcuts") === "Alt+5");
@@ -37,8 +37,8 @@ async function run() {
       && order.indexOf("profiles") === order.indexOf("callme") + 1, order.join(","));
   const keys = Array.from(document.querySelectorAll("a[data-route]"))
     .map((a) => a.getAttribute("aria-keyshortcuts"));
-  check("the shortcuts still follow the list, Alt+1 to Alt+8",
-    keys.join(",") === "Alt+1,Alt+2,Alt+3,Alt+4,Alt+5,Alt+6,Alt+7,Alt+8", keys.join(","));
+  check("the shortcuts still follow the list, Alt+1 to Alt+9",
+    keys.join(",") === "Alt+1,Alt+2,Alt+3,Alt+4,Alt+5,Alt+6,Alt+7,Alt+8,Alt+9", keys.join(","));
 
   // ---- shape ----------------------------------------------------------------
   const h1 = sec().querySelector("h1");

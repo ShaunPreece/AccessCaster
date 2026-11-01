@@ -36,8 +36,9 @@
          every screen reader, with Alt+digit global shortcuts and N-of-M position. -->
     <nav aria-label="Main">
       <ul class="navlist" role="list">
-        <!-- ORDER: the pages used DURING a session come first, and the three you visit
-             deliberately - Backups, Device, Help & About - sit at the end in that order. The
+        <!-- ORDER: the pages used DURING a session come first, and the four you visit
+             deliberately - Backups, Device, App settings, Help & About - sit at the end in that
+             order, Help last. The
              Alt+digit shortcuts follow the list positions, so bindShortcuts must match this order
              exactly. -->
         <li><a class="navlink" href="#/channels"   data-route="channels"   aria-keyshortcuts="Alt+1">Channels and Processing</a></li>
@@ -47,7 +48,8 @@
         <li><a class="navlink" href="#/callme"     data-route="callme"     aria-keyshortcuts="Alt+5">CallMe</a></li>
         <li><a class="navlink" href="#/profiles"   data-route="profiles"   aria-keyshortcuts="Alt+6">Backups</a></li>
         <li><a class="navlink" href="#/status"     data-route="status"     aria-keyshortcuts="Alt+7">Device</a></li>
-        <li><a class="navlink" href="#/about"      data-route="about"      aria-keyshortcuts="Alt+8">Help &amp; About</a></li>
+        <li><a class="navlink" href="#/settings"   data-route="settings"   aria-keyshortcuts="Alt+8">App settings</a></li>
+        <li><a class="navlink" href="#/about"      data-route="about"      aria-keyshortcuts="Alt+9">Help &amp; About</a></li>
       </ul>
     </nav>
 
@@ -89,7 +91,7 @@
           <!-- NO INTRO PARAGRAPH. Explaining what the report is and why it is by exception is a
                thing you read once and then hear on every single visit
                before the report you came for. The Help page says it (the "Current state" entry
-               under Alt+8), and the report itself is the answer. -->
+               under Alt+9), and the report itself is the answer. -->
           <div id="ov-body" role="status" aria-live="polite" aria-atomic="true">
             <p>Reading the unit...</p>
           </div>
@@ -181,231 +183,6 @@
               <span>Enable MIDI control</span>
             </label>
           </p>
-        </div>
-
-        <div class="cat-tab" data-tab-key="speak" data-tab-title="Announcements" hidden>
-          <!-- The heading is what the tab DOES, and it is more than buttons: faders, the encoder
-               and the banks are all announced, and so are changes made on the unit rather than
-               here. Do not narrow it to "Announce button presses". -->
-          <h2 id="announce-heading">Announce Interactions on Mixer</h2>
-          <!-- Only what no control below says: that changes made ON THE UNIT are caught, not just
-               the ones made here. What each switch announces is in its own label, and the Help
-               page keeps the full account. -->
-          <p id="announce-note" class="note">
-            Mutes, solos, bank changes, channel buttons and the encoder, including changes made on
-            the unit itself.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-toggle" aria-describedby="announce-note">
-              <span>Announce button presses aloud</span>
-            </label>
-          </p>
-          <p id="announce-levels-note" class="note">
-            Says the name and level of whatever you turn: a fader, the monitor, or the channel the
-            encoder is set to.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-levels-toggle" aria-describedby="announce-levels-note">
-              <span>Announce fader and monitor levels aloud</span>
-            </label>
-          </p>
-          <p id="announce-startup-summary-note" class="note">
-            When the app opens, says anything that needs attention, such as a mute, a solo or a
-            recording already running.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-startup-summary-toggle"
-                     aria-describedby="announce-startup-summary-note">
-              <span>Speak the desk's state when the app opens</span>
-            </label>
-          </p>
-          <p id="announce-mute-tones-note" class="note">
-            Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does not
-            say which channel.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-mute-tones-toggle"
-                     aria-describedby="announce-mute-tones-note">
-              <span>Play a tone for mute instead of speaking it</span>
-            </label>
-          </p>
-          <p id="announce-remember-note" class="note">
-            Without this, announcements switch back on every time the app starts.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-remember-toggle"
-                     aria-describedby="announce-remember-note">
-              <span>Start with announcements the way I left them</span>
-            </label>
-          </p>
-          <div class="field">
-            <label for="announce-voice">Announcement voice</label>
-            <select id="announce-voice" aria-describedby="announce-voice-help"></select>
-            <span id="announce-voice-help" class="hint">
-              Choosing one plays a sample. Your screen reader keeps its own voice.
-            </span>
-          </div>
-          <div class="field">
-            <label for="announce-output">Where announcements play</label>
-            <select id="announce-output" aria-describedby="announce-output-help"></select>
-            <span id="announce-output-help" class="hint">
-              This computer's own speakers or headphones keep announcements out of your recording,
-              and audible when the desk mutes or solos.
-            </span>
-          </div>
-          <p>
-            <button type="button" class="secondary" id="announce-devices-refresh"
-                    aria-describedby="announce-devices-help">Refresh voices and outputs</button>
-            <span id="announce-devices-help" class="hint">
-              Use after plugging in headphones or installing a voice.
-            </span>
-          </p>
-          <p id="announce-speech-status" role="status" aria-live="polite"></p>
-          <div class="field">
-            <label for="announce-volume">Announcement volume</label>
-            <input type="range" id="announce-volume" min="0" max="100" step="5" value="100"
-                   aria-describedby="announce-volume-help">
-            <span id="announce-volume-value" class="proc-value" aria-hidden="true">100%</span>
-            <span id="announce-volume-help" class="hint">
-              Announcements only. Windows, your screen reader and the desk are not affected.
-            </span>
-          </div>
-        </div>
-
-        <!-- KEYBOARD SHORTCUTS. Next to Announcements because the first shortcut is the announcer's
-             own on/off switch, and that is the case the whole tab exists for: the announcer talking
-             over a guest is something you deal with NOW, from whatever program you are in, not after
-             finding this window and this tab.
-             A LISTBOX, ONE TAB STOP: each option reads what the shortcut does and its keys, and
-             Enter opens a menu of everything that can be done to it (app.js renderHotkeyList).
-             Editing is a dialog with Save, so nothing is registered while you browse its key list.
-             THE LIST IS YOURS, NOT OURS: Add offers a catalogue that `Project/commands.py` GENERATES
-             from the app's own spec tables - channels, faders, pads, mix schemes, presets.
-             NO "PRESS THE KEYS YOU WANT" CAPTURE FIELD, deliberately. That is the usual way to set a
-             shortcut and it is hostile to a screen reader: the field swallows the keys the screen
-             reader needs, and you cannot hear what you just typed. Checkboxes and a dropdown say the
-             same thing, are readable, and can be checked BEFORE anything is registered. -->
-        <div class="cat-tab" data-tab-key="shortcuts" data-tab-title="Keyboard shortcuts" hidden>
-          <h2 id="hotkeys-heading">Keyboard shortcuts</h2>
-          <p id="hotkeys-note" class="note">
-            These work anywhere in Windows, whatever program you are in and even with this window
-            closed, for as long as AccessCaster is running. Each one needs Ctrl, Alt or Windows in
-            it, so it cannot take a plain key away from your screen reader.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="hotkeys-enabled" aria-describedby="hotkeys-enabled-help">
-              <span>Use keyboard shortcuts</span>
-            </label>
-          </p>
-          <p id="hotkeys-enabled-help" class="hint">
-            Turning this off releases every combination, so they go back to whatever other programs
-            do with them.
-          </p>
-
-          <p id="hotkey-list-label" class="field-label">Your shortcuts</p>
-          <!-- The hint is BEFORE the list and NOT a description of it: a description is read every
-               time focus comes back into the list, after every dialog, ahead of anything else. -->
-          <p id="hotkey-list-help" class="hint">
-            Press Enter to edit a shortcut, Delete to delete it, or the Applications key for more
-            options.
-          </p>
-          <ul id="hotkey-list" class="hotkey-items" role="listbox"
-              aria-labelledby="hotkey-list-label"></ul>
-          <p id="hotkey-list-empty" class="hint" hidden>
-            You have no shortcuts yet. Press Add a shortcut to make one.
-          </p>
-          <p>
-            <button type="button" class="secondary" id="hotkey-add-btn">Add a shortcut</button>
-            <!-- Names the keys held now (applyHotkeyState), so the setting is heard without
-                 opening it. -->
-            <button type="button" class="secondary" id="hotkey-mods-btn">Change the keys to hold</button>
-            <button type="button" class="secondary" id="hotkey-restore-btn">Restore default
-              shortcuts</button>
-          </p>
-          <!-- Ticked when the whole pad scheme is bound, partly ticked when some of it is (app.js
-               applyHotkeyState). Unticking deletes those shortcuts; ticking adds what is missing. -->
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="hotkeys-pad-set" aria-describedby="hotkeys-pad-set-help">
-              <span>Use the SMART pad keys</span>
-            </label>
-          </p>
-          <p id="hotkeys-pad-set-help" class="hint">
-            The number keys play the pads of the bank the unit is on, Dash and Equals change bank,
-            and P says what is playing.
-          </p>
-          <p class="hint">
-            To copy your shortcuts to another computer, save this app's settings on the
-            <a href="#/profiles">Backups page</a>.
-          </p>
-          <!-- The menu every shortcut button opens, positioned under it; see openHotkeyMenu. -->
-          <ul id="hotkey-menu" class="context-menu" role="menu" aria-label="Shortcut options" hidden>
-            <li role="menuitem" tabindex="-1" data-action="edit">Edit</li>
-            <li role="menuitem" tabindex="-1" data-action="toggle" id="hotkey-menu-toggle">Turn off</li>
-            <li role="menuitemcheckbox" tabindex="-1" data-action="speak" id="hotkey-menu-speak"
-                aria-checked="true">Speak when pressed</li>
-            <li role="menuitem" tabindex="-1" data-action="delete">Delete</li>
-          </ul>
-
-
-          <p id="hotkeys-status" role="status" aria-live="polite"></p>
-        </div>
-        <!-- LEVELS. Its own tab rather than part of Announcements, because it answers a different
-             question: Announcements is about the unit's CONTROLS, this is about its AUDIO. It is
-             also the one part of the app that does not work over Remote Desktop, which needs
-             somewhere of its own to be explained. -->
-        <!-- NOT called "Levels": nothing here is a meter you read, it is the background watch and
-             the Windows input level that watch depends on, so the name says warnings. The meter
-             itself is on Channels. -->
-        <div class="cat-tab" data-tab-key="levels" data-tab-title="Level warnings" hidden>
-          <h2 id="meter-heading">Level warnings</h2>
-          <!-- What this reads, and why it will not match the unit's own meters exactly, is on the
-               Help page. The tab itself just does the job. -->
-          <p id="meter-note" class="note">
-            Levels on the unit's audio streams, as Windows sees them.
-          </p>
-          <p id="meter-status" role="status" aria-live="polite"></p>
-
-          <!-- THE CHECK ITSELF LIVES ON CHANNELS; this tab keeps the stream chooser because the
-               background watch below needs it.
-               Why: every stream this desk offers is a MIX. "Microphone (RODECaster Pro II
-               Main Stereo)" is all four mics, both USB returns and Bluetooth at once, so a check
-               here could say "something is reaching the computer" and never "Mic 2 is right" -
-               which is the question you actually have. On Channels the server isolates the one
-               channel on a temporary Chat mix and takes the fader out of the reading, so the number
-               means something. -->
-          <h3 id="meter-h-stream">Which stream to watch</h3>
-          <div>
-            <div class="field">
-              <label for="meter-stream">Audio device to watch</label>
-              <select id="meter-stream"></select>
-            </div>
-            <p class="hint" id="meter-check-hint">
-              To check one channel, use Check this channel's level on the Channels page.
-            </p>
-          </div>
-
-          <!-- Windows' own level for the metered stream. It sits between the check and the
-               warnings because it is what makes both of them mean anything: it is a hidden
-               multiplier on every reading, and getting it wrong damages recordings while the
-               unit's own meters look perfectly healthy. -->
-          <h3 id="meter-h-input">Windows level</h3>
-          <div id="meter-input-level"></div>
-
-          <h3 id="meter-h-watch">Warn me while I work</h3>
-          <div>
-            <p class="hint" id="meter-watch-hint">
-              Watches in the background and speaks only when something needs saying.
-            </p>
-            <div id="meter-watch-controls"></div>
-            <p id="meter-watch-status" role="status" aria-live="polite"></p>
-          </div>
         </div>
 
         <!-- NOT called "Network": that name says cables and IP addresses, and Bluetooth then reads
@@ -545,32 +322,6 @@
                are writable, so what is left is scanning, pairing and static IP, and the honest
                reason is that the unit does not act on them, not that we are afraid to try. -->
           <p id="net-readonly" class="hint"></p>
-        </div>
-
-
-        <!-- ITS OWN TAB, not part of Hardware: that tab is about what the UNIT is, and this is
-             about how you reach the APP. Compare the MIDI switch, which is folded away from a tab of
-             its own precisely because it HAS a correct home to fold into. This has none, so a tab is
-             the only right answer. LAST on the strip: least often visited, and it leaves every
-             remembered tab position where it was. -->
-        <div class="cat-tab" data-tab-key="access" data-tab-title="Remote access" hidden>
-          <h2 id="dev-h-access">Remote access from another device</h2>
-          <p class="hint" id="dev-access-note">Checking.</p>
-          <div class="field">
-            <label for="dev-access-url">Access link</label>
-            <input type="text" id="dev-access-url" readonly aria-describedby="dev-access-note">
-          </div>
-          <p>
-            <button type="button" class="secondary" id="dev-access-copy">Copy the link</button>
-            <button type="button" class="secondary" id="dev-access-new"
-                    aria-describedby="dev-access-new-hint">Make a new link</button>
-          </p>
-          <p class="hint" id="dev-access-new-hint">
-            The old link stops working.
-          </p>
-          <p class="hint" id="dev-access-warning"></p>
-          <p id="dev-access-status" role="status" aria-live="polite"></p>
-
         </div>
 
       </div>
@@ -1364,63 +1115,15 @@
           settings</button>
       </p>
 
-      <!-- THIS APP's OWN SETTINGS. Deliberately NOT part of a profile: a profile is restored onto a
-           desk, often somebody else's, and quietly replacing their key bindings as a side effect of
-           restoring a mixer would be a nasty surprise. Two separate things, two separate buttons.
-           It lives on this page because this is where backup lives, and the case it exists for is
-           "I am moving to another computer", which is what someone comes to this page to solve. -->
-      <h2 id="h-appsettings">This app's own settings</h2>
-
-      <!-- START AT SIGN-IN. The same HKCU Run value the installer's checkbox writes, so this is the
-           way back for anyone who did not tick it. "You" is load-bearing:
-           the entry is per-user on purpose, because the server holds a fixed port and a machine-wide
-           one would start an instance for every account that signs in. -->
-      <p class="field">
-        <label class="switch">
-          <input type="checkbox" id="autostart-switch" aria-describedby="autostart-hint">
-          <span>Start AccessCaster when you sign in to Windows</span>
-        </label>
-      </p>
-      <p class="hint" id="autostart-hint">
-        It starts in the system tray, so your shortcuts work from the moment you sign in.
-      </p>
-
+      <!-- Moving to another computer is the case someone brings to this page, and half of it is
+           the app's own settings, which no backup of the desk carries. -->
       <p class="note" role="note">
-        Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong
-        to AccessCaster
-        rather than to the unit, so no profile carries them and reinstalling would lose them. Saving
-        them here writes one small file you can copy to another computer or keep somewhere safe. It
-        contains nothing about the desk and no remote-access token, so it is safe to email to
-        yourself.
-      </p>
-      <!-- A PLAIN PARAGRAPH, AND NOT DESCRIBED-BY ANYTHING. Make it role="status" as well as
-           spoken by announce() and named by the Save button's description, and one save is read out
-           three times in full. The guide already forbids the same words in a status line and
-           announce(); the third voice is the description, which a screen reader re-reads when focus
-           comes back to the button after setBusy. This
-           section speaks through announce(); the line is here to be READ, not spoken. -->
-      <p id="appsettings-state"></p>
-      <p class="profile-actions">
-        <button type="button" class="primary"
-                id="appsettings-export-btn">Save this app's settings to a file</button>
-        <button type="button" class="secondary" id="appsettings-open-btn">Open the folder</button>
+        Your keyboard shortcuts and other AccessCaster preferences are not part of a backup of the
+        unit. Save them to a file from the General tab of
+        <a href="#/settings" id="backups-appsettings-link">App settings</a>.
       </p>
 
-      <div class="field">
-        <label for="appsettings-file">Restore from a saved settings file</label>
-        <input type="file" id="appsettings-file" accept=".json,application/json"
-               aria-describedby="appsettings-import-hint">
-        <p class="hint" id="appsettings-import-hint">
-          Choose a file, then press Restore. A voice or audio device this computer lacks is skipped,
-          and said.
-        </p>
-      </div>
-      <p class="profile-actions">
-        <button type="button" class="secondary" id="appsettings-import-btn"
-                aria-describedby="appsettings-import-hint">Restore these settings</button>
-      </p>
-
-</section>
+    </section>
 
     <!-- Recording ---------------------------------------------------------- -->
     <!-- A PLAIN PAGE, not a tab strip, and that is deliberate: this is the one page in the app
@@ -1699,7 +1402,338 @@
       </div>
     </section>
 
-    <!-- HELP & ABOUT (Alt+8) IS IN static/help.html AND IS SPLICED IN HERE by page.render_index.
+    <!-- App settings ------------------------------------------------------- -->
+    <!-- EVERYTHING ABOUT ACCESSCASTER ITSELF RATHER THAN THE UNIT: how it speaks, its keys, its
+         level warnings, the remote-access link, starting at sign-in, saving these settings to a
+         file, and its own updates. None of it is in a backup of the desk, which is why it is
+         its own page: Device and Backups are the unit's. Tab panes as on Device
+         (buildStaticTabs). -->
+    <section class="app-section" id="sec-settings" hidden>
+      <h1 id="h-settings" tabindex="-1">App settings</h1>
+      <div id="settings-panel" class="cat-panel" role="tabpanel">
+
+        <div class="cat-tab" data-tab-key="speak" data-tab-title="Announcements">
+          <!-- The heading is what the tab DOES, and it is more than buttons: faders, the encoder
+               and the banks are all announced, and so are changes made on the unit rather than
+               here. Do not narrow it to "Announce button presses". -->
+          <h2 id="announce-heading">Announce Interactions on Mixer</h2>
+          <!-- Only what no control below says: that changes made ON THE UNIT are caught, not just
+               the ones made here. What each switch announces is in its own label, and the Help
+               page keeps the full account. -->
+          <p id="announce-note" class="note">
+            Mutes, solos, bank changes, channel buttons and the encoder, including changes made on
+            the unit itself.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-toggle" aria-describedby="announce-note">
+              <span>Announce button presses aloud</span>
+            </label>
+          </p>
+          <p id="announce-levels-note" class="note">
+            Says the name and level of whatever you turn: a fader, the monitor, or the channel the
+            encoder is set to.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-levels-toggle" aria-describedby="announce-levels-note">
+              <span>Announce fader and monitor levels aloud</span>
+            </label>
+          </p>
+          <p id="announce-startup-summary-note" class="note">
+            When the app opens, says anything that needs attention, such as a mute, a solo or a
+            recording already running.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-startup-summary-toggle"
+                     aria-describedby="announce-startup-summary-note">
+              <span>Speak the desk's state when the app opens</span>
+            </label>
+          </p>
+          <p id="announce-mute-tones-note" class="note">
+            Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does not
+            say which channel.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-mute-tones-toggle"
+                     aria-describedby="announce-mute-tones-note">
+              <span>Play a tone for mute instead of speaking it</span>
+            </label>
+          </p>
+          <p id="announce-remember-note" class="note">
+            Without this, announcements switch back on every time the app starts.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="announce-remember-toggle"
+                     aria-describedby="announce-remember-note">
+              <span>Start with announcements the way I left them</span>
+            </label>
+          </p>
+          <div class="field">
+            <label for="announce-voice">Announcement voice</label>
+            <select id="announce-voice" aria-describedby="announce-voice-help"></select>
+            <span id="announce-voice-help" class="hint">
+              Choosing one plays a sample. Your screen reader keeps its own voice.
+            </span>
+          </div>
+          <div class="field">
+            <label for="announce-output">Where announcements play</label>
+            <select id="announce-output" aria-describedby="announce-output-help"></select>
+            <span id="announce-output-help" class="hint">
+              This computer's own speakers or headphones keep announcements out of your recording,
+              and audible when the desk mutes or solos.
+            </span>
+          </div>
+          <p>
+            <button type="button" class="secondary" id="announce-devices-refresh"
+                    aria-describedby="announce-devices-help">Refresh voices and outputs</button>
+            <span id="announce-devices-help" class="hint">
+              Use after plugging in headphones or installing a voice.
+            </span>
+          </p>
+          <p id="announce-speech-status" role="status" aria-live="polite"></p>
+          <div class="field">
+            <label for="announce-volume">Announcement volume</label>
+            <input type="range" id="announce-volume" min="0" max="100" step="5" value="100"
+                   aria-describedby="announce-volume-help">
+            <span id="announce-volume-value" class="proc-value" aria-hidden="true">100%</span>
+            <span id="announce-volume-help" class="hint">
+              Announcements only. Windows, your screen reader and the desk are not affected.
+            </span>
+          </div>
+        </div>
+
+        <!-- KEYBOARD SHORTCUTS. Next to Announcements because the first shortcut is the announcer's
+             own on/off switch, and that is the case the whole tab exists for: the announcer talking
+             over a guest is something you deal with NOW, from whatever program you are in, not after
+             finding this window and this tab.
+             A LISTBOX, ONE TAB STOP: each option reads what the shortcut does and its keys, and
+             Enter opens a menu of everything that can be done to it (app.js renderHotkeyList).
+             Editing is a dialog with Save, so nothing is registered while you browse its key list.
+             THE LIST IS YOURS, NOT OURS: Add offers a catalogue that `Project/commands.py` GENERATES
+             from the app's own spec tables - channels, faders, pads, mix schemes, presets.
+             NO "PRESS THE KEYS YOU WANT" CAPTURE FIELD, deliberately. That is the usual way to set a
+             shortcut and it is hostile to a screen reader: the field swallows the keys the screen
+             reader needs, and you cannot hear what you just typed. Checkboxes and a dropdown say the
+             same thing, are readable, and can be checked BEFORE anything is registered. -->
+        <div class="cat-tab" data-tab-key="shortcuts" data-tab-title="Keyboard shortcuts" hidden>
+          <h2 id="hotkeys-heading">Keyboard shortcuts</h2>
+          <p id="hotkeys-note" class="note">
+            These work anywhere in Windows, whatever program you are in and even with this window
+            closed, for as long as AccessCaster is running. Each one needs Ctrl, Alt or Windows in
+            it, so it cannot take a plain key away from your screen reader.
+          </p>
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="hotkeys-enabled" aria-describedby="hotkeys-enabled-help">
+              <span>Use keyboard shortcuts</span>
+            </label>
+          </p>
+          <p id="hotkeys-enabled-help" class="hint">
+            Turning this off releases every combination, so they go back to whatever other programs
+            do with them.
+          </p>
+
+          <p id="hotkey-list-label" class="field-label">Your shortcuts</p>
+          <!-- The hint is BEFORE the list and NOT a description of it: a description is read every
+               time focus comes back into the list, after every dialog, ahead of anything else. -->
+          <p id="hotkey-list-help" class="hint">
+            Press Enter to edit a shortcut, Delete to delete it, or the Applications key for more
+            options.
+          </p>
+          <ul id="hotkey-list" class="hotkey-items" role="listbox"
+              aria-labelledby="hotkey-list-label"></ul>
+          <p id="hotkey-list-empty" class="hint" hidden>
+            You have no shortcuts yet. Press Add a shortcut to make one.
+          </p>
+          <p>
+            <button type="button" class="secondary" id="hotkey-add-btn">Add a shortcut</button>
+            <!-- Names the keys held now (applyHotkeyState), so the setting is heard without
+                 opening it. -->
+            <button type="button" class="secondary" id="hotkey-mods-btn">Change the keys to hold</button>
+            <button type="button" class="secondary" id="hotkey-restore-btn">Restore default
+              shortcuts</button>
+          </p>
+          <!-- Ticked when the whole pad scheme is bound, partly ticked when some of it is (app.js
+               applyHotkeyState). Unticking deletes those shortcuts; ticking adds what is missing. -->
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="hotkeys-pad-set" aria-describedby="hotkeys-pad-set-help">
+              <span>Use the SMART pad keys</span>
+            </label>
+          </p>
+          <p id="hotkeys-pad-set-help" class="hint">
+            The number keys play the pads of the bank the unit is on, Dash and Equals change bank,
+            and P says what is playing.
+          </p>
+          <p class="hint">
+            To copy your shortcuts to another computer, save this app's settings on the
+            <a href="#/profiles">Backups page</a>.
+          </p>
+          <!-- The menu every shortcut button opens, positioned under it; see openHotkeyMenu. -->
+          <ul id="hotkey-menu" class="context-menu" role="menu" aria-label="Shortcut options" hidden>
+            <li role="menuitem" tabindex="-1" data-action="edit">Edit</li>
+            <li role="menuitem" tabindex="-1" data-action="toggle" id="hotkey-menu-toggle">Turn off</li>
+            <li role="menuitemcheckbox" tabindex="-1" data-action="speak" id="hotkey-menu-speak"
+                aria-checked="true">Speak when pressed</li>
+            <li role="menuitem" tabindex="-1" data-action="delete">Delete</li>
+          </ul>
+
+
+          <p id="hotkeys-status" role="status" aria-live="polite"></p>
+        </div>
+        <!-- LEVELS. Its own tab rather than part of Announcements, because it answers a different
+             question: Announcements is about the unit's CONTROLS, this is about its AUDIO. It is
+             also the one part of the app that does not work over Remote Desktop, which needs
+             somewhere of its own to be explained. -->
+        <!-- NOT called "Levels": nothing here is a meter you read, it is the background watch and
+             the Windows input level that watch depends on, so the name says warnings. The meter
+             itself is on Channels. -->
+        <div class="cat-tab" data-tab-key="levels" data-tab-title="Level warnings" hidden>
+          <h2 id="meter-heading">Level warnings</h2>
+          <!-- What this reads, and why it will not match the unit's own meters exactly, is on the
+               Help page. The tab itself just does the job. -->
+          <p id="meter-note" class="note">
+            Levels on the unit's audio streams, as Windows sees them.
+          </p>
+          <p id="meter-status" role="status" aria-live="polite"></p>
+
+          <!-- THE CHECK ITSELF LIVES ON CHANNELS; this tab keeps the stream chooser because the
+               background watch below needs it.
+               Why: every stream this desk offers is a MIX. "Microphone (RODECaster Pro II
+               Main Stereo)" is all four mics, both USB returns and Bluetooth at once, so a check
+               here could say "something is reaching the computer" and never "Mic 2 is right" -
+               which is the question you actually have. On Channels the server isolates the one
+               channel on a temporary Chat mix and takes the fader out of the reading, so the number
+               means something. -->
+          <h3 id="meter-h-stream">Which stream to watch</h3>
+          <div>
+            <div class="field">
+              <label for="meter-stream">Audio device to watch</label>
+              <select id="meter-stream"></select>
+            </div>
+            <p class="hint" id="meter-check-hint">
+              To check one channel, use Check this channel's level on the Channels page.
+            </p>
+          </div>
+
+          <!-- Windows' own level for the metered stream. It sits between the check and the
+               warnings because it is what makes both of them mean anything: it is a hidden
+               multiplier on every reading, and getting it wrong damages recordings while the
+               unit's own meters look perfectly healthy. -->
+          <h3 id="meter-h-input">Windows level</h3>
+          <div id="meter-input-level"></div>
+
+          <h3 id="meter-h-watch">Warn me while I work</h3>
+          <div>
+            <p class="hint" id="meter-watch-hint">
+              Watches in the background and speaks only when something needs saying.
+            </p>
+            <div id="meter-watch-controls"></div>
+            <p id="meter-watch-status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <!-- ITS OWN TAB: it is about how you reach the app, which no other tab is. -->
+        <div class="cat-tab" data-tab-key="access" data-tab-title="Remote access" hidden>
+          <h2 id="dev-h-access">Remote access from another device</h2>
+          <p class="hint" id="dev-access-note">Checking.</p>
+          <div class="field">
+            <label for="dev-access-url">Access link</label>
+            <input type="text" id="dev-access-url" readonly aria-describedby="dev-access-note">
+          </div>
+          <p>
+            <button type="button" class="secondary" id="dev-access-copy">Copy the link</button>
+            <button type="button" class="secondary" id="dev-access-new"
+                    aria-describedby="dev-access-new-hint">Make a new link</button>
+          </p>
+          <p class="hint" id="dev-access-new-hint">
+            The old link stops working.
+          </p>
+          <p class="hint" id="dev-access-warning"></p>
+          <p id="dev-access-status" role="status" aria-live="polite"></p>
+
+        </div>
+
+        <!-- STARTING AND MOVING THE APP. Saving these settings to a file is deliberately NOT
+             part of a backup of the desk: a backup is restored onto a desk, often somebody
+             else's, and quietly replacing their key bindings as a side effect of restoring a
+             mixer would be a nasty surprise. The Backups page points here. -->
+        <div class="cat-tab" data-tab-key="general" data-tab-title="General" hidden>
+          <h2 id="h-appsettings">General</h2>
+          <!-- START AT SIGN-IN. The same HKCU Run value the installer's checkbox writes, so this is the
+               way back for anyone who did not tick it. "You" is load-bearing:
+               the entry is per-user on purpose, because the server holds a fixed port and a machine-wide
+               one would start an instance for every account that signs in. -->
+          <p class="field">
+            <label class="switch">
+              <input type="checkbox" id="autostart-switch" aria-describedby="autostart-hint">
+              <span>Start AccessCaster when you sign in to Windows</span>
+            </label>
+          </p>
+          <p class="hint" id="autostart-hint">
+            It starts in the system tray, so your shortcuts work from the moment you sign in.
+          </p>
+
+          <p class="note" role="note">
+            Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong
+            to AccessCaster rather than to the unit, so no backup of the unit carries them and
+            reinstalling would lose them. Saving them here writes one small file you can copy to another
+            computer or keep somewhere safe. It contains nothing about the desk and no remote-access
+            token, so it is safe to email to yourself.
+          </p>
+          <!-- A PLAIN PARAGRAPH, AND NOT DESCRIBED-BY ANYTHING. Make it role="status" as well as
+               spoken by announce() and named by the Save button's description, and one save is read out
+               three times in full. The guide already forbids the same words in a status line and
+               announce(); the third voice is the description, which a screen reader re-reads when focus
+               comes back to the button after setBusy. This
+               section speaks through announce(); the line is here to be READ, not spoken. -->
+          <p id="appsettings-state"></p>
+          <p class="profile-actions">
+            <button type="button" class="primary"
+                    id="appsettings-export-btn">Save this app's settings to a file</button>
+            <button type="button" class="secondary" id="appsettings-open-btn">Open the folder</button>
+          </p>
+
+          <div class="field">
+            <label for="appsettings-file">Restore from a saved settings file</label>
+            <input type="file" id="appsettings-file" accept=".json,application/json"
+                   aria-describedby="appsettings-import-hint">
+            <p class="hint" id="appsettings-import-hint">
+              Choose a file, then press Restore. A voice or audio device this computer lacks is skipped,
+              and said.
+            </p>
+          </div>
+          <p class="profile-actions">
+            <button type="button" class="secondary" id="appsettings-import-btn"
+                    aria-describedby="appsettings-import-hint">Restore these settings</button>
+          </p>
+        </div>
+
+        <div class="cat-tab" data-tab-key="updates" data-tab-title="Updates" hidden>
+          <!-- ACCESSCASTER'S OWN UPDATES (app_updates.py). How often it looks, and the button that looks
+               now whatever that is set to; F12 does the same from anywhere on the page. The hint is
+               written by the server. The decision and the download are #update-dialog and
+               #update-progress-dialog. -->
+          <h2 id="h-updates">Updates</h2>
+          <div class="field">
+            <label for="update-days">Check for updates</label>
+            <select id="update-days" aria-describedby="update-hint"></select>
+            <p class="hint" id="update-hint"></p>
+          </div>
+          <p class="profile-actions">
+            <button type="button" class="secondary" id="update-check-btn"
+                    aria-keyshortcuts="F12">Check for updates now</button>
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- HELP & ABOUT (Alt+9) IS IN static/help.html AND IS SPLICED IN HERE by page.render_index.
          Server-side rather than fetched by the browser on purpose: this page's h1 is the route's
          focus target and buildStaticTabs reads its panes at startup, so a fetch would race both.
          What the browser receives is identical to having the section written out below. -->
@@ -2022,6 +2056,44 @@
       itself when the service is back; otherwise, start AccessCaster from the Start menu.</p>
     <div class="dialog-actions">
       <button type="button" id="server-lost-ok">OK</button>
+    </div>
+  </dialog>
+
+  <!-- AN UPDATE IS TWO DIALOGS, handed over in one tick (app.js startUpdate): the decision, then the
+       progress. Not one dialog whose content changes, because a screen reader builds its buffer
+       for a dialog when it opens, so a progress view revealed inside the decision dialog is never
+       read (see #progress-dialog). Every word in both is the server's (selfupdate/phrases.py).
+       THE RELEASE NOTES ARE A READ-ONLY TEXT BOX, and focus lands in it: being read before the
+       decision is the point of the dialog, and a text box can be arrowed through, read with
+       say-all and searched in every screen reader. -->
+  <dialog id="update-dialog" role="alertdialog"
+          aria-labelledby="update-title" aria-describedby="update-summary">
+    <h2 id="update-title">Install the update?</h2>
+    <p id="update-summary"></p>
+    <div class="field">
+      <label for="update-notes">What changed</label>
+      <textarea id="update-notes" readonly rows="10"></textarea>
+    </div>
+    <p id="update-after" class="hint"></p>
+    <div class="dialog-actions">
+      <button type="button" class="primary" id="update-install">Install now</button>
+      <button type="button" class="secondary" id="update-skip">Skip this version</button>
+      <button type="button" class="secondary" id="update-later">Later</button>
+    </div>
+  </dialog>
+
+  <!-- The download, the check of it and the hand-off. A NATIVE progress bar, the one control every
+       screen reader reports without being asked; the status line carries one sentence per STAGE,
+       never per cent. Cancel is there while there is something to cancel. Under the closing
+       sentence there is NOTHING TO PRESS: a button under "AccessCaster will now close" reads as
+       the step that does it, whatever its label. The button comes back as Close only when the
+       update fails. -->
+  <dialog id="update-progress-dialog" aria-labelledby="update-progress-title">
+    <h2 id="update-progress-title" tabindex="-1">Updating AccessCaster</h2>
+    <progress id="update-progress" max="100" aria-labelledby="update-progress-title"></progress>
+    <p id="update-progress-step" role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button type="button" class="secondary" id="update-progress-btn">Cancel</button>
     </div>
   </dialog>
 

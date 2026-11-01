@@ -1121,7 +1121,7 @@ async function loadDeviceState() {
   }
 }
 
-/* ---- Device page: LEVEL METERS -------------------------------------------------------------
+/* ---- App settings: LEVEL METERS -----------------------------------------------------------
    The whole point of this group is that a spoken meter is not a meter read aloud. So the page is
    built around the on-request CHECK (which never interrupts) with the background warnings as the
    opt-in, and every threshold is a control rather than a constant, because how often this should
@@ -1640,12 +1640,7 @@ const DEVICE_TAB_READ = {
   state: () => loadOverview(),
   hardware: () => Promise.all([loadDeviceState(), loadStatus(false)]),
   unit: () => loadUnitSettings(),
-  speak: () => loadAnnounceState(),
-  shortcuts: () => loadHotkeys(),
-  levels: () => loadMeters(),
   network: () => loadNetwork(),
-  // Reads nothing from the DESK: the link is this app's own, so opening the tab is free.
-  access: () => loadAccess(),
 };
 
 function wireDeviceTabs() {
@@ -1672,6 +1667,41 @@ async function readDevice() {
   // its own half.
   if (key === "hardware") { await loadDeviceState(); return; }
   await readDeviceTab(key);
+}
+
+/* ---- App settings: the tab strip, and reading per tab ------------------
+   Everything about AccessCaster itself rather than the unit. NONE of these reads the desk: each
+   is this app's own state, so a tab costs nothing to open. Debounced like Device's all the same,
+   because selection follows the arrow keys. */
+let settingsTabs = null;
+let _settingsTabReadTimer = null;
+
+const SETTINGS_TAB_READ = {
+  speak: () => loadAnnounceState(),
+  shortcuts: () => loadHotkeys(),
+  levels: () => loadMeters(),
+  access: () => loadAccess(),
+  general: () => loadAutostart(),
+  updates: () => loadUpdates(),
+};
+
+function wireSettingsTabs() {
+  settingsTabs = buildStaticTabs("settings", "settings-panel", { onSelect: (key) => {
+      clearTimeout(_settingsTabReadTimer);
+      _settingsTabReadTimer = window.setTimeout(() => readSettingsTab(key), 350);
+    },
+  });
+}
+
+async function readSettingsTab(key) {
+  const read = SETTINGS_TAB_READ[key];
+  if (!read) return;
+  try { await read(); } catch { /* each loader reports its own failure */ }
+}
+
+function readSettings() {
+  clearTimeout(_settingsTabReadTimer);
+  return readSettingsTab(settingsTabs ? settingsTabs.current() : "speak");
 }
 
 async function loadAnnounceState() {
@@ -1797,7 +1827,7 @@ async function commitAnnounceVolume() {
   }
 }
 
-/* ===== Device page: global keyboard shortcuts =====
+/* ===== App settings: global keyboard shortcuts =====
    Reads GET /api/hotkeys and writes to /api/hotkeys/{set,add,delete}. The SERVER owns everything
    that can be got wrong: what commands exist (commands.py, generated from the app's own spec
    tables), whether a combination is legal, and whether Windows will accept it. This page shows what
@@ -7102,29 +7132,27 @@ function applyDriverButtons(drv) {
   routingCtl.driverPage.textContent = missing
     ? "Open RODE's software page instead"
     : "Open RODE's software page, to reinstall or repair the driver";
-  // SAID BEFORE THE PRESS, not buried in Help: this is the one thing in the app that reaches the
-  // internet, and somebody who chose it partly for what it does not do should hear that here.
+  // SAID BEFORE THE PRESS, not buried in Help: this reaches RODE's website, and somebody who chose
+  // the app partly for what it does not do should hear that here.
   routingCtl.driverHint.textContent = !known
     ? "Whether RODE's driver is installed could not be read."
     : (missing
-        ? "Expanded needs this driver. Downloading it is the only time AccessCaster connects to "
-          + "the internet, and it only ever happens when you press that button. The file comes "
-          + "from RODE, is checked to be signed by them, and their own installer then runs and "
-          + "asks Windows for permission in the usual way."
+        ? "Expanded needs this driver. Downloading it connects to RODE's website, and only ever "
+          + "when you press that button. The file is checked to be signed by RODE, and their own "
+          + "installer then runs and asks Windows for permission in the usual way."
         : "The driver is installed. If it is not working, RODE's own installer can repair it.");
 }
 
 /* Fetch RODE's driver and hand it over, behind a confirmation and then the progress dialog.
-   CONFIRMED FIRST because this is the app's only outbound connection and the one place it installs
-   anything; the dialog says so in as many words, so agreeing to it is a decision rather than a
-   side effect of pressing a button labelled "download". */
+   CONFIRMED FIRST because this reaches RODE's website and installs somebody else's software; the
+   dialog says so in as many words, so agreeing to it is a decision rather than a side effect of
+   pressing a button labelled "download". */
 async function installDriver() {
   const ok = await confirmAction(
     "Download RODE's driver?",
     "AccessCaster will connect to RODE's website, download their Virtual Devices driver, check it "
       + "is signed by RODE, and then run their installer. Windows will ask your permission, and the "
-      + "installer may want to restart the computer. This is the only time this app uses the "
-      + "internet.",
+      + "installer may want to restart the computer.",
     "Download and install");
   if (!ok) return;
   _profileJobRunning = true;
@@ -7704,7 +7732,7 @@ function applyAnnouncerWarning(d) {
   const a = d.announcer || {};
   // ONE LINE, and only when it applies. The screen reader half of this belongs in Help, not here:
   // anyone recording with a screen reader already runs a second pair of headphones for it and sets
-  // the announcement output to match, on the Device page. Repeating that here every time would be
+  // the announcement output to match, under App settings. Repeating that here every time would be
   // a lecture, not a warning.
   warn.textContent = (a.announcing && a.mute_while_recording)
     ? "Announcements are switched off while recording and back on when you stop." : "";
@@ -8901,7 +8929,7 @@ const ROUTES = {
   // loadShows reads the desk (whether it can be reset, and back itself up first) for the factory
   // reset; the rest read files on this computer.
   profiles:   { title: "Backups",            section: "sec-profiles",
-                onShow: () => { loadProfiles(); refreshBaselinePanel(); loadShows(); loadAutostart(); } },
+                onShow: () => { loadProfiles(); refreshBaselinePanel(); loadShows(); } },
   // Entering the page reads the unit once (state, storage, recordings) and then leaves a cheap
   // poll running for the state alone; leaving it stops the poll. See loadRecording.
   recording:  { title: "Recording",          section: "sec-recording",
@@ -8909,6 +8937,8 @@ const ROUTES = {
   // Read once on entry, then the free poll while the page is open. See loadCallme.
   callme:     { title: "CallMe",             section: "sec-callme",
                 onShow: () => loadCallme() },
+  // Reads nothing from the desk: every tab is this app's own state (see SETTINGS_TAB_READ).
+  settings:   { title: "App settings",       section: "sec-settings",   onShow: () => readSettings() },
   about:      { title: "Help & About",       section: "sec-about" },
 };
 // CHANNELS, NOT DEVICE. Device is a settings page near the end of the nav, not a working one. The
@@ -9006,7 +9036,8 @@ function bindShortcuts() {
   // the last three. The numbers follow the list.
   const map = {
     Digit1: "channels", Digit2: "routing", Digit3: "pads", Digit4: "recording",
-    Digit5: "callme", Digit6: "profiles", Digit7: "status", Digit8: "about",
+    Digit5: "callme", Digit6: "profiles", Digit7: "status", Digit8: "settings",
+    Digit9: "about",
   };
   document.addEventListener("keydown", (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -9257,6 +9288,355 @@ function initSingleInstanceGuard() {
   setTimeout(() => { if (active === null) becomeActive(); }, 400);
 }
 
+/* ---- AccessCaster's own updates ---------------------------------------
+   The server (app_updates.py) checks, downloads and starts the installer; the page asks, shows the
+   decision and follows the download. Every sentence comes from the server.
+
+   CHECKING IS AUTOMATIC AND INSTALLING NEVER IS. Nothing here installs anything without Install
+   now having been pressed in #update-dialog.
+
+   THE HAND-OFF WAITS FOR THE PAGE. Once the download is verified the server does nothing until
+   this page says `proceed`, which it does only after taking its controls away and giving the
+   closing sentence time to be read: said after the installer starts, it is cut off mid-word. The
+   page cannot hear when its screen reader has finished, so the wait is an estimate from the
+   sentence's length (UPDATE_SPEAK_MS_PER_CHAR). */
+const UPDATE_POLL_MS = 400;
+// How long a check may run before "checking" is said. A real check answers in well under this.
+const UPDATE_CHECKING_AFTER_MS = 500;
+// The closing sentence's reading time, per character: about a default speech rate, so a faster
+// one is never cut off, within a floor and a ceiling.
+const UPDATE_SPEAK_MS_PER_CHAR = 60;
+const UPDATE_SPEAK_MIN_MS = 3000;
+const UPDATE_SPEAK_MAX_MS = 10000;
+// A status line changed in the same moment as a focus move is cut off by the focus announcement.
+const UPDATE_AFTER_FOCUS_MS = 400;
+// How long after the installer starts before the page says AccessCaster has not come back. An
+// install and restart takes well under a minute.
+const UPDATE_BACK_WITHIN_MS = 180000;
+// Set before the page reloads onto a new version, so the reloaded page does not say again what the
+// reload already said.
+const UPDATE_RELOADED_KEY = "accesscaster.update-reloaded";
+
+const updateState = {
+  offer: null,          // what #update-dialog is showing
+  checking: "",         // the server's "checking" sentence, from the last state read
+  poll: null,
+  stage: null,          // the last job stage the progress dialog acted on
+  returnTo: null,       // focus goes back here when the update dialogs close
+  handingOver: false,   // decision -> progress in progress: the decision's close must not refocus
+  handedOff: false,     // the installer has been started: an outage now is the update, not a fault
+  notBack: "",          // said if the app does not come back; the server is gone when it is needed
+  backTimer: null,
+  daysCommit: null,
+};
+
+function updateDialogOpen() {
+  return ["update-dialog", "update-progress-dialog"]
+    .some((id) => document.getElementById(id).open);
+}
+
+async function loadUpdates() {
+  let d;
+  try {
+    d = await (await fetch("/api/update")).json();
+  } catch {
+    return null;
+  }
+  updateState.checking = d.checking || "";
+  const sel = document.getElementById("update-days");
+  const s = d.settings;
+  if (sel.options.length !== s.choices.length) {
+    sel.replaceChildren(...s.choices.map((c) => new Option(c.label, String(c.days))));
+  }
+  sel.value = String(s.days);
+  setText("update-hint", s.hint);
+  return d;
+}
+
+/* AN APP SETTING, NOT THE DESK, so it commits after a pause rather than on Enter: a closed select
+   fires `change` on every arrow press, and this only saves which option was left chosen. */
+function onUpdateDaysChange(ev) {
+  const value = Number(ev.target.value);
+  if (updateState.daysCommit !== null) window.clearTimeout(updateState.daysCommit);
+  updateState.daysCommit = window.setTimeout(async () => {
+    updateState.daysCommit = null;
+    try {
+      const res = await postJSON("/api/update/interval", { days: value });
+      if (res.ok) setText("update-hint", res.hint);
+      else announce(res.message || "Not saved.", true);
+    } catch {
+      announce(SERVICE_UNREACHABLE, true);
+    }
+  }, SELECT_COMMIT_MS);
+}
+
+/* Check for updates now, and F12. A version already found opens the decision without asking the
+   network again; the server decides that. */
+async function checkForUpdates() {
+  const btn = document.getElementById("update-check-btn");
+  if (isBusy(btn) || updateDialogOpen()) return;
+  setBusy(btn, true);
+  const slow = window.setTimeout(() => {
+    if (updateState.checking) announce(updateState.checking);
+  }, UPDATE_CHECKING_AFTER_MS);
+  let res;
+  try {
+    res = await postJSON("/api/update/check", {});
+  } catch {
+    res = { ok: false, message: SERVICE_UNREACHABLE };
+  } finally {
+    window.clearTimeout(slow);
+    setBusy(btn, false);
+  }
+  if (res.offer) {
+    openUpdateDialog(res.offer);
+  } else {
+    announce(res.message || "Done.", !res.ok);
+  }
+  loadUpdates();        // the hint says when it last looked
+}
+
+function openUpdateDialog(offer) {
+  if (updateDialogOpen()) return;
+  updateState.offer = offer;
+  updateState.returnTo = document.activeElement;
+  setText("update-title", offer.title);
+  setText("update-summary", offer.summary);
+  setText("update-after", offer.after);
+  const notes = document.getElementById("update-notes");
+  notes.value = offer.notes;
+  document.getElementById("update-dialog").showModal();
+  notes.focus();
+  notes.setSelectionRange(0, 0);
+  notes.scrollTop = 0;
+}
+
+function returnUpdateFocus() {
+  const back = updateState.returnTo;
+  updateState.returnTo = null;
+  if (back && back.isConnected && typeof back.focus === "function") back.focus();
+}
+
+async function onUpdateSkip() {
+  const version = updateState.offer.version;
+  document.getElementById("update-dialog").close();
+  let res;
+  try {
+    res = await postJSON("/api/update/skip", { version: version });
+  } catch {
+    res = { ok: false, message: SERVICE_UNREACHABLE };
+  }
+  announce(res.message || "Done.", !res.ok);
+  loadUpdates();
+}
+
+/* Install now: the decision dialog hands over to the progress dialog IN ONE TICK, with the first
+   line already in place, so focus never lands on the page between the two and the progress
+   dialog's content is there when a screen reader builds its buffer for it. The request is sent
+   after both dialogs have changed hands. */
+async function startUpdate() {
+  const offer = updateState.offer;
+  updateState.stage = null;
+  updateState.notBack = "";
+  const bar = document.getElementById("update-progress");
+  bar.value = 0;
+  setText("update-progress-step", offer.downloading);
+  const btn = document.getElementById("update-progress-btn");
+  btn.textContent = "Cancel";
+  btn.hidden = false;
+  updateState.handingOver = true;
+  document.getElementById("update-dialog").close();
+  updateState.handingOver = false;
+  document.getElementById("update-progress-dialog").showModal();
+  btn.focus();
+
+  let res;
+  try {
+    res = await postJSON("/api/update/install", { version: offer.version });
+  } catch {
+    res = { ok: false, message: SERVICE_UNREACHABLE };
+  }
+  if (!res.ok) {
+    updateFailed(res.message || "The update could not start.");
+    return;
+  }
+  updateState.poll = window.setInterval(updateTick, UPDATE_POLL_MS);
+}
+
+function stopUpdatePoll() {
+  if (updateState.poll !== null) window.clearInterval(updateState.poll);
+  updateState.poll = null;
+}
+
+async function updateTick() {
+  let job;
+  try {
+    job = (await (await fetch("/api/update/job")).json()).job;
+  } catch {
+    return;             // a blip; the next tick asks again
+  }
+  if (!job) return;
+  const bar = document.getElementById("update-progress");
+  // AN UNKNOWN LENGTH IS THE ONLY CASE THE BAR SHOWS NO FRACTION. Once the bytes are in it stays at
+  // whatever it reached: switching it to indeterminate swallows the last reading.
+  if (job.percent === null && job.stage === "downloading") bar.removeAttribute("value");
+  else if (job.percent !== null) bar.value = job.percent;
+  if (job.stage === updateState.stage) return;
+  updateState.stage = job.stage;
+  updateState.notBack = job.not_back;
+  if (job.stage === "checking") {
+    setStatus("update-progress-step", job.message);
+  } else if (job.stage === "ready") {
+    stopUpdatePoll();
+    updateReady(job.message);
+  } else if (job.stage === "failed") {
+    stopUpdatePoll();
+    updateFailed(job.message);
+  } else if (job.stage === "cancelled") {
+    stopUpdatePoll();
+    closeUpdateProgress();
+    announce(job.message);
+  }
+}
+
+/* The download is verified. Take every control away, THEN say the closing sentence, give it time to
+   be read, and only then tell the server to start the installer. Focus goes to the heading: left on
+   a hidden button it would still take Space. */
+function updateReady(sentence) {
+  document.getElementById("update-progress-btn").hidden = true;
+  document.getElementById("update-progress-title").focus();
+  window.setTimeout(() => setStatus("update-progress-step", sentence), UPDATE_AFTER_FOCUS_MS);
+  const reading = Math.min(UPDATE_SPEAK_MAX_MS,
+                           Math.max(UPDATE_SPEAK_MIN_MS, sentence.length * UPDATE_SPEAK_MS_PER_CHAR));
+  window.setTimeout(proceedWithUpdate, UPDATE_AFTER_FOCUS_MS + reading);
+}
+
+async function proceedWithUpdate() {
+  // Marked before the request: the server can be gone before its reply arrives.
+  updateState.handedOff = true;
+  let res;
+  try {
+    res = await postJSON("/api/update/proceed", {});
+  } catch {
+    // No reply is what a server closing for the installer looks like.
+    res = { ok: true };
+  }
+  if (!res.ok) {
+    updateState.handedOff = false;
+    updateFailed((res.job && res.job.message) || "The update could not start.");
+    return;
+  }
+  updateState.backTimer = window.setTimeout(() => {
+    updateState.handedOff = false;
+    updateFailed(updateState.notBack);
+  }, UPDATE_BACK_WITHIN_MS);
+}
+
+/* The update failed: the one button comes back as Close and takes focus, and the reason is said
+   after that focus move has been announced, so it is the last thing heard. */
+function updateFailed(sentence) {
+  stopUpdatePoll();
+  const btn = document.getElementById("update-progress-btn");
+  btn.textContent = "Close";
+  btn.hidden = false;
+  btn.focus();
+  window.setTimeout(() => setStatus("update-progress-step", sentence), UPDATE_AFTER_FOCUS_MS);
+}
+
+function closeUpdateProgress() {
+  const dlg = document.getElementById("update-progress-dialog");
+  if (dlg.open) dlg.close();
+  returnUpdateFocus();
+}
+
+/* Cancel while the download runs, Close once it has failed. The poll sees the cancel land. */
+function onUpdateProgressButton() {
+  if (document.getElementById("update-progress-btn").textContent === "Close") {
+    closeUpdateProgress();
+    return;
+  }
+  postJSON("/api/update/cancel", {}).catch(() => {});
+}
+
+/* AccessCaster came back on the SAME version after the installer was started: the install did not
+   take. The server says so and names the installer still on disk. A NEW version is handled by
+   noteServer, which reloads the page. */
+async function updateReturnedUnchanged() {
+  if (!updateState.handedOff) return;
+  updateState.handedOff = false;
+  window.clearTimeout(updateState.backTimer);
+  let report = null;
+  try {
+    report = (await postJSON("/api/update/report", {})).report;
+  } catch { /* the message below still stands */ }
+  updateFailed(report ? report.text : updateState.notBack);
+}
+
+/* What the last update did, from the far side of its restart. A successful one has already been
+   said by the reload that brought this page onto it; anything else is said here. Taken only when
+   the state read says one is waiting, so an ordinary page load sends nothing. */
+async function takeUpdateReport(state) {
+  let report = null;
+  if (state && state.report_waiting) {
+    try {
+      report = (await postJSON("/api/update/report", {})).report;
+    } catch {
+      return;
+    }
+  }
+  let reloadedFor = null;
+  try {
+    reloadedFor = sessionStorage.getItem(UPDATE_RELOADED_KEY);
+    sessionStorage.removeItem(UPDATE_RELOADED_KEY);
+  } catch { /* storage blocked: say it, which is the safe side */ }
+  if (!report) return;
+  if (report.kind === "updated" && reloadedFor !== null) return;
+  announce(report.text, report.kind !== "updated");
+}
+
+/* The tray's Install item or its notification asked for the decision. */
+async function openUpdateFromRequest() {
+  if (updateDialogOpen()) return;
+  try {
+    const d = await (await fetch("/api/update")).json();
+    if (d.offer) openUpdateDialog(d.offer);
+  } catch { /* the tray item can be chosen again */ }
+}
+
+function wireUpdates() {
+  document.getElementById("update-days").addEventListener("change", onUpdateDaysChange);
+  document.getElementById("update-check-btn").addEventListener("click", checkForUpdates);
+  document.getElementById("update-install").addEventListener("click", startUpdate);
+  document.getElementById("update-skip").addEventListener("click", onUpdateSkip);
+  document.getElementById("update-later")
+    .addEventListener("click", () => document.getElementById("update-dialog").close());
+  document.getElementById("update-dialog").addEventListener("close", () => {
+    if (!updateState.handingOver) returnUpdateFocus();
+  });
+  document.getElementById("update-progress-btn").addEventListener("click", onUpdateProgressButton);
+  // ESCAPE IS CANCEL while there is something to cancel, Close once it has failed, and nothing
+  // once the installer is starting: a dialog that vanishes then leaves the user on a page that is
+  // about to lose its server.
+  document.getElementById("update-progress-dialog").addEventListener("cancel", (ev) => {
+    ev.preventDefault();
+    if (!document.getElementById("update-progress-btn").hidden) onUpdateProgressButton();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "F12" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    // Taken from the browser, whose own F12 opens its developer tools.
+    e.preventDefault();
+    if (!document.querySelector("dialog[open]")) checkForUpdates();
+  });
+  // A download still running when the window closes is cancelled rather than left to install
+  // into nobody's page. Once the installer has started there is nothing to cancel.
+  window.addEventListener("pagehide", (e) => {
+    if (e.persisted || updateState.handedOff
+        || !document.getElementById("update-progress-dialog").open) return;
+    try { navigator.sendBeacon("/api/update/cancel"); } catch { /* the server times it out */ }
+  });
+  loadUpdates().then(takeUpdateReport);
+}
+
 /* ---- init ----------------------------------------------------------- */
 
 /* THE PAGE WATCHES THE SERVER IT WAS LOADED FROM, through the heartbeat below. Each reply names the
@@ -9273,7 +9653,9 @@ function noteServer(reply) {
   if (w.reloading) return;
   if (reply === null) {
     w.misses += 1;
-    if (w.misses >= SERVER_LOST_AFTER && !w.lostShown) openServerLost();
+    // While an update is installing, the outage IS the update, and the progress dialog is already
+    // saying so.
+    if (w.misses >= SERVER_LOST_AFTER && !w.lostShown && !updateState.handedOff) openServerLost();
     return;
   }
   const wasLost = w.misses >= SERVER_LOST_AFTER;
@@ -9286,12 +9668,22 @@ function noteServer(reply) {
   if (reply.version !== w.seen.version) {
     w.reloading = true;
     closeServerLost();
+    // The update's own progress dialog too: while a modal is open the rest of the page is inert,
+    // and the live region this line goes to is out there.
+    const updateDlg = document.getElementById("update-progress-dialog");
+    if (updateDlg.open) updateDlg.close();
+    try { sessionStorage.setItem(UPDATE_RELOADED_KEY, reply.version); } catch { /* said twice */ }
     announce("AccessCaster was updated to version " + reply.version + ". Reloading.", true);
     window.setTimeout(() => window.location.reload(), 2500);
     return;
   }
-  if (reply.instance !== w.seen.instance) w.seen.instance = reply.instance;
-  if (wasLost) {
+  const updating = updateState.handedOff;
+  if (reply.instance !== w.seen.instance) {
+    w.seen.instance = reply.instance;
+    updateReturnedUnchanged();
+  }
+  // An update that did not take is said by its own dialog, not as the app being back.
+  if (wasLost && !updating) {
     w.lostShown = false;
     closeServerLost();
     announce("AccessCaster is back.", true);
@@ -9330,6 +9722,7 @@ function initAppLifecycle() {
       reply = null;
     }
     noteServer(reply);
+    if (reply && reply.update_request) openUpdateFromRequest();
   };
   const ok = document.getElementById("server-lost-ok");
   if (ok) ok.addEventListener("click", closeServerLost);
@@ -9381,9 +9774,10 @@ async function init() {
     .addEventListener("change", onAnnounceSpeechChange("output"));
   document.getElementById("announce-devices-refresh")
           .addEventListener("click", onAnnounceDevicesRefresh);
-  wireAccess();         // the remote-access link on Device > Hardware
+  wireAccess();         // the remote-access link on App settings > Remote access
   wireCallme();         // the CallMe page's buttons, hosting switch and copy
   wireHotkeys();        // the shortcut chooser, its editor, and the Add / Delete dialogs
+  wireUpdates();        // AccessCaster's own updates: F12, the Backups page controls, the dialogs
   document.getElementById("dev-state-btn").addEventListener("click", loadDeviceState);
   const fwCheck = document.getElementById("dev-fw-check");
   if (fwCheck) fwCheck.addEventListener("click", () => onFirmwareCheck(fwCheck));
@@ -9394,6 +9788,7 @@ async function init() {
   document.getElementById("net-scan-btn").addEventListener("click", onWifiScan);
   document.getElementById("net-scan-list").addEventListener("change", onScanPick);
   wireDeviceTabs();     // the Device page's tab strip, built over its static panes
+  wireSettingsTabs();   // the App settings page's tab strip, likewise
   document.getElementById("fader-levels-refresh")
           .addEventListener("click", () => loadFaderLevels(true));
   document.getElementById("fader-solos-clear")

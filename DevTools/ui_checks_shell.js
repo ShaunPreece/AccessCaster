@@ -33,9 +33,10 @@ async function run() {
 
   // The version has to be THERE, not on its way. See the header comment.
   await waitFor(() => /version \d/.test(el("app-title").textContent), 5000);
-  // "version 2.50" SPELLED OUT, never "v2.50": a screen reader reads that v as "volt".
+  // "version 2.63.0" SPELLED OUT, never "v2.63.0": a screen reader reads that v as "volt".
   check("the heading names the app and carries the version, spelled out",
-    /^AccessCaster version \d+\.\d+$/.test(title.textContent.trim()), title.textContent.trim());
+    /^AccessCaster version \d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(title.textContent.trim()),
+    title.textContent.trim());
 
   // ---- where focus starts ------------------------------------------------
   check("a fresh window puts focus on that heading",

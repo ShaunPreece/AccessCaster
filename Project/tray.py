@@ -12,7 +12,12 @@ without anything of ours having to describe it. The menu offers:
   - Open AccessCaster    re-open / focus the configurator web page
   - Announcer            checkable toggle for the spoken button-press announcer
   - Diagnostic log       open the app's own log of what it did (see Project/diagnostics.py)
+  - Check for updates    or "Install update to version X" once one is waiting (app_updates.py)
   - Quit                 stop the server and exit
+
+The icon is also how the update feature reaches somebody who is not looking at the page: a new
+version is announced as a WINDOWS NOTIFICATION from it (`_notify`), which a screen reader reads
+without the focus moving and without the app's own voice talking over it.
 
 Accessibility: the icon registers as NOTIFYICON_VERSION_4 so the shell delivers proper keyboard
 selection (NIN_KEYSELECT) and context-menu (WM_CONTEXTMENU) notifications, i.e. the whole thing
@@ -28,6 +33,7 @@ import sys
 import time
 
 import announcer
+import app_updates
 import autostart
 import diagnostics
 import server
@@ -36,6 +42,8 @@ import win32api
 import win32con
 import win32gui
 from paths import resource_path
+from selfupdate import phrases as update_phrases
+from selfupdate import restart as update_restart
 
 APP_NAME = "AccessCaster"
 URL = f"http://localhost:{server.HTTP_PORT}/"
@@ -45,11 +53,21 @@ WM_TRAY = win32con.WM_USER + 20          # our private "the tray icon did someth
 ID_OPEN = 1023
 ID_ANNOUNCE = 1024
 ID_LOG = 1026
+ID_UPDATE = 1027
 ID_QUIT = 1025
+# Posted by another thread that needs the page shown: raising a window is done on this one.
+WM_SHOW_PAGE = win32con.WM_USER + 21
 
 # Shell notification-icon constants not all exposed by win32con.
 NIN_SELECT = win32con.WM_USER + 0        # left-click / Space on the selected icon
 NIN_KEYSELECT = win32con.WM_USER + 1     # Enter on the selected icon
+NIN_BALLOONUSERCLICK = win32con.WM_USER + 5   # the user chose our notification
+NIIF_INFO = 0x01
+# A notification raised in the user's first hour after signing in to a new machine waits, as
+# Windows asks of every app.
+NIIF_RESPECT_QUIET_TIME = 0x80
+# The shell refuses a notification body longer than this, in characters.
+_NOTIFY_MAX = 255
 NOTIFYICON_VERSION_4 = 4
 _TRAY_ICON_ID = 1
 
@@ -71,6 +89,8 @@ class TrayApp:
         self._last_open = float("-inf")
         self._create_window()
         self._add_icon()
+        app_updates.notify = self._notify
+        app_updates.open_page = lambda: win32gui.PostMessage(self.hwnd, WM_SHOW_PAGE, 0, 0)
 
     # -- hidden message-only-ish window that receives the tray callbacks --------------------------
     def _create_window(self) -> None:
@@ -83,6 +103,9 @@ class TrayApp:
             win32con.WM_COMMAND: self._on_command,
             win32con.WM_DESTROY: self._on_destroy,
             win32con.WM_CLOSE: lambda h, m, w, l: win32gui.DestroyWindow(h),
+            WM_SHOW_PAGE: self._on_show_page,
+            win32con.WM_QUERYENDSESSION: lambda h, m, w, l: 1,
+            win32con.WM_ENDSESSION: self._on_end_session,
         }
         class_atom = win32gui.RegisterClass(wc)
         self.hwnd = win32gui.CreateWindow(class_atom, APP_NAME, win32con.WS_OVERLAPPED,
@@ -120,6 +143,13 @@ class TrayApp:
         event = win32api.LOWORD(lparam)
         if event in (win32con.WM_CONTEXTMENU, win32con.WM_RBUTTONUP):
             self._show_menu()
+        elif event == NIN_BALLOONUSERCLICK:
+            # The only notifications this icon raises are the update's, so choosing one is asking
+            # for the decision. With nothing waiting it simply shows the page.
+            if app_updates.held_version() is not None:
+                app_updates.request_decision()
+            else:
+                _show_page()
         elif event in _OPEN_EVENTS:
             # WM_LBUTTONUP is the only event the Windows 11 hidden-icons overflow sends, for a
             # click, Enter, a screen reader or UIA Invoke alike: it never sends NIN_SELECT. On the
@@ -139,6 +169,10 @@ class TrayApp:
             ann_flags |= win32con.MF_CHECKED
         win32gui.AppendMenu(menu, ann_flags, ID_ANNOUNCE, "&Announcer")
         win32gui.AppendMenu(menu, win32con.MF_STRING, ID_LOG, "Diagnostic &log")
+        waiting = app_updates.held_version()
+        win32gui.AppendMenu(menu, win32con.MF_STRING, ID_UPDATE,
+                            update_phrases.tray_install(waiting) if waiting is not None
+                            else update_phrases.TRAY_CHECK)
         win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
         win32gui.AppendMenu(menu, win32con.MF_STRING, ID_QUIT, "&Quit")
         pos = win32gui.GetCursorPos()
@@ -158,6 +192,13 @@ class TrayApp:
             self._toggle_announcer()
         elif cmd == ID_LOG:
             self._open_log()
+        elif cmd == ID_UPDATE:
+            # A version already waiting goes straight to the decision on the page. Otherwise the
+            # check runs on its own thread and answers in a notification, or opens the decision.
+            if app_updates.held_version() is not None:
+                app_updates.request_decision()
+            else:
+                app_updates.check_from_tray()
         elif cmd == ID_QUIT:
             self._quit()
         return 0
@@ -178,6 +219,28 @@ class TrayApp:
             subprocess.Popen(["explorer.exe", diagnostics.folder()])
             return
         subprocess.Popen(["notepad.exe", path])
+
+    def _notify(self, text: str) -> None:
+        """Raise a Windows notification from the tray icon. Called from any thread: Shell_NotifyIcon
+        posts to the shell and does not need this window's thread."""
+        if len(text) > _NOTIFY_MAX:
+            text = text[:_NOTIFY_MAX - 1].rsplit(" ", 1)[0]
+        nid = (self.hwnd, _TRAY_ICON_ID, win32gui.NIF_INFO, 0, 0, "", text, 10000,
+               update_phrases.NOTIFICATION_TITLE, NIIF_INFO | NIIF_RESPECT_QUIET_TIME)
+        win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
+
+    def _on_show_page(self, hwnd, msg, wparam, lparam):
+        _show_page()
+        return 0
+
+    def _on_end_session(self, hwnd, msg, wparam, lparam):
+        """Windows is ending the session, or the installer's Restart Manager is closing the app to
+        replace its files (lParam ENDSESSION_CLOSEAPP). Either way stop as Quit does: the shortcuts,
+        the HID handles and the port are let go, and an update can then restart the app. Without
+        an answer here Restart Manager cannot close a tray app, which has no visible window."""
+        if wparam:
+            self._quit()
+        return 0
 
     def _toggle_announcer(self) -> None:
         # Saved or not by the server, by the same rule as the page's switch and the shortcut.
@@ -200,30 +263,33 @@ def main() -> int:
     # tray with the announcer and the shortcuts live and open NOTHING: a browser window taking the
     # focus of whatever you signed in to do is the reason people turn autostart off again.
     at_login = autostart.started_at_login()
+    # Brought back by the installer after an update. The page the update was started from is still
+    # open and reloads itself on the new version, so this opens nothing either.
+    quiet = at_login or update_restart.after_update()
 
     # ANOTHER SIGNED-IN ACCOUNT ON THIS PC HAS IT: refuse and stop. Checked before the
     # already-serving branch below, which answers over localhost and so cannot tell whose instance
     # replied; without this it opens the other account's UI, in which nothing this user presses or
     # hears belongs to them.
     if server._other_account_holds_port(server.HTTP_PORT):
-        server._refuse_other_account(not at_login)
+        server._refuse_other_account(not quiet)
         return 1
 
     # Single instance: if a server is already answering, just open/focus its page and exit. This
     # stops a second tray + server starting, and never disturbs the one already running.
     if server._app_already_serving(server.HTTP_PORT):
-        # ...except at login, where there is nothing to show and nobody asked to see it. Something
+        # ...except at login or after an update, where there is nothing to show and nobody asked to see it. Something
         # is already serving, which is the whole point, so leave it alone and go.
-        if at_login:
+        if quiet:
             return 0
         _show_page()
         return 0
 
-    started = server.start_server_managed(open_browser=not at_login)
+    started = server.start_server_managed(open_browser=not quiet)
     if started is None:
         # A race: someone else grabbed the port in the moment between our check and bind. Same
         # reasoning as above - at login the other instance IS the outcome we wanted, silently.
-        if at_login:
+        if quiet:
             return 0
         _show_page()
         return 0

@@ -1,9 +1,9 @@
-// probe: route=profiles timeout=90
-/* THIS APP's OWN SETTINGS, the export/import section on the Profiles page (built).
+// probe: route=settings timeout=90
+/* SAVING AND RESTORING THIS APP's OWN SETTINGS, on the General tab of App settings.
 
-   It sits on the Profiles page and NOT inside a profile, and the first check here is that the two
-   are told apart: a profile is the DESK, this is the APP, and someone arriving to solve "I am moving
-   to another computer" has to be able to tell which button they want. Everything else is the usual
+   NOT part of a backup of the unit, and the first check here is that the two are told apart: a
+   backup is the DESK, this is the APP, and someone arriving to solve "I am moving to another
+   computer" has to be able to tell which button they want. Everything else is the usual
    pair of questions - can a screen reader reach and understand it, and does pressing something
    dangerous ask first.
 
@@ -14,8 +14,10 @@
 const el = (id) => document.getElementById(id);
 
 async function run() {
-  await waitFor(() => el("sec-profiles") && !el("sec-profiles").hidden, 20000);
-  await waitFor(() => el("appsettings-export-btn"), 15000);
+  await waitFor(() => el("sec-settings") && !el("sec-settings").hidden, 20000);
+  await waitFor(() => el("tab-settings-general"), 15000);
+  el("tab-settings-general").click();
+  await waitFor(() => !el("appsettings-export-btn").closest(".cat-tab").hidden, 5000);
   await sleep(600);
 
   // ---- It is its own section, and it says it is about the APP -----------------------------

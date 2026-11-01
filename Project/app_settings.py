@@ -46,6 +46,7 @@ PORTABLE = (
     "callme_contacts",
     "callme_auto_extend",
     "callme_ringtone",
+    "app_update_days",
 )
 
 # WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice, an audio output and a
@@ -71,6 +72,12 @@ EXCLUDED = {
     # A RECORD OF ONE DESK. Which voicing preset currently sits on which channel is a fact about
     # that mixer, not a preference, and importing it would claim presets that are not applied.
     "applied_presets": "it describes one particular desk rather than a preference",
+    # THIS COPY'S UPDATE STATE (app_updates.py). When it last looked, the version it turned down
+    # and an install in flight all describe the copy on this computer, which may be on another
+    # version; carried over, a skip would hide a release the other machine never saw.
+    "app_update_last_checked": "it is when this copy last looked for an update",
+    "app_update_skipped": "it names a version this copy was asked not to offer",
+    "app_update_installing": "it is this copy's record of an update in progress",
 }
 
 # Every settings key this module has an opinion about. A key in settings.json that is in NONE of

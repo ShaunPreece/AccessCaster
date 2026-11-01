@@ -905,13 +905,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   INSTALLER. Verified valid, DigiCert-issued, on 29th September 2026. `driver_install.SIGNER` is
   that string, compared WHOLE against the certificate's O= field (`subject_organisation`), never
   searched for in the subject, and it is the whole of what makes the download safe to run.
-- **THE DRIVER DOWNLOAD IS THE APP'S ONLY OUTBOUND INTERNET CALL, AND KEEPING IT SO IS A FEATURE.**
-  Everything else talks to localhost and the USB cable. It runs only from the button press: never
-  at startup, never on a timer, never a version check. `test_driver_install.py` asserts the claim
-  rather than trusting it, by scanning `Project/*.py` for a non-localhost `urlopen`; `server.py`'s
-  ping of its own `/api/announce` is the one hit it is right to ignore. Said plainly in the README,
-  in Help and on the control itself, because somebody who chose this app partly for what it does
-  not do deserves to be told where the exception is.
+- **THE APP REACHES THE INTERNET IN TWO PLACES AND NO OTHER: this driver download, from its button
+  only, and its own update check and download (`selfupdate/http.py`), to
+  `updates.slightperception.com` only.** Everything else talks to localhost and the USB cable.
+  `test_driver_install.py` asserts it by scanning `Project/` for a non-localhost `urlopen`;
+  `server.py`'s ping of its own `/api/announce` is the one hit it is right to ignore. The README
+  and Help list both, because somebody who chose this app partly for what it does not do deserves
+  to be told exactly what it contacts. A third caller means changing all three together.
 - **CHECK THE SIGNATURE, NEVER A HASH.** The URL carries no version and RODE replace the file in
   place, so a pinned hash refuses every release they ship, which trains people to skip the check.
 - **PASS A PATH TO POWERSHELL BY ENVIRONMENT VARIABLE, NOT AS AN ARGUMENT.**
@@ -1621,8 +1621,48 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   file cannot be opened, so no caller saves over a file it could not read: `settings_file.update` drops
   the change then, because writing would replace every other key with nothing.
 
+## AccessCaster's own updates
+
+The scheme is shared with two other apps, Hydra and Claudio, which read the same signed index from
+the same bucket: `selfupdate/` is a copy of Claudio's port, and `selfupdate/versions.py` is kept
+verbatim against the publishing tool's own copy. When to ask and who is told is `app_updates.py`.
+
+- **THE VERSION IS THREE-PART SEMVER** ("2.63.0", "2.64.0-beta.1"). `UpdateVersion.parse` refuses
+  "2.62", and a build whose own version it cannot read never checks at all, silently.
+  `test_selfupdate.py` parses `version.__version__`. A pre-release label puts the build on the beta
+  track; the track is read off the version, never stored.
+- **CHECKING IS AUTOMATIC, INSTALLING NEVER IS.** An automatic check only ever raises a Windows
+  notification from the tray icon (`app_updates.notify`). Never the app's own voice: speech nobody
+  asked for talks over the screen reader.
+- **THE DOWNLOAD IS TWO DIALOGS ON THE PAGE, NOT ONE**, handed over in one tick (`startUpdate`).
+  The other apps carry the whole update in one dialog; on this page that would be a progress view
+  revealed inside an open dialog, which a screen reader never reads (see Web UI below).
+- **THE SERVER WAITS FOR THE PAGE'S `proceed` BEFORE STARTING THE INSTALLER.** The page takes its
+  controls away, says the closing sentence and gives it time to be read; started first, the
+  installer cuts the sentence off. No `proceed` within `PROCEED_WITHIN_S` installs nothing.
+- **THE APP DOES NOT EXIT ITSELF TO INSTALL.** Setup's Restart Manager closes it (the tray answers
+  WM_QUERYENDSESSION and WM_ENDSESSION) and `/RESTARTAPPLICATIONS` brings it back with `--updated`,
+  registered by `restart.register` just before. The restart opens no page: the browser window is not
+  part of the install, stays open, and reloads itself when a new version answers its heartbeat.
+- **`/VERYSILENT`, never `/SILENT`**: under `/SILENT` Setup's progress window takes focus on its
+  Cancel button and a Space cancels the install. **And the installer must not prompt during a
+  silent run**: the firewall task is remembered from the last install, so `installer.iss` skips it
+  when silent and its marker says the rule is already there.
+- **"Could not download" and "did not match" are different sentences.** A complete file that hashes
+  wrong is the one case the signature exists to catch; calling it a network failure hides it.
+- **The user agent is `AccessCaster/<version>`.** Cloudflare refuses Python's default with a 403,
+  which reads as "no release has happened".
+- **Every update route is LOCAL ONLY** (`server.UPDATE_ROUTES`): a phone on the network can read the
+  state but cannot start, steer or stop an install on this PC.
+- **A failed download forgets the held offer AND the last-checked stamp**, so a republished index
+  reaches a running app. The downloaded installer is deleted only on the launch after a confirmed
+  update; every other path keeps it, because the failure message tells the user to run it by hand.
+
 ## Web UI and screen reader
 
+- **DEVICE AND BACKUPS ARE THE UNIT'S; APP SETTINGS (Alt+8) IS ACCESSCASTER'S.** A new preference of
+  the app goes on App settings, never on a unit page, and none of its tabs reads the desk
+  (`ui_checks_settings.js` asserts it).
 - **NO QUOTE MARKS AROUND A NAME IN ANY MESSAGE.** A quote straight after a digit is read as a
   unit: "Saved as 'Tester1'." is heard as "Tester 1 feet", and a double quote as inches. Write
   `Saved Mic 2's current settings as {name}.`, never `'{name}'` or `"${name}"`.

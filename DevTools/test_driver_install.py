@@ -19,6 +19,7 @@ import zipfile
 import _bootstrap  # puts Project/ on sys.path
 import _testkit
 import driver_install as di
+import selfupdate.check as update_check
 import server
 import virtual_devices
 from _testkit import check, check_true, patched
@@ -111,13 +112,14 @@ check("it refuses rather than downloading again", r.get("ok"), False)
 check("and points at the manual route for a repair",
       "software page" in (r.get("message") or "").lower(), True)
 
-print("\nTHE ONE OUTBOUND CALL IS THE ONLY ONE")
-# The claim the README and Help both make, asserted rather than trusted: no other module reaches
-# the network. `urllib`/`socket` appear elsewhere for the LAN server and for reading this machine's
-# own address, so match on the ACT of fetching a URL rather than on the import.
+print("\nWHAT THE APP CONTACTS, AND NOTHING ELSE")
+# The README and Help both list what reaches the internet: RODE's driver download, on a button
+# press, and AccessCaster's own update check and download. Asserted rather than trusted: no other
+# module fetches anything. `urllib`/`socket` appear elsewhere for the LAN server and for reading
+# this machine's own address, so match on the ACT of fetching a URL rather than on the import.
 proj = _bootstrap.PROJECT
 callers = []
-for path in glob.glob(os.path.join(proj, "*.py")):
+for path in glob.glob(os.path.join(proj, "**", "*.py"), recursive=True):
     with open(path, encoding="utf-8") as source:
         for line in source:
             if not re.search(r"urlopen\s*\(|urlretrieve\s*\(", line):
@@ -126,8 +128,10 @@ for path in glob.glob(os.path.join(proj, "*.py")):
             # another instance is already serving, which is the app talking to itself.
             if re.search(r"localhost|127\.0\.0\.1", line):
                 continue
-            callers.append(os.path.basename(path))
-check("exactly one module reaches anything beyond this computer",
-      sorted(set(callers)), ["driver_install.py"])
+            callers.append(os.path.relpath(path, proj).replace(os.sep, "/"))
+check("only the driver download and the update opener reach beyond this computer",
+      sorted(set(callers)), ["driver_install.py", "selfupdate/http.py"])
+check("and the update opener is only ever pointed at our own update server",
+      update_check.ROOT, "https://updates.slightperception.com/")
 
 raise SystemExit(_testkit.finish())

@@ -1,5 +1,6 @@
 # Runtime dependencies, pinned to the versions the app is built and tested with, on Python 3.12.
 # Install with: python -m pip install -r requirements.txt
 comtypes==1.4.17      # Windows' own audio endpoints: the level meters and the Windows level
+cryptography==50.0.0  # Ed25519, to check an update's index was signed by us (selfupdate/signing.py)
 hidapi==0.15.0        # the desk's USB control interface
 pywin32==312          # SAPI speech for the announcer, and the tray

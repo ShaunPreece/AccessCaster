@@ -37,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
 import app_settings  # this app's own settings file: export and import, no file access
+import app_updates  # keeping AccessCaster itself up to date: check, decide, download, install
 import autogain  # sets a mic's gain by measuring it
 import autostart  # the HKCU Run entry, shared with installer.iss
 import browser  # the Chromium browser the UI opens in
@@ -45,7 +46,7 @@ import channels
 import commands  # the catalogue of what a shortcut can do, from the spec tables
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
-import driver_install  # fetching that driver from RODE: the app's ONLY outbound call
+import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import model_tree
@@ -2225,6 +2226,12 @@ def read_network_status() -> dict:
 # the very network it is for, in clear. So the join is refused unless the request came from this
 # machine.
 LOCAL_ONLY_ROUTES = {"/api/network/wifi/join", "/api/access", "/api/access/new"}
+# AccessCaster's own update changes software on THIS PC, so a page on a phone can read where it
+# stands but cannot start, steer or stop one.
+UPDATE_ROUTES = {"/api/update/check", "/api/update/skip", "/api/update/interval",
+                 "/api/update/install", "/api/update/cancel", "/api/update/proceed",
+                 "/api/update/report"}
+LOCAL_ONLY_ROUTES |= UPDATE_ROUTES
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 # ---------------------------------------------------------------------------
@@ -2288,7 +2295,8 @@ def _lan_address() -> str:
 
 
 def read_access() -> dict:
-    """What the Device page shows: the link to open on another device, and the plain warnings."""
+    """What App settings > Remote access shows: the link to open on another device, and the plain
+    warnings."""
     return {
         "url": f"http://{_lan_address()}:{HTTP_PORT}/?t={access_token()}",
         "port": HTTP_PORT,
@@ -6700,9 +6708,8 @@ def driver_install_status() -> dict:
 def action_install_driver() -> dict:
     """Fetch RODE's Virtual Devices driver, check its signature and hand it to Windows.
 
-    **THE APP'S ONLY OUTBOUND INTERNET CALL, and only ever from this press.** Never at startup,
-    never on a timer, never a check for a newer version. See driver_install.py for why that is kept
-    deliberate, and for why the signature rather than a hash is what gets checked.
+    **Reaches the internet only from this press**, never at startup or on a timer. See
+    driver_install.py for why, and for why the signature rather than a hash is what gets checked.
 
     REFUSED WHEN IT IS ALREADY INSTALLED, because the honest answer there is not "installing" but
     "you already have it": a second install of the same version tells the user nothing and costs
@@ -8911,6 +8918,8 @@ GET_ROUTES = {
     "/api/status": read_device_status,
     "/api/device/overview": device_overview,
     "/api/appsettings/autostart": read_autostart,
+    "/api/update": app_updates.state,
+    "/api/update/job": app_updates.job,
     "/api/announce": lambda: {"on": speech.enabled.is_set(), "levels": announcer.levels_on,
                               "mute_tones": announcer.mute_tones,
                               "startup_summary": announcer.startup_summary,
@@ -9042,6 +9051,14 @@ POST_ROUTES = {
     "/api/appsettings/export": (action_export_app_settings, []),
     "/api/appsettings/open": (action_open_app_settings_folder, []),
     "/api/appsettings/autostart": (action_set_autostart, [(bool, "on", None)]),
+    # AccessCaster's own update, every one LOCAL ONLY (UPDATE_ROUTES).
+    "/api/update/check": (app_updates.check_now, []),
+    "/api/update/skip": (app_updates.skip, [(str, "version", "")]),
+    "/api/update/interval": (app_updates.set_interval, [(int, "days", -1)]),
+    "/api/update/install": (app_updates.install, [(str, "version", "")]),
+    "/api/update/cancel": (app_updates.cancel, []),
+    "/api/update/proceed": (app_updates.proceed, []),
+    "/api/update/report": (lambda: {"ok": True, "report": app_updates.take_report()}, []),
     "/api/channels/wireless-mute": (action_set_channel_wireless_mute,
                                     [(str, "name", ""), (bool, "on", None)]),
     "/api/channels/level": (action_set_channel_level, [(str, "name", ""), (int, "db", 0)]),
@@ -9229,8 +9246,8 @@ class Handler(BaseHTTPRequestHandler):
                 "<p>AccessCaster is running on another computer and will not accept control from "
                 "this device without its access link.</p>"
                 "<p>On the computer the RODECaster is plugged into, open AccessCaster, go to the "
-                "Device page and then the Hardware tab, and find \"Remote access from another "
-                "device\". Send that link to this device and open it.</p>"
+                "App settings page and then the Remote access tab. Send the access link there to "
+                "this device and open it.</p>"
                 "</body></html>").encode("utf-8")
         self.send_response(401)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -9341,7 +9358,10 @@ class Handler(BaseHTTPRequestHandler):
                 _last_ping = time.monotonic()
                 _client_seen = True
                 _quit_at = None
-                self._send_json({"ok": True, "instance": _INSTANCE_ID, "version": APP_VERSION})
+                # `update_request`: the tray asked for the update decision. Taken only by a page
+                # on this machine, which is the only one that can act on it.
+                self._send_json({"ok": True, "instance": _INSTANCE_ID, "version": APP_VERSION,
+                                 "update_request": self._is_local() and app_updates.take_request()})
             elif self.path == "/api/quit":
                 # The webpage is closing (sendBeacon on pagehide). Schedule shutdown after a
                 # short grace; a reloaded page's ping arrives first and cancels it.
@@ -9399,14 +9419,16 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path in LOCAL_ONLY_ROUTES and not self._is_local():
                 # A wifi password must not cross the network it is for, and the access token must
                 # not be replaced by the remote page it lets in.
-                self._send_json({
-                    "ok": False,
-                    "message": (("Joining a wifi network can only be done from the computer the "
-                                 "unit is plugged into. The password would otherwise travel across "
-                                 "the network in the clear, which is the network you are joining.")
-                                if self.path == "/api/network/wifi/join" else
-                                ("The access link can only be changed on the computer the unit is "
-                                 "plugged into."))})
+                if self.path in UPDATE_ROUTES:
+                    message = app_updates.phrases.LOCAL_ONLY
+                elif self.path == "/api/network/wifi/join":
+                    message = ("Joining a wifi network can only be done from the computer the "
+                               "unit is plugged into. The password would otherwise travel across "
+                               "the network in the clear, which is the network you are joining.")
+                else:
+                    message = ("The access link can only be changed on the computer the unit is "
+                               "plugged into.")
+                self._send_json({"ok": False, "message": message})
             elif self.path in POST_ROUTES:
                 action, specs = POST_ROUTES[self.path]
                 if specs:
@@ -9646,8 +9668,8 @@ def _refuse_other_account(interactive: bool) -> None:
             "the app.\n\n"
             "Quit AccessCaster in the other account, or sign that account out, then start it "
             "again here.\n\n"
-            "To use the app from a different machine instead, turn on Remote access on the Device "
-            "page of the copy that is already running.")
+            "To use the app from a different machine instead, use the Remote access tab of App "
+            "settings in the copy that is already running.")
     print("AccessCaster is already running in another Windows account on this PC.")
     if not interactive or os.name != "nt":
         return
@@ -9759,7 +9781,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
         threading.Thread(target=_client_watchdog, daemon=True).start()
     if announce and announcer.starts_on():
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
-        # The Device page can still turn it off.
+        # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=announcer.GREETING_STARTED)
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
@@ -9793,6 +9815,9 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
     # Recording page free to poll, and it is how a press of the unit's own REC button is noticed.
     # Read-only, its own handle, and idle unless the recorder changes state.
     _recorder_watcher()
+    # AccessCaster's own update: says what the last one did, then checks now and then. Silent
+    # unless a version is found, and never from a source run.
+    app_updates.start()
     # The CallMe listener, for the same reasons: a call rings whatever page is open, and it has to
     # be heard whether or not anyone is announcing. It seeds itself from a dump once it opens.
     _callme_watcher()

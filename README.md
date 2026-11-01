@@ -42,9 +42,14 @@ accessible page where you can:
   own rule and the usual answer to "the driver is installed, so where are my devices".
 - **Getting that driver**, if it is missing: a button on the Routing page downloads RODE's own file,
   verifies it is signed by RODE and runs their installer, with the normal Windows permission prompt.
-  **This is the only thing AccessCaster does that reaches the internet**, and it happens only when
-  you press that button: never at startup, never on a timer, never to check for a newer version.
+  It reaches RODE's website only when you press that button, never at startup or on a timer.
   A second button simply opens RODE's software page if you would rather do it yourself.
+- **Updates**: once a day AccessCaster checks `updates.slightperception.com` for a newer version
+  of itself and, if there is one, says so in a Windows notification. Nothing is installed until
+  you choose to, after hearing what changed. The file it reads is signed, and the download is
+  checked against it, so a version that did not come from us is refused. How often it checks,
+  including only when you ask, is a setting. These two, the driver and the update check, are the
+  only things AccessCaster does that reach the internet.
 - **SMART pads**: create, clear and reassign sound pads, voice-FX pads, mixer pads and MIDI
   pads, with dynamic banks, and play any pad from the keyboard.
 - **Recording**: start, pause and stop the recorder, choose multitrack or mixed, see what

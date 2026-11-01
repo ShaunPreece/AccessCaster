@@ -1,10 +1,9 @@
 """Fetch RODE's Virtual Devices driver and hand it to Windows to install.
 
-THIS IS THE APP'S ONLY OUTBOUND INTERNET CALL. Everything else it does talks to localhost and the
-USB cable. That is a property worth keeping deliberate rather than losing by accident, so this runs
-ONLY when the user presses the button: never at startup, never on a timer, never as a check for a
-newer version. Said plainly in the README and in Help, because a user who chose this app partly for
-what it does not do deserves to know where the one exception is.
+ONE OF TWO THINGS IN THE APP THAT REACH THE INTERNET; the other is AccessCaster's own update check
+(`selfupdate/`). Everything else talks to localhost and the USB cable. This one runs ONLY when the
+user presses the button, never at startup or on a timer. The README and Help list both, because a
+user who chose this app partly for what it does not do deserves to know exactly what it contacts.
 
 WHY THE APP DOES IT AT ALL, rather than the installer. The Routing page already reports whether the
 driver is installed, running and connected, so the fix belongs where the problem is named. An

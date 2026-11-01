@@ -11,8 +11,11 @@ here so there is exactly one number to change:
   - the release notes: ProjectBuilds/make_release_notes.py turns HISTORY below into the page
                    the installer offers to open when it finishes.
 
-Format: plain "MAJOR.MINOR" string, e.g. "2.00". The UI says "version 2.50" in words: never "v2.50",
-which a screen reader reads as "volt 2.50".
+Format: SemVer, "MAJOR.MINOR.PATCH" with an optional pre-release label, e.g. "2.63.0" or
+"2.64.0-beta.1". Three parts because the update scheme (`selfupdate/versions.py`) refuses anything
+else, and a build whose own version it cannot read never checks for updates at all. A pre-release
+label puts the build on the beta track. The UI says "version 2.63.0" in words: never "v2.63.0",
+which a screen reader reads as "volt".
 
 HISTORY IS DATA, NOT PROSE, and that is the whole point of it being a list rather than a paragraph.
 The release notes are GENERATED from it, so there is no second copy to fall out of step: a
@@ -29,10 +32,27 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.62"
+__version__ = "2.63.0"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.63.0", [
+        ("AccessCaster now tells you when there is a new version",
+         "Once a day AccessCaster checks whether a newer version exists, and if one does, Windows "
+         "shows a notification from its tray icon. Nothing is installed until you choose to. Press "
+         "F12 anywhere in the AccessCaster window, or choose Install update from the tray menu, to "
+         "read what changed and decide: Install now, Skip this version, or Later. Installing "
+         "downloads the new version, checks it is genuinely ours, and restarts AccessCaster on it, "
+         "with this window staying open throughout. How often it checks, including only when you "
+         "ask, is on the Updates tab of App settings, beside Check for updates now."),
+
+        ("App settings has a page of its own, on Alt plus 8",
+         "Everything about AccessCaster itself rather than the unit is now in one place: "
+         "announcements, keyboard shortcuts, level warnings and remote access, which were tabs on "
+         "the Device page, and starting at sign-in and saving these settings to a file, which were "
+         "on the Backups page, plus the new Updates tab. Device and Backups are now only about the "
+         "unit. Help and About moves to Alt plus 9, so it stays last."),
+    ]),
     ("2.62", [
         ("CallMe: take guests' calls without the touchscreen",
          "RODE's CallMe lets a guest join your show from another RODECaster or from a web browser, "

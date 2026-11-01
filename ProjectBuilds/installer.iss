@@ -285,9 +285,21 @@ begin
     the Defender popup will simply appear on first run instead. }
 end;
 
+{ AN UPDATE FROM INSIDE THE APP RUNS SETUP SILENTLY, and a silent Setup re-uses the previous install's
+  tasks, so the firewall task is selected again and its 'runas' would raise a UAC prompt in the
+  middle of an update nobody is watching. The rule is keyed on the exe's path, which an upgrade does
+  not change, so a silent run that finds our marker leaves the existing rule alone. }
+function FirewallRuleAlreadyAdded: Boolean;
+var
+  Marker: String;
+begin
+  Result := RegQueryStringValue(HKA, FW_MARK_KEY, FW_MARK_NAME, Marker) and (Marker = '1');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('firewallrule') then
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('firewallrule')
+     and not (WizardSilent and FirewallRuleAlreadyAdded) then
     AddFirewallRule;
 end;
 
