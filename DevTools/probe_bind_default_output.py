@@ -115,6 +115,7 @@ class Sampler(threading.Thread):
         self.stop = threading.Event()
         self.arrivals = 0
         self.binds = 0
+        self.counted = 0        # the arrival the last counted bind followed
         self.events: list = []
 
     def run(self) -> None:
@@ -130,7 +131,11 @@ class Sampler(threading.Thread):
                 self.arrivals += 1
                 self.events.append(f"{now:7.1f}s  arrival {self.arrivals}")
             if bound and not was_bound:
-                self.binds += 1
+                # The mix-only step of a cycle also unbinds and rebinds the service; only the first
+                # bind after each multitrack arrival counts towards the rate.
+                if self.arrivals > self.counted:
+                    self.binds += 1
+                    self.counted = self.arrivals
                 self.events.append(f"{now:7.1f}s  BOUND after arrival {self.arrivals}")
             if was_bound and not bound:
                 self.events.append(f"{now:7.1f}s  unbound")
@@ -168,8 +173,11 @@ def main() -> None:
         print("No playback device outside the desk and the driver. Nothing to move to.")
         return
     # Every cycle ends in post-fader multitrack, so the mode found here is put back at the end.
-    mode_before = api("/api/routing/live").get("usb_multitrack")
-    if mode_before is None:
+    # The arrivals counted only happen in Expanded, so a desk found in Standard is switched to
+    # Expanded first and back afterwards.
+    live = api("/api/routing/live")
+    mode_before, expanded_before = live.get("usb_multitrack"), live.get("usb_expanded")
+    if mode_before is None or expanded_before is None:
         print("Could not read the desk's USB output mode, so it could not be put back. Stopping.")
         return
     print(f"default was : {was_default.name if was_default else '?'}")
@@ -180,6 +188,10 @@ def main() -> None:
         policy.SetDefaultEndpoint(target.id, vd.E_CONSOLE)
         policy.SetDefaultEndpoint(target.id, vd.E_MULTIMEDIA)
 
+    if not expanded_before:
+        print("switching USB 1 input to Expanded ...", flush=True)
+        api("/api/routing/usb-expanded", post={"on": True}, timeout=150.0)
+        time.sleep(10)
     sampler = Sampler()
     sampler.start()
     try:
@@ -199,6 +211,11 @@ def main() -> None:
     finally:
         sampler.stop.set()
         sampler.join(timeout=3)
+        if not expanded_before:
+            res = api("/api/routing/usb-expanded", post={"on": False}, timeout=150.0)
+            print("USB 1 input restored to Standard" if res.get("ok") else
+                  f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
+            time.sleep(10)
         res = post_mode(mode_before)
         print(f"USB output mode restored to {mode_before}" if res.get("ok") else
               f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {res.get('message')}")

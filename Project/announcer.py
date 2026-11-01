@@ -966,7 +966,13 @@ def usb_mode_change(was, now) -> str:
             "The unit's USB audio mode has changed.")
 
 
-def _loop(gen: int | None = None) -> None:
+# The first thing said once the desk is open: the app's own start-up names the app, a person
+# switching announcements back on hears that they are on.
+GREETING_ON = "Control announcer is on."
+GREETING_STARTED = "AccessCaster started."
+
+
+def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
     global live_state
     if gen is None:
         gen = _loop_gen
@@ -1019,7 +1025,7 @@ def _loop(gen: int | None = None) -> None:
                 # says they are back on, and the pump keeps only the newest phrase, so a greeting
                 # here would silence it.
                 if not _quiet_start.is_set():
-                    speech.say("Control announcer is on.")
+                    speech.say(greeting)
                 _quiet_start.clear()
                 announced_on = True
             elif time.monotonic() - lost_at >= _RECONNECT_SPEAK_AFTER_S:
@@ -1131,10 +1137,10 @@ def restore_after_record() -> bool:
     return True
 
 
-def action_set_announce(on: bool, chosen: bool = True) -> dict:
+def action_set_announce(on: bool, chosen: bool = True, greeting: str = GREETING_ON) -> dict:
     """Switch announcements on or off. `chosen` is a person's decision (the page, the tray, the
     shortcut), which is saved when they have asked for it to be remembered; the app switching them
-    back on at start-up or after a take is not."""
+    back on at start-up or after a take is not. `greeting` is what is said once the desk is open."""
     global _thread, suspended_for_record, _loop_gen
     # A DELIBERATE toggle cancels our claim on it either way, so a recording stopping later never
     # overrides what the user has since chosen.
@@ -1146,7 +1152,7 @@ def action_set_announce(on: bool, chosen: bool = True) -> dict:
             if not speech.enabled.is_set():
                 _loop_gen += 1
                 speech.enabled.set()
-                _thread = threading.Thread(target=_loop, args=(_loop_gen,),
+                _thread = threading.Thread(target=_loop, args=(_loop_gen, greeting),
                                                     daemon=True)
                 _thread.start()
         return {"ok": True, "announce": True,

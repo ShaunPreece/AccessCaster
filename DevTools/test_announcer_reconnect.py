@@ -66,7 +66,8 @@ EXPANDED = FakeIface(0x0094, b"path-mode-5")
 class Rig:
     """Runs the real `announcer._loop` over a fake desk that can be re-enumerated under it."""
 
-    def __init__(self, speak_after):
+    def __init__(self, speak_after, greeting=announcer.GREETING_ON):
+        self.greeting = greeting
         self.iface = STANDARD
         self.opened = []          # every interface the loop opened, in order
         self.said = []
@@ -124,7 +125,8 @@ class Rig:
                          "_RETRY_S": 0.02,    # the real 0.3 s only paces the retries
                          "_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
         speech.enabled.set()
-        self.thread = threading.Thread(target=announcer._loop, daemon=True)
+        self.thread = threading.Thread(target=announcer._loop, args=(None, self.greeting),
+                                       daemon=True)
         self.thread.start()
         time.sleep(0.15)                       # let it open and greet
         return self
@@ -150,6 +152,10 @@ with Rig(speak_after=0.05) as rig:
           rig.said.count("Control announcer is on."), 1)
     check("and it re-seeds, since mutes and levels can move while it is deaf",
           rig.seeded, 2)
+
+print("\nTHE APP'S OWN START-UP NAMES THE APP")
+with Rig(speak_after=0.05, greeting=announcer.GREETING_STARTED) as rig:
+    check("it greets with the app's name", rig.said, ["AccessCaster started."])
 
 print("\nA BLIP TOO SHORT TO HAVE LOST ANYTHING STAYS QUIET")
 with Rig(speak_after=5.0) as rig:

@@ -169,7 +169,7 @@ def run() -> None:
     res = set_unit("definitelyNotASetting", 1)
     check("an unknown property is refused", res.get("ok"), False)
 
-    print(f"\nMUTE {CHAN} FROM SOFTWARE, READ BACK, UNMUTE")
+    print(f"\nMUTE {CHAN} FROM SOFTWARE, READ BACK, PUT BACK")
     was_muted = channel_state(CHAN).get("muted")
     print(f"  info {CHAN} starts {'MUTED' if was_muted else 'unmuted'}")
     try:
@@ -187,7 +187,7 @@ def run() -> None:
     finally:
         set_mute(CHAN, bool(was_muted))
         time.sleep(SETTLE_S)
-    check("unmuted again", channel_state(CHAN).get("muted"), was_muted)
+    check("mute back where it started", channel_state(CHAN).get("muted"), was_muted)
 
     print("\nSTRAY CHECK: occurrence counts, not names (the check that catches a stray like "
           "btDoScan's)")

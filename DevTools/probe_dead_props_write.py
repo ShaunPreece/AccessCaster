@@ -2,7 +2,8 @@
 
 The read-only half is `probe_dead_props.py`. This is the behavioural half a second desk needs
 before the dead list can be said to hold there too: write a value that differs, re-dump, classify,
-then restore and prove the tree came back byte-identical.
+then restore, prove the property and every occurrence count came back, and list any other value
+that still differs.
 
 FOUR OUTCOMES, and only the first two agree with "inactive":
 
@@ -43,6 +44,10 @@ SETTLE = 1.5
 # Needs a listener, not a dump: see the module docstring.
 AUDIBLE = {"toneGeneration", "emergencyMuteActive"}
 
+# Never written, whatever is on the dead list: recording to a pad reboots the desk, and the project
+# guide rules PADRECORDER out of any further probing.
+NEVER_PROBE = {"PADRECORDER"}
+
 # A value that differs from the resting one, per kind. `pair` properties are not written: their
 # operand layout is per property and guessing one is exactly the stray hazard this avoids.
 WRITABLE_KINDS = {"bool", "int"}
@@ -73,6 +78,9 @@ def probe(prop: str, reason: str) -> str:
         print(f"{prop}: NOT PRESENT on this desk")
         return "absent"
     node, resting, kind = hits[0]
+    if node.name in NEVER_PROBE:
+        print(f"{prop}: SKIPPED, {node.name} is never probed")
+        return "skipped (never probed)"
     if kind not in WRITABLE_KINDS:
         print(f"{prop}: SKIPPED, kind {kind!r} has no safe single-operand write")
         return "skipped"
@@ -87,10 +95,17 @@ def probe(prop: str, reason: str) -> str:
         # Written whatever the classification found, so a failed dump or a Ctrl+C still puts the
         # property back. Writing the resting value over a swallowed write changes nothing.
         write(node, prop, kind, resting)
-    root3, _ = snapshot()
+    root3, after = snapshot()
     if values_of(root3, prop) != values_of(root, prop):
         raise RuntimeError(f"{prop} did not read back at {resting!r} after the restore: "
                            "CHECK THIS DESK. Stopping before the next property.")
+    if any(count_changes(before, after)):
+        raise RuntimeError(f"an occurrence count differs after restoring {prop}: CHECK THIS DESK "
+                           "for a stray. Stopping before the next property.")
+    changed = [f"{n.name}.{p}" for n, n0 in zip(mt.walk(root3), mt.walk(root))
+               for (p, v, _k), (_p0, v0, _k0) in zip(n.props, n0.props) if v != v0]
+    if changed:
+        print(f"    note: also differs from before the write: {', '.join(changed[:8])}")
     print("    restored: yes")
     print(f"    reason on record: {reason or '(none)'}")
     return verdict

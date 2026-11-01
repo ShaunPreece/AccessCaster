@@ -10480,7 +10480,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
     if announce and announcer.starts_on():
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # The Device page can still turn it off.
-        announcer.action_set_announce(True, chosen=False)
+        announcer.action_set_announce(True, chosen=False, greeting=announcer.GREETING_STARTED)
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
     # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something
