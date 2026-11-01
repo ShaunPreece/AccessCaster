@@ -65,10 +65,10 @@ SNAPSHOT_KEY = "device_snapshot"
 # One profile per desk may be marked as the baseline: the state the unit was in before this app ever
 # wrote to it, captured on first run (server.baseline_status). It is an ordinary profile in every
 # other way - same format, same restore path - but it is the only copy of the desk as it came, and
-# there is no software factory reset to fall back on if it is lost. So it gets two protections that
-# a normal profile does not: an ordinary save can never overwrite that name (a name collision would
-# silently replace the one thing that cannot be recreated), and deleting it takes a deliberate
-# second step rather than the same click as any other profile.
+# a factory reset gives factory settings, not these, so nothing rebuilds it. It gets two
+# protections that a normal profile does not: an ordinary save can never overwrite that name (a name
+# collision would silently replace the one thing that cannot be recreated), and deleting it takes a
+# deliberate second step rather than the same click as any other profile.
 BASELINE_KEY = "baseline"
 
 # ---- the paired show ---------------------------------------------------------------------------
@@ -429,8 +429,8 @@ def delete(name: str, force: bool = False) -> dict:
     must not be reachable with a crafted name.
 
     The AS-FOUND baseline needs `force`. It is the only record of the desk before this app touched
-    it and there is no software factory reset to rebuild it from, so it does not go the same way as
-    an ordinary profile: the caller gets `baseline: True` back and has to ask first."""
+    it and a factory reset gives factory settings rather than these, so it does not go the same way
+    as an ordinary profile: the caller gets `baseline: True` back and has to ask first."""
     safe = safe_name(name)
     if not safe:
         return {"ok": False, "message": f"Profile {name} not found."}
@@ -439,8 +439,8 @@ def delete(name: str, force: bool = False) -> dict:
         if got.get("ok") and is_baseline(got["prof"]):
             return {"ok": False, "baseline": True, "name": safe, "message":
                     f"{safe} is the as-found baseline: how this unit was set up before "
-                    f"AccessCaster changed anything. It cannot be captured again, and the unit has no "
-                    f"software factory reset to fall back on. Confirm to delete it anyway."}
+                    f"AccessCaster changed anything. It cannot be captured again, and a factory "
+                    f"reset gives factory settings, not these. Confirm to delete it anyway."}
     folder = os.path.join(PROFILES_DIR, safe)
     if not _child_of_profiles(folder):
         return {"ok": False, "message": "That profile name is not one this app can delete."}

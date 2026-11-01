@@ -46,9 +46,9 @@ dropout also happens with nothing of ours running.
 Usage, with the app or `DevTools/run_dev_server.py` already serving:
 
     python DevTools/probe_import_drop.py --list
-    python DevTools/probe_import_drop.py --backup NAME --delta 7 --trials 10
+    python DevTools/probe_import_drop.py --backup show:N --delta 7 --trials 10
     python DevTools/probe_import_drop.py --backup NAME --delta 7 --trials 10 --via profile
-    python DevTools/probe_import_drop.py --backup NAME --delta 0     # a true no-op, for comparison
+    python DevTools/probe_import_drop.py --backup show:N --delta 0     # a true no-op, for comparison
 """
 import argparse
 import subprocess
@@ -185,12 +185,8 @@ def run_restore(name: str, via: str) -> dict:
 
     The reply's `via` says which job to poll: the two halves have separate job states.
     """
-    # THE PROFILE ARM GOES STRAIGHT TO `/api/profiles/restore`, NOT to the backup chooser.
-    # `/api/backup/restore` prefers the paired show whenever one is on the drive, and its `clean`
-    # flag does NOT select the profile path the way it reads: clean=True forces the profile, but
-    # only by FACTORY-RESETTING the desk first, which is no control at all. Passing clean=False and
-    # expecting the profile runs a SHOW IMPORT instead, so the control arm becomes a second copy of
-    # the arm it is meant to be compared against.
+    # THE PROFILE ARM GOES STRAIGHT TO `/api/profiles/restore`, NOT to the backup chooser, whose
+    # `clean=True` forces the profile only by FACTORY-RESETTING the desk first.
     if via == "profile":
         started = api("/api/profiles/restore", post={"name": name, "clean": False})
         status = "/api/profiles/restore/status"
@@ -230,13 +226,19 @@ def main() -> int:
     if args.list:
         print("backups:")
         for b in api("/api/backups").get("backups") or []:
-            print(f"  {b['kind']:<8} {b['name']}")
+            show = f"   (--via show: show:{b['snapshot']})" if b.get("snapshot") is not None else ""
+            print(f"  {b['kind']:<8} {b['name']}{show}")
         print("\nknobs, in the order --delta takes them:")
         for i, (label, read, _w) in enumerate(knobs(), 1):
             print(f"  {i:>2}. {label:<22} currently {read()}")
         return 0
     if not args.backup:
         ap.error("--backup is required (use --list to see them)")
+    # `/api/backup/restore` restores a paired backup through its profile and never imports its show,
+    # so a paired name on the show arm would run the control arm under the show arm's label.
+    if args.via == "show" and not args.backup.startswith("show:"):
+        ap.error(f"--via show needs a show:<snapshot> name; {args.backup!r} would restore through "
+                 "its profile (use --list to see the snapshots)")
 
     baseline_devices = rode_devices_present()
     if baseline_devices <= 0:

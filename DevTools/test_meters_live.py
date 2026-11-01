@@ -100,7 +100,8 @@ def main() -> int:
     print("RESULT")
     print(f"  highest peak seen: {peak_seen * 100:.1f} percent")
     print(f"  spoken warnings:   {said or 'none'}")
-    print(f"  windows endpoint:  {w.volume_db:+.2f} dB, so full scale reads "
+    print(f"  level scaling it:  {w.volume_db:+.2f} dB (an output reads before Windows' volume, "
+          f"so 0), full scale reads "
           f"{w.ceiling * 100:.1f}% and clipping is called at "
           f"{0.99 * meters.trusted_ceiling(w.ceiling) * 100:.1f}%")
     print(f"  the app would say: "

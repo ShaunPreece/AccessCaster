@@ -2014,8 +2014,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   started by every `meters.Meter` on a capture endpoint; holding the stream open with `ffmpeg -f
   dshow` reads 42 percent where a bare meter reads 0.0. Over Remote Desktop no desk endpoint exists,
   so a waker that never starts is invisible there.
-- **The clip threshold must be scaled by the endpoint's LIVE volume ceiling.** Windows' endpoint
-  volume scales the meter, so at -1.08 dB true full scale can never pass 0.99. `trusted_ceiling()`
+- **The clip threshold must be scaled by an INPUT's LIVE volume ceiling, and never an output's.**
+  Windows' capture level scales an input's meter, so at -1.08 dB true full scale can never pass
+  0.99. An output's meter reads BEFORE its volume (a -6 dBFS tone read 0.500 on the desk's Main
+  Stereo output at -6.3 and -18.3 dB, 1st November 2026), so scaling it calls ordinary speech
+  clipping; `meters.reading_scale` holds both rules. `trusted_ceiling()`
   refuses an untrustworthy ceiling and falls back to 1.0, because a failed volume read would
   otherwise announce a whisper as clipping. The healthy/strong/hot boundaries are Shaun's judgements;
   do not rescale those.

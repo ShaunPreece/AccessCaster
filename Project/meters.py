@@ -105,8 +105,9 @@ class IAudioEndpointVolume(IUnknown):
     """Windows' own level for an endpoint: read for the meter's ceiling, written only from a
     control the user operates (it changes what every application on the machine records).
 
-    It scales the meter: at -1.08 dB a true full-scale signal reads 10^(-1.08/20) = 0.883, so a
-    fixed clip threshold of 0.99 is unreachable. See `Meter.refresh_ceiling`.
+    It scales an INPUT's meter: at -1.08 dB a true full-scale signal reads 10^(-1.08/20) = 0.883, so
+    a fixed clip threshold of 0.99 is unreachable. An output's meter it leaves alone. See
+    `reading_scale`.
 
     Every method is declared, in order, even the unused ones: a COM vtable is positional, so a gap
     makes every later method call the wrong slot.
@@ -319,6 +320,19 @@ CEILING_REFRESH_S = 2.0
 MIN_TRUSTED_CEILING = 0.05
 
 
+def reading_scale(volume_db: float, is_capture: bool) -> tuple:
+    """(the Windows level that scales a meter reading, the ceiling it gives): what a true
+    full-scale signal reads.
+
+    AN OUTPUT'S METER READS BEFORE WINDOWS' VOLUME, AN INPUT'S AFTER IT. Measured on the desk's Main
+    Stereo pair: a -6 dBFS tone read 0.500 on the output at both -6.3 and -18.3 dB, while the
+    input's reading fell 12 dB with its level. Scaling an output by its volume calls ordinary speech
+    clipping, so an output is always read at full scale."""
+    if not is_capture:
+        return 0.0, 1.0
+    return volume_db, min(1.0, 10.0 ** (volume_db / 20.0))
+
+
 def trusted_ceiling(ceiling: float) -> float:
     """The ceiling to use. Shared by describe, verdict and Watcher so they cannot disagree."""
     try:
@@ -433,14 +447,14 @@ class Meter:
                 self.wake_failed = True
 
     def refresh_ceiling(self) -> float:
-        """Re-read the endpoint volume and mute, and return the ceiling: what a true full-scale
-        signal reads, 10^(dB/20) capped at 1.0. Re-read rather than cached, because the Windows
-        level is a live slider anything can move, and the clip threshold follows it."""
+        """Re-read the endpoint volume and mute, and return the ceiling (`reading_scale`).
+        Re-read rather than cached, because the Windows level is a live slider anything can move,
+        and the clip threshold follows it."""
         if self._vol is None:
             return self.ceiling
         try:
-            self.volume_db = float(self._vol.GetMasterVolumeLevel())
-            self.ceiling = min(1.0, 10.0 ** (self.volume_db / 20.0))
+            self.volume_db, self.ceiling = reading_scale(
+                float(self._vol.GetMasterVolumeLevel()), self.is_capture)
             self.muted = bool(self._vol.GetMute())
         except Exception:
             pass

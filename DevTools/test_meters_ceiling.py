@@ -5,10 +5,11 @@
      microphone is. Over Remote Desktop the desk's endpoints do not exist at all, so a meter
      exercised only there cannot show the fault.
 
-  2. THE ENDPOINT CEILING. Windows' own capture level scales the meter. At a capture level of
-     -1.08 dB a signal at TRUE full scale reads 0.883 (measured twice, 8 dB apart, 88.3 percent
+  2. THE ENDPOINT CEILING. Windows' own capture level scales an input's meter. At a capture level
+     of -1.08 dB a signal at TRUE full scale reads 0.883 (measured twice, 8 dB apart, 88.3 percent
      both times), so a fixed clip threshold of 0.99 is unreachable and the clipping warning, the
-     one thing a recording cannot recover from, is never spoken.
+     one thing a recording cannot recover from, is never spoken. An OUTPUT's meter reads before
+     its volume, so scaling it calls ordinary speech clipping.
 
 Neither is testable against hardware without shouting into a microphone with the processing
 bypassed, so the ARITHMETIC and the WORDING are pinned here instead.
@@ -32,8 +33,8 @@ def close(label, got, want, tol=1e-3):
 
 
 def ceiling_for(db: float) -> float:
-    """The same expression Meter.refresh_ceiling uses, kept here so a change to one is visible."""
-    return min(1.0, 10.0 ** (db / 20.0))
+    """An input's ceiling at `db`, from the function Meter.refresh_ceiling uses."""
+    return meters.reading_scale(db, is_capture=True)[1]
 
 
 print("THE CEILING ARITHMETIC")
@@ -42,6 +43,20 @@ close("-1.08 dB (a measured capture level) reaches 0.883", ceiling_for(-1.08), 0
 close("-6 dB reaches about half", ceiling_for(-6.0), 0.5012)
 close("a BOOST is capped at 1.0, never above", ceiling_for(30.0), 1.0)
 close("a big attenuation still gives a usable floor", ceiling_for(-20.0), 0.1)
+
+print("\nAN OUTPUT IS READ AT FULL SCALE, WHATEVER ITS VOLUME")
+check("an output at -10.5 dB keeps a ceiling of 1.0 and no level to report",
+      meters.reading_scale(-10.5, is_capture=False), (0.0, 1.0))
+check("an input at -10.5 dB is scaled by it",
+      meters.reading_scale(-10.5, is_capture=True)[0], -10.5)
+OUT = "Speakers (RODECaster Pro II Main Stereo)"
+out_db, out_ceiling = meters.reading_scale(-10.5, is_capture=False)
+check("speech peaking at 0.75 on that output is NOT called clipping",
+      "CLIPPING" in meters.describe(0.75, 1.0, OUT, ceiling=out_ceiling, volume_db=out_db), False)
+check("and no note claims Windows is taking level off it", meters.level_note(out_db), "")
+check("Meter takes its ceiling from reading_scale",
+      "reading_scale(" in Path(meters.__file__).read_text(encoding="utf-8")
+      .split("def refresh_ceiling")[1][:900], True)
 
 print("\nCLIPPING IS REACHABLE ON AN ATTENUATED ENDPOINT (bug 2)")
 NAME = "Microphone (RODECaster Pro II Main Stereo)"
