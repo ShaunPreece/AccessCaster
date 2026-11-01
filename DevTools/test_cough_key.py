@@ -13,6 +13,7 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import announcer
 import channels
 import devices
 import server
@@ -30,8 +31,8 @@ def press(muted: dict) -> tuple[str, list]:
         writes.append((name, on))
         return {"ok": True}
 
-    with patched((server, {"_ann_live_state": {"muted": muted},
-                           "action_set_channel_mute": set_mute})):
+    with patched((announcer, {"live_state": {"muted": muted}}),
+                 (server, {"action_set_channel_mute": set_mute})):
         said = server._hk_mics()["message"]
     return said, writes
 

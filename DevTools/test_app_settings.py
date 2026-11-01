@@ -26,14 +26,14 @@ from _testkit import check
 
 # Every key the app WRITES to settings.json, read off the source rather than listed by hand: a hand
 # list misses exactly the new preference this check exists to catch. Three shapes cover every
-# writer: `update_settings(key=...)`, a `_KEY = "..."` constant passed as `**{_KEY: ...}`, and
+# writer: `settings_file.update(key=...)`, a `_KEY = "..."` constant passed as `**{_KEY: ...}`, and
 # action_set_meter_option's spec table, whose keys are the "meter_*" strings.
 _SRC = "\n".join(p.read_text(encoding="utf-8")
                  for p in pathlib.Path(_bootstrap.PROJECT).glob("*.py"))
 _KEY_CONSTS = dict(re.findall(r'^(_\w+_KEY) = "(\w+)"', _SRC, re.M))
-WRITTEN_BY_THE_APP = (set(re.findall(r"update_settings\((\w+)=", _SRC))
+WRITTEN_BY_THE_APP = (set(re.findall(r"settings_file.update\((\w+)=", _SRC))
                       | {_KEY_CONSTS[c]
-                         for c in re.findall(r"update_settings\(\*\*\{(_\w+_KEY)", _SRC)}
+                         for c in re.findall(r"settings_file.update\(\*\*\{(_\w+_KEY)", _SRC)}
                       | set(re.findall(r'\("(meter_\w+)", (?:bool|float)', _SRC)))
 
 # THE REAL STORED SHAPE, copied from a live settings.json rather than invented. An invented shape

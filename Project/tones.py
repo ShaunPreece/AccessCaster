@@ -59,7 +59,7 @@ TONES = {
 NOTE_S = 0.07
 GAP_S = 0.025
 # The whole cue, for callers that need to know how long it occupies the speech worker (see
-# server.action_set_announce_mute_tones, which plays both cues in turn). TWO notes: this timing is
+# announcer.action_set_announce_mute_tones, which plays both cues in turn). TWO notes: this timing is
 # quoted for the mute pair, and the three-note job cues are not on anyone's critical path.
 DURATION_S = 2 * NOTE_S + GAP_S
 # Bumped whenever the SHAPE of a cue changes, because the file on disk is not regenerated just

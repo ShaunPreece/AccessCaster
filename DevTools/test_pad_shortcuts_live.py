@@ -25,9 +25,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import announcer
 import devices
 import server
 import soundpad
+import speech
 from _testkit import check, check_in
 
 
@@ -80,9 +82,9 @@ def main() -> int:
     print(f"{dev.name}: {len(pads)} pads, {per_bank} per bank, on bank {was_bank + 1}")
 
     # The announcer owns the pushed stream, and the play tracking under test lives in its handler.
-    server._ann_quiet_start.set()
-    server._announce_on.set()
-    threading.Thread(target=server._announce_loop, daemon=True).start()
+    announcer._quiet_start.set()
+    speech.enabled.set()
+    threading.Thread(target=announcer._loop, daemon=True).start()
     time.sleep(2.5)                       # the seed read, so the first press is not racing it
 
     silence(pads, "left over from a previous run")
@@ -159,7 +161,7 @@ def main() -> int:
         # Silence BEFORE the announcer goes: the tracking that says what is still playing is its
         # read loop, and without it this can only guess.
         silence(pads, "left playing by this run")
-        server._announce_on.clear()
+        speech.enabled.clear()
         server._hk_release_held()
         for pos, _pi, _nm in soundpad.latched_pads():
             soundpad.unlatch_pad(pos)

@@ -2,11 +2,11 @@
 
 THE PROBLEM IT GUARDS: the desk pushes our OWN writes back on the state stream, so a level set from
 the web UI is announced twice - once by the screen reader reading the UI's live region, once by the
-announcer speaking the echo. server._ann_mark_self_write suppresses the second.
+announcer speaking the echo. announcer.mark_self_write suppresses the second.
 
 Why the test is shaped like this: the marks live in the process that DECODES the stream, and the
 process holding port 8770 may be an installed build that does not have them. So this script does both
-halves itself - it marks the write exactly as action_set_fader_level does (via _ann_publish_level,
+halves itself - it marks the write exactly as action_set_fader_level does (via announcer.publish_level,
 so the fader-index to source-code translation is exercised, not bypassed), drives the real write over
 the running app's HTTP API, and reads the real echo off its own HID handle.
 
@@ -15,12 +15,12 @@ Every path is tested in PAIRS, so a silent result cannot be mistaken for a broke
   UNMARKED - the CONTROL. Whether it speaks is the measurement, not the assumption.
 
 Three paths:
-  LEVEL  a fader level, marked by _ann_publish_level   - the desk DOES echo it.
-  MUTE   a channel mute, marked by _ann_publish_mute   - the desk does NOT echo it as
+  LEVEL  a fader level, marked by announcer.publish_level   - the desk DOES echo it.
+  MUTE   a channel mute, marked by announcer.publish_mute   - the desk does NOT echo it as
          channelOutputMute. What it pushes instead is twelve `mixMute` records, one per output mix
          (the firmware propagating the mute into the matrix), and the announcer speaks none of them.
          So there is no second announcement on this path to suppress.
-  GAIN   a mic gain, marked by _ann_mark_self_gain     - the desk pushes NOTHING back at all,
+  GAIN   a mic gain, marked by announcer.mark_self_gain     - the desk pushes NOTHING back at all,
          though the write itself lands and reads back.
 
 THAT ASYMMETRY IS THE FINDING, and it narrows the claim: "the desk pushes our own writes back" is
@@ -46,10 +46,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import announcer
 import channels
 import rcp_hid
 import rcp_read
-import server
+import server  # noqa: F401  (installs the announcer's hooks)
+import speech
 from _desk import api, push_handle
 
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
@@ -58,11 +60,11 @@ GAIN_CHAN = 3       # same reason: Mic 1 carries a live microphone and is never 
 
 SAID: list[tuple[float, str]] = []
 _t0 = time.monotonic()
-server._ann_say = lambda text: SAID.append((time.monotonic() - _t0, text))
+speech.say = lambda text: SAID.append((time.monotonic() - _t0, text))
 # Level and gain pushes are gated on the "announce levels" setting. This process only DECODES, it
 # never speaks, so forcing it on cannot make the real announcer chattier - but leaving it off would
 # make the unmarked control halves silent and report a false pass.
-server._ann_levels_on = True
+announcer.levels_on = True
 
 
 def listen(dev, st: dict, secs: float) -> list[str]:
@@ -72,8 +74,8 @@ def listen(dev, st: dict, secs: float) -> list[str]:
     while time.monotonic() < end:
         rep = dev.read(256, timeout_ms=100)
         if rep:
-            server._ann_handle_report(bytes(rep), st)
-        server._ann_flush_pending(st)
+            announcer.handle_report(bytes(rep), st)
+        announcer.flush_pending(st)
     return [text for _t, text in SAID[before:]]
 
 
@@ -136,7 +138,7 @@ def main() -> int:
           f"Mic {GAIN_CHAN} gain starts at {gain_was} dB (both restored at the end)")
 
     st = {"bank": None, "pending": None, "at": 0.0}
-    server._ann_live_state = st
+    announcer.live_state = st
     failures, notes = [], []
     try:
         with push_handle("announcer echo check") as dev:
@@ -145,7 +147,7 @@ def main() -> int:
             # ---- LEVEL: the one path the desk really does echo. This is the regression. ----
             target_a = 60 if original != 60 else 55
             phase(dev, st, "LEVEL   MARKED",
-                  lambda: server._ann_publish_level("fader", FADER, target_a / 100.0),
+                  lambda: announcer.publish_level("fader", FADER, target_a / 100.0),
                   "/api/faders/level", {"fader": FADER, "percent": target_a}, False,
                   failures, notes)
             phase(dev, st, "LEVEL   UNMARKED", None,
@@ -157,7 +159,7 @@ def main() -> int:
             # SILENT: see the module docstring - the desk answers a software mute with mixMute
             # matrix records only.
             phase(dev, st, "MUTE    MARKED",
-                  lambda: server._ann_publish_mute(strip, not mute_was),
+                  lambda: announcer.publish_mute(strip, not mute_was),
                   "/api/channels/mute", {"name": MUTE_CHAN, "on": not mute_was}, False,
                   failures, notes)
             phase(dev, st, "MUTE    UNMARKED", None,
@@ -170,7 +172,7 @@ def main() -> int:
             g_a = base + 6 if base <= 30 else base - 6
             g_b = base + 12 if base <= 24 else base - 12
             phase(dev, st, "GAIN    MARKED",
-                  lambda: server._ann_mark_self_gain(GAIN_CHAN, True),
+                  lambda: announcer.mark_self_gain(GAIN_CHAN, True),
                   "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_a}, False, failures, notes)
             phase(dev, st, "GAIN    UNMARKED", None,
                   "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_b}, None, failures, notes)

@@ -13,7 +13,7 @@ THE RULES THIS PINS, each of which is a way it could go wrong and be very annoyi
   * the notice is spoken only when the recording was started ON THE UNIT - started from the app,
     the reply carries the same words silently, and silence is the whole point.
 
-No device and no speech: `_ann_say` and `action_set_announce` are stubbed, so nothing is spoken and
+No device and no speech: `speech.say` and `announcer.action_set_announce` are stubbed, so nothing is spoken and
 no announcer thread is started.
 
     python DevTools/test_announcer_suspend.py
@@ -29,8 +29,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import announcer
 import recorder
 import server
+import settings_file
+import speech
 from _testkit import check
 
 SAID = []
@@ -43,71 +46,71 @@ def fake_say(text):
 def fake_set_announce(on, chosen=True):
     """Stands in for the real one: flips the flag without starting the announcer thread (which
     would open the HID device), and clears our claim exactly as the real one does."""
-    server._ann_suspended_for_record = False
+    announcer.suspended_for_record = False
     if on:
-        server._announce_on.set()
+        speech.enabled.set()
     else:
-        server._announce_on.clear()
+        speech.enabled.clear()
     return {"ok": True, "announce": bool(on)}
 
 
-server._ann_say = fake_say
-server.action_set_announce = fake_set_announce
+speech.say = fake_say
+announcer.action_set_announce = fake_set_announce
 
 
 def reset(announcing: bool):
     SAID.clear()
-    server._ann_suspended_for_record = False
-    server._ann_quiet_stop.clear()
-    server._ann_quiet_start.clear()
+    announcer.suspended_for_record = False
+    announcer._quiet_stop.clear()
+    announcer._quiet_start.clear()
     if announcing:
-        server._announce_on.set()
+        speech.enabled.set()
     else:
-        server._announce_on.clear()
+        speech.enabled.clear()
     # Nothing is a self-echo unless a test says so.
-    server._ann_self_writes.clear()
+    announcer._self_writes.clear()
 
 
 def mark_ours():
     """Mark a recorder write as OURS, the way action_record does before it writes."""
-    server._ann_mark_self_write(("record",))
+    announcer.mark_self_write(("record",))
 
 
 print("\nA RECORDING STARTED ON THE UNIT (nothing marked as ours)")
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-check("announcements are switched off", server._announce_on.is_set(), False)
-check("and the app remembers that IT did it", server._ann_suspended_for_record, True)
+check("announcements are switched off", speech.enabled.is_set(), False)
+check("and the app remembers that IT did it", announcer.suspended_for_record, True)
 check("the notice is spoken BEFORE the silence, in one phrase", len(SAID), 1)
 check("and it says both what happened and what it did to announcements",
       "Recording started" in SAID[0] and "Announcements off" in SAID[0], True)
 check("the announcer thread is told to leave QUIETLY, so its sign-off is not recorded",
-      server._ann_quiet_stop.is_set(), True)
+      announcer._quiet_stop.is_set(), True)
 
 print("\nAND STOPPED AGAIN")
 SAID.clear()
 server._recorder_state_changed(recorder.RECORDING, recorder.READY)
-check("announcements are back on", server._announce_on.is_set(), True)
-check("the claim is released", server._ann_suspended_for_record, False)
+check("announcements are back on", speech.enabled.is_set(), True)
+check("the claim is released", announcer.suspended_for_record, False)
 check("one phrase, saying both things", len(SAID), 1)
 check("and it says they are back", "back on" in SAID[0], True)
 check("the announcer is restarted QUIETLY, so its greeting cannot silence that phrase",
-      server._ann_quiet_start.is_set(), True)
+      announcer._quiet_start.is_set(), True)
 
 print("\nA USER WHO HAD ANNOUNCEMENTS OFF KEEPS THEM OFF")
 reset(announcing=False)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 check("nothing is spoken", SAID, [])
-check("no claim is made on the switch", server._ann_suspended_for_record, False)
+check("no claim is made on the switch", announcer.suspended_for_record, False)
 server._recorder_state_changed(recorder.RECORDING, recorder.READY)
-check("and they are STILL off after the recording", server._announce_on.is_set(), False)
+check("and they are STILL off after the recording", speech.enabled.is_set(), False)
 check("still nothing spoken", SAID, [])
 
 print("\nSTARTED FROM THE APP: the notice is NOT spoken (the reply carries it, silently)")
 reset(announcing=True)
 mark_ours()
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-check("announcements are still switched off", server._announce_on.is_set(), False)
+check("announcements are still switched off", speech.enabled.is_set(), False)
 check("but nothing was said out loud, so nothing lands in the take", SAID, [])
 
 print("\nA PAUSE ON THE UNIT GIVES ANNOUNCEMENTS BACK UNTIL IT RESUMES")
@@ -115,21 +118,21 @@ reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
 server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-check("pausing brings announcements back", server._announce_on.is_set(), True)
+check("pausing brings announcements back", speech.enabled.is_set(), True)
 check("and says it paused", SAID, ["Recording paused."])
 SAID.clear()
 server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
-check("resuming switches them off again", server._announce_on.is_set(), False)
+check("resuming switches them off again", speech.enabled.is_set(), False)
 check("saying only that it is recording again, not the off notice a second time",
       SAID, ["Recording again."])
 server._recorder_state_changed(recorder.RECORDING, recorder.READY)
-check("and the stop still gives them back", server._announce_on.is_set(), True)
+check("and the stop still gives them back", speech.enabled.is_set(), True)
 
 print("\nA PAUSE WITH ANNOUNCEMENTS OFF SAYS NOTHING AND LEAVES THEM OFF")
 reset(announcing=False)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-check("still off while paused", server._announce_on.is_set(), False)
+check("still off while paused", speech.enabled.is_set(), False)
 check("nothing spoken", SAID, [])
 
 print("\nA PAUSE FROM THE APP: announcements come back, the reply carries the word")
@@ -138,43 +141,43 @@ server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
 mark_ours()
 server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-check("back on", server._announce_on.is_set(), True)
+check("back on", speech.enabled.is_set(), True)
 check("nothing spoken by the watcher", SAID, [])
 
 print("\nTHE USER TURNS THEM BACK ON MID-TAKE")
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-check("off, as before", server._announce_on.is_set(), False)
-server.action_set_announce(True)              # a deliberate toggle by the user
-check("their choice releases our claim", server._ann_suspended_for_record, False)
+check("off, as before", speech.enabled.is_set(), False)
+announcer.action_set_announce(True)              # a deliberate toggle by the user
+check("their choice releases our claim", announcer.suspended_for_record, False)
 server._recorder_state_changed(recorder.RECORDING, recorder.READY)
-check("so stopping does not switch them off again", server._announce_on.is_set(), True)
+check("so stopping does not switch them off again", speech.enabled.is_set(), True)
 
 print("\nTHE OPTION OFF: a user with a separate headphone output keeps their announcements")
 # Settings are stubbed from here on, so the real settings.json is neither read nor written.
 _settings = {}
-server.load_settings = lambda: dict(_settings)
-server.update_settings = lambda **kw: _settings.update(kw)
+settings_file.load = lambda: dict(_settings)
+settings_file.update = lambda **kw: _settings.update(kw)
 check("it defaults to ON, because most people do not want speech in the take",
-      server._record_mutes_announcer(), True)
+      announcer.record_mutes_announcer(), True)
 _settings["record_mute_announcer"] = False
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-check("announcements keep playing through the take", server._announce_on.is_set(), True)
-check("no claim is made on the switch", server._ann_suspended_for_record, False)
+check("announcements keep playing through the take", speech.enabled.is_set(), True)
+check("no claim is made on the switch", announcer.suspended_for_record, False)
 check("and the spoken notice does NOT promise silence that is not coming",
       len(SAID) == 1 and "Announcements off" not in SAID[0], True)
 server._recorder_state_changed(recorder.RECORDING, recorder.READY)
-check("they are still on afterwards", server._announce_on.is_set(), True)
+check("they are still on afterwards", speech.enabled.is_set(), True)
 
 print("\nTURNING THE OPTION OFF MID-TAKE GIVES THEM BACK STRAIGHT AWAY")
 _settings["record_mute_announcer"] = True
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-check("off while recording", server._announce_on.is_set(), False)
-server.action_set_record_mute_announcer(False)
+check("off while recording", speech.enabled.is_set(), False)
+announcer.action_set_record_mute_announcer(False)
 check("switching the option off restores them without waiting for the stop",
-      server._announce_on.is_set(), True)
+      speech.enabled.is_set(), True)
 _settings["record_mute_announcer"] = True
 
 print("\nNO DESTINATION IS A STOP TOO")
@@ -182,7 +185,7 @@ reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("the drive being pulled mid-take still gives announcements back",
-      server._announce_on.is_set(), True)
+      speech.enabled.is_set(), True)
 
 print("\nPLUGGING THE DRIVE IN AND OUT, WORDED FROM THE SERVER")
 # recorder.spoken_change owns the words; this pins the WIRING round it - the medium name coming
@@ -197,7 +200,7 @@ server._recorder_state_changed(recorder.READY, recorder.NO_DESTINATION)
 check("taking it out while idle names the drive that left",
       SAID, ["Recording no longer available: the USB drive was removed."])
 check("and it did not touch announcements, having never suspended them",
-      server._announce_on.is_set(), True)
+      speech.enabled.is_set(), True)
 # Mid-take: the phrase must arrive WITH the news that announcements are back, in one phrase,
 # because the speech pump coalesces and a second call would silence the first.
 reset(announcing=True)
@@ -216,35 +219,35 @@ server._note_recorder_context({})
 print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
 reset(announcing=False)
 t0 = time.monotonic()
-server._ann_say_and_wait("Resuming")
+speech.say_and_wait("Resuming")
 check("with announcements off it does not wait", time.monotonic() - t0 < 0.5, True)
 
 
 def fake_say_worker_done(text):
     """The worker's side: speak, then answer DONE for a sync phrase."""
     SAID.append(text)
-    if text.startswith(server._ANN_SYNC_PREFIX):
-        sid = text[len(server._ANN_SYNC_PREFIX):].partition(" ")[0]
-        threading.Timer(0.2, server._ann_worker_replies,
+    if text.startswith(speech.SYNC_PREFIX):
+        sid = text[len(speech.SYNC_PREFIX):].partition(" ")[0]
+        threading.Timer(0.2, speech._worker_replies,
                         args=(types.SimpleNamespace(stdout=iter(["SAID x\n", f"DONE {sid}\n"])),)
                         ).start()
 
 
-server._ann_say = fake_say_worker_done
-_silent, server._ANN_SILENT = server._ANN_SILENT, False    # the stubbed worker plays nothing
+speech.say = fake_say_worker_done
+_silent, speech.SILENT = speech.SILENT, False    # the stubbed worker plays nothing
 reset(announcing=True)
 t0 = time.monotonic()
-server._ann_say_and_wait("Resuming")
+speech.say_and_wait("Resuming")
 took = time.monotonic() - t0
 check("it waits for the worker's DONE", 0.15 < took < 2.0, True)
 check("and the phrase travels as a sync line carrying the words",
       len(SAID) == 1 and SAID[0].endswith(" Resuming"), True)
-check("no waiter is left behind", server._ann_sync_waiters, {})
+check("no waiter is left behind", speech._sync_waiters, {})
 ev = threading.Event()
-server._ann_sync_waiters["99"] = ev
-server._ann_release(server._ANN_SYNC_PREFIX + "99 Resuming")
+speech._sync_waiters["99"] = ev
+speech._release(speech.SYNC_PREFIX + "99 Resuming")
 check("a sync phrase that is dropped releases its waiter", ev.is_set(), True)
-server._ann_say = fake_say
-server._ANN_SILENT = _silent
+speech.say = fake_say
+speech.SILENT = _silent
 
 sys.exit(_testkit.finish())

@@ -24,6 +24,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import profiles
 import server
+import settings_file
 import wording
 from _desk import wait_for_job
 from _testkit import check, check_true
@@ -32,8 +33,8 @@ TMP = tempfile.mkdtemp(prefix="accesscaster-baseline-test-")
 profiles.PROFILES_DIR = os.path.join(TMP, "profiles")
 os.makedirs(profiles.PROFILES_DIR, exist_ok=True)
 SETTINGS: dict = {}
-server.load_settings = lambda: dict(SETTINGS)
-server.update_settings = lambda **kw: SETTINGS.update(kw)
+settings_file.load = lambda: dict(SETTINGS)
+settings_file.update = lambda **kw: SETTINGS.update(kw)
 print(f"temporary profile store: {profiles.PROFILES_DIR}\n")
 
 try:

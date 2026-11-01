@@ -259,7 +259,8 @@ The layers, bottom up:
 - `rcp_transfer.py` builds every write record, and owns Transfer Mode.
 - `rcp_read.py` serves every lookup from the cached parse.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
-  `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, `commands.py`.
+  `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, `commands.py`, and `announcer.py` (the
+  desk's button presses spoken) over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
@@ -638,7 +639,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
   0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path
   changes with it, so **NO LONG-LIVED READER MAY CACHE ITS `RodeInterface`** - resolve it again on
-  every reopen, as `_announce_loop` and `recorder.Watcher` both do. Caching it is what made the
+  every reopen, as `announcer._loop` and `recorder.Watcher` both do. Caching it is what made the
   announcer go silent for good after a USB setting was changed in the app itself: the read failed,
   the reopen was tried on the old path for ever, and to a screen-reader user that is
   indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
@@ -667,7 +668,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE ANNOUNCER SAYS WHEN THE USB MODE MOVED WHILE IT WAS DEAF, AND A PUSH CANNOT DO THIS JOB.**
   The desk can leave Expanded unprompted (measured: off the bus with nothing written to it for
   nine minutes, back two seconds later in Standard with the setting reset), and it changes as it
-  leaves the bus, so any push announcing it is sent into the gap. `_ann_seed_layout` therefore
+  leaves the bus, so any push announcing it is sent into the gap. `announcer.seed_layout` therefore
   records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
   and B inputs go dead and every RODECaster device on the computer is renamed.
@@ -1022,7 +1023,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `action_set_fader_mute` / `action_set_fader_solo`. An empty fader and a stereo-linked pair both
   have no channel name to look up, and a pair is deliberately absent from the assignable channel
   list, so a by-name route could not mute one. They still write the same properties and call the
-  same `_ann_publish_mute` / `_ann_publish_solo` as the Channels page, which is what stops the two
+  same `announcer.publish_mute` / `announcer.publish_solo` as the Channels page, which is what stops the two
   pages disagreeing.
 - **PER-STRIP MUTE AND SOLO GATE ON `processing`, NEVER ON THE LEVEL GATE** (`_strip_toggle_gate`).
   They are compact bools on the channel's processing selector, so `processing` is the capability
@@ -1351,7 +1352,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   value, so a one-write version passes the first test and fails every call after.
 - **CallMe has its own Watcher on its own handle, not a branch of the announcer**, because the
   announcer thread stops when announcements are off and a call still has to be tracked and
-  answerable. Its speech goes through `_ann_say`, which is where the switch is enforced.
+  answerable. Its speech goes through `speech.say`, which is where the switch is enforced.
 - **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
   `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
   then times out with no clue why. `callme.build_dial` writes the factory empty string first.
@@ -1388,7 +1389,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   second SpVoice playing the ring on the same output does not mix with the worker's, it holds the
   name back until the ring ends (measured: three names sent over the ring, none heard). So
   `_callme_ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
-  `_ann_say_and_wait`, and starts again every `_CALLME_RING_CYCLE_S`. It stops when the SAME call id
+  `speech.say_and_wait`, and starts again every `_CALLME_RING_CYCLE_S`. It stops when the SAME call id
   is no longer ringing, the ringtone is switched off, or past the desk's 120 s.
 
 ## The desk pushes, and does not echo
@@ -1398,7 +1399,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   - Any announcer state that compares a pushed value against memory must be SEEDED at startup, or
     the desk's first resting push reads as a change (the phantom "Levels" and "Bank 1").
   - Any cache the announcer keeps must be told about OUR writes explicitly
-    (`_ann_publish_level`, `_ann_publish_mute`).
+    (`announcer.publish_level`, `announcer.publish_mute`).
 - **The exception, proven 28th August 2026: it DOES push our own property writes back on report 04.**
   That is why the announcer needs the 1.5 s echo-suppression window per target. The two facts sit at
   different layers; do not collapse them.
@@ -1455,7 +1456,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   announcer-SUSPENSION decisions stay keyed on the new state, correctly: announcements are off only
   while RECORDING, whatever the reason the desk left it. A PAUSE gives them back, because nothing
   reaches the take then and a silent pause sounds exactly like recording. A resume from the app
-  speaks "Resuming" and waits for it to finish (`_ann_say_and_wait`) before it sends the command; a
+  speaks "Resuming" and waits for it to finish (`speech.say_and_wait`) before it sends the command; a
   resume from the unit's button is already recording by the time we hear it.
 
 ## Reading the model dump
@@ -1596,9 +1597,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `applied_presets` (it describes one desk, not a preference). **Adding a new preference means
   adding it to PORTABLE, MACHINE_SPECIFIC or EXCLUDED** - `test_app_settings.py` fails if a key the
   app writes is in none of them, so a new setting cannot quietly become unbackupable. It finds the
-  keys by reading `update_settings(...)` calls out of `Project/`, never from a hand list: the hand
+  keys by reading `settings_file.update(...)` calls out of `Project/`, never from a hand list: the hand
   list missed three. A preference the import should apply LIVE also needs a line in
-  `server._apply_announcer_settings`, and a voice or output change there bumps `_ann_worker_gen`.
+  `speech.apply_settings` or `announcer.apply_settings`, and a voice or output change bumps
+  `speech.worker_gen`.
 - **IMPORT MERGES, IT NEVER REPLACES.** The excluded keys live in the same file, so a replace would
   delete this machine's remote-access token and its first-run record as a side effect of restoring
   somebody's shortcuts.
@@ -1614,9 +1616,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **EVERY USER-DATA JSON FILE IS WRITTEN WITH `paths.write_json`, NEVER `open(..., "w")`.** It
   writes a temporary file beside the target and swaps it in, so a kill or power cut mid-write leaves
   the old file whole; written in place, a half file parses as nothing and the next
-  `update_settings` writes a file holding only its own key. **Every one is read with
+  `settings_file.update` writes a file holding only its own key. **Every one is read with
   `paths.read_json`**, which keeps a file that will not parse as `<name>.bad` and raises when the
-  file cannot be opened, so no caller saves over a file it could not read: `update_settings` drops
+  file cannot be opened, so no caller saves over a file it could not read: `settings_file.update` drops
   the change then, because writing would replace every other key with nothing.
 
 ## Web UI and screen reader
@@ -1643,20 +1645,20 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   reached, and an uncaught rejection says nothing and leaves the control as pressed. A switch puts
   itself back when the write fails or is refused (`sendToggle`, `sendBypass`).
 
-- **`_ann_say` IS WHERE THE ANNOUNCER SWITCH IS ENFORCED, because it is the only place every phrase
-  passes through.** `_announce_on` gates the read loop, and roughly half this app's speech comes
+- **`speech.say` IS WHERE THE ANNOUNCER SWITCH IS ENFORCED, because it is the only place every phrase
+  passes through.** `speech.enabled` gates the read loop, and roughly half this app's speech comes
   from elsewhere: the virtual-devices follow-up after a USB mode change, the recorder watcher. Gate
   it anywhere else and "announcements off" leaves all of that talking. The phrases announcing speech
   is BACK are safe because each sets the flag before it speaks, so no force path is needed. A
   suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
-  different faults. Hotkey replies and the level watch are handed `_ann_say` itself; a second
+  different faults. Hotkey replies and the level watch are handed `speech.say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
 
 - **THE ANNOUNCER STARTS ON UNLESS ITS OFF IS REMEMBERED, and only a person's toggle is saved.**
   "Start with announcements the way I left them" (`announcer_remember`) is unticked by default,
   because a start-up in silence sounds exactly like the app or the desk being broken. Ticked, the
   page's switch, the tray's item and the shortcut all save `announcer` through
-  `action_set_announce(chosen=True)`; start-up and the switch-back after a take pass
+  `announcer.action_set_announce(chosen=True)`; start-up and the switch-back after a take pass
   `chosen=False` and never save, or a take would overwrite the person's choice. With no saved
   `announcer_remember`, a saved `announcer` of False counts as ticked: the tray used to keep that
   preference on its own.
@@ -1973,7 +1975,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   the SYSTEM default output, which on these machines is the desk, so a cue would go to the callers
   instead of the operator. `tones.py` generates the WAVs and the speech worker plays them with
   `SpeakStream` on the SAME SpVoice it speaks with, so they inherit the announcer's chosen device and
-  volume for nothing. The queue carries them as `!wav <path>`; `_ann_say_oneshot` must strip that
+  volume for nothing. The queue carries them as `!wav <path>`; `speech._say_oneshot` must strip that
   prefix or the fallback path reads a Windows file path aloud.
 - **THE PUMP COALESCES, SO TWO CUES QUEUED TOGETHER BECOME ONE.** Right for speech (the newest state
   is the only one worth hearing), wrong for a pair, and it silently ate the low half of the mute
@@ -2383,8 +2385,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change of more than `_CLIENT_TIMEOUT`
   on wall-clock arithmetic stops the server while the page is open. `time.time()` is only for a
   time shown to a person (`read_at`).
-- **EACH ANNOUNCER LOOP CARRIES A GENERATION (`_ann_loop_gen`)** and leaves as soon as it is not the
-  newest, without touching `_ann_live_state`. Off and on within one read or one reconnect sleep
+- **EACH ANNOUNCER LOOP CARRIES A GENERATION (`announcer._loop_gen`)** and leaves as soon as it is not the
+  newest, without touching `announcer.live_state`. Off and on within one read or one reconnect sleep
   otherwise leaves two loops running, with two handles and every report handled twice.
 
 - **AN OPEN PAGE OUTLIVES ITS SERVER, so the page watches it** (`noteServer` in app.js). A window
@@ -2519,7 +2521,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
       encoderSignal | 00 | 01 0b 08 | 01 05 01 <int32 LE> | 01 ...    +1 clockwise, -1 anti
 
   `parse_push` returns it as a list of (value, kind) pairs. Read it as anything else and every turn
-  has a delta of 0, which `_ann_at_limit` treats as "do not know", so turning past 100% says
+  has a delta of 0, which `announcer._at_limit` treats as "do not know", so turning past 100% says
   "Encoder not linked to anything". `test_announcer` builds the real composite and pins the delta.
   The desk publishes eight composites: `encoderSignal`, `mixLinkRequest`, `mixUnlinkRequest`,
   `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`, `playerJumpToSample`,
@@ -2530,14 +2532,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   press, stayed at 0 across two encoder presses, and returned to -1 only on a second press of the
   same channel button. So while a channel is selected the announcer must NOT advance its ring - doing
   so announced USB 1 and then Chat while the desk had never left Mic 1, and left `enc_pos` pointing
-  at an entry `_ann_at_limit` then read. **This is why there is no "Free the encoder" control**: it
+  at an entry `announcer._at_limit` then read. **This is why there is no "Free the encoder" control**: it
   wrote `systemChannelSelected` = -1 to undo something the desk already undoes, on the strength of a
   docstring claiming a power cycle was the only way back. Do not rebuild it.
 
 - **SAY WHAT A CHANNEL HAS, NEVER WHAT IT LACKS**, in the dead-turn message as well as the selection
   one. It used to assert "has nothing for the encoder to adjust" for any turn the ring did not see,
   which included a mic gain that was moving perfectly well. Both go through
-  `_ann_selected_phrase` now, which works it out from the strip and so cannot claim it wrongly.
+  `announcer._selected_phrase` now, which works it out from the strip and so cannot claim it wrongly.
 - Two rules follow: **never write "use the encoder" for a named level** in UI copy or docs, and **key
   every spoken announcement off the PROPERTY THAT CHANGED**, never off an assumption about the
   encoder. Done that way, turning the encoder on a channel correctly announces that channel.
@@ -2609,7 +2611,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   measured 30th August 2026, one open mic and three muted went to four OPEN after two presses.
   A mic on no fader has no strip and so no mute: it is SKIPPED (`channels.strip_on_fader`), not
   refused, or one mic taken off its fader stops the key for every other (`test_cough_key`).
-- **Hotkey actions must speak their result**, via `_ann_say`, which is independent of whether the
+- **Hotkey actions must speak their result**, via `speech.say`, which is independent of whether the
   announcer is on. The window is not in front of you when a shortcut fires; the speech is the only
   feedback. Silence is what a broken shortcut sounds like. **EXCEPT where the user has silenced that
   shortcut** (per row, `speak`), and except the announcements shortcut turning announcements OFF,
@@ -2780,6 +2782,15 @@ shared one; a new copy is how they drifted apart the first time.
 - **The master Compellor and output delay come from `rcp_read.master_processing`**, shared by the
   Routing page and a profile. They were built twice, so a property added to one and not the other
   would have been a setting the page could change and a profile could not put back.
+
+## The announcer and speech modules
+
+- **THE ANNOUNCER AND SPEECH NEVER IMPORT THE SERVER.** `announcer.Hooks` is everything the
+  announcer needs from the app (the device lock, pad tracking, what a reconnect means), and the
+  server installs `_AnnouncerHooks`, whose methods look the server's state up when called, so a
+  test that patches `server._hk_mixer_pos` still reaches the decoder. Call them as `speech.say(...)`
+  and read `announcer.live_state`, never `from speech import say`: the tests patch the module
+  attribute, and a name imported into another module keeps the original.
 
 --------------------------------------------------------------------------------
 ## Tooling

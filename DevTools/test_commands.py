@@ -13,6 +13,7 @@ import types
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import announcer
 import channels
 import commands
 import devices
@@ -27,7 +28,7 @@ channels.publish_strip_vector(list(devices.PRO2_FADERS.default_vector))
 # only its mute.
 writes = []
 stub = types.ModuleType("server")
-stub._ann_live_state = {"muted": {channels.channel_strip_index("Mic1"): True}}
+announcer.live_state = {"muted": {channels.channel_strip_index("Mic1"): True}}
 stub.action_get_channels = lambda: {"channels": [
     {"name": "Mic1", "muted": True, "solo": True, "processing_on": True, "phantom": True}]}
 stub.action_set_channel_mute = lambda name, on: writes.append(("mute", on)) or {}
@@ -42,7 +43,7 @@ for cmd in ("mute", "solo", "proc", "phantom"):
     commands.run(f"chan.{cmd}:Mic1")
     check(f"{cmd} on a channel that has it ON turns it off", writes, [(cmd, False)])
 
-stub._ann_live_state = None
+announcer.live_state = None
 writes.clear()
 commands.run("chan.mute:Mic1")
 check("mute with no announcer cache falls back to a read", writes, [("mute", False)])

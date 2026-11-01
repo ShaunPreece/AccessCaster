@@ -20,6 +20,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels
 import server
+import settings_file
 from _testkit import check
 
 # A preset as the files store it: normalised floats, the module flags, the mode, and the marker.
@@ -57,8 +58,8 @@ def live(**over):
 
 # Stub the three things that would otherwise touch the disk or the desk.
 SETTINGS: dict = {}
-server.load_settings = lambda: dict(SETTINGS)
-server.update_settings = lambda **kw: SETTINGS.update(kw)
+settings_file.load = lambda: dict(SETTINGS)
+settings_file.update = lambda **kw: SETTINGS.update(kw)
 server._device_hardware_id = lambda: "DESK-A"
 server._load_factory_presets = lambda: {"Podcast Studio": PRESET}
 server._load_user_presets = lambda: {"Shaun voice": PRESET}

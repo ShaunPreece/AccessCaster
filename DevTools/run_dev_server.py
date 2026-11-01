@@ -22,7 +22,7 @@ import server
 
 
 def main():
-    srv = server._bring_up_server(open_browser=False, watchdog=False, announcer=True)
+    srv = server._bring_up_server(open_browser=False, watchdog=False, announce=True)
     if not srv:
         print("could not bring the server up (is something already on port 8770?)")
         return 1

@@ -25,6 +25,7 @@ import autogain
 import devices
 import meters
 import server
+import speech
 from _testkit import check, check_in, check_not_in, patched
 
 # PIN THE DESK. This suite asserts Pro II channel LABELS ("USB 2 (Secondary)"), so with a Duo
@@ -153,7 +154,7 @@ print("\nA RUN WHOSE WATCHER HAS DIED, AND A STALE TIMER")
 # second one, or the first run's Chat isolation is dropped with nothing left to put it back.
 spoken = []
 meters.cue = lambda *_a, **_k: None            # no beeps in an offline run
-server._ann_say = lambda text, *a, **k: spoken.append(text)
+speech.say = lambda text, *a, **k: spoken.append(text)
 
 server._chan_check = None
 server._chan_check_iso = object()             # a run with nothing alive but something to restore

@@ -17,6 +17,7 @@ import time
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
 import server
+import speech
 
 
 def main():
@@ -26,12 +27,12 @@ def main():
     print(repr(server._hk_state()))
 
     print("\n--- announcements on/off (twice, so it ends as it started) ---")
-    was = server._announce_on.is_set()
+    was = speech.enabled.is_set()
     try:
         print(repr(server._hk_announcer()))
     finally:
         print(repr(server._hk_announcer()))
-    print(f"announcer back where it started: {server._announce_on.is_set() == was}")
+    print(f"announcer back where it started: {speech.enabled.is_set() == was}")
 
     print("\n--- the cough key (twice: mute what is open, then open exactly those) ---")
     before = _mic_mutes()

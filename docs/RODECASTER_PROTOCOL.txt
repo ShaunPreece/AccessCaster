@@ -883,14 +883,14 @@ everything returned to baseline; no stray appended, and the desk was byte-identi
     new strip. Our code resolves that the same way processing does (channels.proc_selector).
   * The desk PUSHES this property on report-04 whenever a mute changes, which the
     announcer already decodes. Any cache holding mute state is still told about our own
-    write explicitly (server._ann_publish_mute), because the echo is not dependable
+    write explicitly (announcer.publish_mute), because the echo is not dependable
     enough to be a cache: it can lag, and it is absent while the announcer is off.
     CORRECTED 2026-08-28: this bullet used to assert the desk does NOT echo our own
     writes at all. That is FALSE for levels - three writes made over our HTTP API with
     no hand on the desk came straight back and were announced (DevTools/
     announcer_echo_check.py, hardware). For MUTE specifically it is still unverified in
     either direction, because the mute endpoint could not be driven against the older
-    installed build. Assume the echo DOES arrive and suppress it (_ann_is_self_echo)
+    installed build. Assume the echo DOES arrive and suppress it (announcer.is_self_echo)
     rather than assuming it does not.
   * Section 2.6 used to say this property was unwritable. See the note there for why
     that conclusion was wrong: the scan behind it used the mic-preamp channel-address

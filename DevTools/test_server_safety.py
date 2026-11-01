@@ -28,7 +28,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import announcer
 import server
+import settings_file
+import speech
 from _testkit import as_device, check, patched
 
 print("STATIC FILES")
@@ -64,16 +67,16 @@ print("\nSETTINGS FILE")
 # Held for the whole run: the folder is removed when this object goes, at exit however it ends.
 settings_dir = tempfile.TemporaryDirectory(prefix="ac-settings-", ignore_cleanup_errors=True)
 folder = settings_dir.name
-server._SETTINGS_FILE = os.path.join(folder, "settings.json")
-server.update_settings(a=1)
-server.update_settings(b=2)
-check("changes merge", server.load_settings(), {"a": 1, "b": 2})
+settings_file.FILE = os.path.join(folder, "settings.json")
+settings_file.update(a=1)
+settings_file.update(b=2)
+check("changes merge", settings_file.load(), {"a": 1, "b": 2})
 check("no temporary file is left behind", sorted(os.listdir(folder)), ["settings.json"])
-with open(server._SETTINGS_FILE, "w", encoding="utf-8") as f:
+with open(settings_file.FILE, "w", encoding="utf-8") as f:
     f.write('{"hotkeys": {"enabled": tr')
-server.update_settings(x=1)
-check("a fresh file is started", server.load_settings(), {"x": 1})
-with open(server._SETTINGS_FILE + ".bad", encoding="utf-8") as f:
+settings_file.update(x=1)
+check("a fresh file is started", settings_file.load(), {"x": 1})
+with open(settings_file.FILE + ".bad", encoding="utf-8") as f:
     check("and the one that would not parse is kept", f.read(), '{"hotkeys": {"enabled": tr')
 
 
@@ -96,7 +99,7 @@ with as_device(server.devices.PRO2), patched(
         (server.rcp_read, {"read_model":
                            lambda *a, **k: reads.append(server._hid_lock.locked()) or b""}),
         (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
-        (server, {"_ann_publish_level": lambda *a: None})):
+        (announcer, {"publish_level": lambda *a: None})):
     server.channels.publish_strip_vector([0, 1, 2, 3, 4, 5, 6, 7, 8])
     res = server.action_set_fader_level(6, 50)
     check("the level is set", res.get("ok"), True)
@@ -220,17 +223,17 @@ server._autogain = None
 
 print("\nANNOUNCER LOOPS")
 with patched((server.rcp_transfer, {"find_control_interface": lambda fresh=False: object()}),
-             (server, {"_ann_seed_layout": lambda st: None})):
+             (announcer, {"seed_layout": lambda st: None})):
     try:
         newest = {"bank": 1}
-        server._ann_live_state = newest
-        server._ann_loop_gen = 5
-        server._announce_on.set()
-        server._announce_loop(4)
+        announcer.live_state = newest
+        announcer._loop_gen = 5
+        speech.enabled.set()
+        announcer._loop(4)
         check("a superseded loop leaves the newest loop's state alone",
-              server._ann_live_state is newest, True)
+              announcer.live_state is newest, True)
     finally:
-        server._announce_on.clear()
-        server._ann_live_state = None
+        speech.enabled.clear()
+        announcer.live_state = None
 
 sys.exit(_testkit.finish())

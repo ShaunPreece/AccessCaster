@@ -87,7 +87,7 @@ def patched(*targets):
 
     Each target is `(owner, {name: replacement, ...})`:
 
-        with patched((server, {"_ann_say": said.append}), (rcp_read, {"read_model": fake})):
+        with patched((speech, {"say": said.append}), (rcp_read, {"read_model": fake})):
     """
     with contextlib.ExitStack() as stack:
         for owner, attrs in targets:

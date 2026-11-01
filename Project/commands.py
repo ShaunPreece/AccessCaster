@@ -28,11 +28,13 @@ is free and keeps the arrow pointing one way.
 
 from __future__ import annotations
 
+import announcer
 import channels
 import devices
 import diagnostics
 import recorder
 import soundpad
+import speech
 
 # How far one press moves a level, as a percentage of full scale. Five is a real step you can hear
 # without being a jump, and four presses make a fifth of the range.
@@ -135,7 +137,7 @@ def _run_app(arg: str) -> dict:
         return server._hk_window()
     if arg in ("volume.up", "volume.down"):
         step = LEVEL_STEP if arg.endswith("up") else -LEVEL_STEP
-        res = server.action_set_announce_volume(server._ann_volume + step)
+        res = speech.action_set_announce_volume(speech.volume + step)
         # The confirmation is spoken by the action itself, at the new level, which is the point of
         # it: you hear what you have chosen. Saying it twice would talk over that.
         return {**res, "message": ""} if res.get("ok") else res
@@ -163,8 +165,7 @@ def _channel_commands() -> list:
 def _muted_now(name: str) -> bool:
     """Whether a channel is muted. The announcer's push-fed cache answers for free; a dump is the
     fallback when it has nothing, the same trade the cough key makes."""
-    import server
-    muted = (server._ann_live_state or {}).get("muted") or {}
+    muted = (announcer.live_state or {}).get("muted") or {}
     strip = channels.channel_strip_index(name)
     if strip in muted:
         return bool(muted[strip])
@@ -228,8 +229,7 @@ def _level_commands() -> list:
 def _known_level(kind: str, idx: int):
     """A level from the announcer's own cache, 0-1, or None. The cache is fed by the desk's pushes,
     so it is both free and current whenever the announcer is running."""
-    import server
-    st = server._ann_live_state
+    st = announcer.live_state
     known = (st or {}).get("known") or {}
     return known.get((kind, idx))
 

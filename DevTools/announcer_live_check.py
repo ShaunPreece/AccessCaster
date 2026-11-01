@@ -1,7 +1,7 @@
 """Live check of the control announcer's decoder against REAL hardware bytes. READ ONLY.
 
-Opens its own read-only HID handle (exactly as server._announce_loop does), feeds every report-04
-packet through the REAL decoder (server._ann_handle_report) with _ann_say captured instead of
+Opens its own read-only HID handle (exactly as announcer._loop does), feeds every report-04
+packet through the REAL decoder (announcer.handle_report) with speech.say captured instead of
 spoken, and prints what the announcer WOULD have said, with the raw prefix bytes beside it.
 
 Why not just run the app and listen: this prints what would be said, so it can be read rather
@@ -19,14 +19,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
+import announcer
 import channels
 import rcp_hid
 import rcp_read
-import server
+import server  # noqa: F401  (installs the announcer's hooks)
+import speech
 
 SAID: list[tuple[float, str]] = []
 _t0 = time.monotonic()
-server._ann_say = lambda text: SAID.append((time.monotonic() - _t0, text))
+speech.say = lambda text: SAID.append((time.monotonic() - _t0, text))
 
 
 def speak(text: str, enabled: bool) -> None:
@@ -64,11 +66,11 @@ def main() -> int:
                 seen += 1
                 b = bytes(rep)
                 before = len(SAID)
-                server._ann_handle_report(b, st)
+                announcer.handle_report(b, st)
                 for t, text in SAID[before:]:
                     print(f"  {t:6.2f}s  SPOKEN: {text!r}")
             before = len(SAID)
-            server._ann_flush_pending(st)
+            announcer.flush_pending(st)
             for t, text in SAID[before:]:
                 print(f"  {t:6.2f}s  SPOKEN (press-edge fallback): {text!r}")
 

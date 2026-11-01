@@ -20,15 +20,17 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import announcer
 import channels
 import devices
 import rcp_read
 import rcp_transfer
 import server
+import speech
 from _testkit import as_device, check, check_true, push
 
 SPOKEN: list[str] = []
-server._ann_say = lambda text: SPOKEN.append(text)          # capture instead of speak
+speech.say = lambda text: SPOKEN.append(text)          # capture instead of speak
 
 # The Duo's CONFIRMED factory layout (devices.DUO_FADERS.default_vector): 10 slots, source 2 =
 # Headset on strip 4, an empty strip at 8 (-1) and USB 2 mirrored into the spare slot 9.
@@ -50,7 +52,7 @@ def run(pkts):
     SPOKEN.clear()
     st = {"bank": None, "pending": None, "at": 0.0}
     for p in pkts:
-        server._ann_handle_report(p, st)
+        announcer.handle_report(p, st)
     return list(SPOKEN), st
 
 
@@ -59,17 +61,17 @@ print("ENCODER RING IS DERIVED FROM THE DEVICE, NOT HARDCODED")
 # The ring is the faders with no physical pot, then the monitor. Pro II: 6 physical of 9, so
 # faders 7/8/9 + monitor - which must match the desk's own ring order exactly.
 with as_device(devices.PRO2):
-    check("Pro II ring unchanged", server._ann_encoder_ring(), server._ANN_ENCODER_RING_PRO2)
+    check("Pro II ring unchanged", announcer._encoder_ring(), announcer._ENCODER_RING_PRO2)
 with as_device(devices.DUO):
     # Duo: 4 physical of 9, so five virtual faders (indices 4-8) then the monitor. The ORDER is
     # unobserved on that desk; what matters here is that it is not the Pro II's three.
-    check("Duo ring covers its five virtual faders", server._ann_encoder_ring(),
+    check("Duo ring covers its five virtual faders", announcer._encoder_ring(),
           (("fader", 4), ("fader", 5), ("fader", 6), ("fader", 7), ("fader", 8), ("monitor", 0)))
 
 print("\nSPOKEN NAMES USE THE DUO'S OWN SOURCES (code 2 = Headset, NOT Mic 3)")
 with as_device(devices.DUO):
-    check("source label 2", server._ann_source_label(2), "Headset")
-    check("no Mic 3 to name", server._ann_source_label(3), "Source 3")
+    check("source label 2", announcer._source_label(2), "Headset")
+    check("no Mic 3 to name", announcer._source_label(3), "Source 3")
     channels.publish_strip_vector(list(DUO_VEC))
     said, _ = run([state_packet("channelOutputMute", 4, True)])
     check("mute on the Headset strip", said, ["Headset muted"])
@@ -80,7 +82,7 @@ with as_device(devices.DUO):
     said, _ = run([state_packet("channelOutputMute", 9, True)])
     check("the spare slot 9 still names its source", said, ["USB 2 muted"])
 with as_device(devices.PRO2):
-    check("Pro II still says Mic 3 for the same code", server._ann_source_label(2), "Mic 3")
+    check("Pro II still says Mic 3 for the same code", announcer._source_label(2), "Mic 3")
 
 print("\nCHANNEL-BUTTON SELECTION SPEAKS THE RIGHT THING ON THE DUO")
 # systemChannelSelected on selector 0x0f. What the encoder then moves depends on the strip: a mic
@@ -119,18 +121,18 @@ print("\nGAIN NAMES COME FROM THE ADDRESS THE CHANGE WAS PUSHED AT")
 # the low byte up in a per-device selector table instead is what leaves a gain turned ON THE DESK
 # matching nothing and never spoken at all, because the Duo's table holds the dead MIX selectors.
 with as_device(devices.DUO):
-    check("Duo Mic 2 gain at INPUTSOURCE[1]", server._ann_gain_label([0x26F], True), "Mic 2 gain")
+    check("Duo Mic 2 gain at INPUTSOURCE[1]", announcer._gain_label([0x26F], True), "Mic 2 gain")
     check("Duo Headset level at INPUTSOURCE[2]",
-          server._ann_gain_label([0x270], False), "Headset input level")
-    check("the DEAD MIX address names nothing", server._ann_gain_label([0x149], True), None)
+          announcer._gain_label([0x270], False), "Headset input level")
+    check("the DEAD MIX address names nothing", announcer._gain_label([0x149], True), None)
     check("a source this desk does not have names nothing (Pro II Mic 4)",
-          server._ann_gain_label([0x271], True), None)
+          announcer._gain_label([0x271], True), None)
     check("a mic address asked as a line names nothing",
-          server._ann_gain_label([0x26F], False), None)
-    check("an unparseable address names nothing", server._ann_gain_label(None, True), None)
+          announcer._gain_label([0x26F], False), None)
+    check("an unparseable address names nothing", announcer._gain_label(None, True), None)
 with as_device(devices.PRO2):
-    check("Pro II Mic 1 gain at INPUTSOURCE[0]", server._ann_gain_label([0x26E], True), "Mic 1 gain")
-    check("Pro II Mic 4 gain at INPUTSOURCE[3]", server._ann_gain_label([0x271], True), "Mic 4 gain")
+    check("Pro II Mic 1 gain at INPUTSOURCE[0]", announcer._gain_label([0x26E], True), "Mic 1 gain")
+    check("Pro II Mic 4 gain at INPUTSOURCE[3]", announcer._gain_label([0x271], True), "Mic 4 gain")
 
 print("\nTHE PUSHED ADDRESS IS READ IN FULL, NOT JUST ITS LOW BYTE")
 # 0x026E needs two bytes. Reading only the low one calls it selector 0x6E, which is an ordinary

@@ -27,9 +27,11 @@ import subprocess
 import sys
 import time
 
+import announcer
 import autostart
 import diagnostics
 import server
+import speech
 import win32api
 import win32con
 import win32gui
@@ -133,7 +135,7 @@ class TrayApp:
         menu = win32gui.CreatePopupMenu()
         win32gui.AppendMenu(menu, win32con.MF_STRING, ID_OPEN, "&Open AccessCaster")
         ann_flags = win32con.MF_STRING
-        if server._announce_on.is_set():
+        if speech.enabled.is_set():
             ann_flags |= win32con.MF_CHECKED
         win32gui.AppendMenu(menu, ann_flags, ID_ANNOUNCE, "&Announcer")
         win32gui.AppendMenu(menu, win32con.MF_STRING, ID_LOG, "Diagnostic &log")
@@ -179,7 +181,7 @@ class TrayApp:
 
     def _toggle_announcer(self) -> None:
         # Saved or not by the server, by the same rule as the page's switch and the shortcut.
-        server.action_set_announce(not server._announce_on.is_set())
+        announcer.action_set_announce(not speech.enabled.is_set())
 
     def _quit(self) -> None:
         self._remove_icon()

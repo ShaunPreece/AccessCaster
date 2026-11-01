@@ -28,9 +28,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import announcer
 import rcp_hid
 import rcp_transfer
 import server
+import speech
 from _testkit import check, patched
 
 
@@ -62,7 +64,7 @@ EXPANDED = FakeIface(0x0094, b"path-mode-5")
 
 
 class Rig:
-    """Runs the real `_announce_loop` over a fake desk that can be re-enumerated under it."""
+    """Runs the real `announcer._loop` over a fake desk that can be re-enumerated under it."""
 
     def __init__(self, speak_after):
         self.iface = STANDARD
@@ -116,18 +118,19 @@ class Rig:
             (rcp_hid, {"open_handle": self.open, "close_handle": lambda dev, purpose="": None}),
             # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
             # Windows' default audio device, which is the user's screen reader.
-            (server, {"_ann_say": self.say, "_ann_seed_layout": self.seed,
-                      "_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow,
-                      "_ANN_RETRY_S": 0.02,    # the real 0.3 s only paces the retries
-                      "_ANN_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
-        server._announce_on.set()
-        self.thread = threading.Thread(target=server._announce_loop, daemon=True)
+            (speech, {"say": self.say}),
+            (server, {"_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow}),
+            (announcer, {"seed_layout": self.seed,
+                         "_RETRY_S": 0.02,    # the real 0.3 s only paces the retries
+                         "_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
+        speech.enabled.set()
+        self.thread = threading.Thread(target=announcer._loop, daemon=True)
         self.thread.start()
         time.sleep(0.15)                       # let it open and greet
         return self
 
     def __exit__(self, *exc):
-        server._announce_on.clear()
+        speech.enabled.clear()
         self.thread.join(timeout=3.0)
         self._stack.close()
 
@@ -170,15 +173,15 @@ print("\nA USB MODE THAT MOVED WHILE WE WERE DEAF IS SAID, NOT SWALLOWED")
 # can see it. 5 is post-fader multitrack plus Expanded, 2 is the same output mode without it.
 # Leaving Expanded says only that: the faders it empties are said by _tidy_after_standard, which
 # the reconnect starts on its own thread because it writes.
-check("leaving Expanded says so", server._ann_usb_mode_change(5, 2),
+check("leaving Expanded says so", announcer.usb_mode_change(5, 2),
       "The unit has left Expanded USB input.")
-check("entering it says so", server._ann_usb_mode_change(2, 5), "USB input is now Expanded.")
+check("entering it says so", announcer.usb_mode_change(2, 5), "USB input is now Expanded.")
 check("an output-mode change names the new mode",
-      server._ann_usb_mode_change(0, 2),
+      announcer.usb_mode_change(0, 2),
       "USB output to this computer is now every channel, post-fader.")
 check("an unchanged mode says nothing, so a plain reconnect is not narrated",
-      server._ann_usb_mode_change(5, 5), "")
-check("and an unreadable mode never speaks a guess", server._ann_usb_mode_change(None, 2), "")
+      announcer.usb_mode_change(5, 5), "")
+check("and an unreadable mode never speaks a guess", announcer.usb_mode_change(None, 2), "")
 
 rig = Rig(speak_after=0.05)
 rig.seeded_mode = 5                       # the desk was in Expanded when the announcer started
@@ -210,8 +213,8 @@ check("a write too old to be this reconnect is not ours", server._usb_mode_writt
 
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",
-      server._ANN_RECONNECT_SPEAK_AFTER_S > 0, True)
+      announcer._RECONNECT_SPEAK_AFTER_S > 0, True)
 check("retries back off, or an absent desk is re-enumerated forever at full speed",
-      server._ANN_RETRY_SLOW_S > server._ANN_RETRY_S, True)
+      announcer._RETRY_SLOW_S > announcer._RETRY_S, True)
 
 sys.exit(_testkit.finish())

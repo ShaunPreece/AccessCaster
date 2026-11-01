@@ -26,7 +26,7 @@ if PROJECT not in sys.path:
 # it, a sweep of the offline suites rewrites the user's real `off_fader_chains.json` and leaves
 # profiles in the user's real profiles folder.
 #
-# A TEST NEVER MAKES A NOISE EITHER. A suite that does not stub `_ann_say` leaves the real announcer
+# A TEST NEVER MAKES A NOISE EITHER. A suite that does not stub `speech.say` leaves the real announcer
 # in place, so anything it exercises SPEAKS OR CHIMES through SAPI, onto the desk the user monitors
 # on, with nothing to say what is making the sound, possibly mid-recording. `test_shows_sim`
 # completes dozens of background jobs and fires the done/failed cue for every one.
