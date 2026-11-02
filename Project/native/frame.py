@@ -57,7 +57,7 @@ class MainFrame(Speaker, wx.Frame):
 
         # Never shown: the window the screen-reader notifications are raised from.
         sink = wx.StaticText(root, label="", size=(1, 1))
-        self._notifier = announce.Notifier(sink.GetHandle(), "AccessCaster")
+        self._notifier = announce.Notifier(sink, "AccessCaster")
 
         self.desk = DeskState(self)
         self.sections = [WebSection(self, *section) if isinstance(section, tuple) else section(self)
@@ -119,7 +119,7 @@ class MainFrame(Speaker, wx.Frame):
         server.open_ui(f"http://localhost:{server.HTTP_PORT}/#/{route}")
 
     def say(self, text, recent=False):
-        self._notifier.say(text, announce.MOST_RECENT if recent else announce.ALL)
+        self._notifier.say(text, recent)
 
     # ---- the tree --------------------------------------------------------------------------
 

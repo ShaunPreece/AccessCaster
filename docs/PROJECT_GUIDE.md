@@ -1694,6 +1694,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Native window
 
+- **NOTHING IN `native/` OUTSIDE `native/win/` CALLS A WINDOWS API.** Screen reader speech and
+  control descriptions go through `native.announce` and `native.a11y`, which import the platform's
+  own. Import `native.win` directly, or add a Win32 call to a page, and a port to another platform
+  has to hunt for it. The Categories tree is a `wx.TreeCtrl` on purpose: on Windows it is the
+  native tree view, where `wx.dataview.DataViewTreeCtrl` is a control wx draws itself. A port to
+  macOS swaps it, because there the roles reverse.
 - **NO `wx.Simplebook` OR `wx.Notebook` TO SWITCH THE PAGES.** Both move the focus into each page
   they show, which pulls it out of the Categories tree on every arrow press. `MainFrame._show`
   shows and hides the pages itself.

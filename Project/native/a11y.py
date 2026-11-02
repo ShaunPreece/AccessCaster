@@ -2,34 +2,20 @@
 counterpart of aria-describedby), and a value in words for a slider, which on its own reads a bare
 number.
 
-Only these two answers are overridden. Everything else (name, role, state) is left unimplemented,
-which makes wx fall through to the control's standard accessibility, so the control still reads as
-the native checkbox or slider it is.
+`describe(window, description="", value=None)` gives `window` a description and, optionally,
+`value`: a callable returning the value in words, asked each time a screen reader reads it. It
+returns an object whose `description` can be changed later. Name, role and state are left to the
+control, so it still reads as the native checkbox or slider it is.
+
+Each platform supplies its own describe. There is none outside Windows, so on any other platform
+this import fails rather than leaving every description unread.
 """
-import wx
+import sys
 
+if sys.platform == "win32":
+    from native.win.accessible import describe
+else:
+    raise ImportError(f"No control descriptions for {sys.platform}: the Windows describe is "
+                      "native/win/accessible.py")
 
-class _Accessible(wx.Accessible):
-    def __init__(self, window, description, value):
-        super().__init__(window)
-        self.description = description
-        self.value = value
-
-    def GetDescription(self, childId):
-        if childId == wx.ACC_SELF and self.description:
-            return (wx.ACC_OK, self.description)
-        return (wx.ACC_NOT_IMPLEMENTED, "")
-
-    def GetValue(self, childId):
-        if childId == wx.ACC_SELF and self.value is not None:
-            return (wx.ACC_OK, self.value())
-        return (wx.ACC_NOT_IMPLEMENTED, "")
-
-
-def describe(window, description="", value=None):
-    """Give `window` a description and, optionally, `value`: a callable returning the value in
-    words, asked each time a screen reader reads it. Returns the object, whose `description` can be
-    changed later."""
-    acc = _Accessible(window, description, value)
-    window.SetAccessible(acc)
-    return acc
+__all__ = ["describe"]

@@ -7,7 +7,7 @@ constructor: a second SetFocus is a second focus event, and the control is read 
 
 A screen reader reads a dialog's text when the dialog opens and not when it changes, so a stage the
 user has to hear in full (a question, a result) opens a dialog of its own. While a job runs, its
-stages are spoken through UIA notifications raised from the job's dialog (`JobDialog.say`).
+stages are spoken through notifications raised from the job's dialog (`JobDialog.say`).
 """
 import wx
 
@@ -33,11 +33,11 @@ class SpeakingDialog(Speaker, wx.Dialog):
         # reader reads it as part of the dialog's text, and with nothing else to focus, takes it as
         # the focus.
         self.sink = wx.StaticText(self, label="", size=(1, 1))
-        self._notifier = announce.Notifier(self.sink.GetHandle(), "")
+        self._notifier = announce.Notifier(self.sink, "")
         self.sink.Bind(wx.EVT_WINDOW_DESTROY, self._on_sink_destroyed)
 
     def say(self, text, recent=False):
-        self._notifier.say(text, announce.MOST_RECENT if recent else announce.ALL)
+        self._notifier.say(text, recent)
 
     def _on_sink_destroyed(self, event):
         self._notifier.close()
