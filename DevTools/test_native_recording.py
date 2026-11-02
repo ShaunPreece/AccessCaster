@@ -1,6 +1,7 @@
 """The native window's Recording (Project/native/recording_section.py), offline: the recordings and
 the card and drive are listed with what each is, a choice survives a read, Record starts or resumes
-by the state and each transport press is refused where it cannot act, a pushed state reads the
+by the state and each transport press is refused where it cannot act, the Now line counts a take
+only while the page is shown, a pushed state reads the
 recorder only when it is news, the raw switch waits for separate tracks, and a delete, eject,
 reconnect and erase each call the server with the right target and read again. Nothing is shown
 and nothing touches a desk.
@@ -163,6 +164,27 @@ with patched(sync, (server, live)):
     rec._on_status(None)
     check("Recording status speaks the listener's sentence", frame.said[-1],
           "Recording. 1 minute so far.")
+
+# ---- the Now line's clock --------------------------------------------------------------------
+ticking = {"read_recorder_live": lambda: {"ok": True, "state": recorder.RECORDING,
+                                          "message": "Recording. 2 minutes so far."}}
+with patched(sync, (server, ticking)):
+    section.show(payload(state=recorder.RECORDING), "Recording. 1 minute so far.")
+    check("a hidden page runs no clock", rec._clock.IsRunning(), False)
+    rec.Show()
+    rec._run_clock()
+    check("a take on a shown page runs the clock", rec._clock.IsRunning(), True)
+    rec._tick()
+    check("a tick puts the listener's time on the Now line", rec.now.GetValue(),
+          "Recording. 2 minutes so far.")
+    section.show(payload(state=recorder.PAUSED), "Paused.")
+    check("a pause stops it", rec._clock.IsRunning(), False)
+    rec._ticked({"ok": True, "state": recorder.RECORDING, "message": "Recording. 3 minutes so far."})
+    check("and a late tick does not overwrite the paused line", rec.now.GetValue(), "Paused.")
+    section.show(payload(state=recorder.RECORDING), "")
+    rec.Hide()
+    rec._run_clock()
+    check("leaving the page stops it", rec._clock.IsRunning(), False)
 
 section.show(payload(state=recorder.READY), "")
 section.busy = True

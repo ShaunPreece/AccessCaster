@@ -60,7 +60,7 @@ channels.park_chain("DESK-A", 3, {})
 check("an empty chain is not parked (nothing to give back)",
       channels.take_chain("DESK-A", 3), None)
 check("the store survives being re-read from disk", (channels.park_chain("DESK-A", 4, chain(9)) or
-      channels._orphan_load().get("DESK-A", {}).get("4")), chain(9))
+      channels._parked_load(channels._ORPHAN_FILE).get("DESK-A", {}).get("4")), chain(9))
 channels.take_chain("DESK-A", 4)
 
 
@@ -108,7 +108,7 @@ print("_follow_chains: a channel that LEAVES the layout")
 before = [chain(0), chain(1), chain(2)]
 install(before)
 note = server._follow_chains([0, 1, 2], [0, 7, 2], before)
-check("the departing channel's chain is parked", channels._orphan_load()
+check("the departing channel's chain is parked", channels._parked_load(channels._ORPHAN_FILE)
       .get("DESK-TEST", {}).get("1"), chain(1))
 check_in("and the user is told it is kept, not lost", "comes back", note)
 check_in("the note is about PROCESSING, not the layout (reported separately)",
@@ -145,6 +145,28 @@ note = server._follow_chains([0, 7, 2], [0, 1, 2], before)
 check_in("the failure is reported, not swallowed", "warning", note)
 check("and the chain is parked again rather than dropped",
       channels.take_chain("DESK-TEST", 1), chain(1))
+
+print()
+print("the stereo link mute store")
+check("nothing parked reads back as None", channels.take_link_mutes("DESK-LINK", 6), None)
+channels.park_link_mutes("DESK-LINK", 6, True, False, True)
+check("a link's mutes come back intact", channels.take_link_mutes("DESK-LINK", 6),
+      {"lower": True, "upper": False, "pair": True})
+check("and taking them POPS them", channels.take_link_mutes("DESK-LINK", 6), None)
+
+print()
+print("_unlink_mutes: what each mic gets back")
+MIC3, MIC4 = 2, 3
+kept = {"lower": True, "upper": False, "pair": True}
+check("a muted Mic 3 linked with an open Mic 4 unlinks the same way",
+      server._unlink_mutes(kept, True, MIC3, MIC4), {MIC3: True, MIC4: False})
+check("a pair opened while linked opens both",
+      server._unlink_mutes(kept, False, MIC3, MIC4), {MIC3: False, MIC4: False})
+check("a pair muted while linked mutes both",
+      server._unlink_mutes({"lower": False, "upper": False, "pair": False}, True, MIC3, MIC4),
+      {MIC3: True, MIC4: True})
+check("a link made outside the app hands the pair's mute to both",
+      server._unlink_mutes(None, True, MIC3, MIC4), {MIC3: True, MIC4: True})
 
 print()
 raise SystemExit(_testkit.finish())

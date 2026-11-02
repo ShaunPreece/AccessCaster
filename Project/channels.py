@@ -961,46 +961,67 @@ def write_chain(strip_idx: int, desired: dict, current: dict | None = None,
 # Stereo link makes this the common case rather than an edge case, since linking a pair evicts the
 # upper mic and the unlink that returns it may be days later. Hence a FILE, not a memory cache.
 _ORPHAN_FILE = "off_fader_chains.json"
+# Each linked pair's mic mutes as they were at the link, for the unlink to hand back.
+_LINK_MUTES_FILE = "stereo_link_mutes.json"
 
 
-def _orphan_load() -> dict:
-    """The whole store: {device hardware id: {channel code as str: chain}}. {} if absent or corrupt
-    (see `paths.read_json`), or if it cannot be opened: a lost parked chain is a channel that comes
-    back with the wrong voicing, never a crash."""
+def _parked_load(name: str) -> dict:
+    """A whole parking store: {device hardware id: {code as str: record}}. {} if absent or corrupt
+    (see `paths.read_json`), or if it cannot be opened: a lost record is a channel that comes back
+    with the wrong voicing or mute, never a crash."""
     try:
-        return _paths.read_json(_paths.data_path(_ORPHAN_FILE), {})
+        return _paths.read_json(_paths.data_path(name), {})
     except OSError as exc:
-        diagnostics.event("chain.park_unreadable", str(exc))
+        diagnostics.event("chain.park_unreadable", str(exc), file=name)
         return {}
 
 
-def _orphan_save(store: dict) -> None:
+def _parked_save(name: str, store: dict) -> None:
     # Never fail a fader move because the parking file could not be written.
     with _contextlib.suppress(Exception):
-        _paths.write_json(_paths.data_path(_ORPHAN_FILE), store, indent=None)
+        _paths.write_json(_paths.data_path(name), store, indent=None)
+
+
+def _park(name: str, device_id: str, code: int, record: dict) -> None:
+    store = _parked_load(name)
+    store.setdefault(str(device_id or ""), {})[str(int(code))] = record
+    _parked_save(name, store)
+
+
+def _take(name: str, device_id: str, code: int) -> dict | None:
+    store = _parked_load(name)
+    per_device = store.get(str(device_id or ""))
+    if not isinstance(per_device, dict):
+        return None
+    record = per_device.pop(str(int(code)), None)
+    if record is not None:
+        _parked_save(name, store)
+    return record if isinstance(record, dict) else None
 
 
 def park_chain(device_id: str, code: int, chain: dict) -> None:
     """Keep `code`'s chain while it has no strip. Keyed by DESK as well as channel, so two desks
     do not hand each other their voicings (same reasoning as _applied_preset_record in server)."""
-    if not chain:
-        return
-    store = _orphan_load()
-    store.setdefault(str(device_id or ""), {})[str(int(code))] = chain
-    _orphan_save(store)
+    if chain:
+        _park(_ORPHAN_FILE, device_id, code, chain)
 
 
 def take_chain(device_id: str, code: int) -> dict | None:
     """Pop `code`'s parked chain, or None if we never saw it leave. Popping is the point: once it
     is back on a strip the desk owns it again, and a stale copy would later overwrite an edit."""
-    store = _orphan_load()
-    per_device = store.get(str(device_id or ""))
-    if not isinstance(per_device, dict):
-        return None
-    chain = per_device.pop(str(int(code)), None)
-    if chain is not None:
-        _orphan_save(store)
-    return chain if isinstance(chain, dict) else None
+    return _take(_ORPHAN_FILE, device_id, code)
+
+
+def park_link_mutes(device_id: str, pair_code: int, lower: bool, upper: bool, pair: bool) -> None:
+    """Keep each mic's mute from just before `pair_code` was linked, and the pair's mute just
+    after, until the unlink."""
+    _park(_LINK_MUTES_FILE, device_id, pair_code,
+          {"lower": bool(lower), "upper": bool(upper), "pair": bool(pair)})
+
+
+def take_link_mutes(device_id: str, pair_code: int) -> dict | None:
+    """Pop what `park_link_mutes` kept for `pair_code`, or None if the app did not make the link."""
+    return _take(_LINK_MUTES_FILE, device_id, pair_code)
 
 
 def read_channels(blob: bytes | None = None) -> list:

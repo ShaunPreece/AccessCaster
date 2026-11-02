@@ -76,6 +76,12 @@ def active_pad_spec():
     return devices.get_active_device().pad
 
 
+def pad_place(grid: int) -> str:
+    """Grid position `grid` (1-based) as the user sees it on the desk: "pad 1, bank 3"."""
+    bank, pad = divmod(int(grid) - 1, active_pad_spec().pads_per_bank)
+    return f"pad {pad + 1}, bank {bank + 1}"
+
+
 def pad_writes_enabled() -> bool:
     """True iff the active device is verified for SMART-pad writes (has the 'pad_write' cap)."""
     return "pad_write" in devices.get_active_device().caps
@@ -901,12 +907,13 @@ def clear_grid_pad(grid: int) -> dict:
     pidx = grid - 1
     pos, ptype, name = _position_of(pidx)
     if pos is None:
-        return {"ok": True, "message": f"Pad {grid} is already empty.", "health": pool_health()}
+        return {"ok": True, "message": f"{pad_place(grid).capitalize()} is already empty.",
+                "health": pool_health()}
     if ptype != PAD_TYPE_SOUND:                    # non-sound clear can touch region-B binding
         clean_pool()                               # silently GC stray orphans first (no-op if clean)
     clear_slot(pos, ptype)
     health = pool_health()
-    msg = f"Cleared pad {grid} ({PAD_TYPE_LABEL.get(ptype, 'pad')} {name}). " + _health_message(health)
+    msg = f"Cleared {pad_place(grid)} ({PAD_TYPE_LABEL.get(ptype, 'pad')} {name}). " + _health_message(health)
     return {"ok": health["clean"], "message": msg, "health": health}
 
 
@@ -968,7 +975,7 @@ def set_pad_replay(grid: int, replay: bool) -> dict:
     if res.get("ok"):
         state = "restart from the start" if replay else "pause/resume"
         res["replay"] = bool(replay)
-        res["message"] = f"Pad {grid} will {state} on the next press."
+        res["message"] = f"{pad_place(grid).capitalize()} will {state} on the next press."
     return res
 
 
@@ -1333,7 +1340,7 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
     kinds = kinds or {}
     pos, ptype, _name = _position_of(grid - 1, blob)
     if pos is None:
-        return {"ok": False, "message": f"Pad {grid} is empty; nothing to edit."}
+        return {"ok": False, "message": f"{pad_place(grid).capitalize()} is empty; nothing to edit."}
 
     recs, labels, values = [], [], {}
     for name, value in items:
@@ -1354,7 +1361,7 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
     _commit_pad_records(recs)
     first = items[0][0]
     return {"ok": True, "name": first, "value": values[first], "values": values,
-            "message": f"Pad {grid} {', '.join(labels)}."}
+            "message": f"{pad_place(grid).capitalize()} {', '.join(labels)}."}
 
 
 # Values that are said by name rather than by number.
@@ -1554,7 +1561,8 @@ def set_back_channel_member(grid: int, prop: str, on: bool) -> dict:
     if mode != MIXER_MODE["backchannel"]:
         what = MIXER_MODE_LABEL.get(mode, "not a mixer action")
         return {"ok": False,
-                "message": f"Pad {grid} is {what}, not a Back Channel pad, so it has no members."}
+                "message": (f"{pad_place(grid).capitalize()} is {what}, not a Back Channel pad, "
+                            f"so it has no members.")}
     return set_pad_property(grid, prop, on, blob=blob)
 
 
@@ -2366,11 +2374,12 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
     pad = next((p for p in live["pads"] if p["grid"] == int(grid)), None)
     if pad is None:
         return {"ok": False, "message": f"There is no pad {grid} on this unit."}
+    place = pad_place(grid).capitalize()
     if not pad["present"]:
-        return {"ok": False, "message": f"Pad {grid} is empty, so there is no sound to export."}
+        return {"ok": False, "message": f"{place} is empty, so there is no sound to export."}
     if pad["type"] != PAD_TYPE_SOUND:
         return {"ok": False,
-                "message": (f"Pad {grid} is {pad['name']!r}, a {pad['type_label']} pad. Only sound "
+                "message": (f"{place} is {pad['name']!r}, a {pad['type_label']} pad. Only sound "
                             f"pads have an audio file; a voice effect is a recipe, not a recording.")}
     wanted = pad.get("file")
     os.makedirs(dest_dir, exist_ok=True)
@@ -2383,7 +2392,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         src = _pad_audio_source(root, int(grid), wanted)
         if src is None:
             return {"ok": False,
-                    "message": f"Pad {grid} says it plays {wanted or 'a file'}, but that file is "
+                    "message": f"{place} says it plays {wanted or 'a file'}, but that file is "
                                f"not on the unit's storage."}
         # Name the copy after the PAD, not after the desk's internal filename, and keep the real
         # extension. A folder of Music_Bed.wav and audio_3.wav tells you nothing about which pad
@@ -2394,7 +2403,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         shutil.copyfile(src, dst)
         size_mb = round(os.path.getsize(dst) / (1024 * 1024), 1)
         return {"ok": True, "path": dst, "folder": dest_dir, "size_mb": size_mb,
-                "message": (f"Pad {grid}, {pad['name']}, exported to {dst} ({size_mb} MB). "
+                "message": (f"{place}, {pad['name']}, exported to {dst} ({size_mb} MB). "
                             f"The pad on the unit is unchanged.")}
 
 

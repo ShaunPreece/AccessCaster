@@ -4152,9 +4152,7 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
                 moves.append((code, src, i))
         # PARK FIRST, off the pre-write snapshot: once the moves below start writing, the vacated
         # strip's chain is gone for good.
-        # Falls back to the model name because _device_hardware_id is "" until the first status read:
-        # parking under one key and looking under another would lose the chain we just saved.
-        device_id = _device_hardware_id() or devices.get_active_device().name
+        device_id = _layout_store_key()
         parked = []
         for code, src in old_at.items():
             if code not in new_at and src < len(chains_before):
@@ -4198,7 +4196,7 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
             return (f"WARNING: the processing chain did not fully follow {wording.join_and(bad)} "
                     f"({written} of the writes landed). Set that channel's processing again, or "
                     f"restore a profile.")
-        return _chain_note(spec=spec, parked=parked, homeless=homeless, written=written,
+        return _chain_note(spec=spec, parked=parked, homeless=homeless,
                            moved=[c for c, _s, _d in moves],
                            restored=[c for c, _d, _c in returns])
     except Exception as exc:
@@ -4206,21 +4204,24 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
                 f"Check the affected channels' processing.")
 
 
-def _chain_note(spec, parked=(), homeless=(), written=0, moved=(), restored=()) -> str:
+def _chain_note(spec, parked=(), homeless=(), moved=(), restored=()) -> str:
     """The one sentence the user hears about what happened to the processing. Says what was KEPT for
     an off-fader channel as well as what moved: "off-fader" otherwise reads as "deleted", and the
     whole point of parking is that it is not."""
     def names(codes):
         return wording.join_and(_channel_name(c, spec) for c in codes)
 
+    def own(codes):
+        return "their own" if len(codes) > 1 else "its own"
+
     out = ""
     if moved and restored:
-        out = (f"Processing and effects followed {names(moved)}, and {names(restored)} got its own "
-               f"processing back ({written} values).")
+        out = (f"Processing and effects followed {names(moved)}, and {names(restored)} got "
+               f"{own(restored)} processing back.")
     elif moved:
-        out = f"Processing and effects followed {names(moved)} ({written} values)."
+        out = f"Processing and effects followed {names(moved)}."
     elif restored:
-        out = f"{names(restored)} got its own processing back ({written} values)."
+        out = f"{names(restored)} got {own(restored)} processing back."
     if parked:
         # Says only what happened to the PROCESSING. action_set_fader already reports the layout
         # side ("X is now off-fader"), and hearing the same clause twice in one announcement is
@@ -4229,8 +4230,10 @@ def _chain_note(spec, parked=(), homeless=(), written=0, moved=(), restored=()) 
         out += (f" The processing for {names(parked)} is kept, and comes back when "
                 f"{'they get faders' if many else 'it gets a fader'} again.")
     if homeless:
-        out += (f" {names(homeless)} had no stored processing, so it is using whatever was "
-                f"already on that fader; set its processing to taste.")
+        many = len(homeless) > 1
+        out += (f" {names(homeless)} had no stored processing, so "
+                f"{'each is' if many else 'it is'} using whatever was already on "
+                f"{'its' if many else 'that'} fader; set {own(homeless)} processing to taste.")
     return out.strip()
 
 
@@ -4381,31 +4384,43 @@ def fader_model() -> dict:
     }
 
 
-def _carry_mute(new_vec, codes, muted: bool) -> str:
-    """Re-mute `codes` on the strips they now sit on, if the desk opened them.
+def _settle_mutes(new_vec, wanted: dict) -> list:
+    """Write channelOutputMute on the strip each code in `wanted` now sits on, where the desk left
+    it different. Returns the codes this OPENED, so the reply can say a mic is live.
 
-    THE DESK UNMUTES WHAT IT REARRANGES. Linking a pair clears channelOutputMute on both inputs, and
-    unlinking clears it on the mic it hands back (measured), and the RODE app does not put it back
-    either. A mic that the user deliberately silenced going live because they tried a stereo link
-    is the worst failure this feature could have, so we carry the state across.
-
-    ONE DIRECTION ONLY: it re-mutes, it never unmutes. Muting something the user has open is the
-    same class of surprise in reverse, which is exactly why a profile restore refuses to write mutes
-    at all (profiles.UNIT_NEVER_RESTORE). Restoring what our own write disturbed is a different thing
-    from applying somebody's old snapshot, but only in this direction."""
-    if not muted:
-        return ""
-    spec = _active_faders()
+    THE DESK'S MUTES DO NOT FOLLOW THE INPUTS: a strip has kept its own mute through a link, so the
+    pair inherited the lower mic's, and has also been seen clearing it. Neither is relied on; the
+    outcome is read back and settled. A code with no strip (an upper mic left off-fader) is skipped."""
     mutes = rcp_read.values(rcp_read.read_model(fresh=True), "channelOutputMute")
-    done = []
-    for code in codes:
+    opened = []
+    for code, muted in wanted.items():
         strip = next((i for i, c in enumerate(new_vec) if c == code), None)
-        if strip is None or strip >= len(mutes) or mutes[strip]:
+        if strip is None or strip >= len(mutes) or bool(mutes[strip]) == muted:
             continue
         rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-            channels.MUTE_PROP, True, channels.proc_selector_for_strip(strip)))
-        done.append(_channel_name(code, spec))
-    return f" {wording.join_and(done)} stayed muted." if done else ""
+            channels.MUTE_PROP, muted, channels.proc_selector_for_strip(strip)))
+        if not muted:
+            opened.append(code)
+    return opened
+
+
+def _unlink_mutes(kept, pair_muted: bool, lower: int, upper: int) -> dict:
+    """Each mic's mute after an unlink. `kept` is `channels.take_link_mutes`' record.
+
+    A pair whose mute is unchanged since the link was never muted or opened by anybody, so each mic
+    gets back what it had: a muted Mic 3 linked with an open Mic 4 unlinks the same way. A pair muted
+    or opened while linked was a choice, and both mics keep it. With no record (linked outside the
+    app) the pair's mute is all there is to go on."""
+    if kept and kept.get("pair") == pair_muted:
+        return {lower: bool(kept.get("lower")), upper: bool(kept.get("upper"))}
+    return {lower: pair_muted, upper: pair_muted}
+
+
+def _layout_store_key() -> str:
+    """The desk key for the layout parking stores. Falls back to the model name because
+    `_device_hardware_id` is "" until the first status read: parking under one key and looking
+    under another would lose the record."""
+    return _device_hardware_id() or devices.get_active_device().name
 
 
 def _stereo_link_gate():
@@ -4454,7 +4469,11 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
 
     Processing follows both ways through _follow_chains: linking parks BOTH mics' chains (the pair
     keeps the lower mic's strip voicing, which is what the desk does), and unlinking hands each one
-    back."""
+    back.
+
+    Mutes follow the same way. A pair is muted if EITHER mic was, so a link never opens a mic the
+    user silenced; each mic's own mute is parked (`channels.park_link_mutes`) and `_unlink_mutes`
+    decides what the unlink hands back."""
     gate = _stereo_link_gate()
     if gate is not None:
         return gate
@@ -4465,6 +4484,10 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
     lower, upper = pair
     label = spec.pair_label.get(int(pair_code), f"pair {pair_code}")
     chain_note = mute_note = ""
+
+    def names(codes):
+        return wording.join_and(_channel_name(c, spec) for c in codes)
+
     try:
         with _hid_lock:
             blob = rcp_read.read_model()
@@ -4503,22 +4526,16 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                 spare = next((i for i, c in enumerate(target) if _is_empty_fader(c)), None)
                 if spare is not None:
                     target[spare] = upper
-            # MUTE TRAVELS WITH THE INPUTS, the same principle as the processing chain. Read before
-            # the write, since a linked mic has no strip of its own to read afterwards. A pair counts
-            # as muted only when BOTH its inputs were, so linking never silences something that was
-            # open, and unlinking hands the pair's own state to both mics.
+            # Mutes are read before the write, since a linked mic has no strip of its own to read
+            # afterwards.
             mutes = rcp_read.values(blob, "channelOutputMute")
 
             def muted_now(code):
                 i = next((j for j, c in enumerate(vec) if c == code), None)
                 return bool(mutes[i]) if i is not None and i < len(mutes) else False
 
-            if on:
-                keep_muted = muted_now(lower) and muted_now(upper)
-                carry_to = [int(pair_code)]
-            else:
-                keep_muted = muted_now(int(pair_code))
-                carry_to = [lower, upper]
+            lower_muted, upper_muted, pair_muted = (muted_now(lower), muted_now(upper),
+                                                    muted_now(int(pair_code)))
             chains_before = channels.read_chains(blob) if _chain_follow_on() else None
             for i in range(spec.count):
                 if target[i] != vec[i]:
@@ -4527,7 +4544,26 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             new = _read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = _follow_chains(vec, new, chains_before)
-            mute_note = _carry_mute(new, carry_to, keep_muted)
+            if on:
+                pair_muted = lower_muted or upper_muted
+                _settle_mutes(new, {int(pair_code): pair_muted})
+                channels.park_link_mutes(_layout_store_key(), pair_code, lower_muted,
+                                         upper_muted, pair_muted)
+                if pair_muted:
+                    because = [] if lower_muted and upper_muted else [
+                        lower if lower_muted else upper]
+                    mute_note = (f" {label} is muted, because {names(because)} was." if because
+                                 else f" {label} is muted.")
+            else:
+                wanted = _unlink_mutes(channels.take_link_mutes(_layout_store_key(), pair_code),
+                                       pair_muted, lower, upper)
+                opened = _settle_mutes(new, wanted)
+                muted = [c for c in (lower, upper) if wanted[c] and c in new]
+                if muted:
+                    mute_note += f" {names(muted)} {'is' if len(muted) == 1 else 'are'} muted."
+                if opened:
+                    mute_note += (f" {names(opened)} {'is' if len(opened) == 1 else 'are'} open, "
+                                  f"as before the link.")
     except Exception as exc:
         verb = "link" if on else "unlink"
         return {"ok": False, "message": f"Could not {verb} {label}: {exc}"}
@@ -6728,7 +6764,7 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
     if not res.get("ok"):
         return res
     return {"ok": True, "name": safe,
-            "message": (f"Saved the mix scheme {safe}. "
+            "message": (f"Saved the mix preset {safe}. "
                         f"{routing_schemes.describe(cap['scheme'], expanded=channels.usb_expanded())}")}
 
 

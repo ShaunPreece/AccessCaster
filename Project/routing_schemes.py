@@ -74,7 +74,7 @@ def load(name: str) -> dict:
         with open(_path(safe), "r", encoding="utf-8") as f:
             scheme = json.load(f)
     except (OSError, ValueError) as exc:
-        return {"ok": False, "message": f"Could not read the mix scheme: {exc}"}
+        return {"ok": False, "message": f"Could not read the mix preset: {exc}"}
     return {"ok": True, "safe": safe, "scheme": scheme}
 
 
@@ -85,8 +85,8 @@ def delete(name: str) -> dict:
     try:
         os.remove(_path(safe))
     except OSError as exc:
-        return {"ok": False, "message": f"Could not delete the mix scheme: {exc}"}
-    return {"ok": True, "message": f"Deleted the mix scheme {safe}."}
+        return {"ok": False, "message": f"Could not delete the mix preset: {exc}"}
+    return {"ok": True, "message": f"Deleted the mix preset {safe}."}
 
 
 # ---- capture (pure: an already-read model blob in, a scheme dict out) --------------------------
@@ -164,7 +164,7 @@ def save(safe: str, scheme: dict) -> dict:
         os.makedirs(SCHEMES_DIR, exist_ok=True)
         write_json(_path(safe), scheme, indent=1)
     except OSError as exc:
-        return {"ok": False, "message": f"Could not save the mix scheme: {exc}"}
+        return {"ok": False, "message": f"Could not save the mix preset: {exc}"}
     return {"ok": True, "name": safe}
 
 

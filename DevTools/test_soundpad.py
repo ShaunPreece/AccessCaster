@@ -68,6 +68,10 @@ check("restore ok", res["ok"], False)
 check("names the setting", res["results"][0]["message"].endswith(
     "colour: Pad 12 is empty; nothing to edit."), True)
 
+print("a pad is named by its place on the desk, as the pad list names it")
+check("first pad of bank 3", soundpad.pad_place(17), "pad 1, bank 3")
+check("last pad of bank 1", soundpad.pad_place(8), "pad 8, bank 1")
+
 print("the CLI recipe list includes the presets that belong to no pad")
 with patched((soundpad.sys, {"argv": ["soundpad.py", "restore", "list"]})):
     out = io.StringIO()

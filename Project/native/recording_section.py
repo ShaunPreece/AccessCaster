@@ -34,6 +34,7 @@ LIST_HINT = "Newest first. To copy them off, take the card or drive to a compute
 STORAGE_HINT = "Eject before pulling a card or drive out. Erase deletes everything on it."
 NO_STORAGE_WRITE = "AccessCaster cannot eject or erase storage on this unit."
 RUNNING = (recorder.RECORDING, recorder.PAUSED)
+CLOCK_MS = 1000
 
 
 def recording_label(take):
@@ -210,6 +211,11 @@ class RecorderPage(wx.Panel):
         self.mute = Switch(self, box, box_sizer, "Switch announcements off while recording",
                            announcer.action_set_record_mute_announcer, lambda: self._mute,
                            self._remember_mute, description=MUTE_HINT)
+        # The Now line's running time during a take, from the push listener: no desk read.
+        self._clock = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, lambda _e: self._tick(), self._clock)
+        self.Bind(wx.EVT_SHOW, self._on_show)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
         self.show()
 
     def _button(self, parent, row, label, handler):
@@ -249,6 +255,32 @@ class RecorderPage(wx.Panel):
         for control in (self.multitrack, self.format, self.bypass, self.mute):
             control.show()
         self._show_bypass()
+        self._run_clock()
+
+    def _run_clock(self):
+        running = self.IsShown() and self.section.state == recorder.RECORDING
+        if running and not self._clock.IsRunning():
+            self._clock.Start(CLOCK_MS)
+        elif not running and self._clock.IsRunning():
+            self._clock.Stop()
+
+    def _on_show(self, event):
+        event.Skip()
+        self._run_clock()
+
+    def _on_destroy(self, event):
+        if event.GetEventObject() is self:
+            self._clock.Stop()
+        event.Skip()
+
+    def _tick(self):
+        call(self, server.read_recorder_live, done=self._ticked)
+
+    def _ticked(self, reply):
+        # A take stopped between the tick and its reply is left to the section's own read.
+        if (reply.get("ok") and reply.get("state") == recorder.RECORDING
+                and self.section.state == recorder.RECORDING):
+            self.set_sentence(reply["message"])
 
     def _show_bypass(self):
         data = self.section.data or {}

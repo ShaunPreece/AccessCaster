@@ -1040,11 +1040,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   operator cannot spot by glancing at a lit button. Every solo reply names EVERYTHING the headphones
   now carry (`_solo_summary`), not just the channel pressed, and every page with a solo control also
   carries Clear all solos. Adding solo somewhere new means adding both.
-- **THE DESK UNMUTES WHAT IT REARRANGES.** Linking clears `channelOutputMute` on both inputs and
-  unlinking clears it on the mic it hands back; the RODE app does not restore it either. `_carry_mute`
-  does, and it only ever RE-mutes. Muting something the user has open is the same surprise in
-  reverse, which is why `profiles.UNIT_NEVER_RESTORE` refuses mutes outright; restoring what our own
-  write disturbed is a different thing, but only in that one direction.
+- **A STEREO LINK'S MUTES ARE SETTLED BY US, NEVER LEFT TO THE DESK.** The desk's `channelOutputMute`
+  does not follow the inputs: a strip has kept its own mute through a link (the pair inherited a
+  muted Mic 3 while Mic 4 was open, 2nd November 2026), and has also been seen clearing it.
+  `_settle_mutes` reads back and writes the outcome. A pair is muted if EITHER mic was, so a link
+  never opens a mic the user silenced. Each mic's own mute is parked (`channels.park_link_mutes`, a
+  file, because the unlink can be days later) and `_unlink_mutes` hands it back if the pair's mute
+  is unchanged since the link; a pair muted or opened while linked passes that choice to both.
+  Without the parked record, a muted-plus-open link followed by an unlink mutes the open mic.
 - **A CROSS-POINT SELECTOR LEAVES BYTE RANGE AT SOURCE 14.** It is
   `CROSS_POINT_BASE + 13*source + output`, so Game (12) is 232 and Music (13) is 245 but Virtual A
   (14) is 258 and Virtual B (15) is 271, and the desk addresses those two with a TWO-byte index.
