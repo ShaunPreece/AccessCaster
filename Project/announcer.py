@@ -183,6 +183,9 @@ levels_on = bool(settings_file.load().get("announcer_levels", True))
 # MUTE AS A TONE INSTEAD OF A SENTENCE. Off by default: speech is what everyone gets until they
 # choose otherwise, and the tones only make sense to someone who has been told what they mean.
 mute_tones = bool(settings_file.load().get("announcer_mute_tones", False))
+# RECORDING AS A TONE INSTEAD OF A SENTENCE: start, pause and stop, from the unit or from here
+# (server._recorder_state_changed). Off by default, like the mute tones.
+record_tones = bool(settings_file.load().get("announcer_record_tones", False))
 # SPEAK THE DESK'S STATE WHEN THE APP OPENS. It is an ANNOUNCEMENT, not a page, so it is a setting
 # of its own rather than a side effect of which page the app opens on. Default ON: knowing the
 # desk's state without looking is the point of the app, and on a normal desk it is one sentence.
@@ -1263,6 +1266,25 @@ def action_set_announce_mute_tones(on: bool) -> dict:
                         if on else "Mutes will be spoken, naming the channel.")}
 
 
+def action_set_announce_record_tones(on: bool) -> dict:
+    """Whether recording starting, pausing and stopping is a TONE rather than a spoken sentence.
+
+    A tone is short enough to be over before the take is under way, and it plays for every press,
+    a shortcut's and the unit's own button alike. The confirmation plays the three cues in turn."""
+    global record_tones
+    record_tones = bool(on)
+    settings_file.update(announcer_record_tones=record_tones)
+    if on:
+        # One at a time, with a gap: the speech thread keeps only the newest item waiting.
+        for name in ("record_start", "record_pause", "record_stop"):
+            speech.tone(name)
+            time.sleep(tones.record_cue_seconds(name) + 0.4)
+    return {"ok": True, "record_tones": record_tones,
+            "message": ("Recording will play a tone instead of being spoken: one long beep for "
+                        "recording, two for paused, three for stopped."
+                        if on else "Recording starting, pausing and stopping will be spoken.")}
+
+
 def action_set_announce_remember(on: bool) -> dict:
     """Whether announcements start the way they were left, rather than always on.
 
@@ -1302,12 +1324,14 @@ def apply_settings(changes: dict) -> None:
 
     `announcer` (the remembered on or off) is left to the next launch: switching speech on or off
     in the middle of an import would be its own surprise."""
-    global remember, levels_on, mute_tones, startup_summary
+    global remember, levels_on, mute_tones, record_tones, startup_summary
     if "announcer_remember" in changes:
         remember = bool(changes["announcer_remember"])
     if "announcer_levels" in changes:
         levels_on = bool(changes["announcer_levels"])
     if "announcer_mute_tones" in changes:
         mute_tones = bool(changes["announcer_mute_tones"])
+    if "announcer_record_tones" in changes:
+        record_tones = bool(changes["announcer_record_tones"])
     if "announcer_startup_summary" in changes:
         startup_summary = bool(changes["announcer_startup_summary"])

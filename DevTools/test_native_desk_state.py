@@ -14,6 +14,7 @@ import _testkit
 import devices
 import rcp_read
 import rcp_transfer
+import recorder
 import wx
 from _testkit import as_device, check, check_true, patched, push
 from native import desk_state
@@ -201,6 +202,13 @@ with as_device(devices.PRO2):
     feed([proc], "masterCompellorOn", v_bool(True))
     store._flush_dirty()
     check("a value the desk already had notifies nothing", events[count + 1:], [])
+
+    count = len(events)
+    feed([recorder.SEL_RECORDER], "recordState", v_int(recorder.RECORDING))
+    check("a recording state is passed on at once", events[count:],
+          [("recorder", recorder.RECORDING)])
+    feed([recorder.SEL_RECORDER + 1], "recordState", v_int(recorder.READY))
+    check("a recording state on another block is ignored", events[count + 1:], [])
 
     feed([ch + 0], "channelInputSource", v_int(1))
     check_true("a fader reassignment asks for a full read", store._reread is not None)

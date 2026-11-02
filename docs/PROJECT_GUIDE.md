@@ -1486,6 +1486,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   reaches the take then and a silent pause sounds exactly like recording. A resume from the app
   speaks "Resuming" and waits for it to finish (`speech.say_and_wait`) before it sends the command; a
   resume from the unit's button is already recording by the time we hear it.
+- **A RECORD TONE IS QUEUED IN `_recorder_state_changed` BEFORE `suspend_for_record`, AND PLAYS FOR
+  THE APP'S OWN PRESSES TOO** (`announcer.record_tones`, `recorder.record_cue`). The speech thread
+  plays what is already queued after announcements go off, but `speech._submit` drops anything
+  submitted after: queued after the suspend, or left to `action_record`'s reply, which returns after
+  the watcher has already suspended, a start is silent. That is also why a shortcut's spoken reply to
+  a start is never heard. With tones on, a resume from the app skips "Resuming": the start tone marks it.
 
 ## Reading the model dump
 
@@ -1771,8 +1777,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A CONTROL THAT CANNOT ACT NOW REFUSES THROUGH ITS GUARD, AND IS NEVER DISABLED**
   (`Switch(guard=)`, the Master Mix page's raw tracks switch while no separate tracks are made). A
   disabled Win32 control leaves the tab order, so it would vanish from under the user.
-- **THE MASTER MIX PAGE POLLS RODE'S DRIVER LINE WHILE IT IS SHOWN**, the one page that reads
-  anything on show. `server.read_usb_driver` reads Windows and the service's status, never the
+- **THE MASTER MIX PAGE POLLS RODE'S DRIVER LINE WHILE IT IS SHOWN**, as the CallMe pages poll
+  their listener: neither reads the desk. `server.read_usb_driver` reads Windows and the service's status, never the
   desk. Its `switching` holds both USB Confirm buttons: a second switch made sooner lands in the
   middle of the first's bind wait.
 - **A LIST OR NUMBER BOX WHOSE VALUE REPLACES NOTHING WRITES AS IT CHANGES, THROUGH `LatestWins`**
@@ -1782,6 +1788,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **THE PADS ARE NOT IN THE DESK STATE** (`pads_section.PadsSection`). They come from a model dump
   of their own, about 1.5 s, read after the desk state's first read, on F5 and after a change made
   in the window; a change made on the desk shows after F5.
+- **A RESTORE OR A FACTORY RESET ENDS WITH `frame.desk_rewritten`, NOT `desk.refresh`**
+  (`backups_section`). The pads and the backups are read by their sections, outside the desk state,
+  so a desk state refresh alone leaves the Pads pages showing the grid from before.
+- **THE WINDOW READS THE DEVICE STATUS AS THE SERVICE COMES UP** (`MainFrame.start`). Only
+  `read_device_status` publishes the hardware id every per-desk setting is filed under: without it
+  the pan links save against no desk and the as-found backup is never offered.
 - **THE PADS ARE READ AGAIN `REREAD_AFTER_MS` AFTER A SETTINGS DIALOG THAT WROTE, LONGER THAN
   `_Field.DELAY_MS`.** A write still waiting in `LatestWins` when the dialog closes is still sent,
   but its reply has no dialog to land on; reading sooner would read the pad before it.
@@ -1797,6 +1809,23 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A DIALOG OPENED STRAIGHT AFTER ANOTHER CLOSES IS OPENED WITH `wx.CallAfter`**
   (`PadsPage._changed`). Opened at once, it comes up while the focus is still returning from the
   first, and its first control is never read.
+- **THE RECORDER IS NOT IN THE DESK STATE, BUT ITS PUSHES COME THROUGH IT**
+  (`recording_section.RecordingSection`). `DeskState` passes each `recordState` push on as a
+  `recorder` event, and the section reads the recorder (one dump) only for a state it is not
+  showing. A push caused by the window's own press arrives before the press's reply, so it is held
+  and read after the reply only if the two disagree; reading at once queues a dump behind the
+  command.
+- **THE CALLME PAGES ASK THE SERVER'S LISTENER EVERY SECOND WHILE ONE IS SHOWN**
+  (`callme_section.CallMeSection.poll`, `server.read_callme_live`), which reads no desk; a full
+  read is a dump. A call's state lives in that listener, so the desk state's pushes do not carry
+  it. Each redraw puts text on the same controls and only when `version` moves: during a call it
+  moves once a second, with the call quality.
+- **THE CALLME END BUTTON IS "DECLINE OR HANG UP", AND THE SERVER CHOOSES AT THE PRESS**
+  (`action_callme_end`): a call that began ringing a moment ago is declined, not the guest already
+  on the line. The web page's label that follows the state is the renaming-under-focus fault below.
+- **THE TRANSPORT BUTTONS HAVE FIXED LABELS** (Record, Pause, Stop recording): the web page's one
+  button that renames itself would be read again by the screen reader while focused, over the reply.
+  Record starts or resumes by the state it holds.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 

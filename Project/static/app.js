@@ -1714,6 +1714,8 @@ async function loadAnnounceState() {
     if (lv) lv.checked = data.levels !== false;
     const mt = document.getElementById("announce-mute-tones-toggle");
     if (mt) mt.checked = data.mute_tones === true;
+    const rt = document.getElementById("announce-record-tones-toggle");
+    if (rt) rt.checked = data.record_tones === true;
     const ss = document.getElementById("announce-startup-summary-toggle");
     if (ss) ss.checked = data.startup_summary !== false;
     const rm = document.getElementById("announce-remember-toggle");
@@ -9752,6 +9754,7 @@ async function init() {
    ["announce-toggle", "/api/announce"],
    ["announce-levels-toggle", "/api/announce/levels"],
    ["announce-mute-tones-toggle", "/api/announce/mute-tones"],
+   ["announce-record-tones-toggle", "/api/announce/record-tones"],
    ["announce-startup-summary-toggle", "/api/announce/startup-summary"],
    ["announce-remember-toggle", "/api/announce/remember"]]
     .forEach(([id, url]) => document.getElementById(id).addEventListener("change", toggleTo(url)));

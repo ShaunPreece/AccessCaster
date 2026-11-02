@@ -14,18 +14,25 @@ import wx
 
 import server
 from native import announce
+from native.backups_section import BackupsSection
+from native.callme_section import CallMeSection
 from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
 from native.pads_section import PadsSection
 from native.pages import Speaker, WebSection
+from native.recording_section import RecordingSection
 from native.routing_section import RoutingSection
 
-# The sections still on the web page, as (title, web route), in tree order after SMART pads.
-WEB_SECTIONS = [
-    ("Recording", "recording"),
-    ("CallMe", "callme"),
-    ("Backups", "profiles"),
+# The sections in tree order: a native section's class, or (title, web route) for one still on the
+# web page.
+SECTIONS = [
+    ChannelsSection,
+    RoutingSection,
+    PadsSection,
+    RecordingSection,
+    CallMeSection,
+    BackupsSection,
     ("Device", "status"),
     ("App settings", "settings"),
     ("Help and About", "about"),
@@ -53,8 +60,8 @@ class MainFrame(Speaker, wx.Frame):
         self._notifier = announce.Notifier(sink.GetHandle(), "AccessCaster")
 
         self.desk = DeskState(self)
-        self.sections = [ChannelsSection(self), RoutingSection(self), PadsSection(self)] + [
-            WebSection(self, title, route) for title, route in WEB_SECTIONS]
+        self.sections = [WebSection(self, *section) if isinstance(section, tuple) else section(self)
+                         for section in SECTIONS]
         tree_root = self.tree.AddRoot("AccessCaster")
         self._branches = []
         for section in self.sections:
@@ -86,6 +93,8 @@ class MainFrame(Speaker, wx.Frame):
             if started is None:
                 return {"ok": False, "message": "AccessCaster could not start: another copy is "
                                                 "already running on this computer."}
+            # Publishes the desk's hardware id, which every per-desk setting is filed under.
+            server.read_device_status()
             return {"ok": True}
         call(self, bring_up, done=self._started)
 
@@ -97,6 +106,14 @@ class MainFrame(Speaker, wx.Frame):
         for section in self.sections:
             if hasattr(section, "start"):
                 section.start()
+
+    def desk_rewritten(self):
+        """A job has put the whole desk back (a restore, a factory reset): the desk state, and every
+        section that reads the desk for itself, read it again."""
+        self.desk.refresh()
+        for section in self.sections:
+            if hasattr(section, "read"):
+                section.read()
 
     def open_web_page(self, route):
         server.open_ui(f"http://localhost:{server.HTTP_PORT}/#/{route}")

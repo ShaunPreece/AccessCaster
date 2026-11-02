@@ -66,6 +66,21 @@ STATE_SPOKEN = {
 }
 
 
+def record_cue(was, now):
+    """The tone for a transport change (`tones.RECORD_CUES`), or None. A card or drive going in or
+    out has none, and nor does a take ended by its drive being pulled: that one is spoken, since the
+    sentence says why it stopped."""
+    if was is None or was == now:
+        return None
+    if now == RECORDING:
+        return "record_start"
+    if now == PAUSED:
+        return "record_pause"
+    if now == READY and was in (RECORDING, PAUSED):
+        return "record_stop"
+    return None
+
+
 def spoken_change(was, now, medium: str = "") -> str:
     """What to say when the state MOVES from `was` to `now`, or "" to stay quiet.
 

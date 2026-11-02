@@ -21,7 +21,7 @@ import server
 import soundpad
 import wx
 from _testkit import as_device, check, check_in, check_true, patched
-from native import pad_dialogs, pad_fx, pad_maint, pads_section
+from native import dialogs, pad_dialogs, pad_fx, pad_maint, pads_section
 
 app = wx.App()
 
@@ -423,7 +423,7 @@ with as_device(devices.PRO2):
         def ShowModal(self):
             return wx.ID_OK
 
-    with patched((pad_maint, {"TextDialog": Result})):
+    with patched((dialogs, {"TextDialog": Result})):
         maint._finished(maint.restore_backup, {"reply": {"ok": True, "message": "Back."}},
                         ("Pads restored", "Pads not restored"))
         maint._finished(maint.restore_backup, {"reply": {"ok": False, "message": "No."}},

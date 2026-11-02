@@ -21,7 +21,7 @@ import _testkit
 import native
 import wx
 from _testkit import check, check_true, patched
-from native import dialogs, routing_mixes
+from native import callme_section, dialogs, routing_mixes
 
 app = wx.App()
 
@@ -94,6 +94,10 @@ dialog.Destroy()
 
 dialog = routing_mixes.SavePresetDialog(frame, "Headphones 1")
 check_true("Save as a preset lands on the name", first_focusable(dialog) is dialog.name_box)
+dialog.Destroy()
+
+dialog = callme_section.ContactDialog(frame, None)
+check_true("Add a contact lands on the name", first_focusable(dialog) is dialog.name_box)
 dialog.Destroy()
 
 frame.Destroy()

@@ -22,6 +22,7 @@ import diagnostics
 import rcp_hid
 import rcp_read
 import rcp_transfer
+import recorder
 import server
 from native.calls import call
 
@@ -78,7 +79,7 @@ _MASTER = {
 
 _RELEVANT = (STRUCTURAL | set(_STRIP_BOOLS) | _MODULES | _PARAMS | set(_FX_ON) | set(_FX_PARAMS)
              | _INPUTS | _MIX | _LEVELS | set(_MASTER)
-             | {"channelBypassProcessing", channels.CHAIN_PRESET_MARKER_PROP})
+             | {"channelBypassProcessing", channels.CHAIN_PRESET_MARKER_PROP, "recordState"})
 _CHAIN = (_MODULES | _PARAMS | {channels.CHAIN_ADVANCED_PROP, channels.CHAIN_PRESET_MARKER_PROP})
 
 
@@ -97,7 +98,10 @@ class DeskState:
     `fn("changed", names)` with the names of the channels a push changed, `fn("mix", outputs)`
     with the indices of the outputs whose mode or mix a push changed, `fn("faders", None)` when a
     fader write's reply changed the layout, `fn("levels", None)` when a push changed anything in
-    `levels`, and `fn("master", None)` when a push changed anything in `master`."""
+    `levels`, `fn("master", None)` when a push changed anything in `master`, and
+    `fn("recorder", state)` with each recording state the desk pushes (`recorder.READY` and the
+    rest), which it pushes for its own REC button and for a card or drive going in or out. The
+    recorder is not held here: the Recording section reads it for itself."""
 
     def __init__(self, owner):
         self.owner = owner
@@ -241,7 +245,13 @@ class DeskState:
             rcp_hid.close_handle(dev, "window listener")
 
     def _apply(self, path, name, value, kind):
-        if self._stop.is_set() or self.channels is None:
+        if self._stop.is_set():
+            return
+        if name == "recordState":
+            if path == [recorder.SEL_RECORDER] and kind == "int":
+                self._notify("recorder", value)
+            return
+        if self.channels is None:
             return
         if name in STRUCTURAL:
             self._reread_soon()

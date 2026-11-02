@@ -35,6 +35,7 @@ PORTABLE = (
     "announcer_levels",
     "announcer_volume",
     "announcer_mute_tones",
+    "announcer_record_tones",
     "announcer_startup_summary",
     "record_mute_announcer",
     "meter_warn_clip",

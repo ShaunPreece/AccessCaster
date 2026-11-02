@@ -558,11 +558,17 @@ def _recorder_state_changed(was, now) -> None:
     # back to naming no medium at all rather than guessing one.
     medium = _recorder_context.get("where") or ""
     phrase = recorder.spoken_change(was, now, medium)
+    # A tone replaces the phrase, and plays for this app's own presses too: a shortcut's spoken
+    # reply to a start is lost to the silence the take begins with. It is queued before that
+    # silence, and the speech thread plays what is already queued.
+    cue = recorder.record_cue(was, now) if announcer.record_tones else None
     if now == recorder.RECORDING:
         # Only a NEW take explains the silence: after a pause it is already known.
         going_quiet = (speech.enabled.is_set() and announcer.record_mutes_announcer()
                        and was != recorder.PAUSED)
-        if speech.enabled.is_set() and not ours and phrase:
+        if cue:
+            speech.tone(cue)
+        elif speech.enabled.is_set() and not ours and phrase:
             # One phrase, not two: the speech pump coalesces, so a second would silence the first.
             speech.say(f"{phrase}."
                      + (" Announcements off until you stop." if going_quiet else ""))
@@ -571,7 +577,9 @@ def _recorder_state_changed(was, now) -> None:
     if now == recorder.PAUSED:
         # Restored only if the take suspended them, so the resume suspends them again the same way.
         announcer.restore_after_record()
-        if speech.enabled.is_set() and not ours and phrase:
+        if cue:
+            speech.tone(cue)
+        elif speech.enabled.is_set() and not ours and phrase:
             speech.say(f"{phrase}.")
         return
     if now in (recorder.READY, recorder.NO_DESTINATION):
@@ -579,7 +587,9 @@ def _recorder_state_changed(was, now) -> None:
         # give announcements back just the same as one that was stopped. It is a no-op when we did
         # not switch them off in the first place, so an idle plug costs nothing here.
         came_back = announcer.restore_after_record()
-        if not ours and speech.enabled.is_set() and phrase:
+        if cue:
+            speech.tone(cue)
+        elif not ours and speech.enabled.is_set() and phrase:
             speech.say(phrase + (". Announcements are back on." if came_back else "."))
         return
     if speech.enabled.is_set() and not ours and phrase:
@@ -815,9 +825,10 @@ def action_record(command: str) -> dict:
         return {"ok": True, "message": "It is already recording."}
     if cmd == "stop" and before in (recorder.READY, recorder.NO_DESTINATION):
         return {"ok": True, "message": "Nothing is recording."}
-    if cmd == "resume" and before == recorder.PAUSED:
+    if cmd == "resume" and before == recorder.PAUSED and not announcer.record_tones:
         # Announcements are back on during a pause (_recorder_state_changed), and this is the one
-        # resume where the notice can be finished before the take carries on.
+        # resume where the notice can be finished before the take carries on. With record tones,
+        # the start tone marks the resume instead.
         speech.say_and_wait("Resuming")
 
     # Mark it BEFORE the write: the unit pushes the new state back in about 30 ms, which can beat
@@ -9296,6 +9307,7 @@ GET_ROUTES = {
     "/api/update/job": app_updates.job,
     "/api/announce": lambda: {"on": speech.enabled.is_set(), "levels": announcer.levels_on,
                               "mute_tones": announcer.mute_tones,
+                              "record_tones": announcer.record_tones,
                               "startup_summary": announcer.startup_summary,
                               "remember": announcer.remember,
                               "volume": speech.volume,
@@ -9355,6 +9367,8 @@ POST_ROUTES = {
     "/api/announce": (announcer.action_set_announce, [(bool, "on", None)]),
     "/api/announce/levels": (announcer.action_set_announce_levels, [(bool, "on", None)]),
     "/api/announce/mute-tones": (announcer.action_set_announce_mute_tones, [(bool, "on", None)]),
+    "/api/announce/record-tones": (announcer.action_set_announce_record_tones,
+                                   [(bool, "on", None)]),
     "/api/announce/startup-summary": (announcer.action_set_announce_startup_summary, [(bool, "on", None)]),
     "/api/announce/remember": (announcer.action_set_announce_remember, [(bool, "on", None)]),
     "/api/announce/volume": (speech.action_set_announce_volume, [(int, "percent", 100)]),

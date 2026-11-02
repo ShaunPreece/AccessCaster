@@ -11,8 +11,9 @@ stages are spoken through UIA notifications raised from the job's dialog (`JobDi
 """
 import wx
 
+import paths
 import speech
-from native import announce
+from native import a11y, announce
 from native.calls import call
 from native.pages import Speaker
 
@@ -194,6 +195,103 @@ class JobDialog(SpeakingDialog):
         self._stopping = True
         self.say("Stopping.")
         call(self, self._stop)
+
+
+def follow_job(parent, title, text, start, status):
+    """A job the server starts and then reports on, in a `JobDialog` that stays until it is done.
+    `start()` runs off the UI thread and starts it; `status(reply)` names the status function to
+    poll, from the start's reply, or None for a reply that is already the result. Each new stage is
+    spoken. Returns the job's last status, or the start's reply when it refused or was final."""
+    def begin(job):
+        def started(reply):
+            ask = status(reply) if reply.get("ok") else None
+            if ask is None:
+                job.finish(reply)
+                return
+            job.say(reply.get("message") or text)
+            job.poll(ask, lambda st: stage(job, st))
+        call(job, start, done=started)
+
+    def stage(job, st):
+        if st.get("done"):
+            job.finish(st)
+        # The job words its own stages, counts included ("Pad 3 of 10: Applause").
+        elif st.get("message"):
+            job.say(st["message"])
+
+    job = JobDialog(parent, title, text, begin, stop=None, closable=False)
+    with job:
+        return job.run()
+
+
+def report(parent, titles, reply):
+    """What a job came to, in a dialog of its own titled (done, failed). Spoken instead, it races
+    the screen reader reading the control the focus returns to, and one cuts the other off."""
+    message = reply.get("message") or ("Done." if reply.get("ok") else "That did not work.")
+    dialog = TextDialog(parent, titles[0] if reply.get("ok") else titles[1], message,
+                        [(wx.ID_OK, "OK")], default=wx.ID_OK, escape=wx.ID_OK)
+    with dialog:
+        dialog.ShowModal()
+
+
+class NameDialog(wx.Dialog):
+    """A name to type, then `ok_label` or Cancel. A name outside `paths.safe_name`'s rule is refused
+    in a message box of its own, and the dialog stays open on the name. With `submit`, OK runs
+    `submit(name)` off the UI thread instead of closing, and the dialog closes only on a success,
+    keeping its reply as `reply`; a refusal is shown the same way."""
+
+    MAX_NAME = 40
+    RULE = f"Up to {MAX_NAME} letters, digits, spaces, dashes or underscores."
+
+    def __init__(self, parent, title, label, value, ok_label, description, submit=None):
+        super().__init__(parent, title=title)
+        self._submit = submit
+        self._busy = False
+        self.reply = None
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
+        self.name_box = wx.TextCtrl(self, value=value, size=(320, -1))
+        self.name_box.SetMaxLength(self.MAX_NAME)
+        self.name_box.SelectAll()
+        a11y.describe(self.name_box, description)
+        sizer.Add(self.name_box, 0, wx.ALL, 10)
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, label=ok_label)
+        ok.SetDefault()
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
+        buttons.Realize()
+        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(sizer)
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        self.CentreOnParent()
+
+    def name(self):
+        return self.name_box.GetValue().strip()
+
+    def _refuse(self, text):
+        wx.MessageBox(text, "Name not used", wx.OK | wx.ICON_WARNING, self)
+        self.name_box.SetFocus()
+
+    def _on_ok(self, event):
+        if self._busy:
+            return
+        if not paths.safe_name(self.name()):
+            self._refuse(self.RULE if self.name() else "Type a name first.")
+            return
+        if self._submit is None:
+            event.Skip()
+            return
+        self._busy = True
+        call(self, self._submit, self.name(), done=self._submitted)
+
+    def _submitted(self, reply):
+        self._busy = False
+        if not reply.get("ok"):
+            self._refuse(reply.get("message") or "That name could not be used.")
+            return
+        self.reply = reply
+        self.EndModal(wx.ID_OK)
 
 
 class ListDialog(wx.Dialog):

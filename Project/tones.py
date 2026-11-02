@@ -83,6 +83,35 @@ def _note_samples(freqs) -> list:
     return out
 
 
+# THE RECORDER'S CUES: name -> (Hz, beeps, seconds per beep, seconds between). THE COUNT CARRIES
+# THE MEANING, at one pitch within each cue: one long beep is recording, two short are paused, three
+# short are stopped. A cue with no rise or fall cannot be heard as a mute pair or a job cue, which
+# are both told apart by direction. The pitch falling from cue to cue is only a second hint.
+RECORD_CUES = {
+    "record_start": (880.0, 1, 0.25, 0.0),
+    "record_pause": (660.0, 2, 0.08, 0.08),
+    "record_stop": (440.0, 3, 0.08, 0.08),
+}
+RECORD_VERSION = 1
+
+
+def record_cue_seconds(name: str) -> float:
+    _freq, count, note_s, gap_s = RECORD_CUES[name]
+    return count * note_s + (count - 1) * gap_s
+
+
+def _beep_samples(freq, count, note_s, gap_s) -> list:
+    frames = int(SAMPLE_RATE * note_s)
+    fade = max(1, int(SAMPLE_RATE * FADE_S))
+    out = []
+    for i in range(count):
+        if i:
+            out += [0.0] * int(SAMPLE_RATE * gap_s)
+        out += [PEAK * min(1.0, n / fade, (frames - n) / fade)
+                * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE) for n in range(frames)]
+    return out
+
+
 # THE RINGTONE: one ring of a British phone, the 400 and 450 Hz pair in two 0.4 s bursts 0.2 s
 # apart, with a soft bell two octaves up glinting at the start of each burst so it is recognisably a
 # phone but not this computer's or anyone's mobile. One ring per file; the caller alternates it with
@@ -178,6 +207,8 @@ def tone_path(name: str) -> str:
         make, version = _ring_samples, RING_VERSION
     elif name == "working":
         make, version = _working_samples, WORKING_VERSION
+    elif name in RECORD_CUES:
+        make, version = (lambda: _beep_samples(*RECORD_CUES[name])), RECORD_VERSION
     elif TONES.get(name):
         make, version = (lambda: _note_samples(TONES[name])), TONE_VERSION
     else:

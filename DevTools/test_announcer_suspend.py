@@ -215,6 +215,42 @@ server._recorder_state_changed(None, recorder.READY)
 check("the first state we ever see is announced as nothing at all", SAID, [])
 server._note_recorder_context({})
 
+print("\nRECORD TONES INSTEAD OF SPEECH")
+# Each tone with whether announcements were on as it was queued: a start's must be queued before
+# the take's silence, a pause's and a stop's after announcements come back.
+TONES = []
+_tone, speech.tone = speech.tone, lambda name: TONES.append((name, speech.enabled.is_set())) or True
+announcer.record_tones = True
+reset(announcing=True)
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+check("a start plays the start tone, before the silence", TONES, [("record_start", True)])
+check("and says nothing", SAID, [])
+check("and announcements still go quiet for the take", speech.enabled.is_set(), False)
+TONES.clear()
+server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
+server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+check("pause, resume and stop each play their own",
+      TONES, [("record_pause", True), ("record_start", True), ("record_stop", True)])
+check("with nothing spoken", SAID, [])
+reset(announcing=True)
+TONES.clear()
+mark_ours()
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+check("a press from this app plays one too", TONES, [("record_start", True)])
+reset(announcing=True)
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+TONES.clear()
+SAID.clear()
+server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+check("a take ended by a pulled drive has no tone", TONES, [])
+check("and is spoken, saying why", SAID[0].startswith("Recording stopped"), True)
+reset(announcing=True)
+server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
+check("a drive going in has no tone either", TONES, [])
+announcer.record_tones = False
+speech.tone = _tone
+
 print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
 reset(announcing=False)
 t0 = time.monotonic()

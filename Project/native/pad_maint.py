@@ -11,7 +11,7 @@ import soundpad
 import wording
 from native import a11y
 from native.calls import call
-from native.dialogs import JobDialog, ListDialog, TextDialog, confirm
+from native.dialogs import JobDialog, ListDialog, confirm, follow_job, report
 from native.pad_dialogs import READ_ONLY, content, where
 from native.pages import group, page_box
 
@@ -128,16 +128,10 @@ class MaintPage(wx.Panel):
         return False
 
     def _finished(self, source, result, titles):
-        """A job has ended: show the pads read after it, and what it came to in a dialog of its own,
-        titled (done, failed). Spoken instead, the result races the screen reader reading the
-        button the focus returns to, and one cuts the other off."""
+        """A job has ended: show the pads read after it, and what it came to (`dialogs.report`)."""
         if result.get("model"):
             self.section.show(result["model"])
-        reply = result["reply"]
-        dialog = TextDialog(self, titles[0] if reply.get("ok") else titles[1], _message(reply),
-                            [(wx.ID_OK, "OK")], default=wx.ID_OK, escape=wx.ID_OK)
-        with dialog:
-            dialog.ShowModal()
+        report(self, titles, result["reply"])
         source.SetFocus()
 
     def _on_clear_all(self, _event):
@@ -209,28 +203,11 @@ class MaintPage(wx.Panel):
                       server.action_restore_factory_fx)
 
     def _pad_job(self, source, title, text, titles, action, *args):
-        """A job on the pad-restore channel: started by `action(*args)`, its progress polled and
-        spoken, then the pads read again."""
-        def begin(job):
-            def started(reply):
-                if not reply.get("ok"):
-                    job.finish({"reply": reply})
-                    return
-                job.say(_message(reply))
-                job.poll(server.pad_restore_status, lambda st: status(job, st))
-            call(job, action, *args, done=started)
-
-        def status(job, st):
-            if st.get("done"):
-                job.finish({"reply": st})
-            # The job words its own steps, counts included ("Pad 3 of 10: Applause").
-            elif st.get("message"):
-                job.say(st["message"])
-
-        job = JobDialog(self, title, text, begin, stop=None, closable=False)
-        with job:
-            result = job.run()
-        self._finished(source, result, titles)
+        """A job on the pad-restore channel, started by `action(*args)` and followed to the end,
+        then the pads read again."""
+        reply = follow_job(self, title, text, lambda: action(*args),
+                           lambda _started: server.pad_restore_status)
+        self._finished(source, {"reply": reply}, titles)
         self.section.read()
 
     def _on_export(self, _event):
