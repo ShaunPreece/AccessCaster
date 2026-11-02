@@ -3000,6 +3000,31 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
             "skipped": skipped, "unchanged": sorted(unchanged), "health": pool_health()}
 
 
+def clear_pads_not_in(pads: list, progress=None) -> dict:
+    """Clear every USER pad whose grid position `pads` (a profile's pad list) does not hold. System
+    pads are never touched. CALLER HOLDS THE HID LOCK, and must NOT hold a transfer session: a
+    clear only completes when the desk leaves transfer mode, so each one needs its own.
+
+    A factory reset refills the factory pads, so after a clean restore a slot the profile saved
+    EMPTY holds a factory pad unless it is cleared here. Returns {ok, cleared, failed}."""
+    spec = active_pad_spec()
+    keep = {e.get("grid") for e in pads}
+    user_range = spec.user_banks * spec.pads_per_bank
+    extra = sorted(pidx for _pos, pidx, ptype, _name in pad_positions()
+                   if pidx is not None and pidx < user_range and ptype != SYSTEM_PAD_TYPE
+                   and pidx + 1 not in keep)
+    cleared, failed = [], []
+    for n, pidx in enumerate(extra, 1):
+        if progress:
+            progress(f"Clearing pad {pidx + 1}, which the profile has empty ({n} of {len(extra)}).")
+        try:
+            clear_grid_pad(pidx + 1)
+            cleared.append(pidx + 1)
+        except Exception:
+            failed.append(pidx + 1)
+    return {"ok": not failed, "cleared": cleared, "failed": failed}
+
+
 # ----------------------------------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------------------------------

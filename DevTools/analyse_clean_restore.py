@@ -42,8 +42,9 @@ NOISY = ("Meter", "meter", "Progress", "CurrentPosition", "elapsed", "Elapsed", 
          "showName", "showUID", "snapshot", "Snapshot", "usbConnected", "screenTouched",
          "storageVolumeState", "mixLinkRequest", "mixUnlinkRequest",
          # The desk sets the encoder colour from its own state, and a call-slot disconnect is a
-         # write-only trigger it leaves set.
-         "encoderColour", "sipSlotCallDisconnect")
+         # write-only trigger it leaves set. `encoderSignal` holds the last turn and
+         # `selectedBank` the bank on show: neither is a setting.
+         "encoderColour", "sipSlotCallDisconnect", "encoderSignal", "selectedBank")
 
 # Differences a correct clean restore is EXPECTED to produce. Named, counted, and reported as a
 # total rather than hidden: each one is a decision written down elsewhere.
@@ -88,25 +89,40 @@ def _bus_chain(key, before: dict) -> bool:
 
 
 def _cross_point_is_not_ours(key, before: dict) -> bool:
-    """True for a cross-point LEVEL that a profile deliberately does not carry.
+    """True for a cross-point LEVEL or LINK that a profile deliberately does not carry.
 
     Two cases, both written down in PROJECT_GUIDE and in routing_schemes.capture:
       * EXCLUDED (`mixDisabled`): excluding also unlinks, and an unlink freezes the level at
         whatever the fader read when it was unlinked, so the number is inert and recording it makes
-        a restore fail its own read-back.
+        a restore fail its own read-back. An excluded cell plays nothing however it is linked, so
+        its `mixLink` is inert too (and on a source with no fader the unlink does not move it).
       * LINKED (`mixLink`): a linked cross-point has no level of its own, it follows the channel
         fader. A float residue such as -1.04e-07 on one of them is zero."""
     path, block, prop = key
-    if block != "MIX" or prop != "mixLevelWithAnchor":
+    if block != "MIX" or prop not in ("mixLevelWithAnchor", "mixLink"):
         return False
-    return bool(before.get((path, "MIX", "mixDisabled"))) or bool(before.get((path, "MIX",
-                                                                              "mixLink")))
+    if before.get((path, "MIX", "mixDisabled")):
+        return True
+    return prop == "mixLevelWithAnchor" and bool(before.get((path, "MIX", "mixLink")))
+
+
+def _pads_by_idx(snapshot: dict) -> dict:
+    """The snapshot with every PAD key addressed by padIdx instead of stream position.
+
+    A pad's place in the stream is not a setting: a rebuild appends its record, so every pad after
+    it moves along one place, and a by-position diff reports each of them as changed."""
+    idx = {path: v for (path, block, prop), v in snapshot.items()
+           if block == "PAD" and prop == "padIdx"}
+    return {((("padIdx", idx[path]),) if block == "PAD" and path in idx else path, block, prop): v
+            for (path, block, prop), v in snapshot.items()}
 
 
 def compare(before: dict, after: dict, factory: dict | None = None,
             pads_restored: bool = False) -> dict:
     """Split every difference into by-design, pads, factory-valued and real."""
     res = {"by_design": [], "pads": [], "factory": [], "real": [], "gone": [], "new": []}
+    before, after = _pads_by_idx(before), _pads_by_idx(after)
+    factory = None if factory is None else _pads_by_idx(factory)
     for key, was in before.items():
         _path, block, prop = key
         # The SHOWS LIST is not desk state: every export renumbers it and adds a node, so a clean

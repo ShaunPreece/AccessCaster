@@ -125,7 +125,7 @@ check_true("the saved scheme is applied after the failed read", applied and appl
 print("\nTHE DEAD-PROPERTY PROBE PUTS A WRITE BACK WHEN THE DUMP AFTER IT FAILS")
 writes = []
 snaps = iter([("root", {})])
-node = SimpleNamespace(name="PADRECORDER")
+node = SimpleNamespace(name="SYSTEM")
 
 
 def _snap_then_fail():
@@ -139,8 +139,17 @@ with patched((probe_dead_props_write, {"snapshot": _snap_then_fail,
                                        "write": lambda node, prop, kind, v: writes.append(v)}),
              (probe_dead_props_write.mt, {"find_property": lambda root, prop: [(node, False, "bool")]})):
     with contextlib.suppress(TimeoutError):
-        probe_dead_props_write.probe("padRecorderArmed", "")
+        probe_dead_props_write.probe("shareAnom", "")
 check("the test value, then the resting value", writes, [True, False])
+
+print("\nTHE DEAD-PROPERTY PROBE NEVER WRITES A PADRECORDER PROPERTY")
+writes = []
+node = SimpleNamespace(name="PADRECORDER")
+with patched((probe_dead_props_write, {"snapshot": lambda: ("root", {}),
+                                       "write": lambda node, prop, kind, v: writes.append(v)}),
+             (probe_dead_props_write.mt, {"find_property": lambda root, prop: [(node, False, "bool")]})):
+    verdict = probe_dead_props_write.probe("padRecorderArmed", "")
+check("skipped, and nothing written", (verdict, writes), ("skipped (never probed)", []))
 
 print("\nA CAPTURE'S PROPERTY WRITES ARE FOUND AT ANY ADDRESS DEPTH")
 sent = [capture_analyze.UsbPacket(n, False, 0x05, 5, 1, rec) for n, rec in enumerate((

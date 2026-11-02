@@ -6591,8 +6591,11 @@ class _BackgroundJob:
     an honest failure message rather than a dialog that never closes.
     """
 
-    def __init__(self, busy: str, failed: str):
+    def __init__(self, busy: str, failed: str, rewrites_desk: bool = False):
         self._lock = threading.Lock()
+        # A job that rewrites the desk holds the announcer's desk-change speech for its run
+        # (announcer.hold_desk_speech): every write it makes would otherwise be read out.
+        self._rewrites_desk = rewrites_desk
         self._busy = busy        # "A profile save is already running."
         self._failed = failed    # "Could not save the profile"
         self._state = {"running": False, "step": 0, "total": 0, "label": "",
@@ -6650,10 +6653,15 @@ class _BackgroundJob:
             # has a timestamp of its own.
             at = time.monotonic()
             diagnostics.event("job.start", label)
+            if self._rewrites_desk:
+                announcer.hold_desk_speech(label)
             try:
                 res = work(self) or {}
             except Exception as exc:
                 res = {"ok": False, "message": f"{crashed}: {exc}"}
+            finally:
+                if self._rewrites_desk:
+                    announcer.release_desk_speech()
             diagnostics.event("job.end", label, ok=bool(res.get("ok")),
                               took=f"{time.monotonic() - at:.2f}s",
                               said=res.get("message") or "Done.")
@@ -7016,7 +7024,7 @@ def action_baseline_add_pads() -> dict:
 # PAD_RESTORE_SECONDS a pad), so the page is not blocked and can poll progress for live-region
 # announcements.
 _restore_job = _BackgroundJob("A profile restore is already running.",
-                              "Could not restore the profile")
+                              "Could not restore the profile", rewrites_desk=True)
 
 
 def profile_restore_status() -> dict:
@@ -7128,6 +7136,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
             mx_res = _apply_matrix(prof.get("routing") or {})
         pad_res = None
         pad_tidy = None
+        pad_extra = None
         if pad_list:
             job.step("Restoring SMART pads...")
             with _hid_lock:
@@ -7139,6 +7148,10 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 with rcp_transfer.transfer_session():
                     pad_res = soundpad.restore_pads(pad_list, profiles.pads_dir(safe),
                                                     progress=job.tick)
+                # Only on a clean restore: there every pad outside the profile is one the reset
+                # put back. An ordinary restore leaves pads the profile does not mention alone.
+                if clean:
+                    pad_extra = soundpad.clear_pads_not_in(pad_list, progress=job.step)
                 # Pads replaced by the restore left their old audio behind; clear it out.
                 pad_tidy = soundpad.tidy_unused_pad_audio(progress=job.tick)
 
@@ -7170,6 +7183,12 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 msg += f" Restored {rebuilt} of {total_pads} SMART pads."
             if pad_res.get("skipped"):
                 msg += " Could not restore: " + "; ".join(pad_res["skipped"]) + "."
+        if pad_extra and pad_extra["cleared"]:
+            msg += (f" Cleared {wording.plural(len(pad_extra['cleared']), 'pad')} "
+                    f"{wording.join_and(map(str, pad_extra['cleared']))}, empty in the profile.")
+        if pad_extra and pad_extra["failed"]:
+            msg += (f" Could not clear {wording.plural(len(pad_extra['failed']), 'pad')} "
+                    f"{wording.join_and(map(str, pad_extra['failed']))}, which the profile has empty.")
         if pad_tidy and pad_tidy.get("removed"):
             msg += " " + pad_tidy["message"]
         if healed and healed.get("message"):
@@ -7193,7 +7212,8 @@ def restore_profile(name: str, clean: bool = False) -> dict:
 # by nature (you cannot import while a reset runs) and because every one of them needs a progress
 # dialog: an import and a reset take seconds, and a blind operator staring at a page that has not
 # changed cannot tell "working" from "died".
-_show_job = _BackgroundJob("A show command is already running.", "The show command failed")
+_show_job = _BackgroundJob("A show command is already running.", "The show command failed",
+                           rewrites_desk=True)
 
 
 def _shows_write_gate():
@@ -8279,7 +8299,7 @@ def action_clear_all_pads() -> dict:
 # and can poll progress for live-region announcements. This state is the single source the status
 # endpoint reports.
 _pad_restore_job = _BackgroundJob("A pad restore is already running.",
-                                  "The pad restore failed")
+                                  "The pad restore failed", rewrites_desk=True)
 
 
 def pad_restore_status() -> dict:
@@ -9762,7 +9782,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
         # fresh window if none is found.
         if open_browser and _focus_app_window():
             print("AccessCaster is already running; brought its window to the front.")
-        else:
+        elif open_browser:
             print(f"AccessCaster is already running; opening {url}")
             open_ui(url)
         diagnostics.stop("could not bind the port")

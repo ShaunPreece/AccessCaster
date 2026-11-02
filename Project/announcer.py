@@ -104,6 +104,52 @@ _STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
 # real mute a moment later still speaks.
 _MIXER_QUIET_S = 0.75
 _mixer_quiet_until = 0.0
+# HELD WHILE THE APP ITSELF REWRITES THE DESK: a profile restore, a show command, a pad restore.
+# Every setting such a job writes comes back as a push, and reading each one out ("55 d B, Mic 1")
+# describes nothing the operator chose and buries the job's own progress. Only the SPEECH is held:
+# the state cache keeps updating, so the first turn afterwards still quotes the truth. A count,
+# because jobs on different job states can overlap, and a tail after the last release, because the
+# final writes' pushes arrive after the job has returned.
+_HOLD_TAIL_S = 1.5
+_hold_lock = threading.Lock()
+_holds = 0
+_hold_until = 0.0
+
+
+def hold_desk_speech(label: str) -> None:
+    """Stop speaking desk changes until the matching `release_desk_speech`. Says `label`, once, so
+    the silence that follows is explained."""
+    global _holds
+    with _hold_lock:
+        _holds += 1
+        first = _holds == 1
+    if first and speech.enabled.is_set():
+        speech.say(f"{label}. Please wait.")
+
+
+def release_desk_speech() -> None:
+    global _holds, _hold_until
+    with _hold_lock:
+        _holds = max(0, _holds - 1)
+        if _holds == 0:
+            _hold_until = time.monotonic() + _HOLD_TAIL_S
+
+
+def _desk_speech_held() -> bool:
+    return _holds > 0 or time.monotonic() < _hold_until
+
+
+def _say(text: str) -> None:
+    """Speak a desk change, unless a job is rewriting the desk."""
+    if _desk_speech_held():
+        diagnostics.event("announcer.held", text)
+    else:
+        speech.say(text)
+
+
+def _tone(name: str) -> bool:
+    """Play a desk-change cue; False when held, so the caller's spoken fallback is held too."""
+    return False if _desk_speech_held() else speech.tone(name)
 # PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Measured: a short press runs
 # 475 ms down-to-up and mutes nothing; a hold pushes `channelOutputMute = True` 765 ms after the
 # press edge, WHILE STILL HELD, and mutes the channel selected BEFORE the press. So the desk does
@@ -292,7 +338,7 @@ def handle_report(b: bytes, st: dict) -> None:
         hooks.note_bank(ival)
         if ival != st["bank"]:
             st["bank"] = ival
-            speech.say(f"Bank {ival + 1}")
+            _say(f"Bank {ival + 1}")
         return
     # PAD PLAYBACK, TRACKED AND NEVER SPOKEN. A playing pad pushes `padProgress` about twenty times a
     # second, so this is the one branch where saying anything at all would be wrong: the "what is
@@ -341,7 +387,7 @@ def handle_report(b: bytes, st: dict) -> None:
         if ival is None or ival == st.get("chan_sel"):
             return
         st["chan_sel"] = ival
-        speech.say("Levels. Encoder sets fader and monitor levels" if ival < 0
+        _say("Levels. Encoder sets fader and monitor levels" if ival < 0
                  else _selected_phrase(ival))
         return
     if name in ("inputMicrophoneGain", "inputDigitalGain"):
@@ -359,7 +405,7 @@ def handle_report(b: bytes, st: dict) -> None:
             st["gain_said"] = (who, ival)
             if not is_self_echo(("gain", who)):
                 # Number first, as for any level that moved (see _level_words).
-                speech.say(f"{ival} d B, {who}")
+                _say(f"{ival} d B, {who}")
         return
     if name == "encoderColour":
         # -1 = the encoder is bound to nothing; anything else is the colour of what it drives.
@@ -428,10 +474,10 @@ def handle_report(b: bytes, st: dict) -> None:
             # is the announcement that arrives too late as words: you press it mid-sentence, and by
             # the time "Mic 2 muted" has been said the moment has gone. The cue does not name the
             # channel, which is the trade and is why this is an option rather than the default.
-            if not (mute_tones and speech.tone("muted" if on else "unmuted")):
-                speech.say(f"{who} {'muted' if on else 'unmuted'}")
+            if not (mute_tones and _tone("muted" if on else "unmuted")):
+                _say(f"{who} {'muted' if on else 'unmuted'}")
         else:
-            speech.say(f"{who} solo {'on' if on else 'off'}")
+            _say(f"{who} solo {'on' if on else 'off'}")
         return
     # Press EDGES. Do not speak yet: hold the generic word for _PENDING_S in case the state
     # property follows (it names the channel, which is strictly better).
@@ -465,7 +511,7 @@ def handle_report(b: bytes, st: dict) -> None:
         # still on, and leave the ring position alone.
         sel_now = st.get("chan_sel")
         if sel_now is not None and sel_now >= 0:
-            speech.say(_selected_phrase(sel_now))
+            _say(_selected_phrase(sel_now))
             return
         # A short press advances the fixed ring (_encoder_ring), so once we know where we are we
         # can say WHAT was just selected and where it sits - before a click moves it. Until the first
@@ -474,10 +520,10 @@ def handle_report(b: bytes, st: dict) -> None:
         # self-corrects, silence just leaves you guessing.
         pos = st.get("enc_pos")
         if pos is None:
-            speech.say("Select")
+            _say("Select")
         else:
             st["enc_pos"] = (pos + 1) % len(_encoder_ring())
-            speech.say(_ring_phrase(st, st["enc_pos"]))
+            _say(_ring_phrase(st, st["enc_pos"]))
         return
 
 
@@ -777,14 +823,14 @@ def _note_level(st: dict, kind: str, source: int, level: float) -> None:
         said[key], at[key] = level, now
         st["run_key"], st["run_at"] = key, now
         st["levels"].pop(key, None)
-        speech.say(_moved_phrase(kind, source, level, short=short))
+        _say(_moved_phrase(kind, source, level, short=short))
 
 
 def flush_pending(st: dict) -> None:
     """Speak anything being held: a press edge with no STATE behind it (_PENDING_S), and the
     settled position of a fader or the monitor encoder (_SETTLE_S)."""
     if st.get("pending") and (time.monotonic() - st.get("at", 0.0)) > _PENDING_S:
-        speech.say(st["pending"])
+        _say(st["pending"])
         st["pending"] = None
     # A turn that moved nothing: tell the operator, once per burst.
     turn_at = st.get("enc_turn_at") if levels_on else None
@@ -800,10 +846,10 @@ def flush_pending(st: dict) -> None:
             # (systemChannelSelected 0, then -1 on the second press), so that is what is named here.
             sel = st.get("chan_sel")
             if sel is not None and sel >= 0:
-                speech.say(_selected_phrase(sel)
+                _say(_selected_phrase(sel)
                          + ". Press its channel button again for the fader and monitor levels")
             else:
-                speech.say("Encoder not linked to anything")
+                _say("Encoder not linked to anything")
     levels = st.get("levels")
     if levels and (time.monotonic() - st.get("levels_at", 0.0)) > _SETTLE_S:
         said = st.setdefault("said", {})
@@ -813,7 +859,7 @@ def flush_pending(st: dict) -> None:
             said[key] = lvl
             st.setdefault("said_at", {})[key] = time.monotonic()
             st["run_key"] = None            # the gesture is over; name it again next time
-            speech.say(_moved_phrase(key[0], key[1], lvl))
+            _say(_moved_phrase(key[0], key[1], lvl))
         levels.clear()
 
 

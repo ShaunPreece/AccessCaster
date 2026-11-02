@@ -71,6 +71,9 @@ print(f"=== cross-point source {args.source} -> output {args.output}: "
       f"MIX instance {INDEX}, selector {sel} ({sel:#06x}), address {addr} ===")
 
 before, counts_before, path = snapshot()
+ON_FADER = args.source in {v for v, _k in rcp_read.find_all(rcp_read.read_model_stable(fresh=True),
+                                                            "channelInputSource")}
+print(f"  source {args.source} is {'on a fader' if ON_FADER else 'on no fader'}")
 check("the tree puts that MIX instance at the selector this code builds", path, [sel])
 print(f"  baseline {before}")
 
@@ -86,7 +89,9 @@ try:
     time.sleep(SETTLE)
     during, _c, _p = snapshot()
     check("excluding sets mixDisabled", during.get("mixDisabled"), True)
-    check("excluding clears mixLink", during.get("mixLink"), False)
+    # The unlink only moves mixLink for a source that is on a fader.
+    check("excluding clears mixLink" if ON_FADER
+          else "excluding a source on no fader leaves mixLink", during.get("mixLink"), not ON_FADER)
 finally:
     t.set_cross_point_excluded(args.output, args.source,
                                bool(before.get("mixDisabled")))

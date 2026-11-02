@@ -145,6 +145,28 @@ said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
 check("a real mute once the window passes", said, ["USB 1 (Main Stereo) unmuted"])
 pad_shortcuts.mixer_positions = frozenset()
 
+print("\nA JOB THAT REWRITES THE DESK HOLDS THE DESK-CHANGE SPEECH")
+SPOKEN.clear()
+_was_enabled = speech.enabled.is_set()
+speech.enabled.set()                  # the explanation is only spoken with announcements on
+announcer.hold_desk_speech("Restoring the profile")
+if not _was_enabled:
+    speech.enabled.clear()
+check("the hold explains itself once", list(SPOKEN), ["Restoring the profile. Please wait."])
+announcer.hold_desk_speech("Importing the show")
+said, st_h = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
+check("a second hold says nothing more, and a mute push is silent", said, [])
+check("the mute cache is still updated while held", st_h["muted"][1], True)
+announcer.release_desk_speech()
+said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
+check("still held while one job is running", said, [])
+announcer.release_desk_speech()
+said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
+check("held for the tail after the last job", said, [])
+announcer._hold_until = 0.0
+said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
+check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmuted"])
+
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
 # channelInputSource is pushed with the same 0x1C+strip selector; value = the new source code.

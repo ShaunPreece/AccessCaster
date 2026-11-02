@@ -694,6 +694,10 @@ def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
     global _session_pad_root
     if not on:
+        roots = ([_session_pad_root] if _session_pad_root
+                 else sorted(desk_drives.on_desk(_drive_roots())))
+        for root in roots:
+            dismount_volume(root)
         _session_pad_root = None
     rec = build_global_prop_int("transferModeType", SEL_SYSTEM, 2 if on else 0)
     # Logged as its own event as well as the record below it: entering transfer mode
@@ -752,6 +756,59 @@ def flush_volume(root: str) -> None:
     except Exception as exc:
         diagnostics.event("transfer.flush_fallback", str(exc))   # the slow but proven path follows
     _flush_volume_powershell(root)
+
+
+def dismount_volume(root: str) -> bool:
+    """Flush, lock and dismount the pad volume at `root`, so Windows lets go of it before the desk
+    takes the media away. True when Windows dismounted it.
+
+    LEAVING TRANSFER MODE PULLS THE MEDIA WITHOUT WARNING. Without a dismount first, Windows keeps
+    its mount of the volume, cached FAT and free-space bitmap included, across the desk's own
+    changes to the disk, and marks the volume dirty, which is the "There's a problem with this
+    drive" notification on the next mount. A refused lock (another process has a file open) still
+    dismounts: those handles are invalid either way once the media goes.
+    """
+    GENERIC_READ_WRITE = 0x80000000 | 0x40000000
+    FILE_SHARE_READ_WRITE = 0x00000001 | 0x00000002
+    OPEN_EXISTING = 3
+    FSCTL_LOCK_VOLUME = 0x00090018
+    FSCTL_DISMOUNT_VOLUME = 0x00090020
+    INVALID_HANDLE = ctypes.c_void_p(-1).value
+    try:
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.restype = ctypes.c_void_p
+        k32.DeviceIoControl.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                                        ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32,
+                                        ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        k32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        with quiet_drive_errors():
+            handle = k32.CreateFileW("\\\\.\\" + root[0] + ":", GENERIC_READ_WRITE,
+                                     FILE_SHARE_READ_WRITE, None, OPEN_EXISTING, 0, None)
+            if handle in (0, INVALID_HANDLE, None):
+                return False         # no volume mounted on that letter: nothing to let go of
+            try:
+                returned = ctypes.c_uint32(0)
+
+                def ioctl(code: int) -> bool:
+                    return bool(k32.DeviceIoControl(handle, code, None, 0, None, 0,
+                                                    ctypes.byref(returned), None))
+
+                k32.FlushFileBuffers(handle)
+                locked = False
+                for _ in range(5):
+                    if ioctl(FSCTL_LOCK_VOLUME):
+                        locked = True
+                        break
+                    time.sleep(0.1)
+                dismounted = ioctl(FSCTL_DISMOUNT_VOLUME)
+            finally:
+                k32.CloseHandle(handle)    # closing the handle also releases the lock
+        diagnostics.event("transfer.dismount", root, locked=locked, dismounted=dismounted)
+        return dismounted
+    except Exception as exc:
+        diagnostics.event("transfer.dismount_failed", f"{root}: {exc}")
+        return False
 
 
 def _flush_volume_powershell(root: str) -> None:

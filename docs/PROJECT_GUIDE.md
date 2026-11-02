@@ -1338,6 +1338,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Windows raise a MODAL "There is a problem with this drive" box on our behalf, for a condition we
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
   Thread-scoped on purpose: never swap it for process-wide `SetErrorMode`.
+- **EVERY TRANSFER-MODE EXIT DISMOUNTS THE PAD VOLUME FIRST** (`rcp_transfer.dismount_volume`, from
+  `_set_transfer_mode_raw`): flush, lock, `FSCTL_DISMOUNT_VOLUME`. The exit pulls the media without
+  warning, and otherwise Windows keeps its mount, cached FAT and free-space bitmap included, across
+  the desk's own changes to the disk. A FAT_FILE_SYSTEM bugcheck (0x23, in
+  `FatDeallocateDiskSpace` while the tidy deleted a pad file) happened with no dismount; it did not
+  reproduce in 40 cycles, so this is the likely fix, not a proven one. A refused lock still
+  dismounts. **The volume arrives with its boot-sector dirty byte (0x41) already set**, with nothing
+  written and after a clean dismount (Pro II, fw 1.7.6), so the "There's a problem with this drive"
+  notification is the desk's doing, and the dismount does not stop it. Do not clear the byte: the
+  desk appears to keep its own side mounted.
 
 ## CallMe
 
@@ -1431,6 +1441,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   mic was a CLEAN-RESTORE bug and not a Shows-page bug. A MERGE restore touches none of it. The page
   does not offer a clean restore (the reset's crash risk does not belong on a routine restore); it
   is reachable through the API and the DevTools tests only.
+- **A CLEAN RESTORE CLEARS EVERY USER PAD THE PROFILE HAS EMPTY** (`soundpad.clear_pads_not_in`),
+  because the reset refills the factory pads. It runs AFTER the pad transfer session closes: a clear
+  only completes when the desk leaves transfer mode. A merge restore leaves unmentioned pads alone.
 - **THE VERSION NUMBER LIVES IN `Project/version.py` AND NOWHERE ELSE, INCLUDING THE EXE'S WINDOWS
   VERSION RESOURCE.** `AccessCaster.spec` is ordinary Python at build time, so it reads that file
   with a regex and GENERATES `ProjectBuilds/version_info.generated.txt` (gitignored); `installer.iss`
@@ -1691,6 +1704,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
   different faults. Hotkey replies and the level watch are handed `speech.say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
+- **A JOB THAT REWRITES THE DESK HOLDS THE ANNOUNCER'S DESK-CHANGE SPEECH** (`_BackgroundJob`'s
+  `rewrites_desk`: the profile restore, the show commands, the pad restore). The announcer says
+  "<job>. Please wait." once and drops every desk change until 1.5 s after the last job ends; the
+  state cache keeps updating. Desk-change speech must go through `announcer._say` / `_tone`, or it
+  talks through a restore. The job's own steps and its end tone are not held.
 
 - **THE ANNOUNCER STARTS ON UNLESS ITS OFF IS REMEMBERED, and only a person's toggle is saved.**
   "Start with announcements the way I left them" (`announcer_remember`) is unticked by default,
