@@ -1,6 +1,7 @@
-"""Controls that write the desk: a switch and a slider, each holding its own write path.
+"""Controls that write the desk: a switch, a slider, a list and a number box, each holding its own
+write path.
 
-Both take `current()`, what the desk last reported (None when it did not report), and
+Each takes `current()`, what the desk last reported (None when it did not report), and
 `remember(value)`, called when a write is accepted, so the caller's record stays the desk's state.
 `accepted(reply)`, if given, is called after it with the accepted write's reply, for a write whose
 reply carries more than the value.
@@ -140,6 +141,91 @@ class Slider:
     def _settled(self, _value, reply):
         if reply.get("ok") and not self._quiet:
             self.page.frame.reply(self.slider, reply, recent=True)
+
+
+class _Field:
+    """What `Choice` and `Number` share. Arrowing either fires a change per step, so the writes go
+    through `LatestWins`, which sends only the newest value once the control has been still for
+    `DELAY_MS`; the reply is spoken once it has settled. `guard()` refuses before anything is sent."""
+
+    DELAY_MS = 400     # longer than the gap between arrow presses, so arrowing through writes once
+
+    def __init__(self, page, control, send, current, remember, description, guard, accepted):
+        self.page = page
+        self.control = control
+        self._current = current
+        self._remember = remember
+        self._guard = guard
+        self._accepted = accepted
+        self.acc = a11y.describe(control, description)
+        self._writer = LatestWins(page, send, self._done, settled=self._settled,
+                                  delay_ms=self.DELAY_MS)
+
+    def show(self):
+        self._put(self._current())
+
+    def _on_change(self, _event):
+        refusal = self._guard() if self._guard else None
+        if refusal:
+            self.show()
+            self.page.frame.say(refusal)
+            return
+        self._writer.change(self._get())
+
+    def _done(self, value, reply):
+        if reply.get("ok"):
+            self._remember(value)
+            if self._accepted:
+                self._accepted(reply)
+            return
+        self.page.frame.say(reply.get("message") or "Could not make that change.")
+        self.show()
+
+    def _settled(self, _value, reply):
+        if reply.get("ok"):
+            self.page.frame.reply(self.control, reply, recent=True)
+
+
+class Choice(_Field):
+    """A list whose choice writes, for a value that replaces nothing (a pad's colour). A value
+    whose write replaces something is applied by a button instead (PROJECT_GUIDE part 2). `items`
+    is (value, label) pairs."""
+
+    def __init__(self, page, parent, sizer, label, items, send, current, remember,
+                 description="", guard=None, accepted=None):
+        self._values = [value for value, _label in items]
+        choice = labelled(parent, sizer, label, lambda p: wx.Choice(p))
+        set_choices(choice, [text for _value, text in items])
+        super().__init__(page, choice, send, current, remember, description, guard, accepted)
+        choice.Bind(wx.EVT_CHOICE, self._on_change)
+
+    def _get(self):
+        return self._values[self.control.GetSelection()]
+
+    def _put(self, value):
+        index = self._values.index(value) if value in self._values else wx.NOT_FOUND
+        if self.control.GetSelection() != index:
+            self.control.SetSelection(index)
+
+
+class Number(_Field):
+    """A number box whose value writes, for a number the user knows rather than feels their way to
+    (a MIDI control number): typing takes the digits, and the arrows still step by one. A typed
+    value is sent on Enter or on leaving the box."""
+
+    def __init__(self, page, parent, sizer, label, lo, hi, send, current, remember,
+                 description="", guard=None, accepted=None):
+        spin = labelled(parent, sizer, label, lambda p: wx.SpinCtrl(
+            p, min=lo, max=hi, size=(90, -1), style=wx.SP_ARROW_KEYS | wx.TE_PROCESS_ENTER))
+        super().__init__(page, spin, send, current, remember, description, guard, accepted)
+        spin.Bind(wx.EVT_SPINCTRL, self._on_change)
+
+    def _get(self):
+        return self.control.GetValue()
+
+    def _put(self, value):
+        if value is not None and self.control.GetValue() != value:
+            self.control.SetValue(value)
 
 
 def set_choices(choice, labels):

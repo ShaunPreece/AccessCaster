@@ -1757,6 +1757,28 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   anything on show. `server.read_usb_driver` reads Windows and the service's status, never the
   desk. Its `switching` holds both USB Confirm buttons: a second switch made sooner lands in the
   middle of the first's bind wait.
+- **A LIST OR NUMBER BOX WHOSE VALUE REPLACES NOTHING WRITES AS IT CHANGES, THROUGH `LatestWins`**
+  (`controls.Choice`, `controls.Number`): a pad's colour, play mode or MIDI mapping. Arrowing sends
+  only the newest value, `DELAY_MS` after the arrows stop. Anything that replaces something keeps
+  its Confirm button (above).
+- **THE PADS ARE NOT IN THE DESK STATE** (`pads_section.PadsSection`). They come from a model dump
+  of their own, about 1.5 s, read after the desk state's first read, on F5 and after a change made
+  in the window; a change made on the desk shows after F5.
+- **THE PADS ARE READ AGAIN `REREAD_AFTER_MS` AFTER A SETTINGS DIALOG THAT WROTE, LONGER THAN
+  `_Field.DELAY_MS`.** A write still waiting in `LatestWins` when the dialog closes is still sent,
+  but its reply has no dialog to land on; reading sooner would read the pad before it.
+- **NO DIALOG FOCUSES ANYTHING FROM ITS CONSTRUCTOR; THE CONTROL TO LAND ON IS CREATED FIRST.** A
+  dialog activating focuses its first focusable control, and that focus event is what is read; a
+  `SetFocus` as well is a second event, and the control is read twice. `TextDialog` moves its
+  default button first in the tab order. `test_native_dialogs` walks every native dialog for it.
+- **EVERY DIALOG HAS A CONTROL TO LAND ON**, even a job that cannot be closed: its button is Please
+  wait (`JobDialog(closable=False)`). With none, the screen reader focuses something of its own.
+- **A DIALOG'S NOTIFICATION WINDOW HAS NO NAME** (`dialogs.SpeakingDialog`). A screen reader reads
+  it as part of the dialog's text, and in a dialog with nothing else to focus, as the focus: named
+  with the title, the title is heard three times.
+- **A DIALOG OPENED STRAIGHT AFTER ANOTHER CLOSES IS OPENED WITH `wx.CallAfter`**
+  (`PadsPage._changed`). Opened at once, it comes up while the focus is still returning from the
+  first, and its first control is never read.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 

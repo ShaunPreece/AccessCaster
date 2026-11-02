@@ -17,12 +17,12 @@ from native import announce
 from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
-from native.pages import WebSection
+from native.pads_section import PadsSection
+from native.pages import Speaker, WebSection
 from native.routing_section import RoutingSection
 
-# The sections still on the web page, as (title, web route), in tree order after Routing.
+# The sections still on the web page, as (title, web route), in tree order after SMART pads.
 WEB_SECTIONS = [
-    ("SMART pads", "pads"),
     ("Recording", "recording"),
     ("CallMe", "callme"),
     ("Backups", "profiles"),
@@ -32,7 +32,7 @@ WEB_SECTIONS = [
 ]
 
 
-class MainFrame(wx.Frame):
+class MainFrame(Speaker, wx.Frame):
     def __init__(self):
         super().__init__(None, title="AccessCaster", size=(980, 680))
         root = wx.Panel(self)
@@ -53,7 +53,7 @@ class MainFrame(wx.Frame):
         self._notifier = announce.Notifier(sink.GetHandle(), "AccessCaster")
 
         self.desk = DeskState(self)
-        self.sections = [ChannelsSection(self), RoutingSection(self)] + [
+        self.sections = [ChannelsSection(self), RoutingSection(self), PadsSection(self)] + [
             WebSection(self, title, route) for title, route in WEB_SECTIONS]
         tree_root = self.tree.AddRoot("AccessCaster")
         self._branches = []
@@ -103,15 +103,6 @@ class MainFrame(wx.Frame):
 
     def say(self, text, recent=False):
         self._notifier.say(text, announce.MOST_RECENT if recent else announce.ALL)
-
-    def reply(self, source, reply, recent=False):
-        """Speak an action's reply to a change made from `source`. A refusal is always spoken. A
-        success only while `source` still has the focus: once the user has moved on, it would cut
-        off the screen reader reading where they are now."""
-        if not reply.get("ok"):
-            self.say(reply.get("message") or "That did not work.", recent)
-        elif wx.Window.FindFocus() is source:
-            self.say(reply.get("message") or "Done.", recent)
 
     # ---- the tree --------------------------------------------------------------------------
 

@@ -1,6 +1,10 @@
 """Dialogs for the desk's longer jobs: the question before one, the job running, and what it came
 to, each its own dialog.
 
+A dialog activating focuses its first focusable control, and that one focus event is what the
+screen reader reads. So the control to land on is created first and nothing is focused from a
+constructor: a second SetFocus is a second focus event, and the control is read twice.
+
 A screen reader reads a dialog's text when the dialog opens and not when it changes, so a stage the
 user has to hear in full (a question, a result) opens a dialog of its own. While a job runs, its
 stages are spoken through UIA notifications raised from the job's dialog (`JobDialog.say`).
@@ -9,8 +13,33 @@ import wx
 
 from native import announce
 from native.calls import call
+from native.pages import Speaker
 
 _WRAP_DIP = 440
+
+
+class SpeakingDialog(Speaker, wx.Dialog):
+    """A dialog that speaks through notifications raised from a window inside it, so what it says
+    comes from the dialog the user is in. It is its own `frame`, so the controls in
+    `native.controls`, which speak through `page.frame`, work in it unchanged. A subclass adds
+    `self.sink` to its sizer."""
+
+    def __init__(self, parent, title):
+        super().__init__(parent, title=title)
+        self.frame = self
+        # Never shown: the window the notifications are raised from. Nameless, because a screen
+        # reader reads it as part of the dialog's text, and with nothing else to focus, takes it as
+        # the focus.
+        self.sink = wx.StaticText(self, label="", size=(1, 1))
+        self._notifier = announce.Notifier(self.sink.GetHandle(), "")
+        self.sink.Bind(wx.EVT_WINDOW_DESTROY, self._on_sink_destroyed)
+
+    def say(self, text, recent=False):
+        self._notifier.say(text, announce.MOST_RECENT if recent else announce.ALL)
+
+    def _on_sink_destroyed(self, event):
+        self._notifier.close()
+        event.Skip()
 
 
 def _paragraphs(dialog, sizer, text):
@@ -26,16 +55,17 @@ def _paragraphs(dialog, sizer, text):
 
 class TextDialog(wx.Dialog):
     """Some text and a row of buttons, for a question or a result. `buttons` is (id, label) pairs in
-    order; `ShowModal` returns the id pressed. `default` takes the focus and Enter; Escape and the
-    title bar's close answer with `escape`."""
+    order; `ShowModal` returns the id pressed. `default` is first in the tab order, so the focus
+    lands on it, and takes Enter; Escape and the title bar's close answer with `escape`."""
 
     def __init__(self, parent, title, text, buttons, default, escape):
         super().__init__(parent, title=title)
         sizer = wx.BoxSizer(wx.VERTICAL)
         _paragraphs(self, sizer, text)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        for button_id, label in buttons:
-            row.Add(wx.Button(self, button_id, label), 0, wx.ALL, 5)
+        made = [wx.Button(self, button_id, label) for button_id, label in buttons]
+        for button in made:
+            row.Add(button, 0, wx.ALL, 5)
         sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
         self.SetSizerAndFit(sizer)
         # Every button ends the dialog with its own id, including ones wx has no default for.
@@ -43,24 +73,29 @@ class TextDialog(wx.Dialog):
         self.SetEscapeId(escape)
         chosen = self.FindWindow(default)
         chosen.SetDefault()
-        chosen.SetFocus()
+        if chosen is not made[0]:
+            chosen.MoveBeforeInTabOrder(made[0])
         self.CentreOnParent()
 
 
-class JobDialog(wx.Dialog):
+class JobDialog(SpeakingDialog):
     """A job running on the desk: what it is doing now, and a Stop button.
 
     `begin(dialog)` runs once the dialog is up and starts the job; from then on the caller drives
     `say`, `poll` and `finish`. `stop()` runs, off the UI thread, on Stop, Escape or the title bar's
     close: it asks the job to end, and the dialog stays until the job reports that it has. A job
     that cannot be stopped passes `stop=None`: its button is Close, which ends the dialog with
-    `result` None and leaves the job running.
+    `result` None and leaves the job running. With `closable=False` the button is Please wait, and
+    it, Escape and the title bar's close only say to wait: for a job whose result decides what the
+    user does next.
 
     No progress bar: NVDA beeps a progress bar's changes, and a job that measures a microphone must
     make no sound of its own."""
 
-    def __init__(self, parent, title, text, begin, stop, stop_label=None):
-        super().__init__(parent, title=title)
+    WAIT = "Please wait until this finishes."
+
+    def __init__(self, parent, title, text, begin, stop, stop_label=None, closable=True):
+        super().__init__(parent, title)
         self._begin = begin
         self._stop = stop
         self._stopping = False
@@ -68,19 +103,23 @@ class JobDialog(wx.Dialog):
         self.result = None
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.status = _paragraphs(self, sizer, text)[0]
-        button = wx.Button(self, wx.ID_CANCEL, stop_label or ("Stop" if stop else "Close"))
+        if closable:
+            button = wx.Button(self, wx.ID_CANCEL, stop_label or ("Stop" if stop else "Close"))
+            # Bound on the dialog and not skipped, so the cancel id stops the job instead of
+            # ending the modal. The title bar's close arrives as the same button.
+            self.Bind(wx.EVT_BUTTON, self._on_stop, id=wx.ID_CANCEL)
+            self.SetEscapeId(wx.ID_CANCEL)
+        else:
+            # A button that only says to wait: a dialog needs a control for the focus to land on,
+            # or the screen reader finds one of its own.
+            button = wx.Button(self, label="Please wait")
+            button.Bind(wx.EVT_BUTTON, lambda _e: SpeakingDialog.say(self, self.WAIT))
+            self.SetEscapeId(wx.ID_NONE)
+            self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
+            self.Bind(wx.EVT_CLOSE, self._on_close)
         sizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
-        # Never shown: the window this dialog's notifications are raised from.
-        sink = wx.StaticText(self, label="", size=(1, 1))
-        sizer.Add(sink, 0)
-        self._notifier = announce.Notifier(sink.GetHandle(), title)
-        sink.Bind(wx.EVT_WINDOW_DESTROY, self._on_sink_destroyed)
+        sizer.Add(self.sink, 0)
         self.SetSizerAndFit(sizer)
-        # Bound on the dialog and not skipped, so the cancel id stops the job instead of ending
-        # the modal. The title bar's close arrives as the same button.
-        self.Bind(wx.EVT_BUTTON, self._on_stop, id=wx.ID_CANCEL)
-        self.SetEscapeId(wx.ID_CANCEL)
-        button.SetFocus()
         self.CentreOnParent()
 
     def run(self):
@@ -89,7 +128,7 @@ class JobDialog(wx.Dialog):
         self.ShowModal()
         return self.result
 
-    def say(self, text):
+    def say(self, text, recent=False):
         """Show `text` as the job's current stage and speak it. A stage already showing is not
         spoken again."""
         if not self or text == self.status.GetLabel():
@@ -97,7 +136,7 @@ class JobDialog(wx.Dialog):
         self.status.SetLabel(text)
         self.status.Wrap(self.FromDIP(_WRAP_DIP))
         self.Fit()
-        self._notifier.say(text)
+        super().say(text, recent)
 
     def poll(self, status, handle, every_ms=400):
         """Ask `status()` off the UI thread, hand its reply to `handle(reply)` on it, and ask again
@@ -122,6 +161,19 @@ class JobDialog(wx.Dialog):
         if self.IsModal():
             self.EndModal(wx.ID_OK)
 
+    def _on_key(self, event):
+        if event.GetKeyCode() == wx.WXK_ESCAPE:
+            SpeakingDialog.say(self, self.WAIT)
+            return
+        event.Skip()
+
+    def _on_close(self, event):
+        if event.CanVeto() and not self._finished:
+            event.Veto()
+            SpeakingDialog.say(self, self.WAIT)
+            return
+        event.Skip()
+
     def _on_stop(self, _event):
         if self._stopping or self._finished:
             return
@@ -131,10 +183,6 @@ class JobDialog(wx.Dialog):
         self._stopping = True
         self.say("Stopping.")
         call(self, self._stop)
-
-    def _on_sink_destroyed(self, event):
-        self._notifier.close()
-        event.Skip()
 
 
 class DeletePresetDialog(wx.Dialog):
@@ -158,7 +206,6 @@ class DeletePresetDialog(wx.Dialog):
         buttons.Realize()
         sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(sizer)
-        self.list.SetFocus()
 
     def chosen(self):
         return self.names[self.list.GetSelection()]

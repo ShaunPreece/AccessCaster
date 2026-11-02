@@ -368,7 +368,6 @@ class SavePresetDialog(wx.Dialog):
         sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_save, id=wx.ID_OK)
-        self.name_box.SetFocus()
         self.CentreOnParent()
 
     def _on_save(self, event):

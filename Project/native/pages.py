@@ -10,6 +10,20 @@ on the right. Every page window is a child of `frame.host`.
 import wx
 
 
+class Speaker:
+    """`reply` for a window that has `say(text, recent)`: the main window, and a dialog with speech
+    of its own (`dialogs.SpeakingDialog`)."""
+
+    def reply(self, source, reply, recent=False):
+        """Speak an action's reply to a change made from `source`. A refusal is always spoken. A
+        success only while `source` still has the focus: once the user has moved on, it would cut
+        off the screen reader reading where they are now."""
+        if not reply.get("ok"):
+            self.say(reply.get("message") or "That did not work.", recent)
+        elif wx.Window.FindFocus() is source:
+            self.say(reply.get("message") or "Done.", recent)
+
+
 class Page:
     def __init__(self, key, title, window):
         self.key = key
