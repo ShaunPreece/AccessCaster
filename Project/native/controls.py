@@ -2,6 +2,8 @@
 
 Both take `current()`, what the desk last reported (None when it did not report), and
 `remember(value)`, called when a write is accepted, so the caller's record stays the desk's state.
+`accepted(reply)`, if given, is called after it with the accepted write's reply, for a write whose
+reply carries more than the value.
 A refusal is spoken and puts the control back to `current()`. A success is spoken only while the
 control still has the focus (`frame.reply`).
 """
@@ -19,8 +21,9 @@ class Switch:
     spoken. `guard()`, if given, returns a sentence to refuse with before anything is sent."""
 
     def __init__(self, page, parent, sizer, label, send, current, remember, description="",
-                 guard=None):
+                 guard=None, accepted=None):
         self.page = page
+        self._accepted = accepted
         self.box = wx.CheckBox(parent, label=label)
         self.acc = a11y.describe(self.box, description)
         self._send = send
@@ -48,6 +51,8 @@ class Switch:
         self.page.frame.reply(self.box, reply)
         if reply.get("ok"):
             self._remember(on)
+            if self._accepted:
+                self._accepted(reply)
         else:
             self.show()
 
@@ -65,8 +70,9 @@ class Slider:
     FOCUSED_SETTLE_MS = 400
 
     def __init__(self, page, parent, sizer, label, lo, hi, send, current, remember, words,
-                 unread=None, quiet=False):
+                 unread=None, quiet=False, accepted=None):
         self.page = page
+        self._accepted = accepted
         self.slider = labelled(parent, sizer, label, lambda p: wx.Slider(
             p, minValue=lo, maxValue=hi, size=(260, -1)))
         self._current = current
@@ -74,7 +80,7 @@ class Slider:
         self._words = words
         self._unread = lo if unread is None else unread
         self._quiet = quiet
-        a11y.describe(self.slider, value=self._value_words)
+        self.acc = a11y.describe(self.slider, value=self._value_words)
         self._writer = LatestWins(page, send, self._done, settled=self._settled)
         self._moved_at = 0.0
         self._landing = None
@@ -101,6 +107,10 @@ class Slider:
         if self.slider.GetValue() != value:
             self.slider.SetValue(value)
 
+    def set_shown(self, shown):
+        """Show or hide the slider with its label."""
+        self.slider.GetContainingSizer().ShowItems(shown)
+
     def _on_slider(self, _event):
         self._moved_at = time.monotonic()
         self._writer.change(self.slider.GetValue())
@@ -114,6 +124,8 @@ class Slider:
     def _done(self, value, reply):
         if reply.get("ok"):
             self._remember(value)
+            if self._accepted:
+                self._accepted(reply)
             return
         self.page.frame.say(reply.get("message") or "Could not make that change.")
         if self._current() is not None:

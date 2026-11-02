@@ -2,12 +2,12 @@
 (`desk_state`), so a change made on the desk shows without a re-read.
 
 Each page is a tab control (`channel_tabs`): the channel's settings, then presets, processing, the
-parameter groups and effects, as the channel has them. Auto gain and the level check are still on
-the web page.
+parameter groups and effects, as the channel has them.
 """
 import wx
 
 import channels
+from native.channel_jobs import LevelCheck
 from native.channel_tabs import build_tabs
 from native.pages import MessagePage, Page, page_box
 
@@ -22,6 +22,7 @@ class ChannelsSection:
         self.frame = frame
         self.desk = frame.desk
         self.tab_key = None        # the tab last chosen, which every channel page follows
+        self.level_check = LevelCheck(frame)
         # What the next full read owes the user: a refusal if they asked for it, and with
         # `_announce`, the success too. A read the window starts itself says nothing.
         self._asked = False

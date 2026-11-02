@@ -38,8 +38,8 @@ import meters
 # Peaks are aimed here. -9 dBFS puts ordinary speech in the -12 to -6 range with room left for the
 # occasional loud word a percentile deliberately ignores.
 TARGET_DBFS = -9.0
-# How much of the take to ignore at the top. The 99th percentile of a 30-second sample at 20 polls
-# a second discards the loudest ~6 readings, which is a cough, not a sentence.
+# How much of the take to ignore at the top. The 99th percentile of a 15-second sample at 20 polls
+# a second discards the loudest 3 readings, which is a cough, not a sentence.
 PERCENTILE = 0.99
 # Below this the take is treated as silence and nothing is written: there is no honest gain to
 # derive from a microphone that was not used.

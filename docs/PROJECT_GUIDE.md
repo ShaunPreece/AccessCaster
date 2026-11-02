@@ -1176,6 +1176,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   USB 1 hard left. Every strip carries all three; default legs are 0.0 and 1.0. A pan control on a
   stereo channel that writes `channelPan` is dead. RODE's app shows a stereo channel two knobs,
   LEFT and RIGHT, one per leg, not one balance control.
+- **PAN DOES NOTHING WHILE A CHANNEL'S PROCESSING IS OFF** (heard 2nd November 2026, USB 1): the
+  legs are written and read back, and nothing moves until processing is on. The window says so in
+  each pan control's description (`channel_tabs.pan_note`).
 - **WRITING A VOXLAB MACRO (`channelDepth` / `Sparkle` / `Punch`) RECOMPUTES EQ AND DYNAMICS.**
   The desk rewrites the EQ gains, compressor, gate and de-esser thresholds from the macros, so a
   restore writes the macros FIRST and the derived values after. Turning Advanced off in RODE's app
@@ -1606,9 +1609,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE EXPORT IS AN ALLOW-LIST, NEVER A DUMP OF settings.json, AND THE REASON IS A CREDENTIAL.**
   `remote_token` grants remote access to this app and lives in the same file as the keyboard
   shortcuts, so a dump would put it in a file people email to themselves. `app_settings.EXCLUDED`
-  holds it and two others, each with its reason at the site: `baseline_asked` (carrying it would
-  silently suppress a desk's one-and-only first-run backup offer on a new machine) and
-  `applied_presets` (it describes one desk, not a preference). **Adding a new preference means
+  holds it and the others, each with its reason at the site: among them `baseline_asked` (carrying
+  it would silently suppress a desk's one-and-only first-run backup offer on a new machine), and
+  `applied_presets` and `pan_links` (each describes one desk, not a preference). **Adding a new preference means
   adding it to PORTABLE, MACHINE_SPECIFIC or EXCLUDED** - `test_app_settings.py` fails if a key the
   app writes is in none of them, so a new setting cannot quietly become unbackupable. It finds the
   keys by reading `settings_file.update(...)` calls out of `Project/`, never from a hand list: the hand
@@ -1720,6 +1723,19 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   voicing moves the gain too). Re-applying the same voicing is refused for the same reason.
 - **A CONTROL READS AND RECORDS THROUGH `page.rec`** (`ChannelPage.field`), never a record captured
   when it was built: a re-read replaces the record, and a captured one goes stale silently.
+- **A STAGE THE USER MUST HEAR IN FULL OPENS A DIALOG OF ITS OWN** (`native.dialogs`): a screen
+  reader reads a dialog's text when it opens, never when it changes. While a job runs, its stages
+  are spoken by `JobDialog.say`, a notification from the dialog's own notifier. No progress bar
+  in a `JobDialog`: NVDA beeps its changes, and auto gain is measuring a microphone.
+- **A LEVEL CHECK BUTTON'S LABEL CHANGES ONLY WHILE IT DOES NOT HAVE THE FOCUS**
+  (`channel_jobs.LevelCheck`). A screen reader reads a focused button's new name aloud, over the
+  levels the check is speaking. The server toggles, so a press is right whatever the label says.
+- **A STEREO PAN'S THREE SLIDERS ARE BUILT ONCE AND THE LINK ONLY SHOWS OR HIDES THEM**
+  (`channel_tabs.StereoPan`), so linking leaves the focus on the switch.
+- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST EXISTS TWICE AND THE TWO MUST AGREE**:
+  `server.linked_pan_offset` and `linkedPanOffset` in `app.js`. A client shows centre for legs
+  moved since the link, and the server starts the link again from those legs on the next move;
+  if the tests differ, the slider's position and the written legs disagree.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 
@@ -2116,9 +2132,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Metering and Windows audio
 
+- **A SPOKEN LEVEL IS THE LOUDEST SINCE THE LAST ONE SPOKEN, NEVER `peak_hold`** (`meters.Watcher`).
+  The hold falls under 1 dB a second, so it went on reading a voice for half a minute after it
+  stopped. Below `meters.QUIET` (-50 dBFS) a check says "quiet" once, then nothing.
 - **`_ChatIsolation.__enter__` PUTS BACK WHAT IT CHANGED WHEN IT FAILS PART WAY**, because a
   `with` block does not call `__exit__` when `__enter__` raises. A restore that fails is reported
-  with `CHAT_NOT_RESTORED`, by auto gain and the level check alike.
+  with `CHAT_NOT_RESTORED`, by auto gain and the level check alike. `changed` is set BEFORE each
+  write, not after: a mix that already carried the one source is neither settled nor restored, and a
+  write that fails part way must still count as a change.
 - **Level meters read Windows audio endpoints, so metering cannot work or be tested over Remote
   Desktop.** Run `query session` first; that is the whole precondition.
 - **Default to a CAPTURE endpoint.** With no stream chosen the meter defaulted to the PLAYBACK

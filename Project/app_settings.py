@@ -72,6 +72,9 @@ EXCLUDED = {
     # A RECORD OF ONE DESK. Which voicing preset currently sits on which channel is a fact about
     # that mixer, not a preference, and importing it would claim presets that are not applied.
     "applied_presets": "it describes one particular desk rather than a preference",
+    # The same for which stereo channels have their pan sides linked: each link holds where that
+    # desk's legs were when it was made.
+    "pan_links": "it records pan positions on one particular desk",
     # THIS COPY'S UPDATE STATE (app_updates.py). When it last looked, the version it turned down
     # and an install in flight all describe the copy on this computer, which may be on another
     # version; carried over, a skip would hide a release the other machine never saw.

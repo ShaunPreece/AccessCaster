@@ -10,6 +10,7 @@ import wx.lib.scrolledpanel as scrolled
 import server
 from native import a11y
 from native.calls import call
+from native.channel_jobs import AutoGain
 from native.controls import Slider, Switch, set_choices
 from native.pages import group, labelled
 
@@ -48,6 +49,14 @@ def pan_words(value):
     if value >= 100:
         return "hard right"
     return f"{(50 - value) * 2} percent left" if value < 50 else f"{(value - 50) * 2} percent right"
+
+
+def pan_note(rec):
+    """A pan control's description: pan is part of the processing chain, so with processing off
+    it does nothing."""
+    if rec.get("processing_on") is False:
+        return "Processing is off for this channel, so pan does nothing until it is on."
+    return ""
 
 
 def no_strip_note(rec, what):
@@ -113,6 +122,8 @@ class Tab(scrolled.ScrolledPanel):
 
 
 class SettingsTab(Tab):
+    """Mute, listen, the level, auto gain and the level check, then a mic's input settings."""
+
     key = "settings"
     title = "Channel settings"
 
@@ -149,6 +160,14 @@ class SettingsTab(Tab):
             self.add(Slider(page, self, self.sizer, "Level", lo, hi,
                             lambda db: server.action_set_channel_level(name, db),
                             *field("level_db"), words=lambda db: f"{db} decibels"))
+        # Auto gain sets a mic's preamp gain, which nothing else has. The level check works on
+        # every channel but Chat: it listens on the Chat output, which leaves the caller out.
+        if is_mic:
+            auto = wx.Button(self, label="Set gain automatically")
+            auto.Bind(wx.EVT_BUTTON, lambda _e: AutoGain(page, auto).run())
+            self.sizer.Add(auto, 0, wx.ALL, 6)
+        if name != "Chat":
+            page.section.level_check.button(self, self.sizer, name)
 
         self.mic_type = None
         if is_mic:
@@ -391,21 +410,108 @@ class ParamTab(Tab):
         self.key, self.title = key, title
         name = page.name
         stereo = bool(page.rec.get("stereo"))
+        self.pan_controls = []
         single = len(groups) == 1 and groups[0]["group"] == title
         for g in groups:
             sizer, parent = ((self.sizer, self) if single
                              else group(self, self.sizer, g["group"]))
             # Pan comes in a mono and a stereo kind; a channel gets only its own.
+            legs = []
             for ctrl in g["controls"]:
                 if ctrl.get("pan") and bool(ctrl.get("stereo")) != stereo:
                     continue
-                self.add(Slider(
+                if stereo and ctrl["prop"] in server._PAN_LEGS:
+                    legs.append(ctrl)
+                    continue
+                slider = self.add(Slider(
                     page, parent, sizer, ctrl["label"], 0, 100,
                     lambda pct, prop=ctrl["prop"]: server.action_set_channel_param(
                         name, prop, pct / 100),
                     *page.field("params", ctrl["prop"], scale=100),
                     words=pan_words if ctrl.get("pan") else percent_words, unread=50))
+                if ctrl.get("pan"):
+                    self.pan_controls.append(slider.acc)
+            if legs:
+                stereo_pan = self.add(StereoPan(self, parent, sizer, legs))
+                self.pan_controls += stereo_pan.accs()
         self.finish()
+
+    def show(self, rec):
+        super().show(rec)
+        note = pan_note(rec)
+        for acc in self.pan_controls:
+            acc.description = note
+
+
+class StereoPan:
+    """A stereo channel's pan: its two legs, as the desk has them, or with Link on, one Pan
+    control that shifts both from where they were when linked (`server.action_set_linked_pan`).
+    All three sliders are built once and the link shows one kind or the other, so linking never
+    moves the focus off the switch."""
+
+    def __init__(self, tab, parent, sizer, legs):
+        self.tab = tab
+        self.page = page = tab.page
+        name = page.name
+        self._legs_now = self._legs()
+        self.link = Switch(page, parent, sizer, "Link both sides into one pan control",
+                           lambda on: server.action_link_pan(name, on, *self._legs_now),
+                           self._linked, lambda _on: None, accepted=self._links_changed)
+        self.leg_sliders = [Slider(
+            page, parent, sizer, ctrl["label"], 0, 100,
+            lambda pct, prop=ctrl["prop"]: server.action_set_channel_param(name, prop, pct / 100),
+            *page.field("params", ctrl["prop"], scale=100), words=pan_words, unread=50)
+            for ctrl in legs]
+        self.linked = Slider(page, parent, sizer, "Pan", -100, 100,
+                             lambda off: server.action_set_linked_pan(name, off, *self._legs_now),
+                             self._offset, lambda _off: None, words=server.pan_offset_words,
+                             unread=0, accepted=self._moved)
+        self._shown_linked = None
+
+    def accs(self):
+        """The accessibility objects of every control here, for a description."""
+        return [self.link.acc] + [slider.acc for slider in (*self.leg_sliders, self.linked)]
+
+    def _legs(self):
+        """The legs as the record has them, in percent; centre for one not read."""
+        params = self.page.rec.get("params") or {}
+        return tuple(50 if params.get(prop) is None else round(params[prop] * 100)
+                     for prop in server._PAN_LEGS)
+
+    def _links(self):
+        return self.page.section.data.get("pan_links") or {}
+
+    def _linked(self):
+        return self.page.name in self._links()
+
+    def _offset(self):
+        link = self._links().get(self.page.name)
+        return None if link is None else server.linked_pan_offset(link, *self._legs())
+
+    def _links_changed(self, reply):
+        self.page.section.data["pan_links"] = reply.get("pan_links") or {}
+        self.show()
+
+    def _moved(self, reply):
+        params = self.page.rec.setdefault("params", {})
+        for prop, pct in (reply.get("legs") or {}).items():
+            params[prop] = pct / 100
+        self._links_changed(reply)
+
+    def show(self):
+        # A snapshot for the writes, which run off the UI thread.
+        self._legs_now = self._legs()
+        self.link.show()
+        for slider in (*self.leg_sliders, self.linked):
+            slider.show()
+        linked = self._linked()
+        if linked != self._shown_linked:
+            self._shown_linked = linked
+            for slider in self.leg_sliders:
+                slider.set_shown(not linked)
+            self.linked.set_shown(linked)
+            self.tab.Layout()
+            self.tab.FitInside()
 
 
 class EffectsTab(Tab):

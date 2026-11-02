@@ -2837,6 +2837,7 @@ def action_get_channels(percent: bool = True) -> dict:
         "wireless_mics": _wireless_mics(blob),
         "modules": PROCESSING_MODULES, "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]),
         "presets": preset_list(),
+        "pan_links": _pan_links(),
         "gain_min_db": GAIN_MIN_DB, "gain_max_db": GAIN_MAX_DB,
         "level_min_db": LEVEL_MIN_DB, "level_max_db": LEVEL_MAX_DB,
         "message": "Read all channels from the device.",
@@ -3127,10 +3128,15 @@ def _solo_after_clear(strip: int) -> str:
 # can be put back: the channel's processing bypass is ALWAYS restored, and the gain can be undone
 # from the result.
 
-_AUTOGAIN_SECONDS = 30.0
+# The take. 15 s at 20 readings a second is 300, so the 99th percentile still drops the loudest
+# three: a cough, not a sentence.
+_AUTOGAIN_SECONDS = 15.0
 # The second, shorter take that checks the new gain. Ten seconds is enough for a few sentences and
 # short enough that nobody minds being asked twice.
 _AUTOGAIN_VERIFY_S = 10.0
+# Between a take's instruction and its start tone: long enough for a screen reader to finish
+# saying it, after the page's next poll has picked it up.
+_AUTOGAIN_LEAD_S = 2.5
 _autogain_lock = threading.Lock()
 _autogain = None            # the running or finished job, as a plain dict
 
@@ -3234,14 +3240,15 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         # The lock is taken first. `as` binds only once __enter__ succeeds, and a failed __enter__
         # restores for itself.
         with _hid_lock, _ChatIsolation(mic - 1) as iso:
-            # THE CUE COMES FIRST, AND IT FINISHES FIRST - not because it would otherwise be
-            # measured (it plays out on USB 1, and the isolated mix excludes everything except
-            # the microphone, so it cannot reach the measurement) but because the person should
-            # not start talking over their own start signal. Only an acoustic path through
+            # THE INSTRUCTION, THEN THE TONE, THEN THE TAKE. The tone finishes before the take
+            # starts, not because it would otherwise be measured (it plays out on USB 1, and the
+            # isolated mix excludes everything except the microphone) but because the person
+            # should not start talking over their own start signal. Only an acoustic path through
             # monitor speakers could put it in the take.
+            _autogain_lead("Talk at the tone, normally, as you would on air.")
             meters.cue("start")
             _autogain_set(phase="listening", seconds=seconds, started=time.monotonic(),
-                          message="Speak now.")
+                          message="Listening.")
             result = autogain.measure_endpoint(
                 endpoint["id"], seconds,
                 should_stop=lambda: _autogain_state().get("cancel"))
@@ -3269,10 +3276,10 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
                 # Without the second take the result is a PREDICTION rather than a measurement,
                 # and nothing tells the user whether it landed. The isolation is still open, so
                 # it costs nothing but the ten seconds.
+                _autogain_lead("Talk again at the tone, for ten seconds, so it can check.")
                 meters.cue("start")
                 _autogain_set(phase="verifying", seconds=_AUTOGAIN_VERIFY_S,
-                              started=time.monotonic(),
-                              message="Speak again, to check.")
+                              started=time.monotonic(), message="Listening.")
                 check = autogain.correct_for_level(
                     autogain.measure_endpoint(
                         endpoint["id"], _AUTOGAIN_VERIFY_S,
@@ -3307,6 +3314,15 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
             _autogain_warn("WARNING: processing could not be switched back on for that "
                            "microphone. Switch it on yourself on this page, or that channel will "
                            "sound unprocessed.")
+
+
+def _autogain_lead(instruction: str) -> None:
+    """Say what to do before the start tone, not after it: the tone is the signal to begin, so
+    the instruction has to have been heard by then. Stop ends the wait early."""
+    _autogain_set(phase="ready", message=instruction)
+    end = time.monotonic() + _AUTOGAIN_LEAD_S
+    while time.monotonic() < end and not _autogain_state().get("cancel"):
+        time.sleep(0.1)
 
 
 def _autogain_warn(warning: str) -> None:
@@ -3345,6 +3361,7 @@ class _ChatIsolation:
         self.level = 1.0
         self.mode_before = None
         self.excluded_before = {}
+        self.changed = False
         self.restored = False
 
     def _snapshot(self):
@@ -3371,18 +3388,21 @@ class _ChatIsolation:
         # puts back what the earlier ones changed here, and says so if that fails too.
         try:
             if self.mode_before != 2:
+                self.changed = True
                 rcp_transfer.set_output_routing(self.chat, 2)      # Custom
                 time.sleep(0.3)
             for src in self.sources:
                 want = (src != self.keep)
                 if self.excluded_before.get(src) != want:
+                    self.changed = True
                     rcp_transfer.set_cross_point_excluded(self.chat, src, want)
                     time.sleep(0.05)
         except Exception as exc:
             if not self.restore():
                 raise RuntimeError(f"{exc}. {CHAT_NOT_RESTORED}") from exc
             raise
-        time.sleep(0.6)                # let the mix settle before anything is measured
+        if self.changed:
+            time.sleep(0.6)            # let the mix settle before anything is measured
         return self
 
     def __exit__(self, *exc):
@@ -3394,8 +3414,9 @@ class _ChatIsolation:
 
         Verified rather than assumed, for the same reason the processing restore is: leaving
         somebody's Chat output carrying one microphone would break the next call they took, and
-        they would have no way of knowing why."""
-        if self.restored or self.mode_before is None:
+        they would have no way of knowing why. A mix that already carried the one source had
+        nothing written to it, so there is nothing to put back."""
+        if self.restored or self.mode_before is None or not self.changed:
             return True
         try:
             for src in self.sources:
@@ -3631,6 +3652,99 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
         where = f"{pct} percent"
     return {"ok": True,
             "message": f"{ch['label']} {_PROCESSING_SPOKEN[prop].lower()} set to {where}."}
+
+
+# --- STEREO PAN LINK ---------------------------------------------------------------------------
+# A stereo channel pans with two legs. Linked, one Pan control shifts both from where they were
+# when linked. The desk has no such setting, so the links live in settings.json, filed under the
+# desk like the applied presets: {"device": id, "channels": {name: {"base": [l, r], "offset": n}}},
+# in percent. `base` is kept so that returning the control to centre restores the original width
+# after an end stop has squeezed the legs together.
+_PAN_LINKS_KEY = "pan_links"
+_PAN_LEGS = ("channelPanL", "channelPanR")
+
+
+def _pan_links() -> dict:
+    """{channel name: link} for THIS desk; empty if the record belongs to another one."""
+    rec = settings_file.load().get(_PAN_LINKS_KEY)
+    if not isinstance(rec, dict):
+        return {}
+    here = _device_hardware_id()
+    if rec.get("device") and here and rec.get("device") != here:
+        return {}
+    chans = rec.get("channels")
+    return chans if isinstance(chans, dict) else {}
+
+
+def _save_pan_links(links: dict) -> None:
+    settings_file.update(**{_PAN_LINKS_KEY: {"device": _device_hardware_id(), "channels": links}})
+
+
+def shift_pan_legs(base, offset: int) -> list:
+    return [max(0, min(100, int(b) + int(offset))) for b in base]
+
+
+def linked_pan_offset(link: dict, left, right) -> int:
+    """Where the linked control sits for legs now at `left` and `right` (percent): the stored
+    offset, or 0 when the legs have moved since (the desk, a preset, an unlinked write), which
+    links afresh from where they are. `action_set_linked_pan` makes the same call."""
+    expect = shift_pan_legs(link["base"], link["offset"])
+    if abs(expect[0] - left) > 1 or abs(expect[1] - right) > 1:
+        return 0
+    return int(link["offset"])
+
+
+def pan_offset_words(offset: int) -> str:
+    if offset == 0:
+        return "centre"
+    if offset <= -100:
+        return "hard left"
+    if offset >= 100:
+        return "hard right"
+    return f"{-offset} percent left" if offset < 0 else f"{offset} percent right"
+
+
+def action_link_pan(name: str, on: bool, left: float, right: float) -> dict:
+    """Link or unlink a stereo channel's two pan legs. `left` and `right` are where the legs are
+    now, in percent, which becomes the link's centre."""
+    ch = _ui_chan(name)
+    if ch is None:
+        return {"ok": False, "message": f"Unknown channel: {name}."}
+    links = _pan_links()
+    if on:
+        links[name] = {"base": [int(round(left)), int(round(right))], "offset": 0}
+    else:
+        links.pop(name, None)
+    _save_pan_links(links)
+    return {"ok": True, "pan_links": links,
+            "message": f"{ch['label']} pan sides {'linked' if on else 'unlinked'}."}
+
+
+def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> dict:
+    """Move a linked stereo pan: both legs shift by `offset` (-100 to 100) from where they were
+    when linked. `left` and `right` are where the caller shows the legs now, in percent; if they
+    have moved since, the link starts again from them, as `linked_pan_offset` showed it."""
+    ch = _ui_chan(name)
+    if ch is None:
+        return {"ok": False, "message": f"Unknown channel: {name}."}
+    links = _pan_links()
+    link = links.get(name)
+    if link is None:
+        return {"ok": False, "message": f"{ch['label']}'s pan sides are not linked."}
+    if linked_pan_offset(link, left, right) != link["offset"]:
+        link = {"base": [int(round(left)), int(round(right))], "offset": 0}
+    off = max(-100, min(100, int(offset)))
+    legs = shift_pan_legs(link["base"], off)
+    try:
+        with _hid_lock:
+            for prop, pct in zip(_PAN_LEGS, legs):
+                channels.set_channel_processing(name, prop, pct / 100)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not set the pan: {exc}"}
+    links[name] = {"base": link["base"], "offset": off}
+    _save_pan_links(links)
+    return {"ok": True, "pan_links": links, "legs": dict(zip(_PAN_LEGS, legs)),
+            "message": f"{ch['label']} pan {pan_offset_words(off)}."}
 
 
 # --- Mic processing PRESETS (whole-chain: the RODE app's factory set + user-saved) -----
@@ -5089,6 +5203,10 @@ def _chan_check_stop(speak: bool = True, run_id: int | None = None) -> str:
             w.stop()
     except Exception:
         pass
+    # The stop tone as soon as nothing is listening, not after the restore below: it is the
+    # answer to the press, and the restore takes a second or more.
+    if w is not None:
+        meters.cue("stop")
     trouble = ""
     if iso is not None:
         try:
@@ -5105,8 +5223,6 @@ def _chan_check_stop(speak: bool = True, run_id: int | None = None) -> str:
         msg = trouble + broke + " Nothing was measured, so no level is being reported."
     else:
         msg = trouble + (_level_check_summary(w) if w is not None else "")
-    if w is not None:
-        meters.cue("stop")           # the same pair of tones auto gain uses: stop talking now
     if speak and msg:
         speech.say(msg)
     return msg
@@ -9094,6 +9210,12 @@ POST_ROUTES = {
                              [(str, "name", ""), (str, "module", ""), (bool, "on", None)]),
     "/api/channels/param": (action_set_channel_param,
                             [(str, "name", ""), (str, "prop", ""), (float, "value", 0)]),
+    "/api/channels/pan-link": (action_link_pan,
+                               [(str, "name", ""), (bool, "on", None), (float, "left", 50),
+                                (float, "right", 50)]),
+    "/api/channels/pan-linked": (action_set_linked_pan,
+                                 [(str, "name", ""), (int, "offset", 0), (float, "left", 50),
+                                  (float, "right", 50)]),
     "/api/channels/effect": (action_set_channel_effect,
                              [(str, "name", ""), (str, "effect", ""), (bool, "on", None)]),
     "/api/channels/effect-param": (action_set_channel_effect_param,

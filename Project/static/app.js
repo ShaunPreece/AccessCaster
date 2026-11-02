@@ -2670,23 +2670,26 @@ function panOffsetWords(off) {
   return off < 0 ? `${-off} percent left` : `${off} percent right`;
 }
 
-/* Which stereo channels have their two pan legs linked, per channel name. The desk has no such
-   setting, so it is remembered here. Each entry holds the leg positions at the moment of linking
-   (`base`) and the offset applied to them since, so returning the linked slider to centre restores
-   the original width exactly instead of leaving both legs squeezed against an end stop. */
-const STEREO_PAN_LINK_KEY = "accesscaster.stereoPanLink";
-
-function stereoPanLinks() {
-  try { return JSON.parse(window.localStorage.getItem(STEREO_PAN_LINK_KEY)) || {}; }
-  catch { return {}; }
-}
-
-function saveStereoPanLinks(st) {
-  try { window.localStorage.setItem(STEREO_PAN_LINK_KEY, JSON.stringify(st)); }
-  catch { /* storage blocked: the link lasts until the panel is rebuilt */ }
-}
-
+/* Which stereo channels have their two pan legs linked, per channel name: `channelsData.pan_links`,
+   kept by the server in AccessCaster's settings (server.action_link_pan). Each entry holds the leg
+   positions at the moment of linking (`base`) and the offset applied to them since, so returning
+   the linked slider to centre restores the original width exactly instead of leaving both legs
+   squeezed against an end stop. */
 const clampPct = (v) => Math.max(0, Math.min(100, v));
+const shiftedLegs = (base, off) => [clampPct(base[0] + off), clampPct(base[1] + off)];
+
+function panLinks() {
+  if (!channelsData.pan_links) channelsData.pan_links = {};
+  return channelsData.pan_links;
+}
+
+/* Where the linked slider sits for the legs as they are now: the stored offset, or centre when the
+   legs have moved since (the desk, a preset, an unlinked write). server.linked_pan_offset makes the
+   same call, and the server links afresh from these legs on the next move. */
+function linkedPanOffset(entry, l, r) {
+  const expect = shiftedLegs(entry.base, entry.offset);
+  return (Math.abs(expect[0] - l) > 1 || Math.abs(expect[1] - r) > 1) ? 0 : entry.offset;
+}
 
 /* STEREO PAN: two legs, as RODE's app has them, plus a Link switch that turns them into one pan
    control. Linked, the single slider shifts both legs from where they were when linked; unlinked,
@@ -2696,34 +2699,25 @@ function fillStereoPan(host, ch, legs) {
   const [lCtrl, rCtrl] = legs;
   const leg = (prop) => (ch.params && ch.params[prop] !== null && ch.params[prop] !== undefined
     ? ch.params[prop] : null);
-  const links = stereoPanLinks();
+  const l = leg(lCtrl.prop), r = leg(rCtrl.prop);
   const switchId = "panlink-" + ch.name;
-  host.appendChild(makeSwitchRow(switchId, "Link both sides into one pan control", !!links[ch.name],
-    (on) => {
-      const st = stereoPanLinks();
-      if (on) st[ch.name] = { base: [leg(lCtrl.prop), leg(rCtrl.prop)], offset: 0 };
-      else delete st[ch.name];
-      saveStereoPanLinks(st);
+  host.appendChild(makeSwitchRow(switchId, "Link both sides into one pan control",
+    !!panLinks()[ch.name], async (on, input) => {
+      const body = { name: ch.name, on, left: l === null ? 50 : l, right: r === null ? 50 : r };
+      if (!await sendToggle("/api/channels/pan-link", body, input, on)) return;
+      const links = panLinks();
+      if (on) links[ch.name] = { base: [body.left, body.right], offset: 0 };
+      else delete links[ch.name];
       fillStereoPan(host, ch, legs);
       const again = document.getElementById(switchId);
       if (again) again.focus();
     }).row);
 
-  const entry = links[ch.name];
-  const l = leg(lCtrl.prop), r = leg(rCtrl.prop);
+  const entry = panLinks()[ch.name];
   if (!entry || l === null || r === null) {
     host.appendChild(buildParamSlider(ch, lCtrl, l));
     host.appendChild(buildParamSlider(ch, rCtrl, r));
     return;
-  }
-  // The legs moved since the link was made (the desk, another page, a preset): link afresh from
-  // where they are now rather than apply an old offset to an old width.
-  const shifted = (base, off) => [clampPct(base[0] + off), clampPct(base[1] + off)];
-  const expect = shifted(entry.base, entry.offset);
-  if (Math.abs(expect[0] - l) > 1 || Math.abs(expect[1] - r) > 1) {
-    entry.base = [l, r];
-    entry.offset = 0;
-    saveStereoPanLinks(links);
   }
 
   const row = document.createElement("div");
@@ -2736,7 +2730,7 @@ function fillStereoPan(host, ch, legs) {
   input.type = "range";
   input.id = id;
   input.min = "-100"; input.max = "100"; input.step = "1";
-  input.value = String(entry.offset);
+  input.value = String(linkedPanOffset(entry, l, r));
   const out = sliderReadout(id);
   const show = () => {
     const words = panOffsetWords(parseInt(input.value, 10));
@@ -2747,20 +2741,17 @@ function fillStereoPan(host, ch, legs) {
   input.addEventListener("input", show);
   input.addEventListener("change", () => {
     const off = parseInt(input.value, 10);
-    const [nl, nr] = shifted(entry.base, off);
     const key = "param-panlinked-" + ch.name;
     window.clearTimeout(channelDebounce[key]);
     channelDebounce[key] = window.setTimeout(async () => {
+      const nowL = leg(lCtrl.prop), nowR = leg(rCtrl.prop);
       try {
-        for (const [prop, pct] of [[lCtrl.prop, nl], [rCtrl.prop, nr]]) {
-          const res = await postJSON("/api/channels/param", { name: ch.name, prop, value: pct / 100 });
-          if (!res.ok) { announce(res.message || "Could not set the pan.", true); return; }
-          if (ch.params) ch.params[prop] = pct;
-        }
-        const st = stereoPanLinks();
-        if (st[ch.name]) { st[ch.name].offset = off; saveStereoPanLinks(st); }
-        entry.offset = off;
-        announce(`${ch.label} pan ${panOffsetWords(off)}.`);
+        const res = await postJSON("/api/channels/pan-linked",
+          { name: ch.name, offset: off, left: nowL, right: nowR });
+        if (!res.ok) { announce(res.message || "Could not set the pan.", true); return; }
+        if (res.pan_links) channelsData.pan_links = res.pan_links;
+        if (res.legs && ch.params) Object.assign(ch.params, res.legs);
+        announce(res.message || `${ch.label} pan ${panOffsetWords(off)}.`);
       } catch { announce(SERVICE_UNREACHABLE, true); }
     }, WRITE_DEBOUNCE_MS);
   });
@@ -8239,7 +8230,7 @@ async function onLevelCheck(ch) {
 }
 
 /* ---- Auto gain ---------------------------------------------------------
-   Talk for half a minute and the gain sets itself. The server does the measuring (autogain.py and
+   Talk for fifteen seconds and the gain sets itself. The server does the measuring (autogain.py and
    server._autogain_run); this drives the three dialogs and the polling.
 
    THREE DIALOGS, NOT ONE, and it is not decoration: NVDA never reads content revealed INSIDE an
@@ -8257,7 +8248,7 @@ const AG_POLL_MS = 400;
 let agPoll = null;
 let agChannel = null;
 let agReturnFocus = null;
-let agSaidTalk = null;          // which talking phase has had its instruction said
+let agPhase = null;             // the phase last seen, so a countdown restarts with each take
 let agLastCount = null;
 let agFinishing = false;        // guards against two polls both finishing the same run
 
@@ -8284,8 +8275,8 @@ async function onAutoGain(ch) {
   agChannel = ch.name;
   agReturnFocus = document.activeElement;
   setText("ag-confirm-desc",
-    "You will be asked to talk normally, as you would on air, for 30 seconds, then for ten "
-    + "seconds more so it can check its work. This switches " + ch.label + " processing off while "
+    "You will be asked to talk normally, as you would on air, for 15 seconds, then for ten "
+    + "seconds more so it can check its work. Each take starts at a tone. This switches " + ch.label + " processing off while "
     + "it listens and puts it back afterwards, sets the Windows recording level to no change, and "
     + "rewrites the gain. The gain can be undone at the end.");
   const dlg = agDialog("ag-confirm-dialog");
@@ -8300,7 +8291,7 @@ async function agStart() {
   // PAGE - and a screen reader then reads the page from the top, so ten seconds of a thirty-second
   // take are gone before "talk now" is heard. The request is sent AFTER both dialogs have changed
   // hands.
-  agSaidTalk = null;
+  agPhase = null;
   agLastCount = null;
   agFinishing = false;
   setText("ag-progress-desc", "Getting ready. Do not talk yet.");
@@ -8332,14 +8323,13 @@ function agStopPoll() {
 }
 
 /* The countdown is deliberately coarse, and it NEVER repeats the instruction.
-   Re-sending "Talk now, normally, as you would on air" with every countdown update makes the live
-   region read the whole sentence again each time, and the timings then arrive far too late to be
-   any use. The instruction is said ONCE when the take starts; after that the
-   region carries the countdown alone, and only when the wording actually changes. */
+   Re-sending the instruction with every countdown update makes the live region read the whole
+   sentence again each time, and the timings then arrive far too late to be any use. The
+   instruction is said ONCE, before the take's start tone; after that the region carries the
+   countdown alone, and only when the wording actually changes. */
 function agCountdown(left) {
   if (left === null || left === undefined) return null;
-  if (left > 20) return null;
-  if (left > 10) return "20 seconds left.";
+  if (left > 10) return null;
   if (left > 5) return "10 seconds left.";
   if (left > 0) return "Nearly done.";
   return null;
@@ -8353,16 +8343,14 @@ async function agTick() {
   } catch {
     return;                       // a dropped poll is not worth saying anything about
   }
+  if (st.phase !== agPhase) {
+    agPhase = st.phase;
+    agLastCount = null;
+  }
   // Two talking phases: the take that sets the gain, and the shorter one that checks it. Each
-  // says its instruction ONCE and then counts down, for the same reason - repeating the sentence
-  // means the live region reads the whole thing again and the timing arrives too late to use.
+  // one's instruction was said in the "ready" phase before its start tone, so a take only counts
+  // down.
   if (st.phase === "listening" || st.phase === "verifying") {
-    if (agSaidTalk !== st.phase) {
-      agSaidTalk = st.phase;
-      agLastCount = null;
-      setText("ag-progress-desc", st.message || "Talk now.");
-      return;
-    }
     const words = agCountdown(st.seconds_left);
     if (words && words !== agLastCount) {
       agLastCount = words;
@@ -8370,7 +8358,7 @@ async function agTick() {
     }
     return;
   }
-  if (st.phase === "preparing" || st.phase === "starting" || st.phase === "working") {
+  if (["starting", "preparing", "ready", "working"].includes(st.phase)) {
     setText("ag-progress-desc", st.message || "Working.");
     return;
   }

@@ -6,7 +6,8 @@
    one and does nothing on a stereo source. So:
      - a mic has ONE Pan slider, spoken as a direction ("centre"), never as a bare percent;
      - USB 1 has TWO leg sliders and no channelPan slider, plus a Link switch;
-     - linked, one Pan slider writes BOTH legs, shifted together from where they were;
+     - linked, one Pan slider sends one move, which the server applies to BOTH legs from where
+       they were (server.action_set_linked_pan);
      - the probe stubs POSTs, so nothing reaches the desk. */
 
 const el = (id) => document.getElementById(id);
@@ -27,7 +28,6 @@ async function openChannelTab(name, tabText) {
 async function run() {
   await waitFor(() => !el("sec-channels").hidden && strip(), 20000);
   await sleep(1200);
-  window.localStorage.removeItem("accesscaster.stereoPanLink");
 
   // ---- mono: a mic ----
   check("Mic 1 has a Tone and pan tab", await openChannelTab("Mic1", "Tone and pan"));
@@ -39,7 +39,8 @@ async function run() {
     mono && /centre|left|right/.test(mono.getAttribute("aria-valuetext")),
     mono && mono.getAttribute("aria-valuetext"));
 
-  // ---- stereo: USB 1 ----
+  // ---- stereo: USB 1, starting unlinked whatever this computer's settings hold ----
+  channelsData.pan_links = {};
   check("USB 1 has a Tone and pan tab", await openChannelTab("USB1", "Tone and pan"));
   check("USB 1 has no channelPan slider, which would do nothing", !el("param-channelPan-USB1"));
   const left = el("param-channelPanL-USB1");
@@ -55,11 +56,16 @@ async function run() {
 
   // ---- linking ----
   const l0 = parseInt(left.value, 10), r0 = parseInt(right.value, 10);
+  await probeClear();
   link.click();
   await waitFor(() => el("param-panlinked-USB1"), 4000);
   const one = el("param-panlinked-USB1");
   check("linked, the legs give way to one Pan slider",
     !!one && !el("param-channelPanL-USB1") && !el("param-channelPanR-USB1"));
+  const linkPost = pagePosts(await probeLog())[0];
+  check("linking sends where the legs are now",
+    !!linkPost && linkPost.path === "/api/channels/pan-link" && linkPost.body.on === true
+      && linkPost.body.left === l0 && linkPost.body.right === r0, JSON.stringify(linkPost));
   check("focus stays on the Link switch after it rebuilds the section",
     document.activeElement && document.activeElement.id === "panlink-USB1",
     document.activeElement && document.activeElement.id);
@@ -71,15 +77,14 @@ async function run() {
   one.value = "-30";
   one.dispatchEvent(new Event("input", { bubbles: true }));
   one.dispatchEvent(new Event("change", { bubbles: true }));
-  await waitFor(async () => pagePosts(await probeLog()).length >= 2, 8000);
+  await waitFor(async () => pagePosts(await probeLog()).length >= 1, 8000);
   const log = pagePosts(await probeLog());
-  const sent = Object.fromEntries(log.map((r) => [r.body && r.body.prop, r.body && r.body.value]));
-  check("moving it writes both legs and nothing else",
-    log.length === 2 && "channelPanL" in sent && "channelPanR" in sent, JSON.stringify(log));
-  const want = (v) => Math.max(0, Math.min(100, v - 30)) / 100;
-  check("each leg moves by the same amount from where it was",
-    Math.abs(sent.channelPanL - want(l0)) < 1e-9 && Math.abs(sent.channelPanR - want(r0)) < 1e-9,
-    JSON.stringify(sent) + " from " + l0 + "/" + r0);
+  const move = log[0];
+  check("moving it sends one linked move and nothing else",
+    log.length === 1 && move.path === "/api/channels/pan-linked", JSON.stringify(log));
+  check("the move carries the offset and where the legs are",
+    !!move && move.body.offset === -30 && move.body.left === l0 && move.body.right === r0,
+    JSON.stringify(move && move.body) + " from " + l0 + "/" + r0);
   check("the slider says which way it went", one.getAttribute("aria-valuetext") === "30 percent left",
     one.getAttribute("aria-valuetext"));
 
@@ -88,7 +93,6 @@ async function run() {
   await waitFor(() => el("param-channelPanL-USB1"), 4000);
   check("unlinked, the two leg sliders come back", !!el("param-channelPanL-USB1")
     && !!el("param-channelPanR-USB1") && !el("param-panlinked-USB1"));
-  window.localStorage.removeItem("accesscaster.stereoPanLink");
 
   await probeDone();
 }

@@ -514,6 +514,9 @@ def clip_alert() -> None:
 
 # The line between silence and signal: -60 dBFS, about a live mic's floor in a quiet room.
 SILENCE = 0.001
+# Below this a spoken level says "quiet" once and then nothing: under -50 dBFS is a room or a
+# noise floor, not anything worth riding a fader to.
+QUIET = 10 ** (-50 / 20)
 
 
 def level_note(volume_db: float) -> str:
@@ -749,8 +752,9 @@ class Watcher:
 
       CLIPPING          - at once, then held for `clip_gap` seconds so a hot passage is one warning.
       WENT SILENT/LIVE  - after `silence_after` seconds of nothing, so a breath is not an event.
-      THE LEVEL ITSELF  - every `speak_every` seconds; off by default, since a running commentary
-                          is unusable while talking.
+      THE LEVEL ITSELF  - every `speak_every` seconds, the loudest since the last one spoken;
+                          off by default, since a running commentary is unusable while talking.
+                          Below `QUIET` it is not spoken.
 
     Every threshold is a setting, because they are judgements by ear."""
 
@@ -830,6 +834,8 @@ class Watcher:
         last_level = time.monotonic()
         last_sound = time.monotonic()
         was_silent = False
+        loudest = 0.0           # since the level was last spoken
+        quiet_said = False
         try:
             while not self._stop.is_set():
                 v = m.peak()
@@ -838,6 +844,7 @@ class Watcher:
                 self.peak = v
                 self.peak_hold = max(self.peak_hold * 0.995, v)   # a slow decay, like a real meter
                 self.peak_max = max(self.peak_max, v)
+                loudest = max(loudest, v)
                 now = time.monotonic()
 
                 if (now - last_ceiling) >= CEILING_REFRESH_S:
@@ -867,8 +874,18 @@ class Watcher:
 
                 if self.speak_every > 0 and (now - last_level) >= self.speak_every:
                     last_level = now
-                    # A bare level, short enough to ride a fader by.
-                    self._speak(dbfs(self.peak_hold))
+                    # A bare level, short enough to ride a fader by. The loudest since the last
+                    # one, not peak_hold: the hold takes half a minute to fall, so it goes on
+                    # reading a voice long after the voice has stopped.
+                    if loudest >= QUIET:
+                        quiet_said = False
+                        self._speak(dbfs(loudest))
+                    elif not quiet_said:
+                        quiet_said = True
+                        # A watch says it has gone silent itself, a few seconds later.
+                        if not self.warn_silence:
+                            self._speak("quiet")
+                    loudest = 0.0
 
                 self._stop.wait(self.poll)
         except Exception as exc:
