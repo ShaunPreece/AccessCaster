@@ -1736,6 +1736,19 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `server.linked_pan_offset` and `linkedPanOffset` in `app.js`. A client shows centre for legs
   moved since the link, and the server starts the link again from those legs on the next move;
   if the tests differ, the slider's position and the written legs disagree.
+- **THE OUTPUT MIXES PAGE RECORDS ITS OWN CROSS-POINT WRITES AND RE-READS AFTER A MODE WRITE**
+  (`routing_mixes.OutputMixesPage`): the desk pushes back neither `mixDisabled` nor
+  `outputMixMinus` for our writes, so waiting for the push leaves the page showing the old mix.
+  `mixLink`, which is pushed, is not the inclusion: it stays True for a source on no fader.
+- **ITS SOURCE SWITCHES ARE HIDDEN ON ANYTHING BUT A CUSTOM MIX.** Outside Custom the desk ignores
+  the cross-points it has stored, so the switches would describe a mix the output does not carry.
+- **A MONITOR MIX LEVEL WRITE MAKES ITS OUTPUT CUSTOM, AND THE WINDOW RECORDS THAT ITSELF**
+  (`DeskState.monitor_mix_written`), for the same reason: `outputMixMinus` is not pushed back. The
+  level is (`mixLevelWithAnchor`, on every cross-point of the source while a fader moves). The
+  per-output reset re-reads instead, since neither its links nor its mode come back.
+- **A VIRTUAL FADER'S MUTE AND SOLO LIVE ON `levels["faders"]`, NOT ONLY ON A CHANNEL RECORD.** An
+  empty fader or a stereo-linked pair has no channel record, so `_set_level` puts the strip's push
+  on the fader as well; `muted` None is an empty fader and takes no push.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 

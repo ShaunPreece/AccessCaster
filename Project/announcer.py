@@ -1084,7 +1084,7 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
                 # Quiet when the RECORDER is putting announcements back: the stop phrase already
                 # says they are back on, and the pump keeps only the newest phrase, so a greeting
                 # here would silence it.
-                if not _quiet_start.is_set():
+                if greeting and not _quiet_start.is_set():
                     speech.say(greeting)
                 _quiet_start.clear()
                 announced_on = True
@@ -1200,7 +1200,8 @@ def restore_after_record() -> bool:
 def action_set_announce(on: bool, chosen: bool = True, greeting: str = GREETING_ON) -> dict:
     """Switch announcements on or off. `chosen` is a person's decision (the page, the tray, the
     shortcut), which is saved when they have asked for it to be remembered; the app switching them
-    back on at start-up or after a take is not. `greeting` is what is said once the desk is open."""
+    back on at start-up or after a take is not. `greeting` is what is said once the desk is open,
+    if anything."""
     global _thread, suspended_for_record, _loop_gen
     # A DELIBERATE toggle cancels our claim on it either way, so a recording stopping later never
     # overrides what the user has since chosen.

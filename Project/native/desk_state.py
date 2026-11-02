@@ -1,4 +1,5 @@
-"""The window's picture of the desk: read once, then kept current by what the desk pushes.
+"""The window's picture of the desk, its channels, its output mixes and its levels: read once,
+then kept current by what the desk pushes.
 
 It listens on a read-only HID handle of its own, because the announcer's listener runs only while
 announcements are on. The state belongs to the UI thread: the listener thread decodes a push and
@@ -45,20 +46,52 @@ _FX_PARAMS = {p: effect for effect, ps in channels.CHANNEL_FX_PARAMS.items() for
 # Per-input values, addressed at the input itself.
 _INPUTS = {"inputMicrophoneGain", "inputDigitalGain", "inputPower", "inputPhaseFlip"}
 
+# The output mixes: an output's mode, at its own selector, and a source's place in an output's
+# Custom mix, at the cross-point's.
+_MIX = {"outputMixMinus", "mixDisabled"}
+MIX_MINUS, CUSTOM = 1, 2      # an output's mix types, as outputMixMinus holds them; 0 is Main Mix
+
+# The Levels page's values on the OUTPUT block: (group in `levels`, key, kind pushed).
+_OUTPUT_LEVELS = {
+    "outputMonLevel": ("monitor", "percent", "float"),
+    "outputMonMute": ("monitor", "muted", "bool"),
+    "outputBTLevel": ("bluetooth_out", "percent", "float"),
+    "outputBTMute": ("bluetooth_out", "muted", "bool"),
+    "outputMonAutoMute": ("auto_mute", "monitor", "bool"),
+    "outputBTAutoMute": ("auto_mute", "bt", "bool"),
+}
+# A fader's mute and solo are its strip's, so they land on the channel record too.
+_FADER_TOGGLES = {channels.MUTE_PROP: "muted", channels.CUE_PROP: "soloed"}
+_LEVELS = set(_OUTPUT_LEVELS) | {"faderLevel", "headphoneType", "mixLevelWithAnchor"}
+
 _RELEVANT = (STRUCTURAL | set(_STRIP_BOOLS) | _MODULES | _PARAMS | set(_FX_ON) | set(_FX_PARAMS)
-             | _INPUTS | {"channelBypassProcessing", channels.CHAIN_PRESET_MARKER_PROP})
+             | _INPUTS | _MIX | _LEVELS
+             | {"channelBypassProcessing", channels.CHAIN_PRESET_MARKER_PROP})
 _CHAIN = (_MODULES | _PARAMS | {channels.CHAIN_ADVANCED_PROP, channels.CHAIN_PRESET_MARKER_PROP})
 
 
 class DeskState:
-    """`channels` is the last full read (server.action_get_channels with the desk's own 0..1
-    params), with each record changed in place as pushes arrive. A subscriber is called as
-    `fn("read", reply)` after every full read, successful or not, and `fn("changed", names)` with
-    the names of the channels a push changed."""
+    """`channels` is the last full read (server.read_window_state: the channels with the desk's
+    own 0..1 params), with each record changed in place as pushes arrive. `matrix` is the output
+    mixes from the same read (rcp_read.read_matrix_state: `modes` and `excluded`, keyed by output
+    and source index, `ok` False with a `reason` when the grid could not be read), with the layout
+    as `matrix["model"]` (server.matrix_model). `faders` is the fader layout from the same read
+    (`model`, `layout`, `labels`, `stereo`); a fader write's reply updates it through
+    `faders_changed`, and the push that follows asks for a full read (`STRUCTURAL`). `levels` is
+    the Levels page's state from the same read (server._window_levels).
+
+    A subscriber is called as `fn("read", reply)` after every full read, successful or not,
+    `fn("changed", names)` with the names of the channels a push changed, `fn("mix", outputs)`
+    with the indices of the outputs whose mode or mix a push changed, `fn("faders", None)` when a
+    fader write's reply changed the layout, and `fn("levels", None)` when a push changed
+    anything in `levels`."""
 
     def __init__(self, owner):
         self.owner = owner
         self.channels = None
+        self.matrix = None
+        self.faders = None
+        self.levels = None
         self._records = {}           # channel name -> its record in `channels`
         self._strip_names = {}       # strip index -> channel name
         self._subscribers = []
@@ -67,6 +100,8 @@ class DeskState:
         self._reread = None
         self._preset_timers = {}
         self._dirty = set()
+        self._dirty_mix = set()
+        self._dirty_levels = False
         self._flush = None
         self._stop = threading.Event()
         self._thread = None
@@ -101,6 +136,9 @@ class DeskState:
         self._reading = False
         if reply.get("ok"):
             self.channels = reply
+            self.matrix = dict(reply["matrix"], model=reply["matrix_model"])
+            self.faders = reply["faders"]
+            self.levels = reply["levels"]
             self._records = {rec["name"]: rec for rec in reply["channels"]}
             by_code = {entry["source_code"]: name
                        for name, entry in channels.ui_channel_map().items()}
@@ -111,6 +149,38 @@ class DeskState:
         if self._read_again:
             self._read_again = False
             self.refresh()
+
+    def faders_changed(self, reply):
+        """A fader write's reply: its new layout, shown at once, then a full read for the channels
+        that moved with it."""
+        if self.faders is None:
+            return
+        for key, field in (("faders", "layout"), ("labels", "labels"), ("stereo", "stereo")):
+            if reply.get(key) is not None:
+                self.faders[field] = reply[key]
+        self._notify("faders", None)
+        self.refresh()
+
+    def monitor_mix_written(self, output, source, level):
+        """A monitor mix level write was accepted: the source now has a level of its own in that
+        output, which is now a Custom mix. The desk pushes back the level but not the mode."""
+        cells = (self.levels["mix"].get("levels") or {}).get(output)
+        if cells is not None and source in cells:
+            cells[source] = {"level": level, "linked": False}
+        modes = self.matrix.get("modes") or {}
+        if self.matrix.get("ok") and modes.get(output) != CUSTOM:
+            modes[output] = CUSTOM
+            self._notify("mix", {output})
+
+    def solos_cleared(self):
+        """Clear all solos was accepted: no channel and no fader is soloed."""
+        for rec in self._records.values():
+            rec["solo"] = False
+        for fader in self.levels["faders"]:
+            if fader["soloed"] is not None:
+                fader["soloed"] = False
+        self._notify("changed", set(self._records))
+        self._notify("levels", None)
 
     def _reread_soon(self):
         if self._reread is not None and self._reread.IsRunning():
@@ -160,16 +230,30 @@ class DeskState:
         if name in STRUCTURAL:
             self._reread_soon()
             return
-        if len(path) != 1:
+        if (name in _LEVELS or name in _FADER_TOGGLES) and _set_level(
+                self.levels, path, name, value, kind):
+            self._dirty_levels = True
+            self._flush_soon()
+        if name in _LEVELS or len(path) != 1:
             return
-        rec = self._record_for(path[0], name)
-        if rec is None or not _set(rec, name, value, kind):
-            return
-        self._dirty.add(rec["name"])
-        if name in _CHAIN and rec["kind"] == "mic":
-            self._preset_soon(rec["name"])
+        if name in _MIX:
+            output = _set_mix(self.matrix, path[0], name, value, kind)
+            if output is None:
+                return
+            self._dirty_mix.add(output)
+        else:
+            rec = self._record_for(path[0], name)
+            if rec is None or not _set(rec, name, value, kind):
+                return
+            self._dirty.add(rec["name"])
+            if name in _CHAIN and rec["kind"] == "mic":
+                self._preset_soon(rec["name"])
+        self._flush_soon()
+
+    def _flush_soon(self):
         if self._flush is None or not self._flush.IsRunning():
-            # One notification for a burst: a fader or a knob pushes a value per step.
+            # One notification for a burst: a fader or a knob pushes a value per step, and a mix
+            # preset a cross-point per write.
             self._flush = wx.CallLater(30, self._flush_dirty)
 
     def _record_for(self, selector, name):
@@ -182,8 +266,14 @@ class DeskState:
 
     def _flush_dirty(self):
         names, self._dirty = self._dirty, set()
+        outputs, self._dirty_mix = self._dirty_mix, set()
+        levels, self._dirty_levels = self._dirty_levels, False
         if names:
             self._notify("changed", names)
+        if outputs:
+            self._notify("mix", outputs)
+        if levels:
+            self._notify("levels", None)
 
     def _preset_soon(self, name):
         timer = self._preset_timers.get(name)
@@ -210,7 +300,7 @@ class DeskState:
 def _read_channels():
     """A full read on a worker thread, with the fader layout that read published, which is how a
     push addressed at a strip is put on a channel."""
-    reply = server.action_get_channels(percent=False)
+    reply = server.read_window_state()
     if reply.get("ok"):
         reply["strips"] = channels.last_known_strip_vector()
     return reply
@@ -254,3 +344,87 @@ def _set(rec, name, value, kind):
         return False
     holder[key] = value
     return True
+
+
+def _set_mix(matrix, selector, name, value, kind):
+    """Put one pushed mix value on `matrix`. Returns the output it changed, or None."""
+    if matrix is None or not matrix.get("ok"):
+        return None
+    spec = devices.get_active_device().matrix
+    if name == "outputMixMinus":
+        output = selector - rcp_transfer.SEL_OUTPUT_MIXMINUS_BASE
+        if kind != "int" or output not in matrix["modes"]:
+            return None
+        holder, key = matrix["modes"], output
+    else:
+        # RCSYNCMIX carries mixDisabled too, at selectors past the MIX block's.
+        cell = selector - rcp_transfer.CROSS_POINT_BASE
+        if kind != "bool" or not 0 <= cell < spec.cell_count:
+            return None
+        source, output = divmod(cell, rcp_transfer.CROSS_POINT_SOURCE_STRIDE)
+        holder = matrix["excluded"].get(output)
+        if holder is None or source not in holder:
+            return None
+        key = source
+    if holder[key] == value:
+        return None
+    holder[key] = value
+    return output
+
+
+def _set_level(levels, path, name, value, kind):
+    """Put one pushed value on the Levels page's state. Returns whether anything changed."""
+    if levels is None:
+        return False
+    if name == "faderLevel":
+        # Addressed at the fader itself: PHYSICALINTERFACE.FADER[FADER_NODE_BASE + index].
+        if kind != "int" or len(path) != 2 or path[0] != 0:
+            return False
+        holder = _fader(levels, path[1] - devices.FADER_NODE_BASE)
+        key, value = "percent", _percent(value / rcp_transfer.FADER_LEVEL_MAX)
+    elif name in _FADER_TOGGLES:
+        if kind != "bool" or len(path) != 1:
+            return False
+        holder, key = _fader(levels, path[0] - rcp_transfer.SEL_CHANNEL), _FADER_TOGGLES[name]
+        # None is an empty fader, which has nothing to mute or solo.
+        if holder is None or holder[key] is None:
+            return False
+    elif name in _OUTPUT_LEVELS:
+        group, key, wanted = _OUTPUT_LEVELS[name]
+        if kind != wanted or path != [rcp_transfer.SEL_OUTPUT_GLOBAL]:
+            return False
+        holder = levels[group]
+        if wanted == "float":
+            value = _percent(value)
+    elif name == "headphoneType":
+        selectors = [sel for sel, _label in devices.get_active_device().headphones.outputs]
+        if kind != "int" or len(path) != 1 or path[0] not in selectors:
+            return False
+        holder, key = levels["headphone_types"], selectors.index(path[0])
+    elif name == "mixLevelWithAnchor":
+        mix = levels["mix"]
+        cell = path[0] - rcp_transfer.CROSS_POINT_BASE if len(path) == 1 else -1
+        # RCSYNCMIX carries the same name at selectors past the MIX block's.
+        if (kind != "str" or not mix.get("ok")
+                or not 0 <= cell < devices.get_active_device().matrix.cell_count):
+            return False
+        source, output = divmod(cell, rcp_transfer.CROSS_POINT_SOURCE_STRIDE)
+        holder = mix["levels"].get(output)
+        if holder is None or source not in holder:
+            return False
+        key, value = source, rcp_read.decode_level_cell(value)
+    else:
+        return False
+    if holder is None or holder[key] == value:
+        return False
+    holder[key] = value
+    return True
+
+
+def _fader(levels, index):
+    """The Levels state's record for fader `index`, or None for a fader without a level."""
+    return next((f for f in levels["faders"] if f["index"] == index), None)
+
+
+def _percent(level):
+    return max(0, min(100, round(level * 100)))

@@ -697,6 +697,11 @@ a fader (1, 7, 16) clear it as above. The relink recomputes a cell's level from 
 fader, so a stored float can come back rounded: source 16 went "1.00024e-06|0" ->
 "0|0".
 
+WHAT A HOST'S OWN WRITE PUSHES BACK (Pro II, fw 1.7.6, 2nd November 2026). An include or
+exclude pushes mixLink and the link or unlink request on the cross-point's selector, and
+NOT mixDisabled. An outputMixMinus write pushes nothing. A host keeping a picture of the
+matrix records its own writes, or reads again.
+
 THE REQUEST TRIGGERS CHANGE TYPE PERMANENTLY. mixLinkRequest / mixUnlinkRequest are
 write-only triggers. We send the constant composite 01 07 08 01 01 02 01 01 02 (two
 TRUE bools) which is byte-for-byte what the RODE app sends; the desk answers by

@@ -217,7 +217,7 @@ class SettingsTab(Tab):
         def cleared(reply):
             self.reply(source, reply)
             if reply.get("ok"):
-                self.page.section.solos_cleared()
+                self.page.section.desk.solos_cleared()
         call(self, server.action_clear_solos, done=cleared)
 
     def _fill_mic_types(self, current):

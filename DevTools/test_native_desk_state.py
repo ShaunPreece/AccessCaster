@@ -1,6 +1,6 @@
 """The native window's desk state (Project/native/desk_state.py), offline: pushed frames, decoded
-by rcp_read.parse_push as the listener decodes them, land on the right channel's record, and only
-a real change notifies.
+by rcp_read.parse_push as the listener decodes them, land on the right channel's record or output
+mix, and only a real change notifies.
 
 Run: python DevTools/test_native_desk_state.py
 """
@@ -15,7 +15,7 @@ import devices
 import rcp_read
 import rcp_transfer
 import wx
-from _testkit import as_device, check, check_true, push
+from _testkit import as_device, check, check_true, patched, push
 from native import desk_state
 
 
@@ -48,7 +48,21 @@ with as_device(devices.PRO2):
     # Faders: Bluetooth (source 10) on strip 0, Mic1 (0) on strip 1, the pads bus (11) on strip 2.
     store._read_done({"ok": True, "strips": [10, 0, 11],
                       "channels": [record("Mic1", "mic"), record("Bluetooth", "line"),
-                                   record("SMARTpads", "bus")]})
+                                   record("SMARTpads", "bus")],
+                      "matrix": {"ok": True, "modes": {8: 0, 9: 1},
+                                 "excluded": {8: {0: False, 7: False}, 9: {0: False}}},
+                      "matrix_model": {"outputs": [], "sources": []},
+                      "faders": {"model": {}, "layout": [10, 0, 11], "labels": [], "stereo": []},
+                      "levels": {
+                          "faders": [{"index": 6, "percent": 50, "muted": False, "soloed": False},
+                                     {"index": 7, "percent": 0, "muted": None, "soloed": None}],
+                          "monitor": {"percent": 40, "muted": False},
+                          "bluetooth_out": {"percent": 70, "muted": False},
+                          "auto_mute": {"monitor": True, "bt": False},
+                          "headphone_types": [0, 0],
+                          "mix": {"ok": True, "levels": {0: {0: {"level": 0.5, "linked": True}},
+                                                         8: {0: {"level": 0.5, "linked": True}}}},
+                          "model": {}}})
     check("a full read notifies", events[-1][0], "read")
     mic, bt, bus = (store._records[n] for n in ("Mic1", "Bluetooth", "SMARTpads"))
 
@@ -98,6 +112,73 @@ with as_device(devices.PRO2):
     check("an unchanged value notifies nothing", len(events), count)
     check_true("a chain change compares Mic1 with its preset again",
                "Mic1" in store._preset_timers)
+
+    mix = store.matrix
+    feed([rcp_transfer.SEL_OUTPUT_MIXMINUS_BASE + 8], "outputMixMinus", v_int(2))
+    check("an output's mode lands on its index", mix["modes"][8], 2)
+    feed([rcp_transfer.cross_point_selector(8, 7)], "mixDisabled", v_bool(True))
+    check("a cross-point lands on its output and source", mix["excluded"][8][7], True)
+    check("and not on the same source elsewhere", mix["excluded"][8][0], False)
+    feed([rcp_transfer.CROSS_POINT_BASE + devices.PRO2.matrix.cell_count + 7], "mixDisabled",
+         v_bool(True))
+    check("RCSYNCMIX's cross-points are not the matrix", mix["excluded"][8][0], False)
+    feed([rcp_transfer.SEL_OUTPUT_MIXMINUS_BASE + 12], "outputMixMinus", v_int(2))
+    check("a mode for an output not read is ignored", 12 in mix["modes"], False)
+    store._flush_dirty()
+    check("one notification names every output changed", events[-1], ("mix", {8}))
+
+    reads = []
+    with patched((store, {"refresh": lambda: reads.append(True)})):
+        store.faders_changed({"ok": True, "faders": [0, 10, 11],
+                              "labels": ["Mic 1", "Bluetooth", "SMART pads"]})
+    check("a fader write's reply is the new layout", store.faders["layout"], [0, 10, 11])
+    check("and is shown at once", events[-1], ("faders", None))
+    check("then the channels are read again", reads, [True])
+
+    levels = store.levels
+    feed([0, devices.FADER_NODE_BASE + 6], "faderLevel", v_int(127))
+    check("a virtual fader's level lands on it, in percent", levels["faders"][0]["percent"], 100)
+    feed([0, devices.FADER_NODE_BASE + 2], "faderLevel", v_int(10))
+    check("a fader without a level is ignored", [f["percent"] for f in levels["faders"]], [100, 0])
+    feed([ch + 6], "channelOutputMute", v_bool(True))
+    check("a strip's mute lands on its virtual fader", levels["faders"][0]["muted"], True)
+    feed([ch + 7], "channelCueEnable", v_bool(True))
+    check("an empty fader has no solo to land on", levels["faders"][1]["soloed"], None)
+    out = rcp_transfer.SEL_OUTPUT_GLOBAL
+    feed([out], "outputMonLevel", v_float(0.25))
+    check("the monitor level, in percent", levels["monitor"]["percent"], 25)
+    feed([out], "outputBTMute", v_bool(True))
+    check("the Bluetooth output's mute", levels["bluetooth_out"]["muted"], True)
+    feed([out], "outputBTAutoMute", v_bool(True))
+    check("an auto-mute", levels["auto_mute"]["bt"], True)
+    feed([out + 1], "outputMonLevel", v_float(0.9))
+    check("an output value on another block is ignored", levels["monitor"]["percent"], 25)
+    feed([rcp_transfer.SEL_HEADPHONE_TYPE + 1], "headphoneType", v_int(1))
+    check("a headphone type lands on its output", levels["headphone_types"], [0, 1])
+
+    def v_str(text):
+        raw = text.encode("ascii")
+        return bytes([0x01, len(raw) + 2, 0x05]) + raw + b"\x00"
+
+    feed([rcp_transfer.cross_point_selector(8, 0)], "mixLevelWithAnchor", v_str("0.3|0.5"))
+    check("a cross-point level lands on its output and source",
+          levels["mix"]["levels"][8][0], {"level": 0.3, "linked": False})
+    check("and not on the same source elsewhere", levels["mix"]["levels"][0][0]["level"], 0.5)
+    feed([rcp_transfer.CROSS_POINT_BASE + devices.PRO2.matrix.cell_count], "mixLevelWithAnchor",
+         v_str("0.9|0.9"))
+    check("RCSYNCMIX's levels are not the matrix", levels["mix"]["levels"][0][0]["level"], 0.5)
+    count = len(events)
+    store._flush_dirty()
+    check("one notification for the levels, and none for a strip with no channel record",
+          events[count:], [("levels", None)])
+
+    store.monitor_mix_written(0, 0, 0.8)
+    check("a monitor mix write records the level of its own",
+          levels["mix"]["levels"][0][0], {"level": 0.8, "linked": False})
+    check("and makes the output Custom", (mix["modes"].get(0), events[-1]), (2, ("mix", {0})))
+    store.solos_cleared()
+    check("clearing the solos clears every channel's", bt["solo"], False)
+    check("and every fader's", levels["faders"][0]["soloed"], False)
 
     feed([ch + 0], "channelInputSource", v_int(1))
     check_true("a fader reassignment asks for a full read", store._reread is not None)

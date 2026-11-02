@@ -22,8 +22,8 @@ after a session that moved code.
 
 | file | lines | what it owns |
 |---|---|---|
-| `server.py` | 10048 | HTTP API, every `action_*` not owned by a module below, the global-shortcut manager and its page, the tray-facing lifecycle. The big one. |
-| `announcer.py` | 1314 | **The control announcer: speaks the desk's own button presses.** Desk-change speech goes through `_say` / `_tone`, which `hold_desk_speech` / `release_desk_speech` silence while a job rewrites the desk (the state cache still updates). One persistent read-only HID handle (`_loop`, started by `action_set_announce`, one loop per `_loop_gen`, greeting with `GREETING_STARTED` at app start and `GREETING_ON` otherwise), decoded by `handle_report` and `flush_pending`; `seed_layout` reads the layout and mutes once at start and after a reconnect. `live_state` is the push-fed cache other code reads (the cough key, the mute toggle), kept current by `publish_level` / `publish_mute` / `publish_solo` / `forget_solos`, which also mark our own writes (`mark_self_write`, `is_self_echo`) so their echo is not spoken. `suspend_for_record` / `restore_after_record` silence it round a take; `starts_on` and `action_set_announce_remember` are "Start with announcements the way I left them". **It never imports the server**: `Hooks` is what it needs from the app (the device lock, pad tracking, `reconnected`), and the server installs `_AnnouncerHooks`. A mixer pad's `padActive` silences the mute and cue lines for `_MIXER_QUIET_S`, using `hooks.mixer_positions()`. |
+| `server.py` | 10109 | HTTP API, every `action_*` not owned by a module below, the global-shortcut manager and its page, the tray-facing lifecycle. The big one. |
+| `announcer.py` | 1315 | **The control announcer: speaks the desk's own button presses.** Desk-change speech goes through `_say` / `_tone`, which `hold_desk_speech` / `release_desk_speech` silence while a job rewrites the desk (the state cache still updates). One persistent read-only HID handle (`_loop`, started by `action_set_announce`, one loop per `_loop_gen`, greeting with `GREETING_STARTED` at app start and `GREETING_ON` otherwise), decoded by `handle_report` and `flush_pending`; `seed_layout` reads the layout and mutes once at start and after a reconnect. `live_state` is the push-fed cache other code reads (the cough key, the mute toggle), kept current by `publish_level` / `publish_mute` / `publish_solo` / `forget_solos`, which also mark our own writes (`mark_self_write`, `is_self_echo`) so their echo is not spoken. `suspend_for_record` / `restore_after_record` silence it round a take; `starts_on` and `action_set_announce_remember` are "Start with announcements the way I left them". **It never imports the server**: `Hooks` is what it needs from the app (the device lock, pad tracking, `reconnected`), and the server installs `_AnnouncerHooks`. A mixer pad's `padActive` silences the mute and cue lines for `_MIXER_QUIET_S`, using `hooks.mixer_positions()`. |
 | `speech.py` | 481 | **Everything the app says out loud.** `say` (every phrase), `say_and_wait` (returns once the phrase has played; the app's resume and the CallMe ring use it), `tone` (a cue WAV on the same output), all through `_submit`, where the announcements switch `enabled` is enforced and the one-slot newest-wins hand-off to `_speech_thread` happens. `_Engine` renders each phrase into memory with SAPI, trims its silence (`_render`), scales it to `volume` (`_scaled`) and plays it with `wave_player` on the chosen output (`_resolve_output`); a phrase plays at least `PACE_S` before a newer one cuts it off. A voice or output change bumps `config_gen`. The user's `chosen_voice`, `chosen_output` and `volume`, `sapi_lists`, the actions that set them, and `apply_settings`. `SILENT` (set for `test_*` scripts) logs every phrase and plays none. |
 | `wave_player.py` | 169 | `Player`: plays 16-bit mono PCM on one waveOut device, held open between clips and closed after `CLOSE_AFTER_S` of quiet; `play` can be cut off by a `Signal` once `min_ms` has played. `DEFAULT_DEVICE` is Windows' default output. |
 | `settings_file.py` | 49 | `settings.json`: `load`, and `update`, which MERGES so a writer cannot clobber a key it does not know. `FILE` is what the tests redirect. |
@@ -58,14 +58,18 @@ after a session that moved code.
 | `midi_out.py` | 220 | **The desk's own USB MIDI port, and the ONLY way to play a sound pad.** winmm through ctypes, no package and no driver. `ports` / `find_port` (prefix match: Windows truncates a port name at 31 chars), module-level `send_cc` / `press_pad` / `release_pad` / `play_pad` over ONE long-lived shared handle (lazy open, one reopen on a failed send, which is what a replug looks like), `MidiOut` as a context manager for tools, `close`, and `midi_enabled()` which is FOR TOOLS ONLY - the app arms MIDI at the point of use and leaves it on. **CC 35 is play-a-pad and the MIDI CHANNEL is which pad**, within the current bank; the bank is an ordinary HID write (`soundpad.select_bank`). |
 | `tray.py` | 303 | pywin32 system-tray entry point (this is what ships). Left click / Enter opens the page from `_on_tray`, debounced so one press opens one window. Menu: Open, Announcer, **Diagnostic log** (`_open_log`, which opens the file in NOTEPAD rather than handing it to the shell - a `.log` often has no registered handler and `os.startfile` would open the "how do you want to open this" chooser, a dialog with nothing in it to read), Quit. **The update's half**: the menu's Check for updates / Install update item (`ID_UPDATE`), `_notify` (the Windows notification every update notice uses), `NIN_BALLOONUSERCLICK` opening the decision, and `_on_end_session`, which is how the installer's Restart Manager closes a tray app with no visible window. `--updated` (`selfupdate.restart.after_update`) starts it with no page, like `--startup`. |
 | `native_app.py` | 25 | **The native window's entry point**, for now beside the tray rather than in it: `main` shows `MainFrame` and starts the service in-process. Closing the window stops the service. |
-| `native/frame.py` | 252 | `MainFrame`: the Categories tree and the page host, and `desk` (the window's `DeskState`, started with the service and stopped on close). `WEB_SECTIONS` (the areas still on the web page, in tree order), `start` (brings the service up off the UI thread, then each section's `start`), `pages_changed` (rebuilds one branch, keeping the selection by page key), `_show` (the page swap; see PROJECT_GUIDE part 2 under Native window), `_on_key` (F6, F5, Ctrl+Tab, Alt+digit; `_in_tabs` hands Ctrl+Tab to a page's tab control), `say` (speech, through the screen reader), `reply` (an action's reply: a success only while its control has the focus), `open_web_page`. |
+| `native/frame.py` | 253 | `MainFrame`: the Categories tree and the page host, and `desk` (the window's `DeskState`, started with the service and stopped on close). `WEB_SECTIONS` (the areas still on the web page, in tree order after Channels and Routing), `start` (brings the service up off the UI thread, then each section's `start`), `pages_changed` (rebuilds one branch, keeping the selection by page key), `_show` (the page swap; see PROJECT_GUIDE part 2 under Native window), `_on_key` (F6, F5, Ctrl+Tab, Alt+digit; `_in_tabs` hands Ctrl+Tab to a page's tab control), `say` (speech, through the screen reader), `reply` (an action's reply: a success only while its control has the focus), `open_web_page`. |
 | `native/pages.py` | 79 | What a section is made of: `Page` (key, title, window), `page_box` (the page's named group box), `group` (a named group box inside a page), `labelled` (a label then its control, which is what names it), `MessagePage` (a sentence and one button), `WebSection` (an area that opens in the browser). The section protocol is in its docstring. |
-| `native/channels_section.py` | 178 | `ChannelsSection` (draws from `frame.desk`; `level_check`, the one `LevelCheck` every page's button shares; `_desk_event` rebuilds or re-shows on a full read and re-shows the pages a push changed; `refresh(announce)` asks the store for a full read; a page per channel, rebuilt only when the set of channels changes; `tab_key` and `tab_chosen`, the tab every channel page follows; `presets_changed`) and `ChannelPage` (a group box named with the channel holding a `wx.Notebook` of its tabs; `field(*path)` gives a control its `current` and `remember` on the page's record; `show(rec)` passes a newer record to every tab). |
+| `native/channels_section.py` | 175 | `ChannelsSection` (draws from `frame.desk`; `level_check`, the one `LevelCheck` every page's button shares; `_desk_event` rebuilds or re-shows on a full read and re-shows the pages a push changed; `refresh(announce)` asks the store for a full read; a page per channel, rebuilt only when the set of channels changes; `tab_key` and `tab_chosen`, the tab every channel page follows; `presets_changed`) and `ChannelPage` (a group box named with the channel holding a `wx.Notebook` of its tabs; `field(*path)` gives a control its `current` and `remember` on the page's record; `show(rec)` passes a newer record to every tab). |
+| `native/routing_section.py` | 109 | `RoutingSection`: `NATIVE` (the native pages, each with its layout in the desk state) and `WEB_PAGES` (open in the browser). `_read` builds each native page on the first read and rebuilds it when its layout changes, otherwise calls its `show`; a `mix` event re-shows the mix type on Output mixes and Levels, a `faders` event re-shows Fader assignment and Levels, and a `levels` event re-shows Levels. |
+| `native/routing_levels.py` | 331 | `LevelsPage`: `field(*path)` (`current` and `remember` on the desk state's `levels`); the virtual faders (`_build_faders`: `fader`, a list naming the channel on each, then one level, mute and solo for the chosen fader, written through `_fader_send` and recorded by `_fader_done`, named with its channel by `_show_fader`; Clear all solos); `OUTPUTS`, the monitor speakers and the Bluetooth output (level, mute, auto-mute); the monitor mix (`mix_output`, a slider per source written through `_send_mix` and recorded by `desk.monitor_mix_written`; `show_mix_mode` puts the mix type on the list's description; Reset this output to follow the faders); a headphone type per output with its Apply button. |
+| `native/routing_mixes.py` | 359 | `OutputMixesPage`: `output`, the output shown; `mode` with Confirm mix type change, whose description says what the applied mix carries; a `Switch` per source, shown only on Custom, writing through `_send_cross_point` and recording through `_cross_point_done`; the Mix presets group (`read_schemes`, `_fill_schemes`, `_show_scheme` puts the description on Apply and Delete); `_run` for a write that takes seconds; Reset all output mixes. |
+| `native/routing_faders.py` | 125 | `FadersPage`: `fader`, one list of the faders naming the channel on each; `channel` (`_show_fader` adds a held channel that is not offered, such as a linked pair) with Confirm fader change; Reset faders to default; a `Switch` per stereo pair. `_done` hands a write's reply to `desk.faders_changed`. |
 | `native/channel_tabs.py` | 540 | The tabs: `build_tabs` (which tabs a channel gets), `Tab` (a scrolling page), `SettingsTab` (mute, listen, clear solos, wireless mute, level, auto gain, the level check, phantom, polarity, mic type), `PresetsTab` and `DeletePresetDialog`, `ProcessingTab` (processing on, advanced, the modules), `ParamTab` (parameter groups, bucketed by `PARAM_TABS`; `pan_note` describes a pan control as inert while processing is off), `StereoPan` (a stereo channel's Link switch, its two leg sliders and the linked slider, built once and shown by the link), `EffectsTab` (echo and reverb, `EFFECT_PARAMS`). |
 | `native/channel_jobs.py` | 180 | The jobs that listen to a microphone: `AutoGain` (one run: the question, the `JobDialog` polling `server.autogain_status`, `countdown_words`, the result with Undo) and `LevelCheck` (the level check's buttons, one run across every channel; a label changes only while its button is unfocused). |
-| `native/dialogs.py` | 132 | `TextDialog` (text and a row of buttons, for a question or a result; `ShowModal` returns the id pressed) and `JobDialog` (a job running: `run`, `say` speaks a new stage from the dialog's own notifier, `poll` asks a status function one question at a time, `finish`; Stop, Escape and the title bar's close call the job's `stop`). |
-| `native/controls.py` | 143 | `Switch` (a checkbox that writes, speaks the reply and reverts on refusal), `Slider` (a labelled slider through `LatestWins`, its value in words, left alone by `show` for `HANDS_OFF_S` after it moves; a pushed value lands on it once when focused, `FOCUSED_SETTLE_MS` after the pushes stop), `set_choices` (replaces a list's items only when they differ). Both take `accepted(reply)` for a write whose reply carries more than the value; `Slider.set_shown` hides it with its label. |
-| `native/desk_state.py` | 256 | `DeskState`: the window's picture of the desk. One full read (`refresh`, `action_get_channels(percent=False)` plus the fader layout), then its own listener thread (`_listen`) whose pushes `_apply` puts on the addressed record on the UI thread (`_set`), with one `changed` notification per burst (`_flush_dirty`). `STRUCTURAL` pushes and a reconnect ask for a full read; a mic's chain change re-runs `server._preset_now` (`_recompare`). |
+| `native/dialogs.py` | 141 | `confirm` (a Cancel-first question before a change that wipes something), `TextDialog` (text and a row of buttons, for a question or a result; `ShowModal` returns the id pressed) and `JobDialog` (a job running: `run`, `say` speaks a new stage from the dialog's own notifier, `poll` asks a status function one question at a time, `finish`; Stop, Escape and the title bar's close call the job's `stop`). |
+| `native/controls.py` | 149 | `Switch` (a checkbox that writes, speaks the reply and reverts on refusal), `Slider` (a labelled slider through `LatestWins`, its value in words, left alone by `show` for `HANDS_OFF_S` after it moves; a pushed value lands on it once when focused, `FOCUSED_SETTLE_MS` after the pushes stop), `set_choices` (replaces a list's items only when they differ). Both take `accepted(reply)` for a write whose reply carries more than the value; `Slider.set_shown` hides it with its label and `Slider.set_label` renames it. |
+| `native/desk_state.py` | 430 | `DeskState`: the window's picture of the desk, `channels`, `matrix` (the output mixes; `MIX_MINUS` and `CUSTOM` are its mix types), `faders` (the layout; `faders_changed` takes a fader write's reply, then reads again) and `levels` (the Levels page's; `monitor_mix_written` records a monitor mix write, `solos_cleared` Clear all solos). One full read (`refresh`, `server.read_window_state` plus the fader layout), then its own listener thread (`_listen`) whose pushes `_apply` puts on the addressed record (`_set`) or output (`_set_mix`) on the UI thread, a level on `levels` (`_set_level`), with one `changed`, one `mix` and one `levels` notification per burst (`_flush_dirty`). `STRUCTURAL` pushes and a reconnect ask for a full read; a mic's chain change re-runs `server._preset_now` (`_recompare`). |
 | `native/calls.py` | 94 | `call(owner, fn, *args, done=)`: a server function on a worker thread, its reply on the UI thread. `LatestWins`: a slider's writes, newest value only. |
 | `native/a11y.py` | 35 | `describe(window, description, value)`: an MSAA description, and a value in words for a slider; everything else falls through to the native control. |
 | `native/announce.py` | 205 | `Notifier`: UIA notification events from one window, which the screen reader speaks. The same helper as Claudio's. |
@@ -81,8 +85,10 @@ after a session that moved code.
   settings.json), `linked_pan_offset` (where the linked control sits for the legs now),
   `action_link_pan`, `action_set_linked_pan` (writes both legs). `action_get_channels` sends
   `pan_links`.
+- The native window's full read: `read_window_state` (one dump: `_channels_reply`, which
+  `action_get_channels` shares, plus `rcp_read.read_matrix_state` and `matrix_model`, the fader layout with `fader_model`, and `_window_levels`: `_fader_levels`, which `fader_levels_live` shares, the cross-point levels, the auto-mutes and `_headphone_types`, with the Levels page's layout).
 - Specs that drive read + write + UI + profile from one place: `PROCESSING_CONTROLS` (200),
-  `UNIT_SETTINGS` (1611), `_PRESET_PROPS` (3772).
+  `UNIT_SETTINGS` (1611), `_PRESET_PROPS` (3804).
 - USB mode and RODE's virtual devices: `action_set_usb_multitrack` / `action_set_usb_expanded`,
   then `_virtual_devices_follow` directly under them (the thread that runs
   `virtual_devices.reconcile` and speaks the outcome; also called from the announcer's reconnect
@@ -152,13 +158,13 @@ after a session that moved code.
   `action_join_wifi` (2383), `action_set_bt_visible` (2445), `_network_write_gate` (2578).
 - The announcer's hooks: `_AnnouncerHooks` (2639), the server's side of `announcer.Hooks`. Its `reconnected`
   speaks a USB mode change, tidies the faders after Expanded and runs `_virtual_devices_follow`.
-- Auto gain: `_autogain_run` (3211), `_ChatIsolation` (3335), `_autogain_restore_processing` (3446).
-- Per-channel level check: `action_channel_level_check` (5245), `_chan_check_stop` (5185),
-  `_level_check_summary` (5114).
-- Meters and the Windows level: `read_meters` (4847), `action_set_input_level` (4950),
-  `action_meter_watch` (5080).
-- Faders and chains: `action_set_fader` (4565), `action_reset_faders` (5389),
-  `_follow_chains` (4081), `_read_fader_vector` (4273), `_tidy_fader_target` (4520).
+- Auto gain: `_autogain_run` (3243), `_ChatIsolation` (3367), `_autogain_restore_processing` (3478).
+- Per-channel level check: `action_channel_level_check` (5302), `_chan_check_stop` (5242),
+  `_level_check_summary` (5171).
+- Meters and the Windows level: `read_meters` (4904), `action_set_input_level` (5007),
+  `action_meter_watch` (5137).
+- Faders and chains: `action_set_fader` (4597), `action_reset_faders` (5446),
+  `_follow_chains` (4113), `_read_fader_vector` (4305), `_tidy_fader_target` (4552).
 - Per-fader mute and solo (the Levels tab's rows): `action_set_fader_mute`, `action_set_fader_solo`,
   read from `fader_levels_live`; browser half is `onFaderSwitch` / `onClearFaderSolos`.
   By FADER rather than by channel name, so an empty strip and a linked pair both work.
@@ -166,13 +172,13 @@ after a session that moved code.
   `_carry_mute` (which puts back the mute the desk clears when it rearranges a layout). The pair
   table is `devices.FaderSpec.stereo_pairs`; the browser half is
   `buildStereoLinks` / `onStereoLink` / `applyStereoValues` in `app.js`.
-- Routing: `routing_model` (5602), `action_set_cross_point` (6475), `action_reset_all_outputs`
-  (6314, a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (5577, which
+- Routing: `routing_model` (5659), `action_set_cross_point` (6533), `action_reset_all_outputs`
+  (6314, a wrapper round the "everything normal" built-in scheme), `_apply_matrix` (5634, which
   applies a profile's `routing.mix_scheme` through `routing_schemes.apply` and keeps the old
   index-keyed branch only for profiles saved before 29th August 2026).
-- Mix schemes: `_apply_scheme` (6525, the ONE apply path: gate, lock, write, wording),
-  `read_routing_schemes` (6559), `action_apply_routing_scheme` (6595),
-  `action_save_routing_scheme` (6609), `action_delete_routing_scheme` (6638). The format and the
+- Mix schemes: `_apply_scheme` (6583, the ONE apply path: gate, lock, write, wording),
+  `read_routing_schemes` (6617), `action_apply_routing_scheme` (6653),
+  `action_save_routing_scheme` (6667), `action_delete_routing_scheme` (6696). The format and the
   writes are in `routing_schemes.py`.
 - **Background jobs, all four on ONE class: `_BackgroundJob` (`start` / `status` / `busy` /
   `step` / `tick`).** The instances are `_profile_job`, `_restore_job`, `_show_job` and
@@ -185,9 +191,9 @@ after a session that moved code.
   mic preamp and leaves the channel ~55 dB down while the model reads perfect. Nothing can detect
   it by reading; see `PROJECT_GUIDE.md` part 2 before touching this.
 - ONE backup, both mechanisms underneath: `action_backup_now`, `action_restore_backup` (**always the profile since 21st September 2026**: the show import crashes the desk about 1 in 6, see its docstring), `backup_restore_plan` (what the confirmation dialog says, including `warnings` - what the backup will leave you unable to hear, via `_restore_silence_warnings`), `_removable_volume_ready`, `_backup_wording`.
-- Profiles and the as-found baseline: `snapshot_profile` (7004), `restore_profile` (7157, and it
-  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7078),
-  `action_baseline_save` (7110).
+- Profiles and the as-found baseline: `snapshot_profile` (7062), `restore_profile` (7215, and it
+  takes `clean`: reset the desk first, then restore on top), `baseline_status` (7136),
+  `action_baseline_save` (7168).
 - The desk's own Shows (all after `restore_profile`): `read_show_state` (the page payload, and the
   ONE place the two option labels are built), `show_job_status`, `_run_show_job` (one job state for
   all four, since they are mutually exclusive), `_shows_write_gate`, `_export_and_wait`,
@@ -207,21 +213,21 @@ after a session that moved code.
   above `_network_write_gate`.
 - Capability gates, one per risky write family, and all but one now a one-liner over **`_cap_gate`**
   (which holds the shared reasoning: a selector proven on a Pro II is NOT proven on a Duo, and a
-  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4192),
-  `_matrix_write_gate` (6409), `_output_write_gate` (6417), `_network_write_gate`,
+  wrong one can append a stray only a factory reset clears). `_fader_write_gate` (4224),
+  `_matrix_write_gate` (6467), `_output_write_gate` (6475), `_network_write_gate`,
   `_shows_write_gate`, `_recorder_gate` (with `_recorder_refusal`, the sentence the Recording
-  page's delete note shares). **`_level_write_gate` (4651) keeps its own body** because it has a SECOND
+  page's delete note shares). **`_level_write_gate` (4683) keeps its own body** because it has a SECOND
   condition beyond the cap: the device must also carry confirmed faderLevel selectors. Each keeps
   its own refusal sentence, because what the user can and cannot do differs per family.
-  `_chain_follow_on` (4071) is not a gate of this kind.
+  `_chain_follow_on` (4103) is not a gate of this kind.
 - **`_pad_write` is the shape of every live pad edit**: range-check the grid, take the HID lock,
   run the call, turn a crash into a sentence. Seventeen `action_set_pad_*` / `action_clear_pad` /
   `action_assign_fx` functions had these eight lines written out verbatim. `invalid=` is a refusal
   for a value it cannot check itself (checked AFTER the range and BEFORE the lock);
   `plain_value_error=True` surfaces a ValueError's own text, which soundpad writes as a finished
   user-facing sentence.
-- Lifecycle: `_bring_up_server` (9866), `_close_previous_instances` (9831), `_client_watchdog` (161),
-  `Handler` (9308).
+- Lifecycle: `_bring_up_server` (9924), `_close_previous_instances` (9889), `_client_watchdog` (161),
+  `Handler` (9366).
 
 --------------------------------------------------------------------------------
 ## Project/static (the web UI)

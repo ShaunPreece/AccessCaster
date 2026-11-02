@@ -9,7 +9,7 @@ const TABS = ["mixes", "faders", "levels", "master"];
 // "master" covers Master Mix including its USB audio SECTION. USB audio is not a tab of its own:
 // it and the master mix are both the main mix on its way out, and one tab fewer is one fewer arrow
 // press to everything past it.
-const TITLES = ["Output mixes", "Faders", "Levels", "Master Mix"];
+const TITLES = ["Output mixes", "Fader assignment", "Levels", "Master Mix"];
 const tabId = (k) => "tab-routing-" + k;
 const strip = () => document.querySelector("#sec-routing [role='tablist']");
 const buttons = () => Array.from(strip().querySelectorAll("[role='tab']"));

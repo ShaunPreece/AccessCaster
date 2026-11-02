@@ -18,10 +18,10 @@ from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
 from native.pages import WebSection
+from native.routing_section import RoutingSection
 
-# The sections still on the web page, as (title, web route), in tree order after Channels.
+# The sections still on the web page, as (title, web route), in tree order after Routing.
 WEB_SECTIONS = [
-    ("Routing", "routing"),
     ("SMART pads", "pads"),
     ("Recording", "recording"),
     ("CallMe", "callme"),
@@ -53,8 +53,8 @@ class MainFrame(wx.Frame):
         self._notifier = announce.Notifier(sink.GetHandle(), "AccessCaster")
 
         self.desk = DeskState(self)
-        self.sections = [ChannelsSection(self)] + [WebSection(self, title, route)
-                                                   for title, route in WEB_SECTIONS]
+        self.sections = [ChannelsSection(self), RoutingSection(self)] + [
+            WebSection(self, title, route) for title, route in WEB_SECTIONS]
         tree_root = self.tree.AddRoot("AccessCaster")
         self._branches = []
         for section in self.sections:
@@ -81,7 +81,8 @@ class MainFrame(wx.Frame):
     def start(self):
         """Bring the service up off the UI thread, then let each section read the desk."""
         def bring_up():
-            started = server.start_server_managed(open_browser=False)
+            # No "AccessCaster started": the window opening in front already says so.
+            started = server.start_server_managed(open_browser=False, greeting="")
             if started is None:
                 return {"ok": False, "message": "AccessCaster could not start: another copy is "
                                                 "already running on this computer."}

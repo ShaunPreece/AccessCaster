@@ -56,6 +56,8 @@ class ChannelsSection:
                 if page is not None:
                     page.show(page.rec)
             return
+        if event != "read":
+            return
         reply, asked, announce = detail, self._asked, self._announce
         self._asked = self._announce = False
         if not reply.get("ok"):
@@ -90,11 +92,6 @@ class ChannelsSection:
             self.status.set_text("The desk reports no channels.")
             self.pages = [Page("status", TITLE, self.status)]
         self.frame.pages_changed(self)
-
-    def solos_cleared(self):
-        for page in self.channel_pages.values():
-            page.rec["solo"] = False
-            page.show(page.rec)
 
     def presets_changed(self, presets):
         """The preset list changed (saved or deleted): every mic page's list shows the new one."""

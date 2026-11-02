@@ -2818,7 +2818,39 @@ def action_get_channels(percent: bool = True) -> dict:
             # "Mute the wireless mic" switches can be made unavailable when the unit reports no
             # transmitter, without a second trip to the desk for a fact we already have in hand.
             blob = rcp_read.read_model_stable()
-            chans = channels.read_channels(blob)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read channels from the device: {exc}"}
+    return _channels_reply(blob, percent)
+
+
+def read_window_state() -> dict:
+    """The native window's full read: every channel, as `action_get_channels(percent=False)`, and
+    the output mixes (`matrix`, `rcp_read.read_matrix_state` keyed by index, with `matrix_model`'s
+    layout as `matrix_model`), the fader layout (`faders`: `fader_model` as `model`, then
+    `layout`, `labels` and `stereo` as a fader write's reply carries them) and the Levels page's
+    state (`levels`, `_window_levels`), from ONE model dump."""
+    try:
+        with _hid_lock:
+            blob = rcp_read.read_model_stable()
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
+    reply = _channels_reply(blob, percent=False)
+    if reply.get("ok"):
+        reply["matrix"] = rcp_read.read_matrix_state(blob)
+        reply["matrix_model"] = matrix_model()
+        spec = _active_faders()
+        cis = list(rcp_read.values(blob, "channelInputSource"))
+        layout = [cis[i] if i < len(cis) else None for i in range(spec.count)]
+        reply["faders"] = {"model": fader_model(), "layout": layout,
+                           "labels": [_channel_name(c, spec) for c in layout],
+                           "stereo": stereo_link_state(cis, spec)}
+        reply["levels"] = _window_levels(blob)
+    return reply
+
+
+def _channels_reply(blob: bytes, percent: bool) -> dict:
+    try:
+        chans = channels.read_channels(blob)
     except Exception as exc:
         return {"ok": False, "message": f"Could not read channels from the device: {exc}"}
     # Which preset each mic strip is on. BEFORE the percent conversion below, because the comparison
@@ -4661,30 +4693,34 @@ def _level_write_gate():
 
 
 def fader_levels_live() -> dict:
-    """Read the levels we can set: each writable (virtual) fader, plus the monitor speaker.
-
-    faderLevel is 0..127 and only the virtual slots carry a value; we present percent, which is what
-    the announcements say too. `channel` names whatever sits on that fader right now."""
-    dev = devices.get_active_device()
-    spec = dev.fader
-    gate = _level_write_gate()
+    """Read the levels we can set: each writable (virtual) fader, plus the monitor speaker."""
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
-        raw = rcp_read.values(blob, "faderLevel")
-        # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
-        # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
-        # the encoder cycles onto the virtual faders (announcer._encoder_ring).
-        mutes = rcp_read.values(blob, "channelOutputMute")
-        solos = rcp_read.values(blob, channels.CUE_PROP)
-        mon = rcp_read.values(blob, "outputMonLevel")
-        # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
-        # They ride on this read rather than on /api/routing/live because they belong beside the
-        # monitor level on the Levels tab, and this is the read that tab already makes.
-        outs = rcp_read.snapshot_properties(blob)
-        vec = _read_fader_vector(blob, spec)
+        return _fader_levels(blob)
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the levels: {exc}"}
+
+
+def _fader_levels(blob: bytes) -> dict:
+    """`fader_levels_live`'s reply from a dump already read.
+
+    faderLevel is 0..127 and only the virtual slots carry a value; we present percent, which is what
+    the announcements say too. `channel` names whatever sits on that fader right now."""
+    spec = _active_faders()
+    gate = _level_write_gate()
+    raw = rcp_read.values(blob, "faderLevel")
+    # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
+    # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
+    # the encoder cycles onto the virtual faders (announcer._encoder_ring).
+    mutes = rcp_read.values(blob, "channelOutputMute")
+    solos = rcp_read.values(blob, channels.CUE_PROP)
+    mon = rcp_read.values(blob, "outputMonLevel")
+    # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
+    # They ride on this read rather than on /api/routing/live because they belong beside the
+    # monitor level on the Levels tab, and this is the read that tab already makes.
+    outs = rcp_read.snapshot_properties(blob)
+    vec = _read_fader_vector(blob, spec)
     faders = []
     for idx in sorted(spec.level_selectors):
         val = raw[idx] if idx < len(raw) else None
@@ -4721,6 +4757,27 @@ def fader_levels_live() -> dict:
             # labels have to keep saying so or the two are impossible to tell apart by ear.
             "bluetooth_out": {"percent": (None if bt_level is None else round(bt_level * 100)),
                               "muted": one("outputBTMute")}}
+
+
+def _window_levels(blob: bytes) -> dict:
+    """The native Levels page's state from one dump: `_fader_levels`, each output's cross-point
+    levels (`mix`, `rcp_read.read_matrix_levels` less its modes, which the window keeps in
+    `matrix`), the two auto-mutes, the headphone types, and the page's layout as `model`."""
+    levels = _fader_levels(blob)
+    mix = rcp_read.read_matrix_levels(blob)
+    mix.pop("modes", None)
+    levels.update(
+        mix=mix,
+        auto_mute={which: rcp_read.block_value(blob, "OUTPUT", spec["prop"])
+                   for which, spec in _AUTO_MUTE.items()},
+        headphone_types=_headphone_types(blob),
+        model={"faders": sorted(_active_faders().level_selectors),
+               "monitor_mix": monitor_mix_model(),
+               "auto_mute": [[which, spec["label"]] for which, spec in _AUTO_MUTE.items()],
+               "headphones": {
+                   "outputs": [lab for _sel, lab in _active_headphones().outputs],
+                   "values": [[code, lab] for code, lab in _active_headphones().values]}})
+    return levels
 
 
 def action_set_fader_level(fader: int, percent: int) -> dict:
@@ -5664,9 +5721,6 @@ def read_routing_live() -> dict:
     cis = rcp_read.values(blob, "channelInputSource")
     input_sources = {strip: (cis[idx] if idx < len(cis) else None)
                      for strip, idx in _active_input_strips().strip_vec_index.items()}
-    # All headphoneType values in dump order, mapped positionally to the device's outputs.
-    headphone_types = [v for v in rcp_read.values(blob, "headphoneType")
-                       if v is not None and v != ""]
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))
     # Publish it exactly as the strip vector above is published: this is the routing read every
@@ -5709,12 +5763,7 @@ def read_routing_live() -> dict:
         # with "outputMonAutoMuteActive" is not the issue.
         "monitor_auto_mute": rcp_read.block_value(blob, "OUTPUT", "outputMonAutoMute"),
         "bt_auto_mute": rcp_read.block_value(blob, "OUTPUT", "outputBTAutoMute"),
-        # Per-output headphone types: the model dump carries one headphoneType per output
-        # (4 on the Duo: HP1,HP2,HP3,HP4); we map them POSITIONALLY to the device's exposed headphone
-        # outputs (HP1 then HP2): HP1 (0x09) is dump position 0 and HP2 (0x0A) is
-        # position 1.
-        "headphone_types": [headphone_types[i] if i < len(headphone_types) else None
-                            for i in range(len(_active_headphones().outputs))],
+        "headphone_types": _headphone_types(blob),
         **rcp_read.master_processing(blob),
         "message": "Read routing from the device.",
     }
@@ -6324,6 +6373,15 @@ _AUTO_MUTE_SETTLE_S = 0.6
 def _active_headphones():
     """The HeadphoneTypeSpec for the currently-connected device (devices.py)."""
     return devices.get_active_device().headphones
+
+
+def _headphone_types(blob: bytes) -> list:
+    """Each exposed headphone output's amp type. The dump carries one headphoneType per output
+    (4 on the Duo: HP1, HP2, HP3, HP4), mapped POSITIONALLY to the device's exposed outputs: HP1
+    (0x09) is dump position 0 and HP2 (0x0A) position 1."""
+    types = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
+    return [types[i] if i < len(types) else None
+            for i in range(len(_active_headphones().outputs))]
 
 
 def action_set_headphone_type(value: int, output: int = 0) -> dict:
@@ -9863,7 +9921,8 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
 
 
-def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=True):
+def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=True,
+                     greeting=announcer.GREETING_STARTED):
     """Bind the server, wire its lifecycle, and (optionally) open the UI. Returns the running
     ThreadingHTTPServer (already stored in _httpd) or None when another instance is already
     serving or the port could not be bound. Does NOT call serve_forever - the caller decides
@@ -9873,6 +9932,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
       - watchdog:     run the auto-quit watchdog (stops the server once the page closes). The
                       tray app passes False so closing the window leaves the server in the tray.
       - announce:     turn the control announcer on at startup.
+      - greeting:     what the announcer says once the desk is open; empty for nothing.
       - shortcuts:    register the global keyboard shortcuts. OFF in headless mode: a background
                       tooling run must never take keys away from the whole machine.
     """
@@ -9928,7 +9988,7 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
     if announce and announcer.starts_on():
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # App settings can still turn it off.
-        announcer.action_set_announce(True, chosen=False, greeting=announcer.GREETING_STARTED)
+        announcer.action_set_announce(True, chosen=False, greeting=greeting)
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
     # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something
@@ -9983,7 +10043,8 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
     return server
 
 
-def start_server_managed(announce=True, shortcuts=True, open_browser=True):
+def start_server_managed(announce=True, shortcuts=True, open_browser=True,
+                         greeting=announcer.GREETING_STARTED):
     """Start the server for the tray app: there is NO auto-quit watchdog, so closing the web page
     leaves the server running (it lives in the system tray until Quit). The server runs on a
     background daemon thread. Returns the server, or None if it did not start (another instance was
@@ -9995,7 +10056,7 @@ def start_server_managed(announce=True, shortcuts=True, open_browser=True):
     is already off on this path, so a tray instance with no page open sits there quite happily
     rather than deciding after two minutes that the browser failed to start."""
     server = _bring_up_server(open_browser=open_browser, watchdog=False, announce=announce,
-                              shortcuts=shortcuts)
+                              shortcuts=shortcuts, greeting=greeting)
     if server is not None:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

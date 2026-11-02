@@ -800,7 +800,7 @@ def read_matrix_state(blob: bytes | None = None) -> dict:
     return _read_matrix(blob, "mixDisabled", "excluded", lambda v: v is True, "it")
 
 
-def _decode_level_cell(cell) -> dict:
+def decode_level_cell(cell) -> dict:
     """One mixLevelWithAnchor cell: the ASCII string 'level|anchor' (0..1). level == anchor means
     the cross-point is LINKED (it follows the channel fader); they differ when it has been unlinked
     at a manual level. Anything that will not parse comes back as two Nones rather than a guess."""
@@ -819,7 +819,7 @@ def read_matrix_levels(blob: bytes | None = None) -> dict:
     Returns {"ok", "reason", "levels": {output: {source: {"level": float|None, "linked": bool}}},
              "modes": {output: 0|1|2}}. See _read_matrix for the guards.
     """
-    return _read_matrix(blob, "mixLevelWithAnchor", "levels", _decode_level_cell, "levels")
+    return _read_matrix(blob, "mixLevelWithAnchor", "levels", decode_level_cell, "levels")
 
 
 if __name__ == "__main__":

@@ -130,3 +130,12 @@ class JobDialog(wx.Dialog):
     def _on_sink_destroyed(self, event):
         self._notifier.close()
         event.Skip()
+
+
+def confirm(parent, title, text, action):
+    """Ask before a change that wipes something: True if `action` was chosen. Cancel is the
+    default, so Enter on arrival changes nothing."""
+    dialog = TextDialog(parent, title, text, [(wx.ID_OK, action), (wx.ID_CANCEL, "Cancel")],
+                        default=wx.ID_CANCEL, escape=wx.ID_CANCEL)
+    with dialog:
+        return dialog.ShowModal() == wx.ID_OK

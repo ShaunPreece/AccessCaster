@@ -111,6 +111,12 @@ class Slider:
         """Show or hide the slider with its label."""
         self.slider.GetContainingSizer().ShowItems(shown)
 
+    def set_label(self, label):
+        """Rename the slider, through the label that names it."""
+        text = self.slider.GetContainingSizer().GetItem(0).GetWindow()
+        if text.GetLabel() != label:
+            text.SetLabel(label)
+
     def _on_slider(self, _event):
         self._moved_at = time.monotonic()
         self._writer.change(self.slider.GetValue())
