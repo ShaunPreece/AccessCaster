@@ -5202,8 +5202,7 @@ async function loadRouting() {
     const umHint = document.createElement("span");
     umHint.className = "hint";
     umHint.id = "routing-usb-mode-hint";
-    umHint.textContent = "The unit's audio, a screen reader included, drops for a couple of seconds "
-      + "while it changes over.";
+    umHint.textContent = data.usb_drop_hint || "";
     addDescription(um.sel, "routing-usb-mode-hint");
     um.row.appendChild(umHint);
     routingCtl.usbMode = um.sel;
@@ -5227,7 +5226,8 @@ async function loadRouting() {
     const expHint = document.createElement("span");
     expHint.className = "hint";
     expHint.id = "routing-usb-expanded-hint";
-    expHint.textContent = data.usb_expanded_hint || "";
+    expHint.textContent = [data.usb_expanded_hint, data.usb_expanded_drop_hint]
+      .filter(Boolean).join(" ");
     addDescription(exp.sel, "routing-usb-expanded-hint");
     exp.row.appendChild(expHint);
     routingCtl.usbExpanded = exp.sel;

@@ -9,7 +9,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Switch, set_choices
 from native.desk_state import CUSTOM, MIX_MINUS
-from native.dialogs import confirm
+from native.dialogs import DeletePresetDialog, confirm
 from native.pages import group, labelled, page_box
 
 TITLE = "Output mixes"
@@ -95,8 +95,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             excluded[reply["source"]] = reply["excluded"]
 
     def _show_output(self):
-        """Put the chosen output on every control: its mix, its sources' names and states, and the
-        one-output save button's label."""
+        """Put the chosen output on every control: its mix, and its sources' names and states."""
         out = self.current
         self._output_index = out["index"]
         for source in self.model["sources"]:
@@ -106,7 +105,6 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             if switch.box.GetLabel() != label:
                 switch.box.SetLabel(label)
         self.sources_box.SetLabel(f"Sources in {out['label']}")
-        self.save_output.SetLabel(f"Save only the {out['label']} mix as a preset")
         set_choices(self.mode, [label for _value, label in out["modes"]])
         self._show_mode()
 
@@ -199,36 +197,19 @@ class OutputMixesPage(scrolled.ScrolledPanel):
     def _build_schemes(self, parent, sizer):
         box_sizer, box = group(parent, sizer, "Mix presets")
         self.scheme = labelled(box, box_sizer, "Mix preset", lambda p: wx.Choice(p))
-        a11y.describe(self.scheme, "The output mixes saved under a name: which sources each "
-                                   "output carries, and at what level. Never your channels, "
-                                   "processing or pads.")
+        a11y.describe(self.scheme, "Output mixes only, never channels, processing or pads.")
         self.scheme.Bind(wx.EVT_CHOICE, lambda _e: self._show_scheme())
-        row = wx.BoxSizer(wx.HORIZONTAL)
-        apply = wx.Button(box, label="Apply this preset")
+        apply = wx.Button(box, label="Apply preset")
         apply.Bind(wx.EVT_BUTTON, self._on_apply_scheme)
-        # The selected preset's description is read on the buttons that act on it rather than on
+        # The selected preset's description is read on the button that acts on it rather than on
         # the list, so arrowing the list reads only the names.
         self.apply_acc = a11y.describe(apply)
-        delete = wx.Button(box, label="Delete this preset")
+        save = wx.Button(box, label="Save as a preset...")
+        save.Bind(wx.EVT_BUTTON, self._on_save_scheme)
+        delete = wx.Button(box, label="Delete a preset...")
         delete.Bind(wx.EVT_BUTTON, self._on_delete_scheme)
-        self.delete_acc = a11y.describe(delete)
-        row.Add(apply, 0, wx.RIGHT, 8)
-        row.Add(delete, 0)
-        box_sizer.Add(row, 0, wx.ALL, 6)
-
-        self.scheme_name = labelled(box, box_sizer, "Name for a new preset",
-                                    lambda p: wx.TextCtrl(p, size=(260, -1)))
-        self.scheme_name.SetMaxLength(40)
-        a11y.describe(self.scheme_name, "1 to 40 letters, digits, spaces, dashes or underscores. "
-                                        "Saves the mixes as they are now, levels included.")
-        save_all = wx.Button(box, label="Save every output's mix as a preset")
-        save_all.Bind(wx.EVT_BUTTON, lambda e: self._on_save_scheme(e, False))
-        # One output's preset leaves every other output alone when applied, so it is the kind
-        # that is safe mid-show. Its label names the output chosen at the top of the page.
-        self.save_output = wx.Button(box, label="Save only this output's mix as a preset")
-        self.save_output.Bind(wx.EVT_BUTTON, lambda e: self._on_save_scheme(e, True))
-        box_sizer.Add(save_all, 0, wx.ALL, 6)
-        box_sizer.Add(self.save_output, 0, wx.ALL, 6)
+        for button in (apply, save, delete):
+            box_sizer.Add(button, 0, wx.ALL, 6)
 
     def read_schemes(self, select=None):
         """Read the preset list (files, not the desk). `select` is a saved preset's name to choose
@@ -241,12 +222,11 @@ class OutputMixesPage(scrolled.ScrolledPanel):
     def _fill_schemes(self, data, select):
         chosen = self._scheme()
         schemes = [{"builtin": True, "name": b["id"], "label": b["name"],
-                    "text": b["name"] + (f" ({b['scope']})" if b.get("scope") else ""),
+                    "text": _scheme_text(b["name"], b.get("scope")),
                     "description": b["description"], "destructive": b["destructive"]}
                    for b in data.get("builtins") or []]
         schemes += [{"builtin": False, "name": s["name"], "label": s["name"],
-                     "text": f"{s['name']} (saved" + (f", {s['scope']}" if s.get("scope") else "")
-                             + ")",
+                     "text": _scheme_text(s["name"], s.get("scope")),
                      "description": s.get("description") or "", "destructive": False}
                     for s in data.get("saved") or []]
         self._schemes = schemes
@@ -264,10 +244,8 @@ class OutputMixesPage(scrolled.ScrolledPanel):
 
     def _show_scheme(self):
         scheme = self._scheme()
-        text = scheme["description"] if scheme else "No mix presets on this device."
-        self.apply_acc.description = text
-        self.delete_acc.description = (
-            "Built-in presets cannot be deleted." if scheme and scheme["builtin"] else text)
+        self.apply_acc.description = (scheme["description"] if scheme
+                                      else "No mix presets on this device.")
 
     def _on_apply_scheme(self, event):
         source = event.GetEventObject()
@@ -285,62 +263,59 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         self._run(source, f"Applying {scheme['label']}, please wait.",
                   server.action_apply_routing_scheme, scheme["name"], scheme["builtin"])
 
-    def _on_save_scheme(self, event, one_output):
+    def _on_save_scheme(self, event):
         source = event.GetEventObject()
         if self.read_only:
             self.frame.say(READ_ONLY)
             return
-        name = self.scheme_name.GetValue().strip()
-        if not name:
-            self.frame.say("Type a name for the preset first.")
-            self.scheme_name.SetFocus()
-            return
-        out = self.current if one_output else None
+        out = self.current
+        with SavePresetDialog(self, out["label"]) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            name, one_output = dialog.name(), dialog.one_output()
         exists = any(not s["builtin"] and s["name"] == name for s in self._schemes)
         if exists and not confirm(
                 self, f"Replace the mix preset {name}?",
                 "A saved preset of that name already exists. Saving replaces it with "
-                + (f"the {out['label']} mix" if out else "the unit's mixes") + " as it is now.",
-                "Replace preset"):
+                + (f"the {out['label']} mix" if one_output else "the unit's mixes")
+                + " as it is now.", "Replace preset"):
             self.frame.say("Cancelled. The saved preset was not changed.")
             return
 
         def saved(reply):
             self.frame.reply(source, reply)
             if reply.get("ok"):
-                self.scheme_name.SetValue("")
                 self.read_schemes(select=reply.get("name"))
-        call(self, server.action_save_routing_scheme, name, out["key"] if out else "",
+        call(self, server.action_save_routing_scheme, name, out["key"] if one_output else "",
              done=saved)
 
     def _on_delete_scheme(self, event):
         source = event.GetEventObject()
-        scheme = self._scheme()
-        if scheme is None or scheme["builtin"]:
-            self.frame.say("Built-in presets cannot be deleted. Choose a saved one.")
+        own = [s for s in self._schemes if not s["builtin"]]
+        if not own:
+            self.frame.say("There are no presets of your own to delete.")
             return
-        if not confirm(self, f"Delete the mix preset {scheme['label']}?",
-                        "This removes the saved preset from this computer. The unit's mixes are "
-                        "not changed.", "Delete preset"):
-            self.frame.say("Cancelled. The preset was not deleted.")
-            return
+        with DeletePresetDialog(self, [s["name"] for s in own],
+                                [s["text"] for s in own]) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            name = dialog.chosen()
 
         def deleted(reply):
             self.frame.reply(source, reply)
             if reply.get("ok"):
                 self.read_schemes()
-        call(self, server.action_delete_routing_scheme, scheme["name"], done=deleted)
+        call(self, server.action_delete_routing_scheme, name, done=deleted)
 
     # ---- reset -----------------------------------------------------------------------------
 
     def _build_reset(self, parent, sizer):
-        box_sizer, box = group(parent, sizer, "Reset all output mixes")
-        reset = wx.Button(box, label="Reset all output mixes")
+        reset = wx.Button(parent, label="Reset all output mixes")
         a11y.describe(reset, "Headphones, monitor, recording and USB 1 go back to Main Mix; "
                              "Bluetooth, Chat, USB 2 and CallMe to Mix Minus, all following the "
                              "faders. Wipes any custom mix.")
         reset.Bind(wx.EVT_BUTTON, self._on_reset)
-        box_sizer.Add(reset, 0, wx.ALL, 6)
+        sizer.Add(reset, 0, wx.ALL, 6)
 
     def _on_reset(self, event):
         source = event.GetEventObject()
@@ -357,3 +332,57 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             return
         self._run(source, "Resetting every output mix, please wait.",
                   server.action_reset_all_outputs)
+
+
+def _scheme_text(name, scope):
+    """A preset's name in the list, tagged with its scope unless it writes every output."""
+    return name if not scope or scope == "every output" else f"{name}, {scope}"
+
+
+class SavePresetDialog(wx.Dialog):
+    """A name for the new preset, and whether it holds every output's mix or only `output`'s. One
+    output's preset leaves every other output alone when applied, so it is the kind that is safe
+    mid-show."""
+
+    MAX_NAME = 40
+
+    def __init__(self, parent, output):
+        super().__init__(parent, title="Save the mixes as a preset")
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, 10)
+        self.name_box = wx.TextCtrl(self, size=(300, -1))
+        self.name_box.SetMaxLength(self.MAX_NAME)
+        a11y.describe(self.name_box, f"Up to {self.MAX_NAME} letters, digits, spaces, dashes or "
+                                     f"underscores.")
+        sizer.Add(self.name_box, 0, wx.ALL, 10)
+        self.scope = wx.RadioBox(self, label="What to save",
+                                 choices=["Every output's mix", f"Only the {output} mix"],
+                                 style=wx.RA_SPECIFY_ROWS)
+        sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, label="Save")
+        ok.SetDefault()
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
+        buttons.Realize()
+        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(sizer)
+        self.Bind(wx.EVT_BUTTON, self._on_save, id=wx.ID_OK)
+        self.name_box.SetFocus()
+        self.CentreOnParent()
+
+    def _on_save(self, event):
+        if not self.name():
+            # The dialog stays open, so the reason gets a message box of its own and the focus
+            # goes back to the name.
+            wx.MessageBox("Type a name for the preset first.", "No name",
+                          wx.OK | wx.ICON_WARNING, self)
+            self.name_box.SetFocus()
+            return
+        event.Skip()
+
+    def name(self):
+        return self.name_box.GetValue().strip()
+
+    def one_output(self):
+        return self.scope.GetSelection() == 1

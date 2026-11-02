@@ -52,12 +52,14 @@ class JobDialog(wx.Dialog):
 
     `begin(dialog)` runs once the dialog is up and starts the job; from then on the caller drives
     `say`, `poll` and `finish`. `stop()` runs, off the UI thread, on Stop, Escape or the title bar's
-    close: it asks the job to end, and the dialog stays until the job reports that it has.
+    close: it asks the job to end, and the dialog stays until the job reports that it has. A job
+    that cannot be stopped passes `stop=None`: its button is Close, which ends the dialog with
+    `result` None and leaves the job running.
 
     No progress bar: NVDA beeps a progress bar's changes, and a job that measures a microphone must
     make no sound of its own."""
 
-    def __init__(self, parent, title, text, begin, stop, stop_label="Stop"):
+    def __init__(self, parent, title, text, begin, stop, stop_label=None):
         super().__init__(parent, title=title)
         self._begin = begin
         self._stop = stop
@@ -66,7 +68,7 @@ class JobDialog(wx.Dialog):
         self.result = None
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.status = _paragraphs(self, sizer, text)[0]
-        button = wx.Button(self, wx.ID_CANCEL, stop_label)
+        button = wx.Button(self, wx.ID_CANCEL, stop_label or ("Stop" if stop else "Close"))
         sizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
         # Never shown: the window this dialog's notifications are raised from.
         sink = wx.StaticText(self, label="", size=(1, 1))
@@ -123,6 +125,9 @@ class JobDialog(wx.Dialog):
     def _on_stop(self, _event):
         if self._stopping or self._finished:
             return
+        if self._stop is None:
+            self.finish(None)
+            return
         self._stopping = True
         self.say("Stopping.")
         call(self, self._stop)
@@ -130,6 +135,33 @@ class JobDialog(wx.Dialog):
     def _on_sink_destroyed(self, event):
         self._notifier.close()
         event.Skip()
+
+
+class DeletePresetDialog(wx.Dialog):
+    """Its own list of the user's presets, so what is deleted is never whatever a page's preset
+    list happens to show. `labels`, if given, is what the list shows for each of `names`."""
+
+    def __init__(self, parent, names, labels=None):
+        super().__init__(parent, title="Delete a preset")
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(wx.StaticText(self, label="Preset to delete"), 0, wx.LEFT | wx.TOP, 10)
+        self.names = names
+        self.list = wx.ListBox(self, choices=labels or names, size=(300, 120))
+        self.list.SetSelection(0)
+        sizer.Add(self.list, 0, wx.ALL, 10)
+        sizer.Add(wx.StaticText(self, label="Deleting a preset cannot be undone."), 0,
+                  wx.LEFT | wx.RIGHT, 10)
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, label="Delete")
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
+        buttons.Realize()
+        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(sizer)
+        self.list.SetFocus()
+
+    def chosen(self):
+        return self.names[self.list.GetSelection()]
 
 
 def confirm(parent, title, text, action):

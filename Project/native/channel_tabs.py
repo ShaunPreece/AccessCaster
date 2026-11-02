@@ -12,6 +12,7 @@ from native import a11y
 from native.calls import call
 from native.channel_jobs import AutoGain
 from native.controls import Slider, Switch, set_choices
+from native.dialogs import DeletePresetDialog
 from native.pages import group, labelled
 
 # Which tab each of the server's parameter groups (server.PROCESSING_CONTROLS) goes on, so the
@@ -346,33 +347,6 @@ class PresetsTab(Tab):
             if reply.get("ok"):
                 self.page.section.presets_changed(reply.get("presets"))
         call(self, server.action_delete_mic_preset, name, done=deleted)
-
-
-class DeletePresetDialog(wx.Dialog):
-    """Its own list of the user's presets, so what is deleted is never whatever the channel's
-    preset list happens to show."""
-
-    def __init__(self, parent, names):
-        super().__init__(parent, title="Delete a preset")
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label="Preset to delete"), 0, wx.LEFT | wx.TOP, 10)
-        self.names = names
-        self.list = wx.ListBox(self, choices=names, size=(300, 120))
-        self.list.SetSelection(0)
-        sizer.Add(self.list, 0, wx.ALL, 10)
-        sizer.Add(wx.StaticText(self, label="Deleting a preset cannot be undone."), 0,
-                  wx.LEFT | wx.RIGHT, 10)
-        buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label="Delete")
-        buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        self.SetSizerAndFit(sizer)
-        self.list.SetFocus()
-
-    def chosen(self):
-        return self.names[self.list.GetSelection()]
 
 
 class ProcessingTab(Tab):

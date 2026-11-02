@@ -1,11 +1,11 @@
 """Routing: one page each for the output mixes, the faders, the levels and the master mix.
 
-Output mixes, Fader assignment and Levels draw from the window's desk state (`desk_state`), so a
-change made on the desk shows without a re-read. Master Mix still opens in the web page.
+Every page draws from the window's desk state (`desk_state`), so a change made on the desk shows
+without a re-read.
 """
 import wx
 
-from native import routing_faders, routing_levels, routing_mixes
+from native import routing_faders, routing_levels, routing_master, routing_mixes
 from native.pages import MessagePage, Page
 
 TITLE = "Routing"
@@ -18,9 +18,9 @@ NATIVE = [
      lambda desk: desk.faders["model"]),
     ("levels", routing_levels.TITLE, routing_levels.LevelsPage,
      lambda desk: desk.levels["model"]),
+    ("master", routing_master.TITLE, routing_master.MasterMixPage,
+     lambda desk: desk.master["model"]),
 ]
-# The pages still on the web page, as (key, title), in order after the native ones.
-WEB_PAGES = [("master", "Master Mix")]
 
 
 class RoutingSection:
@@ -37,15 +37,8 @@ class RoutingSection:
                                         button="Read the desk again",
                                         on_button=lambda: self.refresh(True))
                        for key, title, _cls, _model in NATIVE}
-        web = [Page(key, title, MessagePage(
-            frame.host, title,
-            f"{title} is not in this window yet. It opens in the web page, on the Routing "
-            f"page's {title} tab.",
-            button="Open Routing in the browser",
-            on_button=lambda: frame.open_web_page(self.route)))
-            for key, title in WEB_PAGES]
         self.pages = [Page(key, title, self.status[key])
-                      for key, title, _cls, _model in NATIVE] + web
+                      for key, title, _cls, _model in NATIVE]
         self.desk.subscribe(self._desk_event)
 
     def start(self):
@@ -63,7 +56,8 @@ class RoutingSection:
             self._read(detail)
             return
         # Before the first read there are no native pages to show anything on.
-        mixes, faders, levels = (self.native.get(key) for key in ("mixes", "faders", "levels"))
+        mixes, faders, levels, master = (self.native.get(key)
+                                         for key in ("mixes", "faders", "levels", "master"))
         if event == "mix" and mixes:
             mixes.show_outputs(detail)
             levels.show_outputs(detail)
@@ -72,6 +66,8 @@ class RoutingSection:
             levels.show()
         elif event == "levels" and levels:
             levels.show()
+        elif event == "master" and master:
+            master.show()
 
     def _read(self, reply):
         asked, announce = self._asked, self._announce

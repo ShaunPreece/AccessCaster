@@ -1718,9 +1718,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   stops reading as the native control it is.
 - **REPLIES ARE SPOKEN WITH `frame.say`**, a UIA notification the screen reader voices, not the
   app's own SAPI voice. `recent=True` for a slider's replies, so a newer one replaces an older one.
-- **MIC TYPE AND THE PROCESSING PRESET ARE APPLIED BY A BUTTON, NEVER BY THE LIST.** Arrowing a
-  closed native list fires a change per item, and either one replaces the processing chain (a
-  voicing moves the gain too). Re-applying the same voicing is refused for the same reason.
+- **MIC TYPE, THE PROCESSING PRESET AND BOTH HALVES OF THE USB MODE ARE APPLIED BY A BUTTON, NEVER
+  BY THE LIST.** Arrowing a closed native list fires a change per item; a mic type or a preset
+  replaces the processing chain (a voicing moves the gain too), and a USB mode write tears the
+  desk's USB audio down. Re-applying the same value is refused for the same reason.
 - **A CONTROL READS AND RECORDS THROUGH `page.rec`** (`ChannelPage.field`), never a record captured
   when it was built: a re-read replaces the record, and a captured one goes stale silently.
 - **A STAGE THE USER MUST HEAR IN FULL OPENS A DIALOG OF ITS OWN** (`native.dialogs`): a screen
@@ -1749,6 +1750,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A VIRTUAL FADER'S MUTE AND SOLO LIVE ON `levels["faders"]`, NOT ONLY ON A CHANNEL RECORD.** An
   empty fader or a stereo-linked pair has no channel record, so `_set_level` puts the strip's push
   on the fader as well; `muted` None is an empty fader and takes no push.
+- **A CONTROL THAT CANNOT ACT NOW REFUSES THROUGH ITS GUARD, AND IS NEVER DISABLED**
+  (`Switch(guard=)`, the Master Mix page's raw tracks switch while no separate tracks are made). A
+  disabled Win32 control leaves the tab order, so it would vanish from under the user.
+- **THE MASTER MIX PAGE POLLS RODE'S DRIVER LINE WHILE IT IS SHOWN**, the one page that reads
+  anything on show. `server.read_usb_driver` reads Windows and the service's status, never the
+  desk. Its `switching` holds both USB Confirm buttons: a second switch made sooner lands in the
+  middle of the first's bind wait.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 

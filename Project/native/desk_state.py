@@ -1,5 +1,5 @@
-"""The window's picture of the desk, its channels, its output mixes and its levels: read once,
-then kept current by what the desk pushes.
+"""The window's picture of the desk, its channels, its output mixes, its levels and its master mix:
+read once, then kept current by what the desk pushes.
 
 It listens on a read-only HID handle of its own, because the announcer's listener runs only while
 announcements are on. The state belongs to the UI thread: the listener thread decodes a push and
@@ -64,8 +64,20 @@ _OUTPUT_LEVELS = {
 _FADER_TOGGLES = {channels.MUTE_PROP: "muted", channels.CUE_PROP: "soloed"}
 _LEVELS = set(_OUTPUT_LEVELS) | {"faderLevel", "headphoneType", "mixLevelWithAnchor"}
 
+# The Master Mix page's values: name -> (its block's selector, key in `master`, kind pushed).
+_MASTER = {
+    "outputMultiBypass": (rcp_transfer.SEL_OUTPUT_GLOBAL, "usb_bypass", "bool"),
+    "masterCompellorOn": (rcp_transfer.SEL_MASTER_PROC, "compellor_on", "bool"),
+    "masterCompellorThreshold": (rcp_transfer.SEL_MASTER_PROC, "compellor_threshold", "float"),
+    "masterCompellorAttack": (rcp_transfer.SEL_MASTER_PROC, "compellor_attack", "float"),
+    "masterCompellorRelease": (rcp_transfer.SEL_MASTER_PROC, "compellor_release", "float"),
+    "masterCompellorGain": (rcp_transfer.SEL_MASTER_PROC, "compellor_gain", "float"),
+    "masterDelayOn": (rcp_transfer.SEL_MASTER_PROC, "delay_on", "bool"),
+    "masterDelaySeconds": (rcp_transfer.SEL_MASTER_PROC, "delay_seconds", "float"),
+}
+
 _RELEVANT = (STRUCTURAL | set(_STRIP_BOOLS) | _MODULES | _PARAMS | set(_FX_ON) | set(_FX_PARAMS)
-             | _INPUTS | _MIX | _LEVELS
+             | _INPUTS | _MIX | _LEVELS | set(_MASTER)
              | {"channelBypassProcessing", channels.CHAIN_PRESET_MARKER_PROP})
 _CHAIN = (_MODULES | _PARAMS | {channels.CHAIN_ADVANCED_PROP, channels.CHAIN_PRESET_MARKER_PROP})
 
@@ -78,13 +90,14 @@ class DeskState:
     as `matrix["model"]` (server.matrix_model). `faders` is the fader layout from the same read
     (`model`, `layout`, `labels`, `stereo`); a fader write's reply updates it through
     `faders_changed`, and the push that follows asks for a full read (`STRUCTURAL`). `levels` is
-    the Levels page's state from the same read (server._window_levels).
+    the Levels page's state from the same read (server._window_levels), and `master` the Master
+    Mix page's (server._window_master).
 
     A subscriber is called as `fn("read", reply)` after every full read, successful or not,
     `fn("changed", names)` with the names of the channels a push changed, `fn("mix", outputs)`
     with the indices of the outputs whose mode or mix a push changed, `fn("faders", None)` when a
-    fader write's reply changed the layout, and `fn("levels", None)` when a push changed
-    anything in `levels`."""
+    fader write's reply changed the layout, `fn("levels", None)` when a push changed anything in
+    `levels`, and `fn("master", None)` when a push changed anything in `master`."""
 
     def __init__(self, owner):
         self.owner = owner
@@ -92,6 +105,7 @@ class DeskState:
         self.matrix = None
         self.faders = None
         self.levels = None
+        self.master = None
         self._records = {}           # channel name -> its record in `channels`
         self._strip_names = {}       # strip index -> channel name
         self._subscribers = []
@@ -102,6 +116,7 @@ class DeskState:
         self._dirty = set()
         self._dirty_mix = set()
         self._dirty_levels = False
+        self._dirty_master = False
         self._flush = None
         self._stop = threading.Event()
         self._thread = None
@@ -139,6 +154,7 @@ class DeskState:
             self.matrix = dict(reply["matrix"], model=reply["matrix_model"])
             self.faders = reply["faders"]
             self.levels = reply["levels"]
+            self.master = reply["master"]
             self._records = {rec["name"]: rec for rec in reply["channels"]}
             by_code = {entry["source_code"]: name
                        for name, entry in channels.ui_channel_map().items()}
@@ -230,6 +246,11 @@ class DeskState:
         if name in STRUCTURAL:
             self._reread_soon()
             return
+        if name in _MASTER:
+            if _set_master(self.master, path, name, value, kind):
+                self._dirty_master = True
+                self._flush_soon()
+            return
         if (name in _LEVELS or name in _FADER_TOGGLES) and _set_level(
                 self.levels, path, name, value, kind):
             self._dirty_levels = True
@@ -268,12 +289,15 @@ class DeskState:
         names, self._dirty = self._dirty, set()
         outputs, self._dirty_mix = self._dirty_mix, set()
         levels, self._dirty_levels = self._dirty_levels, False
+        master, self._dirty_master = self._dirty_master, False
         if names:
             self._notify("changed", names)
         if outputs:
             self._notify("mix", outputs)
         if levels:
             self._notify("levels", None)
+        if master:
+            self._notify("master", None)
 
     def _preset_soon(self, name):
         timer = self._preset_timers.get(name)
@@ -418,6 +442,15 @@ def _set_level(levels, path, name, value, kind):
     if holder is None or holder[key] == value:
         return False
     holder[key] = value
+    return True
+
+
+def _set_master(master, path, name, value, kind):
+    """Put one pushed value on the Master Mix page's state. Returns whether anything changed."""
+    selector, key, wanted = _MASTER[name]
+    if master is None or kind != wanted or path != [selector] or master[key] == value:
+        return False
+    master[key] = value
     return True
 
 

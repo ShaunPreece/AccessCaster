@@ -2827,8 +2827,9 @@ def read_window_state() -> dict:
     """The native window's full read: every channel, as `action_get_channels(percent=False)`, and
     the output mixes (`matrix`, `rcp_read.read_matrix_state` keyed by index, with `matrix_model`'s
     layout as `matrix_model`), the fader layout (`faders`: `fader_model` as `model`, then
-    `layout`, `labels` and `stereo` as a fader write's reply carries them) and the Levels page's
-    state (`levels`, `_window_levels`), from ONE model dump."""
+    `layout`, `labels` and `stereo` as a fader write's reply carries them), the Levels page's
+    state (`levels`, `_window_levels`) and the Master Mix page's (`master`, `_window_master`),
+    from ONE model dump."""
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
@@ -2845,6 +2846,7 @@ def read_window_state() -> dict:
                            "labels": [_channel_name(c, spec) for c in layout],
                            "stereo": stereo_link_state(cis, spec)}
         reply["levels"] = _window_levels(blob)
+        reply["master"] = _window_master(blob)
     return reply
 
 
@@ -4780,6 +4782,27 @@ def _window_levels(blob: bytes) -> dict:
     return levels
 
 
+def _window_master(blob: bytes) -> dict:
+    """The native Master Mix page's state from one dump: the USB audio mode in its two halves, the
+    USB stream's raw switch, the master bus's processing (`rcp_read.master_processing`), and the
+    page's layout as `model`. Publishes the USB mode, as the Routing page's read does."""
+    usb_mode, usb_expanded = recorder.split_usb_multitrack(
+        rcp_read.first(blob, "outputMultiMode", "int"))
+    channels.publish_usb_expanded(usb_expanded)
+    return {
+        "usb_multitrack": usb_mode, "usb_expanded": usb_expanded,
+        "usb_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
+        **rcp_read.master_processing(blob),
+        "model": {"usb_modes": sorted(recorder.USB_MULTITRACK_LABEL.items()),
+                  "usb_expanded": sorted(recorder.USB_EXPANDED_LABEL.items()),
+                  "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
+                  "usb_drop_hint": recorder.USB_DROP_HINT,
+                  "usb_expanded_drop_hint": recorder.USB_EXPANDED_DROP_HINT,
+                  "bypass_hint": recorder.BYPASS_HINT,
+                  "bypass_needs_multitrack": recorder.BYPASS_NEEDS_MULTITRACK,
+                  "read_only": _output_write_gate() is not None}}
+
+
 def action_set_fader_level(fader: int, percent: int) -> dict:
     """Set one VIRTUAL fader's level, 0-100 percent (faderLevel, 0-127 on the wire)."""
     gate = _level_write_gate()
@@ -5669,6 +5692,8 @@ def routing_model() -> dict:
         # no label for, so the control renders with ONE option it cannot be changed away from.
         "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
         "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
+        "usb_drop_hint": recorder.USB_DROP_HINT,
+        "usb_expanded_drop_hint": recorder.USB_EXPANDED_DROP_HINT,
         "input_strips": [{"key": k, "label": lab}
                          for k, _idx, lab in _active_input_strips().strips],
         "input_sources": _active_input_strips().source_palette,
@@ -5916,9 +5941,11 @@ def action_set_usb_expanded(on: bool) -> dict:
         arrived = _write_usb_mode_parked(value, old)
     tail = ("" if on or not cleared else
             f" {wording.join_and(cleared)} came off their faders.")
+    # The one step left to the user, said once the driver's state is known.
+    next_step = f" {recorder.USB_EXPANDED_NEXT}" if on else ""
     return {"ok": True,
             "message": (f"Expanded is {'on' if on else 'off'}.{tail}"
-                        + _virtual_devices_follow(value, arrived))}
+                        + _virtual_devices_follow(value, arrived) + next_step)}
 
 
 def _seed_usb_expanded() -> None:
@@ -6435,7 +6462,8 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
     with _hid_lock:
         rcp_transfer.set_output_delay(on, seconds)
     if not on:
-        return {"ok": True, "message": "Output delay turned off."}
+        return {"ok": True, "message": "Output delay turned off." if seconds is None else
+                f"Output delay is off. Its time is {int(round(seconds * 1000))} milliseconds."}
     if seconds is None:
         return {"ok": True, "message": "Output delay turned on."}
     return {"ok": True, "message": f"Output delay on, {int(round(seconds * 1000))} milliseconds."}

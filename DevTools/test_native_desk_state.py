@@ -62,7 +62,10 @@ with as_device(devices.PRO2):
                           "headphone_types": [0, 0],
                           "mix": {"ok": True, "levels": {0: {0: {"level": 0.5, "linked": True}},
                                                          8: {0: {"level": 0.5, "linked": True}}}},
-                          "model": {}}})
+                          "model": {}},
+                      "master": {"usb_multitrack": 0, "usb_expanded": False, "usb_bypass": False,
+                                 "compellor_on": False, "compellor_threshold": 0.67,
+                                 "delay_on": False, "delay_seconds": 0.0, "model": {}}})
     check("a full read notifies", events[-1][0], "read")
     mic, bt, bus = (store._records[n] for n in ("Mic1", "Bluetooth", "SMARTpads"))
 
@@ -179,6 +182,25 @@ with as_device(devices.PRO2):
     store.solos_cleared()
     check("clearing the solos clears every channel's", bt["solo"], False)
     check("and every fader's", levels["faders"][0]["soloed"], False)
+
+    master = store.master
+    proc = rcp_transfer.SEL_MASTER_PROC
+    feed([proc], "masterCompellorOn", v_bool(True))
+    check("the master Compellor's switch", master["compellor_on"], True)
+    feed([proc], "masterCompellorThreshold", v_float(0.5))
+    check("a Compellor parameter, as the desk's own 0..1", master["compellor_threshold"], 0.5)
+    feed([proc], "masterDelaySeconds", v_float(0.25))
+    check("the output delay's time, in seconds", master["delay_seconds"], 0.25)
+    feed([out], "outputMultiBypass", v_bool(True))
+    check("the USB stream's raw switch, on the OUTPUT block", master["usb_bypass"], True)
+    feed([proc + 1], "masterDelayOn", v_bool(True))
+    check("a master value on another block is ignored", master["delay_on"], False)
+    count = len(events)
+    store._flush_dirty()
+    check("one notification for the master values", events[count:], [("master", None)])
+    feed([proc], "masterCompellorOn", v_bool(True))
+    store._flush_dirty()
+    check("a value the desk already had notifies nothing", events[count + 1:], [])
 
     feed([ch + 0], "channelInputSource", v_int(1))
     check_true("a fader reassignment asks for a full read", store._reread is not None)

@@ -217,15 +217,19 @@ USB_EXPANDED_LABEL = {
     False: "Standard: main and chat only",
     True: "Expanded: main, chat and four separate app inputs",
 }
-USB_EXPANDED_HINT = ("Adds Game, Music, A and B, each on its own fader. Needs RODE's Virtual "
-                     "Devices driver, and stops their ASIO driver working. "
-                     # SAID BEFORE THE PRESS: speech jumping to the laptop speakers unannounced
-                     # reads as something breaking. Why it moves is in virtual_devices.park_output.
-                     "While the unit reconnects, sound plays from this computer's own speakers. "
-                     # THE WINDOWS STEP THAT IS STILL THE USER'S, because a program's output is a
-                     # choice this app knows nothing about. Pointing Windows' default at System
-                     # (RODECaster) the app does itself (virtual_devices.py).
-                     "Send a program to one of the four in Windows' App volume and device "
+USB_EXPANDED_HINT = ("Expanded adds Game, Music, A and B, each on its own fader. Needs RODE's "
+                     "driver, and stops their ASIO driver.")
+# What a USB mode write costs, SAID BEFORE THE PRESS: a screen reader routed through the unit goes
+# silent, and speech jumping to the laptop speakers unannounced reads as something breaking (why
+# it moves is in virtual_devices.park_output). On whatever applies the write: the native Confirm
+# button, or the web page's list, which applies on Enter.
+USB_DROP_HINT = "Audio drops for a couple of seconds, screen reader included."
+USB_EXPANDED_DROP_HINT = ("Audio drops for a couple of seconds, screen reader included, and plays "
+                          "from this computer's speakers until the unit is back.")
+# Said in the reply to turning Expanded on, when it is needed. The Windows step that is still the
+# user's, because a program's output is a choice this app knows nothing about; pointing Windows'
+# default at System (RODECaster) the app does itself (virtual_devices.py).
+USB_EXPANDED_NEXT = ("Send a program to one of the four in Windows' App volume and device "
                      "preferences.")
 
 # What the two processing-bypass switches mean, in RODE's own terms and ours.
