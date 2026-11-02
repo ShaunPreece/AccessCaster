@@ -1253,6 +1253,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Soundpads
 
+- **A LIVE PREVIEW EDIT IS WRITTEN ONLY TO A PAD STILL NAMED "Preview"** (`soundpad.preview_write`,
+  `name=PREVIEW_NAME`). Edits are queued (`server._PreviewWriter`) and can be written after the
+  preview has ended; without the check, a late one lands on whatever pad was made since at that
+  grid. `action_preview_stop` also drops what is waiting (`forget`). `preview_update` is the one
+  caller with `name=None`: an in-place edit of any pad, for tools.
+- **THE APP SHIPS NONE OF RODE'S PAD SOUNDS.** They are RODE's audio, licensed with the desk, and
+  the repo and installer are public. The factory pads come back from the user's OWN desk instead:
+  `action_show_reset` ends with `_keep_factory_pads`, a backup of the freshly reset desk saved over
+  the last one, and Restore the pads from a backup (`action_restore_backup_pads`) puts its pads back
+  with nothing else changed. A test that drives the reset must fake `_keep_factory_pads`: it reads
+  the pads and writes the real backup store.
 - **"RESTORE THE FACTORY VOICE EFFECTS" REBUILDS EIGHT PADS, NOT SIX, AND IT IS DESTRUCTIVE.**
   `soundpad.restore_factory_fx_pads` clears and recreates grid positions **9 to 16**: the six voice
   effects (9, 10, 11, 13, 14, 15) plus Censor (12) and Ducking (16). All eight qualify because they
@@ -1708,7 +1719,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   a record rounded to whole percents cannot be compared again after a pushed change.
 - **EVERY SERVER CALL GOES THROUGH `native.calls`**, never straight from an event handler: an
   action holds the HID lock for seconds, and on the UI thread that freezes the window. A slider's
-  writes go through `LatestWins`, which sends only the newest value.
+  writes go through `LatestWins`, which sends only the newest value, and at least every
+  `Slider.MAX_WAIT_MS` while it keeps moving: a held arrow repeats faster than the delay, and
+  without the maximum nothing is sent until the key is let go. A list must not get one.
 - **A CONTROL'S NAME IS THE STATIC TEXT CREATED JUST BEFORE IT**, with the same parent (Win32's
   labelling, `pages.labelled`). Create the label second and the control reads unnamed.
 - **F6 FINDS THE PAGE'S FIRST CONTROL BY WALKING ITS CHILDREN** (`_first_focusable`):
@@ -1728,6 +1741,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   reader reads a dialog's text when it opens, never when it changes. While a job runs, its stages
   are spoken by `JobDialog.say`, a notification from the dialog's own notifier. No progress bar
   in a `JobDialog`: NVDA beeps its changes, and auto gain is measuring a microphone.
+- **A JOB DIALOG TICKS, EXCEPT AUTO GAIN** (`JobDialog(ticks=False)` in `channel_jobs`): a soft
+  clock (`speech.start_loop("working")`) plays from 1.5 s into a job until it ends, so a silent wait
+  is never mistaken for a hang. A job that measures a microphone must pass `ticks=False`, or the
+  measurement hears the clock. The loop has its own device handle: through the speech thread, each
+  tick would cut off the phrase playing.
 - **A LEVEL CHECK BUTTON'S LABEL CHANGES ONLY WHILE IT DOES NOT HAVE THE FOCUS**
   (`channel_jobs.LevelCheck`). A screen reader reads a focused button's new name aloud, over the
   levels the check is speaking. The server toggles, so a press is right whatever the label says.
@@ -1818,9 +1836,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   different faults. Hotkey replies and the level watch are handed `speech.say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
 - **A JOB THAT REWRITES THE DESK HOLDS THE ANNOUNCER'S DESK-CHANGE SPEECH** (`_BackgroundJob`'s
-  `rewrites_desk`: the profile restore, the show commands, the pad restore). The announcer says
-  "<job>. Please wait." once and drops every desk change until 1.5 s after the last job ends; the
-  state cache keeps updating. Desk-change speech must go through `announcer._say` / `_tone`, or it
+  `rewrites_desk`: the profile restore, the show commands, the pad restore). The announcer drops
+  every desk change until 1.5 s after the last job ends, and says nothing of its own about the
+  job: the page or window that started it speaks its progress through the screen reader, and a
+  sentence in the announcer's voice as well talks over it. The state cache keeps updating. Desk-change speech must go through `announcer._say` / `_tone`, or it
   talks through a restore. The job's own steps and its end tone are not held.
 
 - **THE ANNOUNCER STARTS ON UNLESS ITS OFF IS REMEMBERED, and only a person's toggle is saved.**

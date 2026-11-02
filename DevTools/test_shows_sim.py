@@ -148,6 +148,8 @@ def install():
     shows.send_delete = DESK.delete
     shows.POLL_S = 0.01
     shows.COMMAND_TIMEOUT_S = 0.25
+    # The factory-pads backup reads the pads and writes the real backup store; here it only says so.
+    server._keep_factory_pads = lambda step: " Kept the factory pads."
 
     # THE LISTENER IS STUBBED OR THIS SUITE IS NOT OFFLINE. `rcp_read.PushListener` resolves the
     # control interface itself, and `find_control_interface` is not faked here - so on a machine
@@ -229,6 +231,7 @@ DESK.storage = False
 res = run_job(server.action_show_reset(backup_first=False))
 check("but an UNBACKED reset still works with no storage", res["ok"], True)
 check("and it really reset", DESK.calls, ["reset"])
+check_in("and keeps a copy of the factory pads", "Kept the factory pads.", res["message"])
 
 print("export that silently does nothing")
 reset_desk()

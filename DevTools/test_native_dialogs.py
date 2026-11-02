@@ -3,7 +3,9 @@ nothing else. A dialog activating focuses its first focusable control; a constru
 calls SetFocus raises a second focus event, and the screen reader reads the control twice. So the
 control to land on comes first, and no dialog's constructor focuses anything. The source check
 walks every wx.Dialog in Project/native, so a new dialog is held to it without being listed here.
-The pad dialogs' first control is checked in test_native_pads. Built hidden: nothing is shown.
+The pad dialogs' first control is checked in test_native_pads. A job dialog's ticking runs for
+exactly as long as the dialog, and not at all when it is told not to. Built hidden: nothing is
+shown.
 
 Run: python DevTools/test_native_dialogs.py
 """
@@ -18,7 +20,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import native
 import wx
-from _testkit import check, check_true
+from _testkit import check, check_true, patched
 from native import dialogs, routing_mixes
 
 app = wx.App()
@@ -63,6 +65,28 @@ for closable, label in ((True, "Close"), (False, "Please wait")):
                                stop=None, closable=closable)
     check(f"a job dialog lands on {label}", first_focusable(dialog).GetLabel(), label)
     dialog.Destroy()
+
+
+class FakeLoop:
+    stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+for ticks in (True, False):
+    started, loop = [], FakeLoop()
+    dialog = dialogs.JobDialog(frame, "Clearing all pads", "Clearing.",
+                               lambda d: d.finish({"ok": True}), stop=None, closable=False,
+                               ticks=ticks)
+    with patched((dialogs.speech, {"start_loop": lambda name, delay: started.append(name) or loop})):
+        dialog.run()
+    dialog.Destroy()
+    if ticks:
+        check_true("a job ticks while it runs and stops when it ends",
+                   started == ["working"] and loop.stopped)
+    else:
+        check("a job told not to tick never starts", started, [])
 
 dialog = dialogs.DeletePresetDialog(frame, ["Show"])
 check_true("Delete a preset lands on its list", first_focusable(dialog) is dialog.list)

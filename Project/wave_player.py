@@ -75,6 +75,9 @@ class Signal:
     def clear(self):
         _kernel32.ResetEvent(self.handle)
 
+    def close(self):
+        _kernel32.CloseHandle(self.handle)
+
 
 class Player:
     """Plays one clip at a time, on the calling thread."""

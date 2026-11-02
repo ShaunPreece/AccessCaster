@@ -275,8 +275,9 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     Change an EXISTING pad's effect with no clear/create/allocation: set_transfer_mode(True) ->
     padActive=True on the pad (0x9a) -> param/on-flag on the pad's effect sub-handle (0x9d) ->
     set_transfer_mode(False). PROVEN realtime (changed Monster's pitch live while talking, no reboot,
-    no neighbour disturbed). Best for editing existing pads + realtime preview. (Full-recipe-in-place
-    = several flags/params at once is the natural next step; only single-param is proven so far.)
+    no neighbour disturbed). Best for editing existing pads + realtime preview. The live preview
+    batches: soundpad.preview_write writes several flags and params, one padActive per batch, in ONE
+    session, held open while more edits arrive (server._PreviewWriter queues them, newest wins).
 3.7 EDIT A PAD-LEVEL PROPERTY IN PLACE  [generic, 2026-06-17] soundpad.set_pad_property(grid, name,
     value, kind) - the UI-agnostic editing layer (set_pad_replay and the other setters go through it): resolve the
     pad's 0-based stream position, write ONE FRAME_PAD (0x9a) record in transfer mode, exit. No

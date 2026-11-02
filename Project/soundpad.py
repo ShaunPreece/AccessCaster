@@ -284,24 +284,58 @@ def preview_start(stack: dict, colour: int = 8, mic: int = 1) -> dict:
 
 
 def preview_update(grid: int, param: str, value, kind: str = "float") -> dict:
-    """Stream one in-place edit to the live preview pad, re-asserting padActive so the effect stays
-    engaged while you tweak. padEffectInput lives on the PAD frame; every effect param and on-flag
-    lives on the pad's FX sub-handle. Pass values through sanitise_preview_edit first."""
-    if not pad_writes_enabled():
-        return {"ok": False, "message": _pad_ro_message()}
-    padidx = grid - 1
-    pos = next((p for p, pi, _t, _n in pad_positions() if pi == padidx), None)
-    if pos is None:
-        return {"ok": False, "message": "The preview pad is no longer there. Start preview again."}
-    if param == "padEffectInput":
-        field = pr.write_record(param, kind, value, pos, pr.FRAME_PAD)
-    else:
-        field = pr.write_record(param, kind, value, free_effect_subhandle(padidx), pr.FRAME_FX)
-    recs = [pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD), field]
-    with _transfer_mode(0.4):
-        t.send_records_paced(recs, delay=0.1)
-        time.sleep(0.2)
+    """One in-place edit to any voice-effect pad, in a transfer-mode session of its own."""
+    preview_write({(grid, param): (value, kind)}, more=dict, name=None)
     return {"ok": True}
+
+
+# A preview session's longest run before it leaves transfer mode and finds the pad again.
+PREVIEW_SESSION_S = 5.0
+
+
+def preview_write(edits: dict, more, name: str | None = PREVIEW_NAME) -> None:
+    """Write live-preview edits in ONE transfer-mode session: `edits` is {(grid, param): (value,
+    kind)}, values already passed through sanitise_preview_edit, and `more()` returns the edits
+    that have arrived since, waiting a short while for them, or {} to end the session. Each batch
+    re-asserts padActive, so the effect stays engaged while it is tweaked. padEffectInput lives on
+    the PAD frame; every effect param and on-flag on the pad's FX sub-handle.
+
+    The pad is found once per session from one model read, and with `name` only a pad still
+    carrying it is written: an edit arriving after the preview ended must not land on a pad made
+    since at the same grid. Raises ValueError when there is nothing it may write. CALLER HOLDS
+    THE HID LOCK."""
+    if not pad_writes_enabled():
+        raise ValueError(_pad_ro_message())
+    blob = rr.read_model()
+    nodes = {p.idx: p for p in pad_nodes(blob)}
+    objects = effect_objects(blob)
+    targets = {}
+    for grid in {grid for grid, _param in edits}:
+        pad = nodes.get(grid - 1)
+        if pad is None or (name is not None and (pad.name or "") != name):
+            raise ValueError("The preview pad is no longer there. Start preview again.")
+        sub = next((o.index for o in objects if o.effects_idx == grid - 1), len(objects))
+        targets[grid] = (pad.position, sub)
+    deadline = time.monotonic() + PREVIEW_SESSION_S
+    with _transfer_mode(0.4):
+        while edits:
+            recs = []
+            for grid in dict.fromkeys(grid for grid, _param in edits):
+                pos, _sub = targets[grid]
+                recs.append(pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD))
+            for (grid, param), (value, kind) in edits.items():
+                pos, sub = targets[grid]
+                recs.append(pr.write_record(param, kind, value, pos, pr.FRAME_PAD)
+                            if param == "padEffectInput"
+                            else pr.write_record(param, kind, value, sub, pr.FRAME_FX))
+            t.send_records_paced(recs, delay=0.1)
+            if time.monotonic() >= deadline:
+                break
+            # Only edits for a pad already found; anything else waits for the next session.
+            edits = more()
+            if any(grid not in targets for grid, _param in edits):
+                raise ValueError("The preview pad changed. Start preview again.")
+        time.sleep(0.2)
 
 
 def preview_stop(grid: int) -> dict:

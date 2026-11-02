@@ -31,21 +31,26 @@ def _deliver(owner, done, reply):
 class LatestWins:
     """One control's writes when it can change faster than the desk takes them (a slider being
     arrowed). Waits `delay_ms` after the last change, sends only the newest value, and while a write
-    is in flight holds the newest value back and sends it when that write returns.
+    is in flight holds the newest value back and sends it when that write returns. With
+    `max_wait_ms`, a control that keeps changing still sends its newest value that often: a held
+    arrow key repeats faster than `delay_ms`, so without it nothing is sent until the key is let go.
 
     `send(value)` runs on a worker thread; `done(value, reply)` on the UI thread after every write.
     `settled(value, reply)` runs once the control has been still for `settle_ms` and the last write
     has returned: the moment to speak a reply, which the screen reader would otherwise read over
     the value it is still announcing on every arrow press."""
 
-    def __init__(self, owner, send, done, settled=None, delay_ms=150, settle_ms=1500):
+    def __init__(self, owner, send, done, settled=None, delay_ms=150, settle_ms=1500,
+                 max_wait_ms=None):
         self._owner = owner
         self._send = send
         self._done = done
         self._settled = settled
         self._delay_ms = delay_ms
         self._settle_ms = settle_ms
+        self._max_wait_ms = max_wait_ms
         self._timer = None
+        self._max_timer = None
         self._settle_timer = None
         self._pending = None
         self._in_flight = False
@@ -56,6 +61,9 @@ class LatestWins:
         self._pending = value
         self._still = False
         self._timer = _restart(self._timer, self._delay_ms, self._fire)
+        # Started by the first unsent change and never restarted, unlike the delay.
+        if self._max_wait_ms and (self._max_timer is None or not self._max_timer.IsRunning()):
+            self._max_timer = wx.CallLater(self._max_wait_ms, self._fire)
         if self._settled is not None:
             self._settle_timer = _restart(self._settle_timer, self._settle_ms, self._on_still)
 

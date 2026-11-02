@@ -228,16 +228,7 @@ class _Engine:
         self._player.close()            # the next phrase opens the output now chosen
 
     def _resolve_output(self) -> int:
-        """The waveOut id of the chosen output. Resolved at every open, because the id is a position
-        in Windows' current device list and moves when a device is plugged in or removed. SAPI's
-        output token creates an SpMMAudioOut, whose DeviceId is that waveOut id."""
-        if not self._output:
-            return wave_player.DEFAULT_DEVICE
-        token = _token(self._voice.GetAudioOutputs(), self._output)
-        if token is None:
-            diagnostics.event("announcer.output_missing", self._output, using="the system default")
-            return wave_player.DEFAULT_DEVICE
-        return int(token.CreateInstance().DeviceId)
+        return _output_device(self._voice, self._output)
 
     def _render(self, text: str) -> bytes:
         """`text` spoken into memory, with the voice's silence trimmed from both ends."""
@@ -269,6 +260,19 @@ class _Engine:
             except (OSError, wave.Error):
                 return None
         return self._cues[path]
+
+
+def _output_device(voice, output: str) -> int:
+    """The waveOut id of `output`, through `voice`, a SAPI SpVoice. Resolved at every open, because
+    the id is a position in Windows' current device list and moves when a device is plugged in or
+    removed. SAPI's output token creates an SpMMAudioOut, whose DeviceId is that waveOut id."""
+    if not output:
+        return wave_player.DEFAULT_DEVICE
+    token = _token(voice.GetAudioOutputs(), output)
+    if token is None:
+        diagnostics.event("announcer.output_missing", output, using="the system default")
+        return wave_player.DEFAULT_DEVICE
+    return int(token.CreateInstance().DeviceId)
 
 
 def _token(tokens, wanted: str):
@@ -384,6 +388,55 @@ def tone(name: str) -> bool:
         return False
     _submit(_Item(name, cue_path=path), "cue " + name)
     return True
+
+
+class Loop:
+    """A cue repeated until `stop`, on a device handle of its own, so speech and the other cues play
+    over it rather than cutting it off. It starts after `delay_s`, so something over sooner makes
+    no sound."""
+
+    def __init__(self, path: str, delay_s: float):
+        self._stopped = threading.Event()
+        self._cut = wave_player.Signal()
+        threading.Thread(target=self._run, args=(path, delay_s), name="cue loop",
+                         daemon=True).start()
+
+    def stop(self) -> None:
+        self._stopped.set()
+        self._cut.set()
+
+    def _run(self, path: str, delay_s: float) -> None:
+        import pythoncom  # noqa: PLC0415
+        if self._stopped.wait(delay_s):
+            self._cut.close()
+            return
+        pythoncom.CoInitialize()
+        player = wave_player.Player(tones.SAMPLE_RATE)
+        try:
+            with wave.open(path, "rb") as w:
+                pcm = _scaled(w.readframes(w.getnframes()), volume)
+            import win32com.client  # noqa: PLC0415
+            device = _output_device(win32com.client.Dispatch("SAPI.SpVoice"), chosen_output)
+            while pcm and not self._stopped.is_set() and player.play(pcm, device, self._cut):
+                pass
+        except Exception as exc:
+            diagnostics.event("announcer.loop_failed", str(exc))
+        finally:
+            player.close()
+            self._cut.close()
+            pythoncom.CoUninitialize()
+
+
+def start_loop(name: str, delay_s: float = 0.0) -> Loop | None:
+    """Repeat the named cue until the returned loop's `stop`. None, and nothing plays, with
+    announcements off (like every cue), in a test run, or for a cue we do not have."""
+    if not enabled.is_set() or SILENT:
+        return None
+    try:
+        path = tones.tone_path(name)
+    except Exception:
+        return None
+    return Loop(path, delay_s) if path else None
 
 
 def action_set_announce_volume(percent: int) -> dict:

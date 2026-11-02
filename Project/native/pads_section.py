@@ -1,6 +1,6 @@
 """SMART pads: a page listing every pad, where one is chosen and then either its settings edited
-or what it does changed, each in a dialog named with the pad (`pad_dialogs`). Voice effects and
-pad maintenance still open in the web page.
+or what it does changed, each in a dialog named with the pad (`pad_dialogs`); Voice effects
+(`pad_fx`); and Pad maintenance (`pad_maint`).
 
 The pads are not part of the window's desk state: they come from a model dump of their own
 (`server.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on F5,
@@ -11,14 +11,16 @@ import wx
 import server
 from native import a11y
 from native.calls import call
-from native.dialogs import JobDialog
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
+from native.pad_fx import FxPage
+from native.pad_maint import MaintPage, run_job
 from native.pages import MessagePage, Page, labelled, page_box
 
 TITLE = "SMART pads"
 PADS = "Pads"
-# The pages still on the web page, as (key, title).
-WEB_PAGES = [("fx", "Voice effects"), ("maint", "Pad maintenance")]
+# Every page is built from the first good read; until then each is a sentence saying why it is not
+# there. As (key, title).
+PAGES = [("pads", "Pads"), ("fx", "Voice effects"), ("maint", "Pad maintenance")]
 # How long after a Settings dialog closes the pads are read again: past `controls._Field.DELAY_MS`,
 # so a write still waiting to go out has been sent first.
 REREAD_AFTER_MS = 600
@@ -32,20 +34,22 @@ class PadsSection:
         self.frame = frame
         self.model = None
         self.page = None
+        self.fx = None
+        self.maint = None
         self._reading = False
         self._again = None       # a read asked for while one runs: None, or whether to announce it
-        self.status = MessagePage(frame.host, PADS, "Starting AccessCaster.",
-                                  button="Read the pads again", on_button=lambda: self.read(True))
-        self.pages = [Page("pads", PADS, self.status)] + [
-            Page(key, title, MessagePage(frame.host, title,
-                                         f"{title} is not in this window yet. It opens in the web "
-                                         "page.", button="Open SMART pads in the browser",
-                                         on_button=lambda: frame.open_web_page(self.route)))
-            for key, title in WEB_PAGES]
+        self.statuses = [MessagePage(frame.host, title, "Starting AccessCaster.",
+                                     button="Read the pads again", on_button=lambda: self.read(True))
+                         for _key, title in PAGES]
+        self.pages = [Page(key, title, status) for (key, title), status in zip(PAGES, self.statuses)]
         frame.desk.subscribe(self._desk_event)
 
     def start(self):
-        self.status.set_text("Reading the pads from the desk.")
+        self._set_status("Reading the pads from the desk.")
+
+    def _set_status(self, text):
+        for status in self.statuses:
+            status.set_text(text)
 
     def refresh(self, announce):
         self.read(announce)
@@ -76,20 +80,22 @@ class PadsSection:
         if not model.get("pads"):
             text = model.get("health_message") or "Could not read the pads."
             if self.page is None:
-                self.status.set_text(text)
+                self._set_status(text)
             elif announce:
                 self.frame.say(text)
             return
         self.model = model
         if self.page is None:
-            self.page = PadsPage(self)
+            self.page, self.fx, self.maint = PadsPage(self), FxPage(self), MaintPage(self)
             focus = wx.Window.FindFocus()
-            if focus is not None and self.status.IsDescendant(focus):
+            if focus is not None and any(status.IsDescendant(focus) for status in self.statuses):
                 self.frame.tree.SetFocus()
-            self.pages[0] = Page("pads", PADS, self.page)
+            self.pages = [Page(key, title, window) for (key, title), window
+                          in zip(PAGES, (self.page, self.fx, self.maint))]
             self.frame.pages_changed(self)
         else:
-            self.page.show()
+            for window in (self.page, self.fx, self.maint):
+                window.show()
         if announce:
             self.frame.say("Pads read from the desk.")
 
@@ -120,6 +126,7 @@ class PadsPage(wx.Panel):
         sizer.Add(row, 0, wx.ALL, 6)
         # Why pads cannot be changed, when they cannot: a read-only desk, or an effect pool the
         # desk needs tidied first. Hidden when there is nothing to say.
+        self.grids = []          # the grid of each list item, as last shown
         self.note = wx.TextCtrl(parent, size=(460, 80),
                                 style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL)
         sizer.Add(self.note, 0, wx.ALL, 6)
@@ -131,7 +138,8 @@ class PadsPage(wx.Panel):
 
     def show(self):
         """Put the section's pad read on the list, keeping the chosen pad."""
-        grid = self._chosen()["grid"] if self.list.GetSelection() != wx.NOT_FOUND else None
+        index = self.list.GetSelection()
+        grid = self.grids[index] if index != wx.NOT_FOUND else None
         pads = self.model["pads"]
         labels = [list_label(pad) for pad in pads]
         if self.list.GetCount() == len(labels):
@@ -141,8 +149,8 @@ class PadsPage(wx.Panel):
                     self.list.SetString(index, label)
         else:
             self.list.Set(labels)
-        grids = [pad["grid"] for pad in pads]
-        self.list.SetSelection(grids.index(grid) if grid in grids else 0)
+        self.grids = [pad["grid"] for pad in pads]
+        self.list.SetSelection(self.grids.index(grid) if grid in self.grids else 0)
         notes = []
         if self.model.get("read_only"):
             notes.append("Editing SMART pads is not enabled on this device yet, so pads can be "
@@ -201,24 +209,14 @@ class PadsPage(wx.Panel):
         self._run(pad["grid"], plan)
 
     def _run(self, grid, plan):
-        """Make the change in a job dialog that stays until it is done, then read the pads, so the
-        settings that open next are the new pad's. Nothing else can be started meanwhile."""
-        def work():
-            reply = plan.action(*plan.args)
-            return {"reply": reply, "model": server.soundpad_model()}
-
-        def begin(job):
-            call(job, work, done=job.finish)
-
-        job = JobDialog(self, f"Changing {where(self._pad(grid))}", plan.working, begin, stop=None,
-                        closable=False)
-        with job:
-            result = job.run()
+        """Make the change, then open the new pad's settings from the read made after it."""
+        result = run_job(self, f"Changing {where(self._pad(grid))}", plan.working, plan.action,
+                         *plan.args)
         self._changed(grid, result, plan)
 
     def _changed(self, grid, result, plan):
         """A change has ended: show the pads read after it, and open the new pad's settings."""
-        reply = result.get("reply", result)
+        reply = result["reply"]
         if result.get("model"):
             self.section.show(result["model"])
         message = reply.get("message") or ("Done." if reply.get("ok") else "That did not work.")

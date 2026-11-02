@@ -65,6 +65,9 @@ class Slider:
     report shows at `unread` and reads "not read yet" until it is moved."""
 
     HANDS_OFF_S = 2.0      # longer than LatestWins' settle, so the last write has returned
+    # While a slider keeps moving (an arrow key held), its newest value still goes out this often.
+    # Only sliders: a list sending every item arrowed past would apply each one.
+    MAX_WAIT_MS = 300
     # A value the desk pushes onto the FOCUSED slider waits until the pushes have stopped this long,
     # then lands once: the screen reader reads every value set on it, so an encoder turned from 55
     # to 70 would otherwise be counted out step by step, long after the knob has stopped.
@@ -82,7 +85,8 @@ class Slider:
         self._unread = lo if unread is None else unread
         self._quiet = quiet
         self.acc = a11y.describe(self.slider, value=self._value_words)
-        self._writer = LatestWins(page, send, self._done, settled=self._settled)
+        self._writer = LatestWins(page, send, self._done, settled=self._settled,
+                                  max_wait_ms=self.MAX_WAIT_MS)
         self._moved_at = 0.0
         self._landing = None
         self.slider.Bind(wx.EVT_SLIDER, self._on_slider)

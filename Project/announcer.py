@@ -116,15 +116,13 @@ _holds = 0
 _hold_until = 0.0
 
 
-def hold_desk_speech(label: str) -> None:
-    """Stop speaking desk changes until the matching `release_desk_speech`. Says `label`, once, so
-    the silence that follows is explained."""
+def hold_desk_speech() -> None:
+    """Stop speaking desk changes until the matching `release_desk_speech`. Says nothing itself: a
+    job is always started from a page or the window, which speaks its progress through the screen
+    reader, and a sentence in this voice as well talks over it."""
     global _holds
     with _hold_lock:
         _holds += 1
-        first = _holds == 1
-    if first and speech.enabled.is_set():
-        speech.say(f"{label}. Please wait.")
 
 
 def release_desk_speech() -> None:

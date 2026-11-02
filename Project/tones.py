@@ -122,6 +122,25 @@ def _ring_samples() -> list:
             + [0.0] * int(SAMPLE_RATE * RING_GAP_S) + burst)
 
 
+# THE WORKING CUE: a soft clock, tick then tock, half a second apart, repeated by
+# `speech.start_loop` while a job runs. One second per file, so the loop is the tick-tock pair.
+# Quieter than the other cues: it plays under the screen reader for as long as the job takes.
+WORKING_PEAK = 0.12
+WORKING_VERSION = 1
+
+
+def _working_samples() -> list:
+    out = [0.0] * SAMPLE_RATE
+    attack = int(SAMPLE_RATE * 0.001)
+    for start, freq in ((0, 1800.0), (SAMPLE_RATE // 2, 1350.0)):
+        frames = int(SAMPLE_RATE * 0.03)
+        for n in range(frames):
+            t = n / SAMPLE_RATE
+            gain = min(1.0, n / attack, (frames - n) / (SAMPLE_RATE * 0.01)) * math.exp(-t / 0.008)
+            out[start + n] = WORKING_PEAK * gain * math.sin(2 * math.pi * freq * t)
+    return out
+
+
 def _write_wav(path: str, samples) -> None:
     frames = struct.pack(f"<{len(samples)}h",
                          *(int(max(-1.0, min(1.0, v)) * 32767) for v in samples))
@@ -157,6 +176,8 @@ def tone_path(name: str) -> str:
     """
     if name == "ring":
         make, version = _ring_samples, RING_VERSION
+    elif name == "working":
+        make, version = _working_samples, WORKING_VERSION
     elif TONES.get(name):
         make, version = (lambda: _note_samples(TONES[name])), TONE_VERSION
     else:

@@ -1,12 +1,17 @@
-"""The native window's SMART pads (Project/native/pads_section.py, pad_dialogs.py), offline: the pad
-list names each pad and keeps the chosen one across a read, the Settings dialog offers only what a
-pad's type has and shows the read's values on it, its writes reach the server in the desk's units,
-and the Change dialog hands back the right plan. Nothing is shown and nothing touches a desk.
+"""The native window's SMART pads (Project/native/pads_section.py,
+pad_dialogs.py, pad_fx.py, pad_maint.py),
+offline: the pad list names each pad and keeps the chosen one across a read, the Settings dialog
+offers only what a pad's type has and shows the read's values on it, its writes reach the server in
+the desk's units, the Change dialog hands back the right plan, Voice effects builds the effect the
+switches and sliders show and refuses a preview with no pad to borrow, and Pad maintenance offers
+only sound pads for export and refuses its jobs on a read-only desk. Nothing is shown and nothing touches a
+desk.
 
 Run: python DevTools/test_native_pads.py
 """
 from __future__ import annotations
 
+import datetime
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -16,7 +21,7 @@ import server
 import soundpad
 import wx
 from _testkit import as_device, check, check_in, check_true, patched
-from native import pad_dialogs, pads_section
+from native import pad_dialogs, pad_fx, pad_maint, pads_section
 
 app = wx.App()
 
@@ -52,6 +57,10 @@ def model_with(pads, **values):
 
 
 class FakeDesk:
+    channels = {"channels": [{"name": "Mic1", "label": "Mic 1", "kind": "mic"},
+                             {"name": "Mic2", "label": "Mic 2", "kind": "mic"},
+                             {"name": "USB1", "label": "USB 1", "kind": "line"}]}
+
     def subscribe(self, fn):
         self.listener = fn
 
@@ -119,12 +128,13 @@ with as_device(devices.PRO2):
     check("three pages under SMART pads", [p.title for p in section.pages],
           ["Pads", "Voice effects", "Pad maintenance"])
     section.show({"pads": [], "health_message": "Could not read the pad layout."})
-    check("a failed first read says why on the status page", section.status.text.GetValue(),
-          "Could not read the pad layout.")
+    check("a failed first read says why on every status page",
+          [status.text.GetValue() for status in section.statuses],
+          ["Could not read the pad layout."] * 3)
     section.show(model)
     page = section.page
-    check_true("a good read puts the pads page in the tree", frame.changed == 1
-               and section.pages[0].window is page)
+    check_true("a good read puts all three pages in the tree", frame.changed == 1
+               and [p.window for p in section.pages] == [page, section.fx, section.maint])
     check("the list names bank, pad and what is on it", page.list.GetString(0),
           "Pad 1. Bank 1. Sound: Big Applause")
     check("an empty pad reads as empty", page.list.GetString(4), "Pad 5. Bank 1. Empty")
@@ -237,15 +247,199 @@ with as_device(devices.PRO2):
     check("a mixer action plans its mode", dialog.plan.args, (5, "mixer:4"))
     dialog.Destroy()
 
+    # ---- Voice effects -------------------------------------------------------------------------
+    fx = section.fx
+    check("nothing is included to start with", fx.stack(), {})
+    check("the preview mics are the desk's", fx.mic.GetItems(), ["Mic 1", "Mic 2"])
+    check("a new effect starts on yellow", fx.colour.GetStringSelection(), "Yellow")
+    reverb, pitch = fx.effects[0], fx.effects[4]
+    check_true("an effect's sliders are hidden until it is included",
+               not reverb.sliders["reverbMix"][1].slider.IsShown())
+    streamed = []
+    with patched((server, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
+        reverb.include.SetValue(True)
+        fx.included(reverb)
+        pitch.include.SetValue(True)
+        fx.included(pitch)
+        sent_alone = fx.streamer(reverb.sliders["reverbMix"][0])(80)
+    check_true("with no preview nothing is streamed", not streamed and sent_alone["ok"])
+    check_true("including shows the simple sliders and keeps the advanced ones hidden",
+               reverb.sliders["reverbMix"][1].slider.IsShown()
+               and not reverb.sliders["reverbLowCut"][1].slider.IsShown())
+    reverb.advanced.SetValue(True)
+    fx.relayout(reverb.show)
+    check_true("the advanced switch shows the rest", reverb.sliders["reverbLowCut"][1].slider.IsShown())
+    check("the stack is in the desk's units, pitch in semitones", fx.stack(),
+          {"reverb": {"reverbMix": 0.5, "reverbModel": 0.6, "reverbLowCut": 0.67,
+                      "reverbHighCut": 0.33}, "pitchShift": {"pitchShiftSemitones": 7}})
+    check("pitch reads in semitones", pad_fx.semitone_words(-1), "1 semitone down")
+    fx._on_save(None)
+    check("Save with no name refuses", frame.said[-1], "Give the effect a name first.")
+    full = model_with([dict(sound, grid=g) for g in (1, 2)], custom_fx=["Mine"])
+    section.show(full)
+    fx.preview.SetValue(True)
+    fx._on_preview(None)
+    check_true("a preview with every pad in use is refused and switched back",
+               frame.said[-1] == pad_fx.NO_FREE_PAD and not fx.preview.GetValue())
+    check("the saved effects are listed", fx.saved.GetStrings(), ["Mine"])
+    started, jobs, shown = [], [], []
+
+    class Job:
+        """The wait dialog: runs its begin, which the patched call answers at once."""
+        def __init__(self, _parent, title, _text, begin, **kwargs):
+            jobs.append((title, kwargs.get("closable")))
+            self.begin, self.result = begin, None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            pass
+
+        def finish(self, result):
+            self.result = result
+
+        def run(self):
+            self.begin(self)
+            return self.result
+
+    class Result:
+        def __init__(self, _parent, title, text, *_a, **_k):
+            shown.append((title, text))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            pass
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+    section.show(model)
+    with patched((pad_fx, {"JobDialog": Job, "TextDialog": Result,
+                           "call": lambda _o, fn, *a, done=None: started.append((fn, a))
+                           or done({"ok": True, "grid": 5})})):
+        fx.preview.SetValue(True)
+        fx._on_preview(None)
+    check("a preview starts with the effect as built, on the chosen mic",
+          started, [(server.action_preview_start, (fx.stack(), 3, 1))])
+    check("in a wait dialog that stays until it is live", jobs,
+          [("Starting the live preview", False)])
+    check_true("and once live it says nothing over the switch",
+               fx.preview_grid == 5 and fx.preview.GetValue() and not shown)
+    fx.preview_grid = None
+    with patched((pad_fx, {"JobDialog": Job, "TextDialog": Result,
+                           "call": lambda _o, fn, *a, done=None: done(
+                               {"ok": False, "message": "No room."})})):
+        fx.preview.SetValue(True)
+        fx._on_preview(None)
+    check_true("a start that fails says why in a dialog and switches back off",
+               shown == [("Live preview not started", "No room.")] and not fx.preview.GetValue())
+    fx.preview_grid = 5
+    with patched((server, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
+        fx.streamer(reverb.sliders["reverbMix"][0])(80)
+    check("while it runs a slider streams to the preview pad", streamed[-1], (5, "reverbMix", 0.8))
+    fx.preview_grid, fx._preview_busy = None, False
+    fx.preview.SetValue(False)
+    check("with no saved effects the list says so", fx.saved.GetStrings(), [pad_fx.NONE_SAVED])
+
+    # ---- Pad maintenance -----------------------------------------------------------------------
+    maint = section.maint
+    check("only sound pads are offered for export", maint.export_choice.GetItems(),
+          ["Pad 1, bank 1. Sound: Big Applause"])
+    exported = []
+    with patched((pad_maint, {"call": lambda _o, fn, *a, done=None: exported.append((fn, a))})):
+        maint._on_export(None)
+    check("Export copies the chosen pad", exported, [(server.action_export_pad, (1,))])
+    maint._exporting = False
+    section.show(model_with([empty]))
+    check("with no sound pad the list says so", maint.export_choice.GetItems(),
+          ["No pad has a sound on it"])
+    maint._on_export(None)
+    check("and Export says there is nothing to copy", frame.said[-1],
+          "No pad has a sound on it to export.")
+    section.show(model_with([dict(p) for p in model["pads"]], read_only=True))
+    asked = []
+    with patched((pad_maint, {"confirm": lambda *a: asked.append(a) or False})):
+        maint._on_clear_all(None)
+        maint._on_tidy(None)
+        maint._on_restore_fx(None)
+        maint._on_restore_backup(None)
+    check_true("a read-only desk refuses every job before asking",
+               not asked and frame.said[-4:] == [pad_dialogs.READ_ONLY] * 4)
+    section.show(model)
+    ran = []
+    with patched((pad_maint, {"confirm": lambda *a: False,
+                              "run_job": lambda *a, **k: ran.append(a)})):
+        maint._on_clear_all(None)
+    check("a job not confirmed is not run", ran, [])
+
+    maint._choose_backup({"ok": True, "backups": [], "seconds_per_pad": 15})
+    check("with no backup holding pads it says how to make one", frame.said[-1],
+          pad_maint.NO_BACKUPS)
+    saved = datetime.datetime(2026, 11, 2, 19, 40)
+    check("a backup is listed with its pads and when it was saved",
+          pad_maint.backup_label({"name": "Show night", "pads": 16, "saved_at": saved.timestamp()}),
+          "Show night. 16 pads, saved " + pad_maint.wording.spoken_datetime(saved))
+
+    class ChosenList:
+        def __init__(self, *_a):
+            self.list = wx.ListBox(frame.window, choices=["a", "b"])
+            self.list.SetSelection(1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            self.list.Destroy()
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+    jobs, questions = [], []
+    with patched((pad_maint, {"ListDialog": ChosenList,
+                              "confirm": lambda _p, _t, text, _a: questions.append(text) or True}),
+                 (maint, {"_pad_job": lambda *a: jobs.append(a[4:])})):
+        maint._choose_backup({"ok": True, "seconds_per_pad": 15, "backups": [
+            {"name": "Newest", "pads": 4, "saved_at": None},
+            {"name": "Show night", "pads": 16, "saved_at": None}]})
+    check("the chosen backup's pads are restored", jobs,
+          [(server.action_restore_backup_pads, "Show night")])
+    check_in("the question says how long it can take", "up to 4 minutes", questions[0])
+
+    shown = []
+
+    class Result:
+        def __init__(self, _parent, title, text, *_a, **_k):
+            shown.append((title, text))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            pass
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+    with patched((pad_maint, {"TextDialog": Result})):
+        maint._finished(maint.restore_backup, {"reply": {"ok": True, "message": "Back."}},
+                        ("Pads restored", "Pads not restored"))
+        maint._finished(maint.restore_backup, {"reply": {"ok": False, "message": "No."}},
+                        ("Pads restored", "Pads not restored"))
+    check("a job's result opens in a dialog titled by how it went", shown,
+          [("Pads restored", "Back."), ("Pads not restored", "No.")])
+
     # ---- the change's job dialog stays until the change is done --------------------------------
-    job = pads_section.JobDialog(frame.window, "Changing pad 1, bank 1", "Clearing.", lambda _j: None,
+    job = pad_maint.JobDialog(frame.window, "Changing pad 1, bank 1", "Clearing.", lambda _j: None,
                                  stop=None, closable=False)
     check("its one button only says to wait",
           [c.GetLabel() for c in job.GetChildren() if isinstance(c, wx.Button)], ["Please wait"])
     waits = []
     close = wx.CloseEvent(wx.wxEVT_CLOSE_WINDOW)
     close.SetCanVeto(True)
-    with patched((pads_section.JobDialog.__mro__[1], {"say": lambda _self, text, recent=False:
+    with patched((pad_maint.JobDialog.__mro__[1], {"say": lambda _self, text, recent=False:
                                                       waits.append(text)})):
         job._on_close(close)
     check_true("closing it is refused, and says to wait",

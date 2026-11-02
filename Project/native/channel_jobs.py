@@ -52,7 +52,7 @@ class AutoGain:
             if question.ShowModal() != wx.ID_OK:
                 return
         job = JobDialog(self.page, "Setting the gain", "Getting ready. Do not talk yet.",
-                        self._begin, server.action_autogain_stop)
+                        self._begin, server.action_autogain_stop, ticks=False)
         with job:
             st = job.run() or {}
         if not st.get("ok"):

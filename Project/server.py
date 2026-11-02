@@ -6863,7 +6863,7 @@ class _BackgroundJob:
             at = time.monotonic()
             diagnostics.event("job.start", label)
             if self._rewrites_desk:
-                announcer.hold_desk_speech(label)
+                announcer.hold_desk_speech()
             try:
                 res = work(self) or {}
             except Exception as exc:
@@ -7266,18 +7266,9 @@ def restore_profile(name: str, clean: bool = False) -> dict:
     if not loaded.get("ok"):
         return loaded
     safe, prof = loaded["safe"], loaded["prof"]
-    # refuse a cross-device restore. A profile stamps the product id of the desk it was saved
-    # on; its fader vector, matrix shape and channel set are device-specific, so applying a Pro II
-    # profile to a Duo (or vice versa) would mis-write. Older profiles carry no product id (all saved
-    # on the Pro II historically) - those are allowed, with the per-write guards still protecting.
-    saved_pid = prof.get("product_id")
-    active = devices.get_active_device()
-    if saved_pid is not None and saved_pid != active.product_id:
-        saved_name = prof.get("device_name") or devices.resolve_device(saved_pid).name
-        return {"ok": False,
-                "message": (f"This profile was saved from a {saved_name}, but a {active.name} is "
-                            f"connected. Profiles are device-specific and cannot be restored across "
-                            f"different RODECaster models.")}
+    refusal = _other_desk_refusal(prof)
+    if refusal:
+        return refusal
     pad_list = prof.get("pads") or []
     # Refuse a clean restore we cannot actually do CLEANLY, rather than silently doing a merge and
     # calling it clean. Someone who asked for an exact match needs to know they did not get one.
@@ -7362,7 +7353,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 if clean:
                     pad_extra = soundpad.clear_pads_not_in(pad_list, progress=job.step)
                 # Pads replaced by the restore left their old audio behind; clear it out.
-                pad_tidy = soundpad.tidy_unused_pad_audio(progress=job.tick)
+                pad_tidy = soundpad.tidy_unused_pad_audio()
 
         # AFTER THE PAD PHASE, AND ONLY ON A CLEAN RESTORE. The reset puts sixteen factory pads back,
         # six of them voice-FX pads with no effect definition behind them (soundpad.heal_fx_pool).
@@ -7380,26 +7371,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         if mx_res and not mx_res.get("skipped"):
             msg += f" Re-applied output routing ({mx_res['applied']} matrix writes)."
         if pad_res is not None:
-            unchanged = pad_res.get("unchanged") or []
-            rebuilt = sum(1 for r in pad_res["results"] if r.get("ok") and not r.get("unchanged"))
-            total_pads = len(pad_res["results"])
-            # Say what was left alone as well as what was written. A restore that finishes in
-            # seconds because everything already matched must not read like it did nothing.
-            if unchanged:
-                msg += (f" SMART pads: {len(unchanged)} of {total_pads} were already exactly as "
-                        f"saved and were left alone, {rebuilt} rebuilt.")
-            else:
-                msg += f" Restored {rebuilt} of {total_pads} SMART pads."
-            if pad_res.get("skipped"):
-                msg += " Could not restore: " + "; ".join(pad_res["skipped"]) + "."
-        if pad_extra and pad_extra["cleared"]:
-            msg += (f" Cleared {wording.plural(len(pad_extra['cleared']), 'pad')} "
-                    f"{wording.join_and(map(str, pad_extra['cleared']))}, empty in the profile.")
-        if pad_extra and pad_extra["failed"]:
-            msg += (f" Could not clear {wording.plural(len(pad_extra['failed']), 'pad')} "
-                    f"{wording.join_and(map(str, pad_extra['failed']))}, which the profile has empty.")
-        if pad_tidy and pad_tidy.get("removed"):
-            msg += " " + pad_tidy["message"]
+            msg += _pad_restore_words(pad_res, pad_extra, pad_tidy)
         if healed and healed.get("message"):
             msg += " " + healed["message"]
         return {"ok": True, "message": msg}
@@ -8105,6 +8077,49 @@ def action_delete_backup(name: str, force: bool = False) -> dict:
     return res
 
 
+def _other_desk_refusal(prof: dict) -> dict | None:
+    """A refusal for a profile saved on another model of desk, or None. A profile stamps the product
+    id of the desk it was saved on; its fader vector, matrix shape, channel set and pad grid are
+    device-specific, so applying a Pro II profile to a Duo (or the reverse) would mis-write. Older
+    profiles carry no product id (all saved on the Pro II) and are allowed, with the per-write
+    guards still protecting."""
+    saved_pid = prof.get("product_id")
+    active = devices.get_active_device()
+    if saved_pid is None or saved_pid == active.product_id:
+        return None
+    saved_name = prof.get("device_name") or devices.resolve_device(saved_pid).name
+    return {"ok": False,
+            "message": (f"This profile was saved from a {saved_name}, but a {active.name} is "
+                        f"connected. Profiles are device-specific and cannot be restored across "
+                        f"different RODECaster models.")}
+
+
+def _pad_restore_words(pad_res: dict, extra: dict | None, tidy: dict | None) -> str:
+    """What a pad restore did, for the end of its reply: what was rebuilt and what was already right,
+    anything it could not restore, the pads it emptied, and the audio it tidied."""
+    unchanged = pad_res.get("unchanged") or []
+    rebuilt = sum(1 for r in pad_res["results"] if r.get("ok") and not r.get("unchanged"))
+    total_pads = len(pad_res["results"])
+    # What was left alone as well as what was written: a restore that finishes in seconds because
+    # everything already matched must not read like it did nothing.
+    if unchanged:
+        msg = (f" SMART pads: {len(unchanged)} of {total_pads} were already exactly as saved and "
+               f"were left alone, {rebuilt} rebuilt.")
+    else:
+        msg = f" Restored {rebuilt} of {total_pads} SMART pads."
+    if pad_res.get("skipped"):
+        msg += " Could not restore: " + "; ".join(pad_res["skipped"]) + "."
+    if extra and extra["cleared"]:
+        msg += (f" Cleared {wording.plural(len(extra['cleared']), 'pad')} "
+                f"{wording.join_and(map(str, extra['cleared']))}, empty in the profile.")
+    if extra and extra["failed"]:
+        msg += (f" Could not clear {wording.plural(len(extra['failed']), 'pad')} "
+                f"{wording.join_and(map(str, extra['failed']))}, which the profile has empty.")
+    if tidy and tidy.get("removed"):
+        msg += " " + tidy["message"]
+    return msg
+
+
 def action_restore_backup(name: str, clean: bool = False) -> dict:
     """RESTORE A BACKUP, from this computer's copy. See RESTORE_USES_THE_PROFILE below.
 
@@ -8161,6 +8176,26 @@ def action_restore_backup(name: str, clean: bool = False) -> dict:
     return res
 
 
+def factory_backup_name() -> str:
+    """The backup a factory reset leaves on this computer, one per model of desk."""
+    desk = devices.get_active_device().name.removeprefix("RODECaster ").strip()
+    return safe_name(f"Factory pads and settings {desk}"[:40])
+
+
+def _keep_factory_pads(step) -> str:
+    """Back the freshly reset desk up, pads and sounds included, so Restore the pads from a backup
+    can put the factory pads back on their own later. The app ships none of RODE's sounds: each
+    user's copy comes from their own desk. Saved over the last one, so a firmware update's factory
+    pads replace the old ones. Returns a sentence for the reset's reply."""
+    name = factory_backup_name()
+    res = _do_snapshot(name, include_pads=True, prog=step)
+    if not res.get("ok"):
+        return (" The factory pads could not be kept on this computer: "
+                + (res.get("message") or "the backup failed."))
+    return (f" A copy of the factory pads is kept on this computer as {name}, and Restore the pads "
+            "from a backup puts them back without resetting anything else.")
+
+
 def action_show_reset(backup_first: bool = True) -> dict:
     """THE SOFTWARE FACTORY RESET: settings and pads back to factory, without the setup wizard.
 
@@ -8203,6 +8238,7 @@ def action_show_reset(backup_first: bool = True) -> dict:
                "so check it before turning speakers up.")
         if healed.get("message"):
             msg += " " + healed["message"]
+        msg += _keep_factory_pads(step)
         if saved:
             msg += f" To undo this, restore \"{saved['name']}\" from the Shows list."
         return {"ok": True, "message": msg}
@@ -8534,6 +8570,62 @@ def action_restore_factory_fx() -> dict:
         failed="Could not restore the factory voice effects")
 
 
+def pad_backups() -> dict:
+    """The backups on this computer that hold SMART pads saved on this model of desk, newest first,
+    for restoring their pads alone. Reads each profile once; the store is a handful of files."""
+    active = devices.get_active_device()
+    found = []
+    for name in profiles.list_profiles()["profiles"]:
+        loaded = profiles.load(name)
+        if not loaded.get("ok"):
+            continue
+        prof = loaded["prof"]
+        pads = len(prof.get("pads") or [])
+        if pads and prof.get("product_id") in (None, active.product_id):
+            found.append({"name": loaded["safe"], "pads": pads, "saved_at": prof.get("saved_at")})
+    found.sort(key=lambda b: b["saved_at"] or 0, reverse=True)
+    return {"ok": True, "backups": found, "seconds_per_pad": PAD_RESTORE_SECONDS}
+
+
+def action_restore_backup_pads(name: str) -> dict:
+    """Put a backup's SMART pads back and nothing else: every pad as the backup has it, a pad the
+    backup has empty emptied, the rest of the desk untouched. A backup taken just after a factory
+    reset makes this the way back to the factory pads, sounds included, which the app holds no copy
+    of. Runs on the pad-restore progress channel, like the factory voice effects restore."""
+    loaded = profiles.load(name)
+    if not loaded.get("ok"):
+        return loaded
+    safe, prof = loaded["safe"], loaded["prof"]
+    refusal = _other_desk_refusal(prof)
+    if refusal:
+        return refusal
+    pad_list = prof.get("pads") or []
+    if not pad_list:
+        return {"ok": False, "message": f"{safe} has no SMART pads in it."}
+    if _restore_job.busy():
+        return {"ok": False, "message": "A profile restore is running. Try again when it finishes."}
+
+    def _work(job):
+        with _hid_lock:
+            # One transfer session for every pad, as the full restore does.
+            with rcp_transfer.transfer_session():
+                pad_res = soundpad.restore_pads(pad_list, profiles.pads_dir(safe),
+                                                progress=job.tick)
+            # Outside the session: a clear only completes when the desk leaves transfer mode.
+            extra = soundpad.clear_pads_not_in(pad_list, progress=job.step)
+            # Unspoken: the result follows straight after and would cut it off, and says what it
+            # removed.
+            tidy = soundpad.tidy_unused_pad_audio()
+        pad_shortcuts.pads_stale()
+        return {"ok": True, "message": (f"The SMART pads from {safe} are back, and nothing else on "
+                                        f"the desk was changed."
+                                        + _pad_restore_words(pad_res, extra, tidy))}
+
+    return _pad_restore_job.start(_work, total=len(pad_list),
+                                  message=f"Restoring the SMART pads from {safe}.",
+                                  failed="Could not restore the pads")
+
+
 def _documents_folder(name: str) -> str:
     """Documents\\AccessCaster\\<name>, created if need be: where the app's exports go.
 
@@ -8725,23 +8817,79 @@ def action_preview_start(stack: dict, colour: int, mic: int) -> dict:
         return {"ok": False, "message": f"Could not start live preview: {exc}"}
 
 
+class _PreviewWriter:
+    """Live-preview edits, written by one thread in as few transfer-mode sessions as it can.
+
+    A session costs about two seconds to open and close (the pad volume mounts and dismounts), and
+    a change is a single record, so each edit is queued, the newest value per setting winning, and
+    the thread writes whatever is waiting in one session, holding it open while more arrive within
+    IDLE_S (soundpad.preview_write). A write that fails is reported by the next submit."""
+
+    IDLE_S = 0.6
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._pending = {}       # {(grid, param): (value, kind)}, oldest first
+        self._failure = None
+        self._thread = None
+
+    def submit(self, grid: int, param: str, value, kind: str) -> dict:
+        with self._cond:
+            failure, self._failure = self._failure, None
+            self._pending.pop((grid, param), None)
+            self._pending[(grid, param)] = (value, kind)
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="preview writer",
+                                                daemon=True)
+                self._thread.start()
+            self._cond.notify()
+        return failure or {"ok": True}
+
+    def forget(self, grid: int) -> None:
+        """Drop what is waiting for `grid`, whose preview has ended."""
+        with self._cond:
+            self._pending = {key: v for key, v in self._pending.items() if key[0] != grid}
+
+    def _take(self, wait):
+        with self._cond:
+            if not self._pending:
+                self._cond.wait(wait)
+            edits, self._pending = self._pending, {}
+            return edits
+
+    def _run(self) -> None:
+        while True:
+            edits = self._take(None)
+            if not edits:
+                continue
+            try:
+                with _hid_lock:
+                    soundpad.preview_write(edits, more=lambda: self._take(self.IDLE_S))
+            except Exception as exc:
+                diagnostics.event("preview.write_failed", str(exc))
+                with self._cond:
+                    self._failure = {"ok": False,
+                                     "message": f"Could not update live preview: {exc}"}
+
+
+_preview_writer = _PreviewWriter()
+
+
 def action_preview_update(grid: int, param: str, value) -> dict:
-    """Stream one control change to the live preview pad (an effect param, on-flag, or mic input).
-    The value is validated + clamped before any write."""
+    """Queue one control change for the live preview pad (an effect param, on-flag, or mic input).
+    The value is validated and clamped first. Returns at once; a failed write is reported by the
+    next change."""
     try:
         p, v, kind = soundpad.sanitise_preview_edit(param, value)
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
-    try:
-        with _hid_lock:
-            return soundpad.preview_update(grid, p, v, kind)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not update live preview: {exc}"}
+    return _preview_writer.submit(int(grid), p, v, kind)
 
 
 def action_preview_stop(grid: int) -> dict:
     """Clear the preview scratch pad, removing the effect from the live mic."""
     global _preview_grid
+    _preview_writer.forget(int(grid))
     try:
         with _hid_lock:
             res = soundpad.preview_stop(grid)

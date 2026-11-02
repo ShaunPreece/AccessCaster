@@ -11,6 +11,7 @@ stages are spoken through UIA notifications raised from the job's dialog (`JobDi
 """
 import wx
 
+import speech
 from native import announce
 from native.calls import call
 from native.pages import Speaker
@@ -89,13 +90,18 @@ class JobDialog(SpeakingDialog):
     it, Escape and the title bar's close only say to wait: for a job whose result decides what the
     user does next.
 
-    No progress bar: NVDA beeps a progress bar's changes, and a job that measures a microphone must
-    make no sound of its own."""
+    While it runs, a soft clock ticks (`speech.start_loop`), from `TICK_AFTER_S` so a quick job
+    makes no sound. A job that measures a microphone passes `ticks=False`, and so has no progress
+    bar either: NVDA beeps a progress bar's changes."""
 
     WAIT = "Please wait until this finishes."
+    # Long enough for the screen reader to read the dialog first.
+    TICK_AFTER_S = 1.5
 
-    def __init__(self, parent, title, text, begin, stop, stop_label=None, closable=True):
+    def __init__(self, parent, title, text, begin, stop, stop_label=None, closable=True,
+                 ticks=True):
         super().__init__(parent, title)
+        self._ticks = ticks
         self._begin = begin
         self._stop = stop
         self._stopping = False
@@ -125,7 +131,12 @@ class JobDialog(SpeakingDialog):
     def run(self):
         """Show the dialog until `finish`, and return what was passed to it."""
         wx.CallAfter(self._begin, self)
-        self.ShowModal()
+        loop = speech.start_loop("working", self.TICK_AFTER_S) if self._ticks else None
+        try:
+            self.ShowModal()
+        finally:
+            if loop is not None:
+                loop.stop()
         return self.result
 
     def say(self, text, recent=False):
@@ -185,23 +196,22 @@ class JobDialog(SpeakingDialog):
         call(self, self._stop)
 
 
-class DeletePresetDialog(wx.Dialog):
-    """Its own list of the user's presets, so what is deleted is never whatever a page's preset
-    list happens to show. `labels`, if given, is what the list shows for each of `names`."""
+class ListDialog(wx.Dialog):
+    """Choose one of `names` from a list of its own, then `ok_label` or Cancel. `labels`, if given,
+    is what the list shows for each name; `note` is a sentence under the list."""
 
-    def __init__(self, parent, names, labels=None):
-        super().__init__(parent, title="Delete a preset")
+    def __init__(self, parent, title, label, names, ok_label, labels=None, note=""):
+        super().__init__(parent, title=title)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label="Preset to delete"), 0, wx.LEFT | wx.TOP, 10)
+        sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
         self.names = names
-        self.list = wx.ListBox(self, choices=labels or names, size=(300, 120))
+        self.list = wx.ListBox(self, choices=labels or names, size=(360, 120))
         self.list.SetSelection(0)
         sizer.Add(self.list, 0, wx.ALL, 10)
-        sizer.Add(wx.StaticText(self, label="Deleting a preset cannot be undone."), 0,
-                  wx.LEFT | wx.RIGHT, 10)
+        if note:
+            _paragraphs(self, sizer, note)
         buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label="Delete")
-        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_OK, label=ok_label))
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
         buttons.Realize()
         sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
@@ -209,6 +219,15 @@ class DeletePresetDialog(wx.Dialog):
 
     def chosen(self):
         return self.names[self.list.GetSelection()]
+
+
+class DeletePresetDialog(ListDialog):
+    """Its own list of the user's presets, so what is deleted is never whatever a page's preset
+    list happens to show."""
+
+    def __init__(self, parent, names, labels=None):
+        super().__init__(parent, "Delete a preset", "Preset to delete", names, "Delete", labels,
+                         "Deleting a preset cannot be undone.")
 
 
 def confirm(parent, title, text, action):
