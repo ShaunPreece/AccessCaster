@@ -2624,7 +2624,7 @@ function fillChannelProcessing(body, ch) {
       "Off, Tone shaping sets the modules for you. Your settings are kept either way.").row);
   }
   (channelsData.modules || []).forEach((m) => {
-    const onNow = ch.modules ? ch.modules[m.key + "On"] === true : false;
+    const onNow = ch.modules ? ch.modules[m.prop] === true : false;
     body.appendChild(makeSwitchRow("mod-" + m.key + "-" + ch.name, m.label, onNow,
       (on, input) => sendToggle("/api/channels/module", { name: ch.name, module: m.key, on }, input, on)).row);
   });

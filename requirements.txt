@@ -4,3 +4,4 @@ comtypes==1.4.17      # Windows' own audio endpoints: the level meters and the W
 cryptography==50.0.0  # Ed25519, to check an update's index was signed by us (selfupdate/signing.py)
 hidapi==0.15.0        # the desk's USB control interface
 pywin32==312          # SAPI speech for the announcer, and the tray
+wxPython==4.3.2       # the native window (native/)

@@ -265,6 +265,9 @@ The layers, bottom up:
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
 - `server.py` exposes it as an API, and `static/` is the accessible UI.
+- `native/` (started by `native_app.py`) is a wxPython window replacing the web page one section
+  at a time. It runs the same service in the same process and calls the server's functions
+  directly; a section it does not have yet opens in the browser.
 
 Two rules do most of the work of keeping it honest:
 
@@ -1668,6 +1671,57 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A failed download forgets the held offer AND the last-checked stamp**, so a republished index
   reaches a running app. The downloaded installer is deleted only on the launch after a confirmed
   update; every other path keeps it, because the failure message tells the user to run it by hand.
+
+## Native window
+
+- **NO `wx.Simplebook` OR `wx.Notebook` TO SWITCH THE PAGES.** Both move the focus into each page
+  they show, which pulls it out of the Categories tree on every arrow press. `MainFrame._show`
+  shows and hides the pages itself.
+- **A CHANNEL PAGE'S TABS ARE A `wx.Notebook`, AND ITS SELECTION IS ONLY CHANGED BY CODE WHILE IT IS
+  HIDDEN.** A notebook takes the focus whenever its selection changes on screen. So `ChannelPage`
+  hides itself before building its notebook, and `tab_chosen` moves only the hidden pages to the
+  tab just chosen.
+- **CTRL+TAB IS THE TAB CONTROL'S WHEREVER THE FOCUS IS INSIDE ONE** (`MainFrame._in_tabs`), the
+  Windows convention; elsewhere, including the tree, it steps the section's pages.
+- **A PAGE NEVER READS THE DESK WHEN IT IS SHOWN.** Arrowing the tree shows every page passed, so a
+  read there would queue a dump per arrow press. The pages draw from the window's desk state
+  (`native.desk_state`), read in full at start, on F5, on a reconnect, after a write that moves
+  other values, and after a `STRUCTURAL` push; `show(rec)` puts new values on the same controls
+  rather than rebuilding them, so a re-read never moves the focus.
+- **THE DESK STATE BELONGS TO THE UI THREAD.** Its listener thread only decodes a push and hands it
+  over with `wx.CallAfter`; the records change, and subscribers hear of it, on the thread that draws
+  them. It has its own HID handle because the announcer's listener runs only while announcements
+  are on.
+- **A SLIDER IGNORES `show` FOR `HANDS_OFF_S` AFTER IT MOVES.** The desk pushes back each value
+  written, and an older one arriving mid-drag would pull the slider back under the user's hand.
+- **A PUSHED VALUE LANDS ON THE FOCUSED SLIDER ONCE, `FOCUSED_SETTLE_MS` AFTER THE PUSHES STOP.**
+  The screen reader queues a reading of every value set on the focused control, so setting each
+  encoder step counts 56, 57, 58 aloud long after the knob has stopped.
+- **A SUCCESS IS SPOKEN ONLY WHILE ITS CONTROL STILL HAS THE FOCUS** (`frame.reply`; refusals are
+  always spoken). A reply arriving after the user has moved on cuts off the screen reader reading
+  the control they are on now.
+- **THE WINDOW'S RECORDS HOLD THE DESK'S OWN 0..1 PARAMETERS** (`action_get_channels(percent=False)`;
+  the controls scale with `field(..., scale=100)`). `_preset_now` compares within half a percent, so
+  a record rounded to whole percents cannot be compared again after a pushed change.
+- **EVERY SERVER CALL GOES THROUGH `native.calls`**, never straight from an event handler: an
+  action holds the HID lock for seconds, and on the UI thread that freezes the window. A slider's
+  writes go through `LatestWins`, which sends only the newest value.
+- **A CONTROL'S NAME IS THE STATIC TEXT CREATED JUST BEFORE IT**, with the same parent (Win32's
+  labelling, `pages.labelled`). Create the label second and the control reads unnamed.
+- **F6 FINDS THE PAGE'S FIRST CONTROL BY WALKING ITS CHILDREN** (`_first_focusable`):
+  `NavigateIn` does not reach controls inside a page's group box.
+- **DESCRIPTIONS AND A SLIDER'S VALUE IN WORDS COME FROM `native.a11y.describe`**, an MSAA
+  override of those two answers only. Override anything else (name, role, state) and the control
+  stops reading as the native control it is.
+- **REPLIES ARE SPOKEN WITH `frame.say`**, a UIA notification the screen reader voices, not the
+  app's own SAPI voice. `recent=True` for a slider's replies, so a newer one replaces an older one.
+- **MIC TYPE AND THE PROCESSING PRESET ARE APPLIED BY A BUTTON, NEVER BY THE LIST.** Arrowing a
+  closed native list fires a change per item, and either one replaces the processing chain (a
+  voicing moves the gain too). Re-applying the same voicing is refused for the same reason.
+- **A CONTROL READS AND RECORDS THROUGH `page.rec`** (`ChannelPage.field`), never a record captured
+  when it was built: a re-read replaces the record, and a captured one goes stale silently.
+- **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
+  `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 
 ## Web UI and screen reader
 

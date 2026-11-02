@@ -38,7 +38,7 @@ SECTIONS = [
 ]
 
 REF = re.compile(r"(`([A-Za-z_$][\w$]*)`\s*\()(\d{2,5})([,)])")
-TABLE_ROW = re.compile(r"^(\|\s*`([A-Za-z_][\w.]*\.(?:py|js|ps1|html|css))`\s*\|\s*)(\d+)(\s*\|)")
+TABLE_ROW = re.compile(r"^(\|\s*`([A-Za-z_][\w./]*\.(?:py|js|ps1|html|css))`\s*\|\s*)(\d+)(\s*\|)")
 DEVTOOLS_COUNT = re.compile(r"(## DevTools/ \()(\d+)( files)")
 
 

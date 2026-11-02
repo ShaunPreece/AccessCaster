@@ -2796,17 +2796,22 @@ def _ui_chan(name):
     return channels.ui_channel_map().get(name)
 
 
-# Module on/off toggles shown in the UI, with screen-reader labels.
+# Module on/off toggles shown in the UI, with screen-reader labels. `prop` is the key of the
+# module's state in a channel record's `modules`, which is not always `key` + "On" (pan's is
+# channelPanOn).
 PROCESSING_MODULES = [
-    {"key": "hpf", "label": "High-pass filter"}, {"key": "eq", "label": "Equaliser"},
-    {"key": "compressor", "label": "Compressor"}, {"key": "noiseGate", "label": "Noise gate"},
-    {"key": "deesser", "label": "De-esser"}, {"key": "aphex", "label": "Aphex exciter"},
-    {"key": "pan", "label": "Pan"},
+    {"key": key, "label": label, "prop": channels.PROCESSING_MODULE_ON[key]}
+    for key, label in (("hpf", "High-pass filter"), ("eq", "Equaliser"),
+                       ("compressor", "Compressor"), ("noiseGate", "Noise gate"),
+                       ("deesser", "De-esser"), ("aphex", "Aphex exciter"), ("pan", "Pan"))
 ]
+_MODULE_TOGGLE_LABEL = {m["key"]: m["label"].lower() for m in PROCESSING_MODULES}
 
 
-def action_get_channels() -> dict:
-    """Read every UI channel's full adaptive state (one model dump). Params are 0-100 percent ints."""
+def action_get_channels(percent: bool = True) -> dict:
+    """Read every UI channel's full adaptive state (one model dump). Params are 0-100 percent ints,
+    or with `percent` False the desk's own 0..1 floats, which `_preset_now` can compare again
+    after a pushed change (a whole percent is as coarse as its tolerance)."""
     try:
         with _hid_lock:
             # ONE DUMP FOR BOTH. The wireless-mic slots ride the same read as the channels so the
@@ -2823,9 +2828,10 @@ def action_get_channels() -> dict:
             ui = _ui_chan(c.get("name"))
             if ui is not None:
                 c["preset_now"] = _preset_now(channels.mic_channel_number(ui), c)
-    for c in chans:
-        c["params"] = {p: (round(v * 100) if v is not None else None)
-                       for p, v in c["params"].items()}
+    if percent:
+        for c in chans:
+            c["params"] = {p: (round(v * 100) if v is not None else None)
+                           for p, v in c["params"].items()}
     return {
         "ok": True, "channels": chans, "groups": PROCESSING_CONTROLS,
         "wireless_mics": _wireless_mics(blob),
@@ -3570,7 +3576,8 @@ def action_set_channel_module(name: str, module: str, on: bool) -> dict:
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
     return {"ok": True,
-            "message": f"{ch['label']} {module} turned {'on' if on else 'off'}."}
+            "message": (f"{ch['label']} {_MODULE_TOGGLE_LABEL.get(module, module)} turned "
+                        f"{'on' if on else 'off'}.")}
 
 
 def action_set_channel_effect(name: str, effect: str, on: bool) -> dict:
