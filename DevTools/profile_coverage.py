@@ -328,9 +328,6 @@ NOT_SAVED = {
     "showControlDelete": ("ok", "A COMMAND taking a show's uid: 'delete this backup'. Restoring a "
                                 "number here would destroy a backup, and uids are positional so it "
                                 "would not even be reliably the same one."),
-    "wifiScan": ("ok", "A COMMAND: 'scan for networks now'. What it produces is the ten result "
-                       "slots, which are a transient reading of the room rather than a setting, "
-                       "and are worthless a day later."),
     "mixLinkRequest": ("ok", "A COMMAND, not state: 'link this cross-point'. The state it produces "
                              "is mixLevelWithAnchor, which a profile does save."),
     "mixUnlinkRequest": ("ok", "The other half of the same command."),

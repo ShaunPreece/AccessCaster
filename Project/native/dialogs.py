@@ -107,6 +107,7 @@ class JobDialog(SpeakingDialog):
         self._stop = stop
         self._stopping = False
         self._finished = False
+        self._held = False
         self.result = None
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.status = _paragraphs(self, sizer, text)[0]
@@ -126,8 +127,15 @@ class JobDialog(SpeakingDialog):
             self.Bind(wx.EVT_CLOSE, self._on_close)
         sizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
         sizer.Add(self.sink, 0)
+        self.button = button
         self.SetSizerAndFit(sizer)
         self.CentreOnParent()
+
+    def hold(self):
+        """From now on the job cannot be stopped: its button is Please wait, and it, Escape and the
+        close only say to wait."""
+        self._held = True
+        self.button.SetLabel("Please wait")
 
     def run(self):
         """Show the dialog until `finish`, and return what was passed to it."""
@@ -187,6 +195,9 @@ class JobDialog(SpeakingDialog):
         event.Skip()
 
     def _on_stop(self, _event):
+        if self._held:
+            SpeakingDialog.say(self, self.WAIT)
+            return
         if self._stopping or self._finished:
             return
         if self._stop is None:
@@ -289,6 +300,61 @@ class NameDialog(wx.Dialog):
         self._busy = False
         if not reply.get("ok"):
             self._refuse(reply.get("message") or "That name could not be used.")
+            return
+        self.reply = reply
+        self.EndModal(wx.ID_OK)
+
+
+class FormDialog(wx.Dialog):
+    """A dialog of controls, then `ok_label` and Cancel. The subclass adds its controls to `sizer`,
+    the control to land on first, then calls `finish_layout`. On OK, `request()` runs on the UI
+    thread and returns a refusal sentence, or a function to run off it whose reply decides: the
+    dialog closes on a success, keeping the reply as `reply`, and a refusal is shown in a message
+    box of its own titled `refused`, leaving the dialog open as it was."""
+
+    def __init__(self, parent, title, ok_label, refused):
+        super().__init__(parent, title=title)
+        self._ok_label = ok_label
+        self._refused = refused
+        self._busy = False
+        self.reply = None
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+
+    def finish_layout(self):
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, label=self._ok_label)
+        ok.SetDefault()
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
+        buttons.Realize()
+        self.sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(self.sizer)
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        self.CentreOnParent()
+
+    def request(self):
+        raise NotImplementedError
+
+    def _on_ok(self, _event):
+        if self._busy:
+            return
+        work = self.request()
+        if isinstance(work, str):
+            self._refuse(work)
+            return
+        self._busy = True
+        call(self, work, done=self._submitted)
+
+    def _refuse(self, text):
+        focus = wx.Window.FindFocus()
+        wx.MessageBox(text, self._refused, wx.OK | wx.ICON_WARNING, self)
+        if focus:
+            focus.SetFocus()
+
+    def _submitted(self, reply):
+        self._busy = False
+        if not reply.get("ok"):
+            self._refuse(reply.get("message") or "That did not work.")
             return
         self.reply = reply
         self.EndModal(wx.ID_OK)

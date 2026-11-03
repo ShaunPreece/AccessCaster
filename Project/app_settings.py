@@ -122,6 +122,22 @@ def count_shortcuts(hotkeys) -> int:
     return 0
 
 
+def _tally(keys, shortcuts: int, contacts: int) -> list:
+    """The noun phrases for a set of settings `keys`: shortcuts, contacts, then everything else.
+
+    The shortcuts and contacts keys are counted by their contents, so each is left out of "other
+    preferences" whether or not it holds anything; an empty contacts list is not a preference."""
+    bits = []
+    if shortcuts:
+        bits.append(count(shortcuts, "keyboard shortcut"))
+    if contacts:
+        bits.append(count(contacts, "CallMe contact"))
+    others = len(keys) - ("hotkeys" in keys) - ("callme_contacts" in keys)
+    if others:
+        bits.append(count(others, "other preference"))
+    return bits
+
+
 def describe_export(payload: dict) -> str:
     """What an export caught, as a NOUN PHRASE for dropping into a sentence ("Saved <this> to ...").
 
@@ -132,16 +148,7 @@ def describe_export(payload: dict) -> str:
     got = payload.get("settings") or {}
     if not got:
         return ""
-    bits = []
-    shortcuts = count_shortcuts(got.get("hotkeys"))
-    if shortcuts:
-        bits.append(count(shortcuts, "keyboard shortcut"))
-    contacts = len(got.get("callme_contacts") or ())
-    if contacts:
-        bits.append(count(contacts, "CallMe contact"))
-    others = len(got) - (1 if "hotkeys" in got else 0) - (1 if "callme_contacts" in got else 0)
-    if others:
-        bits.append(count(others, "other preference"))
+    bits = _tally(got, count_shortcuts(got.get("hotkeys")), len(got.get("callme_contacts") or ()))
     return " and ".join(bits) if bits else count(len(got), "setting")
 
 
@@ -209,6 +216,7 @@ def merge_import(payload: dict, current: dict, available: dict | None = None) ->
         "unmatched": unmatched,
         "ignored": sorted(ignored),
         "shortcuts": count_shortcuts(incoming.get("hotkeys")) if "hotkeys" in changes else 0,
+        "contacts": len(changes.get("callme_contacts") or ()),
     }
 
 
@@ -216,14 +224,9 @@ def describe_import(report: dict) -> str:
     """The sentence spoken after an import. Says what did NOT happen as well as what did, because a
     setting silently dropped for naming a device this machine has not got is exactly the kind of
     thing somebody would otherwise spend an evening hunting."""
-    parts = []
-    n = len(report.get("applied") or ())
-    shortcuts = int(report.get("shortcuts") or 0)
-    if shortcuts:
-        parts.append(f"{count(shortcuts, 'keyboard shortcut')} restored")
-    others = n - (1 if shortcuts else 0)
-    if others > 0:
-        parts.append(f"{count(others, 'other preference')} restored")
+    parts = [f"{bit} restored" for bit in _tally(report.get("applied") or (),
+                                                 int(report.get("shortcuts") or 0),
+                                                 int(report.get("contacts") or 0))]
     if not parts:
         parts.append("Nothing was restored")
     msg = ", ".join(parts) + "."

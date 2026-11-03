@@ -2169,10 +2169,9 @@ def read_network_status() -> dict:
             "dhcp": bool(dhcp) if dhcp is not None else None,
             "connected": bool(ip),               # has an IP => joined a network
             "incorrect_psk": bool(incorrect) if incorrect is not None else None,
-            # Whatever a scan last found. The app can start one (action_scan_wifi), so this is the
-            # result of the last scan by either us or the touchscreen.
-            # An empty list still means "nothing has been scanned for yet", not "nothing in range".
-            "scan": slots("wifiScan", 10) or slots("wifiScanResultSSID", 15),
+            # Whatever the unit's last scan found, by the app, the touchscreen or the radio coming
+            # up unjoined. Empty means "nothing scanned for yet" as often as "nothing in range".
+            "scan": wifi_scan_slots(blob),
             "can_scan": "network_write" in devices.get_active_device().caps,
             # Never returned, and this is deliberate rather than an oversight: firmware before
             # 1.7.6 publishes wifiPSK, and putting a password into a JSON payload, a browser page
@@ -2220,8 +2219,8 @@ def read_network_status() -> dict:
 # WHAT IS DELIBERATELY NOT OFFERED, and it is not caution:
 #   * **Bluetooth scanning.** `btDoScan` is not built. Its SYSTEM occurrence is a STRAY, so any
 #     "the write lands but nothing happens" reading taken there is a write into a stray. Making the
-#     unit discoverable and pairing FROM the phone is the route offered. WIFI scanning works: see
-#     action_scan_wifi. No push back does not mean a write was not consumed.
+#     unit discoverable and pairing FROM the phone is the route offered. Wifi scanning works only
+#     while unjoined: see action_scan_wifi.
 #   * **Pairing, connecting and unpairing.** `btDoPair` / `btDoConnect` / `btDoDisconnect` /
 #     `btDoUnPair` are addressable, but they are ACTIONS taking an address we have never seen the
 #     format of, and nothing is paired here to test against. Making the unit DISCOVERABLE and
@@ -2418,6 +2417,18 @@ def action_join_wifi(ssid: str, password: str) -> dict:
                 "message": "The unit only takes plain ASCII in a password, so this one cannot be "
                            "sent from here."}
     try:
+        if not password:
+            # The unit's last scan says which networks need one. Without it the join can only
+            # fail, and writing the name would lose the password the unit has stored (see the
+            # scan comment below), so nothing is sent.
+            with _hid_lock:
+                blob = rcp_read.read_model_stable(fresh=True)
+            scanned = next((e for e in map(parse_scan_slot, wifi_scan_slots(blob))
+                            if e.get("ssid") == ssid), None)
+            if scanned and not scanned["open"]:
+                return {"ok": False, "needs_password": True,
+                        "message": f"{ssid} needs a password. Type it in the Password box, then "
+                                   f"join again."}
         with _hid_lock:
             sel = rcp_transfer.SEL_NETWORK
             rcp_transfer.send_record(rcp_transfer.build_global_prop_string("wifiSSID", ssid, sel))
@@ -2487,22 +2498,27 @@ def action_set_bt_visible(on: bool) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# SCANNING FOR WIFI NETWORKS.
+# SCANNING FOR WIFI NETWORKS, AND DISCONNECTING.
 #
-# `wifiScan` written on the NETWORK selector pushes NOTHING back. What it does is fill in
-# `wifiScan1` to `wifiScan10` SILENTLY, so the results appear only in a later model dump. Format of
-# each slot: `<SSID>----<security>`.
+# THE UNIT SCANS ON ITS OWN EACH TIME ITS RADIO COMES UP WITH NO NETWORK TO JOIN, and only then.
+# The results clear about 3 s after the radio comes on and fill about 12 s after it, in
+# `wifiScan1..10` and the WIFISCANRESULT blocks alike, each `<SSID>----<security>`. Nothing is
+# pushed, so they appear only in a later model dump. While joined it never scans: `wifiScan` (True,
+# or False then True) is stored, never cleared, and no result arrives (Pro II, firmware 1.7.6). So a
+# scan here is the radio off and on with the unit unjoined, and is refused while joined.
 #
-# PUSH-MEANS-CONSUMED IS A BAD HEURISTIC, and this is where it costs most: `requestRecordState` and
-# `requestDropMarker` both push a cleared value when consumed, which makes silence look like proof
-# that nothing happened. Some fields just do the work and say nothing, so the only honest test is to
-# look for the RESULT rather than the acknowledgement.
+# THERE IS NO DISCONNECT OR FORGET PROPERTY. Clearing `wifiSSID` and cycling the radio leaves the
+# unit on, unjoined and scanning. Writing `wifiSSID` also loses the stored password: setting the
+# old name back does not rejoin.
 WIFI_SCAN_SLOTS = 10
-WIFI_SCAN_SETTLE_S = 6.0        # results arrive within a few seconds; this is comfortably past that
+WIFI_RADIO_OFF_S = 2.0          # off long enough for the unit to drop the link and the old results
+WIFI_SCAN_TIMEOUT_S = 25.0      # results arrive about 12 s after the radio comes on
+WIFI_SCAN_POLL_S = 2.0
+WIFI_SCAN_SETTLE_S = 5.0        # a second network has arrived 3 s after the first
 
 
 def parse_scan_slot(raw: str) -> dict:
-    """One `wifiScanN` value: `<SSID>----<security>`.
+    """One scan result: `<SSID>----<security>`.
 
     An SSID may legitimately contain a hyphen, so the split is on the four-hyphen separator from the
     RIGHT and only once. Anything that does not carry a separator is treated as a bare SSID rather
@@ -2522,32 +2538,69 @@ def parse_scan_slot(raw: str) -> dict:
                       else f"{ssid}, needs a password" + (f", {security}" if security else "")}
 
 
-def action_scan_wifi() -> dict:
-    """Scan for wifi networks and return what the unit found.
+def wifi_scan_slots(blob) -> list:
+    """The raw results of the unit's last wifi scan, blanks dropped: the numbered slots, or the
+    WIFISCANRESULT blocks (one unnumbered `wifiScanResultSSID` each) if those are empty."""
+    numbered = [rcp_read.block_value(blob, "NETWORK", f"wifiScan{n}")
+                for n in range(1, WIFI_SCAN_SLOTS + 1)]
+    found = [str(v) for v in numbered if v]
+    return found or [str(v) for v in rcp_read.block_values(blob, "WIFISCANRESULT",
+                                                           "wifiScanResultSSID") if v]
 
-    Writes `wifiScan` = True on NETWORK, waits, then READS the result slots, because the unit
-    reports a scan by filling them in rather than by pushing anything (see the comment above)."""
+
+def _cycle_wifi_radio():
+    sel = rcp_transfer.SEL_NETWORK
+    with _hid_lock:
+        rcp_transfer.send_record(rcp_transfer.build_global_prop_bool("wifi", False, sel))
+    time.sleep(WIFI_RADIO_OFF_S)
+    with _hid_lock:
+        rcp_transfer.send_record(rcp_transfer.build_global_prop_bool("wifi", True, sel))
+
+
+def _wait_for_scan() -> list:
+    """The results of the scan a radio cycle starts. Old results can outlast the radio going off,
+    so only a list read after the slots have cleared counts, and it is taken once it has held for
+    WIFI_SCAN_SETTLE_S, because networks arrive a few seconds apart."""
+    deadline = time.monotonic() + WIFI_SCAN_TIMEOUT_S
+    cleared, last, since, found = False, None, 0.0, []
+    while time.monotonic() < deadline:
+        time.sleep(WIFI_SCAN_POLL_S)
+        with _hid_lock:
+            found = wifi_scan_slots(rcp_read.read_model_stable(fresh=True))
+        if not found:
+            cleared = True
+        if found != last:
+            last, since = found, time.monotonic()
+        elif cleared and found and time.monotonic() - since >= WIFI_SCAN_SETTLE_S:
+            return found
+    return found if cleared else []
+
+
+def action_scan_wifi() -> dict:
+    """Scan for wifi networks and return what the unit found: the radio off and on, then the
+    results read back (see the comment above)."""
     gate = _network_write_gate()
     if gate is not None:
         return gate
     try:
         with _hid_lock:
-            # The scan uses the wifi radio, so with it off there is nothing to scan with; a
-            # wired connection does not change that.
-            if rcp_read.block_value(rcp_read.read_model(), "NETWORK", "wifi") is False:
-                return {"ok": False, "message": "The wifi is off. Turn it on to scan for "
-                                                "networks."}
-            rcp_transfer.send_record(
-                rcp_transfer.build_global_prop_bool("wifiScan", True, rcp_transfer.SEL_NETWORK))
-        time.sleep(WIFI_SCAN_SETTLE_S)
-        with _hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
+            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
+        # The scan uses the wifi radio, so with it off there is nothing to scan with; a wired
+        # connection does not change that.
+        if not state["on"]:
+            return {"ok": False, "message": "The wifi is off. Turn it on to scan for networks."}
+        if state["ip"]:
+            return {"ok": False, "joined": True,
+                    "message": (f"The unit only looks for networks while it is not connected to "
+                                f"one, and it is connected to {state['ssid']}. Disconnect from it "
+                                f"first, or type the name of the network you want.")}
+        _cycle_wifi_radio()
+        raw = _wait_for_scan()
     except Exception as exc:
         return {"ok": False, "message": f"Could not scan for networks: {exc}"}
 
     found, seen = [], set()
-    for n in range(1, WIFI_SCAN_SLOTS + 1):
-        entry = parse_scan_slot(rcp_read.block_value(blob, "NETWORK", f"wifiScan{n}"))
+    for entry in map(parse_scan_slot, raw):
         # The unit can report the same SSID twice (two bands, or two access points on one network),
         # and a picker listing a name twice is unusable by ear.
         if entry.get("ssid") and entry["ssid"] not in seen:
@@ -2555,17 +2608,46 @@ def action_scan_wifi() -> dict:
             found.append(entry)
     if not found:
         return {"ok": True, "networks": [],
-                "message": ("The scan finished but found nothing. The unit only reports ten "
-                            "networks at most, and it can come back empty if the radio was just "
-                            "switched on, so try once more before assuming there is nothing "
-                            "in range.")}
-    current = str(rcp_read.block_value(blob, "NETWORK", "wifiSSID") or "")
+                "message": "The scan finished but found no networks in range."}
+    current = state["ssid"]
     for entry in found:
         entry["current"] = bool(current and entry["ssid"] == current)
     return {"ok": True, "networks": found, "current": current,
             "message": (f"Found {wording.count(len(found), 'network')}. "
                         f"The unit lists ten at most, so a network in range can still be missing "
                         f"from this list; you can always type the name instead.")}
+
+
+def action_disconnect_wifi() -> dict:
+    """Leave the wifi network and forget it: `wifiSSID` cleared, then the radio off and on if it
+    was on, so the unit stays on wifi with nothing to join (see the comment above)."""
+    gate = _network_write_gate()
+    if gate is not None:
+        return gate
+    try:
+        with _hid_lock:
+            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
+        ssid = state["ssid"]
+        if not ssid and not state["ip"]:
+            return {"ok": True, "wifi": state, "message": "The unit is not set up for any network."}
+        with _hid_lock:
+            rcp_transfer.send_record(
+                rcp_transfer.build_global_prop_string("wifiSSID", "", rcp_transfer.SEL_NETWORK))
+        if state["on"]:
+            _cycle_wifi_radio()
+        time.sleep(WIFI_RADIO_OFF_S)
+        with _hid_lock:
+            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not disconnect from the network: {exc}"}
+    if state["ssid"] or state["ip"]:
+        return {"ok": False, "wifi": state,
+                "message": f"The unit did not let go of {ssid or 'its network'}."}
+    return {"ok": True, "wifi": state,
+            "message": (f"Disconnected from {ssid or 'the network'}, and the unit has forgotten "
+                        f"it, so joining it again needs its password."
+                        + (" The wifi stays on, so you can scan for networks." if state["on"]
+                           else ""))}
 
 
 def _cap_gate(cap: str, refusal) -> dict | None:
@@ -9053,6 +9135,18 @@ def _hotkey_label(command_id: str) -> str:
     return label
 
 
+def read_announce() -> dict:
+    """Every announcement setting, and the voices and outputs this computer offers."""
+    lists = speech.sapi_lists()
+    return {"ok": True, "on": speech.enabled.is_set(), "levels": announcer.levels_on,
+            "mute_tones": announcer.mute_tones, "record_tones": announcer.record_tones,
+            "startup_summary": announcer.startup_summary, "remember": announcer.remember,
+            "volume": speech.volume,
+            "voice": speech.chosen_voice, "output": speech.chosen_output,
+            "voices": lists["voices"], "outputs": lists["outputs"],
+            "running": bool(announcer._thread and announcer._thread.is_alive())}
+
+
 def hotkey_state() -> dict:
     return _hotkey_page_state(hotkey_manager())
 
@@ -9341,16 +9435,7 @@ GET_ROUTES = {
     "/api/appsettings/autostart": read_autostart,
     "/api/update": app_updates.state,
     "/api/update/job": app_updates.job,
-    "/api/announce": lambda: {"on": speech.enabled.is_set(), "levels": announcer.levels_on,
-                              "mute_tones": announcer.mute_tones,
-                              "record_tones": announcer.record_tones,
-                              "startup_summary": announcer.startup_summary,
-                              "remember": announcer.remember,
-                              "volume": speech.volume,
-                              "voice": speech.chosen_voice, "output": speech.chosen_output,
-                              "voices": speech.sapi_lists()["voices"],
-                              "outputs": speech.sapi_lists()["outputs"],
-                              "running": bool(announcer._thread and announcer._thread.is_alive())},
+    "/api/announce": read_announce,
     "/api/device/state": read_device_state,
     "/api/device/settings": read_unit_settings,
     "/api/faders/levels": fader_levels_live,
@@ -9458,6 +9543,7 @@ POST_ROUTES = {
     "/api/recorder/announcer-mute": (announcer.action_set_record_mute_announcer, [(bool, "on", None)]),
     "/api/network/wifi": (action_set_wifi, [(bool, "on", None)]),
     "/api/network/wifi/scan": (action_scan_wifi, []),
+    "/api/network/wifi/disconnect": (action_disconnect_wifi, []),
     # LOCAL ONLY (see LOCAL_ONLY_ROUTES): this one carries a wifi password.
     "/api/network/wifi/join": (action_join_wifi, [(str, "ssid", ""), (str, "password", "")]),
     "/api/network/bt-visible": (action_set_bt_visible, [(bool, "on", None)]),

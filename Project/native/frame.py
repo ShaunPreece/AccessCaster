@@ -6,6 +6,7 @@ Keys:
                                with tabs, the next or previous tab
     Alt+1 to Alt+9             jump to a section
     F5                         read the current section from the desk again
+    F12                        check for a new version of AccessCaster
 
 Arrowing the tree shows each page and leaves the focus in the tree. Selecting a section that has
 pages shows its first page.
@@ -14,18 +15,20 @@ import wx
 
 import server
 from native import announce
+from native.app_settings_section import AppSettingsSection
 from native.backups_section import BackupsSection
 from native.callme_section import CallMeSection
 from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
+from native.device_section import DeviceSection
+from native.help_section import HelpSection
 from native.pads_section import PadsSection
-from native.pages import Speaker, WebSection
+from native.pages import Speaker
 from native.recording_section import RecordingSection
 from native.routing_section import RoutingSection
 
-# The sections in tree order: a native section's class, or (title, web route) for one still on the
-# web page.
+# The sections in tree order, which is also their Alt+digit.
 SECTIONS = [
     ChannelsSection,
     RoutingSection,
@@ -33,9 +36,9 @@ SECTIONS = [
     RecordingSection,
     CallMeSection,
     BackupsSection,
-    ("Device", "status"),
-    ("App settings", "settings"),
-    ("Help and About", "about"),
+    DeviceSection,
+    AppSettingsSection,
+    HelpSection,
 ]
 
 
@@ -60,8 +63,7 @@ class MainFrame(Speaker, wx.Frame):
         self._notifier = announce.Notifier(sink, "AccessCaster")
 
         self.desk = DeskState(self)
-        self.sections = [WebSection(self, *section) if isinstance(section, tuple) else section(self)
-                         for section in SECTIONS]
+        self.sections = [section(self) for section in SECTIONS]
         tree_root = self.tree.AddRoot("AccessCaster")
         self._branches = []
         for section in self.sections:
@@ -77,6 +79,10 @@ class MainFrame(Speaker, wx.Frame):
         outer.Add(self.host, 1, wx.EXPAND | wx.ALL, 8)
         outer.Add(sink, 0)
         root.SetSizer(outer)
+        # The desk summary (DeviceSection): a native status bar, which a screen reader reads on
+        # demand and does not speak as it changes.
+        self.status = self.CreateStatusBar()
+        self.status.SetStatusText("Reading the unit.")
 
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self._on_select)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
@@ -115,11 +121,21 @@ class MainFrame(Speaker, wx.Frame):
             if hasattr(section, "read"):
                 section.read()
 
-    def open_web_page(self, route):
-        server.open_ui(f"http://localhost:{server.HTTP_PORT}/#/{route}")
+    def go_to(self, route, key):
+        """Show the page `key` of the section `route`, and move the focus into it."""
+        section = next(s for s in self.sections if s.route == route)
+        branch = self._branches[self.sections.index(section)]
+        item = next((child for child in self._children(branch)
+                     if self.tree.GetItemData(child).key == key), branch)
+        self.tree.SelectItem(item)
+        self._focus_page()
 
     def say(self, text, recent=False):
         self._notifier.say(text, recent)
+
+    def set_status(self, text):
+        if self.status.GetStatusText() != text:
+            self.status.SetStatusText(text)
 
     # ---- the tree --------------------------------------------------------------------------
 
@@ -241,6 +257,11 @@ class MainFrame(Speaker, wx.Frame):
                 self._branch_of(self.tree.GetSelection()))]
             if hasattr(section, "refresh"):
                 section.refresh(True)
+            return
+        if key == wx.WXK_F12 and mods == wx.MOD_NONE:
+            for section in self.sections:
+                if hasattr(section, "check_updates"):
+                    section.check_updates()
             return
         if (key == wx.WXK_TAB and mods in (wx.MOD_CONTROL, wx.MOD_CONTROL | wx.MOD_SHIFT)
                 and not self._in_tabs()):

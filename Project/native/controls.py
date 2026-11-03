@@ -19,11 +19,14 @@ from native.pages import labelled
 
 class Switch:
     """A checkbox. `send(on)` runs on a worker thread and returns an action's reply, which is
-    spoken. `guard()`, if given, returns a sentence to refuse with before anything is sent."""
+    spoken. `guard()`, if given, returns a sentence to refuse with before anything is sent.
+    `working(on)`, if given, returns a sentence spoken as the write goes out, for one that takes
+    seconds."""
 
     def __init__(self, page, parent, sizer, label, send, current, remember, description="",
-                 guard=None, accepted=None):
+                 guard=None, accepted=None, working=None):
         self.page = page
+        self._working = working
         self._accepted = accepted
         self.box = wx.CheckBox(parent, label=label)
         self.acc = a11y.describe(self.box, description)
@@ -46,6 +49,8 @@ class Switch:
             self.box.SetValue(not on)
             self.page.frame.say(refusal)
             return
+        if self._working:
+            self.page.frame.say(self._working(on))
         call(self.page, self._send, on, done=lambda reply: self._returned(on, reply))
 
     def _returned(self, on, reply):
@@ -203,6 +208,11 @@ class Choice(_Field):
         super().__init__(page, choice, send, current, remember, description, guard, accepted)
         choice.Bind(wx.EVT_CHOICE, self._on_change)
 
+    def set_items(self, items):
+        """Replace the (value, label) pairs; `show` then puts the current value back on them."""
+        self._values = [value for value, _label in items]
+        set_choices(self.control, [text for _value, text in items])
+
     def _get(self):
         return self._values[self.control.GetSelection()]
 
@@ -229,6 +239,31 @@ class Number(_Field):
 
     def _put(self, value):
         if value is not None and self.control.GetValue() != value:
+            self.control.SetValue(value)
+
+
+class Decimal(_Field):
+    """A number box for a value with a fractional step (a level in dB): `step` per arrow press,
+    shown to `digits` places. Otherwise as `Number`."""
+
+    def __init__(self, page, parent, sizer, label, lo, hi, step, digits, send, current, remember,
+                 description="", guard=None, accepted=None):
+        spin = labelled(parent, sizer, label, lambda p: wx.SpinCtrlDouble(
+            p, min=lo, max=hi, inc=step, size=(90, -1),
+            style=wx.SP_ARROW_KEYS | wx.TE_PROCESS_ENTER))
+        spin.SetDigits(digits)
+        super().__init__(page, spin, send, current, remember, description, guard, accepted)
+        spin.Bind(wx.EVT_SPINCTRLDOUBLE, self._on_change)
+
+    def set_range(self, lo, hi):
+        if (self.control.GetMin(), self.control.GetMax()) != (lo, hi):
+            self.control.SetRange(lo, hi)
+
+    def _get(self):
+        return self.control.GetValue()
+
+    def _put(self, value):
+        if value is not None and abs(self.control.GetValue() - value) > 1e-6:
             self.control.SetValue(value)
 
 

@@ -1,7 +1,8 @@
 """The pieces every section is made of.
 
-A SECTION is one branch of the tree. It has a `title`, a `pages` list, and optionally `start()`
-(called once the service is up) and `refresh(announce)` (F5). When its pages change it calls
+A SECTION is one branch of the tree. It has a `title`, a `route` (its name for `frame.go_to`), a
+`pages` list, and optionally `start()` (called once the service is up), `refresh(announce)` (F5)
+and `read()` (after a job that rewrites the desk). When its pages change it calls
 `frame.pages_changed(self)`, and the frame rebuilds the branch.
 
 A PAGE is one leaf: a `key` that survives a rebuild, a `title` for the tree, and the `window` shown
@@ -59,9 +60,37 @@ def labelled(parent, sizer, label, control_factory):
     return control
 
 
+def read_only(parent, sizer, label, height=60, width=460, scroll=False):
+    """A labelled read-only text box, for a reading: it takes the focus, so it is met in the tab
+    order and read with its label, which static text is not. `height` None is one line; `scroll`
+    gives a long report a scroll bar."""
+    style = wx.TE_READONLY if height is None else (
+        wx.TE_MULTILINE | wx.TE_READONLY | (0 if scroll else wx.TE_NO_VSCROLL))
+    return labelled(parent, sizer, label, lambda p: wx.TextCtrl(
+        p, size=(width, -1 if height is None else height), style=style))
+
+
+def set_text(box, text):
+    """Replace a text box's value only when it differs: a screen reader reads a focused box again
+    whenever its value is set."""
+    if box.GetValue() != text:
+        box.SetValue(text)
+
+
+def set_items(listbox, labels):
+    """Put `labels` in a list box item by item, so an unchanged list is not replaced under the
+    screen reader."""
+    if listbox.GetCount() == len(labels):
+        for index, label in enumerate(labels):
+            if listbox.GetString(index) != label:
+                listbox.SetString(index, label)
+    else:
+        listbox.Set(labels)
+
+
 class MessagePage(wx.Panel):
-    """A page that is only a sentence and, optionally, one button: a section that is still reading,
-    could not read, or is not built natively yet. The sentence is a read-only text box rather than
+    """A page that is only a sentence and, optionally, one button: a section that is still reading
+    or could not read. The sentence is a read-only text box rather than
     static text so that it takes focus and is read when F6 moves into the page."""
 
     def __init__(self, host, title, text, button=None, on_button=None):
@@ -78,16 +107,3 @@ class MessagePage(wx.Panel):
 
     def set_text(self, text):
         self.text.SetValue(text)
-
-
-class WebSection:
-    """An area not built natively yet: one page whose button opens it in the web page."""
-
-    def __init__(self, frame, title, route):
-        self.title = title
-        self.route = route
-        window = MessagePage(frame.host, title,
-                             f"{title} is not in this window yet. It opens in the web page.",
-                             button=f"Open {title} in the browser",
-                             on_button=lambda: frame.open_web_page(route))
-        self.pages = [Page(route, title, window)]

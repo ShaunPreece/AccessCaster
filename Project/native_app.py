@@ -1,6 +1,6 @@
 """AccessCaster in a native window, in place of the web page. It runs the same service the tray app
-does (announcer, shortcuts, watchers and the web server), so a section not built natively yet still
-opens in the browser. Closing the window stops the service.
+does (announcer, shortcuts, watchers and the web server) in this process. Closing the window stops
+the service.
 
 Run: python Project/native_app.py
 """

@@ -21,7 +21,7 @@ import _testkit
 import native
 import wx
 from _testkit import check, check_true, patched
-from native import callme_section, dialogs, routing_mixes
+from native import callme_section, dialogs, routing_mixes, shortcuts_page, update_dialogs
 
 app = wx.App()
 
@@ -98,6 +98,30 @@ dialog.Destroy()
 
 dialog = callme_section.ContactDialog(frame, None)
 check_true("Add a contact lands on the name", first_focusable(dialog) is dialog.name_box)
+dialog.Destroy()
+
+shortcut_state = {"keys": ["A", "B"], "mods": ["ctrl"], "shortcuts": [],
+                  "modifiers": [{"id": "ctrl", "label": "Ctrl"}, {"id": "alt", "label": "Alt"}]}
+shortcut = {"id": "1", "label": "Record", "key": "B", "enabled": True, "speak": True,
+            "problem": "Another program has it."}
+dialog = shortcuts_page.EditDialog(frame, shortcut_state, shortcut)
+check_true("Edit shortcut lands on its key, after the problem", first_focusable(dialog) is dialog.key)
+check("on the key it has", dialog.key.GetSelection(), 1)
+dialog.Destroy()
+
+dialog = shortcuts_page.ModsDialog(frame, shortcut_state)
+check("Keys to hold lands on the first key", first_focusable(dialog).GetLabel(), "Ctrl")
+dialog.Destroy()
+
+dialog = shortcuts_page.AddDialog(frame, shortcut_state, {"complete": True, "groups": [
+    {"category": "Recording", "commands": [{"id": "rec", "label": "Record"}]}]})
+check_true("Add a shortcut lands on the command type", first_focusable(dialog) is dialog.category)
+dialog.Destroy()
+
+dialog = update_dialogs.DecisionDialog(frame, {"title": "Install AccessCaster 2.64.0?",
+                                               "summary": "A new version.", "notes": "Fixes.",
+                                               "after": "It restarts."})
+check("The update lands on what changed", first_focusable(dialog).GetValue(), "Fixes.")
 dialog.Destroy()
 
 frame.Destroy()

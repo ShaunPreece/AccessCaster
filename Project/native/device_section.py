@@ -1,0 +1,764 @@
+"""Device: the unit itself. The state it is in, its hardware, its own settings, and its wireless
+connections.
+
+Nothing here is in the desk state. Each page reads its own part of the unit (`read`): every page
+after the desk state's first read and after a job that rewrites the desk, and the page shown on F5.
+The reads at start share one dump through the model cache. The overview also gives the window's
+status bar its summary, read again shortly after the desk state changes.
+"""
+import wx
+import wx.lib.scrolledpanel as scrolled
+
+import server
+from native import a11y
+from native.calls import call
+from native.controls import Choice, Slider, Switch
+from native.dialogs import JobDialog, confirm, report
+from native.pages import Page, group, labelled, page_box, read_only, set_items, set_text
+
+TITLE = "Device"
+UNREAD = "Not read from the unit yet."
+UNIT_UNREAD = "The unit's settings have not been read yet."
+NETWORK_UNREAD = "The wireless connections have not been read yet."
+NETWORK_READ_ONLY = ("Changing the network settings is not enabled on this device yet. You can "
+                     "still read what it has.")
+UNIT_SETTINGS_OFF = ("Changing the unit's settings is not enabled on this device yet. You can "
+                     "still read what it has.")
+NOT_REPORTED = (" The unit did not report this setting, so the control shows a default rather "
+                "than its real value.")
+WIFI_OFF = "WiFi is off. Turn it on to see networks and join one."
+# Desk state events that can change the status bar's summary, and how long after the last of a
+# burst it is read again.
+SUMMARY_EVENTS = {"read", "changed", "mix", "faders", "recorder"}
+SUMMARY_AFTER_MS = 1500
+NOT_SCANNED = ("Nothing found. The unit only fills this in after a scan, so this usually means no "
+               "scan has been run rather than nothing being in range.")
+
+
+# ---- the wording ----------------------------------------------------------------------------
+
+def _sentence(text):
+    clean = str(text).strip().rstrip(".")
+    return clean[:1].upper() + clean[1:] + "."
+
+
+def network_line(n):
+    """The unit's internet connection in one sentence. Offline is not a fault in itself, so the
+    sentence says what it costs."""
+    if n.get("wired") and n.get("wifi_ip"):
+        return f"Network: online by cable, and on wifi to {n.get('wifi_ssid')}."
+    if n.get("wired"):
+        return "Network: online by cable."
+    if n.get("wifi_ip"):
+        return f"Network: online over wifi, connected to {n.get('wifi_ssid')}."
+    if n.get("wifi_on") and n.get("wifi_ssid"):
+        wifi = f"Wifi is on but not connected to {n['wifi_ssid']}. "
+    elif n.get("wifi_on"):
+        wifi = "Wifi is on but not joined to a network. "
+    else:
+        wifi = "Wifi is off. "
+    return f"Network: offline. {wifi}CallMe and the firmware check need wifi or a network cable."
+
+
+def _labels(items):
+    return ", ".join(item["label"] for item in items)
+
+
+def overview_lines(d):
+    """The Current state report from `server.device_overview`: by exception, so a short report
+    means all is well. Fader levels are the exception to the exception, since a level has no
+    normal value to infer from silence."""
+    if not d.get("ok"):
+        return [d.get("message") or "Could not read the unit."]
+    lines = [f"{d.get('device_name') or 'The unit'} connected."]
+    # A latched pad first: a voice effect makes no noise of its own, so the only symptom is
+    # sounding wrong.
+    for pad in d.get("pads_engaged") or []:
+        lines.append(f"Pad {pad['grid']}, {pad['name']}, is switched on and processing a live "
+                     "channel. Press that pad on the unit to switch it off, or clear it from the "
+                     "SMART pads page.")
+    if d.get("recording"):
+        lines.append("A recording is PAUSED. The Recording section carries on or stops it."
+                     if d["recording"].get("state") == 1 else
+                     "The unit is RECORDING. The Recording section pauses or stops it.")
+    for volume in d.get("storage_low") or []:
+        lines.append(f"{volume['label']} is nearly full: {volume['free_pct']} percent left, "
+                     f"about {volume['free_mb']} MB.")
+    muted, soloed = d.get("muted") or [], d.get("soloed") or []
+    lines.append(f"Muted: {_labels(muted)}." if muted else "Nothing is muted.")
+    lines.append(f"Soloed: {_labels(soloed)}. While anything is soloed, your headphones hear only "
+                 "the soloed channels." if soloed else "Nothing is soloed.")
+    faders = d.get("faders") or []
+    if not d.get("levels_ok"):
+        lines.append("Fader levels could not be read: the matrix changed shape, which usually "
+                     "means a phone caller is connected.")
+    elif faders:
+        def level(f):
+            if f["label"] == "empty":
+                return f"fader {f['fader']} empty"
+            if f.get("muted"):
+                return f"{f['label']} muted"
+            return f"{f['label']} " + ("unknown" if f.get("percent") is None
+                                       else f"{f['percent']} percent")
+        lines.append("Fader levels: " + ", ".join(level(f) for f in faders) + ".")
+    if d.get("monitor_percent") is not None:
+        lines.append(f"Monitor speaker level: {d['monitor_percent']} percent.")
+    if d.get("network"):
+        lines.append(network_line(d["network"]))
+    routing = d.get("routing") or {}
+    if not routing.get("ok"):
+        lines.append(routing.get("reason") or "The routing could not be read.")
+    elif not routing.get("notes"):
+        lines.append("Routing: nothing unusual, every output is on its usual mix.")
+    else:
+        lines.append("Routing, only what differs from the usual:")
+        lines.extend(routing["notes"])
+    # "Currently selected": on its own, "SMART pad bank: 1" sounds like a setting being offered.
+    if d.get("bank") is not None:
+        lines.append(f"Currently selected SMART pad bank: {d['bank']}.")
+    return lines
+
+
+def desk_summary(d):
+    """The overview reduced to what is WRONG, for the status bar. The reference facts (every fader
+    level, the monitor level) stay on Current state. Empty when the unit could not be read."""
+    if not d or not d.get("ok"):
+        return ""
+    alerts = [f"Pad {p['grid']}, {p['name']}, is switched on and processing a live channel"
+              for p in d.get("pads_engaged") or []]
+    if d.get("recording"):
+        alerts.append("a recording is paused" if d["recording"].get("state") == 1
+                      else "the unit is recording")
+    alerts += [f"{v['label']} is nearly full, {v['free_pct']} percent left"
+               for v in d.get("storage_low") or []]
+    # Offline is a problem only when guests expect to reach the unit.
+    net = d.get("network") or {}
+    if net.get("online") is False and net.get("callme_hosting"):
+        alerts.append("the unit is offline, so CallMe guests cannot reach it")
+    update = d.get("firmware_update") or {}
+    if update.get("available"):
+        alerts.append((f"firmware {update['version']}" if update.get("version")
+                       else "a firmware update") + " is available, on the Device page under "
+                      "Hardware")
+    muted = [c["label"] for c in d.get("muted") or []]
+    soloed = [c["label"] for c in d.get("soloed") or []]
+    if muted:
+        alerts.append("muted: " + ", ".join(muted))
+    if soloed:
+        alerts.append("soloed: " + ", ".join(soloed) + ", so your headphones hear only those")
+    routing = d.get("routing") or {}
+    broken = routing.get("ok") is False
+    if broken:
+        alerts.append(routing.get("reason") or "the routing could not be read")
+    else:
+        alerts += routing.get("notes") or []
+    # What was checked and found clear is said too, so a short summary cannot be mistaken for one
+    # that stopped at the first problem.
+    clear = []
+    if not muted and not soloed:
+        clear.append("nothing is muted or soloed")
+    elif not soloed:
+        clear.append("nothing is soloed")
+    if not broken and not routing.get("notes"):
+        clear.append("every output is on its usual mix")
+    parts = [_sentence(alert) for alert in alerts]
+    if clear:
+        parts.append(_sentence(" and ".join(clear)))
+    # Always said: no bank is wrong, but it changes what every pad does and has no outward sign.
+    if d.get("bank") is not None:
+        parts.append(f"SMART pad bank {d['bank']}.")
+    return " ".join(parts)
+
+
+def firmware_line(firmware, update):
+    update = update or {}
+    if not update.get("available"):
+        return firmware or "Unknown"
+    return (f"{firmware or 'Unknown'}. "
+            + (f"Version {update['version']}" if update.get("version") else "An update")
+            + " is available.")
+
+
+def hardware_lines(d):
+    """Storage and the recorder from `server.read_device_state`, as sentences."""
+    if not d.get("ok"):
+        return [d.get("message") or "Could not read the unit."]
+    volumes = (d.get("storage") or {}).get("volumes") or []
+    cards = [v for v in volumes if not (v.get("label") or "").startswith("Internal")]
+    internal = next((v for v in volumes if (v.get("label") or "").startswith("Internal")), None)
+
+    def space(v):
+        return (f"{v['free_mb']} MB free of {v['capacity_mb']} MB"
+                + ("" if v.get("free_pct") is None else f", {v['free_pct']} percent left")
+                + (". This is nearly full" if v.get("low") else ""))
+    lines = [] if cards else ["Storage: the unit reported no card slot or drive."]
+    lines += [f"{v['label']}: in use, {space(v)}." if v.get("inserted")
+              else f"{v['label']}: nothing in it." for v in cards]
+    if internal:
+        lines.append(f"{internal['label']}: {space(internal)}.")
+    rec = d.get("recorder") or {}
+    lines.append(f"Recorder: {(rec.get('state_label') or 'unknown').lower()}. "
+                 f"{rec.get('total_recordings') or 0} recordings on the unit. Start and stop it "
+                 "in the Recording section.")
+    return lines
+
+
+def wired_text(connected):
+    return {True: "Connected", False: "Not connected"}.get(connected, "Unknown")
+
+
+def connection_text(status):
+    if not status.get("connected"):
+        return "Not connected"
+    return "Connected and responding" if status.get("online") else "Connected"
+
+
+def mic_lines(mics):
+    """The wireless mic reading. No slots at all means the unit said nothing, which is not the
+    same as none connected."""
+    mics = mics or {}
+    if not mics.get("present"):
+        return ["Wireless mics: the unit did not report any, so there is nothing to show."]
+    if not mics.get("any_connected"):
+        return ["Wireless mics: none connected."]
+    lines = []
+    for t in mics.get("transmitters") or []:
+        if t.get("connected"):
+            lines.append(f"Wireless mic {t['index'] + 1}: connected"
+                         + ("" if t.get("battery_pct") is None
+                            else f", battery {t['battery_pct']} percent")
+                         + ("" if t.get("rssi") is None else f", signal {t['rssi']}") + ".")
+    return lines
+
+
+def network_facts(data):
+    """What the unit reports about its radios, one fact to a line. The wifi lines go with the
+    radio: off, they describe nothing."""
+    wifi, bt = data.get("wifi") or {}, data.get("bluetooth") or {}
+
+    def scan(found):
+        return ", ".join(found) if found else NOT_SCANNED
+    lines = []
+    if wifi.get("on"):
+        lines += [
+            "WiFi network: " + ((wifi["ssid"] + (" (has a password saved)"
+                                                if wifi.get("has_password") else ""))
+                               if wifi.get("ssid") else "None set") + ".",
+            "WiFi connected: " + ("Yes" if wifi.get("connected") else "No") + ".",
+            f"WiFi IP address: {wifi.get('ip') or 'None'}.",
+            f"WiFi networks last scanned for: {scan(wifi.get('scan'))}"]
+    visible = bt.get("visible")
+    lines += [
+        "Bluetooth: " + (f"Connected to {bt['connected_address']}" if bt.get("connected")
+                         else "No device connected") + ".",
+        "Bluetooth discoverable: " + {True: "Yes, other devices can find it",
+                                      False: "No, other devices cannot find it"}.get(
+                                          visible, "Unknown") + ".",
+        "Bluetooth paired devices: " + (", ".join(bt["paired"]) if bt.get("paired")
+                                        else "None paired") + ".",
+        f"Bluetooth devices last scanned for: {scan(bt.get('scan'))}"]
+    if data.get("still_read_only"):
+        lines.append(data["still_read_only"])
+    return lines
+
+
+def _button(parent, sizer, label, handler):
+    button = wx.Button(parent, label=label)
+    button.Bind(wx.EVT_BUTTON, handler)
+    sizer.Add(button, 0, wx.ALL, 6)
+    return button
+
+
+def _hardware_read():
+    return {"ok": True, "state": server.read_device_state(),
+            "status": server.read_device_status()}
+
+
+# ---- the section ----------------------------------------------------------------------------
+
+class DeviceSection:
+    title = TITLE
+    route = "status"
+
+    def __init__(self, frame):
+        self.frame = frame
+        self._started = False
+        self.state = StatePage(self)
+        self.hardware = HardwarePage(self)
+        self.unit = UnitPage(self)
+        self.network = NetworkPage(self)
+        self.views = [self.state, self.hardware, self.unit, self.network]
+        self.pages = [Page("state", "Current state", self.state),
+                      Page("hardware", "Hardware", self.hardware),
+                      Page("unit", "Unit settings", self.unit),
+                      Page("network", "Wireless connections", self.network)]
+        self._summary_timer = None
+        frame.desk.subscribe(self._desk_event)
+
+    def _desk_event(self, event, _detail):
+        if event == "read" and not self._started:
+            self._started = True
+            for view in self.views:
+                view.read()
+        elif event in SUMMARY_EVENTS:
+            # A burst of pushes (a restore, a fader moved across) is one read, after the last.
+            if self._summary_timer is None:
+                self._summary_timer = wx.CallLater(SUMMARY_AFTER_MS, self._summary_due)
+            else:
+                self._summary_timer.Start(SUMMARY_AFTER_MS)
+
+    def _summary_due(self):
+        if self.state:          # False once the window is gone
+            self.state.read()
+
+    def read(self):
+        for view in self.views:
+            view.read()
+
+    def refresh(self, announce):
+        shown = [view for view in self.views if view.IsShown()]
+        for view in shown or self.views:
+            view.read(announce)
+
+
+class _Reader:
+    """A page's read: one at a time, a second asked for while one runs is made after it. `fetch`
+    runs on a worker thread; `shown(reply)` puts a reply on the page and returns what F5 says."""
+
+    def _init_reader(self):
+        self._reading = False
+        self._again = None
+
+    def read(self, announce=False):
+        if self._reading:
+            self._again = bool(self._again) or announce
+            return
+        self._reading = True
+        call(self, self.fetch, done=lambda reply: self._read_done(reply, announce))
+
+    def _read_done(self, reply, announce):
+        self._reading = False
+        said = self.shown(reply)
+        if announce:
+            self.section.frame.say(said)
+        if self._again is not None:
+            again, self._again = self._again, None
+            self.read(again)
+
+
+class StatePage(_Reader, wx.Panel):
+    """The overview: what is muted, soloed and engaged, the levels, the network and the routing,
+    by exception."""
+
+    def __init__(self, section):
+        super().__init__(section.frame.host)
+        self.Hide()
+        self._init_reader()
+        self.section = section
+        sizer, parent = page_box(self, "Current state")
+        self.report = read_only(parent, sizer, "Now", height=300, scroll=True)
+        self.report.SetValue(UNREAD)
+
+    def fetch(self):
+        return server.device_overview()
+
+    def shown(self, reply):
+        set_text(self.report, "\n".join(overview_lines(reply)))
+        summary = (desk_summary(reply) if reply.get("ok")
+                   else reply.get("message") or "Could not read the unit.")
+        self.section.frame.set_status(summary)
+        return summary
+
+
+class HardwarePage(_Reader, scrolled.ScrolledPanel):
+    """Storage and the recorder, the firmware and wired network, and the USB facts for
+    troubleshooting. Nothing here can be changed, bar asking for a firmware check."""
+
+    def __init__(self, section):
+        super().__init__(section.frame.host)
+        self.Hide()
+        self._init_reader()
+        self.section = section
+        self.frame = section.frame
+        sizer, parent = page_box(self, "Hardware")
+        self.status = read_only(parent, sizer, "Storage and recorder", height=100)
+        self.status.SetValue(UNREAD)
+
+        box_sizer, box = group(parent, sizer, "Firmware and wired network")
+        self.firmware = read_only(box, box_sizer, "Firmware", height=None)
+        self.wired = read_only(box, box_sizer, "Wired network", height=None)
+        # Checking only: an install restarts the unit, which may be carrying this computer's
+        # audio, the screen reader included.
+        self.check = _button(box, box_sizer, "Check for a firmware update", self._on_check)
+        a11y.describe(self.check, "Asks the unit to check with RODE. Installing is done on the "
+                                  "unit's screen or in RODE's own app.")
+
+        box_sizer, box = group(parent, sizer, "USB interfaces (technical)")
+        self.connection = read_only(box, box_sizer, "Connection", height=None)
+        self.hardware_id = read_only(box, box_sizer, "Hardware id", height=None)
+        self.info = read_only(box, box_sizer, "Status bytes", height=None)
+        self.interfaces = read_only(box, box_sizer, "USB interfaces", height=100, scroll=True)
+        a11y.describe(self.interfaces, "A low-level list of the USB interfaces seen, for "
+                                       "troubleshooting.")
+        self.SetupScrolling(scroll_x=False)
+
+    def fetch(self):
+        return _hardware_read()
+
+    def shown(self, reply):
+        # A failed call is one refusal reply, standing for both halves.
+        state, status = reply.get("state", reply), reply.get("status", reply)
+        set_text(self.status, "\n".join(hardware_lines(state)))
+        if state.get("ok"):
+            set_text(self.firmware, firmware_line(state.get("firmware"),
+                                                  state.get("firmware_update")))
+            set_text(self.wired, wired_text(state.get("wired_connected")))
+        set_text(self.connection, connection_text(status))
+        set_text(self.hardware_id, status.get("hardware_id") or "Unknown")
+        set_text(self.info, "0x" + status["info_hex"] if status.get("info_hex") else "Unknown")
+        set_text(self.interfaces, "\n".join(status.get("interfaces") or ["None found."]))
+        return status.get("message") or "Status read."
+
+    def _on_check(self, _event):
+        job = JobDialog(self, "Checking for a firmware update",
+                        "Checking with RODE. This takes up to twenty seconds.",
+                        lambda dialog: call(dialog, server.action_check_firmware,
+                                            done=dialog.finish),
+                        stop=None, closable=False)
+        with job:
+            reply = job.run()
+        if reply.get("ok"):
+            set_text(self.firmware, firmware_line(reply.get("firmware"),
+                                                  reply.get("firmware_update")))
+            self.section.state.read()       # the summary names a waiting update
+        report(self, ("Firmware check", "Firmware check failed"), reply)
+        self.check.SetFocus()
+
+
+class UnitPage(_Reader, scrolled.ScrolledPanel):
+    """The settings otherwise reached through the unit's touchscreen, built from
+    `server.UNIT_SETTINGS`, then MIDI control, which has a write of its own."""
+
+    def __init__(self, section):
+        super().__init__(section.frame.host)
+        self.Hide()
+        self._init_reader()
+        self.section = section
+        self.frame = section.frame
+        self.data = None             # the last good `server.read_unit_settings`
+        self.values = {}             # prop: value as the unit last reported it
+        self.controls = {}           # prop: its control
+        sizer, parent = page_box(self, "Unit settings")
+        self._sizer = sizer
+        self.note = read_only(parent, sizer, "Unit settings status", height=60)
+        self.note.SetValue(UNIT_UNREAD)
+        for spec in server.UNIT_SETTINGS:
+            self.controls[spec["prop"]] = self._build(parent, sizer, spec)
+        box_sizer, box = group(parent, sizer, "MIDI control")
+        self.midi = Switch(self, box, box_sizer, "Enable MIDI control", server.action_set_midi,
+                           *self.field("midi"),
+                           description="Lets a MIDI app or controller handle mute, faders, "
+                                       "listen and record, without RODE Central.",
+                           guard=self._unread)
+        self.SetupScrolling(scroll_x=False)
+
+    def field(self, prop):
+        def current():
+            return self.values.get(prop)
+
+        def remember(value):
+            self.values[prop] = value
+        return current, remember
+
+    def _unread(self):
+        return UNIT_UNREAD if self.data is None else None
+
+    def _guard(self):
+        if self.data is None:
+            return UNIT_UNREAD
+        return None if self.data.get("writable") else UNIT_SETTINGS_OFF
+
+    def _build(self, parent, sizer, spec):
+        prop = spec["prop"]
+
+        def send(value):
+            return server.action_set_unit_setting(prop, int(value))
+        if spec["kind"] == "bool":
+            current, remember = self.field(prop)
+            return Switch(self, parent, sizer, spec["label"], send,
+                          lambda: None if current() is None else current() == 1,
+                          lambda on: remember(1 if on else 0),
+                          description=spec["detail"], guard=self._guard)
+        if spec["kind"] == "choice":
+            return Choice(self, parent, sizer, spec["label"],
+                          [(value, text) for value, text in spec["choices"]], send,
+                          *self.field(prop), description=spec["detail"], guard=self._guard)
+        lo, hi = int(spec["min"]), int(spec["max"])
+        span = max(1, hi - lo)
+        slider = Slider(self, parent, sizer, spec["label"], lo, hi, send, *self.field(prop),
+                        words=lambda v: f"{v} of {hi}, about {round((v - lo) * 100 / span)} "
+                                        "percent",
+                        unread=hi)
+        slider.slider.SetLineSize(int(spec.get("step") or 1))
+        slider.slider.SetPageSize(int(spec.get("step") or 1) * 5)
+        slider.acc.description = spec["detail"]
+        return slider
+
+    def fetch(self):
+        return server.read_unit_settings()
+
+    def shown(self, reply):
+        if not reply.get("ok"):
+            if self.data is None:
+                set_text(self.note, reply.get("message") or "Could not read the unit's settings.")
+            return reply.get("message") or "Could not read the unit's settings."
+        self.data = reply
+        self.values = {s["prop"]: s.get("value") for s in reply.get("settings") or []}
+        self.values["midi"] = reply.get("midi")
+        for spec in server.UNIT_SETTINGS:
+            self._show(spec)
+        self.midi.show()
+        note = "" if reply.get("writable") else (
+            f"These settings can be read but not changed on the "
+            f"{reply.get('device_name') or 'connected unit'}: changing them has only ever been "
+            "confirmed on a RODECaster Pro 2, so AccessCaster leaves them alone rather than risk "
+            "changing the wrong one.")
+        set_text(self.note, note)
+        self._sizer.Show(self.note.GetContainingSizer(), bool(note))
+        self.Layout()
+        return "Unit settings read."
+
+    def _show(self, spec):
+        prop = spec["prop"]
+        control = self.controls[prop]
+        value = self.values.get(prop)
+        if spec["kind"] == "choice":
+            # A value the unit holds that is not one of the choices (a dim time of 45 seconds) is
+            # listed as it is, never shown as the nearest choice.
+            items = [(v, text) for v, text in spec["choices"]]
+            if value is not None and value not in [v for v, _text in items]:
+                items.append((value, f"Currently {value}"))
+            control.set_items(items)
+        control.acc.description = spec["detail"] + ("" if value is not None else NOT_REPORTED)
+        control.show()
+
+
+class NetworkPage(_Reader, scrolled.ScrolledPanel):
+    """Every radio link the unit can make: wifi, Bluetooth and wireless mics. Wifi on and off,
+    joining a network and Bluetooth discoverability are writable; the rest is a reading."""
+
+    def __init__(self, section):
+        super().__init__(section.frame.host)
+        self.Hide()
+        self._init_reader()
+        self.section = section
+        self.frame = section.frame
+        self.data = None             # the last good `server.read_network_status`
+        self.found = []              # the networks the last scan found
+        sizer, parent = page_box(self, "Wireless connections")
+
+        box_sizer, box = group(parent, sizer, "WiFi")
+        self.wifi = Switch(self, box, box_sizer, "WiFi on", server.action_set_wifi,
+                           *self.field("wifi", "on"),
+                           description="Turn the unit's wifi on or off, and join a network.",
+                           guard=self._guard, accepted=self._wifi_switched,
+                           working=lambda on: ("Turning the wifi on and waiting for it to "
+                                               "connect. Please wait." if on else
+                                               "Turning the wifi off. Please wait."))
+        self.wifi_off = read_only(box, box_sizer, "WiFi status", height=None)
+        self.wifi_off.SetValue(WIFI_OFF)
+        # Everything about wifi but its switch, shown only while the radio is on.
+        self.options = wx.BoxSizer(wx.VERTICAL)
+        box_sizer.Add(self.options, 0, wx.EXPAND)
+        # Shown only while the unit has a network set up, and named after it.
+        self.disconnect = _button(box, self.options, "Disconnect", self._on_disconnect)
+        a11y.describe(self.disconnect, "The unit leaves the network and forgets it and its "
+                                       "password. The wifi stays on.")
+        self.scan = _button(box, self.options, "Scan for networks", self._on_scan)
+        a11y.describe(self.scan, "Up to ten networks, and no hidden ones: type a missing one's "
+                                 "name below. The unit only scans while it is not connected to "
+                                 "a network.")
+        self.networks = labelled(box, self.options, "Networks found", lambda p: wx.ListBox(
+            p, size=(460, 120)))
+        self.networks.Bind(wx.EVT_LISTBOX, self._on_pick)
+        # Choosing from the list fills in this box, so there is one place holding the network to
+        # join, which can be typed into for a hidden network or one the scan missed.
+        self.ssid = labelled(box, self.options, "Network name", lambda p: wx.TextCtrl(
+            p, size=(300, -1)))
+        self.password = labelled(box, self.options, "Password", lambda p: wx.TextCtrl(
+            p, size=(300, -1), style=wx.TE_PASSWORD))
+        a11y.describe(self.password, "Type the network name exactly, capitals included, and "
+                                     "leave the password empty for an open network. Joining "
+                                     "takes up to 45 seconds. The password is sent to the unit "
+                                     "and is not kept by AccessCaster.")
+        self.join = _button(box, self.options, "Join this network", self._on_join)
+
+        box_sizer, box = group(parent, sizer, "Bluetooth")
+        self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this unit",
+                                server.action_set_bt_visible,
+                                *self.field("bluetooth", "visible"),
+                                description="Switch this on, then pair from the phone's own "
+                                            "Bluetooth screen. The unit stops being discoverable "
+                                            "on its own after a few minutes.",
+                                guard=self._guard)
+
+        box_sizer, box = group(parent, sizer, "Wireless microphones")
+        self.mics = read_only(box, box_sizer, "Wireless microphones", height=60)
+        a11y.describe(self.mics, "RODE wireless transmitters the unit can see, and how much "
+                                 "battery each has left. Pairing one is done on the transmitter "
+                                 "and the unit.")
+        self.facts = read_only(parent, sizer, "What the unit reports", height=180, scroll=True)
+        for box_ in (self.mics, self.facts):
+            box_.SetValue(UNREAD)
+        self._show_radio()
+        self.SetupScrolling(scroll_x=False)
+
+    def field(self, part, key):
+        def current():
+            return ((self.data or {}).get(part) or {}).get(key)
+
+        def remember(value):
+            if self.data:
+                self.data[part][key] = value
+        return current, remember
+
+    def _guard(self):
+        if self.data is None:
+            return NETWORK_UNREAD
+        return None if self.data.get("writable") else NETWORK_READ_ONLY
+
+    def fetch(self):
+        return server.read_network_status()
+
+    def shown(self, reply):
+        if not reply.get("ok"):
+            if self.data is None:
+                set_text(self.facts, reply.get("message") or "Could not read the device.")
+            return reply.get("message") or "Could not read the device."
+        self.data = reply
+        wifi = reply.get("wifi") or {}
+        # Prefilled with what the unit has, so rejoining after a password change is one field.
+        # The password is never prefilled: the server never returns it.
+        if not self.ssid.GetValue() and wifi.get("ssid"):
+            self.ssid.SetValue(wifi["ssid"])
+        self.wifi.show()
+        self.bluetooth.show()
+        set_text(self.mics, "\n".join(mic_lines(reply.get("wireless_mics"))))
+        set_text(self.facts, "\n".join(network_facts(reply)))
+        self._show_radio()
+        return "Wireless connections read."
+
+    def _show_radio(self):
+        wifi = (self.data or {}).get("wifi") or {}
+        on = bool(wifi.get("on"))
+        self.wifi_off.GetContainingSizer().ShowItems(not on)
+        self.options.ShowItems(on)
+        self.networks.GetContainingSizer().ShowItems(on and bool(self.found))
+        self.disconnect.Show(on and bool(wifi.get("ssid")))
+        if wifi.get("ssid"):
+            self.disconnect.SetLabel(f"Disconnect from {wifi['ssid']}")
+        self.Layout()
+        self.FitInside()
+
+    def _wifi_switched(self, reply):
+        if reply.get("wifi"):
+            self.data["wifi"].update(reply["wifi"])
+        self._show_radio()
+        # Back on, the readings it has just revealed are from before it went off.
+        if self.wifi.box.GetValue():
+            self.read()
+        self.section.state.read()           # the summary says when the unit is offline
+
+    def _refused(self):
+        refusal = self._guard()
+        if refusal:
+            self.frame.say(refusal)
+        return refusal
+
+    def _on_scan(self, _event):
+        if self._refused():
+            return
+        job = JobDialog(self, "Scanning for networks",
+                        "Scanning for networks. The wifi goes off and on again, and this takes "
+                        "about twenty seconds.",
+                        lambda dialog: call(dialog, server.action_scan_wifi, done=dialog.finish),
+                        stop=None, closable=False)
+        with job:
+            reply = job.run()
+        if not reply.get("ok"):
+            report(self, ("Scan", "Scan failed"), reply)
+            # Refused for being joined: disconnecting is what the reply asks for next.
+            (self.disconnect if reply.get("joined") and self.disconnect.IsShown()
+             else self.scan).SetFocus()
+            return
+        self.found = reply.get("networks") or []
+        set_items(self.networks, [n.get("spoken") or n["ssid"]
+                                  + (", the one this unit is set to" if n.get("current") else "")
+                                  for n in self.found])
+        self._show_radio()
+        if not self.found:
+            report(self, ("Scan", "Scan failed"), reply)
+            self.scan.SetFocus()
+            return
+        # A scan's next step is choosing from it, so the focus goes to what was found.
+        self.networks.SetSelection(0)
+        self._on_pick(None)
+        self.networks.SetFocus()
+        self.frame.say(reply.get("message") or "")
+
+    def _on_disconnect(self, _event):
+        if self._refused():
+            return
+        ssid = ((self.data or {}).get("wifi") or {}).get("ssid") or "the network"
+        if not confirm(self, f"Disconnect from {ssid}?",
+                       f"The unit leaves {ssid} and forgets it, password included, so joining it "
+                       f"again needs the password. The wifi stays on.", "Disconnect"):
+            return
+        job = JobDialog(self, "Disconnecting", f"Disconnecting from {ssid}.",
+                        lambda dialog: call(dialog, server.action_disconnect_wifi,
+                                            done=dialog.finish),
+                        stop=None, closable=False)
+        with job:
+            reply = job.run()
+        report(self, ("Disconnected", "Not disconnected"), reply)
+        if reply.get("wifi") and self.data:
+            self.data["wifi"].update(reply["wifi"])
+        self._show_radio()
+        # The button hides once there is no network, so the focus goes to the next step.
+        (self.disconnect if self.disconnect.IsShown() else self.scan).SetFocus()
+        if reply.get("ok"):
+            self.read()
+            self.section.state.read()
+
+    def _on_pick(self, _event):
+        index = self.networks.GetSelection()
+        if 0 <= index < len(self.found):
+            self.ssid.SetValue(self.found[index]["ssid"])
+
+    def _on_join(self, _event):
+        if self._refused():
+            return
+        ssid = self.ssid.GetValue().strip()
+        if not ssid:
+            self.frame.say("Type the name of the network to join first.")
+            self.ssid.SetFocus()
+            return
+        # Cleared before anything else, whatever happens: a password left in a field is one
+        # review command away from being read out in a room with people in it.
+        password = self.password.GetValue()
+        self.password.SetValue("")
+        job = JobDialog(self, "Joining a network",
+                        f"Joining {ssid}. This can take up to 45 seconds.",
+                        lambda dialog: call(dialog, server.action_join_wifi, ssid, password,
+                                            done=dialog.finish),
+                        stop=None, closable=False)
+        with job:
+            reply = job.run()
+        report(self, ("Joined", "Not joined"), reply)
+        if reply.get("needs_password"):
+            self.password.SetFocus()
+            return
+        self.join.SetFocus()
+        # A join that fails still leaves the name stored on the unit, which Disconnect follows.
+        self.read()
+        self.section.state.read()

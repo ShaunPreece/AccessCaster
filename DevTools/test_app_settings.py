@@ -135,6 +135,18 @@ check("an empty list is none", a.count_shortcuts({"enabled": True, "shortcuts": 
 check("a shape it does not recognise is none, not a crash", a.count_shortcuts("rubbish"), 0)
 check("and the export sentence leads with three", a.describe_export(exported).split()[0], "3")
 
+print("\nSAVE AND RESTORE COUNT THE SAME FILE THE SAME WAY")
+# An empty contacts list is left out of the export's "other preferences", so the restore must leave
+# it out too or the two sentences disagree by one.
+same = {"marker": a.MARKER, "version": 1,
+        "settings": {"hotkeys": REAL_HOTKEYS, "callme_contacts": [], "announcer_volume": 80}}
+_, same_report = a.merge_import(same, {}, {})
+check("the export counts one other preference",
+      a.describe_export(same), "3 keyboard shortcuts and 1 other preference")
+check("and the restore says the same",
+      a.describe_import(same_report).split(".")[0],
+      "3 keyboard shortcuts restored, 1 other preference restored")
+
 print("\nNOTHING RESTORED IS SAID PLAINLY, NOT AS A CHEERFUL SUCCESS")
 _, empty = a.merge_import({"marker": a.MARKER, "version": 1, "settings": {}}, {}, {})
 check("an empty import says nothing was restored",

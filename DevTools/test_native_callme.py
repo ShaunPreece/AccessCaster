@@ -50,8 +50,8 @@ class FakeFrame:
     def reply(self, source, reply, recent=False):
         self.said.append(reply.get("message"))
 
-    def open_web_page(self, route):
-        self.opened.append(route)
+    def go_to(self, route, key):
+        self.opened.append((route, key))
 
 
 def ready(online=True, on_fader=True):
@@ -119,7 +119,7 @@ section.show(payload(ready=ready(online=False, on_fader=True)))
 check_true("offline shows the wifi fix", call_page.wifi.IsShown())
 check_true("and not the fader one", not call_page.put.IsShown())
 call_page.wifi.Command(wx.CommandEvent(wx.wxEVT_BUTTON))
-check("which opens the Device page", frame.opened, ["status"])
+check("which goes to Device, Wireless connections", frame.opened, [("status", "network")])
 section.show(payload())
 check_true("ready hides the group", not call_page.ready_box.IsShown())
 

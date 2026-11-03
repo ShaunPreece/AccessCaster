@@ -1498,8 +1498,14 @@ software replaces the operational controls directly, not by puppeteering the kno
 
   - BLUETOOTH PAIRING is touchscreen-only. What IS reachable, on the NETWORK block
     (root child 0x10) rather than SYSTEM: btVisible makes the desk discoverable, and
-    btDoScan fills btScan1..10 on a Duo (not on the one Pro II tested). Wifi
-    scanning and joining work too (wifiScan, then the SSID and PSK properties).
+    btDoScan fills btScan1..10 on a Duo (not on the one Pro II tested). Joining
+    works (wifiSSID, then wifiPSK, then wifi = True). The desk scans for wifi on
+    its own when the radio comes up with no network to join, filling wifiScan1..10
+    and WIFISCANRESULT's wifiScanResultSSID alike as "<SSID>----<security>", about
+    12 s after the radio comes on; joined, wifiScan is stored and nothing is
+    scanned (Pro II, 1.7.6, 3rd November 2026). There is no disconnect or forget
+    property: wifiSSID = "" is accepted, and any wifiSSID write loses the stored
+    password.
     wifiPSK is write-only in effect on 1.7.6: it reads back empty while the desk
     is joined with a password (10th October 2026). Earlier firmware returned it
     in clear. Joined means wifiIpAddress is non-empty; the wifi bool is only the

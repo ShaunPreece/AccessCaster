@@ -635,6 +635,7 @@ async function loadNetwork() {
     }
     setAvailable(document.getElementById("net-join-btn"), writable, NETWORK_READ_ONLY_OFF);
     netWritable = writable;
+    paintWifiDisconnect(w.ssid || "");
     paintWifiRadio(wifiToggle ? wifiToggle.checked : !!w.on);
     // The network name is prefilled with what the unit already has, so rejoining after a password
     // change is one field rather than two. The PASSWORD is never prefilled and never comes back
@@ -717,9 +718,19 @@ async function netPost(url, body, el, working) {
 }
 
 let netWritable = true;            // the last /api/network read's verdict on network writes
+let netSsid = "";                  // the network the unit is set up for, "" for none
+
+// Disconnect is offered only while the unit has a network to leave, and names it.
+function paintWifiDisconnect(ssid) {
+  netSsid = ssid;
+  document.getElementById("net-disconnect-row").hidden = !ssid;
+  const btn = document.getElementById("net-disconnect-btn");
+  if (ssid) btn.textContent = "Disconnect from " + ssid;
+  setAvailable(btn, netWritable, NETWORK_READ_ONLY_OFF);
+}
 
 /* With the radio off, everything about wifi except its switch is hidden (see #net-wifi-off).
-   Scanning is a write (it sets `wifiScan`), so it follows the same gate as joining. */
+   Scanning cycles the radio, so it follows the same gate as joining. */
 function paintWifiRadio(radioOn) {
   document.getElementById("net-wifi-off").hidden = radioOn;
   document.getElementById("net-wifi-options").hidden = !radioOn;
@@ -760,7 +771,8 @@ async function onBtVisibleToggle(ev) {
    control that says nothing when you reach it. */
 async function onWifiScan(ev) {
   const btn = ev.currentTarget;
-  const res = await netPost("/api/network/wifi/scan", {}, btn, "Scanning for networks...");
+  const res = await netPost("/api/network/wifi/scan", {}, btn,
+    "Scanning for networks. The wifi goes off and on again, and this takes about twenty seconds...");
   if (!res || res.ok === false) return;
   const sel = document.getElementById("net-scan-list");
   const nets = res.networks || [];
@@ -779,6 +791,22 @@ async function onWifiScan(ev) {
   // on the list means the count that was just announced is followed by the thing it counted.
   sel.focus();
   onScanPick();
+}
+
+async function onWifiDisconnect(ev) {
+  const btn = ev.currentTarget;
+  const ssid = netSsid || "the network";
+  const ok = await confirmAction("Disconnect from " + ssid + "?",
+    "The unit leaves " + ssid + " and forgets it, password included, so joining it again needs "
+    + "the password. The wifi stays on.", "Disconnect");
+  if (!ok) return;
+  const res = await netPost("/api/network/wifi/disconnect", {}, btn,
+    "Disconnecting from " + ssid + "...");
+  if (!res || res.ok === false) return;
+  paintWifiDisconnect((res.wifi && res.wifi.ssid) || "");
+  // The button has just hidden, so the focus goes to the next step rather than to the body.
+  document.getElementById("net-scan-btn").focus();
+  loadNetwork();
 }
 
 // Picking from the list writes the name into the box that Join actually reads.
@@ -804,11 +832,17 @@ async function onWifiJoin(ev) {
   // Cleared whatever happened, including on a failure: a password left sitting in a form field is
   // one screen-reader review command away from being read out loud in a room with people in it.
   pskBox.value = "";
-  if (res && res.ok) {
+  if (!res) return;
+  if (res.needs_password) {
+    pskBox.focus();
+    return;
+  }
+  if (res.ok) {
     const toggle = document.getElementById("net-wifi-toggle");
     if (toggle) toggle.checked = true;
-    loadNetwork();          // the address and the reported SSID have both just changed
   }
+  // The reported SSID has changed even when the join failed, and Disconnect follows it.
+  loadNetwork();
 }
 
 /* Send an on/off switch change to the device: disable the control, POST the body,
@@ -9777,6 +9811,7 @@ async function init() {
   document.getElementById("net-bt-toggle").addEventListener("change", onBtVisibleToggle);
   document.getElementById("net-join-btn").addEventListener("click", onWifiJoin);
   document.getElementById("net-scan-btn").addEventListener("click", onWifiScan);
+  document.getElementById("net-disconnect-btn").addEventListener("click", onWifiDisconnect);
   document.getElementById("net-scan-list").addEventListener("change", onScanPick);
   wireDeviceTabs();     // the Device page's tab strip, built over its static panes
   wireSettingsTabs();   // the App settings page's tab strip, likewise

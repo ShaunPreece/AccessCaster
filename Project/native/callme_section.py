@@ -17,18 +17,13 @@ from native import a11y
 from native.calls import call
 from native.controls import Switch
 from native.dialogs import confirm
-from native.pages import Page, group, labelled, page_box
+from native.pages import Page, group, labelled, page_box, read_only, set_text
 
 TITLE = "CallMe"
 UNREAD = "CallMe has not been read yet."
 BUSY = "Still waiting for the unit to answer the last press."
 POLL_MS = 1000
 NO_LINK = "There is no guest link while incoming calls are off."
-
-
-def set_text(box, text):
-    if box.GetValue() != text:
-        box.SetValue(text)
 
 
 def lines(rows):
@@ -42,11 +37,6 @@ def contact_label(contact):
 
 def problems(data):
     return [r for r in (data or {}).get("ready") or [] if not r.get("ok")]
-
-
-def _read_only(parent, sizer, label, height=60):
-    return labelled(parent, sizer, label, lambda p: wx.TextCtrl(
-        p, size=(460, height), style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
 
 
 def _button(parent, row, label, handler):
@@ -207,10 +197,10 @@ class CallPage(wx.Panel):
         # guest's call then never reaches the unit, and nothing on the unit says so.
         self.ready_sizer, box = group(parent, sizer, "Not ready for calls")
         self.ready_box = box
-        self.ready = _read_only(box, self.ready_sizer, "Needs sorting", height=80)
-        self.wifi = wx.Button(box, label="Open Wireless connections in the browser")
-        a11y.describe(self.wifi, "On the Device page, which is still in the web page.")
-        self.wifi.Bind(wx.EVT_BUTTON, lambda _e: self.frame.open_web_page("status"))
+        self.ready = read_only(box, self.ready_sizer, "Needs sorting", height=80)
+        self.wifi = wx.Button(box, label="Go to Wireless connections")
+        a11y.describe(self.wifi, "Device, Wireless connections: join a wifi network there.")
+        self.wifi.Bind(wx.EVT_BUTTON, lambda _e: self.frame.go_to("status", "network"))
         self.ready_sizer.Add(self.wifi, 0, wx.ALL, 6)
         self.fader = labelled(box, self.ready_sizer, "Fader for CallMe 1",
                               lambda p: wx.Choice(p))
@@ -220,7 +210,7 @@ class CallPage(wx.Panel):
         self.ready_sizer.Add(self.put, 0, wx.ALL, 6)
 
         box_sizer, box = group(parent, sizer, "The call")
-        self.now = _read_only(box, box_sizer, "Now")
+        self.now = read_only(box, box_sizer, "Now")
         self.now.SetValue("Reading the unit.")
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.answer = _button(box, row, "Answer", self._on_answer)
@@ -235,7 +225,7 @@ class CallPage(wx.Panel):
         a11y.describe(self.extend, "Offered in the last five minutes of a call on a plan with an "
                                    "hour limit.")
         box_sizer.Add(row, 0, wx.ALL, 6)
-        self.details = _read_only(box, box_sizer, "Call details", height=80)
+        self.details = read_only(box, box_sizer, "Call details", height=80)
         self._show_ready([])
 
     def set_now(self, text):
@@ -545,7 +535,7 @@ class PlanPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         sizer, parent = page_box(self, "Plan")
-        self.plan = _read_only(parent, sizer, "Your plan", height=100)
+        self.plan = read_only(parent, sizer, "Your plan", height=100)
         self.plan.SetValue("Reading the unit.")
         self.auto = Switch(self, parent, sizer, "Extend calls automatically",
                            server.action_callme_auto_extend, *section.field("auto_extend"),

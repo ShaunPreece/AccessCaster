@@ -265,9 +265,9 @@ The layers, bottom up:
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
 - `server.py` exposes it as an API, and `static/` is the accessible UI.
-- `native/` (started by `native_app.py`) is a wxPython window replacing the web page one section
-  at a time. It runs the same service in the same process and calls the server's functions
-  directly; a section it does not have yet opens in the browser.
+- `native/` (started by `native_app.py`) is a wxPython window holding every section the web page
+  has, built to replace it. It runs the same service in the same process and calls the server's
+  functions directly.
 
 Two rules do most of the work of keeping it honest:
 
@@ -591,6 +591,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   joined to a password-protected network), so "has a password saved" never shows there. Older
   firmware may still publish it, so keep it out of the API, the browser, profiles and log lines
   regardless.
+- **THE UNIT SCANS FOR WIFI ONLY WHEN ITS RADIO COMES UP WITH NO NETWORK TO JOIN** (3rd November
+  2026, Pro II, 1.7.6). Joined, `wifiScan` (True, or False then True) is stored, never cleared, and
+  no result arrives. Unjoined, the results clear about 3 s after the radio comes on and fill about
+  12 s after it, in `wifiScan1..10` and the WIFISCANRESULT blocks alike (one unnumbered
+  `wifiScanResultSSID` per block), before `wifiScan` is written; whether `wifiScan` does anything
+  is unproven. So `action_scan_wifi` cycles the radio and refuses while joined.
+- **THERE IS NO WIFI DISCONNECT OR FORGET PROPERTY** (the whole 1.7.6 property list has
+  `btDoDisconnect` only). `action_disconnect_wifi` writes `wifiSSID` = "" (accepted, reads back
+  empty) and cycles the radio. Any `wifiSSID` write loses the stored password: writing the old name
+  back did not rejoin in a minute. So `action_join_wifi` sends nothing when the password is empty
+  and the last scan lists that network as needing one.
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
   stayed busy (active 0.61) and mode 2's went silent (0.06). Needs a person - the mic faders are
@@ -1837,6 +1848,21 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   Record starts or resumes by the state it holds.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
+- **THE WINDOW'S DESK SUMMARY IS ITS STATUS BAR, NEVER SPOKEN ON ITS OWN**
+  (`device_section.StatePage.shown` -> `frame.set_status`). A native status bar is read on demand
+  (NVDA+End, JAWS Insert+Page Down) and not announced as it changes, so it cannot talk over the
+  focus. It is read again `SUMMARY_AFTER_MS` after the last desk event in `SUMMARY_EVENTS`; add an
+  event there if the summary gains a fact it carries. The web page keeps its spoken summary until
+  it is retired.
+- **THE NATIVE HELP IS READ FROM `static/help.html`** (`help_section.topics`), the web page's own
+  file, so the two cannot drift. Retiring the web page must keep that file, or move the parser with
+  it. A topic is one `h3` of the Help tab: a new `h3` there is a new page in the tree.
+- **THE WIFI PASSWORD BOX IS EMPTIED BEFORE THE JOIN STARTS**, whatever the outcome
+  (`NetworkPage._on_join`): a password left in a field is one review command from being read out
+  in a room with people in it. The server never returns one, so it is never prefilled.
+- **AN UPDATE'S DIALOG IS HELD BEFORE `app_updates.proceed`** (`update_dialogs._Follower`): the
+  installer closes this app, so once the download is verified nothing may stop it, and the closing
+  sentence gets its reading time first. Proceed sooner and the sentence is cut off mid-word.
 
 ## Web UI and screen reader
 
@@ -2522,11 +2548,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   auto-mute was the one place still breaking it. If a property is readable, read it back and say
   what the desk holds; if it self-clears (the record commands, the show commands, the marker), say
   what was sent and check the thing it should have changed instead.
-- **A FIELD THAT PUSHES NOTHING BACK HAS NOT NECESSARILY DONE NOTHING.** `wifiScan` was filed
-  unproven for a day because it was written and no push came back, reasoning from
-  `requestRecordState` and `requestDropMarker`, which do push a cleared value when consumed. It
-  fills `wifiScan1..10` silently instead. Test for the RESULT, not the acknowledgement, before
-  writing a capability off.
+- **A FIELD THAT PUSHES NOTHING BACK HAS NOT NECESSARILY DONE NOTHING.** `requestRecordState` and
+  `requestDropMarker` push a cleared value when consumed, but other fields do their work silently
+  (a wifi scan's results only appear in a later dump). Test for the RESULT, not the
+  acknowledgement, before writing a capability off, and check the result came from the write and
+  not from something else the desk does on its own.
 - **THE SETUP WIZARD AFTER A FACTORY RESET IS TOUCH-ONLY.** The encoder does nothing on its first
   screen (it does work on the time step). So a factory reset strands a blind user until somebody
   sighted taps through it: say so in any UI that offers a reset, and prefer

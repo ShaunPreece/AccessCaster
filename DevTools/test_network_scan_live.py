@@ -6,7 +6,9 @@ a network without typing its name.
 IT IS VERIFIABLE. These are ACTIONS, so a read-back of
 the field itself proves nothing (the firmware consumes and clears it). But the RESULTS are ordinary
 readable properties - wifiScan1..10 and btScan1..10 - so the honest test is: note what is in the
-result slots, fire the scan, wait, and see whether they change.
+result slots, fire the scan, wait, and see whether they change. The wifi run also reads the
+WIFISCANRESULT blocks. A desk joined to a network never fills either (PROJECT_GUIDE part 2), so run
+it on an unjoined desk.
 
 SAFE: both fields are in NETWORK, selector 0x10, a confirmed selector. Neither changes a setting - a scan looks around and fills a list.
 Occurrence counts are diffed at the end so a stray would be caught rather than assumed away.
@@ -36,25 +38,42 @@ def slots(blob, prefix, n=10):
     return [rcp_read.block_value(blob, "NETWORK", f"{prefix}{i}") or "" for i in range(1, n + 1)]
 
 
+def result_blocks(blob):
+    """Every non-blank property of the WIFISCANRESULT blocks, a NETWORK child holding one network
+    per instance, as (name, value) in dump order."""
+    return [(name, val) for block, name, val, _kind in rcp_read.iter_block_properties(blob)
+            if block == "WIFISCANRESULT" and val not in (None, "")]
+
+
 def run_scan(kind: str, prop: str, prefix: str, wait: float) -> bool:
     print(f"\n=== {kind.upper()} SCAN ===")
     before_blob = rcp_read.read_model_stable(fresh=True)
     before = slots(before_blob, prefix)
+    blocks_before = result_blocks(before_blob) if kind == "wifi" else []
     print(f"  before: {[s for s in before if s] or 'nothing in the result slots'}")
+    if kind == "wifi":
+        print(f"  WIFISCANRESULT before: {blocks_before or 'nothing'}")
 
     print(f"  writing {prop} = True on selector 0x{SEL:02X}")
     rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(prop, True, SEL))
 
+    # Polls for the whole wait rather than stopping at the first change, so the timing of each
+    # result form is seen.
     start = time.monotonic()
-    after = before
+    after, blocks_after = before, blocks_before
     while time.monotonic() - start < wait:
         time.sleep(3.0)
-        after = slots(rcp_read.read_model_stable(fresh=True), prefix)
-        if after != before:
-            print(f"  the result slots CHANGED after {time.monotonic() - start:.0f}s")
-            break
+        blob = rcp_read.read_model_stable(fresh=True)
+        now, blocks_now = slots(blob, prefix), result_blocks(blob) if kind == "wifi" else []
+        if now != after:
+            print(f"  {time.monotonic() - start:.0f}s: slots {[s for s in now if s]}")
+        if blocks_now != blocks_after:
+            print(f"  {time.monotonic() - start:.0f}s: WIFISCANRESULT {blocks_now}")
+        after, blocks_after = now, blocks_now
     print(f"  after:  {[s for s in after if s] or 'nothing in the result slots'}")
-    changed = after != before
+    if kind == "wifi":
+        print(f"  WIFISCANRESULT after: {blocks_after or 'nothing'}")
+    changed = after != before or blocks_after != blocks_before
     if changed:
         print(f"  RESULT: the scan RAN. {prop} is usable.")
     else:

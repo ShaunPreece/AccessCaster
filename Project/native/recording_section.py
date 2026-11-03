@@ -19,7 +19,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Page, group, labelled, page_box
+from native.pages import Page, group, labelled, page_box, set_items
 
 TITLE = "Recording"
 UNREAD = "The recorder has not been read yet."
@@ -63,17 +63,6 @@ def _with_sentence(action, *args):
     reply = action(*args)
     reply["sentence"] = server.read_recorder_live().get("message") or ""
     return reply
-
-
-def set_items(listbox, labels):
-    """Put `labels` in a list box item by item, so an unchanged list is not replaced under the
-    screen reader."""
-    if listbox.GetCount() == len(labels):
-        for index, label in enumerate(labels):
-            if listbox.GetString(index) != label:
-                listbox.SetString(index, label)
-    else:
-        listbox.Set(labels)
 
 
 class RecordingSection:

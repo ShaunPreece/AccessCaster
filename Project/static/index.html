@@ -224,12 +224,22 @@
                  only way in. Choosing from the list fills that box in rather than replacing it,
                  which keeps ONE place where the name being joined can be read back and corrected.
                  The list starts empty and the button says so; nothing is scanned until asked. -->
+            <!-- Shown only while the unit has a network set up; app.js names it after it. -->
+            <p id="net-disconnect-row" hidden>
+              <button type="button" id="net-disconnect-btn" aria-describedby="net-disconnect-hint">
+                Disconnect
+              </button>
+              <span class="hint" id="net-disconnect-hint">
+                The unit leaves the network and forgets it and its password. The wifi stays on.
+              </span>
+            </p>
             <p>
               <button type="button" id="net-scan-btn" aria-describedby="net-scan-hint">
                 Scan for networks
               </button>
               <span class="hint" id="net-scan-hint">
-                Up to ten networks, and no hidden ones: type a missing one's name below.
+                Up to ten networks, and no hidden ones: type a missing one's name below. The unit
+                only scans while it is not connected to a network.
               </span>
             </p>
             <div class="field" id="net-scan-row" hidden>
