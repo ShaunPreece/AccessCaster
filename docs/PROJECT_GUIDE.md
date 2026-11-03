@@ -248,14 +248,10 @@ baseline" was never silent.
 
 ## How the app is built
 
-A Windows system-tray app (`Project/tray.py`) that runs the service, a local HTTP server
-(`server.py`), and a native window (`native/`) in one process. The web page (`static/`, plain HTML
-and JavaScript talking to a JSON API) is still served, but the tray no longer opens it. The server binds all
-interfaces so a phone in another room can drive the desk, and a token on the link keeps everyone
-else on that network out: requests from the machine itself are always allowed, anything else needs
-the token once, and a cookie carries it from then on. Everything that touches USB is
-behind one lock, because HID is a single resource and the page, the announcer, the meter watcher and
-the shortcut thread all want it.
+A Windows system-tray app (`Project/tray.py`) that runs the service (`server.py`) and a native
+window (`native/`) in one process; the window calls the service's functions directly, and nothing
+listens on the network. Everything that touches USB is behind one lock, because HID is a single
+resource and the window, the announcer, the clip warning and the shortcut thread all want it.
 
 The layers, bottom up:
 
@@ -271,14 +267,14 @@ The layers, bottom up:
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
-- `server.py` exposes it as an API, and `static/` is the accessible UI.
-- `native/` is a wxPython window holding every section the web page has, built to replace it.
-  `tray.py` hosts it in the service's own process, and it calls the server's functions directly.
+- `server.py` is the service over them: the `read_*` and `action_*` functions the window calls,
+  and `start_service`, which brings up the announcer, the shortcuts and the watchers.
+- `native/` is the wxPython window. `tray.py` hosts it in the service's own process.
 
 Two rules do most of the work of keeping it honest:
 
 - **One spec drives everything.** A setting is defined once, and that definition produces the read,
-  the write validation, the control the browser builds, and what a profile backs up. Adding a
+  the write validation, the control the window builds, and what a profile backs up. Adding a
   setting in one place adds it in four, so the UI and the backup cannot drift apart.
 - **Read back every write.** The address model predicts which BLOCK a property is in, not that a
   given field accepts a write. A write that lands nowhere can append a permanent stray property to
@@ -624,7 +620,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   separately-proven halves, and the combination itself is only proven per property.
 - **`wifiPSK` WAS READABLE off the desk, and on 1.7.6 reads empty** (10th October 2026, a Pro II
   joined to a password-protected network), so "has a password saved" never shows there. Older
-  firmware may still publish it, so keep it out of the API, the browser, profiles and log lines
+  firmware may still publish it, so keep it out of every reply, the window, profiles and log lines
   regardless.
 - **THE UNIT SCANS FOR WIFI ONLY WHEN ITS RADIO COMES UP WITH NO NETWORK TO JOIN** (3rd November
   2026, Pro II, 1.7.6). Joined, `wifiScan` (True, or False then True) is stored, never cleared, and
@@ -940,7 +936,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Measured on 30th September 2026 one action at a time with the server stopped: `VER` alone 16.9 s,
   `U` alone 17.3 s, deterministic; a model dump, the `I` command, a bare HID open and close, SAPI
   speech, SAPI enumeration, a Chromium app window and every `meters.py` call all clean. It looked
-  like an Alt-Tab fault because the page's status read sent both on every load and reload.
+  like an Alt-Tab fault because the app's status read sent both on every read.
   `read_device_status` now sends `I` only, whose answer is the liveness proof, and identity is the
   USB serial. `rcp_hid.quick_probe` and the DevTools probes still send both; they are tools, not
   app paths, and cost a few seconds of speech when run.
@@ -956,9 +952,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   searched for in the subject, and it is the whole of what makes the download safe to run.
 - **THE APP REACHES THE INTERNET IN TWO PLACES AND NO OTHER: this driver download, from its button
   only, and its own update check and download (`selfupdate/http.py`), to
-  `updates.slightperception.com` only.** Everything else talks to localhost and the USB cable.
-  `test_driver_install.py` asserts it by scanning `Project/` for a non-localhost `urlopen`;
-  `server.py`'s ping of its own `/api/announce` is the one hit it is right to ignore. The README
+  `updates.slightperception.com` only.** Everything else talks to the USB cable.
+  `test_driver_install.py` asserts it by scanning `Project/` for a `urlopen`. The README
   and Help list both, because somebody who chose this app partly for what it does not do deserves
   to be told exactly what it contacts. A third caller means changing all three together.
 - **CHECK THE SIGNATURE, NEVER A HASH.** The URL carries no version and RODE replace the file in
@@ -967,11 +962,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `powershell -Command "... $args[0] ..." -args <path>` does NOT populate `$args`: the signature
   check ran against an empty path, reported its status as "-args", and refused RODE's genuine MSI.
   An env var cannot be mis-parsed and cannot be injected into either.
-- **THE DRIVER'S STATE IS IN THE LIVE PAYLOAD, NOT THE STRUCTURE ONE, because it is read from
-  Windows rather than from the desk.** So a control whose EXISTENCE is decided from `usb_driver` in
-  `loadRouting`'s structure pass is never created at all. Build such controls with the rest and let
-  the live pass label and show them, which is what every other control on the page does. The same
-  goes for anything else Windows-side.
 - **MATCH THE DRIVER BY UpgradeCode, NEVER BY NAME: EVERY NAME IT CARRIES SPELLS RØDE WITH A SLASHED
   O.** Its MSI ProductName is `RØDECaster Virtual Device Driver` and its Manufacturer is
   `RØDE Microphones` (U+00D8), and Windows copies both verbatim into the uninstall registry. A
@@ -1211,8 +1201,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **RODE'S OWN GUIDE AND THEIR APP SAID SO ALL ALONG** ("You can add processing to any audio channel
   except the SMART pads"), and that was this code's ORIGINAL reason for excluding the bus, overruled
   on 29th August by a write that landed and read back. Enforced in `channels.read_channels` (a bus
-  gets `None` for the whole chain) and `app.js renderChannelPanel` (a bus gets one tab). Pinned by
-  `ui_checks_padsbus.js`.
+  gets `None` for the whole chain) and `native/channel_tabs.build_tabs` (a bus gets the settings
+  tab only).
   **DO NOT PUT THE CHAIN BACK BECAUSE A WRITE READS BACK CLEANLY. It will.** That is the single most
   expensive mistake in this project's history and it has now been made twice on the same property.
 - **PAN IS NOT A FAIR TEST OF A STEREO SOURCE ON ITS OWN**, which was the innocent explanation while
@@ -1317,8 +1307,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   rebuild from tables in `soundpad.py` with no WAV to find, which is what separates them from the
   eight factory SOUNDS. Nothing at grid 17 or above is touched.
   **THE BUTTON'S NAME IS WHY THIS GETS WRITTEN DOWN AS SIX.** Any UI or help copy describing it has
-  to say eight and has to warn that a user's own pad on 12 or 16 is destroyed. `help.html` claimed
-  "those six pads and touches nothing else" while its own Pads section correctly said eight.
+  to say eight and has to warn that a user's own pad on 12 or 16 is destroyed.
 - **THE FACTORY DEFAULT SHOW CARRIES THE VOICE-FX PADS BUT NOT THEIR EFFECT DEFINITIONS**, so a
   software factory reset hands back six FX pads with the right name, type and colour that do nothing
   at all. Proven 4th September 2026 from captures taken weeks earlier: `pre-showreset-raw.bin` holds
@@ -1677,10 +1666,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 --------------------------------------------------------------------------------
 ## The app's own settings (export / import)
 
-- **THE EXPORT IS AN ALLOW-LIST, NEVER A DUMP OF settings.json, AND THE REASON IS A CREDENTIAL.**
-  `remote_token` grants remote access to this app and lives in the same file as the keyboard
-  shortcuts, so a dump would put it in a file people email to themselves. `app_settings.EXCLUDED`
-  holds it and the others, each with its reason at the site: among them `baseline_asked` (carrying
+- **THE EXPORT IS AN ALLOW-LIST, NEVER A DUMP OF settings.json.** The file holds state about this
+  machine and its desks beside the preferences, and an export is a file people email to themselves
+  and import elsewhere. `app_settings.EXCLUDED` holds that state, each key with its reason at the
+  site: among them `baseline_asked` (carrying
   it would silently suppress a desk's one-and-only first-run backup offer on a new machine), and
   `applied_presets` and `pan_links` (each describes one desk, not a preference). **Adding a new preference means
   adding it to PORTABLE, MACHINE_SPECIFIC or EXCLUDED** - `test_app_settings.py` fails if a key the
@@ -1690,8 +1679,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `speech.apply_settings` or `announcer.apply_settings`, and a voice or output change bumps
   `speech.config_gen`.
 - **IMPORT MERGES, IT NEVER REPLACES.** The excluded keys live in the same file, so a replace would
-  delete this machine's remote-access token and its first-run record as a side effect of restoring
-  somebody's shortcuts.
+  delete this machine's first-run record as a side effect of restoring somebody's shortcuts.
 - **`hotkeys` IS `{"enabled": ..., "shortcuts": [...]}`, NOT A MAPPING OF SHORTCUTS.** `len()` on it
   returns 2 for ever, whatever the user has, which is exactly what shipped for an hour on 2nd
   September 2026 and reported "2 keyboard shortcuts" for a machine with six. Count through
@@ -1734,8 +1722,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   closed, and App settings there takes the update's report.
 - **`/VERYSILENT`, never `/SILENT`**: under `/SILENT` Setup's progress window takes focus on its
   Cancel button and a Space cancels the install. **And the installer must not prompt during a
-  silent run**: the firewall task is remembered from the last install, so `installer.iss` skips it
-  when silent and its marker says the rule is already there.
+  silent run**: removing the firewall rule an earlier version added needs a permission prompt, so
+  `installer.iss` does it only on an interactive install or the uninstall, never silently.
 - **"Could not download" and "did not match" are different sentences.** A complete file that hashes
   wrong is the one case the signature exists to catch; calling it a network failure hides it.
 - **The user agent is `AccessCaster/<version>`.** Cloudflare refuses Python's default with a 403,
@@ -1839,10 +1827,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   levels the check is speaking. The server toggles, so a press is right whatever the label says.
 - **A STEREO PAN'S THREE SLIDERS ARE BUILT ONCE AND THE LINK ONLY SHOWS OR HIDES THEM**
   (`channel_tabs.StereoPan`), so linking leaves the focus on the switch.
-- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST EXISTS TWICE AND THE TWO MUST AGREE**:
-  `server.linked_pan_offset` and `linkedPanOffset` in `app.js`. A client shows centre for legs
-  moved since the link, and the server starts the link again from those legs on the next move;
-  if the tests differ, the slider's position and the written legs disagree.
+- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST IS `server.linked_pan_offset` ALONE**, which the
+  window asks (`channel_tabs.StereoPan`). It shows centre for legs moved since the link, and the
+  server starts the link again from those legs on the next move; a second copy of the test would
+  let the slider's position and the written legs disagree.
 - **THE OUTPUT MIXES PAGE RECORDS ITS OWN CROSS-POINT WRITES AND RE-READS AFTER A MODE WRITE**
   (`routing_mixes.OutputMixesPage`): the desk pushes back neither `mixDisabled` nor
   `outputMixMinus` for our writes, so waiting for the push leaves the page showing the old mix.
@@ -1904,7 +1892,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   moves once a second, with the call quality.
 - **THE CALLME END BUTTON IS "DECLINE OR HANG UP", AND THE SERVER CHOOSES AT THE PRESS**
   (`action_callme_end`): a call that began ringing a moment ago is declined, not the guest already
-  on the line. The web page's label that follows the state is the renaming-under-focus fault below.
+  on the line.
 - **THE WINDOW'S TRANSPORT IS TWO BUTTONS WHOSE LABELS FOLLOW THE STATE** (Start recording / Stop
   recording, Pause / Resume), from this window's presses and the unit's REC button alike. A focused
   button that renames itself is read out, so THE NEW LABEL IS THE CONFIRMATION:
@@ -1918,8 +1906,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   (`device_section.StatePage.shown` -> `frame.set_status`). A native status bar is read on demand
   (NVDA+End, JAWS Insert+Page Down) and not announced as it changes, so it cannot talk over the
   focus. It is read again `SUMMARY_AFTER_MS` after the last desk event in `SUMMARY_EVENTS`; add an
-  event there if the summary gains a fact it carries. The web page keeps its spoken summary until
-  it is retired.
+  event there if the summary gains a fact it carries.
 - **THE CLIP WARNING WATCHES A RECORDING ENDPOINT AND SPEAKS ONLY THROUGH `speech.say`**
   (`server._main_mix_stream`, `_clip_start`). The desk's playback endpoint reads this computer's
   own audio, so a watch on it hears the screen reader and its own words. `speech.say` follows the
@@ -1930,9 +1917,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   with that corner off the screen it reads its own copy of the bottom line instead, which keeps the
   tail of longer text drawn there before. wx's default ellipsizing puts a shortened copy in the
   native control, and that copy is what a screen reader reads.
-- **THE NATIVE HELP IS READ FROM `static/help.html`** (`help_section.topics`), the web page's own
-  file, so the two cannot drift. Retiring the web page must keep that file, or move the parser with
-  it. A topic is one `h3` of the Help tab: a new `h3` there is a new page in the tree.
+- **THE HELP IS `help/help.txt`, AND TWO READERS READ IT**: the window (`help_section.topics`) and
+  the website's guide importer (`SlightPerception\Website\Tools\importAppGuide.py`, its `text`
+  shape). A change to the format changes both in the same session. A `#` heading is a topic in the
+  tree, and so is each `##` part of Help; the importer lists every `#` heading and refuses a run
+  that finds one it does not know, so a new topic needs an entry there too.
 - **THE WIFI PASSWORD BOX IS GONE BEFORE THE JOIN STARTS**, whatever the outcome: it lives in
   `wifi_dialogs.JoinDialog`, destroyed as `NetworkPage._ask_join` leaves its `with`. A password left
   in a field is one review command from being read out in a room with people in it. The server
@@ -1948,32 +1937,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   installer closes this app, so once the download is verified nothing may stop it, and the closing
   sentence gets its reading time first. Proceed sooner and the sentence is cut off mid-word.
 
-## Web UI and screen reader
+## Screen reader, wording and speech
 
 - **DEVICE AND BACKUPS ARE THE UNIT'S; APP SETTINGS (Alt+8) IS ACCESSCASTER'S.** A new preference of
-  the app goes on App settings, never on a unit page, and none of its tabs reads the desk
-  (`ui_checks_settings.js` asserts it).
+  the app goes on App settings, never on a unit page, and none of its pages reads the desk.
 - **NO QUOTE MARKS AROUND A NAME IN ANY MESSAGE.** A quote straight after a digit is read as a
   unit: "Saved as 'Tester1'." is heard as "Tester 1 feet", and a double quote as inches. Write
-  `Saved Mic 2's current settings as {name}.`, never `'{name}'` or `"${name}"`.
-
-- **A STAGED SELECT'S OPTION LIST MUST SHIP IN THE STRUCTURE PAYLOAD, NOT THE LIVE ONE.** The
-  controls are built once from `/api/routing`; the live read only sets values. Put the list only in
-  the live payload and the control is built EMPTY, and nothing says so: `setStagedValue` falls back
-  to inventing one option labelled `Value <device value>`, so it renders and reads as a real
-  control that can never be changed away from, with its Apply permanently unavailable. `"What this
-  computer sends"` shipped like that and Expanded could not be turned off from the page.
-  `ui_checks_staged.js` now FAILS a staged select with one option rather than skipping it; the skip
-  was reported as a pass, which is how the dead control stayed green.
-- **ANYTHING BUILT ONCE PER WINDOW FROM A DESK READ KEYS ITSELF ON THE DESK IT DESCRIBES.** The
-  server builds `/api/routing` for whichever desk is attached, and for a Pro II when none is, so it
-  names that desk in `device`, and `loadRouting` rebuilds the page, the output-mix matrix included,
-  whenever that differs from the desk it was built for. A window opened before the desk was plugged
-  in otherwise shows the other desk's faders and outputs, and every write to them is refused. The
-  Add a shortcut catalogue is fetched on every open for the same reason.
-- **A POST FROM THE PAGE IS ALWAYS INSIDE A `try`.** `postJSON` rejects when the service cannot be
-  reached, and an uncaught rejection says nothing and leaves the control as pressed. A switch puts
-  itself back when the write fails or is refused (`sendToggle`, `sendBypass`).
+  `Saved Mic 2's current settings as {name}.`, never `'{name}'` or `"{name}"`.
 
 - **`speech.say` IS WHERE THE ANNOUNCER SWITCH IS ENFORCED, because it is the only place every phrase
   passes through.** `speech.enabled` gates the read loop, and roughly half this app's speech comes
@@ -1981,30 +1951,28 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   it anywhere else and "announcements off" leaves all of that talking. The phrases announcing speech
   is BACK are safe because each sets the flag before it speaks, so no force path is needed. A
   suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
-  different faults. Hotkey replies and the level watch are handed `speech.say` itself; a second
+  different faults. Hotkey replies and the clip warning are handed `speech.say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
 - **A JOB THAT REWRITES THE DESK HOLDS THE ANNOUNCER'S DESK-CHANGE SPEECH** (`_BackgroundJob`'s
   `rewrites_desk`: the profile restore, the show commands, the pad restore). The announcer drops
   every desk change until 1.5 s after the last job ends, and says nothing of its own about the
-  job: the page or window that started it speaks its progress through the screen reader, and a
-  sentence in the announcer's voice as well talks over it. The state cache keeps updating. Desk-change speech must go through `announcer._say` / `_tone`, or it
-  talks through a restore. The job's own steps and its end tone are not held.
+  job: the window that started it speaks its progress through the screen reader, and a sentence in
+  the announcer's voice as well talks over it. The state cache keeps updating. Desk-change speech
+  must go through `announcer._say` / `_tone`, or it talks through a restore. The job's own steps
+  and its end tone are not held.
 
 - **THE ANNOUNCER STARTS ON UNLESS ITS OFF IS REMEMBERED, and only a person's toggle is saved.**
   "Start with announcements the way I left them" (`announcer_remember`) is unticked by default,
   because a start-up in silence sounds exactly like the app or the desk being broken. Ticked, the
-  page's switch, the tray's item and the shortcut all save `announcer` through
+  window's switch, the tray's item and the shortcut all save `announcer` through
   `announcer.action_set_announce(chosen=True)`; start-up and the switch-back after a take pass
   `chosen=False` and never save, or a take would overwrite the person's choice. With no saved
-  `announcer_remember`, a saved `announcer` of False counts as ticked: the tray used to keep that
-  preference on its own.
+  `announcer_remember`, a saved `announcer` of False counts as ticked.
 
-- **THE PAGE IS CALLED "Backups" AND ITS ROUTE KEY IS `profiles`, DELIBERATELY.** The key, the
-  section id `sec-profiles` and `/api/profiles` all keep the old word so a remembered tab position
-  and the API path do not break. So `profiles` in code is right and "Profiles page" in USER-FACING
-  COPY is wrong: it names a page nobody can find. Four such strings survived the rename, in
-  `help.html` and in a dialog in `index.html`. The same trap applies to "Shows": the feature is
-  `shows` in code, and the user sees backups in one list.
+- **THE SECTION IS CALLED "Backups" AND ITS ROUTE KEY IS `profiles`, DELIBERATELY.** So `profiles`
+  in code is right and "Profiles page" in USER-FACING COPY is wrong: it names a page nobody can
+  find. The same trap applies to "Shows": the feature is `shows` in code, and the user sees backups
+  in one list.
 - **`FaderSpec.count` IS 9 ON BOTH DESKS; ONLY `physical` DIFFERS (Pro II 6, Duo 4).** So the Pro II
   has three virtual faders and the **Duo has five**, and copy that says three for the Duo is wrong.
   The Duo's fourth assignable source is Headset, which sits on a virtual fader and is the one
@@ -2012,28 +1980,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the tenth VECTOR SLOT is not a fader at all, which is a separate fact: PHYSICALINTERFACE carries
   four POT nodes then exactly NINE FADER nodes, so one of the ten slots has none.
   Labels and the encoder ring do not shift.
-- **INDEX.HTML IS ASSEMBLED, NOT SERVED.** `Project/page.py` splices `static/help.html` in at the
-  `<!-- INCLUDE help.html -->` marker, and BOTH servers go through it: `server.py` and
-  `DevTools/ui_probe.py`. Read the file straight off disk in a new place and that page loses its
-  whole Help & About section, which the UI checks then report as a fault in the markup. It is
-  spliced server-side rather than fetched in the browser because the router focuses that page's h1
-  and `buildStaticTabs` reads its panes at startup; a fetch races both, and the failure is a screen
-  reader landing on nothing.
 
-- **THE HELP GUIDE DRIFTS, AND IT DRIFTS SILENTLY.** `help.html` describes every page and control,
+- **THE HELP DRIFTS, AND IT DRIFTS SILENTLY.** `help/help.txt` describes every page and control,
   and nothing fails when a control changes underneath it. Five false claims were found in one spot
-  check on 20th September 2026, the oldest dating from a focus change four days earlier. When you
-  change a control, a default, a tab or where focus lands, grep `help.html` for it in the SAME edit.
-  To settle a claim about what is on screen, render it: `ui_probe.py` with a throwaway checks file
-  that dumps the real labels beats reading the code that builds them.
-
-- **THERE IS ONE TAB STRIP AND IT IS `wireTabStrip`.** `buildTabs` (panes built in JS) and
-  `buildStaticTabs` (panes found in index.html) are thin adapters over it and differ ONLY in where
-  the panes come from. They were duplicated line for line until 30th August 2026, accessibility
-  comment and all. Do not "fix" one of them: it is the widget Shaun moves through most, every rule
-  in it (roving tabindex, arrow/Home/End, focus the tab BEFORE hiding the pane focus sits in, the
-  panel's own tab stop) was found by a screen-reader pass, and a change applied to one copy would
-  silently not reach the other.
+  check on 20th September 2026. When you change a control, a default, a page or where focus lands,
+  grep `help.txt` for it in the SAME edit. To settle a claim about what is on screen, read the
+  labels the window's own code gives its controls, not a description of them.
 
 - **DO NOT MARK CAPABILITY-GATED SHORTCUTS AS UNAVAILABLE IN THE CATALOGUE** (Shaun's ruling, 2nd
   September 2026, rejecting exactly that proposal). The shortcut catalogue IS filtered by what a desk
@@ -2041,31 +1993,6 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   desk lacking a capability still lists its shortcuts. Pressing one explains itself clearly, so it
   is not silent, only late. The reasoning: a capability gate is TEMPORARY, and building UI around a
   gap with a known expiry date is work that has to be rolled back later. Do not re-propose it.
-- **EVERY DROPDOWN THAT CHANGES THE DESK APPLIES ON ENTER, THROUGH `enterToApply`, AND NO OTHER
-  WAY.** A CLOSED select fires `change` on EVERY arrow press, and arrowing a closed select is how a
-  screen reader user reads one, so browsing the list would be the action. A delay does not fix it:
-  it fires when you pause to listen. Arrowing or type-to-find browses; Enter on the closed list
-  applies (and must `preventDefault`, or Chromium opens the list instead); Escape or blur reverts to
-  `dataset.deviceValue` and announces "Not applied". `change` applies ONLY after a pointerdown: an
-  expanded list fires `change` as it closes, and Windows commits the highlighted option on Escape as
-  well as Enter, so a keyboard `change` must never apply. ONE RULE FOR ALL OF THEM, Apply buttons included, is Shaun's ruling: a user
-  cannot tell which kind of dropdown they are in. Never write from a select's own `change`. A
-  dropdown that only changes WHAT YOU ARE LOOKING AT (which pad, which output, which shortcut)
-  stays instant. `setStagedValue` is the only writer of `deviceValue`; an apply must call it on
-  success, and a refusal must leave the dropdown on the unit's value. Guarded by
-  `DevTools/ui_checks_staged.js`, which must be run with BOTH `--route routing` and
-  `--route channels`.
-- **`aria-describedby` can name SEVERAL ids, and every Enter-to-apply dropdown relies on it**
-  (`enterToApply` puts `enter-to-apply-hint` FIRST, so the rule is heard before a longer hint).
-  Setting the attribute afterwards OVERWRITES that: add with `addDescription`, never assign. A
-  checks helper that reads only the first id will silently miss the other.
-- **AN ENTER-TO-APPLY WRITE MUST RE-RUN WHATEVER DEPENDS ON THE VALUE IT JUST SET.** Browsing
-  splits the moment a value changes from the moment it is written, and anything gated on that value
-  has to be re-evaluated at the WRITE, not at the next page read. The raw-tracks switch is available
-  only while a multitrack mode is chosen; without the re-run, applying pre-fader leaves the switch
-  unavailable and still saying "choose pre-fader or post-fader above first" until the page is
-  re-entered. Fix shape: update the cached payload (`recordingModel`) and call the dependent applier, rather than
-  re-reading the desk for a value you just set. Guarded in `ui_checks_recording.js`.
 - **USER-FACING TEXT SAYS "RODECaster Pro 2", NEVER "Pro II"** (Shaun, 30th August 2026). A screen
   reader speaks the roman numeral as "Pro aye aye". RODE's own branding is "Pro II" and the instinct
   to "correct" it back is strong - it was done once already, in this very rule's session - so:
@@ -2080,232 +2007,77 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A BACKUP IS ABOUT A SECOND A PAD; A RESTORE IS ABOUT FIFTEEN. Never quote one figure for the
   other.** `PAD_BACKUP_SECONDS = 1` (a backup COPIES files off the mounted pad volume with
   `shutil`), `PAD_RESTORE_SECONDS = 15` (a restore pushes each sound back over transfer mode). Both
-  are in server.py and both are published, so UI copy must read the right one. Quoting the restore
+  are in server.py and both are published, so copy must read the right one. Quoting the restore
   figure on the backup path calls a full grid "a job of many minutes", wrong by an order of
   magnitude, and makes people skip the pads.
   **THERE IS NO SETTINGS-BACKUP FIGURE AT ALL, and `SETTINGS_RESTORE_SECONDS = 25` is not it.** The
-  backup endpoint publishes `seconds_per_pad` and nothing else. `help.html` quoted the 25 on the
-  backup path, so this trap has now been sprung in two different files: check BOTH the dialog copy
-  in `index.html`/`app.js` AND the help text whenever either number moves.
+  backup reply publishes `seconds_per_pad` and nothing else. The help once quoted the 25 on the
+  backup path, so check BOTH the window's dialog copy AND `help.txt` whenever either number moves.
   **ALSO UNMEASURED: how long the unit's OWN backup takes.** `action_backup_now` is proven to work
   but has never been timed, so do not put a number on it. The only measured neighbour is the unit's
   own RESTORE at a 6 second median.
-- **THE HELP & ABOUT VERSION COMES FROM `/api/version`, NOT `/api/status`.** `loadVersion()` runs
-  from `init()` because /api/status is a USB enumeration only the Device page takes, so anyone who
-  went straight to Help & About read "Version unknown". Keep /api/version free of device access:
-  `ui_checks_about.js` asserts that opening a tab there reads NOTHING.
-- **OPENING THE APP PUTS FOCUS IN THE NAV, A ROUTE CHANGE PUTS IT ON THE PAGE'S H1** (Shaun,
-  16th September 2026). `render(route, focusTo)` takes that choice as an argument; only `init` passes
-  `"nav"`, and it focuses the link carrying `aria-current="page"`, so you hear where you are and what
-  else there is before the page itself. Do not "tidy" it into focusing the heading everywhere: the
-  two cases want different things, because a route change has a new page to announce and an opening
-  window does not.
-- **THE APP OPENS ON CHANNELS, AND THE DESK'S STATE IS SPOKEN RATHER THAN NAVIGATED TO** (Shaun,
-  16th September 2026). It used to open on Device purely so that page's entry read would say what
-  the desk was doing, which put the opening page at nav item 6. `speakStartupSummary` now does that
-  independently, so `DEFAULT_ROUTE` is "channels". Do not move it back: the two facts are separable
-  and were only ever tangled by accident.
-- **THE STARTUP SUMMARY NAMES WHAT IT CHECKED, not only what is wrong.** Told "Muted: Mic 3, Mic 4"
-  and nothing else, you cannot tell a clean solo bus from a summary that stops at the first problem,
-  which is exactly what Shaun asked on hearing it. So solo and routing say so when they are clear,
-  and the pad bank is always stated (no bank is wrong, but it changes what every pad does and has no
-  other outward sign). It runs ~1.2 s after load: it costs a full model dump and takes the HID lock,
-  so the opening page gets the device first, and the gap keeps it off the connection line in the
-  live region.
-- **PROSE ABOVE A TAB STRIP SHOULD HAVE ITS OWN HEADING.** H-key navigation goes from the page's h1
-  to the selected pane's h2, and Tab goes from the h1 to the strip, because prose is not focusable,
-  so an intro sitting between them is reachable only by reading through. The Help & About intro got
-  an h2 for that reason on 30th August 2026.
-  **IT WAS NOT WHY THE TEXT APPEARED MISSING THAT DAY, and the first version of this entry said it
-  was.** Shaun reported not seeing the intro; the actual cause was a STALE BROWSER PAGE, which he
-  found himself. Reading line by line reaches unheaded prose perfectly well, so the diagnosis never
-  fitted the symptom. **Check the page is current BEFORE theorising about markup**: the version line
-  on Help & About names the build, so "Version unknown" with no developer credit means the window
-  predates today's static files. A static change needs a window reload, a server change needs the
-  service restarted - and both were hit within an hour on the 30th, once by each of us.
-- **REQUESTS FROM THIS MACHINE MUST STAY EXEMPT FROM THE ACCESS TOKEN.** `_authorised()` passes
-  anything `_is_local()` accepts, and that is deliberate: code already running here can drive the
-  desk anyway, so a token would protect nothing while breaking every DevTools script, every
-  `ui_probe` suite (the probe proxies to 8770 from localhost) and the tray's own browser launch.
-  "Tighten it so even localhost needs the token" is the change that looks responsible and is not.
-- **THE TOKEN ROUTES ARE LOCAL ONLY, and that is not the same as the gate.** `/api/access` and
-  `/api/access/new` are in `LOCAL_ONLY_ROUTES`, so a REMOTE page that is legitimately signed in
-  still cannot read or replace the key that let it in. The guard now runs in `do_GET` as well as
-  `do_POST`; it was POST-only before this, which would have handed the token to any signed-in
-  phone that asked.
-- **THE COOKIE IS SET ON THE PAGE LOAD AND NOWHERE ELSE.** That is what keeps `app.js` ignorant of
-  the token: the page arrives once with `?t=...`, and every later fetch carries the cookie. Do not
-  add token handling to individual fetches; if a new entry point serves the page, it needs the same
-  `Set-Cookie`.
-- **DO NOT WRAP A TAB STRIP IN A LANDMARK. Tried and rejected 30th August 2026.** A `<nav>` round
-  the strip gives a jump target, but jumping to a landmark leaves NVDA in browse mode, so the arrow
-  keys do not move along the tabs until you switch out of it (Shaun: "more confusing than helpful").
-  The section headings are the landmarks. `ui_checks_device.js` asserts the strip is NOT wrapped.
-- **ONE HINT MUST NOT BE `aria-describedby` ON SEVERAL CONTROLS.** The wifi join paragraph was
-  attached to the network-name field, the password field AND the Join button, so four sentences were
-  read out three times while moving through three controls (Shaun, 30th August 2026, on joining a
-  network for the first time: "the repeated hints in wifi name and password fields is too much").
-  The text stays on the page and is read once in normal reading order; the LABELS say what each box
-  is, which is what a label is for. Attach a description to at most one control, and only where it
-  says something the label cannot.
+
+- **ONE HINT DESCRIBES AT MOST ONE CONTROL.** A paragraph attached to the network name, the password
+  and Join was read out three times while moving through three controls (Shaun, 30th August 2026:
+  "the repeated hints in wifi name and password fields is too much"). The LABELS say what each box
+  is, which is what a label is for. Attach a description (`a11y.describe`) to at most one control,
+  and only where it says something the label cannot.
 - **A HINT IS FOR SOMETHING NON-OBVIOUS, OR FOR A CONTROL THAT AFFECTS OTHER THINGS** (Shaun, 30th
-  August 2026: "the elements themselves say all you need to know"). A labelled dropdown whose
-  options name themselves gets neither a hint nor an `aria-describedby`; a description on a dropdown
-  is re-read on every arrow press.
-- **"Turn this shortcut off" is INVERTED against the server's `enabled`.** Ticked means off. The
-  translation lives in exactly two places in app.js (`openHotkeyEdit` and `onHotkeyEditSave`); the
-  server only ever sees `enabled`. "Use this shortcut" reads like a Run button.
-- **THE SHORTCUTS LIST IS A LISTBOX, NOT A GRID OR A LIST OF BUTTONS.** A grid needs focus mode, and
-  NVDA in browse mode reads characters instead of moving between its buttons; a button per
-  shortcut is a tab stop per shortcut. The listbox is one tab stop, and every action is in its menu
-  or on Enter and Delete. The Applications key is answered on the `contextmenu` event, never the
-  keydown: opening on the keydown moves focus into the menu, the browser's own menu then opens over
-  it. A click opens the menu, because a touch screen has no Applications key. The list carries no
-  `aria-describedby`: it is re-read every time focus comes back from a dialog.
-- **A result spoken as a dialog closes goes through `announceAfterFocus`.** Said before the close,
-  the focus landing back on the page cuts it off. A successful delete says nothing at all.
+  August 2026: "the elements themselves say all you need to know"). A labelled list whose items name
+  themselves gets no description; a description is re-read on every focus, so length costs more
+  there than anywhere else. It says only what the label does not, in a sentence or two: not "you
+  are asked to confirm" (the dialog says it), not "takes effect straight away" (the default), never
+  the label again. The long account belongs in the help.
+- **THE SHORTCUTS LIST IS ONE LIST, NOT A BUTTON PER SHORTCUT.** A button per shortcut is a tab stop
+  per shortcut. The list is one tab stop, and every action is in its menu (the Applications key,
+  Shift+F10 or a right-click) or on Enter and Delete.
+- **A RESULT SPOKEN AS A DIALOG CLOSES WAITS FOR THE FOCUS TO LAND BACK.** Said before, the focus
+  arriving on the page cuts it off (`shortcuts_page.ShortcutsPage._applied`, `AFTER_FOCUS_MS`). A
+  successful delete says nothing at all.
 - **ONE CHORD FOR EVERY SHORTCUT** (`HotkeyManager._mods`, saved as `hotkeys.mods`). A shortcut has
   no modifiers of its own choosing: `set_mods` moves them all, and a later duplicate is switched off.
-- **A dialog must close on ONE Escape and put focus back.** Take the `cancel` event,
-  `preventDefault`, then close and restore focus yourself. Letting the dialog close itself left
-  focus wherever the browser chose, which read as Escape not working (Shaun: "I have to hit esc 3
-  times to dismiss?").
-- **A dialog opens onto its first CONTROL, not its heading, and carries no intro paragraph.** The
+- **A DIALOG OPENS ONTO ITS FIRST CONTROL, not its heading, and carries no intro paragraph.** The
   Add-a-shortcut dialog read its name, then an intro, then both labels, then the heading, before
-  reaching anything you could use.
-- **A SHARED HELPER'S CALL SITES ARE NOT ALL THE SAME.** `buildTabs` and `buildStaticTabs` both end
-  `paint(); return { strip, panel,` - a blind text replacement changed both, and buildStaticTabs
-  (which inserts its own strip) then re-wrapped it into a detached node, so FOUR pages silently lost
-  their tab strip. Count the occurrences before replacing, and run every page's checks after.
+  reaching anything you could use. `test_native_dialogs.py` checks every native dialog.
+- **NVDA NEVER READS CONTENT REVEALED INSIDE AN ALREADY-OPEN DIALOG.** Open a FRESH dialog per stage
+  (auto gain has three: confirm, progress, result).
+- **NOTHING MAY REPLACE A CONTROL A SCREEN READER MAY BE SITTING ON**, whatever triggered it: a
+  read, a poll or a write's confirmation. `pages.set_text` and `set_items` replace only what
+  differs, and a section rebuilds a page only when its STRUCTURE changes, never its values.
+- **A FAILED READ MUST SAY SO, not leave old numbers looking live.**
 
-- **Nothing may replace a subtree a screen reader may be sitting in, whatever triggered the
-  replacement:** a read, a tab change, a poll or a write's confirmation. Use `rebuildIfChanged` or
-  `fillOptions`, keyed on a fingerprint of the STRUCTURE, never the values.
-- **A handler built inside `rebuildIfChanged` must read the LIVE payload (`recordingModel`), never
-  the `d` its closure captured.** The builder runs only when the STRUCTURE fingerprint changes, so a
-  captured payload is whatever was on screen the first time the page loaded.
-- **A control that is currently inert goes `aria-disabled` via `setAvailable`, NEVER the `disabled`
-  attribute.** Disabled leaves the tab order, so the control vanishes and reappears as conditions
-  change and anyone sitting on it is thrown elsewhere. aria-disabled keeps its place, announces as
-  unavailable, and carries the reason. Pressing it anyway must SPEAK that reason, and for a checkbox
-  must also put the checkbox BACK: a flipped switch with no write behind it reports a state the unit
-  is not in. Both raw-multitrack switches follow this (`applyBypass` / `sendBypass`).
-  **THE LAST ELEVEN VIOLATIONS WENT ON 2nd September 2026, and `app.js` now has NO raw `.disabled =`
-  assignment at all** - grep for one before adding a control, because the count going back above zero
-  is the whole regression. Three things that pass made it hold: the refusal for a whole PAGE belongs
-  at the one function its writes already share (`routingPost`), not in a list of handlers a new
-  control can be left off; a whole SECTION with no such choke point takes ONE delegated capture-phase
-  listener (`installPadsGuard` on the pads page, which has fifteen handlers and two control families
-  built from the device payload with no fixed ids); and a control that fires per ARROW KEY - a slider,
-  a closed select - must refuse through `refuseChange`, which speaks once for a burst, or the reason
-  talks over the value the screen reader is reading back.
-  **THEY CANNOT BE TESTED FROM A DESK.** All six gates behind them (`unit_settings`, `pad_write`,
-  `fader_write`, `output_write`, `level_write`, `matrix_write`) are ON for both desks, so no desk in
-  existence reaches these branches. Feed the UI the payload a capless desk would send:
-  `DevTools/make_readonly_stub.py` then `DevTools/ui_checks_readonly.js`.
-- **BUSY IS NOT UNAVAILABLE, and neither may clear the other.** `setBusy` and `setAvailable` share
-  `aria-disabled`, so `setBusy(el, false)` keeps it while `dataset.offReason` is set, and
-  `setAvailable(el, true)` keeps it while the control is busy. Without that, a write that re-reads
-  the unit and marks its own control unavailable (Clear this pad, once the pad is empty) is undone
-  the moment its busy state ends. Never use `setBusy` as a read-only gate: it says nothing when
-  pressed, and the next `setAvailable` call lifts it. A gate that a later read re-decides (the raw
-  switches' `applyBypass`) must be handed the read-only reason on EVERY call.
-- **`announce()` REPLACES the live region, it does not queue.** Two announcements in a row leave the
-  first unspoken, so an action that also moves the user must return its result and speak ONE message.
 - **AUTOSTART IS ONE REGISTRY VALUE WRITTEN BY TWO THINGS THAT CANNOT SHARE CODE**, and nothing at
   runtime would notice them drifting: `ProjectBuilds/installer.iss` and `Project/autostart.py` must
   agree on the key, the value NAME and the command. A different name breaks the installer's
   `uninsdeletevalue`, so an uninstall leaves a Run entry pointing at a deleted exe - a startup error
   every login with nothing left to turn it off. `DevTools/test_autostart.py` reads the `.iss` and
-  asserts it. **HKCU, never HKLM**: the server holds a fixed port, so a machine-wide entry starts an
-  instance per account and they fight over it (seen with one user at the console and another over
-  Remote Desktop).
+  asserts it. **HKCU, never HKLM**: only one copy runs per PC (`instance.py`), so a machine-wide
+  entry starts the app for every account and all but the first are refused (seen with one user at
+  the console and another over Remote Desktop).
   **RENAMING THE APP MEANS MIGRATING FOUR THINGS THAT LIVE ON THE USER'S MACHINE**, learned on 20th
-  September 2026 when "Access Caster" became "AccessCaster": the Run value, the firewall rule (netsh
-  keys a rule by NAME, so the old one is orphaned for ever otherwise), the Start Menu group and the
-  desktop shortcut. All four are handled in `installer.iss`, as `[InstallDelete]` entries and a
-  `deletevalue`, and they are deliberately NOT gated on the tasks the user ticks. **The one that is
-  not obvious is `UsePreviousGroup=no`**: Inno defaults to reusing the group name the machine
-  remembers, so the first build after the rename wrote correctly-named shortcuts into a folder still
-  called by the old name. `autostart.py` carries `LEGACY_VALUE_NAME` for the same reason - two Run
-  entries naming one exe start the app twice at sign-in.
+  September 2026 when "Access Caster" became "AccessCaster": the Run value, the firewall rule an
+  earlier version added (netsh keys a rule by NAME, so the old one is orphaned for ever otherwise),
+  the Start Menu group and the desktop shortcut. All four are handled in `installer.iss`, as
+  `[InstallDelete]` entries, a `deletevalue` and `RemoveFirewallRule`, and they are deliberately NOT
+  gated on the tasks the user ticks. **The one that is not obvious is `UsePreviousGroup=no`**: Inno
+  defaults to reusing the group name the machine remembers, so the first build after the rename
+  wrote correctly-named shortcuts into a folder still called by the old name. `autostart.py` carries
+  `LEGACY_VALUE_NAME` for the same reason - two Run entries naming one exe start the app twice at
+  sign-in.
   **The `--startup` flag is the whole difference between a login launch and a manual one** - at login
-  `tray.main` opens no window and comes up in the tray with the announcer and shortcuts live. The
-  tray path runs `watchdog=False`, so a page-less instance does NOT hit the "no webpage connected
-  in 120 s, stop" rule.
+  `tray.main` opens no window and comes up in the tray with the announcer and shortcuts live.
   **A source run REFUSES to write it** rather than naming python.exe plus a script path, which would
   break silently at a login.
 
 - **OPENING A FOLDER MUST ALSO PUT THE USER IN IT.** `os.startfile` opens the window BEHIND the
-  browser: measured 4th September 2026, the foreground two seconds after the call was still
-  "Profiles - AccessCaster". A window you were not moved to is indistinguishable from nothing having
-  happened, and that is exactly how it was reported. Windows will not let a background process take
-  the foreground unaided, so `server._open_folder_focused` borrows the input state of the window that
-  has it (`AttachThreadInput`), which survives a browser being frontmost. Match the window on a title
-  PREFIX: Explorer sets the folder name first and appends " - File Explorer" a moment later, so an
-  equality test passes or fails on how fast the poll got there. Failing to focus is NOT failing to
-  open, so everything after `startfile` swallows its own errors.
-
-- **THE LIGHT THEME'S `--accent` IS A MEASURED VALUE, NOT A TASTE.** `#0d5bd1` gives 5.71:1 on the
-  page and 6.11:1 on a card. It was `#0b6efd` until 4th September 2026, which is 4.21:1 and so under
-  the 4.5:1 AA needs for normal text - every link in the light theme was failing, and it took adding
-  one link to the footer to notice. White on the accent went from 4.50:1 to 6.11:1, so the buttons
-  improved with it. The FOCUS RING stays on the brighter blue deliberately: it is a 3px outline
-  judged against the 3:1 non-text bar and has to stay visible on the accent itself. Re-measure before
-  changing either.
-
-- **A CONTROL'S OUTCOME IS ANNOUNCED LAST**, after `setBusy(btn, false)` and after any refresh it
-  triggers. Announce it earlier and the focused button's aria-disabled coming back off (plus the
-  device read that follows) lands on top of the live region: the result goes unspoken and all you
-  hear is the button's own label again. Measured on the mix schemes control, 29th August 2026.
-- **Do NOT put the same words in a section status line AND `announce()`.** A status line that is
-  also `role="status"` makes two polite regions change at the same moment and the outcome can be
-  dropped. Either the section owns a live region and speaks through it, or it keeps a plain
-  paragraph and `announce()` speaks. The mix presets section learnt this the hard way.
-  **AND THERE IS A THIRD VOICE, which this rule did not name: `aria-describedby` pointing a BUTTON
-  at that same status line.** A screen reader re-reads the description when focus returns to the
-  button, which it does as soon as `setBusy(btn, false)` runs, so the outcome is spoken a third time
-  in full. Measured on "Save this app's settings to a file", 4th September 2026: one save, three
-  complete readings. A status line a control is described by must not also be live.
-  **ELEVEN HANDLERS STILL DO THE TWO-VOICE VERSION** across the pad editor, the Levels tab, Reset all
-  outputs, Mix presets and stereo link. Do not add a twelfth.
-- **THE RECORDING PAGE HAS EXACTLY ONE LIVE REGION (`rec-state`), and its own suite asserts it.**
-  Every outcome on that page, deleting included, goes through `setStatus("rec-state", ...)` - not `announce()` and
-  not a second status line. A new control there must not bring its own.
-- **A panel with no focusable content needs `tabindex="0"`.** `setPanelTabStop()` does this in both
-  tab helpers; do not undo it. Without it Tab sails past the whole page.
-- **Never write to the device from a combo box's `change` event, and never rebuild a panel from
-  one.** A COLLAPSED select fires `change` on every arrow key, so each keypress applied a preset and
-  destroyed the select mid-interaction. The mic preset list applies on Enter like the rest, so
-  deleting a preset has its OWN list in a dialog (`openPresetDelete`): a Delete button reading the
-  preset dropdown would act on whatever leaving the dropdown put back.
-- **`<output>` has an implicit role of `status`, i.e. it is a live region.** A visible value beside a
-  slider announced itself on top of the slider's own `aria-valuetext`; use `aria-hidden` +
-  `aria-live="off"`.
-- **No named `role="group"` anywhere.** It is announced on the way in and again as "out of grouping",
-  and the heading above says the same thing for free.
-- **NVDA never reads content revealed inside an already-open dialog.** Open a FRESH dialog per stage
-  (auto gain has three: confirm, progress, result).
-- **Nothing may rebuild the page while a dialog is open.** `loadChannels()` ran there once and broke
-  the focus trap.
-- **If a label needs cutting, cut the WORDS, never the `label:` key.** A verbosity commit deleted the
-  keys from `REC_TRANSPORT`, so `btn.textContent = spec.label` assigned undefined and the record
-  button had no accessible name. Nothing looked wrong on screen.
-- **Never leave an `aria-describedby` pointing at a deleted id.** Worse than having none.
-- **`aria-describedby` is read on EVERY focus,** so length costs more there than anywhere else.
-  A description says only what the label does not, in a sentence or two: not "you are asked to
-  confirm" (the dialog says it), not "takes effect straight away" (the default), never the label
-  again. The long account belongs on the Help page.
-- **A hidden pane, not a destroyed pane.** Both tab helpers build every pane once and flip `hidden`;
-  a hidden pane is already out of the accessibility tree, the tab order and heading navigation.
-  Focus moves to the incoming tab BEFORE the outgoing pane is hidden.
-- **Store per-element state on the element (`dataset.*`), not in a build-time closure.** An in-place
-  value update leaves a closure stale: the trap behind both `dataset.prev` and `dataset.known`.
-- **A failed read must say so, not leave old numbers looking live.** `markLevelsUnread` puts sliders
-  back to "not read yet".
-- **The web UI binds 0.0.0.0 with no authentication.** The wifi join is refused for any caller that
-  is not this machine, because a password typed into that page would otherwise cross the very network
-  it is for. Keep that refusal.
+  app's: measured, the foreground two seconds after the call was still AccessCaster. A window you
+  were not moved to is indistinguishable from nothing having happened, and that is exactly how it
+  was reported. Windows will not let a background process take the foreground unaided, so
+  `server._open_folder_focused` borrows the input state of the window that has it
+  (`AttachThreadInput`). Match the window on a title PREFIX: Explorer sets the folder name first and
+  appends " - File Explorer" a moment later, so an equality test passes or fails on how fast the
+  poll got there. Failing to focus is NOT failing to open, so everything after `startfile` swallows
+  its own errors.
 
 - **A CUE IS A WAV PLAYED BY THE SPEECH THREAD, NEVER A BEEP.** `winsound.Beep` and
   `[Console]::Beep` go to the SYSTEM default output, which on these machines is the desk, so a cue would go to the callers
@@ -2522,7 +2294,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   Ear-proven 29th August 2026: written True, the monitor speakers duck on a mic fader move. The
   fault was `action_set_auto_mute` reporting success from the write returning, with no read-back, so
   a switch could sit there claiming a setting the desk did not have while Shaun's speakers howled.
-  **It reads back BY BLOCK now and returns the state, and the browser switch follows the DESK, not
+  **It reads back BY BLOCK now and returns the state, and the window's switch follows the DESK, not
   the click.** It occurs once, in OUTPUT: this was never the `btVisible` duplicate trap, and the
   monitor and Bluetooth toggles are not crossed.
 - **THERE IS ONE READER: `model_tree.parse`, indexed once per dump by `rcp_read._index`, AND NO
@@ -2727,45 +2499,20 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   a restore succeeded with the desk alive.
 - It now refuses outright when the desk is not answering, rather than writing into the dark.
 
-## The server's lifecycle, and why it cannot be reasoned about from outside
+## The app's lifecycle, and why it cannot be reasoned about from outside
 
-- **`/static/` RESOLVES AND CONTAINS; IT NEVER SCREENS THE NAME FOR "..".** `os.path.join` drops
-  `STATIC_DIR` altogether when the name is absolute, so `/static/C:/Windows/win.ini` passes any
-  check on the name. `_static_file` resolves with `realpath` and serves only what `commonpath` puts
-  inside `STATIC_DIR`. `test_server_safety.py` pins it.
-- **A REQUEST BODY THAT IS NOT A JSON OBJECT IS A 400, NEVER `{}`.** Read as `{}`, the action runs
-  with its defaults: a malformed POST to `/api/announce` switches announcements off.
-- **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change of more than `_CLIENT_TIMEOUT`
-  on wall-clock arithmetic stops the server while the page is open. `time.time()` is only for a
-  time shown to a person (`read_at`).
+- **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change makes wall-clock arithmetic
+  fire a timeout early or never. `time.time()` is only for a time shown to a person (`read_at`).
 - **EACH ANNOUNCER LOOP CARRIES A GENERATION (`announcer._loop_gen`)** and leaves as soon as it is not the
   newest, without touching `announcer.live_state`. Off and on within one read or one reconnect sleep
   otherwise leaves two loops running, with two handles and every report handled twice.
 
-- **AN OPEN PAGE OUTLIVES ITS SERVER, so the page watches it** (`noteServer` in app.js). A window
-  left open across an upgrade otherwise runs the OLD page against the NEW server, and anything the
-  new version added is missing with no error. The `/api/ping` reply carries `_INSTANCE_ID` and the
-  version; three missed pings open `server-lost-dialog`, and a different version reloads the page.
-  Any HTTP answer counts as alive (a remote page with a stale token is refused, not stopped). The
-  dialog's text never changes while open, because NVDA does not read changes inside an open
-  dialog: recovery closes it and speaks outside it. A page from before this existed cannot do any
-  of it, so the first upgrade past it still needs the old window closed by hand.
-
-- **THE TRAY BUILD HAS NO WATCHDOG.** `start_server_managed` passes `watchdog=False`, deliberately:
-  the app lives in the tray until Quit, so closing the page must not stop it. Only
-  `python server.py` runs with the watchdog on. **Any theory of the form "the watchdog stopped it"
-  is wrong for the installed app**, and it cost an hour on 21st September 2026 before anyone read
-  the call site.
 - **THE TRAY ICON MUST OPEN ON `WM_LBUTTONUP`, NOT ONLY ON `NIN_SELECT`.** On Windows 11 an icon in
   the hidden-icons overflow receives only `WM_LBUTTONDOWN`/`WM_LBUTTONUP` when pressed, by mouse,
   Enter, a screen reader or UIA Invoke (measured 17th October 2026, `NOTIFYICON_VERSION_4`), so an
   icon answering only `NIN_SELECT`/`NIN_KEYSELECT` does nothing there. One taskbar click can send
   both, so `TrayApp._on_tray` drops repeat open events within `_OPEN_DEBOUNCE_S`.
-- **A RUNNING JOB OUTRANKS EVERY STOP TRIGGER** (added 21st September 2026, `_lifecycle_stop_reason`
-  takes `job_running`). A backup is mid-read of the model and a restore is part way through writing
-  settings and pads; a page closing must not abandon either. This is right on the
-  `python server.py` path and is NOT what was happening in the tray.
-- **THE TRAY EXE IS WINDOWED, SO EVERYTHING PRINTED GOES NOWHERE**, including the reason the server
+- **THE TRAY EXE IS WINDOWED, SO EVERYTHING PRINTED GOES NOWHERE**, including the reason anything
   stops. That is why both of 21st September's diagnoses were inferred from the outside and both
   were wrong. **SO READ `%LOCALAPPDATA%\AccessCaster\logs\diagnostic.log` BEFORE THEORISING ABOUT
   ANY LIFECYCLE OR DEVICE FAULT.** `Project/diagnostics.py` tees every `print` into it along with
@@ -2775,11 +2522,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   every two-second tick, an event recurring every two seconds or slower never folded: the recorder
   watcher wrote "no control interface" 34 times in the minute a firmware restart took.
   `test_diagnostics.py` pins it.
-- **THE LOG IS STARTED IN EXACTLY ONE PLACE, `server._bring_up_server`,** and that is what keeps it
-  a single-writer file: every entry point (tray, `python server.py`, the dev server) goes through
-  there, so only the process that actually owns the server ever writes to it. Starting it in each
-  entry point instead would put two processes on one file the moment a second launch raced the
-  first. It is SILENT until then, so the offline suites and the DevTools scripts write nothing.
+- **THE LOG IS STARTED IN EXACTLY ONE PLACE, `server.start_service`,** and that is what keeps it
+  a single-writer file: the tray and every DevTools script that runs the service go through there,
+  and only the holder of the single-instance lock gets that far. It is SILENT until then, so the
+  offline suites write nothing.
 - **THE LOG NEVER HOLDS A CREDENTIAL.** It is meant to be safe to send to somebody, and every record
   sent is logged decoded, so `diagnostics.describe_record` hides the value of `wifiPSK` and every
   `*Password` (`_is_secret`). A new credential property whose name matches neither needs adding.
@@ -2791,30 +2537,21 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the LAST one is muted or faded down. That is why it can look like one particular fader is special:
   it is simply the only one in play. Worth knowing when a user reports silent monitors, because
   blind the cause is invisible and the obvious fix (mute the mic you are using) does not work.
-- **THE PORT IS THE SINGLE-INSTANCE LOCK, AND `_ExclusiveHTTPServer.allow_reuse_address` MUST STAY
-  FALSE.** `HTTPServer` sets it to `1`, and on Windows that flag lets a second process bind a port
-  another process already holds (measured, not assumed). With it `0`, a restart still binds
-  straight after a clean stop with traffic behind it. Put plain `ThreadingHTTPServer`
-  back and two servers can sit on 8770 at once, in different Windows sessions, both reaching for the
-  one desk.
-- **ONLY THE PORT IS MACHINE-WIDE. THE REST OF THE APP BELONGS TO ONE WINDOWS SESSION**, so a second
-  signed-in account is REFUSED rather than served. The announcer speaks into the session that
-  started it, the global shortcuts are registered there, the tray icon lives there and the settings
-  written are that account's - so sharing gives the second user a page that looks right, says
-  nothing and answers no key, which for a blind user is the worst kind of failure. The real
-  multi-user answer is the remote-access token, which serves the UI to another MACHINE.
-- **THE TWO CHECKS THAT CANNOT SEE ACROSS SESSIONS, and why the refusal is its own test.**
-  `_app_already_serving` is an HTTP GET to localhost, which is machine-wide, so it answers True for
-  another account's instance. `_focus_app_window` enumerates windows, which are per-desktop, so it
-  answers False for the same instance. The pair of them therefore ends in "serving but no window",
-  whose fallback is to open the UI - somebody else's. `_other_account_holds_port` runs BEFORE both,
-  in `_bring_up_server` and again in `tray.main`.
-- **NEVER TASKKILL A PID WITHOUT CHECKING ITS SESSION.** `_close_previous_instances` exists to clear
-  a stale zombie server of OURS, and `netstat` hands it the port's holder whoever owns it; killing
-  another account's process is only refused today because that needs admin. `_session_of_pid`
-  (`ProcessIdToSessionId`, a bare PID, no privileges, and no handle on the other process) is the
-  filter. Do not "fix" a failure there by elevating.
-- **AN IDENTICAL EVENT REPEATED BECOMES ONE `repeated ... xN` LINE.** The page polls, the recorder
+- **ONE COPY PER PC, AND THE LOCK IS A `Global\` NAMED MUTEX** (`instance.claim`), which every
+  Windows session sees. The rest of the app belongs to ONE session, so a second signed-in account
+  is REFUSED rather than served: the announcer speaks into the session that started it, the global
+  shortcuts are registered there, the tray icon lives there and the settings written are that
+  account's. Windows releases the mutex when the process ends, however it ends, so a crash leaves
+  no stale lock and nothing is ever killed to take it.
+- **THE LOCK SAYS SOMEBODY HAS THE APP, NOT WHO.** `tray.main` tells the two apart with
+  `_running_instance`: `FindWindow` sees only this desktop's windows, so a held lock with this
+  session's icon window is our own copy, which is asked to show its window, and a held lock with
+  none is another account's, which is refused in a message box. A copy of ours that has only just
+  started holds the lock before its icon window exists, so the search waits `_FIND_RUNNING_S`
+  before concluding. A DevTools script driving the desk holds the same lock (`_desk.service`, and
+  `_bootstrap` for `*_live.py`), so the app started meanwhile is refused as if another account
+  had it.
+- **AN IDENTICAL EVENT REPEATED BECOMES ONE `repeated ... xN` LINE.** The window polls, the recorder
   watches and the announcer reopens its handle, so a line per event is thousands of identical lines
   with the signal buried in them. The FIRST of anything is always written the moment it happens, so
   nothing is hidden, only counted. A flusher thread closes the group within two seconds, because
@@ -2946,7 +2683,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `GetForegroundWindow` returns it, `GetGUIThreadInfo` agrees the focus window is it, and it holds
   for seconds. **And a screen reader goes on reading the app you came from**, because Windows never
   raised a normal activation. Alt-Tabbing to the same window by hand announced it perfectly, which
-  is what proves the window, the browser and the screen reader are all innocent.
+  is what proves the window and the screen reader are both innocent.
   So the test for this is never "is it the foreground" - that passes while broken. It is whether a
   screen reader follows, or failing that whether a plain permitted `SetForegroundWindow` was enough.
   **Do not answer a refusal by forcing it, and do not answer the silence by speaking**: bringing a
@@ -3123,15 +2860,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   CHECKS that the pad that engaged is the one that was asked for. Keep that check: without it a
   stale map silently fires a stranger's voice effect onto a live mic.
 - **`hotkey_manager()` is LAZY.** Importing `server` must never register a system-wide hotkey: every
-  DevTools script imports it. Only `_bring_up_server` asks, and never in headless mode.
+  DevTools script imports it. Only `start_service` asks, and never for a DevTools run.
 - **`test_hotkeys.py` PRESSES NO KEYS, AND MUST NOT AGAIN.** It fires shortcuts by posting
   WM_HOTKEY to the pump. Injected presses proved only that Windows delivers a registered key, which
   any real press shows, and a run killed between a press and its release left Ctrl and Shift held
   down system-wide on the machine in use. `DevTools/press_keys.py` uses `keybd_event`, not
   SendInput, which injects nothing from an RDP session here.
-- **Adding a Device tab breaks `ui_checks_device.js` in three places**, none of them obvious: the
-  tab/title lists, the fixed string of pane headings, and the arrow-key debounce check, which counts
-  presses to land on Unit settings (nine rights over seven tabs, not eight over six).
 
 ## The server's shared shapes
 
@@ -3179,7 +2913,7 @@ shared one; a new copy is how they drifted apart the first time.
   `python DevTools/codemap_lines.py` rewrites them; `--check` reports drift and exits 1. It covers
   the `name` (NNN) references, the file table's line counts and the DevTools file count, and it
   touches no prose. They were regenerated BY HAND on 29th August 2026 and all 96 were wrong again by
-  the 30th, drifting up to 755 lines, because one day's work moves server.py and app.js by hundreds.
+  the 30th, drifting up to 755 lines, because one day's work moves server.py by hundreds.
   A confidently wrong line number is worse than none: you jump, land elsewhere, and grep anyway.
 - **THE RELEASE NOTES ARE GENERATED FROM `version.py` HISTORY, which is a LIST, not prose.**
   `ProjectBuilds/make_release_notes.py` writes `Project/ReleaseNotes.html` before the freeze; the
@@ -3198,13 +2932,8 @@ shared one; a new copy is how they drifted apart the first time.
   `ACCESSCASTER_DATA_DIR` to a temp folder when `sys.argv[0]` starts with `test_`, before the first
   Project import, which is the only moment it can work: `profiles.PROFILES_DIR` and
   `routing_schemes.SCHEMES_DIR` are derived from `paths.DATA_DIR` at import. It is keyed on the NAME
-  rather than an opt-in call because an opt-in is what a new test forgets. The dev server, the probes
-  and the capture tools are not tests and keep the real data dir, which is the point of running them.
-- **A UI PROBE SUITE THAT "NEVER REPORTED BACK WITHIN 90s" WITH 0 PAGE ERRORS IS A SYNTAX ERROR IN
-  THE SUITE, NOT A HUNG PAGE.** The whole file is one function body, so a second `const` of a name
-  already used throws at PARSE time and no check runs, which reads as a timeout. `ui_checks_boundary.js`
-  sat like that from 3rd September to the 16th. `node --check DevTools/ui_checks_*.js` catches it in
-  a second and is worth running after editing one.
+  rather than an opt-in call because an opt-in is what a new test forgets. The probes and the
+  capture tools are not tests and keep the real data dir, which is the point of running them.
 - **A `Project/` function called only by a probe or a live test in `DevTools/` is in use, not dead.**
   A dead-code sweep that searches `Project/` alone reports it as unused.
 - **THE GENERATED REFERENCES ARE ONE FILE PER DESK, and must stay that way:**
@@ -3250,20 +2979,6 @@ shared one; a new copy is how they drifted apart the first time.
 
 - **Import `DevTools/_bootstrap.py` FIRST in any new DevTools script** that touches the Project
   modules. 19 of 48 scripts once could not run as documented without it.
-- **Loading the app's page in a HEADLESS BROWSER STOPS THE SERVER**: `pagehide` fires
-  `sendBeacon("/api/quit")`. Use `ui_probe.py` (it stubs POSTs and serves its own copy) or start the
-  server with `ACCESS_CASTER_NO_UI=1`.
-- **`ui_probe.py` takes a free port per run.** It used to hardcode 8771 with `allow_reuse_address`,
-  and two servers bind that port CLEANLY on Windows (measured), so concurrent suites silently swapped
-  traffic and one reported "the page never reported back".
-- **`ui_probe.py` HOLDS ITS BROWSER IN A KILL-ON-CLOSE JOB OBJECT (`BrowserJob`).** Terminating
-  the one `msedge.exe` it starts leaves the rest of Chromium's process tree running, and a probe
-  killed by its caller's timeout never reaches cleanup at all. Survivors run until shutdown, then
-  Windows' "restart apps after sign-in" relaunches them: hundreds had piled up by 17th October 2026.
-  Do not go back to `subprocess.Popen` plus `terminate()`. Profiles a killed run leaves are swept
-  after a day.
-- **`ui_probe.py`'s default 90 s timeout is not enough.** Pads and Device need 600 s (about nine
-  minutes); each suite's `// probe:` first line gives its own, and `run_ui_probes.py` reads it. A timeout reports as "never reported back", which reads like a fault.
 - **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
   a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026, so do not reach for
   transfer mode to get at recordings.
@@ -3283,21 +2998,11 @@ shared one; a new copy is how they drifted apart the first time.
   prompt. It is kept registered between sessions on purpose, because registering it costs a UAC
   prompt, so check whether it is still there (`Get-ScheduledTask AccessCasterCapServer`) and remove
   it once USB capture is no longer in use (`Unregister-ScheduledTask AccessCasterCapServer`, elevated).
-- **`ui_checks_recording.js` FAILS ON A MISSING PRECONDITION, not on a bug.** It proxies reads to
-  whatever is on 8770, so it needs `DevTools/run_dev_server.py` (the installed build predates the
-  page), and it needs a card or drive IN: with no destination the unit reports state 3 and the page
-  correctly disables the transport. Both met = 72 pass, 0 fail (29th August 2026). Diagnosed as a
-  probe bug twice; check `/api/recorder/live` state first.
-- **`ui_probe.py` quietens the first-run baseline dialog by default,** because it took focus and
-  silently failed 15 checks across two suites. The baseline suite passes `--offer-baseline`.
-- **A server-side change needs the SERVICE restarted, not the window reloaded.** A static-file change
-  needs only a reload. The INSTALLED build serves its OWN bundled copy of `static/`, so repo edits
-  are invisible to it.
-- **Never stop `server.py` (port 8770) as routine cleanup.** Only stop it when exclusive device access
-  is genuinely needed, then restart it. **A live device test IS that case** (the server owns the HID
-  handle), and **`/api/quit` will not stop `run_dev_server.py`**: it only sets a deadline the
-  lifecycle watchdog acts on, and the dev server runs with the watchdog off. Kill the process, then
-  restart it to pick the new code up.
+- **A DEVTOOLS SCRIPT THAT DRIVES THE DESK NEEDS THE APP QUIT, and refuses to start while it
+  runs.** The app holds the desk, and there is no way in from outside the process: a script runs
+  the service itself (`_desk.service`, with `start=True` for one that needs the watchers), and the
+  single-instance lock refuses it while the app is up. Quit from the tray, run the script, then
+  start the app again. A change to the app's code needs the app restarted to take effect.
 - **When driving the GUI: the Windows "System tray overflow window" can sit OVER the app and silently
   swallow clicks.** It is topmost, does not show up in a plain EnumWindows sweep, and `WindowFromPoint`
   returns 0 until the probe sets DPI awareness. `PrintWindow(h, dc, 2)` captures the app's own pixels

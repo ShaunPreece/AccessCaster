@@ -4,7 +4,7 @@
     python DevTools/codemap_lines.py --check    report drift and exit 1, change nothing
 
 CodeMap carries about 100 line references and a line count per file. One day's work moves
-server.py and app.js by hundreds of lines, so a hand-kept number is wrong within the day, and a
+server.py by hundreds of lines, so a hand-kept number is wrong within the day, and a
 wrong line reference sends the reader to the middle of something else. A derived number is
 derived: like the two coverage reports (property_coverage.py, profile_coverage.py), this is
 regenerable, with a --check mode that exits 1 on drift.
@@ -33,7 +33,6 @@ CODEMAP = pathlib.Path(_bootstrap.docs_path("CodeMap.md"))
 # A section runs until the next heading listed here (or the end of the mapped region).
 SECTIONS = [
     ("### server.py landmarks", REPO / "Project" / "server.py"),
-    ("## Project/static (the web UI)", REPO / "Project" / "static" / "app.js"),
     ("## DevTools/", None),                      # nothing below here carries line references
 ]
 
@@ -84,7 +83,7 @@ def line_count(path: pathlib.Path) -> int:
 
 def find_source(name: str) -> pathlib.Path | None:
     """The file a table row names, looked for where the map says things live."""
-    for folder in ("Project", "Project/static"):
+    for folder in ("Project",):
         p = REPO / folder / name
         if p.exists():
             return p

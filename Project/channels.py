@@ -757,7 +757,7 @@ def input_value(blob: bytes, ch: dict, prop: str, dev=None):
 
 
 def read_mixer() -> dict:
-    """Mic-focused live read for the web UI: gain + phantom + polarity + type per mic, MIDI, fw.
+    """Mic-focused live read: gain + phantom + polarity + type per mic, MIDI, fw.
 
     Device-aware: reads exactly the mics the CONNECTED device exposes (4 on the Pro II, 2 on the
     Duo), keyed by 1-based mic channel, each mic read from its own ADDRESS - so the Duo shows
@@ -1046,7 +1046,7 @@ def read_channels(blob: bytes | None = None) -> list:
 
     Returns a list (device ui_channels order) of dicts: name, label, kind, plus muted, level_db,
     processing_on, modules{}, params{} for all; and for mics also phantom, polarity, mic_type,
-    effects{}. Mirrors the RODE app's per-channel panel so the web UI can present one adaptive
+    effects{}. Mirrors the RODE app's per-channel panel so the window can present one adaptive
     Channels view.
 
     INPUT values (mic gain / power / polarity / type; line inputDigitalGain) are read BY ADDRESS

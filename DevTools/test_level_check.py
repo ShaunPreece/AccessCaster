@@ -8,8 +8,7 @@ NO DEVICE NEEDED. What this pins is the reasoning, not the plumbing:
     listening to ("Microphone (RODECaster Pro II Chat) clipping" while you check Mic 1 names the
     wrong thing entirely);
   * Chat is refused, with the mechanism said out loud rather than a bare "no";
-  * the check lives ONLY on the channel, so there is no Device > Levels endpoint left behind for a
-    page to call.
+  * the check lives ONLY on the channel, with no stream-wide check left behind.
 
 and for the main mix clip warning (App settings, Announcements): it watches the main recording
 stream, never a playback one, says nothing but clipping, and its switch is saved and reported.
@@ -136,21 +135,12 @@ src, why = server._chan_check_source("Nonsense")
 check("an unknown channel is refused", src, None)
 check_in("with the channel name in the message", "Nonsense", why)
 
-print("\nTHE UI AND THE SERVER AGREE ABOUT CHAT")
-app_js = (ROOT / "Project" / "static" / "app.js").read_text(encoding="utf-8")
-check_in("the page does not even build the button for Chat", 'ch.name !== "Chat"', app_js)
+print("\nTHE WINDOW AND THE SERVER AGREE ABOUT CHAT")
+tabs_src = (ROOT / "Project" / "native" / "channel_tabs.py").read_text(encoding="utf-8")
+check_in("the window does not even build the button for Chat", 'if name != "Chat"', tabs_src)
 
 print("\nTHE CHECK IS PER CHANNEL ONLY: NO STREAM-WIDE CHECK, NOT EVEN A HIDDEN ONE")
-check("its endpoint is not in the POST routes",
-      "/api/meters/check" in server.POST_ROUTES, False)
-check("and there is no action left to call",
-      hasattr(server, "action_meter_check"), False)
-check_not_in("the page has no orphan button for it", "meter-check-btn", app_js)
-index_html = (ROOT / "Project" / "static" / "index.html").read_text(encoding="utf-8")
-check_not_in("nor any markup for one", 'id="meter-check-btn"', index_html)
-# The stream dropdown STAYS: the background watch still meters one stream.
-check_in("the stream chooser survives, for the watch", 'id="meter-stream"', index_html)
-check_in("and the tab points to the Channels page for the check", "Channels page", index_html)
+check("there is no action for one", hasattr(server, "action_meter_check"), False)
 
 print("\nA RUN WHOSE WATCHER HAS DIED, AND A STALE TIMER")
 # When a run's watcher thread dies mid-run, the next press must stop that run rather than start a
@@ -207,12 +197,8 @@ check_in("and answers it with an instruction about the fader", "fader up", serve
 check_in("naming where the exclusion would be, since that is the other cause",
          "Routing, Output mixes", server_src)
 
-print("\nTHE STATUS ENDPOINT")
-check("it is a GET route, since asking must never start anything",
-      "/api/channels/level-check/status" in server.GET_ROUTES, True)
-check("and the toggle is a POST",
-      "/api/channels/level-check" in server.POST_ROUTES, True)
-st = server.channel_level_check_status()
+print("\nTHE CHECK'S STATE")
+st = server._chan_check_state()
 check("nothing is running to begin with", st["running"], False)
 check("and it says so with no channel named", st["channel"], "")
 

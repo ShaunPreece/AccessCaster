@@ -94,10 +94,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "startup"; Description: "Start {#AppName} automatically when &Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
-; Ticked by default. Adds an inbound Windows Firewall allow-rule so a phone or other device on the
-; same network can open the page. Creating the rule needs admin, so it asks for approval once
-; (Private networks only). Untick it to skip and just answer the Defender popup on first run instead.
-Name: "firewallrule"; Description: "Allow {#AppName} through Windows &Firewall (for phone / LAN access; asks for approval once)"; GroupDescription: "Network:"
 
 [InstallDelete]
 ; THE SHORTCUTS THE OLD NAME LEFT BEHIND. Earlier builds were named "Access Caster" with a space,
@@ -109,7 +105,7 @@ Name: "firewallrule"; Description: "Allow {#AppName} through Windows &Firewall (
 ; and with no cost, which is why this stays in the one installer everybody gets rather than being
 ; split into a special build or a separate migration tool. Two installers carrying the same version
 ; number and behaving differently would be far worse than five lines nobody's machine reads.
-; The same reasoning covers the legacy Run value and firewall rule below.
+; The same reasoning covers the legacy Run value and the firewall rules below.
 Type: files; Name: "{autoprograms}\Access Caster\*"
 Type: dirifempty; Name: "{autoprograms}\Access Caster"
 Type: files; Name: "{autodesktop}\Access Caster.lnk"
@@ -128,9 +124,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; Optional autostart, added only if the "startup" task is ticked and removed on uninstall.
 ;
 ; DELIBERATELY HKCU EVEN IN AN ALL-USERS INSTALL, and this is the one place where the scopes should
-; NOT match. AccessCaster is a server on a FIXED port (8770), so a machine-wide Run entry would
-; launch an instance for every user who logs in and they would fight over that port, as happens on
-; a PC with one user at the console and another in a Remote Desktop session. Autostart is therefore
+; NOT match. Only one copy of AccessCaster runs per PC (Project/instance.py), so a machine-wide Run
+; entry would start it for every user who logs in and all but the first would be refused, as on a
+; PC with one user at the console and another in a Remote Desktop session. Autostart is therefore
 ; a choice each account makes for itself.
 ;
 ; THE --startup FLAG MATTERS AND MUST MATCH Project/autostart.py. Started at sign-in the app comes up
@@ -167,17 +163,14 @@ Filename: "{app}\ReleaseNotes.html"; Description: "See the release notes for thi
     Flags: shellexec nowait postinstall skipifsilent
 
 [Code]
-{ Firewall rule. A per-user install runs without admin, but creating a firewall rule needs it, so
-  we elevate ONLY the netsh step via the 'runas' verb. In an all-users install Setup is elevated
-  already and 'runas' simply runs it, so this one path covers both modes. The rule allows
-  inbound connections to AccessCaster.exe on Private networks, so a phone or other device on the
-  same network can open the page without the Windows Defender popup appearing on first run.
-  A marker records that we added it, so uninstall only prompts to remove it if it exists.
+{ THE FIREWALL RULE AN EARLIER VERSION ADDED, which nothing needs now that the app serves no page
+  to the network. A netsh rule is machine-wide and removing it needs admin, so the delete is
+  elevated on its own through the 'runas' verb; in an all-users install Setup is elevated already
+  and 'runas' simply runs it. A marker records that a rule was added, so only a machine that has
+  one is asked.
 
-  THE MARKER USES HKA, NOT HKCU, so it follows the install scope: a netsh rule is always
-  machine-wide, so if an all-users install were marked under one admin's HKCU, an uninstall by a
-  different admin would leave the rule behind for ever. HKA resolves to HKLM for an all-users
-  install and HKCU for a per-user one, which is exactly the scope the rule really has. }
+  THE MARKER USES HKA, NOT HKCU, so it follows the install scope: HKA resolves to HKLM for an
+  all-users install and HKCU for a per-user one, which is the scope the rule was recorded in. }
 
 const
   FW_RULE_NAME = 'AccessCaster';
@@ -266,56 +259,44 @@ begin
   end;
 end;
 
-procedure AddFirewallRule;
-var
-  AppExe, Params: String;
-  ResultCode: Integer;
-begin
-  AppExe := ExpandConstant('{app}\{#AppExe}');
-  { Delete any same-named rule first so a reinstall does not stack duplicates, and the pre-rename
-    one with it, then add. Both deletes are in the SAME elevated command as the add, so the user
-    answers one UAC prompt rather than two. }
-  Params := '/C netsh advfirewall firewall delete rule name="' + FW_RULE_NAME + '" >nul 2>&1 & ' +
-            'netsh advfirewall firewall delete rule name="' + FW_RULE_NAME_LEGACY + '" >nul 2>&1 & ' +
-            'netsh advfirewall firewall add rule name="' + FW_RULE_NAME + '" ' +
-            'dir=in action=allow program="' + AppExe + '" enable=yes profile=private';
-  if ShellExec('runas', 'cmd.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    RegWriteStringValue(HKA, FW_MARK_KEY, FW_MARK_NAME, '1');
-  { If the user declines the UAC prompt, ShellExec returns False: the install still succeeds and
-    the Defender popup will simply appear on first run instead. }
-end;
-
-{ AN UPDATE FROM INSIDE THE APP RUNS SETUP SILENTLY, and a silent Setup re-uses the previous install's
-  tasks, so the firewall task is selected again and its 'runas' would raise a UAC prompt in the
-  middle of an update nobody is watching. The rule is keyed on the exe's path, which an upgrade does
-  not change, so a silent run that finds our marker leaves the existing rule alone. }
-function FirewallRuleAlreadyAdded: Boolean;
+function FirewallRuleAdded: Boolean;
 var
   Marker: String;
 begin
   Result := RegQueryStringValue(HKA, FW_MARK_KEY, FW_MARK_NAME, Marker) and (Marker = '1');
 end;
 
+{ Both names, the pre-rename one with the current one, in ONE elevated command, so the user
+  answers one permission prompt rather than two. Declining it leaves the rule and the marker, so
+  the next install or the uninstall asks again. }
+procedure RemoveFirewallRule;
+var
+  ResultCode: Integer;
+begin
+  if ShellExec('runas', 'cmd.exe',
+       '/C netsh advfirewall firewall delete rule name="' + FW_RULE_NAME + '" >nul 2>&1 & ' +
+       'netsh advfirewall firewall delete rule name="' + FW_RULE_NAME_LEGACY + '" >nul 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RegDeleteKeyIncludingSubkeys(HKA, FW_MARK_KEY);
+end;
+
+{ NOT ON A SILENT RUN. An update from inside the app runs Setup silently, and a permission prompt
+  appearing in the middle of an update nobody is watching is unexplained. An allow-rule for a
+  program that no longer listens does no harm meanwhile. }
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('firewallrule')
-     and not (WizardSilent and FirewallRuleAlreadyAdded) then
-    AddFirewallRule;
+  if (CurStep = ssPostInstall) and not WizardSilent and FirewallRuleAdded then
+  begin
+    MsgBox('This version of AccessCaster no longer needs the Windows Firewall rule an earlier ' +
+           'version added for phone access. Windows will now ask for permission to remove it.',
+           mbInformation, MB_OK);
+    RemoveFirewallRule;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  Marker: String;
-  ResultCode: Integer;
 begin
-  { Only remove the rule (and trigger a UAC prompt) if we actually added one. }
-  if (CurUninstallStep = usUninstall) and
-     RegQueryStringValue(HKA, FW_MARK_KEY, FW_MARK_NAME, Marker) and (Marker = '1') then
-  begin
-    ShellExec('runas', 'cmd.exe',
-      '/C netsh advfirewall firewall delete rule name="' + FW_RULE_NAME + '" >nul 2>&1 & ' +
-      'netsh advfirewall firewall delete rule name="' + FW_RULE_NAME_LEGACY + '" >nul 2>&1',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    RegDeleteKeyIncludingSubkeys(HKA, FW_MARK_KEY);
-  end;
+  { Only remove the rule, and raise a permission prompt, if one was added. }
+  if (CurUninstallStep = usUninstall) and FirewallRuleAdded then
+    RemoveFirewallRule;
 end;

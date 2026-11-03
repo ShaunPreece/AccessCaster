@@ -1,14 +1,14 @@
 """The app's OWN settings export and import. Offline, no device, no files touched.
 
-WHAT THIS EXISTS TO STOP, and it is one thing above all others: `remote_token` is the credential
-that grants remote access to this app, it lives in the same settings file as the keyboard shortcuts,
-and an export is a file people email to themselves. A dump of settings.json would have carried it.
-So the export is an ALLOW-LIST, and the first two checks here are that the token does not leave and
-that an import cannot bring one in.
+WHAT THIS EXISTS TO STOP: settings.json holds state about THIS machine and ITS desks beside the
+preferences, and an export is a file people email to themselves and import elsewhere. A dump of
+settings.json would carry that state to a machine it is wrong for. So the export is an ALLOW-LIST,
+and the first checks here are that an excluded key does not leave and that an import cannot bring
+one in.
 
 The second thing it pins is that IMPORT MERGES rather than replaces. The excluded keys live in the
-same file, so a replace would delete this machine's token and its first-run record as a side effect
-of restoring somebody's keyboard shortcuts.
+same file, so a replace would delete this machine's first-run record as a side effect of restoring
+somebody's keyboard shortcuts.
 
 Run: python DevTools/test_app_settings.py
 """
@@ -25,16 +25,14 @@ import app_settings as a
 from _testkit import check
 
 # Every key the app WRITES to settings.json, read off the source rather than listed by hand: a hand
-# list misses exactly the new preference this check exists to catch. Three shapes cover every
-# writer: `settings_file.update(key=...)`, a `_KEY = "..."` constant passed as `**{_KEY: ...}`, and
-# action_set_meter_option's spec table, whose keys are the "meter_*" strings.
+# list misses exactly the new preference this check exists to catch. Two shapes cover every
+# writer: `settings_file.update(key=...)`, and a `_KEY = "..."` constant passed as `**{_KEY: ...}`.
 _SRC = "\n".join(p.read_text(encoding="utf-8")
                  for p in pathlib.Path(_bootstrap.PROJECT).glob("*.py"))
 _KEY_CONSTS = dict(re.findall(r'^(_\w+_KEY) = "(\w+)"', _SRC, re.M))
 WRITTEN_BY_THE_APP = (set(re.findall(r"settings_file.update\((\w+)=", _SRC))
                       | {_KEY_CONSTS[c]
-                         for c in re.findall(r"settings_file.update\(\*\*\{(_\w+_KEY)", _SRC)}
-                      | set(re.findall(r'\("(meter_\w+)", (?:bool|float)', _SRC)))
+                         for c in re.findall(r"settings_file.update\(\*\*\{(_\w+_KEY)", _SRC)})
 
 # THE REAL STORED SHAPE, copied from a live settings.json rather than invented. An invented shape
 # like {"hk1": ..., "hk2": ...} passes while the counting code is broken, because on the real shape
@@ -59,19 +57,18 @@ SAMPLE = {
     "meter_clip_db": -3.0,
     "announcer_voice": "Hazel",
     "announcer_output": "Speakers (Nonexistent)",
-    "remote_token": "SECRET-DO-NOT-LEAK",
     "applied_presets": {"Mic1": "Broadcast"},
-    "baseline_asked": ["9BF8-ED22"],
+    "baseline_asked": ["9BF8-ED22-DO-NOT-LEAK"],
 }
 
 print("EVERY SETTING HAS BEEN DECIDED ABOUT")
 check("no key the app writes is missing from all three lists",
       sorted(WRITTEN_BY_THE_APP - a.KNOWN), [])
 
-print("\nTHE EXPORT IS AN ALLOW-LIST, AND THE CREDENTIAL NEVER LEAVES")
+print("\nTHE EXPORT IS AN ALLOW-LIST, AND THIS MACHINE'S STATE NEVER LEAVES")
 exported = a.build_export(SAMPLE)
 blob = json.dumps(exported)
-check("the remote-access token is not in the file", "SECRET-DO-NOT-LEAK" not in blob, True)
+check("the first-run record is not in the file", "DO-NOT-LEAK" not in blob, True)
 for key in a.EXCLUDED:
     check(f"{key} is excluded", key not in exported["settings"], True)
 check("the shortcuts DID travel", "hotkeys" in exported["settings"], True)
@@ -81,7 +78,7 @@ check("it is marked as ours", exported["marker"], a.MARKER)
 # A key absent from settings must be absent from the export, not exported as null: a null would
 # stamp over a real value on the machine it is imported onto.
 check("an unset preference is omitted rather than written as null",
-      "meter_speak_every" not in exported["settings"], True)
+      "meter_clip_sound" not in exported["settings"], True)
 
 print("\nA FILE THAT IS NOT OURS IS REFUSED, AND SAYS WHAT TO USE INSTEAD")
 check("a random JSON file is refused", bool(a.validate({"hello": 1})), True)
@@ -92,12 +89,11 @@ check("a file with no settings in it is refused",
       bool(a.validate({"marker": a.MARKER, "version": 1})), True)
 check("our own export passes", a.validate(exported), "")
 
-print("\nIMPORT MERGES, SO THIS MACHINE'S OWN SECRETS AND STATE SURVIVE")
-onto = {"remote_token": "THIS-MACHINES-OWN-TOKEN", "baseline_asked": ["OTHER-DESK"]}
+print("\nIMPORT MERGES, SO THIS MACHINE'S OWN STATE SURVIVES")
+onto = {"baseline_asked": ["OTHER-DESK"]}
 changes, report = a.merge_import(exported, onto, {"announcer_voice": ["Hazel", "George"],
                                                   "announcer_output": ["Remote Audio"]})
-check("the local token is not in the changes", "remote_token" not in changes, True)
-check("nor is the local first-run record", "baseline_asked" not in changes, True)
+check("the local first-run record is not in the changes", "baseline_asked" not in changes, True)
 check("the shortcuts came across", "hotkeys" in changes, True)
 
 print("\nA DEVICE THIS COMPUTER HAS NOT GOT IS REPORTED, NOT SILENTLY APPLIED")
@@ -118,10 +114,10 @@ check("with no lists at all, the machine-specific settings still apply",
 
 print("\nA HAND-EDITED FILE CANNOT SMUGGLE ANYTHING IN")
 evil = {"marker": a.MARKER, "version": 1,
-        "settings": {"remote_token": "HACKED", "baseline_asked": ["x"],
+        "settings": {"applied_presets": {"Mic1": "x"}, "baseline_asked": ["x"],
                      "something_invented": 1, "hotkeys": {"x": 1}}}
 changes3, report3 = a.merge_import(evil, {}, {})
-check("the token is refused", "remote_token" not in changes3, True)
+check("a desk record is refused", "applied_presets" not in changes3, True)
 check("the first-run record is refused", "baseline_asked" not in changes3, True)
 check("an unknown key is refused", "something_invented" not in changes3, True)
 check("all three are reported as ignored", len(report3["ignored"]), 3)

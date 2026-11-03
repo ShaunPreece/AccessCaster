@@ -25,15 +25,16 @@ stack.
              part under test.
   exportonly an export command and NO reset: what the reset dialog's backup sends on a desk with no
              drive, before the reset refuses. Proven by `showControlLastError`, not by a new uuid.
-  app        THE WHOLE RUNNING SERVER, end to end over HTTP. THE CONTROL, and it must be run: if
-             every layer above comes up clean and this still drops, a layer is missing and the list
-             is wrong. Exclusive - it ignores the other layers, because the app brings its own.
+  app        THE APP'S OWN SERVICE, run in this process with its watchers, through its own reset
+             action. THE CONTROL, and it must be run: if every layer above comes up clean and this
+             still drops, a layer is missing and the list is wrong. Exclusive - it ignores the other
+             layers, because the app brings its own. Quit AccessCaster first, for every layer.
 
 PRESENCE IS CHECKED WITHOUT OPENING ANYTHING. `hid.enumerate` briefly opens each device on Windows to
 read its strings, which would put HID traffic inside the very window this test depends on being
 quiet, so presence comes from PowerShell's `Get-PnpDevice` - pure SetupAPI, no handle. It is also a
-SEPARATE PROCESS, which is what makes it valid for the `app` layer, where the thing under test is the
-process we would otherwise be asking.
+SEPARATE PROCESS, which is what makes it valid for the `app` layer, where the thing under test is
+this process itself.
 
 EVERY TRIAL PROVES THE RESET ACTUALLY RAN, by reading the loaded show's uuid afterwards.
 `newFromDefault` mints a NEW uuid, so an unchanged one means the command did nothing: that trial is
@@ -68,12 +69,14 @@ import hid
 import rcp_hid
 import rcp_read
 import shows
-from _desk import BASE, api, rode_devices_present, wait_for_job
+import _desk
+from _desk import rode_devices_present, wait_for_job
 
 QUIET_SECONDS = 20.0
 POLL_S = 1.5                    # shows.POLL_S, so `poll` polls exactly as the app does
 SAMPLE_AT = (3.0, 10.0, 20.0)
 LAYERS = ("handles1", "handles2", "poll", "export", "exportonly", "app")
+server = None
 
 
 def uuid_direct() -> str | None:
@@ -82,7 +85,7 @@ def uuid_direct() -> str | None:
 
 def uuid_via_app() -> str | None:
     """The app's own answer, so the `app` layer never opens a competing handle of ours."""
-    return (api("/api/shows").get("current") or {}).get("uuid")
+    return (server.read_show_state().get("current") or {}).get("uuid")
 
 
 class Load:
@@ -190,10 +193,10 @@ def fire_in_process(layers: set) -> str:
 
 
 def fire_via_app() -> str:
-    """Drive the real server. backup_first=false because a Duo has nowhere to save one, and a
+    """Drive the app's own reset. backup_first False because a Duo has nowhere to save one, and a
     refused backup would stop the reset before it ever ran (action_show_reset refuses rather than
     reset unbacked, on purpose)."""
-    started = api("/api/shows/reset", timeout=20.0, post={"backup_first": False})
+    started = server.action_show_reset(False)
     if not started.get("ok", True) and "already running" in str(started.get("message", "")):
         return f"app REFUSED: {started.get('message')}"
     return f"app: {started.get('message') or started}"
@@ -243,7 +246,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
         load.stop()
     if use_app:
         try:
-            st = wait_for_job(lambda: api("/api/shows/status", timeout=15.0), 90.0)
+            st = wait_for_job(server.show_job_status, 90.0)
             print(f"  app job: {st.get('message') or 'job finished'}")
         except TimeoutError as e:
             print(f"  app job: {e}")
@@ -311,11 +314,12 @@ def main() -> int:
     print(f"USB drop test. Layers: {name}. {trials} trials, {quiet:.0f}s window each.")
     print("EVERY TRIAL IS AN UNBACKED FACTORY RESET. Expendable desks only.")
 
+    global server
+    server = _desk.service(start="app" in layers)
     if "app" in layers:
-        probe = api("/api/shows", timeout=15.0)
+        probe = server.read_show_state()
         if not probe.get("ok"):
-            print(f"The server is not answering on {BASE}: {probe.get('message')}")
-            print("Start it first: python DevTools/run_dev_server.py")
+            print(f"The app's service could not read the desk: {probe.get('message')}")
             return 2
         baseline = uuid_via_app()
     elif "exportonly" in layers:

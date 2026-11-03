@@ -345,7 +345,7 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
 
 
 # A scheme that names more outputs than this is SUMMARISED rather than listed. It is read aloud
-# through the page's live region, and a full-desk scheme listed output by output is a 60-word
+# as the window's reply, and a full-desk scheme listed output by output is a 60-word
 # sentence nobody can hold in their head - the custom mixes are the part worth hearing.
 _DESCRIBE_LIST_LIMIT = 3
 
@@ -356,8 +356,8 @@ def scope_text(scheme: dict, device=None) -> str:
     WHY THE LABEL AND NOT THE DESCRIPTION: the description hangs off the Apply button, so it is
     heard after the choice is made rather than while it is being made, and whether a preset leaves
     every other output alone is exactly what the choice turns on. A suffix on the option is read as
-    you arrow past it, and it cannot be put on the dropdown as a description without a screen
-    reader re-announcing it over the option name (see index.html, the deliberate omission there).
+    you arrow past it, and it cannot be put on the list as a description without a screen
+    reader re-announcing it over the option name.
 
     DERIVED, NEVER STORED. A preset saved on a Pro 2 and read on a Duo names outputs that desk does
     not have, and a stored phrase would then be a lie."""

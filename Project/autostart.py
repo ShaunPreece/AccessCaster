@@ -15,15 +15,15 @@ name and an uninstall leaves a Run entry pointing at a deleted exe - a startup e
 with nothing left on the machine to turn it off. `DevTools/test_autostart.py` reads `installer.iss`
 and asserts the two still agree, because nothing else would notice them drifting.
 
-HKCU AND NEVER HKLM. AccessCaster serves a FIXED port (8770), so a machine-wide Run entry would
-start an instance for every account that signs in and they would fight over it. That is not
-hypothetical: a machine can have somebody at the console and somebody else in an RDP session at
-once. Autostart is a choice each account makes for itself, which is why the wording says
+HKCU AND NEVER HKLM. Only one copy of AccessCaster runs per PC (instance.py), so a machine-wide Run
+entry would start it for every account that signs in and all but the first would be refused. That
+is not hypothetical: a machine can have somebody at the console and somebody else in an RDP
+session at once. Autostart is a choice each account makes for itself, which is why the wording says
 "when YOU sign in".
 
 THE `--startup` FLAG IS THE WHOLE DIFFERENCE BETWEEN THIS AND A NORMAL LAUNCH. Started by hand you
-want the page; started at login you want the tray, the announcer and the global shortcuts, and no
-browser window taking the focus you were using for something else. `tray.main` reads it.
+want the window; started at login you want the tray, the announcer and the global shortcuts, and
+no window taking the focus you were using for something else. `tray.main` reads it.
 """
 from __future__ import annotations
 

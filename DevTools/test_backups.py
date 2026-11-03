@@ -31,7 +31,7 @@ from _testkit import check, patched
 
 
 def page_name(entry: dict) -> str:
-    """What `selectedBackupName()` in app.js sends for a backups list entry."""
+    """What the Backups page sends for a list entry (`native/backups_section.py`)."""
     return entry["key"] if entry["kind"] == "unit" else entry["name"]
 
 
@@ -72,49 +72,6 @@ try:
         rename_and_delete(tmp)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
-
-
-print("EVERY KEY THE PAGE POSTS IS READ BY ITS ROUTE")
-APP_JS = Path(server.STATIC_DIR) / "app.js"
-CALL = re.compile(r'postJSON\(\s*"(/api/[^"]+)"\s*,\s*\{')
-
-
-def object_keys(text: str, start: int) -> list[str]:
-    """The top-level keys of the object literal whose opening brace is at `start`."""
-    depth, pieces, piece = 0, [], ""
-    for ch in text[start + 1:]:
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            if depth == 0:
-                pieces.append(piece)
-                break
-            depth -= 1
-        if ch == "," and depth == 0:
-            pieces.append(piece)
-            piece = ""
-        else:
-            piece += ch
-    keys = []
-    for p in pieces:
-        m = re.match(r"\s*(\w+)\s*(?::|$)", p)
-        if m:
-            keys.append(m.group(1))
-    return keys
-
-
-source = APP_JS.read_text(encoding="utf-8")
-calls = 0
-for m in CALL.finditer(source):
-    route = m.group(1)
-    if route not in server.POST_ROUTES:
-        continue
-    calls += 1
-    read = {key for (_, key, _) in server.POST_ROUTES[route][1]}
-    dropped = [k for k in object_keys(source, m.end() - 1) if k not in read]
-    line = source.count("\n", 0, m.start()) + 1
-    check(f"app.js:{line} {route} posts only keys its route reads", dropped, [])
-check("the page's literal posts were found", calls > 30, True)
 
 
 sys.exit(_testkit.finish())

@@ -287,11 +287,10 @@ class FaderSpec:
 class InputStripSpec:
     """Flexible input-source strips for the older by-NAME routing view.
 
-    This is the older representation of fader assignment, consumed by server.py's
-    routing_model / read_routing_live / action_set_input_source (the /api/routing/inputsource
-    endpoint). It exposes the reassignable strips by a fixed NAME and offers a small source palette
-    to drop onto them. The device-aware fader_model (FaderSpec) is the primary, INDEX-based view;
-    this by-name view remains only for that endpoint.
+    This is the older representation of fader assignment, consumed by server.read_routing_live's
+    `input_sources`. It exposes the reassignable strips by a fixed NAME and offers a small source
+    palette to drop onto them. The device-aware fader_model (FaderSpec) is the primary, INDEX-based
+    view.
 
       strips  : (key, vec_index, label) per reassignable strip. `vec_index` is the strip's
                 position in the channelInputSource vector, written with set_fader_source.
@@ -299,7 +298,7 @@ class InputStripSpec:
 
     A device that uses ONLY the index-based fader_model leaves this EMPTY (the default). The Duo
     does, because its flexible strips sit at different vector positions. With an empty spec the
-    by-name endpoints report nothing and refuse.
+    by-name read reports nothing.
     """
     strips: tuple = ()
     sources: tuple = ()
@@ -500,7 +499,7 @@ CHANNELS_PRO2 = (
     # the SMART pads") and so does their app, which offers no processing for it. A write landing
     # at its own address proves an address is live, never that it reaches audio.
     # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
-    # channels.read_channels, which is where that is enforced, and app.js renderChannelPanel.
+    # channels.read_channels, which is where that is enforced, and native/channel_tabs.build_tabs.
     # DO NOT PUT THE CHAIN BACK on the strength of a write reading back cleanly. It will.
     #
     # Its level is its FADER, not inputDigitalGain (slot 11 reads a flat 0 while every real line

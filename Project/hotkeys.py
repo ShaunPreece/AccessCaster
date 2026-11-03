@@ -2,13 +2,11 @@
 
 WHAT THIS IS FOR. Some things you want from the desk are things you want NOW, from whatever app you
 are in: turn the announcer off because it is talking over a guest, mute every mic because you are
-about to cough, start the recording. Opening the web UI and finding the control is the wrong shape
-for all three. A global hotkey works while the browser window is closed and while another
-application has focus, which is exactly the case the rest of this app cannot serve.
+about to cough, start the recording. Opening the window and finding the control is the wrong shape
+for all three. A global hotkey works while the window is closed and while another application has
+focus, which is exactly the case the rest of this app cannot serve.
 
-WHY IT LIVES IN PYTHON AND NOT IN THE PAGE. A web page only sees keys pressed while it has focus, so
-the browser can configure a shortcut but can never be the thing that catches it. Windows' own
-RegisterHotKey is the mechanism, and it has two properties worth having: the OS owns the binding, so
+Windows' own RegisterHotKey is the mechanism, and it has two properties worth having: the OS owns the binding, so
 no keyboard hook and no key logging is involved, and a combination another program already owns is
 REFUSED at registration rather than silently stolen. See `_apply_now` for what we do with that
 refusal.
@@ -31,7 +29,7 @@ ACCESSIBILITY RULES, and they are the reason for the validation in `parse_bindin
     re-learnt per screen reader.
   - MOD_NOREPEAT is always set. Without it, holding a key fires the action over and over.
   - EVERY ACTION SPEAKS ITS RESULT, UNLESS THAT SHORTCUT IS SET TO STAY QUIET. When a hotkey fires,
-    focus is in another application, so the web UI cannot report anything: the spoken reply is
+    focus is in another application, so the window cannot report anything: the spoken reply is
     normally the only feedback there is. But the case the announcer shortcut exists for is realising
     mid-take that announcements are going into the mix, and speaking
     "announcements off" into that mix is the exact thing you just pressed a key to stop. So each

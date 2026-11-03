@@ -6,22 +6,22 @@ rearranges itself unannounced is worst for a screen-reader user, who finds out b
 change.
 
 The index format, the signature check, the version comparison, the download and every sentence
-belong to the `selfupdate` package. This module owns WHEN to ask, WHO is told, and the job the page
-follows. It never imports the server and holds no browser wording: the page shows what `state()`
-and `job()` hand it.
+belong to the `selfupdate` package. This module owns WHEN to ask, WHO is told, and the job the
+window follows. It never imports the window: the window shows what `state()` and `job()` hand it.
 
 WHO IS TOLD WHAT:
   - An automatic check that finds a version raises a WINDOWS NOTIFICATION from the tray icon
     (`notify`, installed by `tray.py`), never the app's own voice: speech nobody asked for talks
     over the screen reader. Every other automatic outcome is silent.
-  - A check the user asked for answers where it was asked: the page's own reply, or another
+  - A check the user asked for answers where it was asked: the window's own reply, or another
     notification for the tray's menu item.
-  - The decision and the download are the page's, in its two update dialogs.
+  - The decision and the download are the window's, in its two update dialogs.
 
-HOW THE INSTALL ENDS. Download, then `ready`, and NOTHING HAPPENS until the page says `proceed`:
-the page takes its controls away and gives the closing sentence time to be heard first, because
-said after the installer starts it is cut off mid-word. A page that never says it (closed, or
-gone) leaves the verified installer on disk and installs nothing, after `PROCEED_WITHIN_S`.
+HOW THE INSTALL ENDS. Download, then `ready`, and NOTHING HAPPENS until the window says `proceed`:
+the progress dialog takes its controls away and gives the closing sentence time to be heard first,
+because said after the installer starts it is cut off mid-word. A dialog that never says it
+(closed, or gone) leaves the verified installer on disk and installs nothing, after
+`PROCEED_WITHIN_S`.
 """
 from __future__ import annotations
 
@@ -48,21 +48,20 @@ _SKIPPED_KEY = "app_update_skipped"
 # launch, which is the only process that can say whether the install took.
 _INSTALLING_KEY = "app_update_installing"
 
-# How long after start-up before the first automatic check. The greeting, the startup summary and
-# the first page load own those seconds, and an update is something the user can deal with whenever
-# they like.
+# How long after start-up before the first automatic check. The greeting and the window's first
+# reads own those seconds, and an update is something the user can deal with whenever they like.
 SETTLE_S = 60
 
 # How often the running app asks `interval.is_due`. AccessCaster lives in the tray for days, so the
 # check has to come round while it runs, not only at launch.
 POLL_S = 3600
 
-# How long the page has, once the download is ready, to say `proceed`. Generous: the page waits
-# for a long sentence to be read first. Past it the page is taken to be gone.
+# How long the window has, once the download is ready, to say `proceed`. Generous: it waits for a
+# long sentence to be read first. Past it the dialog is taken to be gone.
 PROCEED_WITHIN_S = 120
 
-# How long a report from the far side of a restart waits for a page to take it before it is raised
-# as a notification instead. The page that started the update reconnects within seconds.
+# How long a report from the far side of a restart waits for the window to take it before it is
+# raised as a notification instead. The restart opens the window, which takes it within seconds.
 REPORT_WAIT_S = 30
 
 # /VERYSILENT rather than /SILENT: under /SILENT Setup's progress window takes focus on its Cancel
@@ -77,7 +76,7 @@ INSTALLER_ARGS = ["/VERYSILENT", "/RESTARTAPPLICATIONS", "/NORESTART"]
 # close this one.
 _DETACHED = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
-# Job stages, as the page reads them.
+# Job stages, as the window reads them.
 DOWNLOADING = "downloading"
 CHECKING = "checking"
 READY = "ready"
@@ -86,11 +85,11 @@ FAILED = "failed"
 CANCELLED = "cancelled"
 _ACTIVE = (DOWNLOADING, CHECKING, READY)
 
-# Installed by tray.py. `notify(text)` raises a Windows notification; `open_page()` raises or
-# opens the page, which then finds `_open_request` set and opens the decision. Both are None in a
-# dev server run, where there is no tray: the notice is then only logged.
+# Installed by tray.py. `notify(text)` raises a Windows notification; `open_window()` shows the
+# window, which then finds `_open_request` set and opens the decision. Both are None in a DevTools
+# run, where there is no tray: the notice is then only logged.
 notify = None
-open_page = None
+open_window = None
 
 _lock = threading.Lock()
 # A check or a download is in flight. COVERS THE NETWORK CALL ONLY, never the decision: held across
@@ -100,7 +99,7 @@ _busy = False
 # the decision without going back to the network.
 _offer = None
 _job = None
-# The tray asked the page to open the decision.
+# The tray asked the window to open the decision.
 _open_request = False
 # What the last update did, from the far side of its restart: {"kind": "updated" | "failed", "text"}.
 _report = None
@@ -169,7 +168,7 @@ def _later(seconds, fn, *args) -> None:
 
 def start() -> None:
     """Report what the last update did, then keep the automatic check running. Called once, from
-    the server's bring-up."""
+    `server.start_service`."""
     global _started
     if _started:
         return
@@ -234,7 +233,7 @@ def _run_check():
 
 
 def check_now() -> dict:
-    """Check for updates now, from the page: its button and F12. Opens the decision straight from
+    """Check for updates now, from the window: its button and F12. Opens the decision straight from
     a held offer rather than asking the network an answer it already has. A skipped version is
     offered like any other here: the skip silences the automatic check only."""
     global _offer
@@ -261,7 +260,7 @@ def check_now() -> dict:
 
 def check_from_tray() -> None:
     """The tray menu's item, on a thread of its own so the menu does not wait on the network. An
-    offer opens the decision on the page; anything else is answered in a notification, which is
+    offer opens the decision in the window; anything else is answered in a notification, which is
     where the user asked from."""
     def work():
         reply = check_now()
@@ -279,16 +278,16 @@ def held_version():
 
 
 def request_decision() -> None:
-    """Have the page open the decision: the tray's Install item and the notification's click."""
+    """Have the window open the decision: the tray's Install item and the notification's click."""
     global _open_request
     with _lock:
         _open_request = True
-    if open_page is not None:
-        open_page()
+    if open_window is not None:
+        open_window()
 
 
 def take_request() -> bool:
-    """True once per request; the page's heartbeat asks."""
+    """True once per request; the window asks as it opens."""
     global _open_request
     with _lock:
         asked, _open_request = _open_request, False
@@ -333,7 +332,7 @@ def set_interval(days: int) -> dict:
 # ---- the download -------------------------------------------------------------------------------
 
 def install(version: str) -> dict:
-    """Start downloading the held offer. `version` is the one the page's dialog showed, so an
+    """Start downloading the held offer. `version` is the one the decision showed, so an
     offer replaced in between cannot be installed under the old one's notes."""
     global _busy, _job
     with _lock:
@@ -393,7 +392,7 @@ def _forget_the_offer() -> None:
 
 
 def job() -> dict:
-    """The download's progress, for the page's progress dialog to poll."""
+    """The download's progress, for the progress dialog to poll."""
     with _lock:
         return {"ok": True, "job": _job.payload() if _job is not None else None}
 
@@ -418,13 +417,13 @@ def _proceed_timed_out(job: _Job) -> None:
         if job.stage != READY:
             return
         job.stage, job.message = CANCELLED, phrases.CANCELLED_DOWNLOAD
-    checker.log("no page asked to install, so nothing was installed")
+    checker.log("the window did not ask to install, so nothing was installed")
 
 
 # ---- the hand-off -------------------------------------------------------------------------------
 
 def proceed() -> dict:
-    """The page has taken its controls away and the closing sentence has been read: start the
+    """The dialog has taken its controls away and the closing sentence has been read: start the
     installer and leave it to close the app.
 
     THE APP DOES NOT EXIT ITSELF HERE. The installer's Restart Manager asks it to close, and
@@ -484,14 +483,14 @@ def _read_outcome() -> None:
 
 
 def report_waiting() -> bool:
-    """Whether a report is waiting, without taking it, so a page asks to take one only when there
-    is one."""
+    """Whether a report is waiting, without taking it, so the window asks to take one only when
+    there is one."""
     with _lock:
         return _report is not None
 
 
 def take_report():
-    """The report, once. The page that started the update takes it when it reconnects."""
+    """The report, once. The window takes it when the restart opens it."""
     global _report
     with _lock:
         report, _report = _report, None
@@ -499,8 +498,8 @@ def take_report():
 
 
 def _report_unclaimed() -> None:
-    """No page took the report: the update was started and the window closed before it finished.
-    Said as a notification, so the user hears the outcome of what they started."""
+    """The window did not take the report in time. Said as a notification instead, so the user
+    hears the outcome of what they started."""
     report = take_report()
     if report is not None:
         _notify(report["text"])
@@ -518,7 +517,7 @@ def _discard_downloads() -> None:
         checker.log(f"could not remove {folder}")
 
 
-# ---- what the page reads ------------------------------------------------------------------------
+# ---- what the window reads ----------------------------------------------------------------------
 
 def _settings_payload() -> dict:
     days = interval.normalise(_setting(_DAYS_KEY, interval.DEFAULT))
@@ -535,7 +534,7 @@ def _settings_payload() -> dict:
 
 
 def state() -> dict:
-    """Everything the page needs: the settings, any offer waiting, and the job in flight."""
+    """Everything the window needs: the settings, any offer waiting, and the job in flight."""
     with _lock:
         current = _job.payload() if _job is not None else None
     return {"ok": True, "running": __version__, "settings": _settings_payload(),

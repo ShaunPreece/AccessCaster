@@ -199,10 +199,6 @@ def _saved_record_feedback(saved: dict) -> str:
 
 
 record_feedback = _saved_record_feedback(settings_file.load())
-# SPEAK THE DESK'S STATE WHEN THE APP OPENS. It is an ANNOUNCEMENT, not a page, so it is a setting
-# of its own rather than a side effect of which page the app opens on. Default ON: knowing the
-# desk's state without looking is the point of the app, and on a normal desk it is one sentence.
-startup_summary = bool(settings_file.load().get("announcer_startup_summary", True))
 
 
 def _load_remember() -> bool:
@@ -878,8 +874,8 @@ def flush_pending(st: dict) -> None:
 # reliable cache: it can lag, and it is absent while the announcer is off, which is why the publish
 # helpers below still exist.
 #
-# Without the suppression below, every change is said TWICE: the screen reader reads our live region
-# and the announcer speaks the echo. The fix is narrow on purpose: suppress the SPEECH for the exact
+# Without the suppression below, every change is said TWICE: the screen reader reads the window's
+# reply and the announcer speaks the echo. The fix is narrow on purpose: suppress the SPEECH for the exact
 # target just written, for a moment, and never the cache updates. A change made ON the desk is
 # unaffected and still speaks at once, which is the whole point of the announcer and why "turn it
 # off while the app has focus" is the wrong shape. The window is refreshed by each write, so dragging
@@ -938,7 +934,7 @@ def mark_self_gain(key, is_mic: bool) -> None:
 def publish_level(kind: str, idx: int, level01: float) -> None:
     """Tell the announcer about a level WE just wrote, so the encoder ring quotes the new value.
 
-    Cache only, deliberately SILENT: the web UI already announces the result in its live region, and
+    Cache only, deliberately SILENT: the window already speaks the result, and
     speaking as well would say everything twice. Keyed exactly as the ring is - ("fader", fader
     index) or ("monitor", 0) - so no layout translation is needed (that is only for cross-point
     pushes, which arrive keyed by source code). Safe no-op when the announcer is off.
@@ -967,8 +963,8 @@ def publish_level(kind: str, idx: int, level01: float) -> None:
 def publish_mute(strip_idx: int, on: bool) -> None:
     """Tell the announcer about a mute WE just wrote, so the encoder ring keeps quoting the truth.
 
-    Same contract as publish_level: cache only, deliberately SILENT (the web UI announces the
-    mute itself in its live region), and it marks the echo so the announcer does not say it a second
+    Same contract as publish_level: cache only, deliberately SILENT (the window speaks the
+    mute itself), and it marks the echo so the announcer does not say it a second
     time. The ring says "Mic 2 muted" instead of a level for a muted channel, so without the cache a
     mute set from here would leave the ring reading out a level nobody can hear, the mirror image of
     a stale level. Keyed by STRIP index, exactly as the desk's own pushes are,
@@ -1313,28 +1309,12 @@ def action_set_announce_remember(on: bool) -> dict:
                         else "Announcements will always be on when the app starts.")}
 
 
-def action_set_announce_startup_summary(on: bool) -> dict:
-    """Whether the desk's state is spoken when the app opens.
-
-    Only the EXCEPTIONS: what is muted or soloed, a pad left switched on, a recording already
-    running, a nearly-full drive, and any output not on its usual mix. On a desk with nothing to
-    report it is a single sentence saying so. The full picture stays on the Device page, which is
-    where you go when the sentence tells you something is wrong.
-    """
-    global startup_summary
-    startup_summary = bool(on)
-    settings_file.update(announcer_startup_summary=startup_summary)
-    return {"ok": True, "startup_summary": startup_summary,
-            "message": ("The desk's state will be spoken when the app opens."
-                        if on else "The desk's state will not be spoken when the app opens.")}
-
-
 def apply_settings(changes: dict) -> None:
     """Push restored announcer preferences into the running announcer, not just the file.
 
     `announcer` (the remembered on or off) is left to the next launch: switching speech on or off
     in the middle of an import would be its own surprise."""
-    global remember, levels_on, mute_tones, record_feedback, startup_summary
+    global remember, levels_on, mute_tones, record_feedback
     if "announcer_remember" in changes:
         remember = bool(changes["announcer_remember"])
     if "announcer_levels" in changes:
@@ -1343,5 +1323,3 @@ def apply_settings(changes: dict) -> None:
         mute_tones = bool(changes["announcer_mute_tones"])
     if "announcer_record_feedback" in changes or "announcer_record_tones" in changes:
         record_feedback = _saved_record_feedback(changes)
-    if "announcer_startup_summary" in changes:
-        startup_summary = bool(changes["announcer_startup_summary"])

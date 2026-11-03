@@ -226,8 +226,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
     def _show_driver(self, driver):
         text = driver.get("text") or ""
         if text != self.driver_text.GetValue():
-            # Said while the page is shown, as the web page's live line is: a bind landing is
-            # worth hearing.
+            # Said while the page is shown: a bind landing is worth hearing.
             if self._driver is not None and self.IsShownOnScreen() and text:
                 self.frame.say(text)
             self.driver_text.SetValue(text)

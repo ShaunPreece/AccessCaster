@@ -21,11 +21,11 @@ THE JOB DURATION IS THE HONEST WORK PROXY. A job under NOOP_S means the desk did
 whatever the delta claimed. Every trial prints it, so a run that quietly degenerated into no-ops
 cannot be read as a clean result.
 
-IT DRIVES THE RUNNING SERVER OVER HTTP AND OPENS NOTHING ITSELF. The app owns the device, and a
-second process with its own handle would be a variable in the measurement rather than a tool for
-it. Presence comes from PowerShell `Get-PnpDevice` for the same reason `test_usb_drop_live` uses it:
-`hid.enumerate` OPENS each device on Windows, so asking the question would put traffic on the wire
-inside the window that has to stay quiet.
+IT RUNS THE APP'S SERVICE ITSELF, THE WATCHERS INCLUDED, so the desk sees the handles it sees
+when the app is running and nothing more. Quit AccessCaster first. Presence comes from PowerShell
+`Get-PnpDevice` for the same reason `test_usb_drop_live` uses it: `hid.enumerate` OPENS each device
+on Windows, so asking the question would put traffic on the wire inside the window that has to
+stay quiet.
 
 EVERYTHING IT DISTURBS IS SILENT AND REVERSIBLE: mic gains and virtual fader levels, both of which
 a profile and a show carry. It never touches phantom power (a pop on a live mic), the monitor
@@ -43,7 +43,7 @@ show command, no reload from the desk's own file, no mass-storage gadget. So it 
 The arm is not optional, because the case against shows is association and nothing more: the
 dropout also happens with nothing of ours running.
 
-Usage, with the app or `DevTools/run_dev_server.py` already serving:
+Usage, with AccessCaster quit:
 
     python DevTools/probe_import_drop.py --list
     python DevTools/probe_import_drop.py --backup show:N --delta 7 --trials 10
@@ -51,13 +51,14 @@ Usage, with the app or `DevTools/run_dev_server.py` already serving:
     python DevTools/probe_import_drop.py --backup show:N --delta 0     # a true no-op, for comparison
 """
 import argparse
-import subprocess
-import sys
 import time
 
 import _bootstrap  # puts Project/ on the path; import FIRST
 import diagnostics
-from _desk import api, rode_devices_present, wait_for_job
+import _desk
+from _desk import rode_devices_present, wait_for_job
+
+server = None
 
 SETTLE_S = 6.0          # between trials, so one import is not still landing when the next starts
 STATUS_POLL_S = 2.0
@@ -70,19 +71,19 @@ NOOP_S = 8.0            # a job quicker than this did essentially nothing, whate
 # same N knobs and two runs at the same delta are comparable.
 
 def _mic_gains() -> list:
-    got = api("/api/channels")
+    got = server.action_get_channels()
     out = []
     for c in got.get("channels") or []:
         if c.get("kind") == "mic" and isinstance(c.get("level_db"), int):
             n = int(c["name"].replace("Mic", ""))
             out.append((f"gain {c['name']}",
                         lambda name=c["name"]: _one_channel(name, "level_db"),
-                        lambda v, n=n: api("/api/channel/gain", post={"channel": n, "db": v})))
+                        lambda v, n=n: server.action_set_gain(n, v)))
     return out
 
 
 def _one_channel(name: str, key):
-    for c in api("/api/channels").get("channels") or []:
+    for c in server.action_get_channels().get("channels") or []:
         if c.get("name") == name:
             return c.get(key)
     return None
@@ -90,18 +91,17 @@ def _one_channel(name: str, key):
 
 def _fader_levels() -> list:
     out = []
-    for f in api("/api/faders/levels").get("faders") or []:
+    for f in server.fader_levels_live().get("faders") or []:
         if isinstance(f.get("percent"), int):
             i = f["index"]
             out.append((f"level fader {i + 1}",
                         lambda i=i: _one_fader(i),
-                        lambda v, i=i: api("/api/faders/level",
-                                           post={"fader": i, "percent": v})))
+                        lambda v, i=i: server.action_set_fader_level(i, v)))
     return out
 
 
 def _one_fader(index: int):
-    for f in api("/api/faders/levels").get("faders") or []:
+    for f in server.fader_levels_live().get("faders") or []:
         if f.get("index") == index:
             return f.get("percent")
     return None
@@ -131,45 +131,6 @@ def put_back(chosen: list, originals: dict) -> list:
     return left
 
 
-# ---- restarting the server over the top of itself -------------------------------------------
-# THIS IS A FAULT CONDITION, NOT A CONVENIENCE. `server._close_previous_instances` taskkills
-# whatever is holding port 8770, and the incumbent is holding TWO open HID handles on MI_09 - the
-# announcer and the recorder watcher, both long-lived read handles. A force-kill tears those down
-# without ever closing them, so the desk is left with handles that were never released.
-#
-# That makes it a candidate cause in its own right, which `--restart kill` puts before every import.
-
-def listening_pid() -> int:
-    """The PID listening on 8770, or 0. netstat rather than anything that opens the device."""
-    out = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True)
-    for line in out.stdout.splitlines():
-        if "LISTENING" in line and line.split()[1].endswith(":8770"):
-            try:
-                return int(line.split()[-1])
-            except ValueError:
-                return 0
-    return 0
-
-
-def restart_over_the_top() -> bool:
-    """Start a fresh dev server, which force-kills the incumbent. True once the NEW one is serving.
-
-    Waits on the listening PID CHANGING rather than on the port answering, because the old server
-    answers every endpoint right up to the moment it is killed.
-    """
-    was = listening_pid()
-    subprocess.Popen([sys.executable, _bootstrap.devtools_path("run_dev_server.py")],
-                     cwd=_bootstrap.REPO, creationflags=subprocess.CREATE_NO_WINDOW)
-    deadline = time.monotonic() + 90.0
-    while time.monotonic() < deadline:
-        time.sleep(2.0)
-        now = listening_pid()
-        if now and now != was:
-            time.sleep(4.0)            # let its startup read and announcer settle
-            return True
-    return False
-
-
 def run_restore(name: str, via: str) -> dict:
     """Fire the restore and wait for the job, returning its final status.
 
@@ -185,21 +146,21 @@ def run_restore(name: str, via: str) -> dict:
 
     The reply's `via` says which job to poll: the two halves have separate job states.
     """
-    # THE PROFILE ARM GOES STRAIGHT TO `/api/profiles/restore`, NOT to the backup chooser, whose
+    # THE PROFILE ARM GOES STRAIGHT TO `restore_profile`, NOT to the backup chooser, whose
     # `clean=True` forces the profile only by FACTORY-RESETTING the desk first.
     if via == "profile":
-        started = api("/api/profiles/restore", post={"name": name, "clean": False})
-        status = "/api/profiles/restore/status"
+        started = server.restore_profile(name, False)
+        status = server.profile_restore_status
         started.setdefault("via", "profile")
     else:
-        started = api("/api/backup/restore", post={"name": name})
-        status = ("/api/shows/status" if started.get("via") == "show"
-                  else "/api/profiles/restore/status")
+        started = server.action_restore_backup(name)
+        status = (server.show_job_status if started.get("via") == "show"
+                  else server.profile_restore_status)
     if not started.get("ok"):
         return {"ok": False, "message": started.get("message") or "the restore did not start"}
     at = time.monotonic()
     try:
-        st = wait_for_job(lambda: api(status, timeout=15.0), JOB_CEILING_S, STATUS_POLL_S)
+        st = wait_for_job(status, JOB_CEILING_S, STATUS_POLL_S)
     except TimeoutError as e:
         st = {"ok": False, "message": str(e)}
     st["seconds"] = time.monotonic() - at
@@ -217,15 +178,14 @@ def main() -> int:
     ap.add_argument("--via", choices=("show", "profile"), default="show",
                     help="show: the import (showControlImport). profile: the CONTROL, ~148 "
                          "property writes, no show command and no storage gadget")
-    ap.add_argument("--restart", choices=("none", "kill"), default="none",
-                    help="kill: start a fresh server over the top before each import, which "
-                         "force-kills the incumbent and its two open HID handles")
     ap.add_argument("--list", action="store_true", help="list the backups and the knobs, then exit")
     args = ap.parse_args()
+    global server
+    server = _desk.service(start=True)
 
     if args.list:
         print("backups:")
-        for b in api("/api/backups").get("backups") or []:
+        for b in server.read_backups().get("backups") or []:
             show = f"   (--via show: show:{b['snapshot']})" if b.get("snapshot") is not None else ""
             print(f"  {b['kind']:<8} {b['name']}{show}")
         print("\nknobs, in the order --delta takes them:")
@@ -234,7 +194,7 @@ def main() -> int:
         return 0
     if not args.backup:
         ap.error("--backup is required (use --list to see them)")
-    # `/api/backup/restore` restores a paired backup through its profile and never imports its show,
+    # `action_restore_backup` restores a paired backup through its profile and never imports its show,
     # so a paired name on the show arm would run the control arm under the show arm's label.
     if args.via == "show" and not args.backup.startswith("show:"):
         ap.error(f"--via show needs a show:<snapshot> name; {args.backup!r} would restore through "
@@ -254,7 +214,7 @@ def main() -> int:
     originals = {label: read() for label, read, _w in chosen}
 
     print(f"{args.trials} x restore of {args.backup!r} via={args.via}, "
-          f"delta={len(chosen)} settings, restart={args.restart}, "
+          f"delta={len(chosen)} settings, "
           f"{baseline_devices} devices present.")
     print(f"The diagnostic log is {diagnostics.log_path()}")
     print(f"A job under {NOOP_S:.0f}s did essentially nothing: treat that trial as a no-op.")
@@ -262,14 +222,6 @@ def main() -> int:
 
     noops = 0
     for n in range(1, args.trials + 1):
-        if args.restart == "kill":
-            if not restart_over_the_top():
-                print(f"  trial {n}: the replacement server never took the port. Stopping.")
-                return 1
-            if rode_devices_present() < baseline_devices:
-                print(f"\nDROPPED ON THE RESTART ITSELF, before trial {n}'s import. That would be "
-                      f"a bigger finding than the import: the kill alone did it.")
-                return 1
         stamp = time.strftime("%H:%M:%S")
         # DISTURB, AND PROVE IT TOOK. A knob that silently refuses turns the trial into a no-op
         # that runs, and passes, without changing anything on the desk.

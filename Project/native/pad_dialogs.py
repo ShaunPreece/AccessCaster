@@ -301,7 +301,7 @@ APPLY_HELP = {
 
 
 def add_sound(grid, path):
-    """Put the file at `path` on the pad, as the web page's upload does."""
+    """Put the file at `path` on the pad."""
     name = os.path.basename(path)
     try:
         with open(path, "rb") as f:

@@ -1,5 +1,5 @@
 """Offline tests of AccessCaster's own update: the rules, the signed check, the download, the
-wording, and the server-side job the page follows. NO NETWORK, nothing installed, no desk.
+wording, and the job the window follows. NO NETWORK, nothing installed, no desk.
 
 Nearly every check here pins a failure that is SILENT in the field. An off-by-one in the version
 comparison shows up as a user never being offered anything, which looks exactly like no release
@@ -25,7 +25,6 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path; import FIRST)
 import _testkit
 import app_updates
-import server
 import settings_file
 from _testkit import check, check_true, patched
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -197,7 +196,7 @@ sentences = [phrases.available("2.64.0"), phrases.confirm_title("2.64.0"),
              phrases.CHECKING_STAGE, phrases.READY_STAGE, phrases.CANCELLED_DOWNLOAD,
              phrases.COULD_NOT_DOWNLOAD, phrases.WRONG_CHECKSUM, phrases.COULD_NOT_CHECK,
              phrases.CANNOT_CHECK, phrases.ALREADY_CHECKING, phrases.OFFER_CHANGED,
-             phrases.LOCAL_ONLY, phrases.not_back("2.64.0"), phrases.up_to_date("2.63.0"),
+             phrases.not_back("2.64.0"), phrases.up_to_date("2.63.0"),
              phrases.skipped("2.64.0"), phrases.just_updated("2.64.0"),
              phrases.update_did_not_take("2.63.0", r"C:\x\AccessCasterSetup-v2.64.0.exe"),
              phrases.settings_status("once a day", None, "2.64.0", datetime.date(2026, 11, 1)),
@@ -263,7 +262,7 @@ with patched((checker, {"run": lambda running, skipped: found}),
           app_updates.install("2.65.0")["ok"], False)
     check("the right version starts", app_updates.install("2.64.0")["ok"], True)
     check("the job reaches ready", (wait_for("ready") or {}).get("stage"), "ready")
-    check("nothing is launched until the page says proceed", launched, [])
+    check("nothing is launched until the window says proceed", launched, [])
     check("proceed starts the installer", app_updates.proceed()["ok"], True)
     args = launched[0][0][0] if launched else []
     check("silently, restarting the app, never rebooting", args[1:],
@@ -325,13 +324,12 @@ app_updates.request_decision()
 check("the tray's request is taken once", (app_updates.take_request(), app_updates.take_request()),
       (True, False))
 
-print("\nTHE SERVER AND THE INSTALLER")
-check("every update route is local only", server.UPDATE_ROUTES - server.LOCAL_ONLY_ROUTES, set())
-check("and every one of them is served", server.UPDATE_ROUTES - set(server.POST_ROUTES), set())
+print("\nTHE RESTART AND THE INSTALLER")
 check("a source run never registers a restart", restart.register(), False)
 iss = (REPO / "ProjectBuilds" / "installer.iss").read_text(encoding="utf-8")
-check_true("a silent update does not re-add the firewall rule, which would raise UAC",
-           "not (WizardSilent and FirewallRuleAlreadyAdded)" in iss)
+check_true("a silent update never touches the firewall rule, which would raise UAC",
+           "not WizardSilent and FirewallRuleAdded" in iss)
+check_true("and no install adds one", "add rule" not in iss)
 
 print("\nTHE NOTES THE PUBLISHER READS")
 sys.path.insert(0, str(REPO / "ProjectBuilds"))

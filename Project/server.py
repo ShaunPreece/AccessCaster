@@ -1,46 +1,31 @@
 """
-AccessCaster - accessible local web server.
+AccessCaster - the service: everything the app knows about and does to the desk.
 
 A screen-reader and keyboard friendly controller for the RODECaster Pro II and Duo. It talks to
 the unit over the same USB control channel RODE's own app uses, and every control shows the
 unit's real state: one command makes the desk stream its whole property model, which rcp_read
 parses.
 
-Design (matches the sibling Access Deck / LightSwitch apps):
-- stdlib http.server only, no web framework
-- real native HTML controls, ARIA live regions, true modal <dialog> for any
-  decision UI
-- built to WCAG 2.2 AA and the ARIA APG rather than to one screen reader's quirks, which is
-  what should make it behave the same across them. EXERCISED on NVDA; JAWS and Narrator
-  have had some testing and VoiceOver none, so "should" is doing real work in that sentence
-
-Run:  python server.py
-Then open http://localhost:8770  (also reachable from another device on the LAN
-at http://<this-pc-ip>:8770, though the USB control happens on this PC).
+The window (`native/`) calls the read_* and action_* functions here directly, on worker threads.
+`start_service` brings up what runs whether or not the window is open (the announcer, the global
+shortcuts and the watchers), and `stop_service` lets it all go. `tray.py` is the entry point.
 """
 
 from __future__ import annotations
 
-import contextlib
 import datetime
 import json
 import os
-import secrets  # remote-access token (see access_token)
-import socket  # to report this machine's LAN address for the remote link
-import subprocess
 import tempfile
 import threading
 import time
-import urllib.parse  # to read ?t=<token> off a request path
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
 import app_settings  # this app's own settings file: export and import, no file access
 import app_updates  # keeping AccessCaster itself up to date: check, decide, download, install
 import autogain  # sets a mic's gain by measuring it
 import autostart  # the HKCU Run entry, shared with installer.iss
-import browser  # the Chromium browser the UI opens in
 import callme  # RODE's remote guests: hosting, answering, call state
 import channels
 import commands  # the catalogue of what a shortcut can do, from the spec tables
@@ -52,7 +37,6 @@ import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meani
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import model_tree
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
-import page  # assembles index.html from static/index.html + static/help.html
 import profiles  # settings backup/restore (save+restore live here, not in server)
 import rcp_hid
 import rcp_read
@@ -77,104 +61,15 @@ from version import (
     __version__ as APP_VERSION,  # single source of truth (Project/version.py)
 )
 
-HTTP_HOST = "0.0.0.0"     # bind all interfaces so a phone on the LAN can view the UI
-HTTP_PORT = 8770
-STATIC_DIR = os.path.realpath(resource_path("static"))
 
-
-def _static_file(name: str) -> str | None:
-    """The file in static/ a /static/<name> request names, or None when it resolves outside.
-
-    Resolved and then contained, rather than screened for "..": os.path.join drops STATIC_DIR
-    entirely when `name` is absolute, so "C:/Windows/win.ini" would otherwise be served as is.
-    commonpath raises ValueError for a path on another drive."""
-    full = os.path.realpath(os.path.join(STATIC_DIR, name))
-    try:
-        inside = os.path.commonpath([full, STATIC_DIR]) == STATIC_DIR
-    except ValueError:
-        return None
-    return full if inside and full != STATIC_DIR else None
-
-# One lock around ALL device access. ThreadingHTTPServer serves requests on
-# separate threads and the unit must never be opened twice at once; this also
-# serialises the slow transfer-mode pad write against status reads.
+# One lock around ALL device access. The window, the shortcuts and the watchers call in from
+# their own threads and the unit must never be opened twice at once; this also serialises the
+# slow transfer-mode pad write against status reads.
 _hid_lock = threading.Lock()
 pad_shortcuts.lock = _hid_lock
 
-# --- App lifecycle: the server lives only as long as a webpage is open. ---------------------
-# The page heartbeats /api/ping; closing it fires /api/quit (sendBeacon) and stops sending pings.
-# A watchdog shuts the server down when no client has pinged for _CLIENT_TIMEOUT, so the server
-# behaves like an app (open = running, close = stopped). DISABLED in headless mode
-# (ACCESS_CASTER_NO_UI) so our background/tooling runs are not auto-killed.
-_httpd = None                      # set in main(); the running ThreadingHTTPServer
-_last_ping = time.monotonic()           # updated by every /api/ping
-# Which run of the server this is. The ping reply carries it with the version, so an open page can
-# tell that the server it was loaded from has gone and a different one answers in its place.
-_INSTANCE_ID = secrets.token_hex(8)
 _preview_grid = None               # grid of the live-preview scratch pad, if one is engaged
-_client_seen = False               # True once any page has pinged at least once
-_quit_at = None                    # set by /api/quit; a deadline a ping can still cancel
-_CLIENT_TIMEOUT = 600.0            # seconds with no ping before the watchdog stops the server.
-                                   # Generous so a backgrounded/throttled tab (browsers clamp
-                                   # hidden timers to ~1/min) is not mistaken for a closed page;
-                                   # the page also re-pings on visibility/focus to reset this.
-_STARTUP_GRACE = 120.0             # seconds to wait for the first page before giving up
-_QUIT_GRACE = 5.0                  # after a quit beacon, wait this long so a RELOAD can cancel it
 
-
-def _request_shutdown():
-    """Stop the HTTP server from a worker/watchdog thread (shutdown() blocks the calling
-    thread until serve_forever returns, so it must not run on a request thread)."""
-    # Let the endpoint watcher unregister its callback rather than leaving Windows' audio service
-    # holding a pointer into a process that is going away.
-    _virtual_devices_watch_stop.set()
-    if _httpd is not None:
-        threading.Thread(target=_httpd.shutdown, daemon=True).start()
-
-
-def _lifecycle_stop_reason(now, start, client_seen, last_ping, quit_at, job_running=False):
-    """Pure decision for the lifecycle watchdog (unit-testable). Returns a stop reason string,
-    or None to keep running. Triggers, in priority order:
-      - a /api/quit beacon set quit_at and its grace has elapsed (a reload's ping clears quit_at),
-      - no page ever connected within _STARTUP_GRACE (browser failed to open),
-      - the connected page went silent for _CLIENT_TIMEOUT (closed, crashed, lost network).
-
-    A RUNNING JOB OUTRANKS ALL THREE. Without this, a page that goes away mid-backup stops the HTTP
-    server while the desk is healthy and still on the bus and the process is still alive, and from
-    the outside that is indistinguishable from the desk dropping off the bus.
-    The server exists to serve the page, but a job is not the page's work, it is the DESK's: a
-    backup is mid-read of the model and a restore is part way through writing settings and pads. A
-    window closing must not decide to abandon that. Once the job ends, every trigger applies as
-    before - including the quit beacon, which is still pending and fires on the next pass."""
-    if job_running:
-        return None
-    if quit_at is not None and now >= quit_at:
-        return "Webpage closed; stopping AccessCaster."
-    if not client_seen:
-        if now - start > _STARTUP_GRACE:
-            return "No webpage connected; stopping."
-        return None
-    if now - last_ping > _CLIENT_TIMEOUT:
-        return "Webpage heartbeat lost; stopping AccessCaster."
-    return None
-
-
-def _client_watchdog():
-    """Background: stop the server once every webpage has closed. See _lifecycle_stop_reason."""
-    start = time.monotonic()
-    while True:
-        time.sleep(1.0)
-        if _httpd is None:
-            continue
-        # Both job states, because either can be the one holding the desk.
-        busy = _profile_job.busy() or _show_job.busy() or _firmware_job.busy()
-        reason = _lifecycle_stop_reason(time.monotonic(), start, _client_seen, _last_ping, _quit_at,
-                                        job_running=busy)
-        if reason:
-            diagnostics.event("app.watchdog_stop", reason)
-            print(reason)
-            _request_shutdown()
-            return
 
 # Channel / pad layout of the RODECaster Pro II SMART pads.
 MIC_CHANNELS = (1, 2, 3, 4)
@@ -577,8 +472,8 @@ def action_check_firmware() -> dict:
 #
 #   * **The state comes from a PUSH, not a poll.** recorder.Watcher holds one read-only HID handle
 #     and hears `recordState` change within ~30 ms, from our writes AND from the unit's own REC
-#     button. So `/api/recorder/live` costs nothing and can be polled while the page is open,
-#     while `/api/recorder` (the full page: volumes and the recordings list) does a ~1.5 s dump.
+#     button. So `read_recorder_live` costs nothing and can be polled while the page is shown,
+#     while `read_recorder` (the full page: volumes and the recordings list) does a ~1.5 s dump.
 #   * **A write is never trusted.** `requestRecordState` is a request the firmware consumes and
 #     resets, so the only honest confirmation is reading `recordState` back, which is what
 #     action_record does before it tells anyone the recording started.
@@ -596,8 +491,8 @@ def _recorder_state_changed(was, now) -> None:
     anyway. Anything audible in the room reaches the mics, so silence is the only fix that works.
 
     THE NOTICE IS SPOKEN BEFORE THE SILENCE, and only when the recording was started ON THE UNIT.
-    Started from this app, the reply carries the same words into the page's live region instead,
-    which makes no sound at all and therefore cannot land in the take. Started on the unit there is
+    Started from this app, the reply carries the same words to the window instead, spoken by the
+    screen reader rather than by this app, and therefore cannot land in the take. Started on the unit there is
     no reply to carry it, so one short phrase at the top of the recording is the price of the
     operator knowing what just happened.
 
@@ -735,8 +630,7 @@ def _recorder_payload(blob: bytes) -> dict:
     out["writable"] = "recorder" in dev.caps
     out["device_name"] = dev.name
     # Multitrack lives here rather than on Routing: it decides what a recording CONTAINS, which is
-    # a question you ask on this page and nowhere else. The write still goes to
-    # /api/routing/multitrack, which owns the selector.
+    # a question you ask on this page and nowhere else. The write is `action_set_multitrack`.
     mt = rcp_read.values(blob, "recordingMultitrackMode", "int")
     out["multitrack"] = mt[0] if mt else None
     out["multitrack_modes"] = [[k, v] for k, v in sorted(recorder.MULTITRACK_LABEL.items())]
@@ -801,7 +695,7 @@ def read_recorder() -> dict:
 
 # WHERE A RECORDING WOULD GO and HOW LONG THERE IS ROOM FOR, from the last full read.
 #
-# Kept so the CHEAP endpoint can answer in full sentences too. /api/recorder/live costs no device
+# Kept so the CHEAP read can answer in full sentences too. `read_recorder_live` costs no device
 # read at all (it is answered from the push listener), and without this it could only say the bare
 # state - so "Recording status" would give you less than arriving on the page did.
 _recorder_context = {"where": "", "room": "", "low": None}
@@ -1149,8 +1043,8 @@ def action_storage_erase(index: int) -> dict:
 # CALLME - RODE's remote guests: hosting, answering and call state.
 #
 # The protocol and the wording are callme.py; this is the app side. Like the recorder, the state
-# comes from a PUSH heard by its own Watcher, so `/api/callme/live` costs no device read and the
-# page can poll it, while `/api/callme` does a dump and re-seeds the Watcher.
+# comes from a PUSH heard by its own Watcher, so `read_callme_live` costs no device read and the
+# window can poll it, while `read_callme` does a dump and re-seeds the Watcher.
 
 _callme_watch = None
 # How long an answer is given to reach Active before the reply goes out without it. Measured at
@@ -1678,7 +1572,7 @@ def callme_status() -> dict:
 # for each (rcp_transfer.UNIT_SETTING_SEL). Without them the whole group is reachable ONLY from
 # the touchscreen, which is exactly the class of setting this project exists to replace.
 #
-# ONE SPEC DRIVES FOUR THINGS: the read, the write's value validation, the control the browser
+# ONE SPEC DRIVES FOUR THINGS: the read, the write's value validation, the control the window
 # builds, and the profile's restore set. Adding a setting here adds it to all four, so the Device
 # page's copy and what a profile actually carries cannot drift apart.
 #   kind    : "bool" -> a checkbox, "choice" -> a select, "int" -> a range slider
@@ -2239,8 +2133,8 @@ def read_network_status() -> dict:
             "scan": wifi_scan_slots(blob),
             "can_scan": "network_write" in devices.get_active_device().caps,
             # Never returned, and this is deliberate rather than an oversight: firmware before
-            # 1.7.6 publishes wifiPSK, and putting a password into a JSON payload, a browser page
-            # and a log line is not a thing to do casually. Whether the network HAS a password is
+            # 1.7.6 publishes wifiPSK, and putting a password into a reply, the window and a log
+            # line is not a thing to do casually. Whether the network HAS a password is
             # enough. On 1.7.6 it reads empty, so this is False there whatever is stored.
             "has_password": bool(first("wifiPSK")),
         },
@@ -2293,98 +2187,8 @@ def read_network_status() -> dict:
 #   * **Static IP and DNS.** Derived but untried, and a bad write drops the unit off the network,
 #     which is exactly the state that then needs the touchscreen to fix.
 
-# The password is the reason this endpoint is not like the others. This app serves its pages on
-# 0.0.0.0 so a phone on the LAN can use it, which means a password typed into that page would cross
-# the very network it is for, in clear. So the join is refused unless the request came from this
-# machine.
-LOCAL_ONLY_ROUTES = {"/api/network/wifi/join", "/api/access", "/api/access/new"}
-# AccessCaster's own update changes software on THIS PC, so a page on a phone can read where it
-# stands but cannot start, steer or stop one.
-UPDATE_ROUTES = {"/api/update/check", "/api/update/skip", "/api/update/interval",
-                 "/api/update/install", "/api/update/cancel", "/api/update/proceed",
-                 "/api/update/report"}
-LOCAL_ONLY_ROUTES |= UPDATE_ROUTES
-_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 # ---------------------------------------------------------------------------
-# REMOTE ACCESS: a token, because this server binds 0.0.0.0.
-#
-# THE HAZARD IT CLOSES. The page is meant to be reachable from a phone in another room, and without
-# a token anyone who can reach port 8770 has FULL control of the desk - mutes, routing, Clear all
-# pads. Fine on a home LAN or a tailnet, not at a venue, a shared studio or a university network.
-#
-# THE SHAPE, and each part is a deliberate trade:
-#   - REQUESTS FROM THIS MACHINE ARE ALWAYS ALLOWED. Anything already running here can drive the
-#     desk anyway, so a token would protect nothing and would break every DevTools script and the
-#     tray's own browser launch. It is the same trust boundary the app itself has.
-#   - EVERYTHING ELSE NEEDS THE TOKEN, once. It arrives as `?t=...` on the page URL, and a
-#     successful page load sets a cookie, so the API calls that follow carry it without every
-#     fetch in app.js having to know. Reloading, deep-linking and leaving the tab open all work.
-#   - IT IS A SHARED SECRET, NOT A LOGIN. There is no user to name and nobody to lock out; the
-#     threat is "a stranger on this network", and a link you can send to your own phone answers it
-#     without a password to type on a phone keyboard with a screen reader.
-#   - HTTP, so the token is visible to anyone who can already read your LAN traffic. Said plainly
-#     in the UI rather than implied: this raises the bar from "anyone" to "anyone with the link",
-#     which is the honest claim.
-_ACCESS_TOKEN_KEY = "remote_token"
-_token_lock = threading.Lock()
-
-
-def access_token() -> str:
-    """The remote-access token, made on first use and kept in settings.json."""
-    with _token_lock:
-        tok = (settings_file.load().get(_ACCESS_TOKEN_KEY) or "").strip()
-        if not tok:
-            tok = secrets.token_urlsafe(18)
-            settings_file.update(**{_ACCESS_TOKEN_KEY: tok})
-        return tok
-
-
-def new_access_token() -> str:
-    """Replace the token, so a link that has been shared stops working."""
-    with _token_lock:
-        tok = secrets.token_urlsafe(18)
-        settings_file.update(**{_ACCESS_TOKEN_KEY: tok})
-        return tok
-
-
-def _lan_address() -> str:
-    """This machine's address on the LAN, for the link we show. No traffic is sent: connecting a
-    UDP socket only picks the route, which is enough for the OS to tell us which address it would
-    use. Falls back to the hostname if there is no route at all."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("192.0.2.1", 9))     # TEST-NET-1: routable-looking, never actually reached
-            return s.getsockname()[0]
-        finally:
-            s.close()
-    except OSError:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except OSError:
-            return "this-computer"
-
-
-def read_access() -> dict:
-    """What App settings > Remote access shows: the link to open on another device, and the plain
-    warnings."""
-    return {
-        "url": f"http://{_lan_address()}:{HTTP_PORT}/?t={access_token()}",
-        "port": HTTP_PORT,
-        "note": ("Open this link on a phone or another computer on the same network to control the "
-                 "unit from there. Anyone with the link has full control, so treat it like a "
-                 "password. This machine itself never needs it."),
-        "warning": ("The link travels unencrypted, so it protects you from a stranger guessing the "
-                    "address, not from someone who can already read your network's traffic."),
-    }
-
-
-def action_new_access_token() -> dict:
-    new_access_token()
-    return {"ok": True,
-            "message": "A new link has been made. Any link you shared before will no longer work.",
-            "access": read_access()}
 
 
 def _wifi_state(blob) -> dict:
@@ -2753,8 +2557,7 @@ def soundpad_model() -> dict:
             live = soundpad.read_pads_live(min_banks=PAD_MIN_BANKS)
         base.update(live)
         base["can_edit"] = bool(live.get("health", {}).get("clean"))
-        # A preview scratch pad the server still tracks but no page owns (e.g. the browser was
-        # closed mid-preview) - the freshly loaded page uses this to clear it on load.
+        # The live preview's scratch pad while one is engaged, or None.
         base["preview_grid"] = _preview_grid
         return base
     except Exception as exc:
@@ -4009,7 +3812,7 @@ def preset_list() -> list:
 _APPLIED_PRESETS_KEY = "applied_presets"
 _PRESET_MATCH_TOL = 0.005     # normalised 0..1 floats: a read-back is never bit-identical
 # The factory marker slots, in channelCurrentFxPreset order, confirmed against the RODE app's own
-# list (app.js keeps the same list for its dropdown).
+# list.
 _FACTORY_MARKER_NAMES = ("Neutral", "Podcast Studio", "Broadcast")
 
 
@@ -4224,8 +4027,7 @@ def action_delete_mic_preset(name: str) -> dict:
 
 # Flexible channel strips that can be reassigned (the by-name routing view) + the source palette
 # live per-device in devices.InputStripSpec, resolved via _active_input_strips(). The Duo uses the
-# index-based fader_model instead, so its spec is empty and the by-name endpoints below report
-# nothing and refuse on it.
+# index-based fader_model instead, so its spec is empty and the by-name read reports nothing.
 
 
 def _active_input_strips():
@@ -4734,20 +4536,6 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             "stereo": stereo_link_state(new, spec), "message": msg}
 
 
-def read_faders_live() -> dict:
-    """Live-read the channel on each fader (the channelInputSource vector order)."""
-    spec = _active_faders()
-    try:
-        with _hid_lock:
-            vec = _read_fader_vector(spec=spec)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the fader layout: {exc}"}
-    return {"ok": True, "faders": vec,
-            "labels": [_channel_name(c, spec) for c in vec],
-            "stereo": stereo_link_state(vec, spec),
-            "message": "Read the fader layout from the device."}
-
-
 def _tidy_fader_target(vec, fader_index, code, order):
     """Return the target fader vector that places `code` on `fader_index` while keeping a
     VALID layout: no duplicate assignable source, no orphaned channel that is off-fader yet
@@ -4916,7 +4704,7 @@ def _fader_levels(blob: bytes) -> dict:
     solos = rcp_read.values(blob, channels.CUE_PROP)
     mon = rcp_read.values(blob, "outputMonLevel")
     # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
-    # They ride on this read rather than on /api/routing/live because they belong beside the
+    # They ride on this read rather than on `read_routing_live` because they belong beside the
     # monitor level on the Levels tab, and this is the read that tab already makes.
     outs = rcp_read.snapshot_properties(blob)
     vec = _read_fader_vector(blob, spec)
@@ -5050,24 +4838,11 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
 
 
 # ---- LEVEL METERING ----------------------------------------------------------------------------
-# The one big accessibility gap that needed NO protocol work at all. Metering over the desk's USB
-# control channel is settled impossible (nothing meter-shaped is ever pushed, and the RODE app asks
-# for nothing in 37 s of capture), but the desk is also a USB AUDIO INTERFACE, and Windows meters
-# every audio endpoint it has. See Project/meters.py for why that route rather than a capture
-# library, and for the Remote Desktop caveat that makes this the one feature in the app that does
-# not work over RDP.
-_meter_watcher = None
-_meter_lock = threading.Lock()
 
 
 def _meter_prefs() -> dict:
     s = settings_file.load()
     return {
-        "stream": s.get("meter_stream") or "",
-        "warn_clip": bool(s.get("meter_warn_clip", True)),
-        "warn_silence": bool(s.get("meter_warn_silence", True)),
-        "silence_after": float(s.get("meter_silence_after", 5.0)),
-        "speak_every": float(s.get("meter_speak_every", 0.0)),
         # A SOUND for clipping as well as the words. Clipping is the one thing here you react to
         # rather than think about, and a spoken sentence arrives a word at a time.
         "clip_sound": bool(s.get("meter_clip_sound", True)),
@@ -5088,201 +4863,6 @@ def _meter_prefs() -> dict:
     }
 
 
-def _meter_stream(found=None) -> str:
-    """The stream the meter controls actually act on: the one chosen, or the first desk stream.
-
-    THE FALLBACK IS THE MICROPHONE, and that is a fix rather than a preference. Windows lists the
-    desk's PLAYBACK endpoint first - "Speakers (RODECaster Pro II Main Stereo)" - which is what this
-    PC SENDS the desk, so a meter defaulting to it moves convincingly on your own screen reader's
-    speech while telling you nothing about your microphone: a healthy-looking 61 percent peak that
-    is really NVDA. The two endpoints differ only by a prefix Windows chose. So the default is a
-    CAPTURE endpoint, preferring Main Stereo.
-
-    The fallback matters at all because the page's dropdown SHOWS a stream when nothing has been
-    chosen; without one, "check the level" and "set the Windows level" would act on a stream the
-    user was not looking at. One helper, so the read and both actions cannot disagree."""
-    chosen = _meter_prefs().get("stream") or ""
-    found = found if found is not None else meters.desk_streams()
-    streams = found.get("streams") or []
-    known = {s["id"] for s in streams}
-    if chosen and chosen in known:
-        return chosen
-    inputs = [s for s in streams if s.get("flow") == "recording"]   # meters.FLOW_NAMES
-    # WINDOWS' OWN DEFAULT RECORDING DEVICE FIRST, when it is one of the desk's. That is the stream
-    # everything else on this computer records from, so it is the one worth being told about, and
-    # it is a fact rather than a guess of ours.
-    default_in = meters.default_recording_name()
-    by_default = [s for s in inputs if default_in and s["name"] == default_in]
-    main = [s for s in inputs if "main stereo" in s["name"].lower()]
-    for candidates in (by_default, main, inputs, streams):
-        if candidates:
-            return candidates[0]["id"]
-    return ""
-
-
-def read_meters() -> dict:
-    """What can be metered, what is being metered, and the live reading. Read-only."""
-    found = meters.desk_streams()
-    prefs = _meter_prefs()
-    with _meter_lock:
-        w = _meter_watcher
-        live = {"running": bool(w and w.running),
-                "name": (w.name if w else ""),
-                "peak": (round(w.peak, 4) if w else None),
-                "peak_hold": (round(w.peak_hold, 4) if w else None),
-                "error": (w.error if w else "")}
-    # A stream the user chose that is no longer there is worth saying out loud: it is the normal
-    # result of unplugging the desk, and a silently-cleared setting would look like the app
-    # forgetting rather than the unit being away.
-    chosen = prefs["stream"]
-    known = {s["id"]: s for s in found["streams"]}
-    return {"ok": True,
-            "available": found["ok"],
-            "reason": found["reason"],
-            "remote_session": found["remote"],
-            # `label` says which DIRECTION each one goes, because Windows' own names do not:
-            # "Microphone (... Main Stereo)" is the desk's output mix and "Speakers (... Main
-            # Stereo)" is what this PC sends it. `name` is kept alongside so a user can still match
-            # an entry against what their Windows audio manager shows.
-            "streams": [{"id": s["id"], "name": s["name"], "flow": s["flow"],
-                         "label": meters.stream_label(s["name"], s["flow"])}
-                        for s in found["streams"]],
-            "chosen": chosen,
-            "chosen_present": bool(chosen and chosen in known),
-            "settings": prefs,
-            "live": live,
-            "mix_note": _meter_mix_note(found),
-            # WINDOWS' OWN LEVEL for the chosen stream, in dB. It belongs on this tab because it is
-            # the thing that silently scales everything else here: an input Windows is boosting
-            # clips in Windows while the desk's meters look fine, and one Windows is attenuating
-            # can make the clipping warning unreachable.
-            "input_level": _input_level(_meter_stream(found)),
-            "message": found["reason"] or ""}
-
-
-def _meter_mix_note(found=None) -> str:
-    """A warning when the metered stream contains THIS COMPUTER'S OWN AUDIO. "" when it does not.
-
-    MEASURED, and it is why a perfectly healthy setting reads as clipping: with nothing deliberately
-    playing, "Main Stereo, recording from the unit" idles at -10 dB while "Chat, recording from the
-    unit" carrying Mic 1 alone idles at -45 dB. Thirty-five decibels apart, and the difference is the
-    screen reader. This PC's audio arrives at the unit on USB 1, USB 1 is in the main mix, and the
-    main mix is what that stream carries back.
-
-    It is worse than a distraction on this tab: the level check SPEAKS, and if our speech goes to
-    the unit then a check on the main mix is partly measuring its own voice.
-
-    Only said when it is actually true - the main mix is being metered AND our speech goes to the
-    unit - because a warning that is always there is one nobody hears."""
-    stream_id = _meter_stream(found)
-    if not stream_id:
-        return ""
-    found = found if found is not None else meters.desk_streams()
-    picked = next((s for s in found.get("streams", []) if s["id"] == stream_id), None)
-    if not picked or picked.get("flow") != "recording":
-        return ""
-    if "main stereo" not in picked["name"].lower():
-        return ""
-    ann = _announcer_into_desk()
-    if not (ann.get("known") and ann.get("into_desk")):
-        return ""
-    return ("This is the unit's whole mix, so this computer's own audio, including your screen "
-            "reader, is measured with it and can look like clipping.")
-
-
-def _input_level(endpoint_id: str):
-    """Windows' level for one endpoint, or None if it cannot be read. Never raises: this decorates
-    the meters tab and an unreadable endpoint volume is not worth failing the whole read for."""
-    if not endpoint_id:
-        return None
-    try:
-        got = meters.endpoint_volume(endpoint_id)
-        return got if got.get("ok") else None
-    except Exception:
-        return None
-
-
-def action_set_input_mute(on: bool) -> dict:
-    """Mute or unmute the metered stream in WINDOWS.
-
-    Here because a muted input is invisible from everywhere else: it reads exactly like a dead
-    microphone, and the fix is in a Windows dialog rather than anywhere on the desk. With both of a
-    unit's recording endpoints muted, every meter reads 0.0 and a capture comes back as digital
-    silence, with nothing anywhere saying why."""
-    chosen = _meter_stream()
-    if not chosen:
-        return {"ok": False, "message": "There is no stream to mute."}
-    res = meters.set_endpoint_mute(chosen, bool(on))
-    if not res.get("ok"):
-        return {"ok": False,
-                "message": res.get("message", "Windows would not change that mute.")}
-    return {"ok": True, "muted": res["muted"],
-            "message": ("This stream is muted in Windows. Nothing can be read from it, and nothing "
-                        "recorded from it on this computer will have any sound."
-                        if res["muted"] else
-                        "This stream is no longer muted in Windows.")}
-
-
-def action_set_input_level(db: float) -> dict:
-    """Set WINDOWS' recording or playback level for the metered stream, in dB.
-
-    THIS IS THE ONE CONTROL IN THE APP THAT CHANGES SOMETHING OUTSIDE THE UNIT, and it earns its
-    place: Windows' level for the desk's microphone endpoint is a hidden multiplier on everything.
-    At +7.67 dB, the "75 percent" a lot of advice recommends, anything the desk sends above
-    -7.67 dBFS clips IN WINDOWS while the desk's own meters show nothing wrong, so every recording
-    made on this PC is damaged by a setting nowhere near the desk. It is offered in dB, not percent,
-    because 50 percent is -1.08 dB on this endpoint and unity is about 55 percent, a percentage
-    nobody can reason about.
-
-    IT IS WRITTEN ONLY FROM A CONTROL THE USER OPERATED: this action, and auto gain and the channel
-    level check, which set the Chat device to no change (0 dB) before they measure. The meter only
-    reads it, and adapts its clipping threshold to it.
-
-    The value is READ BACK before anything is reported, because a driver can refuse SILENTLY: an
-    endpoint can sit at -1.08 dB and refuse to move by dB or by scalar with no error at all, and
-    then accept the same write later. That intermittency is the argument for reading back rather
-    than trusting the write."""
-    chosen = _meter_stream()
-    if not chosen:
-        return {"ok": False, "message": "There is no stream to set a level on."}
-    try:
-        res = meters.set_endpoint_volume_db(chosen, float(db))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the Windows level: {exc}"}
-    if not res.get("ok"):
-        got = res.get("db")
-        if got is None:
-            return {"ok": False, "message": res.get("message", "Could not set the Windows level.")}
-        return {"ok": False, "level": res,
-                "message": (f"Windows would not move that level: it is still {got:+.1f} dB. Some "
-                            f"drivers refuse it, and this unit's Chat input has done exactly that "
-                            f"before.")}
-    now = res["db"]
-    note = res.get("note") or ""
-    said = ("no change, which is what you want with this unit" if abs(now) < 0.2
-            else f"{now:+.1f} dB")
-    return {"ok": True, "level": res,
-            "message": f"Windows level for this stream set to {said}." + (f" {note}" if note else "")}
-
-
-def action_set_meter_stream(stream: str) -> dict:
-    """Choose which of the desk's audio streams the meter watches, and restart it if it is running."""
-    found = meters.desk_streams()
-    ids = {s["id"]: s for s in found["streams"]}
-    if stream and stream not in ids:
-        return {"ok": False, "message": ("That stream is not one the unit is offering now. "
-                                         + (found["reason"] or "Read the list again."))}
-    settings_file.update(meter_stream=stream)
-    name = ids[stream]["name"] if stream else ""
-    with _meter_lock:
-        running = bool(_meter_watcher and _meter_watcher.running)
-    if running:
-        action_meter_watch(False)
-        return action_meter_watch(True)
-    return {"ok": True, "message": (f"Meter set to {name}." if stream
-                                    else "No stream chosen for the meter.")}
-
-
 def _clip_level(prefs_warn_clip: bool, clip_db: float) -> float:
     """The peak the warning fires at, as a 0..1 amplitude. ONE conversion, used everywhere.
 
@@ -5291,100 +4871,6 @@ def _clip_level(prefs_warn_clip: bool, clip_db: float) -> float:
     if not prefs_warn_clip:
         return 2.0
     return min(1.0, 10.0 ** (max(-20.0, min(0.0, float(clip_db))) / 20.0))
-
-
-def action_set_meter_option(name: str, value: float) -> dict:
-    """One meter preference. Kept as one endpoint over five because they are all the same shape and
-    all mean the same thing: how much should this thing interrupt you."""
-    spec = {
-        "warn_clip": ("meter_warn_clip", bool, "Warn me when it clips"),
-        "warn_silence": ("meter_warn_silence", bool, "Warn me when it goes silent"),
-        "silence_after": ("meter_silence_after", float, "Seconds of silence before warning"),
-        "speak_every": ("meter_speak_every", float, "Speak the level every"),
-        "clip_sound": ("meter_clip_sound", bool, "Play a sound when it clips"),
-        "clip_db": ("meter_clip_db", float, "Warn me when it reaches"),
-    }
-    if name not in spec:
-        return {"ok": False, "message": f"Unknown meter setting: {name}."}
-    key, cast, label = spec[name]
-    try:
-        v = cast(value)
-    except (TypeError, ValueError):
-        return {"ok": False, "message": f"{label} needs a number."}
-    if name == "clip_db":
-        # dBFS: never above 0 (there is nothing above full scale to warn about) and never so low
-        # that ordinary speech trips it, which would make the warning worthless.
-        v = max(-20.0, min(0.0, v))
-    elif cast is float:
-        v = max(0.0, min(600.0, v))
-    settings_file.update(**{key: (int(v) if cast is bool else v)})
-    with _meter_lock:
-        w = _meter_watcher
-    if w:                                  # apply live, no restart needed for any of these
-        if name == "warn_clip":
-            w.clip_at = _clip_level(bool(v), _meter_prefs()["clip_db"])
-        elif name == "warn_silence":
-            w.warn_silence = bool(v)
-        elif name == "silence_after":
-            w.silence_after = float(v)
-        elif name == "speak_every":
-            w.speak_every = float(v)
-        elif name == "clip_sound":
-            w.clip_sound = bool(v)
-        elif name == "clip_db":
-            w.clip_at = _clip_level(_meter_prefs()["warn_clip"], float(v))
-    # A running CHECK (action_channel_level_check) has its own Watcher, so the setting has to
-    # reach that too or turning the sound off mid-check would appear to do nothing.
-    with _chan_check_lock:
-        c = _chan_check
-    if c is not None:
-        if name == "clip_sound":
-            c.clip_sound = bool(v)
-        elif name == "clip_db":
-            c.clip_at = _clip_level(prefs_warn_clip=True, clip_db=float(v))
-    if cast is bool:
-        return {"ok": True, "message": f"{label}: {'on' if v else 'off'}."}
-    if name == "clip_db":
-        return {"ok": True,
-                "message": f"{label}: {'minus ' + format(abs(v), '.0f') if v < 0 else '0'} dB."}
-    if name == "speak_every":
-        return {"ok": True, "message": ("The level will not be spoken on its own." if not v
-                                        else f"The level will be spoken every {v:g} seconds.")}
-    return {"ok": True, "message": f"{label}: {v:g} seconds."}
-
-
-def action_meter_watch(on: bool) -> dict:
-    """Start or stop the spoken meter."""
-    global _meter_watcher
-    prefs = _meter_prefs()
-    with _meter_lock:
-        if not on:
-            if _meter_watcher:
-                _meter_watcher.stop()
-                _meter_watcher = None
-            return {"ok": True, "message": "Meter warnings off."}
-        if _meter_watcher and _meter_watcher.running:
-            return {"ok": True, "message": "The meter is already running."}
-        found = meters.desk_streams()
-        if not found["ok"]:
-            return {"ok": False, "message": found["reason"]}
-        stream = _meter_stream(found)
-        # THE LEVEL WATCH FOLLOWS THE ANNOUNCER (speech.say enforces it). It speaks unasked, in the
-        # background, which is exactly the kind of voice that must go quiet when the announcer
-        # does, recordings included.
-        w = meters.Watcher(stream, speech.say,
-                           clip_at=_clip_level(prefs["warn_clip"], prefs["clip_db"]),
-                           warn_silence=prefs["warn_silence"],
-                           silence_after=prefs["silence_after"],
-                           speak_every=prefs["speak_every"],
-                           clip_sound=prefs["clip_sound"])
-        if not w.start():
-            return {"ok": False, "message": w.error or "The meter could not start."}
-        _meter_watcher = w
-    return {"ok": True, "message": f"Watching {w.name}. "
-                                   + ("Clipping will be announced. " if prefs["warn_clip"] else "")
-                                   + ("Going quiet will be announced. "
-                                      if prefs["warn_silence"] else "")}
 
 
 # ---- CLIP WARNING ------------------------------------------------------------------------------
@@ -5691,12 +5177,6 @@ def action_channel_level_check(name: str = "", seconds: float = 0.0) -> dict:
             "message": win, "level_note": meters.level_note(w.volume_db)}
 
 
-def channel_level_check_status() -> dict:
-    st = _chan_check_state()
-    st["ok"] = True
-    return st
-
-
 def action_set_output_mute(which: str, on: bool) -> dict:
     """Mute or unmute a whole OUTPUT: the monitor speakers, or the Bluetooth send.
 
@@ -5845,30 +5325,6 @@ def monitor_mix_model() -> dict:
     }
 
 
-def read_monitor_mix_live() -> dict:
-    """Live per-output, per-source levels (0-100 percent) + each output's mode."""
-    try:
-        with _hid_lock:
-            r = rcp_read.read_matrix_levels()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the mix levels: {exc}"}
-    if not r.get("ok"):
-        return {"ok": False, "message": r.get("reason", "Mix levels unavailable.")}
-    lv, modes = r["levels"], r["modes"]
-    outs = {}
-    for oi, _l in _monitor_outputs():
-        srcs = {}
-        for si, _sl in _monitor_sources():
-            cell = lv.get(oi, {}).get(si, {})
-            pct = cell.get("level")
-            srcs[str(si)] = {"percent": (round(pct * 100) if pct is not None else None),
-                             "linked": cell.get("linked")}
-        outs[str(oi)] = {"mode": modes.get(oi),
-                         "mode_label": OUTPUT_MODE_LABEL.get(modes.get(oi), "?"),
-                         "sources": srcs}
-    return {"ok": True, "outputs": outs}
-
-
 def action_set_monitor_level(output_index: int, source_index: int, level01: float) -> dict:
     """Set one source's level in one output. Switches the output to Custom mode if needed, unlinks
     that source, then writes the level. Only affects this output."""
@@ -5969,46 +5425,6 @@ def _apply_matrix(routing: dict) -> dict:
     return {"applied": 0, "failed": 0, "skipped": True}
 
 
-def routing_model() -> dict:
-    """Static layout of the routing controls the UI renders."""
-    return {
-        # Which desk this layout is for, so the page rebuilds when it changes (app.js loadRouting).
-        "device": devices.get_active_device().name,
-        # USB audio's option list. The STRUCTURE endpoint carries it because loadRouting builds the
-        # controls once from this payload; the VALUES arrive with /api/routing/live.
-        "usb_multitrack_modes": [[k, v] for k, v in sorted(recorder.USB_MULTITRACK_LABEL.items())],
-        # EXPANDED'S OPTIONS BELONG HERE TOO, for the same reason and with the same consequence if
-        # they are missing: `setStagedValue` invents a "Value true" option for a device value it has
-        # no label for, so the control renders with ONE option it cannot be changed away from.
-        "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
-        "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
-        "usb_drop_hint": recorder.USB_DROP_HINT,
-        "usb_expanded_drop_hint": recorder.USB_EXPANDED_DROP_HINT,
-        "input_strips": [{"key": k, "label": lab}
-                         for k, _idx, lab in _active_input_strips().strips],
-        "input_sources": _active_input_strips().source_palette,
-        "fader_model": fader_model(),
-        # Headphone-type controls, device-aware: one select per addressable headphone output,
-        # populated with that device's amp-type value list. Both desks expose HP1 + HP2.
-        "headphones": {
-            "outputs": [{"index": i, "label": lab}
-                        for i, (_sel, lab) in enumerate(_active_headphones().outputs)],
-            "values": [[code, lab] for code, lab in _active_headphones().values],
-        },
-        # Master/global output controls (multitrack, auto-mute, headphone type, Compellor, delay)
-        # are read-only on a device without the "output_write" cap (the Duo, pending capture).
-        "output_write_read_only": _output_write_gate() is not None,
-        # Faders 1 to 4 are NOT fixed mic inputs: fader_model offers every fader the full assignable
-        # list, mic faders included. Do not describe them as fixed here.
-        "note": ("Everything about where sound goes: which channel sits on each fader, what each "
-                 "output can hear, the levels the unit normally keeps to itself, and how it "
-                 "records. Changes are sent to the unit immediately, and this page reads the "
-                 "unit's current values every time you open it."),
-        "matrix": matrix_model(),
-        "monitor_mix": monitor_mix_model(),
-    }
-
-
 def read_usb_driver() -> dict:
     """The Routing page's driver line on its own, for its poll. No device read: the service's
     status block and Windows' endpoint list, with the desk's USB mode as last published (every
@@ -6049,7 +5465,7 @@ def read_routing_live() -> dict:
         # Off the vector we already have, so the arrival read still costs one dump.
         "stereo": stereo_link_state(list(cis), _active_faders()),
         # NAMES as well as codes, because a fader can hold a stereo pair and the dropdown's option
-        # list only carries the ASSIGNABLE channels. Without this the browser would have to invent a
+        # list only carries the ASSIGNABLE channels. Without this a caller would have to invent a
         # label and would get "Channel code 6" for a linked pair.
         "fader_labels": [_channel_name(cis[i] if i < len(cis) else None, _active_faders())
                          for i in range(_active_faders().count)],
@@ -6060,8 +5476,7 @@ def read_routing_live() -> dict:
         # both fields are single-instance, and matching the type is what stops a same-named field
         # elsewhere in the dump being read as this one.
         # SPLIT, because the one property holds the output mode and the input mode (recorder.py).
-        # Sending the raw value would make the browser show "Just the mix" for a desk that is
-        # actually in Expanded.
+        # Sending the raw value would show "Just the mix" for a desk that is actually in Expanded.
         "usb_multitrack": usb_mode,
         "usb_expanded": usb_expanded,
         "usb_expanded_labels": [[k, v] for k, v in sorted(recorder.USB_EXPANDED_LABEL.items())],
@@ -6082,25 +5497,6 @@ def read_routing_live() -> dict:
         **rcp_read.master_processing(blob),
         "message": "Read routing from the device.",
     }
-
-
-def action_set_input_source(strip: str, source_code: int) -> dict:
-    spec = _active_input_strips()
-    if strip not in spec.strip_vec_index:
-        return {"ok": False, "message": f"Channel strip {strip} is not assignable."}
-    if source_code not in spec.valid_source_codes:
-        return {"ok": False, "message": f"Source {source_code} is not valid."}
-    # This writes channelInputSource (the fader vector), so it is a fader-assignment write and gates
-    # on the same "fader_write" cap as action_set_fader: a device whose fader-write model is
-    # unconfirmed must refuse rather than drive an unconfirmed layout.
-    gate = _fader_write_gate()
-    if gate is not None:
-        return gate
-    with _hid_lock:
-        rcp_transfer.set_fader_source(spec.strip_vec_index[strip], source_code)
-        channels.invalidate_strip_vector()   # the layout is the processing strip map
-    src = spec.source_label.get(source_code, str(source_code))
-    return {"ok": True, "message": f"{spec.strip_label[strip]} source set to {src}."}
 
 
 def action_set_multitrack(mode: int) -> dict:
@@ -6811,8 +6207,8 @@ def matrix_model() -> dict:
     sources = (m.sources_for(channels.usb_expanded())
                or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
     read_only = _matrix_write_gate() is not None
-    # This note IS rendered (app.js buildMatrix overwrites the static hint with it), so the
-    # read-only variant actually reaches the Duo instead of the page promising writes it cannot do.
+    # The read-only variant of this note reaches a desk without the cap, instead of the page
+    # promising writes it cannot do.
     # ONE LINE. Do not explain Main Mix, Mix Minus and Custom here, and do not claim the source list
     # shows the unit's real current mix: that list is hidden on anything but Custom, because outside
     # Custom it shows stored cross-points the engine ignores. What each mix means is said per output,
@@ -6863,28 +6259,6 @@ def action_set_cross_point(output_index: int, source_index: int, excluded: bool)
     src_lab = src["label"] if src else "source"
     verb = "excluded from" if excluded else "included in"
     return {"ok": True, "message": f"{src_lab} {verb} the {out_lab} mix."}
-
-
-def read_matrix_live() -> dict:
-    """Live per-output, per-source EXCLUDED state for the matrix UI (read-back)."""
-    try:
-        with _hid_lock:
-            st = rcp_read.read_matrix_state()
-    except FileNotFoundError:
-        return {"ok": False,
-                "message": "The matrix read map is not calibrated on this machine yet."}
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the output mixes: {exc}"}
-    if not st["ok"]:
-        return {"ok": False, "message": st["reason"]}
-    # Map source code -> UI source key using the CONNECTED device's matrix labels, so the Duo's
-    # code 2 resolves to "Headset" (its own key) rather than the Pro II's "Mic3".
-    idx2key = {s["index"]: s["key"] for s in _active_matrix().sources_for(True)}
-    excluded = {str(o): {idx2key.get(s, str(s)): bool(v) for s, v in srcs.items()}
-                for o, srcs in st["excluded"].items()}
-    modes = {str(o): v for o, v in st.get("modes", {}).items()}
-    return {"ok": True, "excluded": excluded, "modes": modes,
-            "message": "Read the live output mixes from the device."}
 
 
 # ----------------------------------------------------------------------------
@@ -7078,8 +6452,8 @@ class _BackgroundJob:
     pad restore, the driver install), so there is one lock, one state dict and one finish block.
 
     WHY BACKGROUND AT ALL. These take from a few seconds to well over a minute (a pad backup copies
-    every sound file off the unit over transfer mode). A page that can poll for progress announces
-    each step into a live region; one long silent POST just hangs, which for a screen-reader user is
+    every sound file off the unit over transfer mode). A window that can poll for progress speaks
+    each step; one long silent call just hangs, which for a screen-reader user is
     indistinguishable from a crash.
 
     `start` claims the job, refusing plainly if one is already running, and runs `work(job)` on a
@@ -7101,7 +6475,7 @@ class _BackgroundJob:
         self._phrase = None
 
     def status(self) -> dict:
-        """The whole state, copied, for the status endpoint the page polls."""
+        """The whole state, copied, for the window's progress dialog to poll."""
         with self._lock:
             return dict(self._state)
 
@@ -7167,7 +6541,7 @@ class _BackgroundJob:
                                     "ok": bool(res.get("ok")),
                                     "message": res.get("message") or "Done."})
             # A CUE AT THE END OF EVERY JOB, rising for finished and falling for failed. Every step
-            # a job reports lands in one live region, so the closing sentence arrives sounding
+            # a job reports is spoken the same way, so the closing sentence arrives sounding
             # exactly like the twenty before it and "Backup complete" is heard as one more pad
             # name. A tone is not a sentence and cannot be mistaken for one, and it lands BEFORE
             # the words, so the outcome is known first.
@@ -7191,8 +6565,8 @@ class _BackgroundJob:
 
 
 # A settings-only profile save is quick, but include_pads copies every pad's sound file off the unit
-# over transfer mode and takes a minute or more, so it runs as a job and the page polls
-# /api/profiles/save/status.
+# over transfer mode and takes a minute or more, so it runs as a job and the window polls
+# `profile_save_status`.
 _profile_job = _BackgroundJob("A profile save is already running.", "Could not save the profile")
 
 
@@ -7246,7 +6620,7 @@ def action_open_driver_page() -> dict:
     """Open RODE's own software page in the browser: the manual route, offered as its own button
     rather than only after a failure, so nobody has to make something go wrong to find it."""
     try:
-        open_ui(driver_install.PAGE_URL)
+        webbrowser.open(driver_install.PAGE_URL)
     except Exception as exc:
         return {"ok": False,
                 "message": (f"The page could not be opened ({exc}). Go to {driver_install.PAGE_URL} "
@@ -7266,8 +6640,8 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
     locked session. The device reads stay here because the lock lives here."""
     try:
         with _hid_lock:
-            # PHASES, NOT ITEMS. Everything spoken during a job lands in one live region, so each
-            # line cuts off the one before it; with a line per pad you hear the first two words of
+            # PHASES, NOT ITEMS. Everything spoken during a job goes to one dialog's notifier, so
+            # each line cuts off the one before it; with a line per pad you hear the first two words of
             # each and nothing else, and the closing line sounds like one more pad. Three lines for
             # the whole job, and the last word of the last one cannot be mistaken for a pad name.
             prog("Backing up the settings.")
@@ -7534,7 +6908,7 @@ def profile_restore_status() -> dict:
 
 def restore_profile(name: str, clean: bool = False) -> dict:
     """Start a background restore: apply the settings, then (if the profile carries pads) rebuild
-    the SMART pad grid. The page polls /api/profiles/restore/status for progress. profiles.apply
+    the SMART pad grid. The window polls `profile_restore_status` for progress. profiles.apply
     and soundpad.restore_pads do the device writes and assume the caller holds the HID lock.
 
     `clean` PICKS BETWEEN TWO GENUINELY DIFFERENT OPERATIONS, and the page names both rather than
@@ -8744,7 +8118,7 @@ def action_set_pad_trigger(grid: int, field: str, value: int) -> dict:
 
     ONE field per request, like every other live pad edit, so each change is read back and spoken on
     its own. `field` is validated against soundpad.TRIGGER_EDIT (the same spec that builds the
-    browser controls and the write ranges), so an unknown field is REFUSED rather than quietly
+    window's controls and the write ranges), so an unknown field is REFUSED rather than quietly
     ignored - a silent no-op on a pad mapping is the worst outcome here, since nothing about the desk
     would look wrong afterwards."""
     known = {f["key"]: f for f in soundpad.TRIGGER_EDIT}
@@ -8791,8 +8165,8 @@ def action_set_pad_fade(grid: int, field: str, seconds: float) -> dict:
 
 def action_set_pad_flag(grid: int, name: str, on: bool) -> dict:
     """The two named per-pad switches: a Fade pad excluding the host, and a Censor pad using your own
-    sound instead of the beep. Named (soundpad.PAD_FLAG) rather than taking a property, so the
-    browser cannot ask for an arbitrary pad write."""
+    sound instead of the beep. Named (soundpad.PAD_FLAG) rather than taking a property, so a
+    caller cannot ask for an arbitrary pad write."""
     return _pad_write(grid, "Could not change that pad setting",
                       lambda: soundpad.set_pad_flag(grid, name, on))
 
@@ -8822,7 +8196,7 @@ def action_clear_pad(grid: int) -> dict:
 
 def action_clear_all_pads() -> dict:
     """Clear every user pad (sound/FX/mixer/MIDI/quick-dial), leaving the System pads untouched.
-    Destructive - the web UI confirms with a modal before calling this."""
+    Destructive - the window confirms with a dialog before calling this."""
     try:
         with _hid_lock:
             res = soundpad.clear_all_pads()
@@ -8927,10 +8301,9 @@ def _documents_folder(name: str) -> str:
     """Documents\\AccessCaster\\<name>, created if need be: where the app's exports go.
 
     Documents rather than the app's own data folder (%LOCALAPPDATA%): an export you cannot find is
-    not an export, and a reinstall wipes the data folder. There is no folder picker because the
-    page is a browser page and a native picker is not something a screen reader user should have to
-    fight for a fixed destination anyway - the reply says the full path, and Open folder takes you
-    there."""
+    not an export, and a reinstall wipes the data folder. There is no folder picker: a fixed
+    destination is easier to find again than one chosen each time - the reply says the full path,
+    and Open folder takes you there."""
     base = os.path.join(os.path.expanduser("~"), "Documents", "AccessCaster", name)
     os.makedirs(base, exist_ok=True)
     return base
@@ -8959,13 +8332,12 @@ def action_export_pad(pad: int) -> dict:
 def _open_folder_focused(folder: str) -> None:
     """Open a folder in Explorer AND PUT THE USER IN IT. Raises if it cannot be opened at all.
 
-    `os.startfile` alone opens the window BEHIND the browser: measured, with no window already at
-    that path, the foreground two seconds after the call is still the browser. A window you were not
+    `os.startfile` alone opens the window BEHIND the app's: measured, with no window already at
+    that path, the foreground two seconds after the call is still AccessCaster. A window you were not
     moved to is, to a screen-reader user, indistinguishable from nothing having happened.
 
     Windows will not let a background process take the foreground on its own, so this borrows the
-    input state of the window that HAS it (AttachThreadInput), which is the documented way and the
-    one that survives a browser being frontmost. `AllowSetForegroundWindow` is called first because
+    input state of the window that HAS it (AttachThreadInput), which is the documented way. `AllowSetForegroundWindow` is called first because
     when it does work it is cheaper and needs no window handle.
 
     FAILING TO FOCUS IS NOT FAILING TO OPEN. The folder is what was asked for; the focus is the
@@ -9308,7 +8680,7 @@ def read_announce() -> dict:
     lists = speech.sapi_lists()
     return {"ok": True, "on": speech.enabled.is_set(), "levels": announcer.levels_on,
             "mute_tones": announcer.mute_tones, "record_feedback": announcer.record_feedback,
-            "startup_summary": announcer.startup_summary, "remember": announcer.remember,
+            "remember": announcer.remember,
             "volume": speech.volume,
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
@@ -9340,7 +8712,7 @@ def _hotkey_page_state(mgr) -> dict:
 def hotkey_commands() -> dict:
     """The whole catalogue of bindable commands, grouped by category for the Add dialog.
 
-    THIS ONE READS THE DESK (pads and presets), which is why it is not part of `/api/hotkeys`: the
+    THIS ONE READS THE DESK (pads and presets), which is why it is not part of `hotkey_state`: the
     shortcut list has to answer at once and with the unit unplugged, and only the Add dialog needs
     the catalogue. A read that fails still returns the device-free half rather than nothing."""
     try:
@@ -9420,7 +8792,7 @@ def action_export_app_settings() -> dict:
     return {"ok": True, "path": path, "folder": app_settings_dir(),
             "message": (f"Saved {app_settings.describe_export(payload)} to {name}, in your "
                         f"Documents folder under AccessCaster, App settings. It holds none of "
-                        f"the desk's settings and no remote-access token.")}
+                        f"the desk's settings.")}
 
 
 def action_import_app_settings(payload) -> dict:
@@ -9582,624 +8954,6 @@ def action_set_hotkeys_enabled(on: bool) -> dict:
     return res
 
 
-# ----------------------------------------------------------------------------
-# Declarative route tables. Most endpoints share one shape, so they live in a table that
-# do_GET/do_POST dispatch through; genuinely special routes (raw-body upload, None-aware fields,
-# global-state mutators, dict bodies) stay explicit in the handler.
-# ----------------------------------------------------------------------------
-
-# GET: path -> zero-arg callable whose result is sent as JSON.
-GET_ROUTES = {
-    # THE APP'S OWN VERSION, and nothing else. It is also in /api/status, but that one opens the
-    # USB device and only the Device page takes it, so a page relying on it shows "unknown" to
-    # anyone who goes straight there. This costs no device access at all, so the Help & About page
-    # can have its version without the About tabs reading the unit.
-    "/api/version": lambda: {"app_version": APP_VERSION},
-    # The remote-access link. LOCAL ONLY, like the wifi join: handing the token out over the very
-    # network it protects would defeat it, so a remote page can use the app but cannot read or
-    # replace the key that let it in.
-    "/api/access": read_access,
-    "/api/status": read_device_status,
-    "/api/device/overview": device_overview,
-    "/api/appsettings/autostart": read_autostart,
-    "/api/update": app_updates.state,
-    "/api/update/job": app_updates.job,
-    "/api/announce": read_announce,
-    "/api/device/state": read_device_state,
-    "/api/device/settings": read_unit_settings,
-    "/api/faders/levels": fader_levels_live,
-    # The progress channel of the factory voice-effects restore, its only user. The path does not
-    # name that restore, but the page and the browser checks both address it by this path.
-    "/api/pads/restore-defaults/status": pad_restore_status,
-    "/api/soundpads": soundpad_model,
-    "/api/network": read_network_status,
-    "/api/channels": action_get_channels,
-    "/api/routing": routing_model,
-    "/api/routing/live": read_routing_live,
-    "/api/routing/driver": read_usb_driver,
-    "/api/driver/status": driver_install_status,
-    "/api/faders/live": read_faders_live,
-    "/api/routing/matrix/live": read_matrix_live,
-    "/api/routing/schemes": read_routing_schemes,
-    "/api/monitormix/live": read_monitor_mix_live,
-    "/api/profiles": list_profiles,
-    "/api/backups": read_backups,
-    "/api/profiles/save/status": profile_save_status,
-    "/api/profiles/restore/status": profile_restore_status,
-    "/api/shows": read_show_state,
-    "/api/shows/status": show_job_status,
-    "/api/baseline/status": baseline_status,
-    "/api/meters": read_meters,
-    # The full Recording page: one ~1.5 s dump. /api/recorder/live is the cheap companion, answered
-    # from the push listener with no device read at all, so a page can poll THAT.
-    "/api/recorder": read_recorder,
-    "/api/recorder/live": read_recorder_live,
-    "/api/callme": read_callme,
-    "/api/callme/live": read_callme_live,
-    "/api/channels/autogain/status": autogain_status,
-    "/api/channels/level-check/status": channel_level_check_status,
-    "/api/hotkeys": hotkey_state,
-    "/api/hotkeys/commands": hotkey_commands,
-}
-
-# POST: path -> (action, argspecs). Each argspec is (cast, json_key, default) read
-# from the JSON body and passed positionally to the action. An empty argspec list
-# means "no request body; call action() with no arguments".
-POST_ROUTES = {
-    "/api/refresh": (read_device_status, []),
-    "/api/access/new": (action_new_access_token, []),   # LOCAL ONLY (see LOCAL_ONLY_ROUTES)
-    "/api/faders/reset": (action_reset_faders, []),
-    "/api/pads/clear-all": (action_clear_all_pads, []),
-    "/api/pads/tidy-audio": (action_tidy_pad_audio, []),
-    "/api/pads/restore-fx": (action_restore_factory_fx, []),
-    "/api/pad/export": (action_export_pad, [(int, "pad", 0)]),
-    "/api/pads/exports/open": (action_open_pad_exports, []),
-    "/api/announce": (announcer.action_set_announce, [(bool, "on", None)]),
-    "/api/announce/levels": (announcer.action_set_announce_levels, [(bool, "on", None)]),
-    "/api/announce/mute-tones": (announcer.action_set_announce_mute_tones, [(bool, "on", None)]),
-    "/api/announce/record-feedback": (announcer.action_set_announce_record_feedback,
-                                      [(str, "mode", "")]),
-    "/api/announce/startup-summary": (announcer.action_set_announce_startup_summary, [(bool, "on", None)]),
-    "/api/announce/remember": (announcer.action_set_announce_remember, [(bool, "on", None)]),
-    "/api/announce/volume": (speech.action_set_announce_volume, [(int, "percent", 100)]),
-    "/api/announce/voice": (speech.action_set_announce_voice, [(str, "voice", "")]),
-    "/api/announce/output": (speech.action_set_announce_output, [(str, "output", "")]),
-    "/api/announce/devices": (speech.action_refresh_speech_devices, []),
-    # Global keyboard shortcuts. `mods` is a list of modifier ids ("ctrl", "alt", "win", "shift");
-    # the manager validates and registers before anything is persisted.
-    "/api/hotkeys/set": (action_set_hotkey, [(str, "id", ""), (str, "key", ""),
-                                             (bool, "enabled", True), (bool, "speak", True)]),
-    "/api/hotkeys/mods": (action_set_hotkey_mods, [(list, "mods", [])]),
-    "/api/hotkeys/add": (action_add_hotkey, [(str, "command", ""), (str, "key", "")]),
-    "/api/hotkeys/delete": (action_delete_hotkey, [(str, "id", "")]),
-    "/api/hotkeys/pad-set": (action_set_pad_shortcuts, [(bool, "on", None)]),
-    "/api/hotkeys/restore-defaults": (action_restore_hotkey_defaults, []),
-    "/api/hotkeys/enabled": (action_set_hotkeys_enabled, [(bool, "on", None)]),
-    "/api/faders/level": (action_set_fader_level,
-                          [(int, "fader", -1), (int, "percent", 0)]),
-    "/api/monitor/level": (action_set_monitor_speaker_level, [(int, "percent", 0)]),
-    "/api/meters/stream": (action_set_meter_stream, [(str, "stream", "")]),
-    "/api/meters/option": (action_set_meter_option, [(str, "name", ""), (float, "value", 0)]),
-    "/api/meters/watch": (action_meter_watch, [(bool, "on", None)]),
-    # 0 = "use the saved length" (30 s). Any other default here would override the setting.
-    "/api/channels/level-check": (action_channel_level_check,
-                                 [(str, "name", ""), (float, "seconds", 0.0)]),
-    "/api/meters/input-level": (action_set_input_level, [(float, "db", 0.0)]),
-    "/api/meters/input-mute": (action_set_input_mute, [(bool, "on", None)]),
-    "/api/recorder/format": (action_set_recording_format, [(int, "value", -1)]),
-    "/api/recorder/command": (action_record, [(str, "command", "")]),
-    "/api/device/firmware-check": (action_check_firmware, []),
-    "/api/callme/hosting": (action_callme_hosting, [(bool, "on", None)]),
-    "/api/callme/answer": (action_callme_answer, []),
-    "/api/callme/decline": (action_callme_decline, []),
-    "/api/callme/hangup": (action_callme_hangup, [(int, "slot", 0)]),
-    "/api/callme/end": (action_callme_end, []),
-    "/api/callme/extend": (action_callme_extend, []),
-    "/api/callme/auto-extend": (action_callme_auto_extend, [(bool, "on", None)]),
-    "/api/callme/ringtone": (action_callme_ringtone, [(bool, "on", None)]),
-    "/api/callme/dial": (action_callme_dial, [(str, "code", "")]),
-    "/api/callme/contact/save": (action_callme_contact_save,
-                                 [(str, "name", ""), (str, "code", ""), (str, "was", "")]),
-    "/api/callme/contact/delete": (action_callme_contact_delete, [(str, "code", "")]),
-    "/api/recorder/marker": (action_drop_marker, []),
-    "/api/recorder/delete": (action_delete_recording, [(int, "uid", -1)]),
-    "/api/storage/eject": (action_storage_eject, [(int, "index", -1), (bool, "on", True)]),
-    "/api/storage/erase": (action_storage_erase, [(int, "index", -1)]),
-    "/api/channels/autogain": (action_autogain_start,
-                               [(str, "name", ""), (float, "seconds", 0.0)]),
-    "/api/channels/autogain/stop": (action_autogain_stop, []),
-    "/api/channels/autogain/undo": (action_autogain_undo, []),
-    "/api/recorder/announcer-mute": (announcer.action_set_record_mute_announcer, [(bool, "on", None)]),
-    "/api/network/wifi": (action_set_wifi, [(bool, "on", None)]),
-    "/api/network/wifi/scan": (action_scan_wifi, []),
-    "/api/network/wifi/disconnect": (action_disconnect_wifi, []),
-    # LOCAL ONLY (see LOCAL_ONLY_ROUTES): this one carries a wifi password.
-    "/api/network/wifi/join": (action_join_wifi, [(str, "ssid", ""), (str, "password", "")]),
-    "/api/network/bt-visible": (action_set_bt_visible, [(bool, "on", None)]),
-    "/api/output/mute": (action_set_output_mute, [(str, "which", ""), (bool, "on", None)]),
-    "/api/output/bt-level": (action_set_bt_output_level, [(int, "percent", 0)]),
-    "/api/midi": (action_set_midi, [(bool, "on", None)]),
-    "/api/channel/gain": (action_set_gain, [(int, "channel", 0), (int, "db", 0)]),
-    "/api/channel/phantom": (action_set_phantom, [(int, "channel", 0), (bool, "on", None)]),
-    "/api/channel/polarity": (action_set_polarity, [(int, "channel", 0), (bool, "on", None)]),
-    "/api/channel/mic-type": (action_set_mic_type, [(int, "channel", 0), (int, "type", 0)]),
-    "/api/device/setting": (action_set_unit_setting, [(str, "prop", ""), (int, "value", 0)]),
-    "/api/channels/mute": (action_set_channel_mute, [(str, "name", ""), (bool, "on", None)]),
-    "/api/channels/solo": (action_set_channel_solo, [(str, "name", ""), (bool, "on", None)]),
-    "/api/channels/solo/clear": (action_clear_solos, []),
-    "/api/appsettings/export": (action_export_app_settings, []),
-    "/api/appsettings/open": (action_open_app_settings_folder, []),
-    "/api/appsettings/autostart": (action_set_autostart, [(bool, "on", None)]),
-    # AccessCaster's own update, every one LOCAL ONLY (UPDATE_ROUTES).
-    "/api/update/check": (app_updates.check_now, []),
-    "/api/update/skip": (app_updates.skip, [(str, "version", "")]),
-    "/api/update/interval": (app_updates.set_interval, [(int, "days", -1)]),
-    "/api/update/install": (app_updates.install, [(str, "version", "")]),
-    "/api/update/cancel": (app_updates.cancel, []),
-    "/api/update/proceed": (app_updates.proceed, []),
-    "/api/update/report": (lambda: {"ok": True, "report": app_updates.take_report()}, []),
-    "/api/channels/wireless-mute": (action_set_channel_wireless_mute,
-                                    [(str, "name", ""), (bool, "on", None)]),
-    "/api/channels/level": (action_set_channel_level, [(str, "name", ""), (int, "db", 0)]),
-    "/api/channels/advanced": (action_set_channel_advanced,
-                               [(str, "name", ""), (bool, "on", None)]),
-    "/api/channels/processing-onoff": (action_set_processing_enabled,
-                                       [(str, "name", ""), (bool, "on", None)]),
-    "/api/channels/module": (action_set_channel_module,
-                             [(str, "name", ""), (str, "module", ""), (bool, "on", None)]),
-    "/api/channels/param": (action_set_channel_param,
-                            [(str, "name", ""), (str, "prop", ""), (float, "value", 0)]),
-    "/api/channels/pan-link": (action_link_pan,
-                               [(str, "name", ""), (bool, "on", None), (float, "left", 50),
-                                (float, "right", 50)]),
-    "/api/channels/pan-linked": (action_set_linked_pan,
-                                 [(str, "name", ""), (int, "offset", 0), (float, "left", 50),
-                                  (float, "right", 50)]),
-    "/api/channels/effect": (action_set_channel_effect,
-                             [(str, "name", ""), (str, "effect", ""), (bool, "on", None)]),
-    "/api/channels/effect-param": (action_set_channel_effect_param,
-                                   [(str, "name", ""), (str, "param", ""), (float, "value", 0)]),
-    "/api/processing/preset": (action_apply_mic_preset, [(int, "channel", 0), (str, "preset", "")]),
-    "/api/processing/preset/save": (action_save_mic_preset, [(int, "channel", 0), (str, "name", "")]),
-    "/api/processing/preset/delete": (action_delete_mic_preset, [(str, "name", "")]),
-    "/api/routing/inputsource": (action_set_input_source, [(str, "strip", ""), (int, "source", -1)]),
-    "/api/faders/set": (action_set_fader, [(int, "fader", -1), (int, "code", -1)]),
-    "/api/faders/stereo-link": (action_set_stereo_link, [(int, "pair", -1), (bool, "on", None)]),
-    "/api/faders/mute": (action_set_fader_mute, [(int, "fader", -1), (bool, "on", None)]),
-    "/api/faders/solo": (action_set_fader_solo, [(int, "fader", -1), (bool, "on", None)]),
-    "/api/monitormix/set": (action_set_monitor_level,
-                            [(int, "output", -1), (int, "source", -1), (float, "value", 0)]),
-    "/api/monitormix/reset": (action_reset_monitor_output, [(int, "output", -1)]),
-    "/api/routing/multitrack": (action_set_multitrack, [(int, "mode", -1)]),
-    # USB audio is ROUTING's, not the recorder's: it is an output, and it never
-    # touches the drive, the transport or the recordings list. Same OUTPUT selector either way.
-    "/api/routing/usb-multitrack": (action_set_usb_multitrack, [(int, "mode", -1)]),
-    "/api/routing/usb-expanded": (action_set_usb_expanded, [(bool, "on", None)]),
-    "/api/driver/install": (action_install_driver, []),
-    "/api/driver/page": (action_open_driver_page, []),
-    "/api/routing/usb-bypass": (action_set_usb_bypass, [(bool, "on", None)]),
-    "/api/recorder/processing-bypass": (action_set_processing_bypass, [(bool, "on", None)]),
-    "/api/routing/automute": (action_set_auto_mute, [(str, "which", ""), (bool, "on", None)]),
-    "/api/routing/headphone": (action_set_headphone_type, [(int, "value", -1), (int, "output", 0)]),
-    "/api/routing/compellor": (action_set_master_compellor, [(bool, "on", None)]),
-    "/api/routing/compellor-param": (action_set_compellor_param,
-                                     [(str, "param", ""), (float, "value", 0)]),
-    "/api/routing/outputmode": (action_set_output_mode, [(int, "output", -1), (int, "mode", -1)]),
-    "/api/routing/crosspoint": (action_set_cross_point,
-                                [(int, "output", -1), (int, "source", -1), (bool, "excluded", None)]),
-    "/api/routing/reset-outputs": (action_reset_all_outputs, []),
-    # Mix schemes. The Chat presets are built-in schemes (ids chat-mic-only and chat-normal) and go
-    # through this one apply path rather than an endpoint of their own.
-    "/api/routing/schemes/apply": (action_apply_routing_scheme,
-                                   [(str, "name", ""), (bool, "builtin", False)]),
-    "/api/routing/schemes/save": (action_save_routing_scheme,
-                                  [(str, "name", ""), (str, "output", "")]),
-    "/api/routing/schemes/delete": (action_delete_routing_scheme, [(str, "name", "")]),
-    "/api/profiles/restore": (restore_profile, [(str, "name", ""), (bool, "clean", False)]),
-    # The desk's OWN backup. Import and delete take a SNAPSHOT INDEX, which is the only stable
-    # per-file handle: a uid is a position any export renumbers, and a uuid names the show rather
-    # than the file, so several backups share one (shows.py traps 1 and 2).
-    "/api/shows/export": (action_show_export, []),
-    "/api/shows/import": (action_show_import, [(int, "snapshot", -1)]),
-    "/api/shows/delete": (action_show_delete, [(int, "snapshot", -1)]),
-    "/api/shows/reset": (action_show_reset, [(bool, "backup_first", True)]),
-    # ONE backup: exports a show when there is a drive to hold one, always saves a profile, and
-    # pairs them. Restore always takes the profile (action_restore_backup). The granular show routes
-    # above serve a unit-made show with no profile beside it.
-    "/api/backup": (action_backup_now, [(str, "name", "")]),
-    "/api/backup/restore": (action_restore_backup, [(str, "name", ""), (bool, "clean", False)]),
-    "/api/backup/plan": (backup_restore_plan, [(str, "name", "")]),
-    "/api/backup/delete": (action_delete_backup, [(str, "name", ""), (bool, "force", False)]),
-    # Manual recovery for the silent-channel fault, for the times it happens with no restore
-    # involved. Safe to press at any time: it nudges each mic gain and puts it straight back.
-    "/api/channels/wake": (wake_channels, []),
-    "/api/profiles/info": (profile_info, [(str, "name", "")]),
-    "/api/profiles/delete": (delete_profile, [(str, "name", ""), (bool, "force", False)]),
-    "/api/baseline/save": (action_baseline_save, [(bool, "include_pads", True)]),
-    "/api/baseline/skip": (action_baseline_skip, []),
-    "/api/baseline/add-pads": (action_baseline_add_pads, []),
-    "/api/profiles/rename": (rename_profile, [(str, "name", ""), (str, "new_name", "")]),
-    "/api/pad/clear": (action_clear_pad, [(int, "pad", 0)]),
-    "/api/pad/replay": (action_set_replay, [(int, "pad", 0), (bool, "on", None)]),
-    "/api/pad/gain": (action_set_pad_gain, [(int, "pad", 0), (float, "db", 0)]),
-    "/api/pad/name": (action_set_pad_name, [(int, "pad", 0), (str, "name", "")]),
-    "/api/pad/loop": (action_set_pad_loop, [(int, "pad", 0), (bool, "on", None)]),
-    "/api/pad/colour": (action_set_pad_colour, [(int, "pad", 0), (int, "colour", 0)]),
-    "/api/pad/playmode": (action_set_play_mode, [(int, "pad", 0), (int, "mode", -1)]),
-    "/api/pad/mixer-trigger": (action_set_mixer_trigger, [(int, "pad", 0), (int, "mode", -1)]),
-    "/api/pad/trigger": (action_set_pad_trigger,
-                         [(int, "pad", 0), (str, "field", ""), (int, "value", 0)]),
-    "/api/pad/envelope": (action_set_pad_envelope,
-                          [(int, "pad", 0), (str, "field", ""), (float, "percent", 0.0)]),
-    "/api/pad/fade": (action_set_pad_fade,
-                      [(int, "pad", 0), (str, "field", ""), (float, "seconds", 0.0)]),
-    "/api/pad/flag": (action_set_pad_flag,
-                      [(int, "pad", 0), (str, "name", ""), (bool, "on", None)]),
-    "/api/pad/backchannel": (action_set_back_channel,
-                             [(int, "pad", 0), (str, "source", ""), (bool, "on", None)]),
-    "/api/pad/create-special": (action_create_special_pad, [(int, "pad", 0), (str, "type", "")]),
-    "/api/pad/assign-fx": (action_assign_fx, [(int, "pad", 0), (str, "effect", "")]),
-    "/api/fx/delete": (action_delete_fx_preset, [(str, "name", "")]),
-    "/api/fx/preview/stop": (action_preview_stop, [(int, "grid", 0)]),
-}
-
-
-class Handler(BaseHTTPRequestHandler):
-    # Quieter logging; the user is on a screen reader and console noise is not
-    # useful to them.
-    def log_message(self, fmt, *args):
-        pass
-
-    # --- helpers -----------------------------------------------------------
-    def _send_json(self, obj, status=200):
-        body = json.dumps(obj).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_file(self, path, content_type, extra_headers=None):
-        try:
-            with open(path, "rb") as f:
-                body = f.read()
-        except FileNotFoundError:
-            self.send_error(404)
-            return
-        self._send_body(body, content_type, extra_headers)
-
-    def _send_body(self, body: bytes, content_type, extra_headers=None):
-        """Send bytes we already hold, with the same headers a static file gets.
-
-        Split out from _send_file for index.html, which is assembled rather than read (page.py
-        splices static/help.html into it). The no-cache headers below are the reason this is one
-        function and not two: a second copy would drift and start serving a stale page."""
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        for name, value in (extra_headers or []):
-            self.send_header(name, value)
-        # No caching: this is a local single-user app and the static files change between
-        # sessions/updates. Without this the browser serves a STALE app.js/index.html after an
-        # update, which silently breaks features (a stale app.js against fresh index.html).
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _is_local(self) -> bool:
-        """Did this request come from the machine the unit is plugged into?
-
-        Used by LOCAL_ONLY_ROUTES. Judged on the peer address rather than a header, since a header
-        is whatever the caller says it is."""
-        host = (self.client_address[0] if self.client_address else "") or ""
-        return host in _LOCAL_HOSTS or host.startswith("::ffff:127.")
-
-    # --- remote access ------------------------------------------------------
-    def _token_offered(self) -> str:
-        """The token this request carries, from the query string or the cookie we set."""
-        q = urllib.parse.urlparse(self.path).query
-        got = urllib.parse.parse_qs(q).get("t", [""])[0]
-        if got:
-            return got
-        raw = self.headers.get("Cookie") or ""
-        for part in raw.split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == "ac_token":
-                return value
-        return ""
-
-    def _authorised(self) -> bool:
-        """Local requests always pass; anything else needs the token.
-
-        `compare_digest` rather than `==` so a wrong token cannot be narrowed down by timing. It is
-        a small thing on a LAN, but it costs one call."""
-        if self._is_local():
-            return True
-        return secrets.compare_digest(self._token_offered(), access_token())
-
-    def _refuse(self) -> None:
-        """Say NO in a way a person can act on.
-
-        A bare 401 tells a screen-reader user nothing, so this is a real page with a heading and an
-        explanation. It deliberately does NOT hint at the token or the address: someone who has
-        reached this page without the link is exactly who should learn nothing from it."""
-        body = ("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-                "<title>AccessCaster - link needed</title></head><body>"
-                "<h1>You need the access link</h1>"
-                "<p>AccessCaster is running on another computer and will not accept control from "
-                "this device without its access link.</p>"
-                "<p>On the computer the RODECaster is plugged into, open AccessCaster, go to the "
-                "App settings page and then the Remote access tab. Send the access link there to "
-                "this device and open it.</p>"
-                "</body></html>").encode("utf-8")
-        self.send_response(401)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except OSError:
-            pass
-
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(length) if length > 0 else b""
-
-    def _read_json(self) -> dict:
-        """The request body as a JSON object; an empty body is {}. Anything else raises
-        ValueError, which do_POST answers with a 400, so a malformed request never runs an action
-        with its defaults (an unreadable /api/announce would otherwise switch announcements off)."""
-        raw = self._read_body()
-        if not raw:
-            return {}
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except UnicodeDecodeError as exc:
-            raise ValueError("the body is not UTF-8") from exc
-        if not isinstance(data, dict):
-            raise ValueError("the body is not a JSON object")
-        return data
-
-    def _server_error(self, exc: Exception) -> None:
-        """Log an unexpected exception in a route and answer 500. Under pythonw stderr goes
-        nowhere, so the diagnostics log is the only record of it."""
-        diagnostics.event("http.error", f"{self.command} {self.path}",
-                          error=f"{type(exc).__name__}: {exc}")
-        with contextlib.suppress(OSError):          # the client has gone
-            self._send_json({"ok": False, "message": f"Server error: {exc}"}, status=500)
-
-    # --- routing -----------------------------------------------------------
-    def do_GET(self):
-        # THE GATE. Local requests pass untouched, so nothing on this machine changes; a remote one
-        # needs the token. Checked before ANY route, including the static files, so a stranger
-        # cannot read the page and see the desk's state without control of it.
-        if not self._authorised():
-            self._refuse()
-            return
-        try:
-            self._route_get()
-        except Exception as exc:
-            self._server_error(exc)
-
-    def _route_get(self):
-        path = urllib.parse.urlparse(self.path).path
-        if path in ("/", "/index.html"):
-            # THE COOKIE IS SET HERE AND NOWHERE ELSE. It is what lets every fetch in app.js stay
-            # ignorant of the token: the page is loaded once with ?t=..., and the browser carries
-            # the cookie on the API calls that follow. SameSite=Lax so another site cannot ride it,
-            # and no Secure flag because this is plain HTTP on a LAN - stated in the UI rather than
-            # pretended otherwise.
-            extra = None
-            if not self._is_local():
-                extra = [("Set-Cookie",
-                          "ac_token=%s; Path=/; SameSite=Lax; Max-Age=31536000"
-                          % access_token())]
-            # ASSEMBLED, NOT READ: page.render_index splices static/help.html in at the marker.
-            self._send_body(page.render_index(), "text/html; charset=utf-8", extra_headers=extra)
-            return
-        # LOCAL ONLY applies to reads too: `/api/access` hands back the token itself, so a remote
-        # page that is legitimately signed in must still not be able to read it out (or replace it,
-        # which is the POST half). Only the machine the desk is plugged into may see the key.
-        if path in LOCAL_ONLY_ROUTES and not self._is_local():
-            self._send_json({"ok": False,
-                             "message": "The access link can only be seen on the computer the "
-                                        "unit is plugged into."})
-            return
-        fn = GET_ROUTES.get(path)
-        if fn is not None:
-            # /live and /network routes do a slower (~1.5s) device read; the rest are cheap.
-            self._send_json(fn())
-            return
-        if path.startswith("/static/"):
-            name = path[len("/static/"):]
-            full = _static_file(name)
-            if full is None:
-                self.send_error(403)
-                return
-            ctype = (
-                "text/css; charset=utf-8" if name.endswith(".css")
-                else "application/javascript; charset=utf-8" if name.endswith(".js")
-                # Without this an .html in static/ arrives as text/plain and the browser
-                # shows the source instead of rendering it.
-                else "text/html; charset=utf-8" if name.endswith(".html")
-                else "text/plain; charset=utf-8"
-            )
-            self._send_file(full, ctype)
-            return
-        self.send_error(404)
-
-    def do_POST(self):
-        global _last_ping, _client_seen, _quit_at
-        # Same gate as do_GET, and it matters more here: every write to the desk is a POST.
-        if not self._authorised():
-            self._refuse()
-            return
-        try:
-            if self.path == "/api/ping":
-                # App-lifecycle heartbeat from the open webpage. Cheap, no device access.
-                # A ping also CANCELS a pending quit, so a page reload does not stop the server.
-                _last_ping = time.monotonic()
-                _client_seen = True
-                _quit_at = None
-                # `update_request`: the tray asked for the update decision. Taken only by a page
-                # on this machine, which is the only one that can act on it.
-                self._send_json({"ok": True, "instance": _INSTANCE_ID, "version": APP_VERSION,
-                                 "update_request": self._is_local() and app_updates.take_request()})
-            elif self.path == "/api/quit":
-                # The webpage is closing (sendBeacon on pagehide). Schedule shutdown after a
-                # short grace; a reloaded page's ping arrives first and cancels it.
-                _quit_at = time.monotonic() + _QUIT_GRACE
-                diagnostics.event("app.quit_beacon", "the webpage says it is closing")
-                self._send_json({"ok": True})
-            elif self.path == "/api/focus":
-                # A duplicate page asks us to raise the already-open app window.
-                self._send_json({"ok": _focus_app_window()})
-            elif self.path.startswith("/api/pad/replace"):
-                # pad number in query (?pad=N), filename in a header, body = raw WAV.
-                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                pad_n = int((q.get("pad") or ["0"])[0])
-                # replay defaults ON (factory behaviour); ?replay=0 makes the pad pause/resume.
-                replay = (q.get("replay") or ["1"])[0] not in ("0", "false", "off")
-                filename = self.headers.get("X-Filename", "sound.wav")
-                raw = self._read_body()
-                self._send_json(action_add_sound(pad_n, filename, raw, replay))
-            elif self.path == "/api/routing/delay":
-                # ms is None-aware (None keeps the current delay; only on/off changes).
-                data = self._read_json()
-                ms = data.get("ms", None)
-                self._send_json(action_set_output_delay(bool(data.get("on")),
-                                                        None if ms is None else float(ms)))
-            elif self.path == "/api/profiles/save":
-                # include_pads is a keyword arg on snapshot_profile.
-                data = self._read_json()
-                self._send_json(snapshot_profile(str(data.get("name", "")),
-                                                 include_pads=bool(data.get("include_pads"))))
-            elif self.path == "/api/appsettings/import":
-                # The WHOLE body is the exported file, not a field in it: the page reads the file
-                # the user picked and posts it verbatim, so nothing has to be re-shaped on the way.
-                self._send_json(action_import_app_settings(self._read_json()))
-            elif self.path == "/api/fx/save":
-                # stack is a dict body, not a scalar field.
-                data = self._read_json()
-                self._send_json(action_save_fx_preset(
-                    str(data.get("name", "")),
-                    data.get("stack") or {},
-                    int(data.get("colour", 8))))
-            elif self.path == "/api/fx/preview/start":
-                # stack is a dict body, not a scalar field.
-                data = self._read_json()
-                self._send_json(action_preview_start(
-                    data.get("stack") or {},
-                    int(data.get("colour", 8)),
-                    int(data.get("mic", 1))))
-            elif self.path == "/api/fx/preview/update":
-                # value is passed through untyped (number or string).
-                data = self._read_json()
-                self._send_json(action_preview_update(
-                    int(data.get("grid", 0)),
-                    str(data.get("param", "")),
-                    data.get("value")))
-            elif self.path in LOCAL_ONLY_ROUTES and not self._is_local():
-                # A wifi password must not cross the network it is for, and the access token must
-                # not be replaced by the remote page it lets in.
-                if self.path in UPDATE_ROUTES:
-                    message = app_updates.phrases.LOCAL_ONLY
-                elif self.path == "/api/network/wifi/join":
-                    message = ("Joining a wifi network can only be done from the computer the "
-                               "unit is plugged into. The password would otherwise travel across "
-                               "the network in the clear, which is the network you are joining.")
-                else:
-                    message = ("The access link can only be changed on the computer the unit is "
-                               "plugged into.")
-                self._send_json({"ok": False, "message": message})
-            elif self.path in POST_ROUTES:
-                action, specs = POST_ROUTES[self.path]
-                if specs:
-                    data = self._read_json()
-                    args = [cast(data.get(key, default)) for (cast, key, default) in specs]
-                    self._send_json(action(*args))
-                else:
-                    self._send_json(action())
-            else:
-                self.send_error(404)
-        except (ValueError, TypeError) as exc:
-            self._send_json({"ok": False, "message": f"Bad request: {exc}"}, status=400)
-        except Exception as exc:
-            self._server_error(exc)
-
-
-def open_ui(url: str) -> None:
-    """Open the UI in a Chromium 'app mode' window (no tabs, address bar or toolbar)
-    so keyboard focus stays inside the page and Tab never lands on browser chrome.
-    Falls back to the default browser if no Chromium browser is found."""
-    exe = browser.find_browser()
-    if exe:
-        try:
-            subprocess.Popen([exe, f"--app={url}"])
-            return
-        except Exception:
-            pass
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
-
-
-# The app sets its window/tab title to "<page> - AccessCaster" (app.js APP_TITLE), so we match a
-# title ENDING in "- AccessCaster". That is precise: it catches every app page but not a folder in
-# File Explorer ("AccessCaster - File Explorer") or an editor ("... - Visual Studio Code"). The
-# startswith clause covers the brief initial load before the SPA sets the per-page title.
-_APP_WINDOW_TITLE_SUFFIX = " - AccessCaster"
-_APP_WINDOW_TITLE_PREFIX = "AccessCaster - RODECaster"
-
-
-def _is_app_window_title(title: str) -> bool:
-    return title.endswith(_APP_WINDOW_TITLE_SUFFIX) or title.startswith(_APP_WINDOW_TITLE_PREFIX)
-
-
-def _focus_app_window() -> bool:
-    """Bring the existing AccessCaster browser window to the foreground (Windows only). Returns
-    True if a matching top-level window was found and raised. Used so a relaunch (or a duplicate
-    page) raises the window that is already open instead of opening another one."""
-    if os.name != "nt":
-        return False
-    try:
-        import ctypes
-        from ctypes import wintypes
-    except Exception:
-        return False
-    user32 = ctypes.windll.user32
-    # 64-bit HWNDs must not be truncated to a C int, so declare the signatures explicitly.
-    EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    user32.EnumWindows.argtypes = [EnumProc, wintypes.LPARAM]
-    user32.IsWindowVisible.argtypes = [wintypes.HWND]
-    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-
-    found = []
-
-    def _cb(hwnd, _lparam):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length > 0:
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            if _is_app_window_title(buf.value):
-                found.append(hwnd)
-        return True
-
-    try:
-        user32.EnumWindows(EnumProc(_cb), 0)
-    except Exception:
-        return False
-    if not found:
-        return False
-    return raise_window(found[0])
-
-
 def raise_window(hwnd: int) -> bool:
     """Restore `hwnd` if minimised and bring it to the foreground, from any thread. Returns whether
     Windows made it the foreground window. Logs the outcome as `window.raise`."""
@@ -10275,219 +9029,29 @@ def raise_window(hwnd: int) -> bool:
     return ok
 
 
-def _app_already_serving(port: int) -> bool:
-    """True if an AccessCaster server is already answering on `port`. A lightweight GET to a known
-    endpoint, so we can decide to raise the existing window rather than start a second server."""
-    import urllib.request
-    try:
-        with urllib.request.urlopen(f"http://localhost:{port}/api/announce", timeout=1.5) as r:
-            return r.status == 200
-    except Exception:
-        return False
+def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STARTED) -> None:
+    """Bring up what runs whether or not the window is open. Returns once the desk has been read
+    once, so the window's first pages show real state.
 
-
-# The app runs under pythonw (no console), so a console subprocess would flash a window and
-# steal focus.
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-
-def _pids_listening_on(port: int) -> set:
-    """The PIDs of every process LISTENING on `port`, this one excluded. Pure-stdlib (netstat), so
-    it reads processes belonging to other Windows accounts without any privilege of its own; an
-    empty set on non-Windows or any failure."""
-    if os.name != "nt":
-        return set()
-    try:
-        out = subprocess.run(["netstat", "-ano", "-p", "tcp"],
-                             capture_output=True, text=True, timeout=5,
-                             creationflags=_NO_WINDOW).stdout
-    except Exception:
-        return set()
-    me = os.getpid()
-    pids = set()
-    for line in out.splitlines():
-        if "LISTENING" not in line:
-            continue
-        parts = line.split()
-        if len(parts) < 5 or not parts[1].endswith(f":{port}"):
-            continue
-        try:
-            pid = int(parts[-1])
-        except ValueError:
-            continue
-        if pid and pid != me:
-            pids.add(pid)
-    return pids
-
-
-def _session_of_pid(pid: int):
-    """The Windows session a process belongs to, or None if it cannot be read. `ProcessIdToSessionId`
-    takes a bare PID and opens nothing, so it works on another account's process where reading that
-    process's owner would need admin. Session numbers are all this needs: the point is only whether
-    a holder is US or SOMEBODY ELSE."""
-    if os.name != "nt":
-        return None
-    import ctypes
-    sid = ctypes.c_ulong()
-    try:
-        if not ctypes.windll.kernel32.ProcessIdToSessionId(ctypes.c_ulong(pid), ctypes.byref(sid)):
-            return None
-    except Exception:
-        return None
-    return sid.value
-
-
-def _other_account_holds_port(port: int) -> bool:
-    """True if `port` is held by a process in a DIFFERENT Windows session, i.e. another signed-in
-    account on this PC has AccessCaster running.
-
-    THE WHOLE APP IS NOT MACHINE-WIDE, ONLY THE PORT IS. The announcer speaks into the session that
-    started it, the global shortcuts are registered there, the tray icon lives there and the
-    settings written are that account's. So a second account served by the first account's process
-    gets a page that looks right, says nothing and answers no key - which is why this is a refusal
-    rather than a share."""
-    mine = _session_of_pid(os.getpid())
-    if mine is None:
-        return False
-    return any(_session_of_pid(pid) not in (None, mine) for pid in _pids_listening_on(port))
-
-
-def _refuse_other_account(interactive: bool) -> None:
-    """Report that another Windows account already has the app, and stop. `interactive` is "were we
-    about to open a window for you": if so we owe an explanation in a dialog, and if not (a login
-    start, or a headless tooling run) nobody is watching a screen and a blocking dialog would hang
-    the run. A native MessageBox rather than anything of our own, because it is a real modal dialog
-    to every screen reader without a line of work."""
-    text = ("AccessCaster is already running in another Windows account on this PC.\n\n"
-            "Only one account can use it at a time. There is a single RODECaster on the USB, and "
-            "the spoken announcements and keyboard shortcuts belong to the account that started "
-            "the app.\n\n"
-            "Quit AccessCaster in the other account, or sign that account out, then start it "
-            "again here.\n\n"
-            "To use the app from a different machine instead, use the Remote access tab of App "
-            "settings in the copy that is already running.")
-    print("AccessCaster is already running in another Windows account on this PC.")
-    if not interactive or os.name != "nt":
-        return
-    import ctypes
-    MB_OK, MB_ICONWARNING, MB_SETFOREGROUND = 0x0, 0x30, 0x10000
-    try:
-        ctypes.windll.user32.MessageBoxW(0, text, "AccessCaster",
-                                         MB_OK | MB_ICONWARNING | MB_SETFOREGROUND)
-    except Exception:
-        pass
-
-
-def _close_previous_instances(port: int) -> bool:
-    """Single-instance: terminate any OTHER process of OURS already listening on `port` so this new
-    server cleanly takes over, which stops a stale zombie server answering with old code.
-
-    **OUR OWN SESSION ONLY.** The holder of the port can belong to another signed-in account, and
-    killing that is taking away somebody else's running app (that it needs admin is luck, not a
-    guard). `_other_account_holds_port` handles that case properly, well before this runs.
-
-    Best-effort and pure-stdlib (netstat + taskkill); no-op on non-Windows or any failure. Returns
-    True if it killed at least one."""
-    if os.name != "nt":
-        return False
-    mine = _session_of_pid(os.getpid())
-    pids = {pid for pid in _pids_listening_on(port) if _session_of_pid(pid) == mine}
-    for pid in pids:
-        try:
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                          capture_output=True, timeout=5, creationflags=_NO_WINDOW)
-            print(f"Closed a previous AccessCaster instance (PID {pid}).")
-        except Exception:
-            pass
-    if pids:
-        time.sleep(1.0)            # let the socket(s) release before we bind
-    return bool(pids)
-
-
-class _ExclusiveHTTPServer(ThreadingHTTPServer):
-    """THE BIND IS THE SINGLE-INSTANCE LOCK. `HTTPServer` sets `allow_reuse_address = 1`, and on
-    Windows that flag lets a second process bind a port another process already holds - so two
-    servers could sit on 8770 at once, in different Windows sessions, both reaching for the one
-    desk on the USB. False makes the second bind fail instead, which every entry point already
-    handles as "somebody else is serving"."""
-    allow_reuse_address = False
-
-
-def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=True,
-                     greeting=announcer.GREETING_STARTED):
-    """Bind the server, wire its lifecycle, and (optionally) open the UI. Returns the running
-    ThreadingHTTPServer (already stored in _httpd) or None when another instance is already
-    serving or the port could not be bound. Does NOT call serve_forever - the caller decides
-    whether to block (main) or run it on a thread (the tray app).
-
-      - open_browser: open the accessible web UI app-window after binding.
-      - watchdog:     run the auto-quit watchdog (stops the server once the page closes). The
-                      tray app passes False so closing the window leaves the server in the tray.
-      - announce:     turn the control announcer on at startup.
-      - greeting:     what the announcer says once the desk is open; empty for nothing.
-      - shortcuts:    register the global keyboard shortcuts. OFF in headless mode: a background
-                      tooling run must never take keys away from the whole machine.
+      - announce:  turn the control announcer on at startup, and the clip warning with it.
+      - greeting:  what the announcer says once the desk is open; empty for nothing.
+      - shortcuts: register the global keyboard shortcuts. A DevTools run passes False: a tooling
+                   run must never take keys away from the whole machine.
     """
-    url = f"http://localhost:{HTTP_PORT}/"
-    # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because it is the one place every entry point
-    # goes through: the tray, `python server.py` and the dev server all land here. Starting it in
-    # each entry point instead would put two processes on one file the moment a second launch
-    # raced the first; this way only the process that actually owns the server ever writes to it.
-    diagnostics.start("AccessCaster server starting", version=APP_VERSION,
-                      watchdog=watchdog, announcer=announce, shortcuts=shortcuts)
-    # ANOTHER SIGNED-IN ACCOUNT ON THIS PC HAS IT: refuse. This comes first because both branches
-    # below would otherwise mistake that instance for our own - `_app_already_serving` is a plain
-    # HTTP GET and localhost is machine-wide, while `_focus_app_window` enumerates windows and
-    # cannot see another session's, so the pair of them ends up opening somebody else's UI.
-    if _other_account_holds_port(HTTP_PORT):
-        _refuse_other_account(open_browser)
-        diagnostics.stop("another Windows account is running AccessCaster")
-        return None
-    # If the app is already running with a window open, just raise THAT window and exit. This is
-    # the normal "launched it again" case: never open a second browser window.
-    if open_browser and _app_already_serving(HTTP_PORT) and _focus_app_window():
-        print("AccessCaster is already running; brought its window to the front.")
-        diagnostics.stop("another instance is already serving")
-        return None
-    _close_previous_instances(HTTP_PORT)   # otherwise (zombie/headless server) take over the port
-    try:
-        server = _ExclusiveHTTPServer((HTTP_HOST, HTTP_PORT), Handler)
-    except OSError:
-        # Could not bind (a launch race, or a process we could not kill). If another account took
-        # the port in the moment since the check above, say so rather than opening their UI.
-        if _other_account_holds_port(HTTP_PORT):
-            _refuse_other_account(open_browser)
-            diagnostics.stop("another Windows account is running AccessCaster")
-            return None
-        # Otherwise raise the existing window rather than opening another; only fall back to a
-        # fresh window if none is found.
-        if open_browser and _focus_app_window():
-            print("AccessCaster is already running; brought its window to the front.")
-        elif open_browser:
-            print(f"AccessCaster is already running; opening {url}")
-            open_ui(url)
-        diagnostics.stop("could not bind the port")
-        return None
-    global _httpd, _last_ping
-    _httpd = server
-    _last_ping = time.monotonic()
-    diagnostics.event("app.serving", url)
-    print(f"AccessCaster serving on {url}")
-    print(f"(LAN: http://<this-pc-ip>:{HTTP_PORT}/ - USB control runs on this PC)")
-    if watchdog:
-        # App lifecycle: when the watchdog is on, the server lives only while a webpage is open.
-        threading.Thread(target=_client_watchdog, daemon=True).start()
+    # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because every entry point comes through here.
+    diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
+                      shortcuts=shortcuts)
     if announce and announcer.starts_on():
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=greeting)
     if announce:
         start_clip_warning()
-    # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
-    # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
-    # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something
-    # reads the Routing page. The announcer seeds it too, but only while announcements are ON.
-    # Skipped when something has already published, so this costs one dump at most.
+    # SEED THE EXPANDED FLAG BEFORE ANYTHING ASKS FOR IT. It is a published cache, and unpublished
+    # it answers False: the fader list then omits Game, Music, A and B and the write gate refuses
+    # them, so on a desk that IS in Expanded the four cannot be assigned until something reads the
+    # routing. The announcer seeds it too, but only while announcements are ON. Skipped when
+    # something has already published, so this costs one dump at most.
     threading.Thread(target=_seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
     # RODE's virtual devices may have been left switched off in Windows by a mode change made
     # while this app was not running; apply the driver's current state now. Delayed so the
@@ -10501,7 +9065,6 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
                      args=(_virtual_devices_repair, _virtual_devices_watch_stop),
                      daemon=True, name="virtual-devices-watch").start()
     if shortcuts:
-        # Global shortcuts, started whatever the announcer is doing (one of them turns it on).
         # Failures are reported and never fatal: no shortcut is worth refusing to start the app.
         try:
             mgr = hotkey_manager()
@@ -10511,17 +9074,16 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
             print(f"Keyboard shortcuts registered: {len(live)}.")
         except Exception as exc:
             print(f"Keyboard shortcuts unavailable: {exc}")
-    # The recording state listener, started whatever the announcer is doing: it is what makes the
-    # Recording page free to poll, and it is how a press of the unit's own REC button is noticed.
-    # Read-only, its own handle, and idle unless the recorder changes state.
+    # The recording state listener: it is what makes the Recording page free to poll, and it is
+    # how a press of the unit's own REC button is noticed. Read-only, its own handle, and idle
+    # unless the recorder changes state.
     _recorder_watcher()
     # AccessCaster's own update: says what the last one did, then checks now and then. Silent
     # unless a version is found, and never from a source run.
     app_updates.start()
-    # The CallMe listener, for the same reasons: a call rings whatever page is open, and it has to
-    # be heard whether or not anyone is announcing. It seeds itself from a dump once it opens.
+    # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
+    # not anyone is announcing. It seeds itself from a dump once it opens.
     _callme_watcher()
-    # Best-effort live read at startup so the first page load shows real state.
     try:
         seed = read_live_settings()
         if seed.get("ok"):
@@ -10532,72 +9094,20 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
             print(f"Startup read skipped: {seed.get('message')}")
     except Exception as exc:
         print(f"Startup read skipped: {exc}")
-    if open_browser:
-        open_ui(url)
-    return server
 
 
-def start_server_managed(announce=True, shortcuts=True, open_browser=True,
-                         greeting=announcer.GREETING_STARTED):
-    """Start the server for the tray app: there is NO auto-quit watchdog, so closing the web page
-    leaves the server running (it lives in the system tray until Quit). The server runs on a
-    background daemon thread. Returns the server, or None if it did not start (another instance was
-    already serving).
-
-    `open_browser` FALSE IS THE LOGIN CASE (`tray.main`, `--startup`). Started at sign-in you want
-    the tray, the announcer and the global shortcuts ready, and emphatically NOT a browser window
-    stealing the focus of whatever you actually signed in to do. Nothing else changes: the watchdog
-    is already off on this path, so a tray instance with no page open sits there quite happily
-    rather than deciding after two minutes that the browser failed to start."""
-    server = _bring_up_server(open_browser=open_browser, watchdog=False, announce=announce,
-                              shortcuts=shortcuts, greeting=greeting)
-    if server is not None:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-def _shut_down(reason: str) -> None:
-    """What the app lets go of on the way out, whichever way it stops (the tray's Quit, the
-    watchdog, Ctrl+C). Safe to call more than once.
+def stop_service(reason: str) -> None:
+    """What the app lets go of on the way out. Safe to call more than once.
 
     The global shortcuts go first: left registered, they keep taking those keys from every other
     program with nothing left running to act on them. Then any Hold-mode pad a shortcut is holding,
     which would otherwise keep playing with nothing left to release it, and any live preview still
-    engaged on a mic."""
+    engaged on a mic. The endpoint watcher unregisters its callback rather than leaving Windows'
+    audio service holding a pointer into a process that is going away."""
+    diagnostics.event("app.stopping", reason)
+    _virtual_devices_watch_stop.set()
     if _hotkeys is not None:
         _hotkeys.stop()
     pad_shortcuts.release_held()
     _cleanup_preview_on_exit()
     diagnostics.stop(reason)
-
-
-def stop_server():
-    """Stop the server cleanly (used by the tray's Quit). Safe to call more than once."""
-    diagnostics.event("app.stopping", "stop_server called")
-    if _httpd is not None:
-        _httpd.shutdown()
-    _shut_down("quit from the tray")
-
-
-def main():
-    headless = bool(os.environ.get("ACCESS_CASTER_NO_UI"))
-    # In headless mode (ACCESS_CASTER_NO_UI, our tooling/background runs) the UI, watchdog and
-    # announcer are all off. Otherwise this is the foreground launcher (python server.py): watchdog
-    # ON, so closing the page stops the server.
-    server = _bring_up_server(open_browser=not headless,
-                              watchdog=not headless,
-                              announce=not headless,
-                              shortcuts=not headless)
-    if server is None:
-        return
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping.")
-        server.shutdown()
-    finally:
-        _shut_down("serve_forever returned")
-
-
-if __name__ == "__main__":
-    main()

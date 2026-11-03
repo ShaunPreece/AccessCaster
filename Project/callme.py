@@ -5,8 +5,8 @@ PROJECT_GUIDE.md part 2. In short: everything lives on the SIPCALLING node and t
 nodes, all root children, addressed from the live tree; an incoming call is PUSHED; answering is one
 composite write. The touchscreen is the only other way to do any of it, which is why this exists.
 
-THE WORDING LIVES HERE, like the recorder's: the server speaks it, the page shows it, and the
-browser composes none of it.
+THE WORDING LIVES HERE, like the recorder's: the server speaks it, the window shows it, and the
+window composes none of it.
 """
 
 from __future__ import annotations

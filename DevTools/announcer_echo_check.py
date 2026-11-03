@@ -1,14 +1,14 @@
 """Prove the announcer's ECHO SUPPRESSION on real hardware. Reversible: restores what it moves.
 
 THE PROBLEM IT GUARDS: the desk pushes our OWN writes back on the state stream, so a level set from
-the web UI is announced twice - once by the screen reader reading the UI's live region, once by the
-announcer speaking the echo. announcer.mark_self_write suppresses the second.
+the window is announced twice - once by the window's own reply, once by the announcer speaking the
+echo. announcer.mark_self_write suppresses the second.
 
-Why the test is shaped like this: the marks live in the process that DECODES the stream, and the
-process holding port 8770 may be an installed build that does not have them. So this script does both
-halves itself - it marks the write exactly as action_set_fader_level does (via announcer.publish_level,
-so the fader-index to source-code translation is exercised, not bypassed), drives the real write over
-the running app's HTTP API, and reads the real echo off its own HID handle.
+Why the test is shaped like this: the marks live in the process that DECODES the stream, so this
+script is that process. The MARKED half calls the app's own action (`server.action_set_fader_level`
+and friends), which marks its write as the window's does, the fader-index to source-code
+translation included; the UNMARKED half calls the raw writer underneath, which marks nothing. The
+real echo is read off the script's own HID handle. Quit AccessCaster first.
 
 Every path is tested in PAIRS, so a silent result cannot be mistaken for a broken listener:
   MARKED   - expect NOTHING spoken (the suppression working)
@@ -33,10 +33,6 @@ does and fails only when a MARKED write is spoken (suppression genuinely broken)
 IS known to echo goes quiet (the listener died, and the marked half then proves nothing).
 
 Usage: python DevTools/announcer_echo_check.py
-
-NOTE: the mute and gain phases need a server that HAS /api/channels/mute, i.e. one run from this
-source tree (DevTools/run_dev_server.py). Against an older installed build they report the 404
-rather than guessing, because a missing endpoint looks exactly like perfect suppression.
 """
 from __future__ import annotations
 
@@ -50,9 +46,11 @@ import announcer
 import channels
 import rcp_hid
 import rcp_read
-import server  # noqa: F401  (installs the announcer's hooks)
+import rcp_transfer
 import speech
-from _desk import api, push_handle
+from _desk import push_handle, service
+
+server = service()
 
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
 MUTE_CHAN = "Mic3"  # nothing is plugged into Mic 3, and the standing rule keeps Mic 1 unwritten
@@ -79,24 +77,24 @@ def listen(dev, st: dict, secs: float) -> list[str]:
     return [text for _t, text in SAID[before:]]
 
 
-def phase(dev, st, label: str, mark, path: str, payload: dict, expect_speech, failures: list,
-          notes: list) -> list[str]:
-    """One half of a pair: optionally mark the write as ours, drive it over HTTP, then listen.
+def raw(write):
+    """A raw writer as a write for `phase`: it marks nothing, and raising is its failure."""
+    def run():
+        write()
+        return {"ok": True}
+    return run
 
-    `mark` is a zero-argument callable (or None for the UNMARKED control). Marking happens BEFORE
-    the write, exactly as the server does it, so the echo cannot land inside the gap.
+
+def phase(dev, st, label: str, write, expect_speech, failures: list, notes: list) -> list[str]:
+    """One half of a pair: make the write, then listen.
+
+    `write` is a zero-argument callable returning a reply: the app's action for a MARKED half, or
+    `raw(...)` round the writer underneath it for the UNMARKED control.
 
     `expect_speech` is True (this path echoes, so silence here means the listener is dead),
     False (a marked write: speech here is the suppression failing) or None (measured to be silent
     because the desk does not echo this path - report it, do not judge it)."""
-    if mark is not None:
-        mark()
-    res = api(path, post=payload)
-    if res.get("http_status") == 404:
-        failures.append(f"{label}: {res['message']} - run the server from THIS source tree "
-                        f"(python DevTools/run_dev_server.py)")
-        print(f"{label:22} -> {res['message']}")
-        return []
+    res = write()
     if not res.get("ok"):
         failures.append(f"{label}: the write itself failed: {res.get('message')}")
     said = listen(dev, st, 4.0)
@@ -114,7 +112,7 @@ def phase(dev, st, label: str, mark, path: str, payload: dict, expect_speech, fa
 
 
 def main() -> int:
-    levels = api("/api/faders/levels")
+    levels = server.fader_levels_live()
     original = next((f["percent"] for f in levels["faders"] if f["index"] == FADER), None)
     if original is None:
         print(f"fader index {FADER} has no level control here; nothing to test")
@@ -129,7 +127,7 @@ def main() -> int:
     if rcp_hid.find_control_interface() is None:
         print("no device")
         return 1
-    chans = {c["name"]: c for c in api("/api/channels")["channels"]}
+    chans = {c["name"]: c for c in server.action_get_channels()["channels"]}
     mute_was = bool(chans[MUTE_CHAN]["muted"])
     strip = channels.channel_strip_index(MUTE_CHAN)
     # The channels list carries mute but not gain (gain is a mixer read), so take it from the desk.
@@ -147,11 +145,11 @@ def main() -> int:
             # ---- LEVEL: the one path the desk really does echo. This is the regression. ----
             target_a = 60 if original != 60 else 55
             phase(dev, st, "LEVEL   MARKED",
-                  lambda: announcer.publish_level("fader", FADER, target_a / 100.0),
-                  "/api/faders/level", {"fader": FADER, "percent": target_a}, False,
-                  failures, notes)
-            phase(dev, st, "LEVEL   UNMARKED", None,
-                  "/api/faders/level", {"fader": FADER, "percent": original}, True, failures, notes)
+                  lambda: server.action_set_fader_level(FADER, target_a), False, failures, notes)
+            phase(dev, st, "LEVEL   UNMARKED",
+                  raw(lambda: rcp_transfer.set_fader_level(
+                      FADER, round(original * rcp_transfer.FADER_LEVEL_MAX / 100))),
+                  True, failures, notes)
 
             # ---- MUTE: keyed by STRIP index, so no layout translation on either side. ----
             # Flip AWAY from where it started for the marked half and back for the unmarked one,
@@ -159,11 +157,11 @@ def main() -> int:
             # SILENT: see the module docstring - the desk answers a software mute with mixMute
             # matrix records only.
             phase(dev, st, "MUTE    MARKED",
-                  lambda: announcer.publish_mute(strip, not mute_was),
-                  "/api/channels/mute", {"name": MUTE_CHAN, "on": not mute_was}, False,
+                  lambda: server.action_set_channel_mute(MUTE_CHAN, not mute_was), False,
                   failures, notes)
-            phase(dev, st, "MUTE    UNMARKED", None,
-                  "/api/channels/mute", {"name": MUTE_CHAN, "on": mute_was}, None, failures, notes)
+            phase(dev, st, "MUTE    UNMARKED",
+                  raw(lambda: channels.set_channel_mute(MUTE_CHAN, mute_was)), None,
+                  failures, notes)
 
             # ---- GAIN: the two sides name a gain differently, which is the point of the mark. ----
             # Two DIFFERENT values, because the push side dedupes on (who, value): repeating a value
@@ -172,18 +170,17 @@ def main() -> int:
             g_a = base + 6 if base <= 30 else base - 6
             g_b = base + 12 if base <= 24 else base - 12
             phase(dev, st, "GAIN    MARKED",
-                  lambda: announcer.mark_self_gain(GAIN_CHAN, True),
-                  "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_a}, False, failures, notes)
-            phase(dev, st, "GAIN    UNMARKED", None,
-                  "/api/channel/gain", {"channel": GAIN_CHAN, "db": g_b}, None, failures, notes)
+                  lambda: server.action_set_gain(GAIN_CHAN, g_a), False, failures, notes)
+            phase(dev, st, "GAIN    UNMARKED",
+                  raw(lambda: channels.set_mic_gain(GAIN_CHAN, g_b)), None, failures, notes)
     finally:
-        api("/api/faders/level", post={"fader": FADER, "percent": original})
-        api("/api/channels/mute", post={"name": MUTE_CHAN, "on": mute_was})
+        server.action_set_fader_level(FADER, original)
+        server.action_set_channel_mute(MUTE_CHAN, mute_was)
         if isinstance(gain_was, int):
-            api("/api/channel/gain", post={"channel": GAIN_CHAN, "db": gain_was})
-        back = api("/api/faders/levels")
+            server.action_set_gain(GAIN_CHAN, gain_was)
+        back = server.fader_levels_live()
         now = next((f["percent"] for f in back["faders"] if f["index"] == FADER), None)
-        chans2 = {c["name"]: c for c in api("/api/channels")["channels"]}
+        chans2 = {c["name"]: c for c in server.action_get_channels()["channels"]}
         mute_now = bool(chans2[MUTE_CHAN]["muted"])
         gain_now = channels.read_mixer()["mics"][GAIN_CHAN]["gain_db"]
         for what, before, after in (("fader level", original, now),

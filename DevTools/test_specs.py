@@ -13,7 +13,6 @@ the page or is named in UNIT_SETTINGS_NOT_ON_PAGE with the reason.
 This is the place for any other "two tables that must agree" check. Run:
     python DevTools/test_specs.py
 """
-import pathlib
 import re
 
 import _bootstrap  # puts Project/ on the path; import FIRST
@@ -161,50 +160,6 @@ for _d in devices.DEVICES.values():
     check_true(f"{_d.name}: the stereo_link cap and the pair table agree",
                ("stereo_link" in _d.caps) == bool(_f.stereo_pairs),
                f"cap={'stereo_link' in _d.caps} pairs={bool(_f.stereo_pairs)}")
-
-
-# ---------------------------------------------------------------------------
-# ONE VOICE PER OUTCOME: a live region and announce() must never carry the same words
-# ---------------------------------------------------------------------------
-# A `role="status"` element and `announce()` are both polite live regions. Write the same message
-# into both in one tick and a screen reader says it twice or drops one, which is why the guide
-# forbids it. The pairing is invisible on screen and easy to reintroduce by copying a handler, so
-# it is asserted here rather than left to a browser pass.
-#
-# WHAT IS CHECKED IS THE PAIR, not either half on its own. A live region written by itself is fine
-# and is how most sections speak; `announce()` by itself is fine too. It is writing the SAME words
-# to both, in the same tick, that produces the fault.
-#
-# `setStatus` is the helper for these elements and it clears before it writes, so a repeated message
-# is still spoken. That is the half a bare `setText` into a live region loses, which is why the
-# converted sections use it - but converting the other twenty-odd is a job of its own and NOT
-# asserted here, or this check would fail on code that is merely old rather than wrong.
-
-_static = pathlib.Path(_bootstrap.repo_path("Project", "static"))
-_html = (_static / "index.html").read_text(encoding="utf-8")
-_js = (_static / "app.js").read_text(encoding="utf-8")
-
-# Every id in the markup that is its own live region.
-_live_ids = set(re.findall(r'id="([\w-]+)"[^>]*\brole="status"', _html))
-_live_ids |= set(re.findall(r'id="([\w-]+)"[^>]*\baria-live=', _html))
-check_true("index.html declares some live-region status lines", len(_live_ids) > 5,
-           f"found {len(_live_ids)}")
-
-_paired = []
-for _m in re.finditer(
-        r'set(?:Text|Status)\("([\w-]+)",\s*([^;]+?)\);\s*\n\s*announce\(([^;]+?)\);', _js):
-    said, again = _m.group(2).strip(), _m.group(3)
-    head = said.rstrip(")").split(",")[0].strip()
-    if _m.group(1) in _live_ids and head and head in again:
-        _paired.append(_m.group(1))
-check_true("no live region is announced a second time with the same words",
-           not _paired, f"double-announced: {sorted(set(_paired))}")
-
-# These three sections are the ones that repeat a message, so they must write through the clearing
-# helper rather than a bare setText.
-for _id in ("fader-levels-status", "reset-outputs-status", "stereo-status"):
-    check_true(f"{_id} is written only through setStatus", f'setText("{_id}"' not in _js,
-               "a bare setText here goes silent when the same message repeats")
 
 
 # --- A DESK IS IDENTIFIED BY ITS SERIAL, NOT BY AN ID THAT MOVES -----------------------------

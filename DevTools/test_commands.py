@@ -49,21 +49,16 @@ writes.clear()
 commands.run("chan.mute:Mic1")
 check("mute with no announcer cache falls back to a read", writes, [("mute", False)])
 
-print("\nOPEN ACCESSCASTER goes to the tray's window, never the web page, once one is hosted")
+print("\nOPEN ACCESSCASTER goes to the tray's window")
 import app_window  # noqa: E402
 
-opened = []
-stub._focus_app_window = lambda: opened.append("web") or True
-stub.open_ui = lambda url: opened.append("browser")
 app_window.show = lambda: True
 check("a raised window is silent", commands.run("app.window")["message"], "")
 app_window.show = lambda: False
 check("a refused raise says where the window is", "Alt+Tab" in commands.run("app.window")["message"],
       True)
-check("and neither opened the web page", opened, [])
 app_window.show = None
-commands.run("app.window")
-check("a dev server run, with no window, raises the web page", opened, ["web"])
+check("a run with no window says nothing", commands.run("app.window")["message"], "")
 
 print()
 sys.exit(_testkit.finish())

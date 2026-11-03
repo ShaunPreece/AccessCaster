@@ -1,6 +1,7 @@
 """THE WHOLE CLEAN RESTORE, end to end, with a whole-model diff.
 
-WHAT IT DOES, through the app's own HTTP API so it exercises the shipping path:
+WHAT IT DOES, through the app's own actions in this process, so it exercises the shipping path
+(quit AccessCaster first):
   1. dumps the desk as it stands, and notes every mute and solo,
   2. saves a profile of it, pads included,
   3. runs a CLEAN restore (which exports a backup, software-factory-resets the desk, then writes the
@@ -30,13 +31,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _desk
 import rcp_read
-from _desk import api, wait_for_job
+from _desk import wait_for_job
 from analyse_clean_restore import compare, show, snap
 
 CAP = Path(__file__).resolve().parent / "captures"
 FACTORY_DUMP = CAP / "post-showreset-raw.bin"     # a real factory dump of THIS desk
 PROFILE = "Clean restore retest"
 OUTPUT_MUTES = (("monitor", "outputMonMute"), ("bluetooth", "outputBTMute"))
+server = None
 
 
 def say(text: str) -> None:
@@ -45,8 +47,8 @@ def say(text: str) -> None:
     print(f"** {text}")
 
 
-def poll(path: str, label: str, timeout: float = 900.0) -> dict:
-    """Wait for the server job behind status route `path`, printing each new message. A job still
+def poll(status, label: str, timeout: float = 900.0) -> dict:
+    """Wait for the job behind the status function `status`, printing each new message. A job still
     running at `timeout` comes back as a failure, so the undo still runs."""
     said = [None]
 
@@ -57,7 +59,7 @@ def poll(path: str, label: str, timeout: float = 900.0) -> dict:
             said[0] = msg
 
     try:
-        return wait_for_job(lambda: api(path, timeout=120.0), timeout, 1.5, print_new)
+        return wait_for_job(status, timeout, 1.5, print_new)
     except TimeoutError as e:
         return {"done": False, "ok": False, "message": f"{label}: {e}"}
 
@@ -74,7 +76,7 @@ def live_state(blob: bytes) -> dict:
     """Every mute and solo, the state a restore never writes. A channel the page reports neither
     for (one on no fader) is left out: the app has no route to it either."""
     chans = [(c["name"], c.get("muted"), c.get("solo"))
-             for c in api("/api/channels", timeout=120.0).get("channels") or []]
+             for c in server.action_get_channels().get("channels") or []]
     return {
         "mute": {n: m for n, m, _s in chans if m is not None},
         "solo": {n: s for n, _m, s in chans if s is not None},
@@ -84,12 +86,12 @@ def live_state(blob: bytes) -> dict:
 
 def put_live_state_back(state: dict) -> None:
     for name, on in state["mute"].items():
-        api("/api/channels/mute", post={"name": name, "on": bool(on)})
+        server.action_set_channel_mute(name, bool(on))
     for name, on in state["solo"].items():
-        api("/api/channels/solo", post={"name": name, "on": bool(on)})
+        server.action_set_channel_solo(name, bool(on))
     for which, on in state["output"].items():
         if on is not None:
-            api("/api/output/mute", post={"which": which, "on": bool(on)})
+            server.action_set_output_mute(which, bool(on))
 
 
 def put_desk_back(before_path: Path, state: dict, restored: bool) -> bool:
@@ -98,12 +100,12 @@ def put_desk_back(before_path: Path, state: dict, restored: bool) -> bool:
     if not restored:
         say("The clean restore did not finish, so I am restoring the profile again, without the "
             "reset.")
-        res = api("/api/profiles/restore", post={"name": PROFILE, "clean": False}, timeout=600.0)
+        res = server.restore_profile(PROFILE, False)
         if not res.get("ok"):
             say(f"That restore would not start. Restore the profile called {PROFILE} by hand.")
             print(f"   restore refused: {res.get('message')}")
             return False
-        st = poll("/api/profiles/restore/status", "the ordinary restore")
+        st = poll(server.profile_restore_status, "the ordinary restore")
         print(f"   ordinary restore finished: ok={st.get('ok')} - {st.get('message')}")
     say("Putting the mutes and solos back as they were.")
     put_live_state_back(state)
@@ -126,24 +128,26 @@ def main() -> int:
     if not args.yes:
         print("This FACTORY-RESETS the desk (and puts it back afterwards). Re-run with --yes.")
         return 2
+    global server
+    server = _desk.service()
 
     say("Starting the clean restore retest. I am dumping the desk, then saving a profile of it "
         "with its pads, which takes a few minutes.")
     before_path, before_blob = dump("pre-cleanretest-raw")
     state = live_state(before_blob)
 
-    res = api("/api/profiles/save", post={"name": PROFILE, "include_pads": True}, timeout=600.0)
+    res = server.snapshot_profile(PROFILE, include_pads=True)
     if not res.get("ok"):
         print(f"could not save the profile: {res.get('message')}")
         return 1
-    st = poll("/api/profiles/save/status", "the profile save")
+    st = poll(server.profile_save_status, "the profile save")
     print(f"   profile saved: {st.get('message')}")
     if not st.get("ok"):
         return 1
 
     say("Now the clean restore. It backs the desk up, factory resets it, and writes the profile "
         "back on top.")
-    res = api("/api/profiles/restore", post={"name": PROFILE, "clean": True}, timeout=600.0)
+    res = server.restore_profile(PROFILE, True)
     if not res.get("ok"):
         print(f"could not start the restore: {res.get('message')}")
         return 1
@@ -152,7 +156,7 @@ def main() -> int:
     undo_ok = False
     restored = False
     try:
-        st = poll("/api/profiles/restore/status", "the clean restore")
+        st = poll(server.profile_restore_status, "the clean restore")
         print(f"   restore finished: ok={st.get('ok')} - {st.get('message')}")
         restored = bool(st.get("ok"))
         if not restored:
@@ -169,7 +173,7 @@ def main() -> int:
         undo_ok = put_desk_back(before_path, state, restored)
         # The profile is the undo, so it is kept whenever the undo did not come back clean.
         if undo_ok and not args.keep_profile:
-            gone = api("/api/profiles/delete", post={"name": PROFILE, "force": True})
+            gone = server.delete_profile(PROFILE, True)
             print(f"   scratch profile '{PROFILE}' deleted" if gone.get("ok")
                   else f"   COULD NOT DELETE the scratch profile '{PROFILE}': {gone.get('message')}")
 

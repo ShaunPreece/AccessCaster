@@ -9,8 +9,8 @@ Proves the padTrigger* properties end to end on one EMPTY pad, then puts the des
   4. turn the custom flag off and assert what the DESK does then, which is discard the numbers;
   5. clear the pad and confirm the grid and the effect pool are back to baseline.
 
-EXCLUSIVE DEVICE ACCESS: stop the running service first (the app owns the HID handle), then restart
-it with `python DevTools/run_dev_server.py`. Everything here is reversible and read-back verified; a
+EXCLUSIVE DEVICE ACCESS: quit AccessCaster from the tray first. A live suite refuses to start
+while the app holds the desk. Everything here is reversible and read-back verified; a
 trigger pad writes NO region-B object, so it cannot leave a pool orphan (SOUNDPADS.md).
 
 Usage:

@@ -30,10 +30,10 @@ THREE PROPERTIES IT HAS TO HAVE, and each one is a decision rather than a defaul
   * IT CANNOT BREAK THE APP. Every entry point swallows its own exceptions. A log that can take
     down the thing it is logging is worse than no log.
 
-IT IS OFF UNTIL `start()` IS CALLED, which `server._bring_up_server` does - the one place every
-entry point (tray, `python server.py`, the dev server) funnels through. So the offline test suites
-and the DevTools scripts import this module and write nothing, and only the process that actually
-owns the server writes to the file. That is also what keeps it a SINGLE-WRITER file.
+IT IS OFF UNTIL `start()` IS CALLED, which `server.start_service` does - the one place every
+entry point funnels through, and only the holder of the single-instance lock gets there. So the
+offline test suites import this module and write nothing, and only the process that owns the desk
+writes to the file. That is also what keeps it a SINGLE-WRITER file.
 """
 
 from __future__ import annotations

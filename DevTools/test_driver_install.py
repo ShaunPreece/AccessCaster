@@ -115,18 +115,13 @@ check("and points at the manual route for a repair",
 print("\nWHAT THE APP CONTACTS, AND NOTHING ELSE")
 # The README and Help both list what reaches the internet: RODE's driver download, on a button
 # press, and AccessCaster's own update check and download. Asserted rather than trusted: no other
-# module fetches anything. `urllib`/`socket` appear elsewhere for the LAN server and for reading
-# this machine's own address, so match on the ACT of fetching a URL rather than on the import.
+# module fetches anything. Matched on the ACT of fetching a URL rather than on the import.
 proj = _bootstrap.PROJECT
 callers = []
 for path in glob.glob(os.path.join(proj, "**", "*.py"), recursive=True):
     with open(path, encoding="utf-8") as source:
         for line in source:
             if not re.search(r"urlopen\s*\(|urlretrieve\s*\(", line):
-                continue
-            # LOCALHOST IS NOT OUTBOUND. `server.py` pings its own `/api/announce` to see whether
-            # another instance is already serving, which is the app talking to itself.
-            if re.search(r"localhost|127\.0\.0\.1", line):
                 continue
             callers.append(os.path.relpath(path, proj).replace(os.sep, "/"))
 check("only the driver download and the update opener reach beyond this computer",

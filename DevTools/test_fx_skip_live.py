@@ -10,8 +10,8 @@
 The only writes are the one param and its restore on one pad, plus the disengage after each; the
 pad is engaged for under a second each time, so its effect is briefly live on its input.
 
-EXCLUSIVE DEVICE ACCESS: stop the running service first (the app owns the HID handle), then restart
-it with `python DevTools/run_dev_server.py`.
+EXCLUSIVE DEVICE ACCESS: quit AccessCaster from the tray first. A live suite refuses to start
+while the app holds the desk.
 
 Usage:
     python DevTools/test_fx_skip_live.py                  # Megaphone (grid 10), echoMix

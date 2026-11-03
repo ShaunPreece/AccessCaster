@@ -51,7 +51,7 @@ DATA_DIR = _user_data_dir()
 
 
 def resource_path(*parts: str) -> str:
-    """Absolute path to a read-only bundled asset (e.g. resource_path('static', 'index.html')).
+    """Absolute path to a read-only bundled asset (e.g. resource_path('help', 'help.txt')).
 
     When frozen, every bundled asset sits flat under RESOURCE_DIR (sys._MEIPASS). Running from
     source the assets are split across the repo: the app's own files (static/,

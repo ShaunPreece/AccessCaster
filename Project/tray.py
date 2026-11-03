@@ -1,9 +1,9 @@
 """AccessCaster - the packaged Windows app's entry point: the service, the window and the tray icon,
 in one process.
 
-Running this is the "app". It brings the service up (announcer, shortcuts, watchers and the local
-web server) on a background thread, opens the native window (`native/`), and parks an icon in the
-Windows notification area. Closing the window hides it: the service keeps running behind the icon,
+Running this is the "app". It brings the service up (announcer, shortcuts and watchers) on a
+background thread, opens the native window (`native/`), and parks an icon in the Windows
+notification area. Closing the window hides it: the service keeps running behind the icon,
 and the window comes back as it was left. The user quits from the tray menu.
 
 Tray right-click (or the keyboard Applications key / Shift+F10 on the selected icon) opens a
@@ -47,6 +47,7 @@ import app_updates
 import app_window
 import autostart
 import diagnostics
+import instance
 import server
 import speech
 import win32api
@@ -93,8 +94,15 @@ _TRAY_ICON_ID = 1
 _OPEN_DEBOUNCE_S = 1.0
 _OPEN_EVENTS = (NIN_SELECT, NIN_KEYSELECT, win32con.WM_LBUTTONUP, win32con.WM_LBUTTONDBLCLK)
 
-_COULD_NOT_START = ("AccessCaster could not start: another copy is already running on this "
-                    "computer.")
+_OTHER_ACCOUNT = ("AccessCaster is already running in another Windows account on this PC.\n\n"
+                  "Only one account can use it at a time. There is a single RODECaster on the USB, "
+                  "and the spoken announcements and keyboard shortcuts belong to the account that "
+                  "started the app.\n\n"
+                  "Quit AccessCaster in the other account, or sign that account out, then start it "
+                  "again here.")
+# How long a second launch waits for this session's copy to show its icon window, when the lock
+# is held but no window is found yet: a copy that has only just started.
+_FIND_RUNNING_S = 3.0
 
 _user32 = ctypes.windll.user32
 _user32.GetLastActivePopup.argtypes = [wintypes.HWND]
@@ -124,13 +132,12 @@ class TrayApp:
         self.frame = None
         self._ui_thread = threading.get_ident()
         self._starting = True             # the service is still coming up
-        self._serving = False
         self._quitting = False
         self._last_open = float("-inf")
         self._create_window()
         self._add_icon()
         app_updates.notify = self._notify
-        app_updates.open_page = lambda: win32gui.PostMessage(self.hwnd, WM_OPEN_WINDOW, 0, 0)
+        app_updates.open_window = lambda: win32gui.PostMessage(self.hwnd, WM_OPEN_WINDOW, 0, 0)
         app_window.show = self._show_from_any_thread
         # Windows ending the session closes the window through wx as well as through the icon's
         # window. wx's own answer to the query closes the window, which hides it, and so refuses to
@@ -147,20 +154,14 @@ class TrayApp:
 
     # -- the service ------------------------------------------------------------------------------
     def _bring_up(self, greeting: str) -> None:
-        started = server.start_server_managed(open_browser=False, greeting=greeting)
-        wx.CallAfter(self._brought_up, started is not None)
+        server.start_service(greeting=greeting)
+        wx.CallAfter(self._brought_up)
 
-    def _brought_up(self, ok: bool) -> None:
+    def _brought_up(self) -> None:
         self._starting = False
-        self._serving = ok
         if self._quitting:
             # Quit was chosen while the service came up: finish what `_quit` left.
             self._finish_quit()
-            return
-        if not ok:
-            if self.frame:
-                wx.MessageBox(_COULD_NOT_START, APP_NAME, wx.OK | wx.ICON_WARNING, self.frame)
-            self._quit()
             return
         if self.frame:
             self.frame.start()
@@ -175,7 +176,7 @@ class TrayApp:
             self.frame = MainFrame()
             self.frame.present()
             self.frame.tree.SetFocus()
-            if self._serving:
+            if not self._starting:
                 self.frame.start()
         else:
             self.frame.present()
@@ -188,7 +189,7 @@ class TrayApp:
         if not hwnd:
             return
         server.raise_window(_to_raise(hwnd))
-        if self._serving and app_updates.take_request():
+        if not self._starting and app_updates.take_request():
             self.frame.check_updates()
 
     def _show_from_any_thread(self) -> bool:
@@ -379,22 +380,35 @@ class TrayApp:
             self._finish_quit()
 
     def _finish_quit(self) -> None:
-        if self._serving:
-            server.stop_server()
+        server.stop_service("quit from the tray")
         win32gui.DestroyWindow(self.hwnd)
         # Not `Exit`, which is ignored unless this loop is the active one: Quit can arrive inside a
         # dialog's loop, which ends first.
         self.loop.ScheduleExit()
 
 
-def _running_instance():
-    """This session's running copy's icon window, or None. FindWindow sees only this desktop's
-    windows, so another account's copy is never found here (see `server._other_account_holds_port`
-    for that case)."""
-    try:
-        return win32gui.FindWindow(TRAY_CLASS, None) or None
-    except win32gui.error:
-        return None
+def _running_instance(wait_s: float = 0.0):
+    """This session's running copy's icon window, or None, looking for up to `wait_s`. FindWindow
+    sees only this desktop's windows, so another account's copy is never found here."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            found = win32gui.FindWindow(TRAY_CLASS, None)
+        except win32gui.error:
+            found = 0
+        if found or time.monotonic() >= deadline:
+            return found or None
+        time.sleep(0.2)
+
+
+def _refuse_other_account(interactive: bool) -> None:
+    """Say that another Windows account already has the app. Only when started by a person: at
+    sign-in nobody is watching, and a blocking dialog would sit there unexplained. A native
+    MessageBox is a real modal dialog to every screen reader."""
+    diagnostics.event("app.refused", "another Windows account is running AccessCaster")
+    if interactive:
+        MB_OK, MB_ICONWARNING, MB_SETFOREGROUND = 0x0, 0x30, 0x10000
+        _user32.MessageBoxW(0, _OTHER_ACCOUNT, APP_NAME, MB_OK | MB_ICONWARNING | MB_SETFOREGROUND)
 
 
 def main() -> int:
@@ -406,15 +420,13 @@ def main() -> int:
     # reads what the update did.
     open_window = not autostart.started_at_login()
 
-    # ANOTHER SIGNED-IN ACCOUNT ON THIS PC HAS IT: refuse and stop. Its windows are on another
-    # desktop, so `_running_instance` cannot see it.
-    if server._other_account_holds_port(server.HTTP_PORT):
-        server._refuse_other_account(open_window)
-        return 1
-
-    # Single instance: a copy already running in this session shows its window, and this one goes.
-    running = _running_instance()
-    if running is not None:
+    # Single instance, across every account. The lock held, the copy is either this session's,
+    # which shows its window while this one goes, or another account's, which is refused.
+    if not instance.claim():
+        running = _running_instance(_FIND_RUNNING_S)
+        if running is None:
+            _refuse_other_account(open_window)
+            return 1
         if open_window:
             # This process was just started by the user, so it holds the foreground right, and
             # hands it to the running copy before asking it to raise its window.

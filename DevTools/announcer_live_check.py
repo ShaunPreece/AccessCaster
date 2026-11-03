@@ -5,7 +5,7 @@ packet through the REAL decoder (announcer.handle_report) with speech.say captur
 spoken, and prints what the announcer WOULD have said, with the raw prefix bytes beside it.
 
 Why not just run the app and listen: this prints what would be said, so it can be read rather
-than heard, and it needs no server restart (no fighting the installed build for port 8770).
+than heard.
 
 Usage: python DevTools/announcer_live_check.py [seconds] [--speak]
        --speak also SPEAKS the instructions, for a tester at the desk rather than the screen.

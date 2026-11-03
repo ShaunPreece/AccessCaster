@@ -17,7 +17,7 @@
 import os
 import re
 _ROOT = os.path.dirname(SPECPATH)
-_PROJ = os.path.join(_ROOT, 'Project')          # the app code + static/ + assets/
+_PROJ = os.path.join(_ROOT, 'Project')          # the app code + help/ + assets/
 _ASSETS = os.path.join(_ROOT, 'ProjectAssets')  # device data: fx_recipes, mic_presets
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ with open(_VERSION_FILE, 'w', encoding='utf-8') as fh:
 # Source files live under Project/ and ProjectAssets/, but are bundled FLAT into the frozen app so
 # paths.resource_path finds them under sys._MEIPASS unchanged.
 datas = [
-    (os.path.join(_PROJ, 'static'), 'static'),                  # the accessible web UI
+    (os.path.join(_PROJ, 'help'), 'help'),                      # the window's help text
     # NO FACTORY SMART-PAD WAVs. They are RODE's audio, the app does not restore the factory
     # SOUNDS at all, and the unit keeps its own copies - a factory reset is what puts those back.
     # The two JSON files below are PARAMETERS read off a device rather than recordings, which is a

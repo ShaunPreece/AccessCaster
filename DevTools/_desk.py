@@ -1,18 +1,15 @@
 """Shared helpers for the DevTools scripts that drive a real desk.
 
-The running server's API and its background jobs, how many RODE devices Windows has present, the
-desk's pushes on a handle of the caller's own, one mic's input node and processing chain read off a
-fresh dump and put back, the stray check's occurrence counts, and one-shot speech.
+The app's service in this process and its background jobs, how many RODE devices Windows has
+present, the desk's pushes on a handle of the caller's own, one mic's input node and processing
+chain read off a fresh dump and put back, the stray check's occurrence counts, and one-shot speech.
 """
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from collections import Counter
 
 import _bootstrap
@@ -21,42 +18,35 @@ import model_tree
 import rcp_hid
 import rcp_read
 
-BASE = "http://127.0.0.1:8770"
+def service(start: bool = False, announce: bool = False):
+    """The app's service in this process, for a script that drives a real desk: returns `server`.
 
+    REFUSES WHILE ACCESSCASTER IS RUNNING. The app holds the desk, and two processes writing to it
+    at once interleave their transfers; the single-instance lock (`instance.claim`) says which one
+    has it. Quit the app from the tray first.
 
-def api(path: str, post: dict | None = None, timeout: float = 90.0) -> dict:
-    """GET `path` from the running server, or POST `post` to it as the JSON body.
-
-    A failure comes back as `{"ok": False, "message": ...}` rather than raising, with `http_status`
-    when the server answered with an error: a 404 is the one failure that would otherwise read as
-    the server doing nothing.
-
-    ACTION ROUTES TAKE THEIR ARGUMENTS IN A JSON BODY, NOT THE QUERY STRING, and `do_POST` matches
-    the path EXACTLY, so `?backup_first=false` makes the path miss the table and return 404.
-    """
-    data = json.dumps(post).encode() if post is not None else None
-    req = urllib.request.Request(BASE + path, data=data,
-                                 headers={"Content-Type": "application/json"} if data else {})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "http_status": e.code, "message": f"{path} returned HTTP {e.code}"}
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return {"ok": False, "message": f"{type(e).__name__}: {e}"}
+    `start` brings up the watchers as the app does, for a script that listens to them, and
+    `announce` the announcer with them. The global shortcuts stay off: a tooling run must never
+    take keys away from the whole machine."""
+    import instance
+    if not instance.claim():
+        raise SystemExit("AccessCaster is running and holds the desk. Quit it from the tray, "
+                         "then run this again.")
+    import server
+    if start:
+        server.start_service(announce=announce, shortcuts=False, greeting="")
+    return server
 
 
 def wait_for_job(read_status, timeout: float = 180.0, pause: float = 1.0,
                  on_status=None) -> dict:
     """Poll `read_status()` until the server's background job stops running; return its last status.
 
-    FINISHED IS `running` READING FALSE, the key every job status carries. A status without it (a
-    failed request through `api`) is polled again rather than taken as the end: a wait keyed on a
-    missing key returns at once, while the job is still in flight. `on_status` sees every status
-    read. Raises TimeoutError when the job is still running at `timeout`.
-
-    In process, `read_status` is the server's own status function (`server.show_job_status`);
-    over HTTP, `lambda: api("/api/shows/status")`.
+    FINISHED IS `running` READING FALSE, the key every job status carries. A status without it is
+    polled again rather than taken as the end: a wait keyed on a missing key returns at once, while
+    the job is still in flight. `on_status` sees every status read. Raises TimeoutError when the job
+    is still running at `timeout`. `read_status` is the server's own status function
+    (`server.show_job_status`).
     """
     deadline = time.monotonic() + timeout
     while True:

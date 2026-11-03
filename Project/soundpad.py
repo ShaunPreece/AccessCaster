@@ -1189,7 +1189,7 @@ _EXTRA_PROP_OF.update(FADE_FIELD)
 _EXTRA_PROP_OF["custom"] = CENSOR_FIELD["custom"]
 
 # The six fields the editor offers, in the order they are read out. Each carries its own range, so
-# the browser control, the write validation and the refusal message all come from here.
+# the window's control, the write validation and the refusal message all come from here.
 TRIGGER_EDIT = [
     {"key": "mode", "prop": "padTriggerMode", "kind": "int", "min": 0, "max": 1,
      "label": "How the pad triggers", "said": "trigger mode", "choices": "modes",
@@ -1516,7 +1516,7 @@ def set_fade_seconds(grid: int, field: str, seconds: float) -> dict:
 
 # The two per-pad switches that are not on the main editor rows: a Fade pad leaving the host out of
 # the fade, and a Censor pad using your own sound instead of the beep. Named rather than passed as a
-# raw property so the browser cannot ask for an arbitrary write.
+# raw property so a caller cannot ask for an arbitrary write.
 PAD_FLAG = {
     "fade_exclude_host": FADE_FIELD["exclude_host"],
     "censor_custom": CENSOR_FIELD["custom"],
@@ -2099,7 +2099,7 @@ def factory_fx_names() -> list:
 def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
     """Restore the factory VOICE EFFECTS and the two factory MIXER pads, and RETURN a result.
 
-    `restore_factory_fx` above is the CLI shape - it reports nothing as it goes - so the web UI
+    `restore_factory_fx` above is the CLI shape - it reports nothing as it goes - so the window
     cannot use it. Same work, wrapped: this reports each step through `progress` and hands back what
     was done.
 

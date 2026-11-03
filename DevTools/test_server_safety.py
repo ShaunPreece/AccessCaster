@@ -1,13 +1,10 @@
-"""Offline checks on the server's guards: what it serves, what it writes, and what it puts back.
+"""Offline checks on the service's guards: what it writes, and what it puts back.
 
 THE RULES THIS PINS:
-  * /static/ serves only files inside static/, so an absolute or climbing path is refused;
-  * a request body that is not a JSON object is refused rather than read as {};
   * settings.json is replaced whole, and one that will not parse is kept as settings.json.bad;
   * a saved presets file that will not parse is kept as .bad, so the next save cannot replace it;
   * a fader level write names its channel from the layout held, and reads the desk only under the
     HID lock;
-  * the level watch, with no stream chosen, takes a capture stream rather than playback;
   * however the app stops, a Hold-mode pad a shortcut is holding is released;
   * a Chat isolation whose setup fails part way puts back what it had already changed;
   * auto gain stopped before anything was said reports the stop, not a silent microphone;
@@ -19,7 +16,6 @@ No device and no speech: the desk calls are stubbed.
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
 import tempfile
@@ -35,36 +31,7 @@ import settings_file
 import speech
 from _testkit import as_device, check, patched
 
-print("STATIC FILES")
-check("a file in static/ is served", server._static_file("app.js"),
-      os.path.join(server.STATIC_DIR, "app.js"))
-check("a drive path is refused", server._static_file("C:/Windows/win.ini"), None)
-check("a climbing path is refused", server._static_file("../server.py"), None)
-check("a climbing path in backslashes is refused", server._static_file("..\\server.py"), None)
-check("the folder itself is refused", server._static_file(""), None)
-
-
-print("\nREQUEST BODIES")
-
-
-def body_of(raw: bytes):
-    h = server.Handler.__new__(server.Handler)
-    h.headers = {"Content-Length": str(len(raw))}
-    h.rfile = io.BytesIO(raw)
-    try:
-        return h._read_json()
-    except ValueError:
-        return "refused"
-
-
-check("an empty body is {}", body_of(b""), {})
-check("an object is read", body_of(b'{"on": true}'), {"on": True})
-check("JSON that does not parse is refused", body_of(b"{on: true"), "refused")
-check("JSON that is not an object is refused", body_of(b"[1, 2]"), "refused")
-check("a body that is not UTF-8 is refused", body_of(b"\xff\xfe"), "refused")
-
-
-print("\nSETTINGS FILE")
+print("SETTINGS FILE")
 # Held for the whole run: the folder is removed when this object goes, at exit however it ends.
 settings_dir = tempfile.TemporaryDirectory(prefix="ac-settings-", ignore_cleanup_errors=True)
 folder = settings_dir.name
@@ -111,41 +78,11 @@ with as_device(server.devices.PRO2), patched(
     check("with none held, the read is made under the HID lock", reads, [True])
 
 
-print("\nLEVEL WATCH")
-built = []
-
-
-class _Watcher:
-    def __init__(self, stream, *a, **k):
-        built.append(stream)
-        self.name, self.running, self.error = stream, True, None
-
-    def start(self):
-        return True
-
-    def stop(self):
-        self.running = False
-
-
-real_prefs = server._meter_prefs
-with patched(
-        (server.meters, {
-            "desk_streams": lambda: {"ok": True, "streams": [
-                {"id": "out", "name": "Speakers (RODECaster Main Stereo)", "flow": "playback"},
-                {"id": "in", "name": "Microphone (RODECaster Main Stereo)", "flow": "recording"}]},
-            "default_recording_name": lambda: "",
-            "Watcher": _Watcher}),
-        (server, {"_meter_prefs": lambda: {**real_prefs(), "stream": ""}})):
-    server.action_meter_watch(True)
-    check("with no stream chosen, the watch takes the capture stream", built, ["in"])
-    server.action_meter_watch(False)
-
-
 print("\nSHUTTING DOWN")
 released = []
 with patched((pad_shortcuts.midi_out, {"release_pad": released.append, "close": lambda: None})):
     pad_shortcuts._pads_held.add(2)            # a Hold-mode pad a shortcut is holding: pad 3 of bank 1
-    server._shut_down("test")
+    server.stop_service("test")
     check("a held pad is released however the app stops", released, [3])
     check("and is no longer held", pad_shortcuts._pads_held, set())
 

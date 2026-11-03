@@ -53,7 +53,7 @@ def out_path(slug: str | None = None) -> Path:
 
 # The app's own surface. DevTools scripts are scanned separately and reported apart: a property only
 # a dev script has ever touched is NOT a shipped feature.
-APP_GLOBS = ["Project/*.py", "Project/static/*.js", "Project/static/*.html"]
+APP_GLOBS = ["Project/*.py", "Project/native/*.py"]
 DEV_GLOBS = ["DevTools/*.py"]
 
 

@@ -16,14 +16,14 @@ gain and phantom power, channel processing, routing, faders, the SMART pads, and
 restoring your settings.
 
 AccessCaster talks to the unit over the same USB control channel the official app uses, and
-presents those controls as a plain, standards-based web page, operable entirely from the keyboard.
+presents those controls in a native Windows window, operable entirely from the keyboard.
 It is built and used with NVDA; see Accessibility below for what has and has not been tested
 elsewhere.
 
 ## What it does
 
-AccessCaster runs as a small Windows system-tray app. It starts a local web server and opens an
-accessible page where you can:
+AccessCaster runs as a small Windows system-tray app with a window of standard Windows controls,
+where you can:
 
 - **Microphone channels**: input gain, 48V phantom power, polarity, and mic type on each mic input.
 - **Channel processing**: EQ, compressor, noise gate, de-esser, high-pass filter, pan, Aphex, and
@@ -60,7 +60,7 @@ accessible page where you can:
   another RODECaster by its code or from a contacts list, extend a call before the free plan's
   one-hour limit (or have it extended for you), and set the caller's level and processing like
   any other channel. If the unit is offline or the caller's channel is on no fader, which stops
-  calls without saying so anywhere, the page tells you and offers the fix.
+  calls without saying so anywhere, the window tells you and offers the fix.
 - **Backups**: one button to back the unit up, and one list to restore it from. A copy of your
   settings and pads is kept on this computer and that is what a restore uses, because asking the
   unit to reload its own copy can lock it up. The unit's own copy is still made alongside, and is
@@ -89,10 +89,11 @@ possible, so the device can be set up and run without ever needing the screen.
 
 Accessibility is the entire point of this project, not an afterthought.
 
-- Built on native HTML controls and standard ARIA, to WCAG 2.2 Level AA and the ARIA Authoring
-  Practices Guide, rather than to any one screen reader's quirks.
-- Fully keyboard operable, with a logical tab order.
-- Live regions announce the result of every action.
+- Built from standard Win32 controls (wxPython), which every Windows screen reader reads through
+  Microsoft UI Automation, rather than to any one screen reader's quirks.
+- Fully keyboard operable, with a logical tab order: a tree of sections, F6 between the tree and
+  the page, and Alt with a number for each section.
+- The result of every action is spoken through the screen reader itself.
 - Decision dialogs are true modal dialogs with proper focus handling.
 - The system-tray menu is a standard Windows menu, read correctly by screen readers.
 
@@ -100,9 +101,6 @@ Accessibility is the entire point of this project, not an afterthought.
 
 - **NVDA: developed and used with it daily**, on a real desk, by a blind user. This is the one that
   is genuinely exercised.
-- **VoiceOver on an iPhone: walked once, page by page.** Everything read and worked, though the
-  layout is built for a computer, so there is a lot of swiping. That is the web page only, opened
-  from the PC running the app; it is not a Mac or iPhone version.
 - **JAWS and Narrator: not tested, and feedback is wanted.** Building to the standards above should
   mean they behave the same, but "should" is not "does".
 
@@ -115,35 +113,30 @@ reader this has not been exercised on are the most useful thing anyone can send.
 - **The USB cable must go into the socket nearest the power inlet.** That is the only one the unit
   accepts control over; the other USB socket carries audio only, so a cable there gives you sound
   and no control, and AccessCaster will report that it cannot find the unit.
-- **Windows 10 or 11. Windows only, for now.** The app, the local server and all the USB control
-  run on the Windows machine the unit is plugged into, and a second computer does not get you round
-  that: other devices on your network can open the page as a second screen, which is handy from
-  another room, but they are viewing that PC rather than replacing it.
+- **Windows 10 or 11. Windows only, for now.** The app and all the USB control run on the Windows
+  machine the unit is plugged into.
 
 ## Install
 
 1. Download `AccessCasterSetup-v<version>.exe` from the [Releases](../../releases) page.
 2. Run it. Setup asks whether to install **just for you** or **for all users**, and either is
    fine. Installing for all users needs administrator rights; installing just for you does not,
-   which is the only difference that matters. During install it offers to add a Windows Firewall
-   rule (so you can open the page from your phone or another device on the same network).
-3. When it finishes, AccessCaster starts and opens its page. It also offers to show you the
+   which is the only difference that matters.
+3. When it finishes, AccessCaster starts and opens its window. It also offers to show you the
    release notes.
 
 ## Using it
 
-- Closing the web page does **not** quit the app; it keeps running in the system tray.
+- Closing the window does **not** quit the app; it keeps running in the system tray, and opens
+  again where you left it.
 - To reach the tray with a screen reader, press **Windows + B**, move to "AccessCaster", then
   press the **Applications key** (or Shift + F10) for its menu.
 - The tray menu has:
-  - **Open AccessCaster** to re-open the page,
+  - **Open AccessCaster** to re-open the window,
   - **Announcer** to turn the spoken button-press announcer on or off,
   - **Diagnostic log** to open a log of what the app has sent to the unit,
+  - **Check for updates**, which becomes Install update once a newer version is found,
   - **Quit** to fully close the app.
-
-The page is also reachable from another device on the same network at `http://<this-pc-ip>:8770`,
-which is useful as a second screen from another room. The USB control always happens on the PC
-running the app.
 
 ## Build from source
 
@@ -170,7 +163,8 @@ That produces the standalone app in `ProjectBuilds\dist\AccessCaster\` and the i
 
 ### Layout
 
-- `Project/` the application (the local server, the tray app, and the web UI).
+- `Project/` the application (the service, the tray app, the native window in `native/`, and
+  the help text in `help/`).
 - `ProjectAssets/` data the app loads at runtime (effect recipes and mic presets). It ships no
   audio: the unit holds its own factory pad sounds and rebuilds them on a factory reset.
 - `ProjectBuilds/` the packaging scripts (PyInstaller spec, Inno Setup script, build script).

@@ -171,8 +171,7 @@ def check_dead_links() -> None:
     scan = (sorted(MEM.glob("*.md")) + sorted(DOCS.glob("*.md"))
             + sorted((REPO / "Project").glob("*.py"))
             + sorted((REPO / "DevTools").glob("*.py"))
-            + sorted((REPO / "Project" / "static").glob("*.js"))
-            + sorted((REPO / "DevTools").glob("*.js"))
+            + sorted((REPO / "Project" / "native").glob("*.py"))
             + [NOTES_DIR / "ProjectNotes.md", REPO / "CLAUDE.md", REPO / "README.md"])
     dead: dict = {}
     for p in scan:
@@ -238,15 +237,16 @@ NARRATIVE = re.compile(
     r"shaun (?:said|asked|wanted|ruled)|\(Shaun[,:]|it turned out|earlier session|"
     r"we (?:tried|thought|assumed|discovered)|\boriginally\b|\bat the time\b|"
     r"\bused to (?:be|do|keep|check|go|drop|have|say|work|happen|fail)\b", re.I)
-# User-facing text, where a date or a credit is content: the release history and the help page.
+# User-facing text, where a date or a credit is content: the release history. (The help is .txt,
+# which is not scanned.)
 # This file is exempt too, because its own patterns spell out what they match.
-CODE_EXEMPT = {"version.py", "help.html", "check_notes.py"}
+CODE_EXEMPT = {"version.py", "check_notes.py"}
 
 
 def check_code_comments() -> None:
     for folder in ("Project", "DevTools", "ProjectBuilds"):
         for p in sorted((REPO / folder).rglob("*")):
-            if (p.suffix not in (".py", ".js", ".ps1", ".iss", ".css", ".html")
+            if (p.suffix not in (".py", ".ps1", ".iss")
                     or p.name in CODE_EXEMPT or "dist" in p.parts or "build" in p.parts):
                 continue
             body = read(p)

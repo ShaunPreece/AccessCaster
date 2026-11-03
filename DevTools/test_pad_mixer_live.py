@@ -8,8 +8,8 @@ For each mixer mode (Censor, Trash Talk, Fade, Back Channel, Ducking), on one EM
 A mixer pad writes NO region-B object, so the pool before and after every create must be identical;
 a difference means the create touched the pool.
 
-EXCLUSIVE DEVICE ACCESS: stop the running service first (the app owns the HID handle), then restart
-it with `python DevTools/run_dev_server.py`.
+EXCLUSIVE DEVICE ACCESS: quit AccessCaster from the tray first. A live suite refuses to start
+while the app holds the desk.
 
 Usage:
     python DevTools/test_pad_mixer_live.py --pad 17               # all five modes, cleared after each

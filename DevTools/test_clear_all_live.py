@@ -13,8 +13,8 @@ Needs at least two voice-FX pads on the grid for that case to arise.
 
 The backup folder is kept if anything fails, so the pads can be put back with --restore.
 
-EXCLUSIVE DEVICE ACCESS: stop the running service first, then restart it with
-`python DevTools/run_dev_server.py`. Destructive in the middle: it clears every user pad.
+EXCLUSIVE DEVICE ACCESS: quit AccessCaster from the tray first. A live suite refuses to start
+while the app holds the desk. Destructive in the middle: it clears every user pad.
 
     python DevTools/test_clear_all_live.py
     python DevTools/test_clear_all_live.py --restore     # put the pads back from the kept backup

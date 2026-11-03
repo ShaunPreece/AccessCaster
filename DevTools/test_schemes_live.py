@@ -16,8 +16,8 @@ on this desk, so nothing about this is audible, and the mixes that feed the oper
 ever read. It refuses to run if a phone caller is connected (the matrix changes shape then, and
 every read here would be indexed wrong).
 
-THE SERVER MUST BE STOPPED FIRST: it owns the HID handle. Restart it afterwards
-(python DevTools/run_dev_server.py).
+EXCLUSIVE DEVICE ACCESS: quit AccessCaster from the tray first. A live suite refuses to start
+while the app holds the desk.
 
 Usage: python DevTools/test_schemes_live.py
 """

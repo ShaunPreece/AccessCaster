@@ -861,11 +861,11 @@ def read_output_modes(blob: bytes) -> list:
 
 
 def master_processing(blob: bytes) -> dict:
-    """The master bus's own processing, as the SEVEN keys the page and a profile both use.
+    """The master bus's own processing, as the SEVEN keys the window and a profile both use.
 
-    ONE SOURCE for the Routing page (server.routing_model) and a backup (profiles.save), so a
-    property cannot be one the page changes and a profile cannot put back. The key names are the
-    wire format the browser and the profile JSON both speak, so both callers splat this straight in.
+    ONE SOURCE for the Master Mix page (server.read_window_state) and a backup (profiles.save), so a
+    property cannot be one the window changes and a profile cannot put back. The key names are the
+    format the window and the profile JSON both read, so both callers splat this straight in.
     """
     return {
         "compellor_on": first(blob, "masterCompellorOn"),

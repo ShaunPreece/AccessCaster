@@ -13,8 +13,8 @@ the rate against the same count with the default left on `System`.
     python DevTools/probe_bind_default_output.py --cycles 6 --keep-default
 
 It restores the default output and the USB output mode it found, whatever happens, and every flip
-is a mode the desk already supports. The app's server must be running: the flips go through its
-API so that one process keeps the HID handle.
+is a mode the desk already supports. It runs the app's service itself, the watchers included, so
+quit AccessCaster first.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ import comtypes
 import comtypes.client
 import meters
 import virtual_devices as vd
-from _desk import api
+import _desk
 
 EXPANDED_PID = "pid_0094"       # post-fader multitrack AND Expanded: the mode with fader inputs
 HID_INTERFACE_CLASS = "{4D1E55B2-F16F-11CF-88CB-001111000030}"
@@ -97,10 +97,12 @@ def hid_interfaces(match: str = "vid_19f7") -> dict:
     return found
 
 
+server = None
+
+
 def post_mode(mode: int) -> dict:
-    """Set the desk's USB output mode through the running server. The desk re-enumerates, so the
-    reply can take a while."""
-    return api("/api/routing/usb-multitrack", post={"mode": mode}, timeout=150.0)
+    """Set the desk's USB output mode. The desk re-enumerates, so the reply can take a while."""
+    return server.action_set_usb_multitrack(mode)
 
 
 class Sampler(threading.Thread):
@@ -159,6 +161,9 @@ def main() -> None:
                          "default output wherever it already is. Without this run the rate means "
                          "nothing, because a run of failures alone would produce the same drop.")
     args = ap.parse_args()
+    global server
+    # The watchers too, as the app runs them: this measures the bind with them in place.
+    server = _desk.service(start=True)
 
     comtypes.CoInitialize()
     enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
@@ -175,7 +180,7 @@ def main() -> None:
     # Every cycle ends in post-fader multitrack, so the mode found here is put back at the end.
     # The arrivals counted only happen in Expanded, so a desk found in Standard is switched to
     # Expanded first and back afterwards.
-    live = api("/api/routing/live")
+    live = server.read_routing_live()
     mode_before, expanded_before = live.get("usb_multitrack"), live.get("usb_expanded")
     if mode_before is None or expanded_before is None:
         print("Could not read the desk's USB output mode, so it could not be put back. Stopping.")
@@ -190,7 +195,7 @@ def main() -> None:
 
     if not expanded_before:
         print("switching USB 1 input to Expanded ...", flush=True)
-        api("/api/routing/usb-expanded", post={"on": True}, timeout=150.0)
+        server.action_set_usb_expanded(True)
         time.sleep(10)
     sampler = Sampler()
     sampler.start()
@@ -212,7 +217,7 @@ def main() -> None:
         sampler.stop.set()
         sampler.join(timeout=3)
         if not expanded_before:
-            res = api("/api/routing/usb-expanded", post={"on": False}, timeout=150.0)
+            res = server.action_set_usb_expanded(False)
             print("USB 1 input restored to Standard" if res.get("ok") else
                   f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
             time.sleep(10)

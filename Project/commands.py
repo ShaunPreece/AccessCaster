@@ -277,20 +277,14 @@ def _open_window() -> dict:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
     import app_window
-    import server
     # SILENT ON SUCCESS: Windows announces the raised window and its focused control, so speaking
     # here would talk over the screen reader in a second voice. A real activation is
     # `server.raise_window`'s problem and is documented there.
-    if app_window.show is not None:
-        if app_window.show():
-            return _said("")
-        return _said("AccessCaster is open behind this window. Alt+Tab reaches it.")
-    # A dev server run has no window of its own: the web page stands in.
-    if server._focus_app_window():
+    if app_window.show is None:
         return _said("")
-    # A refused raise must say so, rather than leave the window sitting unseen behind everything.
-    server.open_ui(f"http://localhost:{server.HTTP_PORT}/")
-    return _said("Opening AccessCaster.")
+    if app_window.show():
+        return _said("")
+    return _said("AccessCaster is open behind this window. Alt+Tab reaches it.")
 
 
 # ---------------------------------------------------------------------------------------------

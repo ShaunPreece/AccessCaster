@@ -155,8 +155,8 @@ MULTITRACK_LABEL = {
 
 # SHORT, because the labels carry the "plus the mix" part. What is left is the two things a
 # label cannot fit: the cost, and what pre versus post actually means.
-# LIVES HERE, NOT IN app.js, so all three of this page's hints come from one place and the browser
-# holds none of the wording. The other two are below.
+# LIVES HERE, so all three of the Recording page's hints come from one place and the window holds
+# none of the wording. The other two are below.
 MULTITRACK_HINT = ("Separate tracks use about seven times the space. Pre-fader ignores your fader "
                    "positions, post-fader keeps them.")
 
@@ -232,8 +232,7 @@ USB_EXPANDED_HINT = ("Expanded adds Game, Music, A and B, each on its own fader.
                      "driver, and stops their ASIO driver.")
 # What a USB mode write costs, SAID BEFORE THE PRESS: a screen reader routed through the unit goes
 # silent, and speech jumping to the laptop speakers unannounced reads as something breaking (why
-# it moves is in virtual_devices.park_output). On whatever applies the write: the native Confirm
-# button, or the web page's list, which applies on Enter.
+# it moves is in virtual_devices.park_output). On the Confirm button that applies the write.
 USB_DROP_HINT = "Audio drops for a couple of seconds, screen reader included."
 USB_EXPANDED_DROP_HINT = ("Audio drops for a couple of seconds, screen reader included, and plays "
                           "from this computer's speakers until the unit is back.")

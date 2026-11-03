@@ -271,24 +271,6 @@ def list_endpoints(state_mask: int = STATE_ALL) -> list:
     return out
 
 
-def stream_label(name: str, flow: str) -> str:
-    """A stream named by what it is and which way it goes: "Main Stereo, recording from the unit".
-
-    Windows calls the desk's output mix "Microphone (RODECaster Pro II Main Stereo)" and what the PC
-    sends it "Speakers (... Main Stereo)": opposite directions told apart only by a prefix. The model
-    is dropped, since every entry is the same desk."""
-    inner = name
-    if "(" in name and name.rstrip().endswith(")"):
-        inner = name[name.index("(") + 1:name.rstrip().rindex(")")]
-    for model in ("RODECaster Pro II ", "RODECaster Duo ", "RODECaster "):
-        if inner.startswith(model):
-            inner = inner[len(model):]
-            break
-    way = ("recording from the unit" if flow == FLOW_NAMES[CAPTURE]
-           else "playback to the unit" if flow == FLOW_NAMES[RENDER] else flow)
-    return f"{inner.strip()}, {way}"
-
-
 def desk_streams() -> dict:
     """What the app can meter right now. With nothing to meter, the reason distinguishes a Remote
     Desktop session (nothing is wrong) from a console with no desk audio (unplugged, or the
@@ -567,12 +549,6 @@ def default_playback_name() -> str:
     """Windows' default playback device's friendly name, or "". An unset announcer output means
     this device, and when it is the desk, speech travels into the mix and the recording."""
     return _default_endpoint_name(RENDER)
-
-
-def default_recording_name() -> str:
-    """Windows' default recording device's friendly name, or "". The meter defaults to it when it
-    is the desk's, because it is what every other program on the PC records from."""
-    return _default_endpoint_name(CAPTURE)
 
 
 def _volume_interface(endpoint_id: str):

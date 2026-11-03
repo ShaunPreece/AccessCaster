@@ -56,6 +56,16 @@ if os.path.basename(sys.argv[0] or "").startswith("test_"):
     if os.path.basename(sys.argv[0] or "").endswith("_live.py"):
         os.environ.setdefault("ACCESSCASTER_ALLOW_DEVICE_WRITE", "1")
 
+# A LIVE SUITE NEVER SHARES THE DESK WITH THE RUNNING APP: two processes writing to it interleave
+# their transfers. The app's single-instance lock says which one has it, so a `*_live.py` run
+# takes the lock or stops here. Scripts of other names that drive the desk take it through
+# `_desk.service`.
+if os.path.basename(sys.argv[0] or "").endswith("_live.py"):
+    import instance
+    if not instance.claim():
+        raise SystemExit("AccessCaster is running and holds the desk. Quit it from the tray, "
+                         "then run this again.")
+
 
 def repo_path(*parts: str) -> str:
     """An absolute path to something in the repo, e.g. repo_path('ProjectAssets', 'fx_recipes.json')."""

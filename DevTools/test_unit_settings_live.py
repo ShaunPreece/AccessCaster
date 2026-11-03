@@ -9,16 +9,16 @@ catches a stray: OCCURRENCE COUNTS per property, diffed against a pre-test snaps
 distinct NAMES is not enough - the stray copy carries a name that already exists, so a scan of
 names looks clean while a stray has just been appended.
 
-HOW IT DRIVES. Our own service on 127.0.0.1:8770, over HTTP. No GUI, no RODE app, and it never opens
-the HID device itself, so it cannot fight the running server for the control interface.
+HOW IT DRIVES. The app's own service, in this process: no GUI and no RODE app. Quit AccessCaster
+first, which holds the desk.
 
 WHAT IT DELIBERATELY DOES NOT TOUCH: `outputMonFixed` (Fixed Output Level). Everything else here is
 visual or behavioural, but that one changes what the MONITOR OUTPUT sends, and a fixed full-level
 output into speakers set low is not something to try unasked. It is READ and reported, and left
 alone.
 
-EVERY WRITE IS PUT BACK HOWEVER THE RUN ENDS, and the two temporary profiles it saves into the app's
-real profile store are deleted however it ends too.
+EVERY WRITE IS PUT BACK HOWEVER THE RUN ENDS, and the two temporary profiles it saves into the
+test data dir are deleted however it ends too.
 
 Run:  python DevTools/test_unit_settings_live.py
 """
@@ -30,12 +30,15 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401  (the test data dir, like every other test)
+import _desk
 import _testkit
-from _desk import api, count_changes, wait_for_job
+import profiles
+from _desk import count_changes, wait_for_job
 from _testkit import check
 
 CHAN = "Mic2"                    # nothing is connected to Mic 2 on this desk
 PRE, POST = "PRE_UNIT_TEST", "POST_UNIT_TEST"       # temporary profiles, deleted at the end
+server = None
 SETTLE_S = 0.8
 
 # prop -> {current value: the value to write instead}. A write that happens to match the current
@@ -55,7 +58,7 @@ SKIP = {"outputMonFixed": "changes what the monitor output sends; not tried unas
 
 
 def unit_values():
-    d = api("/api/device/settings", timeout=120.0)
+    d = server.read_unit_settings()
     if not d.get("ok"):
         raise SystemExit("could not read the unit settings: " + str(d.get("message")))
     return {s["prop"]: s["value"] for s in d["settings"]}, d
@@ -71,17 +74,17 @@ def _numeric_target(spec, current):
 def profile_snapshot(name):
     """Save a profile and return (its unit block, {prop: occurrence count}, {prop: values}).
 
-    WAITS FOR THE JOB. /api/profiles/save STARTS a background save and answers immediately, so
-    the file may not exist yet when the reply arrives. The save's own status endpoint says when it
-    does, and it is what the browser polls too.
+    WAITS FOR THE JOB. `snapshot_profile` STARTS a background save and answers immediately, so
+    the file may not exist yet when the reply arrives. The save's own status says when it does, and
+    it is what the window polls too.
     """
-    res = api("/api/profiles/save", post={"name": name, "include_pads": False}, timeout=300.0)
+    res = server.snapshot_profile(name, include_pads=False)
     if not res.get("ok"):
         raise SystemExit(f"could not save the {name} profile: {res.get('message')}")
-    st = wait_for_job(lambda: api("/api/profiles/save/status", timeout=120.0), 180.0, 0.5)
+    st = wait_for_job(server.profile_save_status, 180.0, 0.5)
     if not st.get("ok"):
         raise SystemExit(f"the {name} profile did not save: {st.get('message')}")
-    path = os.path.join(os.environ["LOCALAPPDATA"], "AccessCaster", "profiles", name, "profile.json")
+    path = os.path.join(profiles.PROFILES_DIR, name, "profile.json")
     with open(path, encoding="utf-8") as f:
         prof = json.load(f)
     props = prof["device_snapshot"]["properties"]
@@ -89,16 +92,15 @@ def profile_snapshot(name):
 
 
 def delete_profile(name):
-    shutil.rmtree(os.path.join(os.environ["LOCALAPPDATA"], "AccessCaster", "profiles", name),
-                  ignore_errors=True)
+    shutil.rmtree(os.path.join(profiles.PROFILES_DIR, name), ignore_errors=True)
 
 
 def set_unit(prop, value):
-    return api("/api/device/setting", post={"prop": prop, "value": value}, timeout=300.0)
+    return server.action_set_unit_setting(prop, int(value))
 
 
 def channel_state(name):
-    d = api("/api/channels", timeout=120.0)
+    d = server.action_get_channels()
     for c in d.get("channels") or []:
         if c["name"] == name:
             return c
@@ -106,10 +108,12 @@ def channel_state(name):
 
 
 def set_mute(name, on):
-    return api("/api/channels/mute", post={"name": name, "on": on}, timeout=300.0)
+    return server.action_set_channel_mute(name, on)
 
 
 def main() -> int:
+    global server
+    server = _desk.service()
     try:
         run()
     finally:
@@ -180,7 +184,7 @@ def run() -> None:
         check("the desk reports the new mute state", channel_state(CHAN).get("muted"),
               not was_muted)
         # The Device page's overview lists what is muted, from a different read path.
-        ov = api("/api/device/overview", timeout=120.0)
+        ov = server.device_overview()
         listed = [m["label"] for m in (ov.get("muted") or [])]
         check("and the Device overview agrees", channel_state(CHAN)["label"] in listed,
               not was_muted)

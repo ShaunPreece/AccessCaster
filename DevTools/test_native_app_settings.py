@@ -3,7 +3,7 @@ shortcuts_page.py and help_section.py), offline: each shortcut listed with what 
 keys, the selection kept across a write and moved to a neighbour on a delete, the pad keys switch
 partly ticked, the restore question counting what is lost, the voices and outputs offered from what
 Windows reports, the Windows level shown only for a stream that has one, and the help split into
-topics with the running version and no "not set up" line. Nothing is shown and nothing touches a
+topics read from help.txt with the running version. Nothing is shown and nothing touches a
 desk.
 
 Run: python DevTools/test_native_app_settings.py
@@ -16,7 +16,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import server
 import wx
-from _testkit import check, check_in, check_not_in, check_true, patched
+from _testkit import check, check_in, check_true, patched
 from native import app_settings_section, help_section, shortcuts_page
 from version import __version__
 
@@ -144,16 +144,23 @@ check("the volume is read in percent", announcements.volume._value_words(), "60 
 topics = help_section.topics()
 keys = [key for key, _title, _text in topics]
 check("About comes first", topics[0][1], "About")
-check_in("with the version running", f"Version {__version__}.", topics[0][2])
-check_not_in("the page's own heading is left out", "Help & About", topics[0][2])
-check_true("the Help tab is split into a topic per part",
+check_true("with the version running", topics[0][2].startswith(f"Version {__version__}."))
+check_true("the Help topic is split into a topic per part",
            sum(1 for key in keys if key.startswith("help-")) >= 10)
 check_true("each named by its heading",
            any(title.startswith("Channels and Processing") for _k, title, _t in topics))
-support = dict((key, text) for key, _title, text in topics)["support"]
-check_not_in("Support leaves out the line for a page with no link", "not set up", support)
+check("a part's key drops its shortcut", "help-channels-and-processing" in keys, True)
+check_in("Known issues keeps its parts in its text",
+         "The unit can drop off the USB connection when you reset it",
+         dict((key, text) for key, _title, text in topics)["known-issues"])
+check_true("a term reads with its description",
+           any("The landmark: The touchscreen." in text for _k, _t, text in topics))
+check_true("no list item keeps its dash", not any(line.startswith("- ")
+                                                  for _k, _t, text in topics
+                                                  for line in text.splitlines()))
 check_true("no topic is empty", all(text for _k, _t, text in topics))
-check_true("no comment reaches the text", not any("<!--" in text or "buildStaticTabs" in text
-                                                  for _k, _t, text in topics))
+check_true("no heading line reaches the text", not any(line.startswith("#")
+                                                       for _k, _t, text in topics
+                                                       for line in text.splitlines()))
 
 sys.exit(_testkit.finish())

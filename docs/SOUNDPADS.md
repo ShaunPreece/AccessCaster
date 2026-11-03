@@ -144,7 +144,7 @@ TRIM AND FADE ENVELOPE (padEnv*, sound pads)  [EAR-PROVEN 2026-08-27]
   A fade point OUTSIDE the played region is accepted and silently does nothing, so the editor warns
   (soundpad.envelope_warning). The UI unit is PERCENT, because the desk never reports a file's
   duration, so seconds could not be shown honestly.
-  Read + write: soundpad.ENV_FIELD / ENV_EDIT / set_envelope_percent, POST /api/pad/envelope.
+  Read + write: soundpad.ENV_FIELD / ENV_EDIT / set_envelope_percent, server.action_set_pad_envelope.
 
 FADE + CENSOR MIXER SUB-SETTINGS  [device-proven 2026-08-27]
   padMixerFadeInSeconds / OutSeconds (seconds, no proven ceiling - the app clamps at 60 as a sanity
@@ -153,7 +153,7 @@ FADE + CENSOR MIXER SUB-SETTINGS  [device-proven 2026-08-27]
   created for the test (2.5 / 4.0 / True) and on the factory Censor pad (flag on, then off, clean).
   The censor FILE PATH is read and backed up but never written by us: pointing a pad at audio that
   may not be on the unit is worse than leaving it, and putting the file there is an upload job.
-  soundpad.FADE_FIELD / CENSOR_FIELD / PAD_FLAG, POST /api/pad/fade and /api/pad/flag.
+  soundpad.FADE_FIELD / CENSOR_FIELD / PAD_FLAG, server.action_set_pad_fade and action_set_pad_flag.
 
 MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 2026-08-27]
 
@@ -184,9 +184,9 @@ MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 202
     - padTriggerSend (stamped 2 by the template) is still unexplained. Read and backed up, never
       written back, no control offered.
   READ + WRITE PATH (2026-08-27): soundpad.TRIGGER_FIELD / TRIGGER_EDIT (one spec drives the read,
-  the payload, the browser controls, the write validation and the profile), read_pads_live's per-pad
-  "trigger" dict, soundpad.set_trigger_mapping, POST /api/pad/trigger {pad, field, value}, and the
-  "What this pad sends" fieldset on the pad editor's Settings tab. All eight padTrigger* properties
+  the payload, the window's controls, the write validation and the profile), read_pads_live's per-pad
+  "trigger" dict, soundpad.set_trigger_mapping, server.action_set_pad_trigger(pad, field, value), and the
+  MIDI trigger fields in the pad's Settings dialog. All eight padTrigger* properties
   are now in a profile (they were 8 of the 20 listed gaps in the profile-coverage report).
   Live test: DevTools/test_pad_trigger_live.py (create, read the default, write a custom mapping
   field by field, read every one back, flip the mode, then clear and check the pool).

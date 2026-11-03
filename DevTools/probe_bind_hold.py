@@ -7,7 +7,8 @@ Per trial: Expanded with the mix only, then post-fader. The moment the new Main 
 playback endpoint appears, a silent shared-mode stream is started on it and held HOLD_S seconds,
 then stopped. Each trial reports whether the service bound before the hold (it won the race),
 during it, or after release. Every trial is two USB arrivals, so audio through the desk drops out
-each time. Needs the app's server running. Restores Standard, mix only, however the run ends.
+each time. Runs the app's service itself, so quit AccessCaster first. Restores Standard, mix
+only, however the run ends.
 """
 import sys
 import threading
@@ -18,17 +19,20 @@ import comtypes
 import comtypes.client
 import meters
 import virtual_devices as vd
-from _desk import api
+import _desk
 
 HOLD_S = 10.0
 SETTLE_LIMIT_S = 60.0   # a driver switch takes a few seconds; one still going after this is stuck
 
 
-def post(path: str, body: dict) -> None:
-    """POST to the running server, stopping the run when the request fails."""
-    res = api(path, post=body, timeout=60.0)
+server = None
+
+
+def post(action, *args) -> None:
+    """Run one of the service's actions, stopping the run when it fails."""
+    res = action(*args)
     if not res.get("ok"):
-        raise RuntimeError(f"{path} failed: {res.get('message')}")
+        raise RuntimeError(f"{action.__name__}{args} failed: {res.get('message')}")
 
 
 def settle() -> None:
@@ -36,7 +40,7 @@ def settle() -> None:
     time.sleep(2)
     deadline = time.monotonic() + SETTLE_LIMIT_S
     while True:
-        st = api("/api/routing/driver")
+        st = server.read_usb_driver()
         if "switching" not in st:
             raise RuntimeError(f"could not read the driver state: {st.get('message')}")
         if not st["switching"]:
@@ -101,14 +105,14 @@ def verdict(first_bind: float | None, held: float | None, released: float | None
 
 
 def trial(n: int, enum) -> None:
-    post("/api/routing/usb-multitrack", {"mode": 0})
+    post(server.action_set_usb_multitrack, 0)
     settle()
     time.sleep(3)
     before = set(main_endpoints(enum))
     result = {}
     th = threading.Thread(target=holder, args=(before, result))
     th.start()
-    post("/api/routing/usb-multitrack", {"mode": 2})
+    post(server.action_set_usb_multitrack, 2)
     first_bind = None
     t0 = time.monotonic()
     while time.monotonic() - t0 < 25:
@@ -122,12 +126,16 @@ def trial(n: int, enum) -> None:
 
 
 def main() -> int:
+    global server
+    # The watchers too: the default-output park and the endpoint repair are the app's own
+    # behaviour across an arrival, and this measures the bind with them in place.
+    server = _desk.service(start=True)
     trials = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     comtypes.CoInitialize()
     enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                         interface=meters.IMMDeviceEnumerator)
     try:
-        post("/api/routing/usb-expanded", {"on": True})
+        post(server.action_set_usb_expanded, True)
         settle()
         for n in range(1, trials + 1):
             trial(n, enum)
@@ -138,15 +146,15 @@ def main() -> int:
 
 def put_back() -> None:
     """Standard, mix only. Each step is tried even when the one before it failed."""
-    for path, body in (("/api/routing/usb-expanded", {"on": False}),
-                       ("/api/routing/usb-multitrack", {"mode": 0})):
+    for action, arg in ((server.action_set_usb_expanded, False),
+                        (server.action_set_usb_multitrack, 0)):
         try:
-            post(path, body)
+            post(action, arg)
             settle()
         except (RuntimeError, TimeoutError) as e:
-            print(f"COULD NOT PUT BACK {path} {body}: {e}", flush=True)
+            print(f"COULD NOT PUT BACK {action.__name__}({arg}): {e}", flush=True)
             continue
-        print(f"put back {path} {body}", flush=True)
+        print(f"put back {action.__name__}({arg})", flush=True)
 
 
 if __name__ == "__main__":

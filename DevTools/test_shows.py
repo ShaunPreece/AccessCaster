@@ -4,6 +4,8 @@ model blob or a plain string.
 
 Run: python DevTools/test_shows.py
 """
+import inspect
+
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import devices
@@ -172,23 +174,20 @@ check("blank stays blank", shows._describe_modified(None), "")
 check("implausible number passes through", shows._describe_modified(42), "42")
 check("text passes through", shows._describe_modified("last Tuesday"), "last Tuesday")
 
-print("routes")
-for r in ("/api/shows", "/api/shows/status"):
-    check(f"GET {r}", r in server.GET_ROUTES, True)
-for r in ("/api/shows/export", "/api/shows/import", "/api/shows/delete", "/api/shows/reset",
-          "/api/network/wifi/scan", "/api/backup", "/api/backup/restore", "/api/backup/plan"):
-    check(f"POST {r}", r in server.POST_ROUTES, True)
+print("what each action takes")
+def params(fn):
+    return list(inspect.signature(fn).parameters)
+
+
 # ONE backup takes a NAME, not a handle: the user names it, and the app decides underneath whether
 # that means a show plus a profile or a profile alone.
-check("backup takes a name", server.POST_ROUTES["/api/backup"][1][0][1], "name")
-check("restore takes a name", server.POST_ROUTES["/api/backup/restore"][1][0][1], "name")
+check("backup takes a name", params(server.action_backup_now), ["name"])
+check("restore takes a name, then clean", params(server.action_restore_backup), ["name", "clean"])
 # Import and delete take a SNAPSHOT INDEX: a uid is a position any export renumbers, and a uuid
 # names the show rather than the file so several backups share one.
-check("import takes snapshot", server.POST_ROUTES["/api/shows/import"][1][0][1], "snapshot")
-check("delete takes snapshot", server.POST_ROUTES["/api/shows/delete"][1][0][1], "snapshot")
-check("import handle is an int", server.POST_ROUTES["/api/shows/import"][1][0][0], int)
-check("restore takes clean", [f[1] for f in server.POST_ROUTES["/api/profiles/restore"][1]],
-      ["name", "clean"])
+check("import takes snapshot", params(server.action_show_import)[0], "snapshot")
+check("delete takes snapshot", params(server.action_show_delete)[0], "snapshot")
+check("restore takes clean", params(server.restore_profile), ["name", "clean"])
 
 print("the write gate")
 check("Pro II may write shows", "shows" in devices.PRO2.caps, True)

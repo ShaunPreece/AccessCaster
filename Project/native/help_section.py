@@ -1,12 +1,18 @@
-"""Help and About: the help, a page per topic, read from static/help.html, the file the web page
-shows, so the two say the same.
+"""Help and About: the help, a page per topic, read from help/help.txt.
 
-The tree is the table of contents: About, What it can control, each part of Help (one per `h3`),
-Known issues, and Support this project. A topic is plain text in a read-only box, a paragraph to a
-line with a blank line between, which a screen reader moves through by line or by paragraph.
+The tree is the table of contents: a topic per `#` heading, and for the Help topic a topic per
+`##` part as well. A topic is plain text in a read-only box, a paragraph to a line with a blank
+line between, which a screen reader moves through by line or by paragraph.
+
+The file's format, which the website's guide importer (`importAppGuide.py`) reads as well:
+- `# Title` starts a topic and `## Title` a part of one.
+- Blocks are separated by a blank line. A paragraph is a block, one line per paragraph; a second
+  line in the same block is a line break the reader keeps.
+- `- text` is a list item, a line each; consecutive items need no blank line between them.
+- `* Term` names a term, and the rest of its block is the term's description.
 """
+import re
 import webbrowser
-from html.parser import HTMLParser
 
 import wx
 
@@ -16,104 +22,74 @@ from version import __version__
 
 TITLE = "Help and About"
 SUPPORT_URL = "https://www.slightperception.com/support"
-# A paragraph that is a block of its own, and so a line of its own in the text.
-BLOCKS = {"p", "li", "h1", "h2", "h3", "h4", "dd", "section", "div", "ul", "dl"}
-# The tab whose `h3`s become topics of their own; the other tabs are one topic each.
-SPLIT_TAB = "help"
-# A <br>, kept apart from the source's own line breaks, which are whitespace.
-BREAK = "\x00"
-# Written for a page that has no support link set up; this one has.
-SKIP_IDS = {"support-not-yet"}
+CREDIT = "Version {}. Developed by Shaun Preece."
+# The topic whose parts are topics of their own; the others keep their parts in their text.
+SPLIT_TOPIC = "Help"
+SUPPORT_TOPIC = "Support this project"
 
 
-class _HelpParser(HTMLParser):
-    """help.html as topics: [(key, title, [paragraph, ...])]. Comments and hidden elements are
-    left out, bar the tab panes, which are hidden only until the web page shows one."""
+def slug(title):
+    """A topic's key: lowercase words joined by hyphens, any trailing "(Alt+1)" dropped."""
+    title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
 
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.topics = []
-        self._text = []
-        self._term = ""              # a <dt> waiting for its <dd>
-        self._skip = 0               # depth inside an element left out
-        self._tab = None             # the key of the tab pane being read
-        self._heading = None         # the tag whose text names the next topic, while it is open
-        self._version = False
 
-    def _topic(self, key, title):
-        self.topics.append((key, title, []))
-
-    def _flush(self):
-        # Whitespace collapses as a browser would, except a <br>'s line break.
-        lines = (" ".join(line.split()) for line in "".join(self._text).split(BREAK))
-        text = "\n".join(line for line in lines if line)
-        self._text = []
-        if not text or not self.topics:
-            return
-        if self._term:
-            text, self._term = f"{self._term}: {text}", ""
-        self.topics[-1][2].append(text)
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if self._skip:
-            if tag not in ("br",):
-                self._skip += 1
-            return
-        if tag == "div" and "cat-tab" in (attrs.get("class") or ""):
-            self._flush()
-            self._tab = attrs.get("data-tab-key")
-            self._topic(self._tab, attrs.get("data-tab-title") or self._tab)
-            return
-        if (("hidden" in attrs and tag != "section") or attrs.get("id") in SKIP_IDS
-                or tag == "h1"):
-            self._skip = 1
-            return
-        if tag == "section":
-            self._topic("about", "About")
-        if tag in BLOCKS or tag == "dt":
-            self._flush()
-        if tag == "h3" and self._tab == SPLIT_TAB:
-            self._heading = tag
-            self._topic(None, "")
-        if tag == "br":
-            self._text.append(BREAK)
-        if attrs.get("id") == "app-version":
-            self._version = True
-
-    def handle_endtag(self, tag):
-        if self._skip:
-            self._skip -= 1
-            return
-        if tag == "dt":
-            self._term = " ".join("".join(self._text).split())
-            self._text = []
-            return
-        if tag == self._heading:
-            title = " ".join("".join(self._text).split())
-            self._text = []
-            self._heading = None
-            self.topics[-1] = (f"{SPLIT_TAB}-{len(self.topics)}", title, [])
-            return
-        if tag == "span" and self._version:
-            self._version = False
-        if tag in BLOCKS:
-            self._flush()
-
-    def handle_data(self, data):
-        if self._skip:
-            return
-        self._text.append(__version__ if self._version else data)
+def _blocks(lines, start):
+    """The blocks of a run of lines, as text: a term as "Term: description", an item without its
+    dash. `start` is the run's first line number, for the error."""
+    out, block = [], []
+    for number, line in enumerate(lines + [""], start):
+        if line.strip():
+            block.append((number, line.rstrip()))
+            continue
+        if not block:
+            continue
+        first_number, first = block[0]
+        if first.startswith("* "):
+            if len(block) < 2:
+                raise ValueError(f"help.txt line {first_number}: a term with no description")
+            out.append(f"{first[2:]}: " + "\n".join(text for _n, text in block[1:]))
+        elif first.startswith("- "):
+            for item_number, item in block:
+                if not item.startswith("- "):
+                    raise ValueError(f"help.txt line {item_number}: a list item is one line")
+                out.append(item[2:])
+        else:
+            out.append("\n".join(text for _n, text in block))
+        block = []
+    return out
 
 
 def topics(path=None):
-    """[(key, title, text)] from help.html."""
-    parser = _HelpParser()
-    with open(path or resource_path("static", "help.html"), encoding="utf-8-sig") as fh:
-        parser.feed(fh.read())
-    parser.close()
-    return [(key, title, "\n\n".join(paragraphs))
-            for key, title, paragraphs in parser.topics if paragraphs]
+    """[(key, title, text)] from help.txt, the first topic opening with the version."""
+    with open(path or resource_path("help", "help.txt"), encoding="utf-8-sig") as fh:
+        lines = fh.read().splitlines()
+    # (level, title, first body line number, body lines)
+    sections = []
+    for number, line in enumerate(lines, 1):
+        match = re.match(r"^(#{1,2}) (.+)$", line)
+        if match:
+            sections.append((len(match.group(1)), match.group(2).strip(), number + 1, []))
+        elif sections:
+            sections[-1][3].append(line)
+        elif line.strip():
+            raise ValueError(f"help.txt line {number}: text before the first heading")
+    result, parent = [], None
+    for level, title, start, body in sections:
+        paragraphs = _blocks(body, start)
+        if level == 1:
+            parent = title
+            result.append([slug(title), title, paragraphs])
+        elif parent is None:
+            raise ValueError(f"help.txt line {start - 1}: a part before the first topic")
+        elif parent == SPLIT_TOPIC:
+            result.append([f"{slug(parent)}-{slug(title)}", title, paragraphs])
+        else:
+            result[-1][2].extend([title] + paragraphs)
+    if result:
+        result[0][2].insert(0, CREDIT.format(__version__))
+    return [(key, title, "\n\n".join(paragraphs)) for key, title, paragraphs in result
+            if paragraphs]
 
 
 class HelpPage(wx.Panel):
@@ -134,5 +110,5 @@ class HelpSection:
     route = "about"
 
     def __init__(self, frame):
-        self.pages = [Page(key, title, HelpPage(frame, title, text, support=key == "support"))
+        self.pages = [Page(key, title, HelpPage(frame, title, text, support=title == SUPPORT_TOPIC))
                       for key, title, text in topics()]

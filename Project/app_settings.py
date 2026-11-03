@@ -37,13 +37,8 @@ PORTABLE = (
     "announcer_mute_tones",
     "announcer_record_feedback",
     "announcer_record_tones",      # an export from before the three-way choice
-    "announcer_startup_summary",
     "record_mute_announcer",
     "clip_warning",
-    "meter_warn_clip",
-    "meter_warn_silence",
-    "meter_silence_after",
-    "meter_speak_every",
     "meter_clip_sound",
     "meter_clip_db",
     "callme_contacts",
@@ -60,14 +55,10 @@ PORTABLE = (
 MACHINE_SPECIFIC = (
     "announcer_voice",
     "announcer_output",
-    "meter_stream",
 )
 
 # WHAT NEVER TRAVELS, and why. Each of these would do real harm in an exported file.
 EXCLUDED = {
-    # A CREDENTIAL. It is the token that grants remote access to this app. An export is a file
-    # people email to themselves and drop in shared folders, and this must not be in one.
-    "remote_token": "it is the remote-access credential for this app",
     # PER-DESK FIRST-RUN STATE. It records which desks have already been offered an as-found
     # backup. Carrying it to a new machine would silently suppress that offer for a desk that has
     # never been backed up there, and the offer only ever comes once.
@@ -105,8 +96,8 @@ def build_export(settings: dict) -> dict:
         "settings": values,
         # Named so a human reading the file can tell what it is and what it deliberately omits.
         "note": ("AccessCaster's own settings: keyboard shortcuts, announcement preferences, "
-                 "level warnings and CallMe contacts. It does NOT contain any desk settings (those "
-                 "are profiles), and it deliberately contains no remote-access token."),
+                 "the level check and CallMe contacts. It does NOT contain any desk settings "
+                 "(those are profiles)."),
     }
 
 
@@ -186,8 +177,8 @@ def merge_import(payload: dict, current: dict, available: dict | None = None) ->
     """(changes, report) for an import. `changes` is what to MERGE into settings, never a replace.
 
     MERGE, NOT REPLACE, and that matters: the excluded keys live in the same file, so a replace
-    would delete this machine's remote-access token and its first-run record as a side effect of
-    restoring somebody's keyboard shortcuts.
+    would delete this machine's first-run record and update state as a side effect of restoring
+    somebody's keyboard shortcuts.
 
     `available` optionally maps a MACHINE_SPECIFIC key to the list of names this computer really
     has (voices, audio outputs, capture streams). A name that is not in its list is NOT applied,
@@ -233,8 +224,7 @@ def describe_import(report: dict) -> str:
         parts.append("Nothing was restored")
     msg = ", ".join(parts) + "."
     for key, value in report.get("unmatched") or ():
-        what = {"announcer_voice": "voice", "announcer_output": "announcement output",
-                "meter_stream": "level-meter input"}.get(key, key)
+        what = {"announcer_voice": "voice", "announcer_output": "announcement output"}.get(key, key)
         msg += (f" The saved {what}, {value!r}, is not on this computer, so it was left as it is.")
     ignored = len(report.get("ignored") or ())
     if ignored:

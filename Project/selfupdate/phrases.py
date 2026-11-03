@@ -151,12 +151,6 @@ ALREADY_CHECKING = "AccessCaster is already checking for an update."
 OFFER_CHANGED = ("The update on offer has changed since this was opened. "
                  f"Press {KEY} to see the current one.")
 
-# A remote page, a phone on the network, asked to change something about this
-# PC's copy of the app.
-LOCAL_ONLY = ("Updates can only be checked for and installed on the computer "
-              "AccessCaster runs on.")
-
-
 def not_back(version):
     """Said by the page when the app has not come back long after the
     installer was started. The page keeps this from the moment the hand-off
