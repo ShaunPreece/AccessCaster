@@ -32,6 +32,7 @@ import channels
 import commands  # the catalogue of what a shortcut can do, from the spec tables
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import desk_firmware  # installing a firmware update through the desk's own updater
+import desk_live  # the one listener: everything the desk pushes, to every subscriber
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import encoder_hold  # an encoder hold mutes the channel a channel button selected
@@ -431,8 +432,7 @@ def firmware_job_status() -> dict:
 
 def action_check_firmware() -> dict:
     """Ask the desk to check RODE's server for a firmware update, and say what it found."""
-    listener = rcp_read.PushListener()
-    listening = False
+    listener = desk_live.PushListener()
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
@@ -440,26 +440,16 @@ def action_check_firmware() -> dict:
             if not found:
                 return {"ok": False, "message": "This unit does not offer a firmware check."}
             path = found[0][0].path()
-            # Opened before the write: the desk answers within a second.
-            try:
-                listener.start()
-                listening = True
-            except Exception as exc:
-                diagnostics.event("device.listener_failed", "reading instead of listening",
-                                  error=str(exc))
+            listener.start()        # before the write: the desk answers within a second
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
-        if listening:
-            listener.wait_for("updateChecking", _UPDATE_CHECK_WAIT_S, match=lambda v: v is False)
-        else:
-            time.sleep(3.0)
+        listener.wait_for("updateChecking", _UPDATE_CHECK_WAIT_S, match=lambda v: v is False)
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not check for a firmware update: {exc}"}
     finally:
-        if listening:
-            listener.stop()
+        listener.stop()
     upd = _firmware_update(blob)
     fw = _firmware_version(blob) or "unknown"
     msg = (_firmware_update_sentence(upd)
@@ -472,8 +462,8 @@ def action_check_firmware() -> dict:
 #
 # The protocol side is in recorder.py; this is the app side of it. TWO THINGS SHAPE THIS CODE:
 #
-#   * **The state comes from a PUSH, not a poll.** recorder.Watcher holds one read-only HID handle
-#     and hears `recordState` change within ~30 ms, from our writes AND from the unit's own REC
+#   * **The state comes from a PUSH, not a poll.** recorder.Watcher follows the desk listener and
+#     hears `recordState` change within ~30 ms, from our writes AND from the unit's own REC
 #     button. So `read_recorder_live` costs nothing and can be polled while the page is shown,
 #     while `read_recorder` (the full page: volumes and the recordings list) does a ~1.5 s dump.
 #   * **A write is never trusted.** `requestRecordState` is a request the firmware consumes and
@@ -1003,8 +993,7 @@ def action_storage_erase(index: int) -> dict:
     gate = _storage_gate()
     if gate is not None:
         return gate
-    listener = rcp_read.PushListener()
-    listening = False
+    listener = desk_live.PushListener()
     try:
         with _hid_lock:
             vol, path, blob = _storage_target(index)
@@ -1014,26 +1003,17 @@ def action_storage_erase(index: int) -> dict:
                 return {"ok": False, "message": "A recording is running. Stop it before erasing."}
             if not (vol["inserted"] and vol["mounted"]):
                 return {"ok": False, "message": f"Nothing usable is in the {vol['spoken']}."}
-            try:
-                listener.start()
-                listening = True
-            except Exception as exc:
-                diagnostics.event("device.listener_failed", "reading instead of listening",
-                                  error=str(exc))
+            listener.start()
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("storageVolumeErase", True, path))
-        if listening:
-            listener.wait_for("storageVolumeErase", _ERASE_WAIT_S, match=lambda v: v is False)
-        else:
-            time.sleep(25.0)
+        listener.wait_for("storageVolumeErase", _ERASE_WAIT_S, match=lambda v: v is False)
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not erase the {recorder.volume_spoken(index)}: "
                                         f"{exc}"}
     finally:
-        if listening:
-            listener.stop()
+        listener.stop()
     now = next((v for v in recorder.read_volumes(blob) if v["index"] == vol["index"]), None)
     if not now or now["free_mb"] < now["capacity_mb"] - 64:
         return _storage_reply(blob, False, f"The erase was sent, but the {vol['spoken']} does not "
@@ -2602,25 +2582,16 @@ def action_set_midi(on: bool) -> dict:
 # The control announcer and the speech thread are announcer.py and speech.py. This is the server's
 # side of the announcer's interface.
 class _AnnouncerHooks(announcer.Hooks):
-    """The device lock, the shortcut layer's pad tracking, and what a reconnect means for the USB
+    """The device lock, the shortcut layer's mixer pads, and what a reconnect means for the USB
     mode and RODE's virtual devices. Each looks the server's state up when called."""
 
     lock = _hid_lock
-
-    def note_bank(self, bank):
-        pad_shortcuts.note_bank(bank)
-
-    def note_pad_progress(self, position, progress):
-        pad_shortcuts.note_pad_progress(position, progress)
-
-    def note_pad_active(self, position, on):
-        pad_shortcuts.note_pad_active(position, on)
 
     def mixer_positions(self):
         return pad_shortcuts.mixer_positions
 
     def reconnected(self, was_usb, now_usb):
-        """Runs on the announcer's thread, which must keep reading, so anything that writes goes to
+        """Runs on the announcer's thread, which must keep speaking, so anything that writes goes to
         a thread of its own."""
         if _virtual_devices_retrying.is_set():
             return      # our own flip of the mode, already announced once as a retry
@@ -7293,39 +7264,25 @@ def _reset_and_wait(step) -> dict:
     burst is done by t+4.96 s (measured on a Duo), so the answer arrives sooner with nothing of ours
     in the way.
 
-    THE HID LOCK IS HELD FOR THE WRITE ONLY, not across the wait: the listener is read-only on its
-    own handle, so an announcement or a page read does not queue behind this.
+    THE HID LOCK IS HELD FOR THE WRITE ONLY, not across the wait: listening needs no lock, so an
+    announcement or a page read does not queue behind this.
 
     A READ IS STILL THE FALLBACK. A missed push is not a failed reset, and hidapi makes no promise
     about a frame arriving, so a timeout costs one dump before anything is reported as wrong.
     """
-    listener = rcp_read.PushListener()
-    listening = False
+    listener = desk_live.PushListener()
     try:
         with _hid_lock:
             before_uuid = shows.read_current(rcp_read.read_model_stable(fresh=True)).get("uuid")
             step("Resetting the desk to factory settings and pads...")
-            # OPENED AFTER OUR OWN DUMP AND BEFORE THE WRITE. After, so it does not sit through 536
-            # frames of the baseline read; before, because the push burst starts 20 ms later and a
-            # listener opened afterwards would race it.
-            #
-            # AND FAILING TO OPEN IT IS NOT A FAILED RESET. Listening is an optimisation over
-            # reading, never a requirement, so if a handle cannot be had we do the reset anyway and
-            # fall through to the read below (the offline sim has no HID interface at all).
-            try:
-                listener.start()
-                listening = True
-            except Exception as exc:
-                diagnostics.event("device.listener_failed", "reading instead of listening",
-                                  error=str(exc))
+            listener.start()        # before the write: the push burst starts 20 ms after it
             shows.send_new_from_default()
         # NEVER LONGER THAN THE SHOW-COMMAND TIMEOUT ITSELF. Two independent waits for one command is
         # one too many: `shows.COMMAND_TIMEOUT_S` is the ceiling for "how long we give the desk", so
         # this listens for the shorter of the two and the offline sim's single knob still governs it.
-        after = (listener.wait_for("currentShowUUID",
-                                   timeout=min(_RESET_PUSH_WAIT_S, shows.COMMAND_TIMEOUT_S),
-                                   match=lambda v: v and v != before_uuid)
-                 if listening else None)
+        after = listener.wait_for("currentShowUUID",
+                                  timeout=min(_RESET_PUSH_WAIT_S, shows.COMMAND_TIMEOUT_S),
+                                  match=lambda v: v and v != before_uuid)
         listener_lost = listener.lost
         if after:
             # DO NOT ACT ON THE ANSWER THE INSTANT IT ARRIVES. The uuid lands at about t+1.8 s and
@@ -9104,8 +9061,12 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because every entry point comes through here.
     diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
                       shortcuts=shortcuts)
+    # The one listener, and what follows it whatever else is running: the naming layout, and the
+    # pad bank and playback the shortcuts fire by.
+    desk_live.start()
+    channels.follow_desk()
+    pad_shortcuts.follow_desk()
     if announce and announcer.starts_on():
-        # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=greeting)
     if announce:
@@ -9140,9 +9101,8 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
             print(f"Keyboard shortcuts registered: {len(live)}.")
         except Exception as exc:
             print(f"Keyboard shortcuts unavailable: {exc}")
-    # The recording state listener: it is what makes the Recording page free to poll, and it is
-    # how a press of the unit's own REC button is noticed. Read-only, its own handle, and idle
-    # unless the recorder changes state.
+    # The recording state follower: it is what makes the Recording page free to poll, and it is
+    # how a press of the unit's own REC button is noticed.
     _recorder_watcher()
     # A hold on the encoder while a channel button holds it mutes that channel, as the desk's own
     # hold does for the encoder's ring target.
@@ -9151,7 +9111,7 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     # unless a version is found, and never from a source run.
     app_updates.start()
     # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
-    # not anyone is announcing. It seeds itself from a dump once it opens.
+    # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
     _callme_watcher()
     try:
         seed = read_live_settings()
@@ -9189,8 +9149,9 @@ def stop_service(reason: str) -> None:
     program with nothing left running to act on them. Then any Hold-mode pad a shortcut is holding,
     which would otherwise keep playing with nothing left to release it, and any live preview still
     engaged on a mic. The endpoint watcher unregisters its callback rather than leaving Windows'
-    audio service holding a pointer into a process that is going away, and the speech output
-    closes, since a device left open holds the process's exit up."""
+    audio service holding a pointer into a process that is going away, the speech output closes,
+    since a device left open holds the process's exit up, and the desk listener closes its handle
+    on its own thread."""
     diagnostics.event("app.stopping", reason)
     _virtual_devices_watch_stop.set()
     if _virtual_devices_watch is not None:
@@ -9200,4 +9161,5 @@ def stop_service(reason: str) -> None:
     pad_shortcuts.release_held()
     _cleanup_preview_on_exit()
     speech.stop()
+    desk_live.stop()
     diagnostics.stop(reason)

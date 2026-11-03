@@ -3,10 +3,9 @@ playing.
 
 WHAT IT KEEPS, and why it keeps it: a pad press has to be instant, and knowing where a pad sits, what
 its play mode is and which bank the desk is on all come from a model dump of about 1.5 seconds. So
-this module caches the pad map and the bank, keeps them honest from the desk's pushes (the
-announcer calls `note_bank`, `note_pad_progress` and `note_pad_active`) and from every pad edit
-(`pads_stale`), and remembers what it switched on or is holding down, because the desk does not echo
-our own writes.
+this module caches the pad map and the bank, keeps them honest from the desk's pushes
+(`follow_desk`) and from every pad edit (`pads_stale`), and remembers what it switched on or is
+holding down, because the desk does not echo our own writes.
 
 It never imports the server. The one thing it needs from it is the device lock, which the server
 installs as `lock` at import.
@@ -17,7 +16,7 @@ import contextlib
 import threading
 import time
 
-import announcer
+import desk_live
 import devices
 import diagnostics
 import midi_out
@@ -55,10 +54,28 @@ _pads_held = set()           # padIdx of HOLD-mode sound pads whose MIDI note we
 # WHICH BANK THE DESK IS ON, cached for the same reason the pad map is: MIDI reaches only the
 # current bank, so firing a pad in another one needs this before it can do anything, and a model
 # dump in front of a keypress is not an airhorn. Kept honest from three directions - every pad-map
-# refresh reads it off the same dump, the announcer notes the desk's own pushes, and our own bank
+# refresh reads it off the same dump, `follow_desk` notes the desk's own pushes, and our own bank
 # writes note themselves. None means we have genuinely never seen one, which a
 # caller must not silently read as bank 1: that fires the wrong pad.
 _bank = None
+
+
+def follow_desk() -> None:
+    """Keep the bank and what is playing following the desk, whether or not announcements are on:
+    a stale bank makes a number key fire a stranger's sound."""
+    desk_live.Follower("pad shortcuts", {"selectedBank", "padProgress", "padActive"},
+                       on_push=note_push).start()
+
+
+def note_push(push) -> None:
+    """One push `follow_desk` asked for. Pad playback is addressed at the pad's STREAM POSITION,
+    the last path element."""
+    if push.name == "selectedBank" and push.kind == "int":
+        note_bank(push.value)
+    elif push.name == "padProgress" and push.kind == "float" and push.path:
+        note_pad_progress(push.path[-1], push.value)
+    elif push.name == "padActive" and push.kind == "bool" and push.path:
+        note_pad_active(push.path[-1], push.value)
 
 
 def note_bank(bank) -> None:
@@ -269,7 +286,7 @@ def _arm_midi() -> None:
 _play_lock = threading.Lock()
 _playing = {}                # stream position -> {"first", "first_at", "last", "last_at"}
 # A playing pad pushes about 20 times a second, so a second of silence means it has stopped without
-# us seeing the `padActive` that said so - which happens whenever the announcer starts mid-sound.
+# us seeing the `padActive` that said so - which happens whenever the app starts mid-sound.
 _PLAY_STALE_S = 1.0
 
 
@@ -547,13 +564,13 @@ def bank_step(target: str) -> dict:
 def playing_now(_target: str = "") -> dict:
     """Say what is playing, on demand.
 
-    ON DEMAND AND NEVER ON PRESS, or it talks over the pad it is describing. Reads the state the
-    announcer keeps silently, so twenty progress pushes a second cost nothing until somebody asks.
+    ON DEMAND AND NEVER ON PRESS, or it talks over the pad it is describing. Reads the state
+    `follow_desk` keeps, so twenty progress pushes a second cost nothing until somebody asks.
 
-    FALLS BACK TO A MODEL READ WHEN THE ANNOUNCER IS OFF, because the push stream is the announcer's
-    handle: without this the shortcut would answer "nothing" on a desk that is audibly playing, and
-    a wrong answer is worse than a slow one. The read costs about 1.5 s and cannot give time
-    remaining, which needs two samples of a moving progress figure.
+    FALLS BACK TO A MODEL READ WHILE NOTHING IS LISTENING TO THE DESK: without this the shortcut
+    would answer "nothing" on a desk that is audibly playing, and a wrong answer is worse than a
+    slow one. The read costs about 1.5 s and cannot give time remaining, which needs two samples of
+    a moving progress figure.
 
     THE THREE SOURCES ARE MERGED BY STREAM POSITION, NOT CONCATENATED. They overlap: a voice effect
     this app engaged is in `_pads_on` AND in the desk's own `padActive`, so appending both says
@@ -565,7 +582,7 @@ def playing_now(_target: str = "") -> dict:
         said[position] = (f"{name}, {round(progress * 100)} percent through, "
                           f"{wording.describe_duration(left)} left." if left is not None
                           else f"{name}, {round(progress * 100)} percent through.")
-    if not said and announcer.live_state is None:
+    if not said and not desk_live.connected():
         said.update(_playing_from_model())
     # HID-ENGAGED PADS ARE NOT IN THE STREAM AT ALL. The desk does not echo our own `padActive`
     # write (measured: engaging a voice-FX pad over HID pushes nothing whatever), so a voice
@@ -588,7 +605,7 @@ def playing_now(_target: str = "") -> dict:
 
 
 def _playing_from_model() -> dict:
-    """What the DESK says is active, read fresh. The answer when the announcer is off.
+    """What the DESK says is active, read fresh. The answer while nothing is listening.
 
     Returns {stream position: sentence}, keyed the same way as the tracked state so the caller can
     merge the two rather than say the same pad twice."""

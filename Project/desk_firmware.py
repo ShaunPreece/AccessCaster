@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 
+import desk_live
 import diagnostics
 import model_tree
 import rcp_hid
@@ -127,7 +128,7 @@ class Desk:
         diagnostics.event("firmware.write", name, value=value)
 
     def listener(self):
-        return rcp_read.PushListener()
+        return desk_live.PushListener()
 
     def present(self):
         """The desk's USB product id while its control interface is on the bus, else None."""

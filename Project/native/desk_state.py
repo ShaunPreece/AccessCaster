@@ -1,29 +1,23 @@
 """The window's picture of the desk, its channels, its output mixes, its levels and its master mix:
 read once, then kept current by what the desk pushes.
 
-It listens on a read-only HID handle of its own, because the announcer's listener runs only while
-announcements are on. The state belongs to the UI thread: the listener thread decodes a push and
-hands it over with wx.CallAfter, so the records are changed, and subscribers told, only on the
-thread that draws them.
+It follows the desk listener (`desk_live`) while the window exists. The state belongs to the UI
+thread: the follower's thread hands each push over with wx.CallAfter, so the records are changed,
+and subscribers told, only on the thread that draws them.
 
 A full read happens at start, on request (F5, or after a write that moves other values), when the
 desk comes back after dropping off the bus, and shortly after a push that changes which channels
 exist or where they sit (a fader's source, the USB mode) or what a mic is (its type, which moves
 the gain and the chain). Everything else a push carries is applied to the record it addresses.
 """
-import threading
-import time
-
 import wx
 
 import app_window
 import channels
+import desk_live
 import devices
-import diagnostics
-import rcp_hid
 import rcp_read
 import rcp_transfer
-import recorder
 import server
 from native.calls import call
 
@@ -124,28 +118,29 @@ class DeskState:
         self._dirty_levels = False
         self._dirty_master = False
         self._flush = None
-        self._stop = threading.Event()
-        self._thread = None
+        self._stopped = False
+        self._follower = None
 
     def subscribe(self, fn):
         self._subscribers.append(fn)
 
     def start(self):
         app_window.pushed = self._pushed
-        self._thread = threading.Thread(target=self._listen, name="window-desk-listener",
-                                        daemon=True)
-        self._thread.start()
+        self._follower = desk_live.Follower(
+            "window", _RELEVANT, on_push=lambda push: wx.CallAfter(self._apply, *push[:4]),
+            on_connected=self._connected,
+            on_lost=lambda: wx.CallAfter(self._notify, "lost", None)).start()
         self.refresh()
 
     def stop(self):
         if app_window.pushed == self._pushed:
             app_window.pushed = None
-        self._stop.set()
+        self._stopped = True
         for timer in [self._reread, self._flush, *self._preset_timers.values()]:
             if timer is not None:
                 timer.Stop()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
+        if self._follower is not None:
+            self._follower.stop()
 
     # ---- full reads ------------------------------------------------------------------------
 
@@ -215,40 +210,10 @@ class DeskState:
 
     # ---- pushes ----------------------------------------------------------------------------
 
-    def _listen(self):
-        """The listener thread. It reopens its handle when the desk drops off the bus, and asks
-        for a full read once it is back."""
-        dev, lost = None, False
-        while not self._stop.is_set():
-            if dev is None:
-                iface = rcp_transfer.find_control_interface(fresh=True)
-                if iface is not None:
-                    try:
-                        dev = rcp_hid.open_handle(iface, "window listener")
-                    except Exception as exc:
-                        diagnostics.event("device.open_failed", "window listener",
-                                          error=f"{exc}")
-                if dev is None:
-                    self._stop.wait(2.0)
-                    continue
-                if lost:
-                    lost = False
-                    wx.CallAfter(self.refresh)
-            try:
-                report = dev.read(256, timeout_ms=250)
-            except Exception:
-                rcp_hid.close_handle(dev, "window listener")
-                dev, lost = None, True
-                wx.CallAfter(self._notify, "lost", None)
-                self._stop.wait(0.5)
-                continue
-            if not report or report[0] != 0x04:
-                continue
-            push = rcp_read.parse_push(bytes(report))
-            if push is not None and push[1] in _RELEVANT and not self._stop.is_set():
-                wx.CallAfter(self._apply, *push)
-        if dev is not None:
-            rcp_hid.close_handle(dev, "window listener")
+    def _connected(self, gap):
+        """The desk is open again after dropping off the bus: read it in full."""
+        if gap is not None:
+            wx.CallAfter(self.refresh)
 
     def _pushed(self, path, name, value, kind):
         """`app_window.pushed`: one of our own writes, applied as the desk's push of it would be."""
@@ -256,7 +221,7 @@ class DeskState:
             wx.CallAfter(self._apply, path, name, value, kind)
 
     def _apply(self, path, name, value, kind):
-        if self._stop.is_set():
+        if self._stopped:
             return
         # The node the push is addressed at, named by the desk's own layout.
         node = rcp_read.push_key(path)

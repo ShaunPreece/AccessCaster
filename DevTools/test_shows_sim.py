@@ -21,6 +21,7 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import desk_live
 import devices
 import fake_model
 import profiles as profiles_mod
@@ -34,7 +35,7 @@ from _testkit import as_device, check, check_in, patched
 # a legitimate refusal and look like a regression. Offline tests must not depend on what happens to
 # be plugged into the machine running them.
 devices.force_device(devices.PRO2)
-REAL_LISTENER = rcp_read.PushListener      # before the stub below replaces it
+REAL_LISTENER = desk_live.PushListener     # before the stub below replaces it
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +152,8 @@ def install():
     # The factory-pads backup reads the pads and writes the real backup store; here it only says so.
     server._keep_factory_pads = lambda step: " Kept the factory pads."
 
-    # THE LISTENER IS STUBBED OR THIS SUITE IS NOT OFFLINE. `rcp_read.PushListener` resolves the
-    # control interface itself, and `find_control_interface` is not faked here - so on a machine
+    # THE LISTENER IS STUBBED OR THIS SUITE IS NOT OFFLINE. `desk_live.PushListener` starts the
+    # desk listener, and `find_control_interface` is not faked here - so on a machine
     # with a desk plugged in, an "offline" test opens a REAL handle to it and waits for a push that
     # cannot come, because the command went to the fake desk. It presents as "the job never
     # finished". A stub keeps the suite honest AND exercises the no-push fallback, which is the
@@ -172,7 +173,7 @@ def install():
         def stop(self):
             pass
 
-    rcp_read.PushListener = _NoListener
+    desk_live.PushListener = _NoListener
 
 
 def run_job(start_result):
@@ -526,12 +527,13 @@ check("nothing was sent", DESK.calls, [])
 
 print("a wait for one push ends on time while other pushes keep arriving")
 listener = REAL_LISTENER()                 # never started: the pushes are queued by hand
+listener._sub = desk_live.Subscription("test")
 playing = threading.Event()
 
 
 def _pad_progress():
     while not playing.is_set():
-        listener._q.put(((666, 19), "padProgress", 0.5, "float"))
+        listener._sub._put(desk_live.Push((666, 19), "padProgress", 0.5, "float", None))
         time.sleep(0.05)
 
 

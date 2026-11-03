@@ -268,7 +268,7 @@ The layers, bottom up:
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
 - `server.py` is the service over them: the `read_*` and `action_*` functions the window calls,
-  and `start_service`, which brings up the announcer, the shortcuts and the watchers.
+  and `start_service`, which brings up the desk listener, the announcer, the shortcuts and the watchers.
 - `native/` is the wxPython window. `tray.py` hosts it in the service's own process.
 
 Two rules do most of the work of keeping it honest:
@@ -684,7 +684,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
   0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path
   changes with it, so **NO LONG-LIVED READER MAY CACHE ITS `RodeInterface`** - resolve it again on
-  every reopen, as `announcer._loop` and `recorder.Watcher` both do. Caching it is what made the
+  every reopen, as the desk listener (`desk_live`) does. Caching it is what made the
   announcer go silent for good after a USB setting was changed in the app itself: the read failed,
   the reopen was tried on the old path for ever, and to a screen-reader user that is
   indistinguishable from the app having died. Reconnection now takes about 3 seconds and says
@@ -706,9 +706,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   A `hid.enumerate` blocks for tens of seconds on a desk half off the bus, and the active device is
   asked several times per request, so a scan per lookup stalls every one of them. The list ages out after 5 seconds
   and is dropped by `forget_interfaces`; keep all four of these: a failed `open_handle` forgets it,
-  a watcher's lost read forgets it, `wait_for_reenumeration` forgets it and polls with `fresh=True`,
-  and every watcher's RECONNECT lookup passes `fresh=True` (without that, an arrival waits out the
-  age limit). A status read scans with `refresh_interfaces`. **Never call `enumerate_interfaces`
+  the desk listener's lost read forgets it, `wait_for_reenumeration` forgets it and polls with
+  `fresh=True`, and the listener's RECONNECT lookup passes `fresh=True` (without that, an arrival
+  waits out the age limit). A status read scans with `refresh_interfaces`. **Never call `enumerate_interfaces`
   for a lookup**: it bypasses the list and brings the stall back.
 - **THE ANNOUNCER SAYS WHEN THE USB MODE MOVED WHILE IT WAS DEAF, AND A PUSH CANNOT DO THIS JOB.**
   The desk can leave Expanded unprompted (measured: off the bus with nothing written to it for
@@ -1413,8 +1413,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   bool rises from False to True, so `callme.build_hangup` sends (False, False) then (True, False).
   Sending only the second does nothing whenever the slot already holds it, which is its resting
   value, so a one-write version passes the first test and fails every call after.
-- **CallMe has its own Watcher on its own handle, not a branch of the announcer**, because the
-  announcer thread stops when announcements are off and a call still has to be tracked and
+- **CallMe has its own Watcher, not a branch of the announcer**, because the announcer stops
+  following the desk when announcements are off and a call still has to be tracked and
   answerable. Its speech goes through `speech.say`, which is where the switch is enforced.
 - **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
   `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
@@ -1475,10 +1475,20 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   announcer) hears all of them. Mutes held on at the desk read True in `channelOutputMute` in the
   dump taken while they were held, so the app's mute display from the dump is right. `potLevel` was
   never pushed.
-- **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `rcp_read.PushListener`: own
-  read-only handle, no HID lock, dump frames filtered by `parse_push`. A factory reset pushes
-  `currentShowUUID` itself at about t+1.75 s. **OPEN IT BEFORE THE WRITE** - the burst starts 0.02 s
-  after, so a listener started afterwards loses the race.
+- **ONE LISTENER, ONE HANDLE: `desk_live`.** Started by `start_service` (or by the first
+  subscription), it reads every report-04 frame, decodes each push once and hands it to each
+  subscriber that named it. **NOTHING A SUBSCRIBER DOES RUNS ON THE READER**: each has its own
+  queue, and a `Follower` its own thread, because encoder hold's mute is a write under the HID lock
+  and CallMe rings and speaks, so one slow consumer would stall the rest and a write waiting for its
+  own push would wait on itself. Do not open another long-lived read handle; subscribe.
+- **ANYTHING THAT MUST STAY CURRENT WITH ANNOUNCEMENTS OFF FOLLOWS THE DESK ITSELF, never through the
+  announcer**, which unsubscribes when switched off. The pad shortcuts' bank and playback
+  (`pad_shortcuts.follow_desk`) and the naming layout (`channels.follow_desk`) are their own
+  followers; fed by the announcer, both went stale with announcements off.
+- **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `desk_live.PushListener`: a
+  subscription on the one listener, no HID lock. A factory reset pushes `currentShowUUID` itself at
+  about t+1.75 s. **START IT BEFORE THE WRITE** - the burst starts 0.02 s after, and only pushes
+  heard after `start` are queued.
 - **"IT WORKED" AND "IT HAS FINISHED" ARE DIFFERENT QUESTIONS.** The reset's uuid arrives at t+1.75 s
   and the desk keeps rewriting itself until t+4.96 s, so acting on the answer means writing to a desk
   mid-rebuild. Use `wait_until_quiet()` before the next write, as `_reset_and_wait` does before
@@ -1487,8 +1497,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   three frames and moves NOTHING in the tree, and `showControlLastError` LATCHES at 8 (a reset does
   not clear it). So no read can tell a refused export from one that never happened.
 - **A hidapi HANDLE MUST BE CLOSED BY THE THREAD THAT READS IT.** Closing one from elsewhere while a
-  read is in flight segfaults the interpreter (exit 139). `recorder.Watcher`, the announcer and
-  `PushListener` all close on their own thread and are joined.
+  read is in flight segfaults the interpreter (exit 139). The desk listener closes on its own
+  thread, and `desk_live.stop` joins it.
 - **`channels.last_known_strip_vector` never expires and is for NAMING only.** The TTL'd cache is for
   addressing a WRITE, where staleness is the dangerous case. Do not merge them.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
@@ -1565,8 +1575,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   length, and every byte after it must be zero. Do not reduce that to a size threshold - a false
   positive silently punches 255 bytes out of the middle of the model.
 - **EVERY LISTENER DECODES A PUSH WITH `rcp_read.parse_push`, NEVER BY SCANNING THE FRAME FOR A NAME.**
-  The announcer, the recorder and CallMe watchers and `PushListener` all receive the model dump's
-  frames too, because Windows gives every open handle every input report. A name scan finds
+  The desk listener receives the model dump's frames too, because Windows gives every open handle
+  every input report. A name scan finds
   property names inside a dump slice and reads garbage either side of them; it also glues a
   printable selector onto the name (`mutePressed` at [0, 0x63] reads as `cmutePressed`).
   `parse_push` answers None for anything that is not exactly one record, so a page reading the desk
@@ -1808,10 +1818,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   (`native.desk_state`), read in full at start, on F5, on a reconnect, after a write that moves
   other values, and after a `STRUCTURAL` push; `show(rec)` puts new values on the same controls
   rather than rebuilding them, so a re-read never moves the focus.
-- **THE DESK STATE BELONGS TO THE UI THREAD.** Its listener thread only decodes a push and hands it
-  over with `wx.CallAfter`; the records change, and subscribers hear of it, on the thread that draws
-  them. It has its own HID handle because the announcer's listener runs only while announcements
-  are on.
+- **THE DESK STATE BELONGS TO THE UI THREAD.** Its follower's thread only hands a push over with
+  `wx.CallAfter`; the records change, and subscribers hear of it, on the thread that draws them.
 - **A SLIDER IGNORES `show` FOR `HANDS_OFF_S` AFTER IT MOVES.** The desk pushes back each value
   written, and an older one arriving mid-drag would pull the slider back under the user's hand.
 - **A PUSHED VALUE LANDS ON THE FOCUSED SLIDER ONCE, `FOCUSED_SETTLE_MS` AFTER THE PUSHES STOP.**
@@ -2541,8 +2549,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change makes wall-clock arithmetic
   fire a timeout early or never. `time.time()` is only for a time shown to a person (`read_at`).
 - **EACH ANNOUNCER LOOP CARRIES A GENERATION (`announcer._loop_gen`)** and leaves as soon as it is not the
-  newest, without touching `announcer.live_state`. Off and on within one read or one reconnect sleep
-  otherwise leaves two loops running, with two handles and every report handled twice.
+  newest, without touching `announcer.live_state`. Off and on within one wait otherwise leaves two
+  loops running, with two subscriptions and every push handled twice.
 
 - **THE TRAY ICON MUST OPEN ON `WM_LBUTTONUP`, NOT ONLY ON `NIN_SELECT`.** On Windows 11 an icon in
   the hidden-icons overflow receives only `WM_LBUTTONDOWN`/`WM_LBUTTONUP` when pressed, by mouse,
@@ -2944,7 +2952,7 @@ shared one; a new copy is how they drifted apart the first time.
 ## The announcer, speech and pad-shortcut modules
 
 - **THE ANNOUNCER, SPEECH AND THE PAD SHORTCUTS NEVER IMPORT THE SERVER.** `announcer.Hooks` is
-  everything the announcer needs from the app (the device lock, pad tracking, what a reconnect
+  everything the announcer needs from the app (the device lock, the mixer pads, what a reconnect
   means), and the server installs `_AnnouncerHooks`, whose methods look the state up when called,
   so a test that patches `pad_shortcuts.mixer_positions` still reaches the decoder. The pad
   shortcuts need only the device lock, which the server installs as `pad_shortcuts.lock` straight

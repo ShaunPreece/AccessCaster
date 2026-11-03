@@ -10,27 +10,24 @@ failure this guards against (a `padActive` write over HID gives exactly that), s
 progress state is checked as well as the sentence - the desk pushing progress twenty times a second
 is the closest thing to an ear this can have.
 
-Runs its own announcer, because the pushed stream is the announcer's read handle and the tracking
-under test lives there. Restores the bank and leaves nothing engaged or held.
+Starts the shortcuts' own follower of the desk (`pad_shortcuts.follow_desk`), where the tracking
+under test lives. Restores the bank and leaves nothing engaged or held.
 
     python DevTools/test_pad_shortcuts_live.py
 """
 from __future__ import annotations
 
 import sys
-import threading
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-import announcer
 import devices
 import pad_shortcuts
-import server  # noqa: F401  (installs the device lock and the announcer's pad hooks)
+import server  # noqa: F401  (installs the device lock)
 import soundpad
-import speech
 from _testkit import check, check_in
 
 
@@ -82,11 +79,8 @@ def main() -> int:
     was_bank = pad_shortcuts.current_bank()
     print(f"{dev.name}: {len(pads)} pads, {per_bank} per bank, on bank {was_bank + 1}")
 
-    # The announcer owns the pushed stream, and the play tracking under test lives in its handler.
-    announcer._quiet_start.set()
-    speech.enabled.set()
-    threading.Thread(target=announcer._loop, daemon=True).start()
-    time.sleep(2.5)                       # the seed read, so the first press is not racing it
+    pad_shortcuts.follow_desk()
+    time.sleep(1.0)                       # the listener opening, so the first press is not racing it
 
     silence(pads, "left over from a previous run")
     sound = find_pad(pads, soundpad.PAD_TYPE_SOUND)
@@ -159,10 +153,8 @@ def main() -> int:
                    pad_shortcuts.slot(str(per_bank + 1)), contains=f"{per_bank} pads in a bank")
         check_said("a pad that is not a number", pad_shortcuts.fire("banana"), contains="not a pad")
     finally:
-        # Silence BEFORE the announcer goes: the tracking that says what is still playing is its
-        # read loop, and without it this can only guess.
+        # Silence while the follower still runs: it is what says what is still playing.
         silence(pads, "left playing by this run")
-        speech.enabled.clear()
         pad_shortcuts.release_held()
         for pos, _pi, _nm in soundpad.latched_pads():
             soundpad.unlatch_pad(pos)

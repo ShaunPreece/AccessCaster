@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import desk_live
 import recorder
 from _testkit import check, check_in
 from wording import spoken_datetime
@@ -103,17 +104,24 @@ check("no destination, no claim",
       recorder.room_left(b"", None)["seconds"], None)
 
 print("\nDECODING THE PUSH (the desk's own packets)")
-check("a start push reads as recording", recorder._state_from_push(PUSH_RECORDING), 2)
-check("a stop push reads as ready", recorder._state_from_push(PUSH_STOPPED), 0)
+
+
+def state_of(frame):
+    push = desk_live.decode(frame)
+    return recorder._state_of(push) if push is not None else None
+
+
+check("a start push reads as recording", state_of(PUSH_RECORDING), 2)
+check("a stop push reads as ready", state_of(PUSH_STOPPED), 0)
 check("a report that is not 04 is ignored",
-      recorder._state_from_push(b"\x03" + PUSH_RECORDING[1:]), None)
+      state_of(b"\x03" + PUSH_RECORDING[1:]), None)
 check("an unrelated packet is ignored",
-      recorder._state_from_push(b"\x04\x00\x00\x00\x00selectedBank\x00\x01\x05\x01\x02\x00\x00\x00"),
+      state_of(b"\x04\x00\x00\x00\x00selectedBank\x00\x01\x05\x01\x02\x00\x00\x00"),
       None)
 # The SELECTOR is checked as well as the name, so a same-named field in another block cannot be
 # read as the recorder's.
 check("the wrong selector is refused",
-      recorder._state_from_push(PUSH_RECORDING[:9] + b"\x0f" + PUSH_RECORDING[10:]), None)
+      state_of(PUSH_RECORDING[:9] + b"\x0f" + PUSH_RECORDING[10:]), None)
 
 print("\nELAPSED TIME (counted here, because the unit will not: recordTimeMs stays 0)")
 said = []

@@ -35,8 +35,8 @@ import threading
 import time
 from datetime import datetime
 
+import desk_live
 import diagnostics
-import rcp_hid
 import rcp_read
 import rcp_transfer
 from wording import describe_duration, spoken_datetime
@@ -514,18 +514,13 @@ def delete_recording(uid: int) -> None:
 # ---------------------------------------------------------------------------
 # The Watcher: what the unit is doing, live, for free.
 
-class Watcher(threading.Thread):
-    """Listens for `recordState` pushes on its own read-only HID handle.
+class Watcher:
+    """Follows `recordState` pushes on the one listener (`desk_live`).
 
     WHY A LISTENER RATHER THAN POLLING. Reading the state from the model costs a ~1.5 s dump and the
     HID lock, so polling it would fight every write in the app. The unit pushes the state change
-    within ~30 ms instead, and pushes NOTHING while nothing changes, so this thread is idle almost
-    all the time. It also catches a press of the unit's own REC button, which is the case the page
-    could never poll fast enough for anyway.
-
-    Its own handle, never the announcer's: input reports are delivered per handle, so two listeners
-    do not steal each other's packets (the same reasoning as the announcer's persistent handle).
-    Strictly read-only - it never writes.
+    within ~30 ms instead, and pushes NOTHING while nothing changes. It also catches a press of the
+    unit's own REC button, which the page could never poll fast enough for anyway.
 
     ELAPSED TIME IS COUNTED HERE, because the unit will not tell us: `recordTimeMs` is 0 in the dump
     and never pushed. Paused time is excluded, matching what the unit actually records. If the app
@@ -533,7 +528,6 @@ class Watcher(threading.Thread):
     None and the UI says the time is unknown rather than showing a number that is wrong."""
 
     def __init__(self, on_change=None):
-        super().__init__(daemon=True)
         self._on_change = on_change
         self._lock = threading.Lock()
         self._state = None
@@ -541,7 +535,11 @@ class Watcher(threading.Thread):
         self._banked = 0.0          # seconds recorded before the current run (pauses)
         self._timed = False         # did we see this recording START?
         self._seen_at = 0.0
-        self.running = True
+        self._follower = None
+
+    def start(self) -> None:
+        self._follower = desk_live.Follower("recorder", {"recordState"},
+                                            on_push=self._push).start()
 
     # -- state, as the rest of the app asks for it -------------------------
     def snapshot(self) -> dict:
@@ -566,6 +564,11 @@ class Watcher(threading.Thread):
         the read-back after our own write). `timed=False` says we did not witness the start, so no
         elapsed time is claimed."""
         self._apply(state, timed=timed, speak=False)
+
+    def _push(self, push) -> None:
+        state = _state_of(push)
+        if state is not None:
+            self._apply(state)
 
     def _apply(self, state, timed: bool = True, speak: bool = True) -> None:
         if state is None:
@@ -592,56 +595,12 @@ class Watcher(threading.Thread):
             except Exception as exc:    # a failed announcement must never take the listener down
                 diagnostics.event("recorder.announce_failed", str(exc))
 
-    # -- the thread -------------------------------------------------------
-    def run(self) -> None:
-        dev = None
-        while self.running:
-            if dev is None:
-                iface = rcp_transfer.find_control_interface(fresh=True)
-                if iface is None:
-                    diagnostics.event("device.absent", "no control interface to watch on")
-                    time.sleep(2.0)               # unit unplugged; try again shortly
-                    continue
-                try:
-                    dev = rcp_hid.open_handle(iface, "recorder watcher")
-                except Exception as exc:
-                    dev = None
-                    diagnostics.event("device.open_failed", "recorder watcher", error=f"{exc}")
-                    time.sleep(2.0)
-                    continue
-            try:
-                rep = dev.read(256, timeout_ms=250)
-            except Exception as exc:
-                # THE DESK STOPPING IS SEEN HERE FIRST, because this is the one reader that is
-                # always on and always reading. Its timestamp is the app's own answer to "when did
-                # it stop answering", which nothing else can give without inferring it from outside.
-                diagnostics.event("device.lost", "recorder watcher read failed", error=f"{exc}")
-                rcp_hid.forget_interfaces()
-                rcp_hid.close_handle(dev, "recorder watcher")
-                dev = None
-                time.sleep(0.5)
-                continue
-            if not rep:
-                continue
-            try:
-                state = _state_from_push(bytes(rep))
-                if state is not None:
-                    self._apply(state)
-            except Exception as exc:    # one undecodable packet costs one update, never the thread
-                diagnostics.event("recorder.push_undecoded", str(exc))
-        if dev is not None:
-            rcp_hid.close_handle(dev, "recorder watcher")
 
-
-def _state_from_push(report: bytes):
-    """`recordState`'s value out of one report-04 packet, or None if that is not what this is.
+def _state_of(push):
+    """`recordState`'s value out of one push, or None if that is not what this is.
 
     The address is checked as well as the name: `recordState` is single-instance today, but matching
-    the path too is what stops a same-named field in another block being read as the recorder."""
-    rec = rcp_read.parse_push(report)
-    if rec is None:
+    the key too is what stops a same-named field in another block being read as the recorder."""
+    if push.name != "recordState" or push.key != rcp_transfer.RECORDER or push.kind != "int":
         return None
-    path, name, value, kind = rec
-    if name != "recordState" or rcp_read.push_key(path) != rcp_transfer.RECORDER or kind != "int":
-        return None
-    return value
+    return push.value

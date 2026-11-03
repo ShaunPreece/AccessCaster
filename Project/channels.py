@@ -17,6 +17,7 @@ the channel currently sits on, keyed by its position in the live fader vector.
 import contextlib as _contextlib
 import time as _time  # strip-vector cache expiry only
 
+import desk_live  # the one listener, which the naming layout follows
 import devices  # per-device model (mic selectors, channel order) keyed by product id
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
@@ -257,6 +258,19 @@ def note_strip_source(idx: int, code: int) -> bool:
     if changed:
         invalidate_strip_vector()
     return changed
+
+
+def follow_desk() -> None:
+    """Keep the naming layout following a fader source changed anywhere (the touchscreen, RODE's
+    app, MIDI), whether or not announcements are on."""
+    desk_live.Follower("fader sources", {"channelInputSource"}, on_push=note_source_push).start()
+
+
+def note_source_push(push) -> None:
+    """One pushed `channelInputSource`, addressed at CHANNEL[strip]."""
+    key = push.key
+    if push.kind == "int" and key and key[0] == "CHANNEL" and key[1] < 16:
+        note_strip_source(key[1], push.value)
 
 
 def invalidate_strip_vector() -> None:

@@ -8,9 +8,9 @@ again, for as long as the app runs. Those three properties are ones the app itse
 failure lands on the user at the moment they change a USB setting - and an announcer that has
 stopped speaking is indistinguishable from an app that has died.
 
-So the loop must resolve the interface AGAIN on every reopen, and must say when it comes back. A
-blip too short to have swallowed a press stays quiet, since a reconnect announcement is only useful
-when there was a silence to explain.
+So the desk listener (`desk_live`) must resolve the interface AGAIN on every reopen, and the
+announcer following it must say when it comes back. A blip too short to have swallowed a press
+stays quiet, since a reconnect announcement is only useful when there was a silence to explain.
 
 Offline: the interface list, the handle and the speech are all stubbed, so no unit is needed and
 no USB setting is touched.
@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import announcer
+import desk_live
 import rcp_hid
 import rcp_transfer
 import server
@@ -64,12 +65,13 @@ EXPANDED = FakeIface(0x0094, b"path-mode-5")
 
 
 class Rig:
-    """Runs the real `announcer._loop` over a fake desk that can be re-enumerated under it."""
+    """Runs the real listener and `announcer._loop` over a fake desk that can be re-enumerated
+    under them."""
 
     def __init__(self, speak_after, greeting=announcer.GREETING_ON):
         self.greeting = greeting
         self.iface = STANDARD
-        self.opened = []          # every interface the loop opened, in order
+        self.opened = []          # every interface the listener opened, in order
         self.said = []
         self.seeded = 0
         self.dev = None
@@ -116,13 +118,14 @@ class Rig:
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(patched(
             (rcp_transfer, {"find_control_interface": self.find}),
-            (rcp_hid, {"open_handle": self.open, "close_handle": lambda dev, purpose="": None}),
+            (rcp_hid, {"find_control_interface": self.find, "open_handle": self.open,
+                       "close_handle": lambda dev, purpose="": None}),
+            (desk_live, {"RETRY_S": 0.02}),     # the real 0.3 s only paces the retries
             # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
             # Windows' default audio device, which is the user's screen reader.
             (speech, {"say": self.say}),
             (server, {"_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow}),
             (announcer, {"seed_layout": self.seed,
-                         "_RETRY_S": 0.02,    # the real 0.3 s only paces the retries
                          "_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
         speech.enabled.set()
         self.thread = threading.Thread(target=announcer._loop, args=(None, self.greeting),
@@ -134,6 +137,7 @@ class Rig:
     def __exit__(self, *exc):
         speech.enabled.clear()
         self.thread.join(timeout=3.0)
+        desk_live.stop()
         self._stack.close()
 
 
@@ -171,7 +175,8 @@ with Rig(speak_after=0.05) as rig:
     rig.iface = None
     time.sleep(0.4)
     check("no handle is opened while nothing is on the bus", len(rig.opened), 1)
-    check("and it is still running, ready for a replug", rig.thread.is_alive(), True)
+    check("and it is still running, ready for a replug",
+          (rig.thread.is_alive(), desk_live._thread.is_alive()), (True, True))
 
 print("\nA USB MODE THAT MOVED WHILE WE WERE DEAF IS SAID, NOT SWALLOWED")
 # The desk can drop out of Expanded on its own, and the change is otherwise invisible: the push
@@ -221,6 +226,6 @@ print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",
       announcer._RECONNECT_SPEAK_AFTER_S > 0, True)
 check("retries back off, or an absent desk is re-enumerated forever at full speed",
-      announcer._RETRY_SLOW_S > announcer._RETRY_S, True)
+      desk_live.RETRY_SLOW_S > desk_live.RETRY_S, True)
 
 sys.exit(_testkit.finish())

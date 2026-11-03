@@ -15,6 +15,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import announcer
 import channels
+import desk_live
 import devices
 import pad_shortcuts
 import rcp_read
@@ -168,10 +169,11 @@ check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmut
 
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
-# channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code.
-said, _ = run([push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10))],
-              cold_cache=False)
-check("the layout change itself is silent", said, [])
+# channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code. The
+# announcer does not hear it; the naming layout's own follower does (`channels.follow_desk`).
+check("the announcer does not listen for it", "channelInputSource" in announcer._HEARD, False)
+channels.note_source_push(desk_live.decode(
+    push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10))))
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
 check("TTL'd cache dropped, so writes re-read", channels.cached_strip_vector(), None)
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)

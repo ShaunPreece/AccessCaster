@@ -16,10 +16,9 @@ import json
 import threading
 import time
 
+import desk_live
 import diagnostics
 import model_tree
-import rcp_hid
-import rcp_read
 import rcp_transfer
 from wording import describe_duration, spoken_date
 
@@ -53,8 +52,6 @@ CONNECTED = ("Active", "Expiring")
 UP = CONNECTED + ("Connecting",)
 # How a RODECaster is addressed when dialled, and how its peer address reads back.
 RODE_PREFIX = "rode:"
-
-_SECRET_PROPS = ("sipAccountPassword", "sipNATTraversalPassword", "sipWebPassword")
 
 
 def tier_name(mode) -> str:
@@ -509,21 +506,27 @@ def spell(code: str) -> str:
 # THE WATCHER: the pushes, heard on a handle of its own
 # ---------------------------------------------------------------------------------------------
 
-class Watcher(threading.Thread):
-    """Listens for CallMe pushes on its own read-only HID handle and keeps the live state.
+# The pushes the Watcher folds in: the control node's, then a slot's.
+PUSHED = frozenset({
+    "sipIncomingCallDetails", "sipIncomingCallAccept", "sipCallHostingEnabled", "sipRodeCode",
+    "sipCallHostingToggleEnabled", "sipRemainingCalltime", "sipRemainingWebCalltime",
+    "sipSlotCallAddress", "sipSlotCallIsHost", "sipSlotCallUUID", "sipSlotCallState",
+    "sipSlotCallQuality", "sipSlotCallBitrate", "sipSlotCallJitter", "sipSlotCallPacketLoss"})
 
-    ITS OWN HANDLE, LIKE THE RECORDER'S, and not a branch of the announcer: the announcer only runs
-    while announcements are on, and a call has to be tracked whether or not anyone wants it spoken.
-    Speech goes through `on_say`, which the server points at the announcer's queue, so the
-    announcer switch still decides what is heard.
+
+class Watcher:
+    """Follows CallMe pushes on the one listener (`desk_live`) and keeps the live state.
+
+    NOT A BRANCH OF THE ANNOUNCER: the announcer only runs while announcements are on, and a call
+    has to be tracked whether or not anyone wants it spoken. Speech goes through `on_say`, which the
+    server points at the announcer's queue, so the announcer switch still decides what is heard.
 
     SEEDED FROM A DUMP: the slot paths, and anything that changed while nobody was listening, only
-    come from a model read. `read_model` is called each time the handle opens, so a desk that comes
-    back from a replug is re-read before its pushes are trusted, and every full page read re-seeds
-    it too (`seed`). A push that arrives before any seed is dropped."""
+    come from a model read. `read_model` is called each time the listener has the desk open, so a
+    desk that comes back from a replug is re-read before its pushes are trusted, and every full page
+    read re-seeds it too (`seed`). A push that arrives before any seed is dropped."""
 
     def __init__(self, on_say=None, read_model=None, on_expiring=None, on_ring=None):
-        super().__init__(daemon=True, name="callme-watch")
         self._on_say = on_say
         # Called outside the lock as on_ring(call, sentence) when a NEW call starts ringing. True
         # means it is announcing the call itself (so it can ring AFTER the sentence, which a ring
@@ -545,7 +548,21 @@ class Watcher(threading.Thread):
         # in _state, because every page read re-seeds _state from a dump, which has no memory.
         self._missed = None
         self.version = 0                # bumped on every change the page would show
-        self.running = True
+        self._follower = None
+
+    def start(self) -> None:
+        self._follower = desk_live.Follower(
+            "callme", PUSHED, on_push=lambda push: self.apply(push.path, push.name, push.value),
+            on_connected=self._connected).start()
+
+    def _connected(self, _gap) -> None:
+        # The pushes heard while this dump runs queue behind it and are folded in on top of it.
+        if self._read_model is None:
+            return
+        try:
+            self.seed(self._read_model())
+        except Exception as exc:
+            diagnostics.event("callme.seed_failed", "callme watcher", error=f"{exc}")
 
     # -- state ---------------------------------------------------------------------------------
     def seed(self, blob: bytes) -> None:
@@ -621,6 +638,7 @@ class Watcher(threading.Thread):
     # -- one push -------------------------------------------------------------------------------
     def apply(self, path, name: str, value) -> None:
         """Fold one pushed property into the state and speak what deserves it."""
+        path = list(path) if path is not None else None
         say, ring = [], []
         with self._lock:
             d = self._state
@@ -765,47 +783,3 @@ class Watcher(threading.Thread):
         else:
             return False
         return True
-
-    # -- the thread ----------------------------------------------------------------------------
-    def run(self) -> None:
-        dev = None
-        while self.running:
-            if dev is None:
-                iface = rcp_transfer.find_control_interface(fresh=True)
-                if iface is None:
-                    time.sleep(2.0)
-                    continue
-                try:
-                    dev = rcp_hid.open_handle(iface, "callme watcher")
-                except Exception as exc:
-                    dev = None
-                    diagnostics.event("device.open_failed", "callme watcher", error=f"{exc}")
-                    time.sleep(2.0)
-                    continue
-                # The dump is taken AFTER the handle opens, so nothing pushed meanwhile is lost: it
-                # queues on this handle and is folded in on top of the seed.
-                if self._read_model is not None:
-                    try:
-                        self.seed(self._read_model())
-                    except Exception as exc:
-                        diagnostics.event("callme.seed_failed", "callme watcher", error=f"{exc}")
-            try:
-                rep = dev.read(256, timeout_ms=250)
-            except Exception:
-                rcp_hid.close_handle(dev, "callme watcher")
-                dev = None
-                time.sleep(0.5)
-                continue
-            if not rep or rep[0] != 0x04 or b"sip" not in bytes(rep):
-                continue
-            try:
-                rec = rcp_read.parse_push(bytes(rep))
-                if rec is None:
-                    continue
-                path, name, value, _k = rec
-                if name.startswith("sip") and name not in _SECRET_PROPS:
-                    self.apply(path, name, value)
-            except Exception:
-                pass          # one undecodable packet costs one update, never the thread
-        if dev is not None:
-            rcp_hid.close_handle(dev, "callme watcher")

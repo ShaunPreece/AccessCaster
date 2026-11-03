@@ -1,8 +1,7 @@
 """Live check of the control announcer's decoder against REAL hardware bytes. READ ONLY.
 
-Opens its own read-only HID handle (exactly as announcer._loop does), feeds every report-04
-packet through the REAL decoder (announcer.handle_report) with speech.say captured instead of
-spoken, and prints what the announcer WOULD have said, with the raw prefix bytes beside it.
+Opens its own read-only HID handle, feeds every report-04 packet through the REAL decoder
+(announcer.handle_report) with speech.say captured instead of spoken, and prints what the announcer WOULD have said, with the raw prefix bytes beside it.
 
 Why not just run the app and listen: this prints what would be said, so it can be read rather
 than heard.

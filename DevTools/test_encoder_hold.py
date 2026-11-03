@@ -1,6 +1,6 @@
 """encoder_hold.Watcher's decisions: a hold while a channel button holds the encoder mutes that
 channel, once per hold, and nothing else does; and our own strip writes reach the window. NO DEVICE:
-the thread is never started, and pushes are fed to it directly.
+the follower is never started, and pushes are fed to it directly.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import time
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import app_window
+import desk_live
 import encoder_hold
 import rcp_transfer
 import server
@@ -31,29 +32,29 @@ def watcher():
 
 def hold(w, seconds):
     """The encoder pressed `seconds` ago and still down."""
-    w._push(push([6], "encoderPressed", v_bool(True)))
+    w._push(desk_live.decode(push([6], "encoderPressed", v_bool(True))))
     w._down_at = time.monotonic() - seconds
     w._check_hold()
 
 
 print("ENCODER HOLD")
 w, held = watcher()
-w._push(push([15], "systemChannelSelected", v_int(0)))
+w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(0))))
 hold(w, 1.0)
 check("a hold with a channel selected mutes that channel", held, [0])
 w._check_hold()
 check("once per hold, however long it lasts", held, [0])
-w._push(push([6], "encoderPressed", v_bool(False)))
+w._push(desk_live.decode(push([6], "encoderPressed", v_bool(False))))
 hold(w, 1.0)
 check("the next hold toggles it again", held, [0, 0])
 
 w, held = watcher()
-w._push(push([15], "systemChannelSelected", v_int(0)))
+w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(0))))
 hold(w, 0.3)
 check("a short press does nothing", held, [])
 
 w, held = watcher()
-w._push(push([15], "systemChannelSelected", v_int(-1)))
+w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(-1))))
 hold(w, 1.0)
 check("with no channel selected the desk's own hold is left alone", held, [])
 
@@ -62,8 +63,8 @@ hold(w, 1.0)
 check("before any selection is known, nothing happens", held, [])
 
 w, held = watcher()
-w._push(push([15], "systemChannelSelected", v_int(4)))
-w._push(push([15], "systemChannelSelected", v_int(-1)))
+w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(4))))
+w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(-1))))
 hold(w, 1.0)
 check("a channel button pressed again hands the encoder back", held, [])
 

@@ -12,11 +12,11 @@ stack.
   (none)     THE COMMAND ALONE. One open, one write, one close, then total silence.
              SETTLED: it does not drop the desk, so the firmware's own re-enumeration is NOT
              sufficient, and the cause is somewhere above.
-  handles1   one persistent read handle open across the write.
-  handles2   two, which is what the app really holds: recorder.Watcher keeps one and the announcer
-             keeps another, on separate handles on purpose, and NEITHER takes the HID lock. So at the
-             moment the firmware tears its USB function down, the app has two blocking reads
-             outstanding on interfaces that are disappearing.
+  handles1   one persistent read handle open across the write, which is what the app holds: the
+             desk listener (`desk_live`), which takes no HID lock. So at the moment the firmware
+             tears its USB function down, the app has a blocking read outstanding on an interface
+             that is disappearing.
+  handles2   two, the same with a second handle beside it.
   poll       a full model dump every POLL_S seconds right through the desk's rebuild window, which is
              what shows.wait_for does while it waits for the new uuid.
   export     an export command fired immediately before the reset. The default reset path is TWO show
@@ -91,7 +91,7 @@ def uuid_via_app() -> str | None:
 class Load:
     """The layers that have to exist DURING the write, held open across it.
 
-    These are deliberately NOT a reimplementation of recorder.Watcher or the announcer. The claim
+    These are deliberately NOT a reimplementation of the desk listener. The claim
     under test is not "our copy of their loop behaves the same", it is the far simpler "a read handle
     was open, and a dump was in flight, while the desk tore its USB function down". So this opens the
     handles and issues the dumps, and nothing else.
@@ -129,8 +129,8 @@ class Load:
         #
         # THE HANDLE IS CLOSED HERE, ON THE THREAD THAT READS IT, and that is not tidiness: closing
         # it from `stop()` while this read is in flight SEGFAULTS the interpreter (exit 139).
-        # hidapi does not defend a handle against a close from another thread. Both real readers
-        # (recorder.Watcher and the announcer's loop) close on their own thread too.
+        # hidapi does not defend a handle against a close from another thread. The app's desk
+        # listener closes on its own thread too.
         try:
             while not self._stop.is_set():
                 try:

@@ -1,30 +1,18 @@
 """The control announcer: speaks the desk's own button presses aloud (an accessibility aid).
 
-A background thread listens to report-04 HID events and speaks bank changes / mute / solo /
-encoder presses through `speech`, so a screen-reader user knows what a physical press did
+A background thread follows what the desk pushes (`desk_live`) and speaks bank changes / mute /
+solo / encoder presses through `speech`, so a screen-reader user knows what a physical press did
 without seeing the touchscreen.
 
 DEVICE-AGNOSTIC: the decoder keys off the report-04 PROPERTY NAMES
 (selectedBank / cmutePressed / csoloPressed / encoderPressed), which are protocol-level and shared
 across both desks, NOT a Pro II physical control-map or channel-index table. It speaks generic
 "Bank N" / "Mute" / "Solo" / "Select" (no per-channel index), so the Duo's fewer faders/banks need
-no special-casing. It is also strictly READ-ONLY (one read handle, no writes), so even if a name
-ever differs on a future desk the worst case is a missed announcement, never a mis-write.
+no special-casing. It is also strictly READ-ONLY, so even if a name ever differs on a future desk
+the worst case is a missed announcement, never a mis-write.
 
-HID SHARING: the server uses the same control interface for pad/mixer ops. The announcer keeps
-ONE read-only handle open for its whole lifetime and reads continuously, WITHOUT taking the device lock
-(`hooks.lock`).
-This is safe because the Windows HID stack delivers every input report (the report-04 control
-events) to each open handle's own queue, so the listener never misses a press and never disturbs
-the writes, which open their own handle under that lock (measured: a command still ACKs while a
-second handle is open).
-DO NOT open and close the handle around each poll to avoid two concurrent handles: closing
-FLUSHES the input queue, so every press landing in the gap is dropped and bank/mute/solo
-announcements go intermittent. A persistent handle has no deaf windows and no open/close churn.
-
-THE HANDLE IS REOPENED ON A FRESHLY RESOLVED INTERFACE, never on a remembered one. The desk
-re-enumerates on `outputMultiMode`, `engineMode` and `systemMainMode`, all of which the app itself
-writes, and comes back under a different USB product id and path.
+Switching announcements on subscribes to the listener and switching them off unsubscribes; the
+listener itself, and the reconnect after a re-enumeration, belong to `desk_live`.
 """
 from __future__ import annotations
 
@@ -32,9 +20,9 @@ import threading
 import time
 
 import channels
+import desk_live
 import devices
 import diagnostics
-import rcp_hid
 import rcp_read
 import rcp_transfer
 import recorder
@@ -49,15 +37,6 @@ class Hooks:
 
     lock = threading.Lock()   # the server's device lock, taken for the one seeding dump
 
-    def note_bank(self, bank: int) -> None:
-        """The desk's selected pad bank changed."""
-
-    def note_pad_progress(self, position: int, progress: float) -> None:
-        """A pad's playback position moved."""
-
-    def note_pad_active(self, position: int, on: bool) -> None:
-        """A pad was switched on or off."""
-
     def mixer_positions(self) -> frozenset:
         """The pad positions that hold mixer pads."""
         return frozenset()
@@ -70,18 +49,13 @@ hooks = Hooks()
 
 _thread = None
 # Each loop is started with the next generation and leaves as soon as it is no longer the newest.
-# Off and on within one read or one reconnect sleep would otherwise leave the first loop running
-# beside the second: two handles, and every report and reconnect handled twice.
+# Off and on within one wait would otherwise leave the first loop running beside the second, and
+# every push and reconnect handled twice.
 _loop_gen = 0
 _start_lock = threading.Lock()   # the check-and-start below runs on request threads
-
-# Reconnect pacing. Quick at first, so a momentarily busy handle costs nothing audible and a
-# re-enumeration (about 2.5 s) is picked up as soon as the desk is back; slow after that, because
-# every attempt re-enumerates the USB HID tree and a desk off the bus may never return without a
-# replug.
-_RETRY_S = 0.3
-_RETRY_SLOW_S = 2.0
-_RETRY_FAST_TRIES = 15
+# How often pending speech is looked at when the desk pushes nothing, so a held press edge is
+# spoken promptly when no state follows it.
+_TICK_S = 0.2
 # A reconnect is only worth speaking about when the gap was long enough to have swallowed a press.
 # Coming straight back on the next pass is not news.
 _RECONNECT_SPEAK_AFTER_S = 1.0
@@ -301,7 +275,7 @@ def channel_label(strip_idx: int) -> str:
     Never touches the device: the announcer thread holds no HID lock, so a model dump from here
     would fight the writes. Falls back to the LAST KNOWN layout when the TTL'd cache has expired:
     nothing refreshes that cache while the operator is only pressing buttons. The layout is seeded
-    once when the announcer starts and kept current from the stream (channels.note_strip_source).
+    once when the announcer starts and kept current from the stream (`channels.follow_desk`).
     'Channel N' when no layout has been seen or it does not name that slot."""
     try:
         vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
@@ -318,21 +292,22 @@ def channel_label(strip_idx: int) -> str:
 
 
 def handle_report(b: bytes, st: dict) -> None:
-    """Decode one report-04 frame and speak it, updating the announcer state dict `st`
-    ({"bank", "pending", "at"}). Only a PUSH is acted on: a slice of a model dump decodes as None
-    and is ignored, so a page reading the desk never sounds like the desk changing."""
+    """`handle_push` for one raw report-04 frame, for a tool reading a handle of its own. A slice of
+    a model dump decodes as nothing and is ignored."""
+    push = desk_live.decode(b)
+    if push is not None:
+        handle_push(push, st)
+
+
+def handle_push(push, st: dict) -> None:
+    """Speak one push, updating the announcer state dict `st` ({"bank", "pending", "at"})."""
     global _mixer_quiet_until
-    rec = rcp_read.parse_push(b)
-    if rec is None:
-        return
-    path, name, val, kind = rec
+    path, name, val, kind, node = push
     # Typed views of the value, so a branch that wants an int never acts on a string or a bool.
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
     fval = val if kind == "float" else None
-    # The node the push is addressed at, named by the desk's own layout, and the strip when that
-    # node is CHANNEL[strip], else -1.
-    node = rcp_read.push_key(path)
+    # The strip when the addressed node is CHANNEL[strip], else -1.
     strip = node[1] if node and node[0] == "CHANNEL" and node[1] < 16 else -1
     if name in _TRACED_STATE:
         traced = st.setdefault("traced", {})
@@ -341,26 +316,13 @@ def handle_report(b: bytes, st: dict) -> None:
             diagnostics.event("desk.state", name, value=val)
 
     if name == "selectedBank":
-        if ival is None:
-            return
-        # Keep the shortcut layer's copy current whether or not this is a change: the bank decides
-        # which pad a number key fires, so a stale one plays a stranger's sound.
-        hooks.note_bank(ival)
-        if ival != st["bank"]:
+        if ival is not None and ival != st["bank"]:
             st["bank"] = ival
             _say(f"Bank {ival + 1}")
         return
-    # PAD PLAYBACK, TRACKED AND NEVER SPOKEN. A playing pad pushes `padProgress` about twenty times a
-    # second, so this is the one branch where saying anything at all would be wrong: the "what is
-    # playing" shortcut reads the state out on demand instead, rather than talking over the pad the
-    # whole time it plays. Both are addressed at the pad's STREAM POSITION, the last path element.
-    if name == "padProgress":
-        if fval is not None and path:
-            hooks.note_pad_progress(path[-1], fval)
-        return
+    # A pad switched on or off is addressed at the pad's STREAM POSITION, the last path element.
     if name == "padActive":
         if bval is not None and path:
-            hooks.note_pad_active(path[-1], bval)
             # BOTH EDGES. A momentary pad restores every channel it moved when it is released, and
             # that burst says no more than the one on the way in.
             if path[-1] in hooks.mixer_positions():
@@ -458,13 +420,6 @@ def handle_report(b: bytes, st: dict) -> None:
         idx = node[3] if node and node[:3] == ("PHYSICALINTERFACE", 0, "POT") else -1
         if levels_on and ival is not None and 0 <= idx < _POT_COUNT:
             _note_level(st, "headphone", idx, max(0.0, min(1.0, ival / _POT_LEVEL_MAX)))
-        return
-    if name == "channelInputSource":
-        # A fader source changed. Keep the naming layout current and drop the TTL'd cache, so a
-        # change made on the desk itself is picked up at once instead of after up to 15 s. We do NOT
-        # speak it: our own fader writes push this too, and the UI already reports those.
-        if ival is not None and strip >= 0:
-            channels.note_strip_source(strip, ival)
         return
     if name in _STATE_PROPS:
         if bval is None or strip < 0:
@@ -564,8 +519,8 @@ def seed_layout(st: dict) -> None:
 
     Takes hooks.lock for the one dump (unlike the read loop, which deliberately never does), and
     gives up quietly on any failure - a missing layout only costs us the channel NAME. Every later
-    refresh is free: any page read republishes it, and note_strip_source follows changes on the
-    pushed stream."""
+    refresh is free: any page read republishes it, and `channels.follow_desk` follows changes on
+    the pushed stream."""
     known = {}
     try:
         with hooks.lock:
@@ -606,7 +561,6 @@ def seed_layout(st: dict) -> None:
         bank = [v for v in rcp_read.values(blob, "selectedBank") if isinstance(v, int)]
         if bank:
             st["bank"] = bank[0]
-            hooks.note_bank(bank[0])
         # THE USB AUDIO MODE is seeded for the opposite reason: not to keep a resting value quiet,
         # but so a reconnect can tell that it MOVED. The desk
         # can drop out of Expanded on its own (measured: off the bus unprompted, back two seconds
@@ -1073,6 +1027,14 @@ GREETING_ON = "Announcements on."
 GREETING_STARTED = "AccessCaster started."
 
 
+# Every push `handle_push` acts on.
+_HEARD = (frozenset({"selectedBank", "padActive", "mixLevelWithAnchor", "encoderSignal",
+                     "systemChannelSelected", "inputMicrophoneGain", "inputDigitalGain",
+                     "encoderColour", "faderLevel", "outputMonLevel", "potLevel", "mutePressed",
+                     "soloPressed", "encoderPressed"})
+          | set(_STATE_PROPS) | set(_OUTPUT_MUTES) | set(_TRACED_STATE))
+
+
 def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
     global live_state
     if gen is None:
@@ -1083,83 +1045,49 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
 
     if not current():
         return                        # superseded before it started; the newer loop greets
-    iface = rcp_transfer.find_control_interface()
-    if iface is None:
+    if rcp_transfer.find_control_interface() is None:
         speech.say("The control announcer could not open the device.")
         speech.enabled.clear()
         return
-    # One persistent read-only handle for the whole session. No hooks.lock, no per-cycle
-    # close: input reports are delivered to this handle's own queue regardless of the
-    # pad/mixer writes, so there are no deaf windows where a press gets dropped.
-    dev = None
-    misses = 0                        # consecutive failed opens, for the backoff below
-    lost_at = 0.0
     st = {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0,
           "known": {}, "muted": {}, "enc_pos": None, "enc_down_at": None, "enc_hold": False,
           "said": {}}
     announced_on = False
     seed_layout(st)
     live_state = st              # publish it so our own writes can keep the caches current
-    while current():
-        if dev is None:
-            if iface is None:
-                iface = rcp_transfer.find_control_interface(fresh=True)
+    sub = desk_live.subscribe("announcer", _HEARD)
+    try:
+        while current():
+            event = sub.get(_TICK_S)
+            if not current():
+                break
             try:
-                dev = rcp_hid.open_handle(iface, "announcer") if iface is not None else None
+                if isinstance(event, desk_live.Push):
+                    handle_push(event, st)
+                elif isinstance(event, desk_live.Connected):
+                    if not announced_on:
+                        # Quiet when the RECORDER is putting announcements back: the stop phrase
+                        # already says they are back on, and the pump keeps only the newest phrase,
+                        # so a greeting here would silence it.
+                        if greeting and not _quiet_start.is_set():
+                            speech.say(greeting)
+                        _quiet_start.clear()
+                        announced_on = True
+                    elif event.gap is not None and event.gap >= _RECONNECT_SPEAK_AFTER_S:
+                        # Back after a real gap. Re-seed first: mutes, levels and the fader layout
+                        # can all have moved while we were deaf, and Expanded mode reassigns
+                        # sources as it goes.
+                        was_usb = st.get("usb_mode")
+                        seed_layout(st)
+                        hooks.reconnected(was_usb, st.get("usb_mode"))
+                flush_pending(st)
             except Exception as exc:
-                diagnostics.event("device.open_failed", "announcer", error=f"{exc}")
-                dev = None
-            if dev is None:
-                # THE CACHED PATH GOES STALE ON A RE-ENUMERATION, so it is dropped after any failed
-                # open and re-resolved on the next pass. The desk returns as a DIFFERENT USB product
-                # id - the id encodes the audio configuration, so `outputMultiMode` changes it - and
-                # a handle re-opened on the old path fails for ever, leaving the announcer silently
-                # retrying until the app restarts.
-                iface = None
-                misses += 1
-                time.sleep(_RETRY_S if misses <= _RETRY_FAST_TRIES
-                           else _RETRY_SLOW_S)
-                continue
-            misses = 0
-            if not announced_on:
-                # Quiet when the RECORDER is putting announcements back: the stop phrase already
-                # says they are back on, and the pump keeps only the newest phrase, so a greeting
-                # here would silence it.
-                if greeting and not _quiet_start.is_set():
-                    speech.say(greeting)
-                _quiet_start.clear()
-                announced_on = True
-            elif time.monotonic() - lost_at >= _RECONNECT_SPEAK_AFTER_S:
-                # Back after a real gap. Re-seed first: mutes, levels and the fader layout can all
-                # have moved while we were deaf, and Expanded mode reassigns sources as it goes.
-                was_usb = st.get("usb_mode")
-                seed_layout(st)
-                hooks.reconnected(was_usb, st.get("usb_mode"))
-        try:
-            rep = dev.read(256, timeout_ms=200)
-        except Exception as exc:
-            diagnostics.event("device.lost", "announcer read failed", error=f"{exc}")
-            rcp_hid.forget_interfaces()
-            rcp_hid.close_handle(dev, "announcer")
-            dev = None                                     # reopen on the next pass
-            lost_at = time.monotonic()
-            time.sleep(0.3)
-            continue
-        if not current():
-            break
-        try:
-            if rep:
-                handle_report(bytes(rep), st)
-            # Runs every read cycle (the read above blocks at most 200 ms), so a held press edge is
-            # spoken promptly when the desk sends no state to supersede it.
-            flush_pending(st)
-        except Exception as exc:
-            # Decoding is best-effort: a malformed or unexpected packet costs us ONE announcement,
-            # never the announcer. Carrying on beats a thread that dies and leaves the UI claiming
-            # announcements are on.
-            diagnostics.event("announcer.push_undecoded", str(exc))
-    if dev is not None:
-        rcp_hid.close_handle(dev, "announcer")
+                # Decoding is best-effort: a malformed or unexpected push costs us ONE
+                # announcement, never the announcer. Carrying on beats a thread that dies and
+                # leaves the UI claiming announcements are on.
+                diagnostics.event("announcer.push_undecoded", str(exc))
+    finally:
+        sub.close()
     if gen != _loop_gen:
         # Superseded: the newer loop owns the published state and does its own greeting.
         _quiet_stop.clear()
