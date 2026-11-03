@@ -15,8 +15,8 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import server
 import wx
-from _testkit import check, check_in, check_not_in, check_true, patched
-from native import device_section
+from _testkit import check, check_in, check_not_in, check_true
+from native import device_section, wifi_dialogs
 
 app = wx.App()
 
@@ -188,7 +188,8 @@ net = section.network
 
 def network(on, ssid="Home"):
     return {"ok": True, "writable": True,
-            "wifi": {"on": on, "ssid": ssid, "connected": on, "ip": "10.0.0.2" if on else "",
+            "wifi": {"on": on, "ssid": ssid, "connected": on and bool(ssid),
+                     "ip": "10.0.0.2" if on and ssid else "",
                      "scan": []},
             "bluetooth": {"visible": False, "paired": [], "scan": []},
             "wireless_mics": {"present": True, "any_connected": False}, "still_read_only": ""}
@@ -196,31 +197,47 @@ def network(on, ssid="Home"):
 
 check("before a read the wifi switch refuses", net._guard(), device_section.NETWORK_UNREAD)
 net.shown(network(False))
-check("with the radio off its options are hidden", net.scan.IsShown(), False)
-check("and the off line is shown", net.wifi_off.IsShown(), True)
-check("the name to join is prefilled", net.ssid.GetValue(), "Home")
+check("with the radio off there is neither button", (net.scan.IsShown(), net.disconnect.IsShown()),
+      (False, False))
+check("and the status says it is off", net.wifi_status.GetValue(), device_section.WIFI_OFF)
+check("a one-line reading is reached by Tab", net.wifi_status.AcceptsFocusFromKeyboard(), True)
 net.shown(network(True))
-check("on, the options are shown", (net.scan.IsShown(), net.join.IsShown()), (True, True))
-check("but no list until a scan finds something", net.networks.IsShown(), False)
-check("Disconnect is offered, named after the network",
-      (net.disconnect.IsShown(), net.disconnect.GetLabel()), (True, "Disconnect from Home"))
+check("joined, the status names the network and address", net.wifi_status.GetValue(),
+      "Connected to Home. The unit's address is 10.0.0.2.")
+check("and Disconnect is offered, named after it, with no scan",
+      (net.disconnect.IsShown(), net.disconnect.GetLabel(), net.scan.IsShown()),
+      (True, "Disconnect from Home", False))
 net.shown(network(True, ssid=""))
-check("with no network set up there is nothing to disconnect", net.disconnect.IsShown(), False)
-net.shown(network(True))
-net.found = [{"ssid": "Cafe", "spoken": "Cafe, open network"},
-             {"ssid": "Home", "spoken": "Home, needs a password"}]
-net.networks.Set([n["spoken"] for n in net.found])
-net._show_radio()
-check("a scan's networks are shown", net.networks.IsShown(), True)
-net.networks.SetSelection(0)
-net._on_pick(None)
-check("choosing one fills in the name to join", net.ssid.GetValue(), "Cafe")
-net.ssid.SetValue("")
-with patched((device_section, {"JobDialog": lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("no join without a name"))})):
-    net._on_join(None)
-check("joining with no name is refused", frame.said[-1],
-      "Type the name of the network to join first.")
+check("with no network set up, Scan replaces Disconnect",
+      (net.scan.IsShown(), net.disconnect.IsShown()), (True, False))
+check("and the status says so", net.wifi_status.GetValue(), "Not connected to a wifi network.")
+stuck = network(True)
+stuck["wifi"].update(ip="", incorrect_psk=True)
+net.shown(stuck)
+check("a name with no address is not called connected", net.wifi_status.GetValue(),
+      "Set to join Home, but not connected. It refused the password.")
+
+# The dialogs: a listed network lands on its password, an open one has none, one not listed on
+# its name.
+secured = {"ssid": "Home", "open": False, "spoken": "Home, needs a password"}
+with wifi_dialogs.JoinDialog(frame.window, secured) as join:
+    check("a listed network's dialog is named after it", join.GetTitle(), "Join Home")
+    check("its name is filled in", join.name_box.GetValue(), "Home")
+    first = next(c for c in join.GetChildren() if isinstance(c, wx.TextCtrl))
+    check("and the password is the box it lands on", first is join.password_box, True)
+with wifi_dialogs.JoinDialog(frame.window, {"ssid": "Cafe", "open": True}) as join:
+    check("an open network has no password box", join.password_box, None)
+with wifi_dialogs.JoinDialog(frame.window, wifi_dialogs.NOT_LISTED) as join:
+    first = next(c for c in join.GetChildren() if isinstance(c, wx.TextCtrl))
+    check("a network not listed lands on an empty name",
+          (first is join.name_box, join.name_box.GetValue(), join.password_box is not None),
+          (True, "", True))
+with wifi_dialogs.NetworksDialog(frame.window, [secured], "Found 1 network.") as pick:
+    pick.EndModal = lambda _code: None
+    pick._chosen()
+    check("choosing from the list gives its scan entry", pick.choice, secured)
+with wifi_dialogs.NetworksDialog(frame.window, [], "Found no networks.") as pick:
+    check("with nothing found there is no list", pick.list, None)
 ro = network(True)
 ro["writable"] = False
 net.shown(ro)

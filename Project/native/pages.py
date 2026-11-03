@@ -63,11 +63,18 @@ def labelled(parent, sizer, label, control_factory):
 def read_only(parent, sizer, label, height=60, width=460, scroll=False):
     """A labelled read-only text box, for a reading: it takes the focus, so it is met in the tab
     order and read with its label, which static text is not. `height` None is one line; `scroll`
-    gives a long report a scroll bar."""
-    style = wx.TE_READONLY if height is None else (
-        wx.TE_MULTILINE | wx.TE_READONLY | (0 if scroll else wx.TE_NO_VSCROLL))
-    return labelled(parent, sizer, label, lambda p: wx.TextCtrl(
-        p, size=(width, -1 if height is None else height), style=style))
+    gives a long report a scroll bar.
+
+    Always multi-line, even for one line: wx makes a text box a tab stop only while it is editable
+    or multi-line, so a single-line read-only box is never reached by Tab."""
+    style = wx.TE_MULTILINE | wx.TE_READONLY | (0 if scroll else wx.TE_NO_VSCROLL)
+
+    def make(p):
+        box = wx.TextCtrl(p, size=(width, -1 if height is None else height), style=style)
+        if height is None:
+            box.SetInitialSize((width, box.GetSizeFromTextSize(box.GetTextExtent("Ag")).height))
+        return box
+    return labelled(parent, sizer, label, make)
 
 
 def set_text(box, text):

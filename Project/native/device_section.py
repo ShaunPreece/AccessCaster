@@ -14,7 +14,8 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Page, group, labelled, page_box, read_only, set_items, set_text
+from native.pages import Page, group, page_box, read_only, set_text
+from native.wifi_dialogs import JoinDialog, NetworksDialog
 
 TITLE = "Device"
 UNREAD = "Not read from the unit yet."
@@ -26,7 +27,7 @@ UNIT_SETTINGS_OFF = ("Changing the unit's settings is not enabled on this device
                      "still read what it has.")
 NOT_REPORTED = (" The unit did not report this setting, so the control shows a default rather "
                 "than its real value.")
-WIFI_OFF = "WiFi is off. Turn it on to see networks and join one."
+WIFI_OFF = "WiFi is off. Turn it on to join a network."
 # Desk state events that can change the status bar's summary, and how long after the last of a
 # burst it is read again.
 SUMMARY_EVENTS = {"read", "changed", "mix", "faders", "recorder"}
@@ -58,6 +59,21 @@ def network_line(n):
     else:
         wifi = "Wifi is off. "
     return f"Network: offline. {wifi}CallMe and the firmware check need wifi or a network cable."
+
+
+def wifi_status(wifi):
+    """Where the unit's wifi stands, in one sentence. Joined means an address: a name alone is
+    only where the unit is trying to go."""
+    ssid = wifi.get("ssid")
+    if not wifi.get("on"):
+        return WIFI_OFF
+    if wifi.get("ip"):
+        return f"Connected to {ssid or 'a network'}. The unit's address is {wifi['ip']}."
+    if ssid:
+        refused = " It refused the password." if (wifi.get("incorrect_psk")
+                                                  or wifi.get("wrong_password")) else ""
+        return f"Set to join {ssid}, but not connected.{refused}"
+    return "Not connected to a wifi network."
 
 
 def _labels(items):
@@ -554,7 +570,6 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self.section = section
         self.frame = section.frame
         self.data = None             # the last good `server.read_network_status`
-        self.found = []              # the networks the last scan found
         sizer, parent = page_box(self, "Wireless connections")
 
         box_sizer, box = group(parent, sizer, "WiFi")
@@ -565,33 +580,11 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
                            working=lambda on: ("Turning the wifi on and waiting for it to "
                                                "connect. Please wait." if on else
                                                "Turning the wifi off. Please wait."))
-        self.wifi_off = read_only(box, box_sizer, "WiFi status", height=None)
-        self.wifi_off.SetValue(WIFI_OFF)
-        # Everything about wifi but its switch, shown only while the radio is on.
-        self.options = wx.BoxSizer(wx.VERTICAL)
-        box_sizer.Add(self.options, 0, wx.EXPAND)
-        # Shown only while the unit has a network set up, and named after it.
-        self.disconnect = _button(box, self.options, "Disconnect", self._on_disconnect)
-        a11y.describe(self.disconnect, "The unit leaves the network and forgets it and its "
-                                       "password. The wifi stays on.")
-        self.scan = _button(box, self.options, "Scan for networks", self._on_scan)
-        a11y.describe(self.scan, "Up to ten networks, and no hidden ones: type a missing one's "
-                                 "name below. The unit only scans while it is not connected to "
-                                 "a network.")
-        self.networks = labelled(box, self.options, "Networks found", lambda p: wx.ListBox(
-            p, size=(460, 120)))
-        self.networks.Bind(wx.EVT_LISTBOX, self._on_pick)
-        # Choosing from the list fills in this box, so there is one place holding the network to
-        # join, which can be typed into for a hidden network or one the scan missed.
-        self.ssid = labelled(box, self.options, "Network name", lambda p: wx.TextCtrl(
-            p, size=(300, -1)))
-        self.password = labelled(box, self.options, "Password", lambda p: wx.TextCtrl(
-            p, size=(300, -1), style=wx.TE_PASSWORD))
-        a11y.describe(self.password, "Type the network name exactly, capitals included, and "
-                                     "leave the password empty for an open network. Joining "
-                                     "takes up to 45 seconds. The password is sent to the unit "
-                                     "and is not kept by AccessCaster.")
-        self.join = _button(box, self.options, "Join this network", self._on_join)
+        self.wifi_status = read_only(box, box_sizer, "WiFi status", height=None)
+        self.wifi_status.SetValue(WIFI_OFF)
+        # One of the two at a time: the unit only scans while it has no network to join.
+        self.disconnect = _button(box, box_sizer, "Disconnect", self._on_disconnect)
+        self.scan = _button(box, box_sizer, "Scan for networks", self._on_scan)
 
         box_sizer, box = group(parent, sizer, "Bluetooth")
         self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this unit",
@@ -636,11 +629,6 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
                 set_text(self.facts, reply.get("message") or "Could not read the device.")
             return reply.get("message") or "Could not read the device."
         self.data = reply
-        wifi = reply.get("wifi") or {}
-        # Prefilled with what the unit has, so rejoining after a password change is one field.
-        # The password is never prefilled: the server never returns it.
-        if not self.ssid.GetValue() and wifi.get("ssid"):
-            self.ssid.SetValue(wifi["ssid"])
         self.wifi.show()
         self.bluetooth.show()
         set_text(self.mics, "\n".join(mic_lines(reply.get("wireless_mics"))))
@@ -650,13 +638,13 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
 
     def _show_radio(self):
         wifi = (self.data or {}).get("wifi") or {}
-        on = bool(wifi.get("on"))
-        self.wifi_off.GetContainingSizer().ShowItems(not on)
-        self.options.ShowItems(on)
-        self.networks.GetContainingSizer().ShowItems(on and bool(self.found))
-        self.disconnect.Show(on and bool(wifi.get("ssid")))
-        if wifi.get("ssid"):
-            self.disconnect.SetLabel(f"Disconnect from {wifi['ssid']}")
+        on, ssid = bool(wifi.get("on")), wifi.get("ssid") or ""
+        set_text(self.wifi_status, wifi_status(wifi))
+        self.disconnect.Show(on and bool(ssid))
+        self.scan.Show(on and not ssid)
+        label = f"Disconnect from {ssid}"
+        if ssid and self.disconnect.GetLabel() != label:
+            self.disconnect.SetLabel(label)
         self.Layout()
         self.FitInside()
 
@@ -679,32 +667,43 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         if self._refused():
             return
         job = JobDialog(self, "Scanning for networks",
-                        "Scanning for networks. The wifi goes off and on again, and this takes "
-                        "about twenty seconds.",
+                        "Scanning for networks. This takes about twenty seconds.",
                         lambda dialog: call(dialog, server.action_scan_wifi, done=dialog.finish),
                         stop=None, closable=False)
         with job:
             reply = job.run()
         if not reply.get("ok"):
             report(self, ("Scan", "Scan failed"), reply)
-            # Refused for being joined: disconnecting is what the reply asks for next.
-            (self.disconnect if reply.get("joined") and self.disconnect.IsShown()
-             else self.scan).SetFocus()
+            self._focus_wifi()
             return
-        self.found = reply.get("networks") or []
-        set_items(self.networks, [n.get("spoken") or n["ssid"]
-                                  + (", the one this unit is set to" if n.get("current") else "")
-                                  for n in self.found])
-        self._show_radio()
-        if not self.found:
-            report(self, ("Scan", "Scan failed"), reply)
-            self.scan.SetFocus()
+        # After the scan's dialog has gone and the focus has settled: opened at once, the list's
+        # first item is never read.
+        wx.CallAfter(self._choose, reply)
+
+    def _choose(self, scan):
+        """The networks `scan` found, then the chosen one's password. Cancel on the password goes
+        back to the list, so trying another network is one arrow."""
+        dialog = NetworksDialog(self, scan.get("networks") or [], scan.get("message") or "")
+        with dialog:
+            dialog.ShowModal()
+            network = dialog.choice
+        if network is None:
+            self._focus_wifi()
             return
-        # A scan's next step is choosing from it, so the focus goes to what was found.
-        self.networks.SetSelection(0)
-        self._on_pick(None)
-        self.networks.SetFocus()
-        self.frame.say(reply.get("message") or "")
+        wx.CallAfter(self._ask_join, network, scan)
+
+    def _ask_join(self, network, scan=None):
+        dialog = JoinDialog(self, network)
+        with dialog:
+            joining = dialog.ShowModal() == wx.ID_OK
+            ssid, password = dialog.ssid, dialog.password
+        if not joining:
+            if scan is not None:
+                wx.CallAfter(self._choose, scan)
+            else:
+                self._focus_wifi()
+            return
+        self._join(ssid, password, network, scan)
 
     def _on_disconnect(self, _event):
         if self._refused():
@@ -712,7 +711,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         ssid = ((self.data or {}).get("wifi") or {}).get("ssid") or "the network"
         if not confirm(self, f"Disconnect from {ssid}?",
                        f"The unit leaves {ssid} and forgets it, password included, so joining it "
-                       f"again needs the password. The wifi stays on.", "Disconnect"):
+                       f"again needs the password.", "Disconnect"):
             return
         job = JobDialog(self, "Disconnecting", f"Disconnecting from {ssid}.",
                         lambda dialog: call(dialog, server.action_disconnect_wifi,
@@ -724,30 +723,22 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         if reply.get("wifi") and self.data:
             self.data["wifi"].update(reply["wifi"])
         self._show_radio()
-        # The button hides once there is no network, so the focus goes to the next step.
-        (self.disconnect if self.disconnect.IsShown() else self.scan).SetFocus()
+        self._focus_wifi()
         if reply.get("ok"):
             self.read()
             self.section.state.read()
 
-    def _on_pick(self, _event):
-        index = self.networks.GetSelection()
-        if 0 <= index < len(self.found):
-            self.ssid.SetValue(self.found[index]["ssid"])
+    def _focus_wifi(self):
+        """The wifi step there is now: Disconnect while a network is set up, Scan while not, the
+        switch while the radio is off. A hidden button never keeps the focus."""
+        for control in (self.disconnect, self.scan):
+            if control.IsShown():
+                control.SetFocus()
+                return
+        self.wifi.box.SetFocus()
 
-    def _on_join(self, _event):
-        if self._refused():
-            return
-        ssid = self.ssid.GetValue().strip()
-        if not ssid:
-            self.frame.say("Type the name of the network to join first.")
-            self.ssid.SetFocus()
-            return
-        # Cleared before anything else, whatever happens: a password left in a field is one
-        # review command away from being read out in a room with people in it.
-        password = self.password.GetValue()
-        self.password.SetValue("")
-        job = JobDialog(self, "Joining a network",
+    def _join(self, ssid, password, network, scan):
+        job = JobDialog(self, f"Joining {ssid}",
                         f"Joining {ssid}. This can take up to 45 seconds.",
                         lambda dialog: call(dialog, server.action_join_wifi, ssid, password,
                                             done=dialog.finish),
@@ -755,10 +746,15 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         with job:
             reply = job.run()
         report(self, ("Joined", "Not joined"), reply)
-        if reply.get("needs_password"):
-            self.password.SetFocus()
+        wifi = reply.get("wifi") or {}
+        if wifi and self.data:
+            self.data["wifi"].update(wifi)
+        self._show_radio()
+        # A refused or missing password is put right in the same dialog, for the same network.
+        if reply.get("needs_password") or wifi.get("wrong_password"):
+            wx.CallAfter(self._ask_join, dict(network, ssid=ssid, open=False), scan)
             return
-        self.join.SetFocus()
+        self._focus_wifi()
         # A join that fails still leaves the name stored on the unit, which Disconnect follows.
         self.read()
         self.section.state.read()

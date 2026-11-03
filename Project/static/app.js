@@ -798,7 +798,7 @@ async function onWifiDisconnect(ev) {
   const ssid = netSsid || "the network";
   const ok = await confirmAction("Disconnect from " + ssid + "?",
     "The unit leaves " + ssid + " and forgets it, password included, so joining it again needs "
-    + "the password. The wifi stays on.", "Disconnect");
+    + "the password.", "Disconnect");
   if (!ok) return;
   const res = await netPost("/api/network/wifi/disconnect", {}, btn,
     "Disconnecting from " + ssid + "...");

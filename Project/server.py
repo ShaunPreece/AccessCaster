@@ -2615,7 +2615,7 @@ def action_scan_wifi() -> dict:
     return {"ok": True, "networks": found, "current": current,
             "message": (f"Found {wording.count(len(found), 'network')}. "
                         f"The unit lists ten at most, so a network in range can still be missing "
-                        f"from this list; you can always type the name instead.")}
+                        f"from this list.")}
 
 
 def action_disconnect_wifi() -> dict:
@@ -2645,9 +2645,7 @@ def action_disconnect_wifi() -> dict:
                 "message": f"The unit did not let go of {ssid or 'its network'}."}
     return {"ok": True, "wifi": state,
             "message": (f"Disconnected from {ssid or 'the network'}, and the unit has forgotten "
-                        f"it, so joining it again needs its password."
-                        + (" The wifi stays on, so you can scan for networks." if state["on"]
-                           else ""))}
+                        f"it, so joining it again needs its password.")}
 
 
 def _cap_gate(cap: str, refusal) -> dict | None:

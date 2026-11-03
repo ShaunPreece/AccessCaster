@@ -1857,9 +1857,17 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **THE NATIVE HELP IS READ FROM `static/help.html`** (`help_section.topics`), the web page's own
   file, so the two cannot drift. Retiring the web page must keep that file, or move the parser with
   it. A topic is one `h3` of the Help tab: a new `h3` there is a new page in the tree.
-- **THE WIFI PASSWORD BOX IS EMPTIED BEFORE THE JOIN STARTS**, whatever the outcome
-  (`NetworkPage._on_join`): a password left in a field is one review command from being read out
-  in a room with people in it. The server never returns one, so it is never prefilled.
+- **THE WIFI PASSWORD BOX IS GONE BEFORE THE JOIN STARTS**, whatever the outcome: it lives in
+  `wifi_dialogs.JoinDialog`, destroyed as `NetworkPage._ask_join` leaves its `with`. A password left
+  in a field is one review command from being read out in a room with people in it. The server
+  never returns one, so it is never prefilled; a refused password reopens the dialog empty.
+- **A READING'S TEXT BOX IS ALWAYS MULTI-LINE, EVEN FOR ONE LINE** (`pages.read_only`): wx makes
+  a text box a tab stop only while it is editable or multi-line, so a single-line read-only box is
+  never reached by Tab. `test_native_device.py` checks the WiFi status box is.
+- **THE WIFI DIALOGS HAVE NO DEFAULT BUTTON**: each opens straight after another closes, so the
+  Enter that closed the last could land on it. Enter acts through each list's and box's own key
+  handling instead, and a stray one is harmless: a listed network that needs a password refuses
+  an empty one.
 - **AN UPDATE'S DIALOG IS HELD BEFORE `app_updates.proceed`** (`update_dialogs._Follower`): the
   installer closes this app, so once the download is verified nothing may stop it, and the closing
   sentence gets its reading time first. Proceed sooner and the sentence is cut off mid-word.
