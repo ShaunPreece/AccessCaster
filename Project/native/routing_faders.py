@@ -9,7 +9,7 @@ import server
 from native import a11y
 from native.calls import call
 from native.controls import Switch, set_choices
-from native.pages import group, labelled, page_box
+from native.pages import labelled, page_body
 
 TITLE = "Fader assignment"
 READ_ONLY = "Changing the fader layout is not enabled on this device yet."
@@ -25,7 +25,7 @@ class FadersPage(scrolled.ScrolledPanel):
         self.model = model
         self.read_only = model["read_only"]
         self._codes = []
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
 
         # One list of the faders, each item naming the channel on it, so arrowing it reads the
         # whole layout.
@@ -47,10 +47,9 @@ class FadersPage(scrolled.ScrolledPanel):
         self.links = []
         pairs = model.get("stereo_pairs") or []
         if pairs:
-            links_sizer, links = group(parent, sizer, "Stereo linked inputs")
             for pair in pairs:
                 self.links.append(Switch(
-                    self, links, links_sizer, f"Link {pair['label']}",
+                    self, parent, sizer, f"Link {pair['label']}",
                     send=lambda on, code=pair["code"]: server.action_set_stereo_link(code, on),
                     current=lambda code=pair["code"]: self._linked(code),
                     remember=lambda _on: None,

@@ -9,7 +9,7 @@ import wx
 import channels
 from native.channel_jobs import LevelCheck
 from native.channel_tabs import build_tabs
-from native.pages import MessagePage, Page, page_box
+from native.pages import MessagePage, Page, page_body
 
 TITLE = "Channels and Processing"
 
@@ -27,11 +27,12 @@ class ChannelsSection:
         # `_announce`, the success too. A read the window starts itself says nothing.
         self._asked = False
         self._announce = False
-        self.status = MessagePage(frame.host, TITLE, "Starting AccessCaster.",
+        self.status = MessagePage(frame.host, "Starting AccessCaster.",
                                   button="Read the channels again",
                                   on_button=lambda: self.refresh(True))
         self.pages = [Page("status", TITLE, self.status)]
-        self.channel_pages = {}
+        self.recs = {}             # every channel's record, by name, in the desk's order
+        self.channel_pages = {}    # the pages built so far: see _build
         self.desk.subscribe(self._desk_event)
 
     @property
@@ -39,13 +40,13 @@ class ChannelsSection:
         return self.desk.channels
 
     def start(self):
-        if not self.channel_pages:
+        if not self.recs:
             self.status.set_text("Reading the channels from the desk.")
 
     def refresh(self, announce):
         self._asked = True
         self._announce = self._announce or announce
-        if not self.channel_pages:
+        if not self.recs:
             self.status.set_text("Reading the channels from the desk.")
         self.desk.refresh()
 
@@ -62,15 +63,16 @@ class ChannelsSection:
         self._asked = self._announce = False
         if not reply.get("ok"):
             text = reply.get("message") or "Could not read the channels."
-            if not self.channel_pages:
+            if not self.recs:
                 self.status.set_text(text)
             elif asked:
                 self.frame.say(text)
             return
         recs = reply["channels"]
-        if [r["name"] for r in recs] == list(self.channel_pages):
-            for rec in recs:
-                self.channel_pages[rec["name"]].show(rec)
+        if [r["name"] for r in recs] == list(self.recs):
+            self.recs = {rec["name"]: rec for rec in recs}
+            for name, page in self.channel_pages.items():
+                page.show(self.recs[name])
         else:
             self._rebuild(recs)
         if announce:
@@ -84,14 +86,23 @@ class ChannelsSection:
             self.frame.tree.SetFocus()
         for page in self.channel_pages.values():
             page.Destroy()
-        self.channel_pages = {rec["name"]: ChannelPage(self, rec) for rec in recs}
+        self.recs = {rec["name"]: rec for rec in recs}
+        self.channel_pages = {}
         if recs:
-            self.pages = [Page(rec["name"], rec["label"], self.channel_pages[rec["name"]])
+            self.pages = [Page(rec["name"], rec["label"],
+                               build=lambda name=rec["name"]: self._build(name))
                           for rec in recs]
         else:
             self.status.set_text("The desk reports no channels.")
             self.pages = [Page("status", TITLE, self.status)]
         self.frame.pages_changed(self)
+
+    def _build(self, name):
+        """A channel's page, built the first time the window shows it, from the channel's current
+        record (`desk_state` updates records in place). Its tabs are built as they are shown."""
+        page = ChannelPage(self, self.recs[name])
+        self.channel_pages[name] = page
+        return page
 
     def presets_changed(self, presets):
         """The preset list changed (saved or deleted): every mic page's list shows the new one."""
@@ -100,22 +111,18 @@ class ChannelsSection:
         for page in self.channel_pages.values():
             page.show(page.rec)
 
-    def tab_chosen(self, chosen, key):
-        """Every other channel page moves to the same tab, so arrowing to the next channel keeps
-        you on Dynamics. They are hidden, which matters: a notebook takes the focus when its
-        selection changes while it is on screen."""
+    def tab_chosen(self, key):
+        """Every channel page follows the tab last chosen, so arrowing to the next channel keeps
+        you on Dynamics. Each moves to it in `ChannelPage.before_show`."""
         self.tab_key = key
-        for page in self.channel_pages.values():
-            if page is not chosen and not page.IsShown():
-                page.select_tab(key)
 
 
 class ChannelPage(wx.Panel):
-    """One channel: a group box named with the channel, holding its tabs."""
+    """One channel: its tabs."""
 
     def __init__(self, section, rec):
         super().__init__(section.frame.host)
-        # Hidden before its notebook exists: see ChannelsSection.tab_chosen.
+        # Hidden before its notebook exists: see before_show.
         self.Hide()
         self.section = section
         self.frame = section.frame
@@ -123,15 +130,14 @@ class ChannelPage(wx.Panel):
         self.rec = rec
         self.number = (channels.mic_channel_number(channels.ui_channel_map()[self.name])
                        if rec["kind"] == "mic" else None)
-        sizer, parent = page_box(self, rec["label"], grow=True)
+        sizer, parent = page_body(self, grow=True)
         self.book = wx.Notebook(parent)
         sizer.Add(self.book, 1, wx.EXPAND | wx.ALL, 4)
         self.tabs = build_tabs(self)
         for tab in self.tabs:
             self.book.AddPage(tab, tab.title)
-        self.select_tab(section.tab_key)
+        self.book.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGING, self._on_tab_changing)
         self.book.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_tab)
-        self.show(rec)
 
     def field(self, *path, scale=None):
         """(current, remember) for the value at `path` in this page's record, for a Switch or a
@@ -158,18 +164,38 @@ class ChannelPage(wx.Panel):
     def show(self, rec):
         self.rec = rec
         for tab in self.tabs:
-            tab.show(rec)
+            if tab.built:
+                tab.show(rec)
+
+    def before_show(self):
+        """Move to the tab chosen last on any channel page. Only ever done here, while the page is
+        hidden: a notebook takes the focus when its selection changes on screen. The tab shown is
+        built here if it is not yet, which a page without that tab needs too."""
+        self.select_tab(self.section.tab_key)
+        self.tabs[self.book.GetSelection()].build()
 
     def select_tab(self, key):
         for index, tab in enumerate(self.tabs):
             if tab.key == key:
+                tab.build()
                 self.book.ChangeSelection(index)
                 return
 
-    def _on_tab(self, event):
-        index = self.book.GetSelection()
+    def _on_tab_changing(self, event):
+        # A tab is built before the tab control shows it, so it appears whole. A change made in
+        # code (wx's Ctrl+Tab) names the new tab here and shows it before PAGE_CHANGED. One the
+        # native control makes on Windows names the OLD tab here, and shows the new one only after
+        # PAGE_CHANGED, so `_on_tab` builds it.
+        index = event.GetSelection()
         if index != wx.NOT_FOUND:
-            self.section.tab_chosen(self, self.tabs[index].key)
+            self.tabs[index].build()
+        event.Skip()
+
+    def _on_tab(self, event):
+        index = event.GetSelection()
+        if index != wx.NOT_FOUND:
+            self.tabs[index].build()
+            self.section.tab_chosen(self.tabs[index].key)
         event.Skip()
 
 

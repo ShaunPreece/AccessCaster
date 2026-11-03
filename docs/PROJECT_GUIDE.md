@@ -1445,7 +1445,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (the fault the Recording page's "nothing is ever hidden" rule exists for). Hosting off is not an
   item: a call out still works. Online
   comes from the last dump the app took (`server._note_desk_network`), since the page's poll reads
-  none. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
+  none. **ON A FADER COMES FROM THE FADER LAYOUT, NEVER FROM CALLME'S OWN STATE**: the page's from
+  the window's desk state (`callme_section.problems`), the answer reply's from a read of the layout
+  (`server._callme1_on_fader`). The Watcher hears only `sip*`, and the desk does not push a layout
+  change this app makes, so a copy kept with CallMe's state goes stale. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
   cycle cleared it.
 - **THE RING AND THE CALLER'S NAME TAKE TURNS, NEVER OVERLAP.** The speech thread plays one item at
   a time and keeps only the newest one waiting, so a name and a ring queued together lose one of
@@ -1786,8 +1789,18 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   shows and hides the pages itself.
 - **A CHANNEL PAGE'S TABS ARE A `wx.Notebook`, AND ITS SELECTION IS ONLY CHANGED BY CODE WHILE IT IS
   HIDDEN.** A notebook takes the focus whenever its selection changes on screen. So `ChannelPage`
-  hides itself before building its notebook, and `tab_chosen` moves only the hidden pages to the
-  tab just chosen.
+  hides itself before building its notebook, and moves to the tab last chosen in `before_show`,
+  which `MainFrame._show` calls while the page is still hidden.
+- **A CHANNEL PAGE, AND EACH OF ITS TABS, IS BUILT THE FIRST TIME IT IS SHOWN, NEVER ALL AT ONCE**
+  (`Page(build=...)`, `Tab.build`). Building every channel's page held the wx thread for 2.1 s at
+  start, and nothing answers the screen reader meanwhile; one mic page's tabs together are about
+  0.5 s. A page is built just BEFORE it is shown, for the notebook rule above, and a tab in
+  `before_show`, on `EVT_NOTEBOOK_PAGE_CHANGING` and on `EVT_NOTEBOOK_PAGE_CHANGED`: **a change
+  the native tab control makes on Windows names the OLD tab in PAGE_CHANGING**, and shows the new
+  one only after PAGE_CHANGED, so building on PAGE_CHANGING alone leaves the user on an empty
+  panel ("scrolledpanel"). A tab's panel exists from the start, so the
+  tab control lists every tab; `ChannelPage.show` skips a tab not yet built, which reads the
+  record when it is. `DevTools/probe_ui_stalls.py` measures it.
 - **CTRL+TAB IS THE TAB CONTROL'S WHEREVER THE FOCUS IS INSIDE ONE** (`MainFrame._in_tabs`), the
   Windows convention; elsewhere, including the tree, it steps the section's pages.
 - **A PAGE NEVER READS THE DESK WHEN IT IS SHOWN.** Arrowing the tree shows every page passed, so a
@@ -1818,7 +1831,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A CONTROL'S NAME IS THE STATIC TEXT CREATED JUST BEFORE IT**, with the same parent (Win32's
   labelling, `pages.labelled`). Create the label second and the control reads unnamed.
 - **F6 FINDS THE PAGE'S FIRST CONTROL BY WALKING ITS CHILDREN** (`_first_focusable`):
-  `NavigateIn` does not reach controls inside a page's group box.
+  `NavigateIn` does not reach controls inside a group box.
+- **A PAGE HAS NO GROUP BOX OF ITS OWN** (`pages.page_body`). The tree has just named it, so a group
+  named the same repeats the name on the way in. `MainFrame.go_to` says nothing, so the control
+  that calls it names the page ("Go to Wireless connections").
 - **DESCRIPTIONS AND A SLIDER'S VALUE IN WORDS COME FROM `native.a11y.describe`**, an MSAA
   override of those two answers only. Override anything else (name, role, state) and the control
   stops reading as the native control it is.
@@ -1915,7 +1931,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   button that renames itself is read out, so THE NEW LABEL IS THE CONFIRMATION:
   `RecordingSection._commanded` speaks no reply when the pressed button's label changed and puts the
   reply on the Now line instead; a refusal or a failure, which renames nothing, is spoken. Neither
-  button is ever disabled. The transport group comes first on the page and Now sits below the
+  button is ever disabled. The transport buttons come first on the page and Now sits below the
   buttons, one Tab after a press.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
@@ -2049,8 +2065,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   per shortcut. The list is one tab stop, and every action is in its menu (the Applications key,
   Shift+F10 or a right-click) or on Enter and Delete.
 - **A RESULT SPOKEN AS A DIALOG CLOSES WAITS FOR THE FOCUS TO LAND BACK.** Said before, the focus
-  arriving on the page cuts it off (`shortcuts_page.ShortcutsPage._applied`, `AFTER_FOCUS_MS`). A
-  successful delete says nothing at all.
+  arriving on the page cuts it off (`shortcuts_page.ShortcutsPage._applied`,
+  `pages.AFTER_FOCUS_MS`). A successful delete says nothing at all.
+- **THE AFTER-UPDATE REPORT IS TAKEN ONLY ONCE THE WINDOW IS ACTIVE, AND SAID `AFTER_FOCUS_MS`
+  LATER** (`UpdatesPage.take_report`). Said while the window is still coming to the front, the
+  screen reader drops it; and taking it cancels the 30 s notification that says it otherwise, so
+  it must not be taken before it can be heard.
 - **ONE CHORD FOR EVERY SHORTCUT** (`HotkeyManager._mods`, saved as `hotkeys.mods`). A shortcut has
   no modifiers of its own choosing: `set_mods` moves them all, and a later duplicate is switched off.
 - **A DIALOG OPENS ONTO ITS FIRST CONTROL, not its heading, and carries no intro paragraph.** The

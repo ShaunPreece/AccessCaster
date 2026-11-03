@@ -2,7 +2,8 @@
 shortcuts_page.py and help_section.py), offline: each shortcut listed with what it does and its
 keys, the selection kept across a write and moved to a neighbour on a delete, the pad keys switch
 partly ticked, the restore question counting what is lost, the voices and outputs offered from what
-Windows reports, the Windows level shown only for a stream that has one, and the help split into
+Windows reports, the Windows level shown only for a stream that has one, the after-update report
+waiting for the window to come to the front, and the help split into
 topics read from help.txt with the running version. Nothing is shown and nothing touches a
 desk.
 
@@ -139,6 +140,49 @@ check("the chosen voice is selected", announcements.voice.control.GetSelection()
 check("no outputs refuses a choice and says why", announcements._no_choice("outputs"),
       "Windows reported no outputs to this computer, so there is nothing to choose.")
 check("the volume is read in percent", announcements.volume._value_words(), "60 percent")
+
+# ---- the report after an update --------------------------------------------------------------
+class InactiveFrame(wx.Frame):
+    """A window that has not yet come to the front."""
+
+    def __init__(self):
+        super().__init__(None)
+        self.host = wx.Panel(self)
+        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        self.active = False
+        self.said = []
+
+    def IsActive(self):
+        return self.active
+
+    def say(self, text, recent=False):
+        self.said.append(text)
+
+
+def run_timers(ms):
+    wx.CallLater(ms, app.ExitMainLoop)
+    app.MainLoop()
+
+
+waiting = [{"kind": "updated", "text": "AccessCaster has updated to version 9.9.9."}]
+reports = (app_settings_section.app_updates,
+           {"report_waiting": lambda: bool(waiting), "take_report": lambda: waiting.pop()})
+inactive = InactiveFrame()
+updates = app_settings_section.UpdatesPage(type("S", (), {"frame": inactive})())
+with patched(reports, (app_settings_section, {"call": lambda _o, fn, *a, done=None: done(fn(*a))})):
+    updates.take_report()
+    check("the report waits while the window is not in front", (len(waiting), inactive.said),
+          (1, []))
+    inactive.active = True
+    inactive.ProcessEvent(wx.ActivateEvent(wx.wxEVT_ACTIVATE, True))
+    check("coming to the front takes it", len(waiting), 0)
+    check("but says it only once the screen reader has read the window", inactive.said, [])
+    run_timers(app_settings_section.AFTER_FOCUS_MS + 150)
+    check("then says it", inactive.said, ["AccessCaster has updated to version 9.9.9."])
+    inactive.ProcessEvent(wx.ActivateEvent(wx.wxEVT_ACTIVATE, True))
+    run_timers(app_settings_section.AFTER_FOCUS_MS + 150)
+    check("and only once", len(inactive.said), 1)
+inactive.Destroy()
 
 # ---- help ------------------------------------------------------------------------------------
 topics = help_section.topics()

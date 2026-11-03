@@ -33,10 +33,10 @@ class RoutingSection:
         self._asked = False
         self._announce = False
         self.native = {}             # key -> its page, once the desk has been read
-        self.status = {key: MessagePage(frame.host, title, "Starting AccessCaster.",
+        self.status = {key: MessagePage(frame.host, "Starting AccessCaster.",
                                         button="Read the desk again",
                                         on_button=lambda: self.refresh(True))
-                       for key, title, _cls, _model in NATIVE}
+                       for key, _title, _cls, _model in NATIVE}
         self.pages = [Page(key, title, self.status[key])
                       for key, title, _cls, _model in NATIVE]
         self.desk.subscribe(self._desk_event)

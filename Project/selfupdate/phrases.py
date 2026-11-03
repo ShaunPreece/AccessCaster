@@ -62,9 +62,8 @@ def confirm_summary(running, index, today):
 # Under the release notes, so it is the last thing read before the buttons.
 CONFIRM_AFTER = ("Installing closes AccessCaster for a moment, runs the "
                  "installer and starts it again. Shortcut keys and "
-                 "announcements pause until it is back. This window stays "
-                 "open and reloads itself on the new version. Nothing on the "
-                 "unit changes.")
+                 "announcements pause until it is back. Nothing on the unit "
+                 "changes.")
 
 
 def age(released, today):
@@ -109,7 +108,7 @@ CHECKING_STAGE = "Checking the download."
 # taken away. A button under a sentence that says the app is about to close
 # itself reads as the step that does it, whatever it is called.
 READY_STAGE = ("The update is ready. AccessCaster will now close, install it "
-               "and start again. This window stays open. Please wait.")
+               "and start again. Please wait.")
 
 # The user pressed Cancel. The offer still stands: the next check finds the
 # same version and asks again.

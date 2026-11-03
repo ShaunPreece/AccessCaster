@@ -1,5 +1,6 @@
 """The tabs of a channel page. Each is built once from the channel record and the section's read,
-and `show(rec)` puts a newer record's values on the same controls.
+the first time it is shown (`Tab.build`), and `show(rec)` puts a newer record's values on the same
+controls.
 
 Every control reads and records through `page.rec`, never a record captured at build time: a
 re-read replaces the record.
@@ -94,7 +95,11 @@ def build_tabs(page):
 
 class Tab(scrolled.ScrolledPanel):
     """One tab's page. It scrolls, and brings the focused control into view, because Dynamics
-    alone holds seventeen sliders. `controls` holds every Switch and Slider for `show`."""
+    alone holds seventeen sliders. `controls` holds every Switch and Slider for `show`.
+
+    The panel exists from the start, so the tab control lists every tab, but its controls are made
+    by `build`, the first time the tab is about to be shown: a mic page's tabs together hold the
+    window's thread for about half a second. A subclass makes them in `fill`."""
 
     key = ""
     title = ""
@@ -102,12 +107,22 @@ class Tab(scrolled.ScrolledPanel):
     def __init__(self, page):
         super().__init__(page.book)
         self.page = page
+        self.sizer = None
+        self.controls = []
+        self.built = False
+
+    def build(self):
+        if self.built:
+            return
+        self.built = True
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self.sizer)
-        self.controls = []
-
-    def finish(self):
+        self.fill()
         self.SetupScrolling(scroll_x=False)
+        self.show(self.page.rec)
+
+    def fill(self):
+        raise NotImplementedError
 
     def add(self, control):
         self.controls.append(control)
@@ -128,8 +143,8 @@ class SettingsTab(Tab):
     key = "settings"
     title = "Channel settings"
 
-    def __init__(self, page):
-        super().__init__(page)
+    def fill(self):
+        page = self.page
         rec = page.rec
         name, label = page.name, rec["label"]
         data = page.section.data
@@ -185,7 +200,6 @@ class SettingsTab(Tab):
                 apply = wx.Button(self, label="Apply mic type")
                 apply.Bind(wx.EVT_BUTTON, self._on_apply_mic_type)
                 self.sizer.Add(apply, 0, wx.ALL, 6)
-        self.finish()
 
     def show(self, rec):
         super().show(rec)
@@ -260,8 +274,7 @@ class PresetsTab(Tab):
     key = "presets"
     title = "Presets"
 
-    def __init__(self, page):
-        super().__init__(page)
+    def fill(self):
         self.choice = labelled(self, self.sizer, "Processing preset", lambda p: wx.Choice(p))
         a11y.describe(self.choice, "Sets this channel's processing values, not whether "
                                    "processing is on.")
@@ -282,7 +295,6 @@ class PresetsTab(Tab):
         delete = wx.Button(self, label="Delete a preset")
         delete.Bind(wx.EVT_BUTTON, self._on_delete)
         self.sizer.Add(delete, 0, wx.ALL, 6)
-        self.finish()
 
     def show(self, rec):
         now = rec.get("preset_now")
@@ -355,8 +367,8 @@ class ProcessingTab(Tab):
     key = "processing"
     title = "Processing"
 
-    def __init__(self, page):
-        super().__init__(page)
+    def fill(self):
+        page = self.page
         name = page.name
         self.add(Switch(page, self, self.sizer, "Processing on",
                         lambda on: server.action_set_processing_enabled(name, on),
@@ -372,7 +384,6 @@ class ProcessingTab(Tab):
                 page, self, self.sizer, module["label"],
                 lambda on, key=module["key"]: server.action_set_channel_module(name, key, on),
                 *page.field("modules", module["prop"])))
-        self.finish()
 
 
 class ParamTab(Tab):
@@ -382,10 +393,14 @@ class ParamTab(Tab):
     def __init__(self, page, key, title, groups):
         super().__init__(page)
         self.key, self.title = key, title
+        self.groups = groups
+        self.pan_controls = []
+
+    def fill(self):
+        page, groups = self.page, self.groups
         name = page.name
         stereo = bool(page.rec.get("stereo"))
-        self.pan_controls = []
-        single = len(groups) == 1 and groups[0]["group"] == title
+        single = len(groups) == 1 and groups[0]["group"] == self.title
         for g in groups:
             sizer, parent = ((self.sizer, self) if single
                              else group(self, self.sizer, g["group"]))
@@ -408,7 +423,6 @@ class ParamTab(Tab):
             if legs:
                 stereo_pan = self.add(StereoPan(self, parent, sizer, legs))
                 self.pan_controls += stereo_pan.accs()
-        self.finish()
 
     def show(self, rec):
         super().show(rec)
@@ -495,8 +509,8 @@ class EffectsTab(Tab):
     key = "fx"
     title = "Effects"
 
-    def __init__(self, page):
-        super().__init__(page)
+    def fill(self):
+        page = self.page
         name = page.name
         for effect, params in EFFECT_PARAMS.items():
             title = effect.capitalize()
@@ -511,4 +525,3 @@ class EffectsTab(Tab):
                         name, p, pct / 100),
                     *page.field("effects", effect + "_params", param, scale=100),
                     words=percent_words, unread=50, quiet=True))
-        self.finish()

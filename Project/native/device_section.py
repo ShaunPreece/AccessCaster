@@ -15,7 +15,7 @@ from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import JobDialog, confirm, follow_job, report
 from native.firmware_dialog import FirmwareDialog
-from native.pages import Page, group, page_box, read_only, set_text
+from native.pages import Page, group, page_body, read_only, set_text
 from native.wifi_dialogs import JoinDialog, NetworksDialog
 
 TITLE = "Device"
@@ -372,7 +372,7 @@ class StatePage(_Reader, wx.Panel):
         self.Hide()
         self._init_reader()
         self.section = section
-        sizer, parent = page_box(self, "Current state")
+        sizer, parent = page_body(self)
         self.report = read_only(parent, sizer, "Now", height=300, scroll=True)
         self.report.SetValue(UNREAD)
 
@@ -397,16 +397,15 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
         self._init_reader()
         self.section = section
         self.frame = section.frame
-        sizer, parent = page_box(self, "Hardware")
+        sizer, parent = page_body(self)
         self.status = read_only(parent, sizer, "Storage and recorder", height=100)
         self.status.SetValue(UNREAD)
 
-        box_sizer, box = group(parent, sizer, "Firmware and wired network")
-        self.firmware = read_only(box, box_sizer, "Firmware", height=None)
-        self.wired = read_only(box, box_sizer, "Wired network", height=None)
-        self.check = _button(box, box_sizer, "Check for a firmware update", self._on_check)
+        self.firmware = read_only(parent, sizer, "Firmware", height=None)
+        self.wired = read_only(parent, sizer, "Wired network", height=None)
+        self.check = _button(parent, sizer, "Check for a firmware update", self._on_check)
         # Shown only while the unit offers an update, and named after it.
-        self.install = _button(box, box_sizer, "Install firmware", self._on_install)
+        self.install = _button(parent, sizer, "Install firmware", self._on_install)
         self.install.Hide()
 
         box_sizer, box = group(parent, sizer, "USB interfaces (technical)")
@@ -500,14 +499,13 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self.data = None             # the last good `server.read_unit_settings`
         self.values = {}             # prop: value as the unit last reported it
         self.controls = {}           # prop: its control
-        sizer, parent = page_box(self, "Unit settings")
+        sizer, parent = page_body(self)
         self._sizer = sizer
         self.note = read_only(parent, sizer, "Unit settings status", height=60)
         self.note.SetValue(UNIT_UNREAD)
         for spec in server.UNIT_SETTINGS:
             self.controls[spec["prop"]] = self._build(parent, sizer, spec)
-        box_sizer, box = group(parent, sizer, "MIDI control")
-        self.midi = Switch(self, box, box_sizer, "Enable MIDI control", server.action_set_midi,
+        self.midi = Switch(self, parent, sizer, "Enable MIDI control", server.action_set_midi,
                            *self.field("midi"),
                            description="Lets a MIDI app or controller handle mute, faders, "
                                        "listen and record, without RODE Central.",
@@ -606,21 +604,20 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self.section = section
         self.frame = section.frame
         self.data = None             # the last good `server.read_network_status`
-        sizer, parent = page_box(self, "Wireless connections")
+        sizer, parent = page_body(self)
 
-        box_sizer, box = group(parent, sizer, "WiFi")
-        self.wifi = Switch(self, box, box_sizer, "WiFi on", server.action_set_wifi,
+        self.wifi = Switch(self, parent, sizer, "WiFi on", server.action_set_wifi,
                            *self.field("wifi", "on"),
                            description="Turn the unit's wifi on or off, and join a network.",
                            guard=self._guard, accepted=self._wifi_switched,
                            working=lambda on: ("Turning the wifi on and waiting for it to "
                                                "connect. Please wait." if on else
                                                "Turning the wifi off. Please wait."))
-        self.wifi_status = read_only(box, box_sizer, "WiFi status", height=None)
+        self.wifi_status = read_only(parent, sizer, "WiFi status", height=None)
         self.wifi_status.SetValue(WIFI_OFF)
         # One of the two at a time: the unit only scans while it has no network to join.
-        self.disconnect = _button(box, box_sizer, "Disconnect", self._on_disconnect)
-        self.scan = _button(box, box_sizer, "Scan for networks", self._on_scan)
+        self.disconnect = _button(parent, sizer, "Disconnect", self._on_disconnect)
+        self.scan = _button(parent, sizer, "Scan for networks", self._on_scan)
 
         box_sizer, box = group(parent, sizer, "Bluetooth")
         self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this unit",
@@ -631,8 +628,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
                                             "on its own after a few minutes.",
                                 guard=self._guard)
 
-        box_sizer, box = group(parent, sizer, "Wireless microphones")
-        self.mics = read_only(box, box_sizer, "Wireless microphones", height=60)
+        self.mics = read_only(parent, sizer, "Wireless microphones", height=60)
         a11y.describe(self.mics, "RODE wireless transmitters the unit can see, and how much "
                                  "battery each has left. Pairing one is done on the transmitter "
                                  "and the unit.")

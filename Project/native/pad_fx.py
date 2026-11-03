@@ -18,7 +18,7 @@ from native.calls import call
 from native.controls import Slider, set_choices
 from native.dialogs import JobDialog, TextDialog, confirm
 from native.pad_dialogs import READ_ONLY
-from native.pages import group, labelled, page_box
+from native.pages import group, labelled, page_body
 
 TITLE = "Voice effects"
 NONE_SAVED = "You have not created any effects yet."
@@ -127,7 +127,7 @@ class FxPage(scrolled.ScrolledPanel):
         self.frame = section.frame
         self.preview_grid = None      # the pad the live preview is on, while it is on
         self._preview_busy = False    # a preview stop has not returned
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
         box_sizer, box = group(parent, sizer, "Create a custom voice effect")
         self._build_preview(box, box_sizer)
         self.effects = [_EffectBox(self, box, box_sizer, effect) for effect in EFFECTS]

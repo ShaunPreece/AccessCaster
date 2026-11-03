@@ -1127,7 +1127,6 @@ def _callme_payload(d: dict) -> dict:
     d["now"] = callme.call_now(d)
     d["details"] = [{"label": k, "value": v} for k, v in callme.call_details(d)]
     d["end_label"] = callme.end_label(d)
-    d["ready"] = callme.readiness(d)
     d["callme1_code"] = callme.CALLME1_SOURCE
     d["contacts"] = _callme_contact_rows(_callme_contacts())
     settings = settings_file.load()
@@ -1243,6 +1242,17 @@ def action_callme_hosting(on: bool) -> dict:
     return out
 
 
+def _callme1_on_fader():
+    """Whether CallMe 1 is on a fader, read from the desk's fader layout, or None when the desk
+    cannot be read. CallMe's own state does not follow the faders, and the desk does not push a
+    layout change this app makes, so only a read of the layout itself is current."""
+    try:
+        with _hid_lock:
+            return callme.CALLME1_SOURCE in _read_fader_vector()
+    except Exception:
+        return None
+
+
 def _callme_respond(answer: bool) -> dict:
     """Answer the ringing call into the first free slot, or decline it."""
     gate = _callme_gate()
@@ -1284,7 +1294,7 @@ def _callme_respond(answer: bool) -> dict:
     state, snap = _callme_wait_for(w, slot + 1, "Active") if w is not None else (None, {})
     if state == "Active":
         msg = f"Connected to {call['name']}."
-        if snap.get("on_fader") is False:
+        if _callme1_on_fader() is False:
             msg += " No fader carries CallMe 1, so you will not hear them until one does."
         return {"ok": True, "message": msg}
     if w is not None:

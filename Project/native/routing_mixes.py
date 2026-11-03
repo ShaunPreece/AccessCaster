@@ -10,7 +10,7 @@ from native.calls import call
 from native.controls import Switch, set_choices
 from native.desk_state import CUSTOM, MIX_MINUS
 from native.dialogs import DeletePresetDialog, confirm
-from native.pages import group, labelled, page_box
+from native.pages import group, labelled, page_body
 
 TITLE = "Output mixes"
 READ_ONLY = "Changing output mixes is not enabled on this device yet."
@@ -30,7 +30,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         self.read_only = model["read_only"]
         self._busy = False
         self._schemes = []
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
 
         self.output = labelled(parent, sizer, "Output to configure", lambda p: wx.Choice(
             p, choices=[o["label"] for o in self.outputs]))
@@ -195,21 +195,20 @@ class OutputMixesPage(scrolled.ScrolledPanel):
     # ---- mix presets -----------------------------------------------------------------------
 
     def _build_schemes(self, parent, sizer):
-        box_sizer, box = group(parent, sizer, "Mix presets")
-        self.scheme = labelled(box, box_sizer, "Mix preset", lambda p: wx.Choice(p))
+        self.scheme = labelled(parent, sizer, "Mix preset", lambda p: wx.Choice(p))
         a11y.describe(self.scheme, "Output mixes only, never channels, processing or pads.")
         self.scheme.Bind(wx.EVT_CHOICE, lambda _e: self._show_scheme())
-        apply = wx.Button(box, label="Apply preset")
+        apply = wx.Button(parent, label="Apply preset")
         apply.Bind(wx.EVT_BUTTON, self._on_apply_scheme)
         # The selected preset's description is read on the button that acts on it rather than on
         # the list, so arrowing the list reads only the names.
         self.apply_acc = a11y.describe(apply)
-        save = wx.Button(box, label="Save as a preset...")
+        save = wx.Button(parent, label="Save as a preset...")
         save.Bind(wx.EVT_BUTTON, self._on_save_scheme)
-        delete = wx.Button(box, label="Delete a preset...")
+        delete = wx.Button(parent, label="Delete a preset...")
         delete.Bind(wx.EVT_BUTTON, self._on_delete_scheme)
         for button in (apply, save, delete):
-            box_sizer.Add(button, 0, wx.ALL, 6)
+            sizer.Add(button, 0, wx.ALL, 6)
 
     def read_schemes(self, select=None):
         """Read the preset list (files, not the desk). `select` is a saved preset's name to choose

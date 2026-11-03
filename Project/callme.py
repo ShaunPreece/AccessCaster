@@ -349,10 +349,10 @@ def read_all(blob: bytes) -> tuple:
             slot_at.append(n.path())
     if p is None:
         return {"ok": False, "message": "This unit does not publish CallMe."}, None, []
-    return _state(p, slots, blob), ctl, slot_at
+    return _state(p, slots), ctl, slot_at
 
 
-def _state(p: dict, slots: list, blob: bytes) -> dict:
+def _state(p: dict, slots: list) -> dict:
     code = p.get("sipRodeCode") or ""
     hosting = bool(p.get("sipCallHostingEnabled"))
     mode = p.get("sipLicenceMode")
@@ -368,9 +368,7 @@ def _state(p: dict, slots: list, blob: bytes) -> dict:
             "web_minutes_left": p.get("sipRemainingWebCalltime"),
             "renews": renewal_date(p.get("sipRenewalDate") or "", year=False),
             "incoming": parse_call(p.get("sipIncomingCallDetails")),
-            "slots": slots[:TIER_SLOTS.get(mode, len(slots))],
-            # A call can be answered with CallMe on no fader, but the guest is then heard nowhere.
-            "on_fader": CALLME1_SOURCE in rcp_read.values(blob, "channelInputSource")}
+            "slots": slots[:TIER_SLOTS.get(mode, len(slots))]}
 
 
 def plan_lines(d: dict) -> list:
@@ -477,7 +475,7 @@ def status_sentence(d: dict) -> str:
     return " ".join(parts)
 
 
-def readiness(d: dict) -> list:
+def readiness(online, on_fader) -> list:
     """What has to be in place before a call can work, as [{key, ok, text}], most basic first. The
     page shows only this, with a fix beside each item, until every item is ok.
 
@@ -485,16 +483,18 @@ def readiness(d: dict) -> list:
     the desk; with CallMe 1 on no fader it does nothing at all, and the desk never hears of the call.
     Neither shows on the desk or the guest's page. An unknown (None) is reported as not ok, never
     assumed fine. Hosting is not listed: with it off a call out still works, so it is a setting,
-    not a fault."""
+    not a fault.
+
+    `on_fader` is the caller's: whether CALLME1_SOURCE is in the fader layout it already holds.
+    CallMe's own state does not follow the faders, so it never carries that fact."""
     out = []
-    online = d.get("online")
     out.append({"key": "online", "ok": online is True,
                 "text": "The unit is online." if online else
                         ("The unit is offline, so no call can connect either way. Join it to wifi "
                          "or plug in a network cable." if online is False else
                          "Whether the unit is online is not known yet.")})
-    out.append({"key": "fader", "ok": d.get("on_fader") is True,
-                "text": "CallMe 1 is on a fader." if d.get("on_fader") else
+    out.append({"key": "fader", "ok": on_fader is True,
+                "text": "CallMe 1 is on a fader." if on_fader else
                         "CallMe 1 is on no fader, so a guest's call never reaches the unit. "
                         "Put it on a fader."})
     return out

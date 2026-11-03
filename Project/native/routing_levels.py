@@ -11,7 +11,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Slider, Switch, set_choices
 from native.dialogs import confirm
-from native.pages import group, labelled, page_box
+from native.pages import group, labelled, page_body
 from native.desk_state import CUSTOM, MIX_MINUS
 
 TITLE = "Levels"
@@ -50,7 +50,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         self.frame = section.frame
         self.model = model
         self._shown = []             # every Switch and Slider, which `show` refreshes
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
         self._build_faders(parent, sizer, previous)
         for output in OUTPUTS:
             self._build_output(parent, sizer, output)
@@ -87,29 +87,28 @@ class LevelsPage(scrolled.ScrolledPanel):
         self.fader_level = None
         if not self.model["faders"]:
             return
-        box_sizer, box = group(parent, sizer, "Virtual faders")
-        self.fader = labelled(box, box_sizer, "Virtual fader", lambda p: wx.Choice(p))
+        self.fader = labelled(parent, sizer, "Virtual fader", lambda p: wx.Choice(p))
         self.fader.Bind(wx.EVT_CHOICE, lambda _e: self._show_fader())
         self._fader_position = (previous._fader_position
                                 if previous is not None and previous.fader_level else 0)
         # The list names the channel only: an item that carried the level would be rewritten on
         # every encoder step, and the screen reader reads a focused list again when it changes.
         self.fader_level = Slider(
-            self, box, box_sizer, "Level", 0, 100,
+            self, parent, sizer, "Level", 0, 100,
             self._fader_send(server.action_set_fader_level),
             lambda: self._fader_value("percent"), lambda _value: None,
             words=percent, accepted=self._fader_done("percent"))
         self.fader_mute = Switch(
-            self, box, box_sizer, "Mute", self._fader_send(server.action_set_fader_mute),
+            self, parent, sizer, "Mute", self._fader_send(server.action_set_fader_mute),
             lambda: self._fader_value("muted"), lambda _on: None,
             accepted=self._fader_done("muted"))
         self.fader_solo = Switch(
-            self, box, box_sizer, "Solo", self._fader_send(server.action_set_fader_solo),
+            self, parent, sizer, "Solo", self._fader_send(server.action_set_fader_solo),
             lambda: self._fader_value("soloed"), lambda _on: None,
             accepted=self._fader_done("soloed"))
-        clear = wx.Button(box, label="Clear all solos")
+        clear = wx.Button(parent, label="Clear all solos")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
-        box_sizer.Add(clear, 0, wx.ALL, 6)
+        sizer.Add(clear, 0, wx.ALL, 6)
 
     def _fader_value(self, key):
         return self.levels["faders"][self._fader_position][key]
@@ -278,15 +277,14 @@ class LevelsPage(scrolled.ScrolledPanel):
         self.hp_types = []
         if not hp["outputs"]:
             return
-        box_sizer, box = group(parent, sizer, "Headphones")
         labels = [label for _value, label in hp["values"]]
         for position, output in enumerate(hp["outputs"]):
-            choice = labelled(box, box_sizer, f"{output} type",
+            choice = labelled(parent, sizer, f"{output} type",
                               lambda p: wx.Choice(p, choices=labels))
             a11y.describe(choice, "High sensitivity is louder. Change it with care.")
-            apply = wx.Button(box, label=f"Apply {output} type")
+            apply = wx.Button(parent, label=f"Apply {output} type")
             apply.Bind(wx.EVT_BUTTON, lambda e, p=position: self._on_apply_type(e, p))
-            box_sizer.Add(apply, 0, wx.ALL, 6)
+            sizer.Add(apply, 0, wx.ALL, 6)
             self.hp_types.append(choice)
 
     def _show_headphones(self):

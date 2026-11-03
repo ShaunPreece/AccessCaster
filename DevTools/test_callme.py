@@ -26,7 +26,7 @@ def watcher(slots=1):
     said = []
     w = callme.Watcher(on_say=said.append)
     w._state = {"ok": True, "hosting": True, "hosting_locked": False, "code": "AB12CD",
-                "link": callme.GUEST_LINK + "AB12CD", "incoming": None, "on_fader": True,
+                "link": callme.GUEST_LINK + "AB12CD", "incoming": None,
                 "slots": [callme._slot_view(i + 1, {"sipSlotCallState": "Idle"})
                           for i in range(slots)]}
     w._ctl, w._slots = CTL, SLOTS
@@ -312,16 +312,15 @@ w.apply(CTL, "sipIncomingCallDetails", DETAILS)
 check("with the ringtone off, the Watcher says it itself", said, ["CallMe call from Shaun."])
 
 print("ready for calls")
-READY = {"online": True, "on_fader": True, "hosting": True}
+READY = {"online": True, "hosting": True}
 check("all in place: nothing to fix",
-      [r["key"] for r in callme.readiness(READY) if not r["ok"]], [])
+      [r["key"] for r in callme.readiness(True, True) if not r["ok"]], [])
 check("offline and no fader: both, most basic first",
-      [r["key"] for r in callme.readiness({"online": False, "on_fader": False, "hosting": False})
-       if not r["ok"]], ["online", "fader"])
-check("hosting off is a setting, not a fault",
-      [r["key"] for r in callme.readiness(dict(READY, hosting=False)) if not r["ok"]], [])
+      [r["key"] for r in callme.readiness(False, False) if not r["ok"]], ["online", "fader"])
 check("not knowing whether it is online is not taken as online",
-      callme.readiness(dict(READY, online=None))[0]["ok"], False)
+      callme.readiness(None, True)[0]["ok"], False)
+check("not knowing whether it is on a fader is not taken as on one",
+      callme.readiness(True, None)[1]["ok"], False)
 check("offline outranks hosting in the status line",
       callme.status_sentence(dict(READY, online=False, slots=[], incoming=None)).endswith(
           "The unit is offline, so no call can connect."), True)

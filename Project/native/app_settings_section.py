@@ -18,7 +18,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import confirm, report
-from native.pages import Page, group, page_box, read_only, set_text
+from native.pages import AFTER_FOCUS_MS, Page, page_body, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
 from native.update_dialogs import decide
 
@@ -85,7 +85,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         self.section = section
         self.frame = section.frame
         self.data = None             # the last `server.read_announce`
-        sizer, parent = page_box(self, "Announce Interactions on Mixer")
+        sizer, parent = page_body(self)
         self.switches = [Switch(self, parent, sizer, label, send, *self.field(key),
                                 description=description, guard=self._unread)
                          for key, label, send, description in self.SWITCHES]
@@ -184,7 +184,7 @@ class GeneralPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self.data = None             # the last `server.read_general`
-        sizer, parent = page_box(self, "General")
+        sizer, parent = page_body(self)
         self.autostart = Switch(self, parent, sizer,
                                 "Start AccessCaster when you sign in to Windows",
                                 server.action_set_autostart,
@@ -197,8 +197,7 @@ class GeneralPage(wx.Panel):
             description="Your keyboard shortcuts and spoken announcements only work while "
                         "AccessCaster is running. Off, closing the window quits it.",
             guard=lambda: None if self.data is not None else "Not read yet.")
-        box_sizer, box = group(parent, sizer, "Move this app's settings")
-        self.export = self._button(box, box_sizer, "Save this app's settings to a file",
+        self.export = self._button(parent, sizer, "Save this app's settings to a file",
                                    self._on_export)
         a11y.describe(self.export, "Your keyboard shortcuts, announcement preferences and "
                                    "CallMe contacts belong to AccessCaster rather than to the "
@@ -206,8 +205,8 @@ class GeneralPage(wx.Panel):
                                    "writes one small file you can copy to another computer. It "
                                    "holds nothing about the desk, so it is safe to email to "
                                    "yourself.")
-        self.folder = self._button(box, box_sizer, "Open the folder", self._on_folder)
-        self.restore = self._button(box, box_sizer, "Restore from a saved settings file",
+        self.folder = self._button(parent, sizer, "Open the folder", self._on_folder)
+        self.restore = self._button(parent, sizer, "Restore from a saved settings file",
                                     self._on_restore)
         a11y.describe(self.restore, "A voice or audio device this computer lacks is skipped, "
                                     "and said.")
@@ -297,7 +296,7 @@ class UpdatesPage(wx.Panel):
         self.frame = section.frame
         self.data = None             # the last `app_updates.state`
         self._checking = False
-        sizer, parent = page_box(self, "Updates")
+        sizer, parent = page_body(self)
         self.days = Choice(self, parent, sizer, "Check for updates", [], app_updates.set_interval,
                            *self.field("days"), guard=self._unread, accepted=self._interval_set)
         self.hint = read_only(parent, sizer, "Update status", height=60)
@@ -333,7 +332,22 @@ class UpdatesPage(wx.Panel):
         call(self, app_updates.state, done=done)
 
     def take_report(self):
-        """What the last update did, from this side of its restart."""
+        """What the last update did, from this side of its restart. Taken only once the window
+        is the active one: a line said while it is still coming to the front is dropped by the
+        screen reader, and taking the report cancels the notification that would say it instead
+        (`app_updates._report_unclaimed`)."""
+        if self.frame.IsActive():
+            self._take_report()
+        else:
+            self.frame.Bind(wx.EVT_ACTIVATE, self._on_activate)
+
+    def _on_activate(self, event):
+        event.Skip()
+        if event.GetActive():
+            self.frame.Unbind(wx.EVT_ACTIVATE, handler=self._on_activate)
+            self._take_report()
+
+    def _take_report(self):
         def take():
             return {"ok": True, "report": app_updates.take_report()
                     if app_updates.report_waiting() else None}
@@ -341,7 +355,7 @@ class UpdatesPage(wx.Panel):
         def done(reply):
             found = reply.get("report")
             if found:
-                self.frame.say(found["text"])
+                wx.CallLater(AFTER_FOCUS_MS, self.frame.say, found["text"])
         call(self, take, done=done)
 
     def check(self):

@@ -19,7 +19,7 @@ from native import a11y
 from native.backup_dialogs import BaselineDialog, ResetDialog
 from native.calls import call
 from native.dialogs import NameDialog, confirm, follow_job, report
-from native.pages import Page, group, labelled, page_box
+from native.pages import Page, labelled, page_body
 
 TITLE = "Backups"
 RESET_TITLE = "Start again from factory settings"
@@ -242,25 +242,24 @@ class BackupsPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self.backups = []            # the backups as listed; empty when the list holds NO_BACKUPS
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
         self.backup = wx.Button(parent, label="Back up the unit now")
         self.backup_acc = a11y.describe(self.backup, "")
         self.backup.Bind(wx.EVT_BUTTON, self._on_backup)
         sizer.Add(self.backup, 0, wx.ALL, 6)
 
-        box_sizer, box = group(parent, sizer, "Your backups")
-        self.list = labelled(box, box_sizer, "Backup",
+        self.list = labelled(parent, sizer, "Backup",
                              lambda p: wx.ListBox(p, choices=["Reading the backups."],
                                                   size=(420, 180)))
         self.list.Bind(wx.EVT_LISTBOX, lambda _e: self._show_detail())
         row = wx.BoxSizer(wx.HORIZONTAL)
         # The chosen backup's detail is on Restore, the press it informs, and not on the list: a
         # description that changes under a focused list is read again over the item landed on.
-        self.restore = self._button(box, row, "Restore selected backup", self._on_restore)
+        self.restore = self._button(parent, row, "Restore selected backup", self._on_restore)
         self.restore_acc = a11y.describe(self.restore, "")
-        self.rename = self._button(box, row, "Rename selected backup", self._on_rename)
-        self.delete = self._button(box, row, "Delete selected backup", self._on_delete)
-        box_sizer.Add(row, 0, wx.ALL, 6)
+        self.rename = self._button(parent, row, "Rename selected backup", self._on_rename)
+        self.delete = self._button(parent, row, "Delete selected backup", self._on_delete)
+        sizer.Add(row, 0, wx.ALL, 6)
 
         self.about = labelled(parent, sizer, "About backups", lambda p: wx.TextCtrl(
             p, size=(460, 150), style=wx.TE_MULTILINE | wx.TE_READONLY))
@@ -455,7 +454,7 @@ class ResetPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        sizer, parent = page_box(self, RESET_TITLE)
+        sizer, parent = page_body(self)
         self.button = wx.Button(parent, label=RESET_TITLE)
         self.acc = a11y.describe(self.button, "")
         self.button.Bind(wx.EVT_BUTTON, self._on_reset)

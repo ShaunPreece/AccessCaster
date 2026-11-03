@@ -14,7 +14,7 @@ from native.calls import call
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import MessagePage, Page, labelled, page_box
+from native.pages import MessagePage, Page, labelled, page_body
 
 TITLE = "SMART pads"
 PADS = "Pads"
@@ -38,9 +38,9 @@ class PadsSection:
         self.maint = None
         self._reading = False
         self._again = None       # a read asked for while one runs: None, or whether to announce it
-        self.statuses = [MessagePage(frame.host, title, "Starting AccessCaster.",
+        self.statuses = [MessagePage(frame.host, "Starting AccessCaster.",
                                      button="Read the pads again", on_button=lambda: self.read(True))
-                         for _key, title in PAGES]
+                         for _page in PAGES]
         self.pages = [Page(key, title, status) for (key, title), status in zip(PAGES, self.statuses)]
         frame.desk.subscribe(self._desk_event)
 
@@ -109,7 +109,7 @@ class PadsPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        sizer, parent = page_box(self, PADS)
+        sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Pad", lambda p: wx.ListBox(p, size=(420, 300)))
         a11y.describe(self.list, "Press Enter to edit a pad's settings, or to give an empty pad "
                                  "something to do.")

@@ -136,7 +136,9 @@ class MainFrame(Speaker, wx.Frame):
                 section.read()
 
     def go_to(self, route, key):
-        """Show the page `key` of the section `route`, and move the focus into it."""
+        """Show the page `key` of the section `route`, and move the focus into it. Nothing names
+        the page on the way in, so the control that calls this names it ("Go to Wireless
+        connections")."""
         section = next(s for s in self.sections if s.route == route)
         branch = self._branches[self.sections.index(section)]
         item = next((child for child in self._children(branch)
@@ -179,9 +181,8 @@ class MainFrame(Speaker, wx.Frame):
     def _fill_branch(self, section):
         branch = self._branches[self.sections.index(section)]
         for page in section.pages:
-            if page.window.GetContainingSizer() is None:
-                page.window.Hide()
-                self.host.GetSizer().Add(page.window, 1, wx.EXPAND)
+            if page.built:
+                self._place(page.window)
         self.tree.SetItemData(branch, section.pages[0])
         if len(section.pages) > 1:
             for page in section.pages:
@@ -203,7 +204,7 @@ class MainFrame(Speaker, wx.Frame):
         self._rebuilding = False
         current = self.tree.GetSelection()
         if current.IsOk():
-            self._show(self.tree.GetItemData(current).window)
+            self._show(self.tree.GetItemData(current))
 
     def _on_select(self, event):
         # The tree changes selection as its items are deleted on close and during a rebuild.
@@ -211,11 +212,21 @@ class MainFrame(Speaker, wx.Frame):
             return
         item = event.GetItem()
         if item.IsOk():
-            self._show(self.tree.GetItemData(item).window)
+            self._show(self.tree.GetItemData(item))
 
-    def _show(self, window):
+    def _place(self, window):
+        """Put a page's window in the host, hidden, once."""
+        if window.GetContainingSizer() is None:
+            window.Hide()
+            self.host.GetSizer().Add(window, 1, wx.EXPAND)
+
+    def _show(self, page):
+        window = page.window
         if window is self._shown:
             return
+        self._place(window)
+        if hasattr(window, "before_show"):
+            window.before_show()
         self.host.Freeze()
         if self._shown:
             self._shown.Hide()
@@ -243,7 +254,7 @@ class MainFrame(Speaker, wx.Frame):
         return wx.Window.FindFocus() is self.tree
 
     def _focus_page(self):
-        # NavigateIn does not reach controls that sit inside the page's group box.
+        # NavigateIn does not reach controls that sit inside a group box.
         target = self._first_focusable(self._shown) if self._shown else None
         if target:
             target.SetFocus()

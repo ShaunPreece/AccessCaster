@@ -19,7 +19,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Page, group, labelled, page_box, set_items
+from native.pages import Page, labelled, page_body, set_items
 
 TITLE = "Recording"
 UNREAD = "The recorder has not been read yet."
@@ -174,7 +174,7 @@ class RecorderPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self._mute = announcer.record_mutes_announcer()
-        sizer, parent = page_box(self, "Recorder")
+        sizer, parent = page_body(self)
 
         # THE TRANSPORT COMES FIRST: it is what the page is opened for, and the focus lands on Start
         # recording. The options below are set once and rarely changed.
@@ -184,35 +184,33 @@ class RecorderPage(wx.Panel):
         # after a press the new label is the confirmation and the reply is not spoken over it
         # (`RecordingSection._commanded`). Neither is ever disabled: a disabled button leaves the
         # tab order from under the user, so one that cannot act says why.
-        box_sizer, box = group(parent, sizer, "Start and stop")
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.transport = self._button(box, row, START, self._on_transport)
+        self.transport = self._button(parent, row, START, self._on_transport)
         a11y.describe(self.transport, "Starts a recording, or stops the one running.")
-        self.pause = self._button(box, row, PAUSE, self._on_pause)
+        self.pause = self._button(parent, row, PAUSE, self._on_pause)
         a11y.describe(self.pause, "Pauses a recording, or carries on with a paused one.")
-        self.marker = self._button(box, row, "Drop a marker", self._on_marker)
+        self.marker = self._button(parent, row, "Drop a marker", self._on_marker)
         a11y.describe(self.marker, "Puts a marker your editor can find at this point of the "
                                    "recording.")
-        box_sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, 6)
         # Below the buttons, so one Tab after a press reaches what the unit is doing.
-        self.now = labelled(box, box_sizer, "Now", lambda p: wx.TextCtrl(
+        self.now = labelled(parent, sizer, "Now", lambda p: wx.TextCtrl(
             p, value="Reading the unit.", size=(460, 60),
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
 
-        box_sizer, box = group(parent, sizer, "Recording options")
         self.multitrack = Choice(
-            self, box, box_sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
+            self, parent, sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
             server.action_set_multitrack, *self.field("multitrack"),
             description=f"{recorder.MULTITRACK_HINT} {USB_POINTER}", guard=self._unread,
             accepted=lambda _reply: self._show_bypass())
         self.format = Choice(
-            self, box, box_sizer, "Save recordings as",
+            self, parent, sizer, "Save recordings as",
             sorted(recorder.RECORDING_FORMAT_LABEL.items()), server.action_set_recording_format,
             *self.field("format"), description=recorder.RECORDING_FORMAT_HINT, guard=self._unread)
-        self.bypass = Switch(self, box, box_sizer, "Record the separate tracks raw",
+        self.bypass = Switch(self, parent, sizer, "Record the separate tracks raw",
                              server.action_set_processing_bypass,
                              *self.field("processing_bypass"), guard=self._bypass_refused)
-        self.mute = Switch(self, box, box_sizer, "Silence other announcements while recording",
+        self.mute = Switch(self, parent, sizer, "Silence other announcements while recording",
                            announcer.action_set_record_mute_announcer, lambda: self._mute,
                            self._remember_mute, description=MUTE_HINT)
         # The Now line's running time during a take, from the push listener: no desk read.
@@ -339,7 +337,7 @@ class RecordingsPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self.takes = []              # the recordings as listed; empty when the list holds a note
-        sizer, parent = page_box(self, "Recordings")
+        sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Recording", lambda p: wx.ListBox(
             p, choices=["Reading the unit."], size=(460, 220)))
         a11y.describe(self.list, LIST_HINT)
@@ -396,7 +394,7 @@ class StoragePage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self.shown = []              # the volumes as listed
-        sizer, parent = page_box(self, "Card and drive")
+        sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Card or drive", lambda p: wx.ListBox(
             p, choices=["Reading the unit."], size=(460, 80)))
         a11y.describe(self.list, STORAGE_HINT)

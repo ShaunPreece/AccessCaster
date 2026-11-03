@@ -11,16 +11,13 @@ import server
 from native import a11y
 from native.calls import call
 from native.dialogs import FormDialog, _paragraphs, confirm
-from native.pages import labelled, page_box, set_items
+from native.pages import AFTER_FOCUS_MS, labelled, page_body, set_items
 from native.controls import Switch, set_choices
 
 LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
              "more options.")
 EMPTY = "You have no shortcuts yet. Press Add a shortcut to make one."
 OFF_NOTE = " Shortcuts are off, so none of these combinations is in use."
-# After a menu or dialog closes, the screen reader first reads the item the focus returns to; a
-# reply said before then is cut off by it.
-AFTER_FOCUS_MS = 250
 
 
 def item_text(row):
@@ -62,7 +59,7 @@ class ShortcutsPage(wx.Panel):
         self.frame = section.frame
         self.state = None            # the last `server.hotkey_state`, or a write's `state`
         self.rows = []               # the shortcuts as listed
-        sizer, parent = page_box(self, "Keyboard shortcuts")
+        sizer, parent = page_body(self)
         self.enabled = Switch(
             self, parent, sizer, "Use keyboard shortcuts", server.action_set_hotkeys_enabled,
             lambda: (self.state or {}).get("enabled"), lambda _on: None,

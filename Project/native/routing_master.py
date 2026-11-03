@@ -10,7 +10,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Slider, Switch
 from native.dialogs import JobDialog, confirm
-from native.pages import group, labelled, page_box
+from native.pages import labelled, page_body
 
 TITLE = "Master Mix"
 READ_ONLY = "Changing this is not enabled on this device yet."
@@ -54,7 +54,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         self._writing = False        # a USB mode write from this page has not returned
         self._switching = False      # the server is still finishing a USB change
         self._driver = None          # the driver's last status, from the poll
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
         self._build_usb(parent, sizer)
         self._build_driver(parent, sizer)
         self._build_processing(parent, sizer)
@@ -93,26 +93,25 @@ class MasterMixPage(scrolled.ScrolledPanel):
         """The two halves of the desk's USB mode, each applied by its button: a change tears the
         desk's USB audio down and rebuilds it, and arrowing a closed list fires a change per
         item."""
-        box_sizer, box = group(parent, sizer, "USB audio")
-        self.receives = labelled(box, box_sizer, "What this computer receives (Multitrack)",
+        self.receives = labelled(parent, sizer, "What this computer receives (Multitrack)",
                                  lambda p: wx.Choice(p, choices=[
                                      label for _mode, label in self.model["usb_modes"]]))
-        apply = wx.Button(box, label="Confirm what this computer receives")
+        apply = wx.Button(parent, label="Confirm what this computer receives")
         a11y.describe(apply, self.model["usb_drop_hint"])
         apply.Bind(wx.EVT_BUTTON, self._on_apply_receives)
-        box_sizer.Add(apply, 0, wx.ALL, 6)
+        sizer.Add(apply, 0, wx.ALL, 6)
 
-        self.sends = labelled(box, box_sizer, "What this computer sends (USB 1 Input)",
+        self.sends = labelled(parent, sizer, "What this computer sends (USB 1 Input)",
                               lambda p: wx.Choice(p, choices=[
                                   label for _on, label in self.model["usb_expanded"]]))
         a11y.describe(self.sends, self.model["usb_expanded_hint"])
-        apply = wx.Button(box, label="Confirm what this computer sends")
+        apply = wx.Button(parent, label="Confirm what this computer sends")
         a11y.describe(apply, self.model["usb_expanded_drop_hint"])
         apply.Bind(wx.EVT_BUTTON, self._on_apply_sends)
-        box_sizer.Add(apply, 0, wx.ALL, 6)
+        sizer.Add(apply, 0, wx.ALL, 6)
 
         self.bypass = self._add(Switch(
-            self, box, box_sizer, "Send the separate tracks raw",
+            self, parent, sizer, "Send the separate tracks raw",
             server.action_set_usb_bypass, *self.field("usb_bypass"), guard=self._bypass_refused))
 
     def _bypass_refused(self):
@@ -183,18 +182,17 @@ class MasterMixPage(scrolled.ScrolledPanel):
     def _build_driver(self, parent, sizer):
         """The driver's side of Expanded, read from Windows: without it a desk in Expanded with no
         driver looks the same as one that is working. Then a way to get it."""
-        box_sizer, box = group(parent, sizer, "RODE's Virtual Devices driver")
-        self.driver_text = labelled(box, box_sizer, "Driver", lambda p: wx.TextCtrl(
+        self.driver_text = labelled(parent, sizer, "Virtual Devices driver", lambda p: wx.TextCtrl(
             p, size=(460, 60), style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
-        self.install = wx.Button(box, label="Download and install RODE's Virtual Devices driver")
+        self.install = wx.Button(parent, label="Download and install RODE's Virtual Devices driver")
         self.install_acc = a11y.describe(self.install, DRIVER_UNKNOWN)
         self.install.Bind(wx.EVT_BUTTON, self._on_install)
         self.install.Hide()
-        box_sizer.Add(self.install, 0, wx.ALL, 6)
-        self.driver_page = wx.Button(box, label="Open RODE's software page")
+        sizer.Add(self.install, 0, wx.ALL, 6)
+        self.driver_page = wx.Button(parent, label="Open RODE's software page")
         self.driver_page_acc = a11y.describe(self.driver_page, DRIVER_UNKNOWN)
         self.driver_page.Bind(wx.EVT_BUTTON, self._on_driver_page)
-        box_sizer.Add(self.driver_page, 0, wx.ALL, 6)
+        sizer.Add(self.driver_page, 0, wx.ALL, 6)
 
     def _on_show(self, event):
         event.Skip()
@@ -289,21 +287,20 @@ class MasterMixPage(scrolled.ScrolledPanel):
 
     def _build_processing(self, parent, sizer):
         """The Compellor and the output delay, on every Main Mix output."""
-        box_sizer, box = group(parent, sizer, "Master output processing")
-        self._add(Switch(self, box, box_sizer, "Master Compellor",
+        self._add(Switch(self, parent, sizer, "Master Compellor",
                          server.action_set_master_compellor, *self.field("compellor_on"),
                          description="Evens out the whole mix, on every Main Mix output.",
                          guard=self._guard))
         for key, label in COMPELLOR:
-            self._add(Slider(self, box, box_sizer, label, 0, 100,
+            self._add(Slider(self, parent, sizer, label, 0, 100,
                              lambda pct, k=key: server.action_set_compellor_param(k, pct / 100),
                              *self.field(f"compellor_{key}", scale=100), words=percent))
-        self._add(Switch(self, box, box_sizer, "Output delay", self._send_delay_on,
+        self._add(Switch(self, parent, sizer, "Output delay", self._send_delay_on,
                          *self.field("delay_on"),
                          description=(f"Lines the Main Mix outputs up with video, by up to "
                                       f"{DELAY_MAX_MS} milliseconds."),
                          guard=self._guard))
-        delay = self._add(Slider(self, box, box_sizer, "Output delay time", 0, DELAY_MAX_MS,
+        delay = self._add(Slider(self, parent, sizer, "Output delay time", 0, DELAY_MAX_MS,
                                  self._send_delay_ms, *self.field("delay_seconds", scale=1000),
                                  words=milliseconds))
         delay.slider.SetLineSize(10)

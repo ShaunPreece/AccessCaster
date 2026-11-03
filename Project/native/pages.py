@@ -6,9 +6,14 @@ and `read()` (after a job that rewrites the desk). When its pages change it call
 `frame.pages_changed(self)`, and the frame rebuilds the branch.
 
 A PAGE is one leaf: a `key` that survives a rebuild, a `title` for the tree, and the `window` shown
-on the right. Every page window is a child of `frame.host`.
+on the right. Every page window is a child of `frame.host`. A window with `before_show()` has it
+called while still hidden, each time the tree is about to show it.
 """
 import wx
+
+# When the focus lands somewhere (a menu or dialog closing, the window coming to the front), the
+# screen reader first reads where it landed; a line said before then is cut off by it.
+AFTER_FOCUS_MS = 250
 
 
 class Speaker:
@@ -26,24 +31,43 @@ class Speaker:
 
 
 class Page:
-    def __init__(self, key, title, window):
+    """A page in the window's tree: `window`, or `build`, which makes it HIDDEN the first time the
+    window is about to show it. Building every channel's page at once holds the window's thread
+    for about two seconds, and nothing answers the screen reader until it is done."""
+
+    def __init__(self, key, title, window=None, build=None):
         self.key = key
         self.title = title
-        self.window = window
+        self._window = window
+        self._build = build
+
+    @property
+    def built(self):
+        return self._window is not None
+
+    @property
+    def window(self):
+        if self._window is None:
+            self._window = self._build()
+        return self._window
 
 
-def page_box(panel, title, grow=False):
-    """The page's group box, named with its title so a screen reader names the page on the way in.
-    Returns (sizer, parent): controls go in the sizer and are created as children of `parent`.
-    `grow` makes the box fill the page's height, for a page whose content stretches (tabs)."""
+def page_body(panel, grow=False):
+    """The page's layout. Returns (sizer, parent): controls go in the sizer and are created as
+    children of `parent`. `grow` makes the body fill the page's height, for a page whose content
+    stretches (tabs). No group box: the tree has just named the page, so a group named the same
+    repeats it on the way in. A control that moves the focus here (`MainFrame.go_to`) names the
+    page in its own label instead."""
     outer = wx.BoxSizer(wx.VERTICAL)
     panel.SetSizer(outer)
-    return group(panel, outer, title, 1 if grow else 0)
+    body = wx.BoxSizer(wx.VERTICAL)
+    outer.Add(body, 1 if grow else 0, wx.EXPAND | wx.ALL, 4)
+    return body, panel
 
 
 def group(parent, sizer, title, proportion=0):
     """A named group box inside `sizer`, which a screen reader announces on the way into it.
-    Returns (sizer, parent) as `page_box` does."""
+    Returns (sizer, parent) as `page_body` does."""
     box = wx.StaticBoxSizer(wx.VERTICAL, parent, title)
     sizer.Add(box, proportion, wx.EXPAND | wx.ALL, 4)
     return box, box.GetStaticBox()
@@ -97,15 +121,14 @@ def set_items(listbox, labels):
 
 class MessagePage(wx.Panel):
     """A page that is only a sentence and, optionally, one button: a section that is still reading
-    or could not read. The sentence is a read-only text box rather than
-    static text so that it takes focus and is read when F6 moves into the page."""
+    or could not read. The sentence is a read-only text box named Status rather than static text,
+    so that it takes focus and is read when F6 moves into the page."""
 
-    def __init__(self, host, title, text, button=None, on_button=None):
+    def __init__(self, host, text, button=None, on_button=None):
         super().__init__(host)
-        sizer, parent = page_box(self, title)
-        self.text = wx.TextCtrl(parent, value=text, size=(460, 80),
-                                style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL)
-        sizer.Add(self.text, 0, wx.ALL, 6)
+        sizer, parent = page_body(self)
+        self.text = read_only(parent, sizer, "Status", height=80)
+        self.text.SetValue(text)
         self.button = None
         if button:
             self.button = wx.Button(parent, label=button)

@@ -13,7 +13,7 @@ from native import a11y
 from native.calls import call
 from native.dialogs import JobDialog, ListDialog, confirm, follow_job, report
 from native.pad_dialogs import READ_ONLY, content, where
-from native.pages import group, page_box
+from native.pages import page_body
 
 TITLE = "Pad maintenance"
 
@@ -59,7 +59,7 @@ class MaintPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self._exporting = False
-        sizer, parent = page_box(self, TITLE)
+        sizer, parent = page_body(self)
 
         self.clear_all = self._button(parent, sizer, "Clear all pads",
                                       "Empties every pad except the built-in System pads.",
@@ -76,25 +76,25 @@ class MaintPage(wx.Panel):
                                  "Deletes sound files no pad plays, to free pad storage. Cannot "
                                  "be undone.", self._on_tidy)
 
-        box_sizer, box = group(parent, sizer, "Export a pad's sound to this computer")
         line = wx.BoxSizer(wx.HORIZONTAL)
-        line.Add(wx.StaticText(box, label="Sound pad"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        line.Add(wx.StaticText(parent, label="Sound pad"), 0,
+                 wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
         self.sound_pads = []
-        self.export_choice = wx.Choice(box, size=(320, -1))
+        self.export_choice = wx.Choice(parent, size=(320, -1))
         a11y.describe(self.export_choice, "Only sound pads have a file to export: a voice effect "
                                           "is a recipe the desk builds, not a recording.")
         line.Add(self.export_choice, 0)
-        box_sizer.Add(line, 0, wx.ALL, 6)
+        sizer.Add(line, 0, wx.ALL, 6)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.export = wx.Button(box, label="Export this pad's sound")
+        self.export = wx.Button(parent, label="Export this pad's sound")
         a11y.describe(self.export, "Copies the sound to Documents, AccessCaster, Pad exports. The "
                                    "pad on the desk is unchanged.")
         self.export.Bind(wx.EVT_BUTTON, self._on_export)
         row.Add(self.export, 0, wx.RIGHT, 8)
-        folder = wx.Button(box, label="Open the exports folder")
+        folder = wx.Button(parent, label="Open the exports folder")
         folder.Bind(wx.EVT_BUTTON, self._on_open_folder)
         row.Add(folder, 0)
-        box_sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, 6)
         self.show()
 
     @property

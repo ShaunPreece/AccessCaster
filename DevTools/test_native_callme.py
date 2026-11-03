@@ -22,10 +22,8 @@ app = wx.App()
 
 
 class FakeDesk:
-    faders = {"labels": ["Mic 1", "Mic 2", "Bluetooth"], "layout": [0, 1, 10], "stereo": [],
-              "model": {}}
-
     def __init__(self):
+        self.faders = ON_FADER
         self.changed = []
 
     def subscribe(self, fn):
@@ -54,14 +52,15 @@ class FakeFrame:
         self.opened.append((route, key))
 
 
-def ready(online=True, on_fader=True):
-    return [{"key": "online", "ok": online, "text": "The unit is offline."},
-            {"key": "fader", "ok": on_fader, "text": "CallMe 1 is on no fader."}]
+ON_FADER = {"labels": ["Mic 1", "Mic 2", "CallMe 1"], "layout": [0, 1, 16], "stereo": [],
+            "model": {}}
+OFF_FADER = {"labels": ["Mic 1", "Mic 2", "Bluetooth"], "layout": [0, 1, 10], "stereo": [],
+             "model": {}}
 
 
 def payload(version=1, **values):
     data = {"ok": True, "version": version, "now": "No call.", "details": [], "plan": [
-        {"label": "Plan", "value": "Free"}], "ready": ready(), "hosting": True,
+        {"label": "Plan", "value": "Free"}], "online": True, "hosting": True,
         "hosting_locked": False, "code": "ABC123", "link": "https://example/ABC123",
         "ringtone": True, "auto_extend": False, "incoming": None, "announcing": True,
         "callme1_code": 16, "slots": [],
@@ -83,7 +82,7 @@ call_page, dial, incoming, plan = (section.call_page, section.dial_page, section
 # ---- before a read ---------------------------------------------------------------------------
 call_page._on_answer(wx.CommandEvent())
 check("a press before a read is refused", frame.said[-1], callme_section.UNREAD)
-check_true("and the Not ready group is hidden", not call_page.ready_box.IsShown())
+check_true("and Not ready for calls is hidden", not call_page.ready.IsShown())
 
 # ---- the payload on the pages ----------------------------------------------------------------
 section.show(payload(details=[{"label": "Bitrate", "value": "64 kbps"}]))
@@ -100,8 +99,10 @@ section.show(payload(details=[]))
 check("no call up says so", call_page.details.GetValue(), "No call is up.")
 
 # ---- not ready -------------------------------------------------------------------------------
-section.show(payload(ready=ready(online=True, on_fader=False)))
-check_true("CallMe 1 on no fader shows the group", call_page.ready_box.IsShown())
+frame.desk.faders = OFF_FADER
+frame.desk.listener("faders", None)
+check_true("CallMe 1 taken off its fader shows Not ready, from the desk state alone",
+           call_page.ready.IsShown())
 check_true("with the fader fix", call_page.put.IsShown())
 check_true("and not the wifi one", not call_page.wifi.IsShown())
 check("the faders are offered with what is on them", call_page.fader.GetString(2),
@@ -115,13 +116,17 @@ check("putting CallMe 1 on a fader says where, and who lost it", frame.said[-1],
       "CallMe 1 is on fader 2. Mic 2 is now on no fader.")
 check("the desk state takes the new layout", len(frame.desk.changed), 1)
 check_true("and CallMe is read again", reads)
-section.show(payload(ready=ready(online=False, on_fader=True)))
+frame.desk.faders = ON_FADER
+frame.desk.listener("read", {"ok": True})
+check_true("put back on a fader, a full read of the desk hides it",
+           not call_page.ready.IsShown())
+section.show(payload(online=False))
 check_true("offline shows the wifi fix", call_page.wifi.IsShown())
 check_true("and not the fader one", not call_page.put.IsShown())
 call_page.wifi.Command(wx.CommandEvent(wx.wxEVT_BUTTON))
 check("which goes to Device, Wireless connections", frame.opened, [("status", "network")])
 section.show(payload())
-check_true("ready hides the group", not call_page.ready_box.IsShown())
+check_true("ready hides Not ready", not call_page.ready.IsShown())
 
 # ---- the poll --------------------------------------------------------------------------------
 redraws = []

@@ -5,19 +5,23 @@ The state is the server's CallMe listener's, which hears every change the unit p
 reads the whole of it (`server.read_callme`, one model dump) after the desk state's first read, on
 F5 and after a fix; while one of its pages is shown it asks the listener (`server.read_callme_live`,
 no device read) every `POLL_MS`, and redraws only when its `version` moves. Every sentence comes
-from the server.
+from the server or `callme`.
+
+Whether CallMe 1 is on a fader is the one fact taken from the window's desk state instead
+(`problems`): the listener does not follow the faders, and the desk state does.
 
 A call ringing or ending is spoken by the listener; with announcements off, a new ringing call is
 said here instead, while a CallMe page is shown.
 """
 import wx
 
+import callme
 import server
 from native import a11y
 from native.calls import call
 from native.controls import Switch
 from native.dialogs import confirm
-from native.pages import Page, group, labelled, page_box, read_only, set_text
+from native.pages import Page, labelled, page_body, read_only, set_text
 
 TITLE = "CallMe"
 UNREAD = "CallMe has not been read yet."
@@ -35,8 +39,13 @@ def contact_label(contact):
     return f"{contact['name']}, code {contact['spoken']}"
 
 
-def problems(data):
-    return [r for r in (data or {}).get("ready") or [] if not r.get("ok")]
+def problems(data, faders):
+    """What stops a call working. Whether CallMe 1 is on a fader comes from the window's fader
+    layout, the one Fader assignment shows, which follows a change made anywhere."""
+    if not data:
+        return []
+    on_fader = data.get("callme1_code") in faders["layout"] if faders else None
+    return [r for r in callme.readiness(data.get("online"), on_fader) if not r["ok"]]
 
 
 def _button(parent, row, label, handler):
@@ -81,6 +90,8 @@ class CallMeSection:
     def _desk_event(self, event, _detail):
         if event == "read" and self.data is None and not self._reading:
             self.read()
+        elif event in ("read", "faders") and self.data is not None:
+            self.call_page.show_ready()
 
     def read(self, announce=False):
         if self._reading:
@@ -191,41 +202,40 @@ class CallPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self._ready_state = None
-        sizer, parent = page_box(self, "Current call")
+        sizer, parent = page_body(self)
 
         # Shown only while something stops calls working: offline, or CallMe 1 on no fader. A
         # guest's call then never reaches the unit, and nothing on the unit says so.
-        self.ready_sizer, box = group(parent, sizer, "Not ready for calls")
-        self.ready_box = box
-        self.ready = read_only(box, self.ready_sizer, "Needs sorting", height=80)
-        self.wifi = wx.Button(box, label="Go to Wireless connections")
+        self.ready_sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.ready_sizer, 0, wx.EXPAND)
+        self.ready = read_only(parent, self.ready_sizer, "Not ready for calls", height=80)
+        self.wifi = wx.Button(parent, label="Go to Wireless connections")
         a11y.describe(self.wifi, "Device, Wireless connections: join a wifi network there.")
         self.wifi.Bind(wx.EVT_BUTTON, lambda _e: self.frame.go_to("status", "network"))
         self.ready_sizer.Add(self.wifi, 0, wx.ALL, 6)
-        self.fader = labelled(box, self.ready_sizer, "Fader for CallMe 1",
+        self.fader = labelled(parent, self.ready_sizer, "Fader for CallMe 1",
                               lambda p: wx.Choice(p))
-        self.put = wx.Button(box, label="Put CallMe 1 on this fader")
+        self.put = wx.Button(parent, label="Put CallMe 1 on this fader")
         a11y.describe(self.put, "The channel on that fader comes off it.")
         self.put.Bind(wx.EVT_BUTTON, self._on_put)
         self.ready_sizer.Add(self.put, 0, wx.ALL, 6)
 
-        box_sizer, box = group(parent, sizer, "The call")
-        self.now = read_only(box, box_sizer, "Now")
+        self.now = read_only(parent, sizer, "Now")
         self.now.SetValue("Reading the unit.")
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.answer = _button(box, row, "Answer", self._on_answer)
+        self.answer = _button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
                                    "extends a call that is about to end.")
         # One fixed label: the server decides at the press, so a call that began ringing a moment
         # ago is declined rather than the guest already on the line being cut off.
-        self.end = _button(box, row, "Decline or hang up", self._on_end)
+        self.end = _button(parent, row, "Decline or hang up", self._on_end)
         a11y.describe(self.end, "Declines the call that is ringing, or else hangs up the call "
                                 "that is up.")
-        self.extend = _button(box, row, "Extend the call", self._on_extend)
+        self.extend = _button(parent, row, "Extend the call", self._on_extend)
         a11y.describe(self.extend, "Offered in the last five minutes of a call on a plan with an "
                                    "hour limit.")
-        box_sizer.Add(row, 0, wx.ALL, 6)
-        self.details = read_only(box, box_sizer, "Call details", height=80)
+        sizer.Add(row, 0, wx.ALL, 6)
+        self.details = read_only(parent, sizer, "Call details", height=80)
         self._show_ready([])
 
     def set_now(self, text):
@@ -235,7 +245,10 @@ class CallPage(wx.Panel):
         data = self.section.data
         self.set_now(data.get("now") or "")
         set_text(self.details, lines(data.get("details")) or "No call is up.")
-        self._show_ready(problems(data))
+        self.show_ready()
+
+    def show_ready(self):
+        self._show_ready(problems(self.section.data, self.section.frame.desk.faders))
 
     def _show_ready(self, wrong):
         keys = {r["key"] for r in wrong}
@@ -256,7 +269,6 @@ class CallPage(wx.Panel):
                  self.put: shown and fader}
         if focus in going and not going[focus]:
             self.now.SetFocus()
-        self.ready_box.Show(shown)
         self.ready_sizer.ShowItems(shown)
         if shown:
             self.wifi.Show(wifi)
@@ -318,7 +330,7 @@ class DialPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         self.contacts = []           # as listed; empty when the list holds a note
-        sizer, parent = page_box(self, "Make a call")
+        sizer, parent = page_body(self)
         self.code = labelled(parent, sizer, "Their CallMe code", lambda p: wx.TextCtrl(
             p, size=(260, -1), style=wx.TE_PROCESS_ENTER))
         a11y.describe(self.code, "Or a guest link they have sent you. Enter calls.")
@@ -327,15 +339,14 @@ class DialPage(wx.Panel):
         self.dial.Bind(wx.EVT_BUTTON, self._on_dial)
         sizer.Add(self.dial, 0, wx.ALL, 6)
 
-        box_sizer, box = group(parent, sizer, "Contacts")
-        self.list = labelled(box, box_sizer, "Contact", lambda p: wx.ListBox(
+        self.list = labelled(parent, sizer, "Contact", lambda p: wx.ListBox(
             p, choices=["Reading the contacts."], size=(420, 160)))
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.call_contact = _button(box, row, "Call selected contact", self._on_call_contact)
-        self.edit = _button(box, row, "Edit selected contact", self._on_edit)
-        self.delete = _button(box, row, "Delete selected contact", self._on_delete)
-        self.add = _button(box, row, "Add a contact", self._on_add)
-        box_sizer.Add(row, 0, wx.ALL, 6)
+        self.call_contact = _button(parent, row, "Call selected contact", self._on_call_contact)
+        self.edit = _button(parent, row, "Edit selected contact", self._on_edit)
+        self.delete = _button(parent, row, "Delete selected contact", self._on_delete)
+        self.add = _button(parent, row, "Add a contact", self._on_add)
+        sizer.Add(row, 0, wx.ALL, 6)
 
     def show(self, prefer=None):
         chosen = self._chosen()
@@ -472,7 +483,7 @@ class IncomingPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        sizer, parent = page_box(self, "Incoming calls")
+        sizer, parent = page_body(self)
         self.hosting = Switch(
             self, parent, sizer, "Accept incoming calls", server.action_callme_hosting,
             *section.field("hosting"),
@@ -534,7 +545,7 @@ class PlanPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        sizer, parent = page_box(self, "Plan")
+        sizer, parent = page_body(self)
         self.plan = read_only(parent, sizer, "Your plan", height=100)
         self.plan.SetValue("Reading the unit.")
         self.auto = Switch(self, parent, sizer, "Extend calls automatically",

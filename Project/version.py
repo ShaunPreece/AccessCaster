@@ -32,33 +32,80 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.63.1"
+__version__ = "2.63.2"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
-    ("2.63.1", [
-        ("Troubleshooting in the help",
-         "Known issues and If the unit stops responding are now one help topic, Troubleshooting, "
-         "as questions and answers: my desk has stopped responding, I can't hear a channel, my "
-         "screen reader has gone silent, and more. Going back to the encoder's levels now says "
-         "Virtual faders and monitor."),
-    ]),
-    ("2.63.0", [
-        ("AccessCaster now tells you when there is a new version",
-         "Once a day AccessCaster checks whether a newer version exists, and if one does, Windows "
-         "shows a notification from its tray icon. Nothing is installed until you choose to. Press "
-         "F12 anywhere in the AccessCaster window, or choose Install update from the tray menu, to "
-         "read what changed and decide: Install now, Skip this version, or Later. Installing "
-         "downloads the new version, checks it is genuinely ours, and restarts AccessCaster on it, "
-         "with this window staying open throughout. How often it checks, including only when you "
-         "ask, is on the Updates tab of App settings, beside Check for updates now."),
+    ("2.63.2", [
+        ("AccessCaster has its own window",
+         "The web page is replaced by a Windows window: a tree of categories on the left and the "
+         "chosen page on the right. F6 moves between them, Alt and 1 to 9 jump to a category, and "
+         "Ctrl and Tab move between pages, or between tabs on a page with tabs. F5 reads the "
+         "category from the unit again. Remote access has gone with the web page, so nothing "
+         "outside this computer can reach AccessCaster, and it no longer needs a firewall rule. "
+         "Installing over an earlier version offers to remove the one it added."),
 
-        ("App settings has a page of its own, on Alt plus 8",
-         "Everything about AccessCaster itself rather than the unit is now in one place: "
-         "announcements, keyboard shortcuts, level warnings and remote access, which were tabs on "
-         "the Device page, and starting at sign-in and saving these settings to a file, which were "
-         "on the Backups page, plus the new Updates tab. Device and Backups are now only about the "
-         "unit. Help and About moves to Alt plus 9, so it stays last."),
+        ("Closing the window keeps AccessCaster running",
+         "Your shortcuts and announcements keep working from the notification area, and opening "
+         "AccessCaster again brings the window back where you left it. To have closing the window "
+         "quit instead, turn off Keep running in the system tray on the App settings General page. "
+         "If the unit is part-way through something, such as a restore, Quit tells you and waits."),
+
+        ("AccessCaster tells you when there is a new version",
+         "Once a day, or as often as you choose, AccessCaster checks for a newer version and shows a "
+         "Windows notification if there is one. Nothing is installed until you choose. Press F12 in "
+         "the window, or use the tray menu, to hear what changed, then choose Install now, Skip "
+         "this version or Later. Installing closes AccessCaster for a moment, then starts it again "
+         "on the new version and tells you so. It only contacts updates.slightperception.com, and "
+         "refuses any version that is not signed as ours."),
+
+        ("App settings, on Alt plus 8",
+         "Everything about AccessCaster itself, rather than the unit, is in one place: "
+         "announcements, keyboard shortcuts, starting at sign-in, saving these settings to a file, "
+         "and updates. Help moves to Alt plus 9."),
+
+        ("Install the unit's firmware updates",
+         "When RODE has a new firmware version, the Device page's Hardware section offers to "
+         "install it. AccessCaster backs the unit up first, then lets the unit download and install "
+         "the update and restart, and tells you the version it comes back on. It takes about five "
+         "minutes, and the unit's setup screens may then need someone sighted."),
+
+        ("Wifi: scan, join and disconnect",
+         "Scan for networks lists what the unit can see, and choosing one asks only for its "
+         "password. Disconnect leaves the network the unit is on; joining it again needs the "
+         "password."),
+
+        ("The desk's state in the status bar",
+         "The spoken summary at start-up is replaced by the window's status bar, which lists only "
+         "what needs your attention, such as a mute, a pad left on or a card nearly full. Read it "
+         "with NVDA and End, Insert and Page Down in JAWS, or Narrator and backslash."),
+
+        ("One clip warning",
+         "The level warnings are replaced by one switch on the Announcements page, Warn when the "
+         "main mix clips, which says Main mix clipping when the main mix reaches full scale."),
+
+        ("Holding the encoder mutes what it controls",
+         "A long press of the encoder mutes the channel or monitor it is on, including a channel "
+         "chosen with its channel button, and the announcer says so."),
+
+        ("Announcements start sooner",
+         "A moving fader's levels are heard while it moves, not only where it stops. Restoring a "
+         "backup no longer reads out every level it puts back. Recording's sound can be speech, a "
+         "tone or nothing."),
+
+        ("SMART pads: restore only the pads",
+         "Pad maintenance can put back just the pads from a backup, leaving every other setting "
+         "alone. A factory reset now keeps a backup of the factory pads, so they can come back "
+         "later."),
+
+        ("Auto gain and the level check are quicker",
+         "Auto gain says each instruction before its start tone, and each take is 15 seconds "
+         "instead of 30. The level check starts and stops without a delay, and says quiet when the "
+         "channel goes quiet."),
+
+        ("Troubleshooting in the help",
+         "A new help topic answers questions such as my desk has stopped responding, I can't hear a "
+         "channel, and my screen reader has gone silent."),
     ]),
     ("2.62", [
         ("CallMe: take guests' calls without the touchscreen",
