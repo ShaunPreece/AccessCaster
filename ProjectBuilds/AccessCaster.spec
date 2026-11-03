@@ -2,9 +2,9 @@
 #
 # PyInstaller spec for AccessCaster (Windows tray app).
 #
-# Entry point is tray.py: it starts the local server, opens the accessible web UI, and parks the
-# app in the system tray. Built as onedir (a folder with AccessCaster.exe + an _internal/ dir),
-# which is faster to start than onefile and lets the bundled assets sit on disk for inspection.
+# Entry point is tray.py: it starts the local server, opens the native window (Project/native/), and
+# parks the app in the system tray. Built as onedir (a folder with AccessCaster.exe + an _internal/
+# dir), which is faster to start than onefile and lets the bundled assets sit on disk for inspection.
 # console=False so there is no console window (the pythonw equivalent).
 #
 # Read-only assets are bundled via `datas` and resolved at runtime by paths.resource_path (which
@@ -93,7 +93,7 @@ datas = [
 # comtypes is the level meters' only dependency (Project/meters.py talks to Windows' own audio
 # endpoints through it). It builds its COM interface wrappers at RUN time, so PyInstaller's import
 # detection sees less of it than it needs - name it, and its client module, explicitly.
-hiddenimports = ['hid', 'win32gui', 'win32con', 'win32api',
+hiddenimports = ['hid', 'win32gui', 'win32con', 'win32api', 'win32process',
                  'comtypes', 'comtypes.client', 'comtypes.stream']
 
 

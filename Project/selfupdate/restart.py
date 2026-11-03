@@ -14,10 +14,8 @@ registration also offers to relaunch after a crash, a hang or a reboot, and
 none of those is something this feature was asked to change: the flags below
 switch all three off.
 
-THE RESTARTED APP OPENS NO WINDOW. The browser window the update was started
-from is not part of the install and stays open; it reconnects to the new
-server and reloads itself. A fresh window as well would be a second copy of
-the page arriving on top of the first.
+THE RESTARTED APP OPENS ITS WINDOW. The update was started from the window,
+which closed with the app, and App settings there reads what the update did.
 """
 
 import ctypes
@@ -31,15 +29,9 @@ from .checker import log
 # RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT.
 _FLAGS = 1 | 2 | 8
 
-# What a restart after our own installer is started with. `tray.main` reads it
-# to come up in the tray without opening a page.
+# What a restart after our own installer is started with. The app treats it as
+# any launch a person makes, and opens its window.
 UPDATED_ARG = "--updated"
-
-
-def after_update(argv=None):
-    """True when this launch is Restart Manager bringing the app back after an
-    update it started."""
-    return UPDATED_ARG in (sys.argv if argv is None else argv)
 
 
 def register():

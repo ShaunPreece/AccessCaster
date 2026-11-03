@@ -2,7 +2,8 @@
 
 What it pins down: a toggle shortcut writes the OPPOSITE of the channel's real current state. The
 mute toggle may answer from the announcer's push-fed cache; solo, processing and phantom have no
-such cache and must read the channel, even when the mute cache is populated.
+such cache and must read the channel, even when the mute cache is populated. And the Open
+AccessCaster shortcut goes to the tray's window wherever one is hosted.
 
 Run: python DevTools/test_commands.py
 """
@@ -47,6 +48,22 @@ announcer.live_state = None
 writes.clear()
 commands.run("chan.mute:Mic1")
 check("mute with no announcer cache falls back to a read", writes, [("mute", False)])
+
+print("\nOPEN ACCESSCASTER goes to the tray's window, never the web page, once one is hosted")
+import app_window  # noqa: E402
+
+opened = []
+stub._focus_app_window = lambda: opened.append("web") or True
+stub.open_ui = lambda url: opened.append("browser")
+app_window.show = lambda: True
+check("a raised window is silent", commands.run("app.window")["message"], "")
+app_window.show = lambda: False
+check("a refused raise says where the window is", "Alt+Tab" in commands.run("app.window")["message"],
+      True)
+check("and neither opened the web page", opened, [])
+app_window.show = None
+commands.run("app.window")
+check("a dev server run, with no window, raises the web page", opened, ["web"])
 
 print()
 sys.exit(_testkit.finish())

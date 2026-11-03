@@ -10,6 +10,9 @@ Keys:
 
 Arrowing the tree shows each page and leaves the focus in the tree. Selecting a section that has
 pages shows its first page.
+
+The window belongs to the tray (`tray.TrayApp`), which runs the service. Closing it hides it, and
+the tray shows it again with `present`; only Quit destroys it.
 """
 import wx
 
@@ -107,22 +110,12 @@ class MainFrame(Speaker, wx.Frame):
     # ---- the service -----------------------------------------------------------------------
 
     def start(self):
-        """Bring the service up off the UI thread, then let each section read the desk."""
-        def bring_up():
-            # No "AccessCaster started": the window opening in front already says so.
-            started = server.start_server_managed(open_browser=False, greeting="")
-            if started is None:
-                return {"ok": False, "message": "AccessCaster could not start: another copy is "
-                                                "already running on this computer."}
-            # Publishes the desk's hardware id, which every per-desk setting is filed under.
-            server.read_device_status()
-            return {"ok": True}
-        call(self, bring_up, done=self._started)
+        """The service is up: read the device status, then let each section read the desk. The
+        device status publishes the desk's hardware id, which every per-desk setting is filed
+        under."""
+        call(self, server.read_device_status, done=self._started)
 
-    def _started(self, reply):
-        if not reply.get("ok"):
-            self.say(reply["message"])
-            return
+    def _started(self, _reply):
         self.desk.start()
         for section in self.sections:
             if hasattr(section, "start"):
@@ -145,8 +138,19 @@ class MainFrame(Speaker, wx.Frame):
         self.tree.SelectItem(item)
         self._focus_page()
 
+    def reread(self, route):
+        """Read the section `route` again, after a change made outside the window."""
+        next(s for s in self.sections if s.route == route).refresh(False)
+
+    def check_updates(self):
+        for section in self.sections:
+            if hasattr(section, "check_updates"):
+                section.check_updates()
+
     def say(self, text, recent=False):
-        self._notifier.say(text, recent)
+        # A closed window says nothing: the user has left it.
+        if self.IsShown():
+            self._notifier.say(text, recent)
 
     def set_status(self, text):
         if self.status.GetStatusText() != text:
@@ -197,7 +201,8 @@ class MainFrame(Speaker, wx.Frame):
         self.host.Freeze()
         if self._shown:
             self._shown.Hide()
-        window.Show()
+        # While the window is closed its page stays hidden too; `present` shows it.
+        window.Show(self.IsShown())
         self._shown = window
         self.host.Layout()
         self.host.Thaw()
@@ -274,9 +279,7 @@ class MainFrame(Speaker, wx.Frame):
                 section.refresh(True)
             return
         if key == wx.WXK_F12 and mods == wx.MOD_NONE:
-            for section in self.sections:
-                if hasattr(section, "check_updates"):
-                    section.check_updates()
+            self.check_updates()
             return
         if (key == wx.WXK_TAB and mods in (wx.MOD_CONTROL, wx.MOD_CONTROL | wx.MOD_SHIFT)
                 and not self._in_tabs()):
@@ -290,8 +293,28 @@ class MainFrame(Speaker, wx.Frame):
                 return
         event.Skip()
 
+    # ---- open and closed --------------------------------------------------------------------
+
+    def present(self):
+        """Show the window as it was closed. The page goes first, so that activating the window
+        puts the focus back on the control it was on."""
+        if self._shown and not self._shown.IsShown():
+            self._shown.Show()
+            self.host.Layout()
+        if self.IsIconized():
+            self.Iconize(False)
+        self.Show()
+
     def _on_close(self, event):
+        if event.CanVeto():
+            # To the tray. The window goes first, so Windows records where the focus was as it
+            # deactivates; hiding the page then stops its polls (CallMe, the driver line, the
+            # recording clock), which start and stop with their page's EVT_SHOW.
+            event.Veto()
+            self.Hide()
+            if self._shown:
+                self._shown.Hide()
+            return
         self.desk.stop()
         self._notifier.close()
-        server.stop_server()
         event.Skip()

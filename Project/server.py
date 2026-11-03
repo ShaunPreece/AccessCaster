@@ -10177,15 +10177,6 @@ def _focus_app_window() -> bool:
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-    user32.IsIconic.argtypes = [wintypes.HWND]
-    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-    user32.SetForegroundWindow.restype = wintypes.BOOL
-    user32.BringWindowToTop.argtypes = [wintypes.HWND]
-    # Declared like the rest: an undeclared restype is a C int, which TRUNCATES a 64-bit HWND and
-    # would make the success check below compare two different halves of the same window.
-    user32.GetForegroundWindow.argtypes = []
-    user32.GetForegroundWindow.restype = wintypes.HWND
 
     found = []
 
@@ -10206,7 +10197,27 @@ def _focus_app_window() -> bool:
         return False
     if not found:
         return False
-    hwnd = found[0]
+    return raise_window(found[0])
+
+
+def raise_window(hwnd: int) -> bool:
+    """Restore `hwnd` if minimised and bring it to the foreground, from any thread. Returns whether
+    Windows made it the foreground window. Logs the outcome as `window.raise`."""
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    # Declared: an undeclared restype is a C int, which TRUNCATES a 64-bit HWND and would make the
+    # success check below compare two different halves of the same window.
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
     SW_RESTORE = 9
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)

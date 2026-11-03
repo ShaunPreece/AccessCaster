@@ -328,7 +328,6 @@ check("the tray's request is taken once", (app_updates.take_request(), app_updat
 print("\nTHE SERVER AND THE INSTALLER")
 check("every update route is local only", server.UPDATE_ROUTES - server.LOCAL_ONLY_ROUTES, set())
 check("and every one of them is served", server.UPDATE_ROUTES - set(server.POST_ROUTES), set())
-check("a restart after an update is recognised", restart.after_update(["--updated"]), True)
 check("a source run never registers a restart", restart.register(), False)
 iss = (REPO / "ProjectBuilds" / "installer.iss").read_text(encoding="utf-8")
 check_true("a silent update does not re-add the firewall rule, which would raise UAC",

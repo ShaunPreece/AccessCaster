@@ -1,21 +1,22 @@
-"""AccessCaster - system-tray host (the packaged Windows app's entry point).
+"""AccessCaster - the packaged Windows app's entry point: the service, the window and the tray icon,
+in one process.
 
-Running this is the "app". It starts the local AccessCaster server in the background, opens the
-accessible web UI, and parks an icon in the Windows notification area (system tray). Unlike the
-plain `python server.py` launcher, closing the web window does NOT quit: the server keeps running
-behind the tray icon. The user fully quits from the tray menu.
+Running this is the "app". It brings the service up (announcer, shortcuts, watchers and the local
+web server) on a background thread, opens the native window (`native/`), and parks an icon in the
+Windows notification area. Closing the window hides it: the service keeps running behind the icon,
+and the window comes back as it was left. The user quits from the tray menu.
 
 Tray right-click (or the keyboard Applications key / Shift+F10 on the selected icon) opens a
 NATIVE Win32 popup menu, and native is the whole point: a screen reader reads it as a standard menu
 without anything of ours having to describe it. The menu offers:
 
-  - Open AccessCaster    re-open / focus the configurator web page
+  - Open AccessCaster    show the window
   - Announcer            checkable toggle for the spoken button-press announcer
   - Diagnostic log       open the app's own log of what it did (see Project/diagnostics.py)
   - Check for updates    or "Install update to version X" once one is waiting (app_updates.py)
-  - Quit                 stop the server and exit
+  - Quit                 stop the service and exit
 
-The icon is also how the update feature reaches somebody who is not looking at the page: a new
+The icon is also how the update feature reaches somebody who is not looking at the window: a new
 version is announced as a WINDOWS NOTIFICATION from it (`_notify`), which a screen reader reads
 without the focus moving and without the app's own voice talking over it.
 
@@ -23,17 +24,27 @@ Accessibility: the icon registers as NOTIFYICON_VERSION_4 so the shell delivers 
 selection (NIN_KEYSELECT) and context-menu (WM_CONTEXTMENU) notifications, i.e. the whole thing
 is operable from the keyboard via the notification area (Win+B), not mouse-only. The menu is a
 real HMENU shown with TrackPopupMenu, with the Announcer state exposed as a native checkmark.
+
+The icon's window is a plain Win32 window on the wx thread: wx's message loop dispatches its
+messages like any other window's, so the icon and the window share one thread and nothing here
+needs a lock.
 """
 
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
 import sys
+import threading
 import time
+from ctypes import wintypes
+
+import wx
 
 import announcer
 import app_updates
+import app_window
 import autostart
 import diagnostics
 import server
@@ -41,12 +52,13 @@ import speech
 import win32api
 import win32con
 import win32gui
+import win32process
+from native.frame import MainFrame
 from paths import resource_path
 from selfupdate import phrases as update_phrases
-from selfupdate import restart as update_restart
 
 APP_NAME = "AccessCaster"
-URL = f"http://localhost:{server.HTTP_PORT}/"
+TRAY_CLASS = "AccessCasterTray"
 
 # Tray callback + menu command identifiers.
 WM_TRAY = win32con.WM_USER + 20          # our private "the tray icon did something" message
@@ -55,8 +67,13 @@ ID_ANNOUNCE = 1024
 ID_LOG = 1026
 ID_UPDATE = 1027
 ID_QUIT = 1025
-# Posted by another thread that needs the page shown: raising a window is done on this one.
-WM_SHOW_PAGE = win32con.WM_USER + 21
+# Posted to show and raise the window: by another thread, and by a second launch of the app, which
+# grants this process the foreground first.
+WM_OPEN_WINDOW = win32con.WM_USER + 21
+# Sent from another thread: shows the window and returns its handle, and raises nothing. The sender
+# raises it, because the right to take the foreground is the sender's (`_show_from_any_thread`).
+WM_SHOW_WINDOW = win32con.WM_USER + 22
+_SHOW_TIMEOUT_MS = 10000
 
 # Shell notification-icon constants not all exposed by win32con.
 NIN_SELECT = win32con.WM_USER + 0        # left-click / Space on the selected icon
@@ -72,44 +89,145 @@ NOTIFYICON_VERSION_4 = 4
 _TRAY_ICON_ID = 1
 
 # One press can arrive as several open events (see _on_tray); repeats inside this window are
-# dropped so they cannot open a second browser window before the first one exists.
+# dropped.
 _OPEN_DEBOUNCE_S = 1.0
 _OPEN_EVENTS = (NIN_SELECT, NIN_KEYSELECT, win32con.WM_LBUTTONUP, win32con.WM_LBUTTONDBLCLK)
 
+_COULD_NOT_START = ("AccessCaster could not start: another copy is already running on this "
+                    "computer.")
 
-def _show_page() -> None:
-    """Raise the app window if one is open, otherwise open a fresh one."""
-    if not server._focus_app_window():
-        server.open_ui(URL)
+_user32 = ctypes.windll.user32
+_user32.GetLastActivePopup.argtypes = [wintypes.HWND]
+_user32.GetLastActivePopup.restype = wintypes.HWND
+_user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                                        wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
+                                        ctypes.POINTER(ctypes.c_size_t)]
+_user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
+_SMTO_ABORTIFHUNG = 0x0002
+
+
+def _to_raise(hwnd) -> int:
+    """The window to raise for `hwnd`: a modal dialog open on it, or the window itself."""
+    return _user32.GetLastActivePopup(hwnd) or hwnd
 
 
 class TrayApp:
-    def __init__(self):
+    """The process: the service, the tray icon and the window, all owned here.
+
+    The window is built the first time it is wanted and kept when it is closed, so it reopens
+    instantly and where it was left; it is destroyed only by Quit."""
+
+    def __init__(self, app: wx.App, loop: wx.GUIEventLoop, open_window: bool):
+        self.app = app
+        self.loop = loop
         self.hwnd = None
+        self.frame = None
+        self._ui_thread = threading.get_ident()
+        self._starting = True             # the service is still coming up
+        self._serving = False
+        self._quitting = False
         self._last_open = float("-inf")
         self._create_window()
         self._add_icon()
         app_updates.notify = self._notify
-        app_updates.open_page = lambda: win32gui.PostMessage(self.hwnd, WM_SHOW_PAGE, 0, 0)
+        app_updates.open_page = lambda: win32gui.PostMessage(self.hwnd, WM_OPEN_WINDOW, 0, 0)
+        app_window.show = self._show_from_any_thread
+        # Windows ending the session closes the window through wx as well as through the icon's
+        # window. wx's own answer to the query closes the window, which hides it, and so refuses to
+        # let Windows end the session; these replace it.
+        app.Bind(wx.EVT_QUERY_END_SESSION, lambda event: None)
+        app.Bind(wx.EVT_END_SESSION, lambda event: self._quit())
+        if open_window:
+            self.open_window()
+        # Started at sign-in, the announcer's greeting is what says the app is running. With the
+        # window opening in front, it says so already.
+        greeting = "" if open_window else announcer.GREETING_STARTED
+        threading.Thread(target=self._bring_up, args=(greeting,), name="service-start",
+                         daemon=True).start()
 
-    # -- hidden message-only-ish window that receives the tray callbacks --------------------------
+    # -- the service ------------------------------------------------------------------------------
+    def _bring_up(self, greeting: str) -> None:
+        started = server.start_server_managed(open_browser=False, greeting=greeting)
+        wx.CallAfter(self._brought_up, started is not None)
+
+    def _brought_up(self, ok: bool) -> None:
+        self._starting = False
+        self._serving = ok
+        if self._quitting:
+            # Quit was chosen while the service came up: finish what `_quit` left.
+            self._finish_quit()
+            return
+        if not ok:
+            if self.frame:
+                wx.MessageBox(_COULD_NOT_START, APP_NAME, wx.OK | wx.ICON_WARNING, self.frame)
+            self._quit()
+            return
+        if self.frame:
+            self.frame.start()
+
+    # -- the window -------------------------------------------------------------------------------
+    def _show_window(self) -> int:
+        """Show the window, building it the first time. Returns its handle, or 0 while quitting.
+        Raises nothing: that needs the right to take the foreground, which the caller holds."""
+        if self._quitting:
+            return 0
+        if not self.frame:
+            self.frame = MainFrame()
+            self.frame.present()
+            self.frame.tree.SetFocus()
+            if self._serving:
+                self.frame.start()
+        else:
+            self.frame.present()
+        return self.frame.GetHandle()
+
+    def open_window(self) -> None:
+        """Show and raise the window, on this thread, then open an update decision the tray asked
+        for (`app_updates.request_decision`)."""
+        hwnd = self._show_window()
+        if not hwnd:
+            return
+        server.raise_window(_to_raise(hwnd))
+        if self._serving and app_updates.take_request():
+            self.frame.check_updates()
+
+    def _show_from_any_thread(self) -> bool:
+        """`app_window.show`. The Open AccessCaster shortcut calls this on the hotkey thread, inline,
+        where the foreground right exists (hotkeys._FOREGROUND_COMMANDS). The window is shown on
+        the wx thread by a SENT message, so the shortcut's handler is still running when it returns,
+        and the raise happens back on the calling thread."""
+        if threading.get_ident() == self._ui_thread:
+            hwnd = self._show_window()
+        else:
+            result = ctypes.c_size_t(0)
+            if not _user32.SendMessageTimeoutW(self.hwnd, WM_SHOW_WINDOW, 0, 0, _SMTO_ABORTIFHUNG,
+                                               _SHOW_TIMEOUT_MS, ctypes.byref(result)):
+                return False
+            hwnd = result.value
+        return bool(hwnd) and server.raise_window(_to_raise(hwnd))
+
+    # -- hidden window that receives the tray callbacks -------------------------------------------
     def _create_window(self) -> None:
         hinst = win32gui.GetModuleHandle(None)
         wc = win32gui.WNDCLASS()
         wc.hInstance = hinst
-        wc.lpszClassName = "AccessCasterTray"
+        wc.lpszClassName = TRAY_CLASS
         wc.lpfnWndProc = {
             WM_TRAY: self._on_tray,
             win32con.WM_COMMAND: self._on_command,
-            win32con.WM_DESTROY: self._on_destroy,
-            win32con.WM_CLOSE: lambda h, m, w, l: win32gui.DestroyWindow(h),
-            WM_SHOW_PAGE: self._on_show_page,
+            win32con.WM_CLOSE: lambda h, m, w, l: self._quit() or 0,
+            WM_OPEN_WINDOW: lambda h, m, w, l: self.open_window() or 0,
+            WM_SHOW_WINDOW: lambda h, m, w, l: self._show_window(),
             win32con.WM_QUERYENDSESSION: lambda h, m, w, l: 1,
             win32con.WM_ENDSESSION: self._on_end_session,
         }
         class_atom = win32gui.RegisterClass(wc)
         self.hwnd = win32gui.CreateWindow(class_atom, APP_NAME, win32con.WS_OVERLAPPED,
                                           0, 0, 0, 0, 0, 0, hinst, None)
+        # A process's first ShowWindow takes the show state its launcher asked for, whatever it
+        # passes, so a launch with a hidden window style would hide the main window while wx
+        # records it as shown, and no later Show could bring it up. This window takes that call.
+        win32gui.ShowWindow(self.hwnd, win32con.SW_HIDE)
         win32gui.UpdateWindow(self.hwnd)
 
     def _load_icon(self):
@@ -145,11 +263,11 @@ class TrayApp:
             self._show_menu()
         elif event == NIN_BALLOONUSERCLICK:
             # The only notifications this icon raises are the update's, so choosing one is asking
-            # for the decision. With nothing waiting it simply shows the page.
+            # for the decision. With nothing waiting it simply shows the window.
             if app_updates.held_version() is not None:
                 app_updates.request_decision()
             else:
-                _show_page()
+                self.open_window()
         elif event in _OPEN_EVENTS:
             # WM_LBUTTONUP is the only event the Windows 11 hidden-icons overflow sends, for a
             # click, Enter, a screen reader or UIA Invoke alike: it never sends NIN_SELECT. On the
@@ -157,7 +275,7 @@ class TrayApp:
             now = time.monotonic()
             if now - self._last_open >= _OPEN_DEBOUNCE_S:
                 self._last_open = now
-                _show_page()
+                self.open_window()
         return 0
 
     # -- the native context menu -----------------------------------------------------------------
@@ -187,13 +305,13 @@ class TrayApp:
     def _on_command(self, hwnd, msg, wparam, lparam):
         cmd = win32api.LOWORD(wparam)
         if cmd == ID_OPEN:
-            _show_page()
+            self.open_window()
         elif cmd == ID_ANNOUNCE:
             self._toggle_announcer()
         elif cmd == ID_LOG:
             self._open_log()
         elif cmd == ID_UPDATE:
-            # A version already waiting goes straight to the decision on the page. Otherwise the
+            # A version already waiting goes straight to the decision in the window. Otherwise the
             # check runs on its own thread and answers in a notification, or opens the decision.
             if app_updates.held_version() is not None:
                 app_updates.request_decision()
@@ -229,73 +347,90 @@ class TrayApp:
                update_phrases.NOTIFICATION_TITLE, NIIF_INFO | NIIF_RESPECT_QUIET_TIME)
         win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
 
-    def _on_show_page(self, hwnd, msg, wparam, lparam):
-        _show_page()
-        return 0
-
     def _on_end_session(self, hwnd, msg, wparam, lparam):
         """Windows is ending the session, or the installer's Restart Manager is closing the app to
         replace its files (lParam ENDSESSION_CLOSEAPP). Either way stop as Quit does: the shortcuts,
         the HID handles and the port are let go, and an update can then restart the app. Without
-        an answer here Restart Manager cannot close a tray app, which has no visible window."""
+        an answer here Restart Manager cannot close the app while its window is hidden."""
         if wparam:
             self._quit()
         return 0
 
     def _toggle_announcer(self) -> None:
-        # Saved or not by the server, by the same rule as the page's switch and the shortcut.
+        # Saved or not by the server, by the same rule as the window's switch and the shortcut.
         announcer.action_set_announce(not speech.enabled.is_set())
+        if self.frame:
+            self.frame.reread("settings")
 
     def _quit(self) -> None:
+        """Quit: the window, the icon, then the service. Safe to call more than once."""
+        if self._quitting:
+            return
+        self._quitting = True
         self._remove_icon()
-        server.stop_server()
-        win32gui.DestroyWindow(self.hwnd)
+        # A dialog open in the window runs a loop of its own inside this one, and the process waits
+        # on it: end it before the window goes.
+        for window in wx.GetTopLevelWindows():
+            if isinstance(window, wx.Dialog) and window.IsModal():
+                window.EndModal(wx.ID_CANCEL)
+        if self.frame:
+            self.frame.Close(force=True)
+        if not self._starting:
+            self._finish_quit()
 
-    def _on_destroy(self, hwnd, msg, wparam, lparam):
-        self._remove_icon()
-        win32gui.PostQuitMessage(0)
-        return 0
+    def _finish_quit(self) -> None:
+        if self._serving:
+            server.stop_server()
+        win32gui.DestroyWindow(self.hwnd)
+        # Not `Exit`, which is ignored unless this loop is the active one: Quit can arrive inside a
+        # dialog's loop, which ends first.
+        self.loop.ScheduleExit()
+
+
+def _running_instance():
+    """This session's running copy's icon window, or None. FindWindow sees only this desktop's
+    windows, so another account's copy is never found here (see `server._other_account_holds_port`
+    for that case)."""
+    try:
+        return win32gui.FindWindow(TRAY_CLASS, None) or None
+    except win32gui.error:
+        return None
 
 
 def main() -> int:
     # STARTED BY THE RUN ENTRY, OR BY A PERSON? The Run value carries `--startup` (see
     # autostart.py, which writes the same string installer.iss does). At sign-in we come up in the
-    # tray with the announcer and the shortcuts live and open NOTHING: a browser window taking the
-    # focus of whatever you signed in to do is the reason people turn autostart off again.
-    at_login = autostart.started_at_login()
-    # Brought back by the installer after an update. The page the update was started from is still
-    # open and reloads itself on the new version, so this opens nothing either.
-    quiet = at_login or update_restart.after_update()
+    # tray with the announcer and the shortcuts live and open NOTHING: a window taking the focus
+    # of whatever you signed in to do is the reason people turn autostart off again. A restart
+    # after an update opens the window: the update was started from it, and App settings there
+    # reads what the update did.
+    open_window = not autostart.started_at_login()
 
-    # ANOTHER SIGNED-IN ACCOUNT ON THIS PC HAS IT: refuse and stop. Checked before the
-    # already-serving branch below, which answers over localhost and so cannot tell whose instance
-    # replied; without this it opens the other account's UI, in which nothing this user presses or
-    # hears belongs to them.
+    # ANOTHER SIGNED-IN ACCOUNT ON THIS PC HAS IT: refuse and stop. Its windows are on another
+    # desktop, so `_running_instance` cannot see it.
     if server._other_account_holds_port(server.HTTP_PORT):
-        server._refuse_other_account(not quiet)
+        server._refuse_other_account(open_window)
         return 1
 
-    # Single instance: if a server is already answering, just open/focus its page and exit. This
-    # stops a second tray + server starting, and never disturbs the one already running.
-    if server._app_already_serving(server.HTTP_PORT):
-        # ...except at login or after an update, where there is nothing to show and nobody asked to see it. Something
-        # is already serving, which is the whole point, so leave it alone and go.
-        if quiet:
-            return 0
-        _show_page()
+    # Single instance: a copy already running in this session shows its window, and this one goes.
+    running = _running_instance()
+    if running is not None:
+        if open_window:
+            # This process was just started by the user, so it holds the foreground right, and
+            # hands it to the running copy before asking it to raise its window.
+            _, pid = win32process.GetWindowThreadProcessId(running)
+            _user32.AllowSetForegroundWindow(pid)
+            win32gui.PostMessage(running, WM_OPEN_WINDOW, 0, 0)
         return 0
 
-    started = server.start_server_managed(open_browser=not quiet)
-    if started is None:
-        # A race: someone else grabbed the port in the moment between our check and bind. Same
-        # reasoning as above - at login the other instance IS the outcome we wanted, silently.
-        if quiet:
-            return 0
-        _show_page()
-        return 0
-
-    TrayApp()
-    win32gui.PumpMessages()
+    app = wx.App()
+    # An event loop of our own rather than `app.MainLoop`, which returns at once when no window
+    # exists, as at sign-in, and ends when the last one is destroyed. This one runs until Quit.
+    loop = wx.GUIEventLoop()
+    TrayApp(app, loop, open_window)
+    activator = wx.EventLoopActivator(loop)
+    loop.Run()
+    del activator
     return 0
 
 

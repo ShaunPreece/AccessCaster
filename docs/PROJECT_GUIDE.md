@@ -248,8 +248,9 @@ baseline" was never silent.
 
 ## How the app is built
 
-A Windows system-tray app (`Project/tray.py`) that starts a local HTTP server (`server.py`) and opens
-a web page. The UI is plain HTML and JavaScript talking to a JSON API. The server binds all
+A Windows system-tray app (`Project/tray.py`) that runs the service, a local HTTP server
+(`server.py`), and a native window (`native/`) in one process. The web page (`static/`, plain HTML
+and JavaScript talking to a JSON API) is still served, but the tray no longer opens it. The server binds all
 interfaces so a phone in another room can drive the desk, and a token on the link keeps everyone
 else on that network out: requests from the machine itself are always allowed, anything else needs
 the token once, and a cookie carries it from then on. Everything that touches USB is
@@ -271,9 +272,8 @@ The layers, bottom up:
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
 - `server.py` exposes it as an API, and `static/` is the accessible UI.
-- `native/` (started by `native_app.py`) is a wxPython window holding every section the web page
-  has, built to replace it. It runs the same service in the same process and calls the server's
-  functions directly.
+- `native/` is a wxPython window holding every section the web page has, built to replace it.
+  `tray.py` hosts it in the service's own process, and it calls the server's functions directly.
 
 Two rules do most of the work of keeping it honest:
 
@@ -1730,8 +1730,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   installer cuts the sentence off. No `proceed` within `PROCEED_WITHIN_S` installs nothing.
 - **THE APP DOES NOT EXIT ITSELF TO INSTALL.** Setup's Restart Manager closes it (the tray answers
   WM_QUERYENDSESSION and WM_ENDSESSION) and `/RESTARTAPPLICATIONS` brings it back with `--updated`,
-  registered by `restart.register` just before. The restart opens no page: the browser window is not
-  part of the install, stays open, and reloads itself when a new version answers its heartbeat.
+  registered by `restart.register` just before. The restart opens the window, which the install
+  closed, and App settings there takes the update's report.
 - **`/VERYSILENT`, never `/SILENT`**: under `/SILENT` Setup's progress window takes focus on its
   Cancel button and a Space cancels the install. **And the installer must not prompt during a
   silent run**: the firewall task is remembered from the last install, so `installer.iss` skips it
@@ -1748,6 +1748,28 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Native window
 
+- **THE WINDOW BELONGS TO THE TRAY, AND CLOSING IT HIDES IT** (`MainFrame._on_close` vetoes; only
+  Quit's `Close(force=True)` destroys it). It is built the first time it is wanted, never at
+  sign-in. On close the window hides BEFORE its page, so Windows records the focused control as it
+  deactivates; hiding the page then stops its polls, which start and stop on the page's EVT_SHOW.
+  `present` shows the page first, so activation lands the focus back on that control. A closed
+  window says nothing (`say`).
+- **THE PROCESS RUNS ITS OWN `wx.GUIEventLoop`, NOT `app.MainLoop`** (`tray.main`). wxPython's
+  `MainLoop` returns at once when no window exists, so a sign-in start would exit, and it ends
+  when the last window is destroyed. Quit ends the loop with `ScheduleExit`: `Exit` is ignored
+  while a dialog's loop is the active one, and the process then never ends. Quit ends any modal
+  dialog first, for the same reason.
+- **THE TRAY'S OWN WINDOW TAKES THE PROCESS'S FIRST `ShowWindow`** (`_create_window`). The first
+  call takes the show state the launcher asked for, whatever it passes, so a hidden launch would
+  hide the main window while wx records it as shown, and no later `Show` brings it up.
+- **wx'S DEFAULT `EVT_QUERY_END_SESSION` CLOSES THE TOP WINDOW**, which the window vetoes by hiding,
+  so the app would refuse to let Windows end the session or Restart Manager close it. `TrayApp`
+  binds both session events on the app itself.
+- **THE OPEN SHORTCUT SHOWS THE WINDOW WITH A SENT MESSAGE AND RAISES IT ON THE HOTKEY THREAD**
+  (`TrayApp._show_from_any_thread`). The foreground right belongs to the hotkey handler while it
+  runs (`hotkeys._FOREGROUND_COMMANDS`); `SendMessageTimeout` keeps it running while the wx thread
+  shows the window, then `server.raise_window` raises it from the handler. A second launch hands
+  its own right over with `AllowSetForegroundWindow` before posting `WM_OPEN_WINDOW`.
 - **NOTHING IN `native/` OUTSIDE `native/win/` CALLS A WINDOWS API.** Screen reader speech and
   control descriptions go through `native.announce` and `native.a11y`, which import the platform's
   own. Import `native.win` directly, or add a Win32 call to a page, and a port to another platform
@@ -2208,9 +2230,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   called by the old name. `autostart.py` carries `LEGACY_VALUE_NAME` for the same reason - two Run
   entries naming one exe start the app twice at sign-in.
   **The `--startup` flag is the whole difference between a login launch and a manual one** - at login
-  `tray.main` passes `open_browser=False` and comes up in the tray with the announcer and shortcuts
-  live. The tray path already runs `watchdog=False`, so a page-less instance does NOT hit the
-  "no webpage connected in 120 s, stop" rule; check that first if it ever seems to quit by itself.
+  `tray.main` opens no window and comes up in the tray with the announcer and shortcuts live. The
+  tray path runs `watchdog=False`, so a page-less instance does NOT hit the "no webpage connected
+  in 120 s, stop" rule.
   **A source run REFUSES to write it** rather than naming python.exe plus a script path, which would
   break silently at a login.
 
@@ -2738,8 +2760,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the hidden-icons overflow receives only `WM_LBUTTONDOWN`/`WM_LBUTTONUP` when pressed, by mouse,
   Enter, a screen reader or UIA Invoke (measured 17th October 2026, `NOTIFYICON_VERSION_4`), so an
   icon answering only `NIN_SELECT`/`NIN_KEYSELECT` does nothing there. One taskbar click can send
-  both, so `TrayApp._on_tray` drops repeat open events within `_OPEN_DEBOUNCE_S`; without that,
-  `_show_page` can open two app windows before the first exists.
+  both, so `TrayApp._on_tray` drops repeat open events within `_OPEN_DEBOUNCE_S`.
 - **A RUNNING JOB OUTRANKS EVERY STOP TRIGGER** (added 21st September 2026, `_lifecycle_stop_reason`
   takes `job_running`). A backup is mid-read of the model and a restore is part way through writing
   settings and pads; a page closing must not abandon either. This is right on the
