@@ -1534,11 +1534,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   speaks "Resuming" and waits for it to finish (`speech.say_and_wait`) before it sends the command; a
   resume from the unit's button is already recording by the time we hear it.
 - **A RECORD TONE IS QUEUED IN `_recorder_state_changed` BEFORE `suspend_for_record`, AND PLAYS FOR
-  THE APP'S OWN PRESSES TOO** (`announcer.record_tones`, `recorder.record_cue`). The speech thread
+  THE APP'S OWN PRESSES TOO** (`announcer.record_feedback` "tone", `recorder.record_cue`). The speech thread
   plays what is already queued after announcements go off, but `speech._submit` drops anything
   submitted after: queued after the suspend, or left to `action_record`'s reply, which returns after
   the watcher has already suspended, a start is silent. That is also why a shortcut's spoken reply to
   a start is never heard. With tones on, a resume from the app skips "Resuming": the start tone marks it.
+- **RECORDING'S SOUND IS ONE OF THREE, NEVER TWO AT ONCE** (`announcer.RECORD_FEEDBACK`: speak, tone,
+  silent). Speech after a tone repeats it and lands in the take. "Say nothing" silences only the
+  transport changes `recorder.record_cue` names; a card or drive going in or out, and a take ended by
+  a pulled drive, are still spoken. Announcements are still suspended for the take whichever is
+  chosen: that is the separate "Silence other announcements while recording". The earlier
+  `announcer_record_tones` tick box still reads as "tone" (`_saved_record_feedback`).
 
 ## Reading the model dump
 
@@ -1877,9 +1883,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **THE CALLME END BUTTON IS "DECLINE OR HANG UP", AND THE SERVER CHOOSES AT THE PRESS**
   (`action_callme_end`): a call that began ringing a moment ago is declined, not the guest already
   on the line. The web page's label that follows the state is the renaming-under-focus fault below.
-- **THE TRANSPORT BUTTONS HAVE FIXED LABELS** (Record, Pause, Stop recording): the web page's one
-  button that renames itself would be read again by the screen reader while focused, over the reply.
-  Record starts or resumes by the state it holds.
+- **THE WINDOW'S TRANSPORT IS TWO BUTTONS WHOSE LABELS FOLLOW THE STATE** (Start recording / Stop
+  recording, Pause / Resume), from this window's presses and the unit's REC button alike. A focused
+  button that renames itself is read out, so THE NEW LABEL IS THE CONFIRMATION:
+  `RecordingSection._commanded` speaks no reply when the pressed button's label changed and puts the
+  reply on the Now line instead; a refusal or a failure, which renames nothing, is spoken. Neither
+  button is ever disabled. The transport group comes first on the page and Now sits below the
+  buttons, one Tab after a press.
 - **A MODULE'S STATE IS `modules[m["prop"]]`, NOT `m["key"] + "On"`.** Pan's state is
   `channelPanOn`, so the guessed name reads Pan as off whatever the desk holds.
 - **THE WINDOW'S DESK SUMMARY IS ITS STATUS BAR, NEVER SPOKEN ON ITS OWN**

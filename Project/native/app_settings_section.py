@@ -76,10 +76,6 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
          announcer.action_set_announce_mute_tones,
          "Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does "
          "not say which channel."),
-        ("record_tones", "Play a tone for recording instead of speaking it",
-         announcer.action_set_announce_record_tones,
-         "One long beep means recording, two beeps paused, three beeps stopped, whether you press "
-         "record here, with a shortcut or on the unit."),
         ("remember", "Start with announcements the way I left them",
          announcer.action_set_announce_remember,
          "Without this, announcements switch back on every time the app starts."),
@@ -95,6 +91,13 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         self.switches = [Switch(self, parent, sizer, label, send, *self.field(key),
                                 description=description, guard=self._unread)
                          for key, label, send, description in self.SWITCHES]
+        self.record_feedback = Choice(
+            self, parent, sizer, "When recording starts, pauses or stops",
+            list(announcer.RECORD_FEEDBACK.items()), announcer.action_set_announce_record_feedback,
+            *self.field("record_feedback"),
+            description="A tone is one long beep for recording, two for paused, three for "
+                        "stopped, whether you press record here, with a shortcut or on the unit.",
+            guard=self._unread)
         self.voice = Choice(self, parent, sizer, "Announcement voice", [("", "Windows default voice")],
                             speech.action_set_announce_voice, *self.field("voice"),
                             description="Choosing one plays a sample. Your screen reader keeps "
@@ -161,7 +164,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
                              + [(name, name) for name in data.get("voices") or []])
         self.output.set_items([("", "Windows default output")]
                               + [(name, name) for name in data.get("outputs") or []])
-        for control in (self.voice, self.output, self.volume):
+        for control in (self.record_feedback, self.voice, self.output, self.volume):
             control.show()
 
     def _on_refresh(self, event):

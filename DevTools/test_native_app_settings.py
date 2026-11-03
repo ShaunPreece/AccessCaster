@@ -124,10 +124,13 @@ announcements = app_settings_section.AnnouncementsPage(section)
 check("before a read a switch refuses", announcements._unread(),
       "The announcement settings have not been read yet.")
 announcements.show({"on": True, "levels": False, "mute_tones": False,
-                    "record_tones": True, "remember": False, "volume": 60, "voice": "Zira",
+                    "record_feedback": "tone", "remember": False, "volume": 60, "voice": "Zira",
                     "output": "", "voices": ["David", "Zira"], "outputs": []})
 check("each switch shows its setting", [s.box.GetValue() for s in announcements.switches],
-      [True, False, False, True, False])
+      [True, False, False, False])
+check("recording's sound is a choice of three, showing the setting",
+      (announcements.record_feedback.control.GetCount(),
+       announcements.record_feedback.control.GetStringSelection()), (3, "Play a tone"))
 check("the voices are Windows' own, after the default",
       [announcements.voice.control.GetString(i)
        for i in range(announcements.voice.control.GetCount())],

@@ -229,7 +229,7 @@ async function run() {
   const mute = el("rec-mute-announcer");
   check("there is a switch for it, so it is a CHOICE and not a policy",
     !!mute && mute.type === "checkbox", mute && mute.type);
-  check("its label says what it does", /announcements off while recording/i.test(accessibleName(mute)),
+  check("its label says what it does", /silence other announcements while recording/i.test(accessibleName(mute)),
     accessibleName(mute));
   // The MECHANISM is where announcements are ROUTED, which covers a microphone in the room and a
   // feed into the mix over USB alike. Naming headphones instead names only one way of it.

@@ -1748,8 +1748,8 @@ async function loadAnnounceState() {
     if (lv) lv.checked = data.levels !== false;
     const mt = document.getElementById("announce-mute-tones-toggle");
     if (mt) mt.checked = data.mute_tones === true;
-    const rt = document.getElementById("announce-record-tones-toggle");
-    if (rt) rt.checked = data.record_tones === true;
+    const rf = document.getElementById("announce-record-feedback");
+    if (rf && data.record_feedback) rf.value = data.record_feedback;
     const ss = document.getElementById("announce-startup-summary-toggle");
     if (ss) ss.checked = data.startup_summary !== false;
     const rm = document.getElementById("announce-remember-toggle");
@@ -1806,6 +1806,19 @@ function onAnnounceSpeechChange(kind) {
       setBusy(sel, false);
     }
   };
+}
+
+async function onAnnounceRecordFeedback(ev) {
+  const sel = ev.target;
+  setBusy(sel, true);
+  try {
+    const res = await postJSON("/api/announce/record-feedback", { mode: sel.value });
+    setStatus("announce-speech-status", res.message || "Could not change it.");
+  } catch {
+    setStatus("announce-speech-status", SERVICE_UNREACHABLE);
+  } finally {
+    setBusy(sel, false);
+  }
 }
 
 async function onAnnounceDevicesRefresh(ev) {
@@ -9788,13 +9801,14 @@ async function init() {
    ["announce-toggle", "/api/announce"],
    ["announce-levels-toggle", "/api/announce/levels"],
    ["announce-mute-tones-toggle", "/api/announce/mute-tones"],
-   ["announce-record-tones-toggle", "/api/announce/record-tones"],
    ["announce-startup-summary-toggle", "/api/announce/startup-summary"],
    ["announce-remember-toggle", "/api/announce/remember"]]
     .forEach(([id, url]) => document.getElementById(id).addEventListener("change", toggleTo(url)));
   document.getElementById("announce-volume").addEventListener("input", onAnnounceVolumeInput);
   document.getElementById("announce-voice")
     .addEventListener("change", onAnnounceSpeechChange("voice"));
+  document.getElementById("announce-record-feedback")
+    .addEventListener("change", onAnnounceRecordFeedback);
   document.getElementById("announce-output")
     .addEventListener("change", onAnnounceSpeechChange("output"));
   document.getElementById("announce-devices-refresh")

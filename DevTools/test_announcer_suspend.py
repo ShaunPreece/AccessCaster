@@ -220,7 +220,7 @@ print("\nRECORD TONES INSTEAD OF SPEECH")
 # the take's silence, a pause's and a stop's after announcements come back.
 TONES = []
 _tone, speech.tone = speech.tone, lambda name: TONES.append((name, speech.enabled.is_set())) or True
-announcer.record_tones = True
+announcer.record_feedback = "tone"
 reset(announcing=True)
 server._recorder_state_changed(recorder.READY, recorder.RECORDING)
 check("a start plays the start tone, before the silence", TONES, [("record_start", True)])
@@ -248,8 +248,40 @@ check("and is spoken, saying why", SAID[0].startswith("Recording stopped"), True
 reset(announcing=True)
 server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
 check("a drive going in has no tone either", TONES, [])
-announcer.record_tones = False
+
+print("\nSAY NOTHING: the transport is silent, storage is still spoken")
+announcer.record_feedback = "silent"
+reset(announcing=True)
+TONES.clear()
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+check("a start makes no sound", (TONES, SAID), ([], []))
+check("and announcements still go quiet for the take", speech.enabled.is_set(), False)
+server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
+server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+check("nor do pause, resume and stop", (TONES, SAID), ([], []))
+check("and announcements are back after it", speech.enabled.is_set(), True)
+reset(announcing=True)
+server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+SAID.clear()
+server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+check("a take ended by a pulled drive is still spoken",
+      bool(SAID) and SAID[0].startswith("Recording stopped"), True)
+reset(announcing=True)
+SAID.clear()
+server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
+check("and so is a drive going in", bool(SAID), True)
+announcer.record_feedback = "speak"
 speech.tone = _tone
+
+print("\nTHE CHOICE IS SAVED, AND THE EARLIER TICK BOX STILL MEANS WHAT IT DID")
+check("the old tick box on reads as tones", announcer._saved_record_feedback(
+    {"announcer_record_tones": True}), "tone")
+check("off, or never set, reads as spoken", announcer._saved_record_feedback({}), "speak")
+check("the new choice wins over the old box", announcer._saved_record_feedback(
+    {"announcer_record_feedback": "silent", "announcer_record_tones": True}), "silent")
+check("a choice that is not one is refused",
+      announcer.action_set_announce_record_feedback("loud")["ok"], False)
 
 print("\nSPEAK AND WAIT: what a resume from the app says before it acts")
 reset(announcing=False)

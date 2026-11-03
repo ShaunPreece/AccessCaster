@@ -620,7 +620,13 @@ def _recorder_state_changed(was, now) -> None:
     # A tone replaces the phrase, and plays for this app's own presses too: a shortcut's spoken
     # reply to a start is lost to the silence the take begins with. It is queued before that
     # silence, and the speech thread plays what is already queued.
-    cue = recorder.record_cue(was, now) if announcer.record_tones else None
+    cue = recorder.record_cue(was, now)
+    if cue and announcer.record_feedback == "silent":
+        # A transport change, chosen to make no sound. Announcements are still suspended for the
+        # take and given back after it, below.
+        phrase = ""
+    if announcer.record_feedback != "tone":
+        cue = None
     if now == recorder.RECORDING:
         # Only a NEW take explains the silence: after a pause it is already known.
         going_quiet = (speech.enabled.is_set() and announcer.record_mutes_announcer()
@@ -884,10 +890,10 @@ def action_record(command: str) -> dict:
         return {"ok": True, "message": "It is already recording."}
     if cmd == "stop" and before in (recorder.READY, recorder.NO_DESTINATION):
         return {"ok": True, "message": "Nothing is recording."}
-    if cmd == "resume" and before == recorder.PAUSED and not announcer.record_tones:
+    if cmd == "resume" and before == recorder.PAUSED and announcer.record_feedback == "speak":
         # Announcements are back on during a pause (_recorder_state_changed), and this is the one
         # resume where the notice can be finished before the take carries on. With record tones,
-        # the start tone marks the resume instead.
+        # the start tone marks the resume instead, and with nothing chosen nothing is said.
         speech.say_and_wait("Resuming")
 
     # Mark it BEFORE the write: the unit pushes the new state back in about 30 ms, which can beat
@@ -9196,7 +9202,7 @@ def read_announce() -> dict:
     """Every announcement setting, and the voices and outputs this computer offers."""
     lists = speech.sapi_lists()
     return {"ok": True, "on": speech.enabled.is_set(), "levels": announcer.levels_on,
-            "mute_tones": announcer.mute_tones, "record_tones": announcer.record_tones,
+            "mute_tones": announcer.mute_tones, "record_feedback": announcer.record_feedback,
             "startup_summary": announcer.startup_summary, "remember": announcer.remember,
             "volume": speech.volume,
             "voice": speech.chosen_voice, "output": speech.chosen_output,
@@ -9545,8 +9551,8 @@ POST_ROUTES = {
     "/api/announce": (announcer.action_set_announce, [(bool, "on", None)]),
     "/api/announce/levels": (announcer.action_set_announce_levels, [(bool, "on", None)]),
     "/api/announce/mute-tones": (announcer.action_set_announce_mute_tones, [(bool, "on", None)]),
-    "/api/announce/record-tones": (announcer.action_set_announce_record_tones,
-                                   [(bool, "on", None)]),
+    "/api/announce/record-feedback": (announcer.action_set_announce_record_feedback,
+                                      [(str, "mode", "")]),
     "/api/announce/startup-summary": (announcer.action_set_announce_startup_summary, [(bool, "on", None)]),
     "/api/announce/remember": (announcer.action_set_announce_remember, [(bool, "on", None)]),
     "/api/announce/volume": (speech.action_set_announce_volume, [(int, "percent", 100)]),

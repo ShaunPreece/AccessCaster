@@ -35,6 +35,7 @@ STORAGE_HINT = "Eject before pulling a card or drive out. Erase deletes everythi
 NO_STORAGE_WRITE = "AccessCaster cannot eject or erase storage on this unit."
 RUNNING = (recorder.RECORDING, recorder.PAUSED)
 CLOCK_MS = 1000
+START, STOP, PAUSE, RESUME = "Start recording", "Stop recording", "Pause", "Resume"
 
 
 def recording_label(take):
@@ -147,17 +148,25 @@ class RecordingSection:
 
     def _commanded(self, source, reply, reread):
         self.busy = False
+        label = source.GetLabel() if isinstance(source, wx.Button) else None
         if reply.get("recorder"):
             self.show(reply["recorder"], reply.get("sentence") or self.sentence)
-        self.frame.reply(source, reply)
+        if reply.get("ok") and label is not None and source.GetLabel() != label:
+            # The button that was pressed renamed itself, and the screen reader reads that out:
+            # it is the confirmation. What the new label does not say goes on the Now line.
+            message = reply.get("message") or ""
+            if message and not self.sentence.startswith(message):
+                self.recorder.set_sentence(f"{message} {self.sentence}".strip())
+        else:
+            self.frame.reply(source, reply)
         if reread or (self._pushed is not None and self._pushed != self.state):
             self.read()
         self._pushed = None
 
 
 class RecorderPage(wx.Panel):
-    """What the unit is doing; what a take contains and what it is saved as, the two decisions made
-    before a take; then the transport and whether announcements stop for a take."""
+    """The transport and what the unit is doing; then the options set once: what a take contains,
+    what it is saved as, and whether other announcements stop for a take."""
 
     def __init__(self, section):
         super().__init__(section.frame.host)
@@ -166,11 +175,31 @@ class RecorderPage(wx.Panel):
         self.frame = section.frame
         self._mute = announcer.record_mutes_announcer()
         sizer, parent = page_box(self, "Recorder")
-        self.now = labelled(parent, sizer, "Now", lambda p: wx.TextCtrl(
+
+        # THE TRANSPORT COMES FIRST: it is what the page is opened for, and the focus lands on Start
+        # recording. The options below are set once and rarely changed.
+        #
+        # TWO BUTTONS WHOSE LABELS FOLLOW THE STATE, whoever changed it, this window or the unit's
+        # REC button. A focused button that renames itself is read out by the screen reader, so
+        # after a press the new label is the confirmation and the reply is not spoken over it
+        # (`RecordingSection._commanded`). Neither is ever disabled: a disabled button leaves the
+        # tab order from under the user, so one that cannot act says why.
+        box_sizer, box = group(parent, sizer, "Start and stop")
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        self.transport = self._button(box, row, START, self._on_transport)
+        a11y.describe(self.transport, "Starts a recording, or stops the one running.")
+        self.pause = self._button(box, row, PAUSE, self._on_pause)
+        a11y.describe(self.pause, "Pauses a recording, or carries on with a paused one.")
+        self.marker = self._button(box, row, "Drop a marker", self._on_marker)
+        a11y.describe(self.marker, "Puts a marker your editor can find at this point of the "
+                                   "recording.")
+        box_sizer.Add(row, 0, wx.ALL, 6)
+        # Below the buttons, so one Tab after a press reaches what the unit is doing.
+        self.now = labelled(box, box_sizer, "Now", lambda p: wx.TextCtrl(
             p, value="Reading the unit.", size=(460, 60),
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
 
-        box_sizer, box = group(parent, sizer, "What to record")
+        box_sizer, box = group(parent, sizer, "Recording options")
         self.multitrack = Choice(
             self, box, box_sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
             server.action_set_multitrack, *self.field("multitrack"),
@@ -183,21 +212,7 @@ class RecorderPage(wx.Panel):
         self.bypass = Switch(self, box, box_sizer, "Record the separate tracks raw",
                              server.action_set_processing_bypass,
                              *self.field("processing_bypass"), guard=self._bypass_refused)
-
-        # Fixed labels, one command each: a focused button that renames itself is read again by
-        # the screen reader, over the reply saying what the press did.
-        box_sizer, box = group(parent, sizer, "Start and stop")
-        row = wx.BoxSizer(wx.HORIZONTAL)
-        self.record = self._button(box, row, "Record", self._on_record)
-        a11y.describe(self.record, "Starts a recording, or carries on with a paused one.")
-        self.pause = self._button(box, row, "Pause", self._on_pause)
-        self.stop = self._button(box, row, "Stop recording", self._on_stop)
-        self.marker = self._button(box, row, "Drop a marker", self._on_marker)
-        a11y.describe(self.marker, "Puts a marker your editor can find at this point of the "
-                                   "recording.")
-        self.status = self._button(box, row, "Recording status", self._on_status)
-        box_sizer.Add(row, 0, wx.ALL, 6)
-        self.mute = Switch(self, box, box_sizer, "Switch announcements off while recording",
+        self.mute = Switch(self, box, box_sizer, "Silence other announcements while recording",
                            announcer.action_set_record_mute_announcer, lambda: self._mute,
                            self._remember_mute, description=MUTE_HINT)
         # The Now line's running time during a take, from the push listener: no desk read.
@@ -244,7 +259,15 @@ class RecorderPage(wx.Panel):
         for control in (self.multitrack, self.format, self.bypass, self.mute):
             control.show()
         self._show_bypass()
+        self._show_transport()
         self._run_clock()
+
+    def _show_transport(self):
+        state = self.section.state
+        for button, label in ((self.transport, STOP if state in RUNNING else START),
+                              (self.pause, RESUME if state == recorder.PAUSED else PAUSE)):
+            if button.GetLabel() != label:
+                button.SetLabel(label)
 
     def _run_clock(self):
         running = self.IsShown() and self.section.state == recorder.RECORDING
@@ -278,48 +301,33 @@ class RecorderPage(wx.Panel):
 
     # ---- the transport ---------------------------------------------------------------------
 
-    def _on_record(self, event):
+    def _on_transport(self, event):
         state = self.section.state
         refusal = self._unread() or (NOWHERE if state == recorder.NO_DESTINATION else None)
         if refusal:
             self.frame.say(refusal)
             return
         self.section.command(event.GetEventObject(), server.action_record,
-                             "resume" if state == recorder.PAUSED else "start")
+                             "stop" if state in RUNNING else "start")
 
     def _on_pause(self, event):
         state = self.section.state
         refusal = self._unread()
-        if not refusal and state == recorder.PAUSED:
-            refusal = "It is already paused. Record carries on with it."
-        elif not refusal and state != recorder.RECORDING:
+        if not refusal and state not in RUNNING:
             refusal = "Nothing is recording."
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(event.GetEventObject(), server.action_record, "pause")
-
-    def _on_stop(self, event):
-        # The server refuses a stop with nothing running, and a marker with nothing recording,
-        # from its listener's state without touching the device.
-        refusal = self._unread()
-        if refusal:
-            self.frame.say(refusal)
-            return
-        self.section.command(event.GetEventObject(), server.action_record, "stop")
+        self.section.command(event.GetEventObject(), server.action_record,
+                             "resume" if state == recorder.PAUSED else "pause")
 
     def _on_marker(self, event):
+        # The server refuses a marker with nothing recording, from its listener's state.
         refusal = self._unread()
         if refusal:
             self.frame.say(refusal)
             return
         self.section.command(event.GetEventObject(), server.action_drop_marker)
-
-    def _on_status(self, _event):
-        def said(reply):
-            self.frame.say(reply.get("message") if reply.get("ok")
-                           else self.section.sentence or UNREAD)
-        call(self, server.read_recorder_live, done=said)
 
 
 class RecordingsPage(wx.Panel):

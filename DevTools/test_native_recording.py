@@ -95,7 +95,7 @@ with patched((announcer, {"record_mutes_announcer": lambda: True})):
 section.read = lambda announce=False: reads.append(announce)
 rec, takes, storage = section.recorder, section.recordings, section.storage
 
-check("before a read Record refuses", (rec._on_record(None), frame.said[-1])[1],
+check("before a read Start recording refuses", (rec._on_transport(None), frame.said[-1])[1],
       recording_section.UNREAD)
 section.show(payload(takes=[take(5, "REC0005"), take(4, "REC0004")]), "Ready to record.")
 check("the sentence is on the page", rec.now.GetValue(), "Ready to record.")
@@ -135,35 +135,67 @@ def fake_record(command):
     commands.append(command)
     state = {"start": recorder.RECORDING, "resume": recorder.RECORDING,
              "pause": recorder.PAUSED, "stop": recorder.READY}[command]
-    return {"ok": True, "state": state, "recorder": payload(state=state), "message": command}
+    return {"ok": True, "state": state, "recorder": payload(state=state),
+            "message": {"stop": "Stopped. Saved REC0006, 1 minute."}.get(command, command)}
 
 
+def press(button):
+    """A press as wx sends it: the event carries the button."""
+    event = wx.CommandEvent()
+    event.SetEventObject(button)
+    return event
+
+
+def labels():
+    return rec.transport.GetLabel(), rec.pause.GetLabel()
+
+
+START, STOP = recording_section.START, recording_section.STOP
+PAUSE, RESUME = recording_section.PAUSE, recording_section.RESUME
 live = {"read_recorder_live": lambda: {"ok": True, "message": "Recording. 1 minute so far."}}
 with patched(sync, (server, {"action_record": fake_record, **live})):
     section.show(payload(state=recorder.READY), "")
-    rec._on_record(wx.CommandEvent())
-    check("Record on a ready unit starts", commands[-1], "start")
+    check("a ready unit offers Start recording and Pause", labels(), (START, PAUSE))
+    said = len(frame.said)
+    rec._on_transport(press(rec.transport))
+    check("Start recording on a ready unit starts", commands[-1], "start")
     check("the reply's payload is shown", section.state, recorder.RECORDING)
-    check("with the listener's sentence", rec.now.GetValue(), "Recording. 1 minute so far.")
+    check("and the button becomes Stop recording", labels(), (STOP, PAUSE))
+    check("the new label is the confirmation: nothing is spoken over it", frame.said[said:], [])
+    check("the reply goes on the Now line with the listener's sentence", rec.now.GetValue(),
+          "start Recording. 1 minute so far.")
+    rec._on_pause(press(rec.pause))
+    check("Pause during a take pauses", commands[-1], "pause")
+    check("and becomes Resume", labels(), (STOP, RESUME))
+    rec._on_pause(press(rec.pause))
+    check("Resume on a paused unit carries on", commands[-1], "resume")
+    check("and becomes Pause again", labels(), (STOP, PAUSE))
     section.show(payload(state=recorder.PAUSED), "")
-    rec._on_record(wx.CommandEvent())
-    check("Record on a paused unit resumes", commands[-1], "resume")
-    section.show(payload(state=recorder.READY), "")
+    rec._on_transport(press(rec.transport))
+    check("Stop recording stops a paused take too", commands[-1], "stop")
+    check("and the button becomes Start recording", labels(), (START, PAUSE))
+    check_in("the saved take is on the Now line", "Saved REC0006", rec.now.GetValue())
+    check("still nothing spoken", frame.said[said:], [])
     count = len(commands)
-    rec._on_pause(wx.CommandEvent())
-    check("Pause with nothing recording is refused", frame.said[-1], "Nothing is recording.")
-    section.show(payload(state=recorder.PAUSED), "")
-    rec._on_pause(wx.CommandEvent())
-    check_in("and on a paused unit says how to carry on", "Record carries on", frame.said[-1])
+    rec._on_pause(press(rec.pause))
+    check("Pause with nothing recording is refused aloud", frame.said[-1], "Nothing is recording.")
     section.show(payload(state=recorder.NO_DESTINATION), "")
-    rec._on_record(wx.CommandEvent())
-    check("Record with nowhere to record is refused", frame.said[-1], recording_section.NOWHERE)
+    rec._on_transport(press(rec.transport))
+    check("Start recording with nowhere to record is refused", frame.said[-1],
+          recording_section.NOWHERE)
     check("none of the refusals reached the desk", len(commands), count)
 
-with patched(sync, (server, live)):
-    rec._on_status(None)
-    check("Recording status speaks the listener's sentence", frame.said[-1],
-          "Recording. 1 minute so far.")
+# A reply that changes no label, a failure, is spoken as before.
+failed = {"ok": False, "message": "That did not take.", "recorder": payload(state=recorder.READY)}
+section.show(payload(state=recorder.READY), "")
+section._commanded(rec.transport, failed, False)
+check("a failed press is spoken", frame.said[-1], "That did not take.")
+
+# A state the unit's own REC button changed renames the buttons too.
+section.show(payload(state=recorder.RECORDING), "")
+check("a take started on the unit offers Stop recording", labels(), (STOP, PAUSE))
+section.show(payload(state=recorder.PAUSED), "")
+check("and a pause on the unit offers Resume", labels(), (STOP, RESUME))
 
 # ---- the Now line's clock --------------------------------------------------------------------
 ticking = {"read_recorder_live": lambda: {"ok": True, "state": recorder.RECORDING,
@@ -188,7 +220,7 @@ with patched(sync, (server, ticking)):
 
 section.show(payload(state=recorder.READY), "")
 section.busy = True
-rec._on_record(wx.CommandEvent())
+rec._on_transport(wx.CommandEvent())
 check("a second press while one runs is refused", frame.said[-1], recording_section.BUSY)
 section.busy = False
 
@@ -202,12 +234,12 @@ reads.clear()
 section.busy = True
 frame.desk.listener("recorder", recorder.PAUSED)
 check("one pushed during a press waits for its reply", reads, [])
-section._commanded(rec.record, {"ok": True, "recorder": payload(state=recorder.RECORDING)}, False)
+section._commanded(rec.transport, {"ok": True, "recorder": payload(state=recorder.RECORDING)}, False)
 check("and is read after it when the reply disagrees", reads, [False])
 reads.clear()
 section.busy = True
 frame.desk.listener("recorder", recorder.RECORDING)
-section._commanded(rec.record, {"ok": True, "recorder": payload(state=recorder.RECORDING)}, False)
+section._commanded(rec.transport, {"ok": True, "recorder": payload(state=recorder.RECORDING)}, False)
 check("but not when the reply agrees", reads, [])
 
 # ---- deleting, ejecting, reconnecting and erasing --------------------------------------------

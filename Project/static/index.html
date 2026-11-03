@@ -1199,7 +1199,7 @@
         <p class="field">
           <label class="switch">
             <input type="checkbox" id="rec-mute-announcer" aria-describedby="rec-mute-hint">
-            <span>Switch announcements off while recording</span>
+            <span>Silence other announcements while recording</span>
           </label>
         </p>
         <!-- NAME THE MECHANISM, NOT ONE EXAMPLE. Headphones are only one way announcements stay
@@ -1472,17 +1472,18 @@
               <span>Play a tone for mute instead of speaking it</span>
             </label>
           </p>
-          <p id="announce-record-tones-note" class="note">
-            One long beep means recording, two beeps paused, three beeps stopped, whether you press
-            record here, with a shortcut or on the unit.
-          </p>
-          <p class="field">
-            <label class="switch">
-              <input type="checkbox" id="announce-record-tones-toggle"
-                     aria-describedby="announce-record-tones-note">
-              <span>Play a tone for recording instead of speaking it</span>
-            </label>
-          </p>
+          <div class="field">
+            <label for="announce-record-feedback">When recording starts, pauses or stops</label>
+            <select id="announce-record-feedback" aria-describedby="announce-record-feedback-help">
+              <option value="speak">Speak it</option>
+              <option value="tone">Play a tone</option>
+              <option value="silent">Say nothing</option>
+            </select>
+            <span id="announce-record-feedback-help" class="hint">
+              A tone is one long beep for recording, two for paused, three for stopped, whether
+              you press record here, with a shortcut or on the unit.
+            </span>
+          </div>
           <p id="announce-remember-note" class="note">
             Without this, announcements switch back on every time the app starts.
           </p>
