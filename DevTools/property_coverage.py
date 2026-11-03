@@ -86,9 +86,10 @@ def read_property_list() -> list[tuple[str, str, int]]:
 # 2. Where our code touches each property
 # ---------------------------------------------------------------------------
 # A line that decodes a value out of a model dump.
-READ_CALL = re.compile(r"find_all|\bvalues\(|\bvec\(|\bfirst\(|read_model|path_value|block_value|props\.get")
+READ_CALL = re.compile(r"find_all|\bvalues\(|\bvec\(|\bfirst\(|read_model|path_value|keyed_value|"
+                       r"block_value|props\.get")
 # A line that builds or sends a record to the device.
-WRITE_CALL = re.compile(r"build_\w+|send_record|send_records_paced")
+WRITE_CALL = re.compile(r"build_\w+|write_at|send_record|send_records_paced")
 
 # Most property names live inside a named collection rather than at a call site, so the enclosing
 # constant or function decides the role. Anything not listed falls back to "referenced".

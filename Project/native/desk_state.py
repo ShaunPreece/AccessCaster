@@ -34,21 +34,21 @@ REREAD_AFTER_MS = 1500
 # the comparison reads the preset files.
 PRESET_AFTER_MS = 500
 
-# Per-strip state on the channel block (SEL_CHANNEL + strip): record field, or a function of the
+# Per-strip state on the channel block (CHANNEL[strip]): record field, or a function of the
 # record and the value.
 _STRIP_BOOLS = {channels.MUTE_PROP: "muted", channels.CUE_PROP: "solo",
                 channels.WIRELESS_MUTE_PROP: "wireless_muted",
                 channels.CHAIN_ADVANCED_PROP: "advanced"}
 _MODULES = set(channels.PROCESSING_MODULE_BOOLS)
 _PARAMS = set(channels.PROCESSING_READ_PROPS)
-# Per-strip effects on the effects block (SEL_CHANNEL_FX + strip).
+# Per-strip effects on the effects block (EFFECTS_PARAMETERS[strip]).
 _FX_ON = {prop: effect for effect, prop in channels.CHANNEL_FX_ON.items()}
 _FX_PARAMS = {p: effect for effect, ps in channels.CHANNEL_FX_PARAMS.items() for p in ps}
 # Per-input values, addressed at the input itself.
 _INPUTS = {"inputMicrophoneGain", "inputDigitalGain", "inputPower", "inputPhaseFlip"}
 
-# The output mixes: an output's mode, at its own selector, and a source's place in an output's
-# Custom mix, at the cross-point's.
+# The output mixes: an output's mode, on its own MIXMINUSES node, and a source's place in an
+# output's Custom mix, on the cross-point's MIX node.
 _MIX = {"outputMixMinus", "mixDisabled"}
 MIX_MINUS, CUSTOM = 1, 2      # an output's mix types, as outputMixMinus holds them; 0 is Main Mix
 
@@ -65,16 +65,16 @@ _OUTPUT_LEVELS = {
 _FADER_TOGGLES = {channels.MUTE_PROP: "muted", channels.CUE_PROP: "soloed"}
 _LEVELS = set(_OUTPUT_LEVELS) | {"faderLevel", "headphoneType", "mixLevelWithAnchor"}
 
-# The Master Mix page's values: name -> (its block's selector, key in `master`, kind pushed).
+# The Master Mix page's values: name -> (its block's key, key in `master`, kind pushed).
 _MASTER = {
-    "outputMultiBypass": (rcp_transfer.SEL_OUTPUT_GLOBAL, "usb_bypass", "bool"),
-    "masterCompellorOn": (rcp_transfer.SEL_MASTER_PROC, "compellor_on", "bool"),
-    "masterCompellorThreshold": (rcp_transfer.SEL_MASTER_PROC, "compellor_threshold", "float"),
-    "masterCompellorAttack": (rcp_transfer.SEL_MASTER_PROC, "compellor_attack", "float"),
-    "masterCompellorRelease": (rcp_transfer.SEL_MASTER_PROC, "compellor_release", "float"),
-    "masterCompellorGain": (rcp_transfer.SEL_MASTER_PROC, "compellor_gain", "float"),
-    "masterDelayOn": (rcp_transfer.SEL_MASTER_PROC, "delay_on", "bool"),
-    "masterDelaySeconds": (rcp_transfer.SEL_MASTER_PROC, "delay_seconds", "float"),
+    "outputMultiBypass": (rcp_transfer.OUTPUT, "usb_bypass", "bool"),
+    "masterCompellorOn": (rcp_transfer.MASTER, "compellor_on", "bool"),
+    "masterCompellorThreshold": (rcp_transfer.MASTER, "compellor_threshold", "float"),
+    "masterCompellorAttack": (rcp_transfer.MASTER, "compellor_attack", "float"),
+    "masterCompellorRelease": (rcp_transfer.MASTER, "compellor_release", "float"),
+    "masterCompellorGain": (rcp_transfer.MASTER, "compellor_gain", "float"),
+    "masterDelayOn": (rcp_transfer.MASTER, "delay_on", "bool"),
+    "masterDelaySeconds": (rcp_transfer.MASTER, "delay_seconds", "float"),
 }
 
 _RELEVANT = (STRUCTURAL | set(_STRIP_BOOLS) | _MODULES | _PARAMS | set(_FX_ON) | set(_FX_PARAMS)
@@ -247,8 +247,10 @@ class DeskState:
     def _apply(self, path, name, value, kind):
         if self._stop.is_set():
             return
+        # The node the push is addressed at, named by the desk's own layout.
+        node = rcp_read.push_key(path)
         if name == "recordState":
-            if path == [recorder.SEL_RECORDER] and kind == "int":
+            if node == rcp_transfer.RECORDER and kind == "int":
                 self._notify("recorder", value)
             return
         if self.channels is None:
@@ -257,23 +259,23 @@ class DeskState:
             self._reread_soon()
             return
         if name in _MASTER:
-            if _set_master(self.master, path, name, value, kind):
+            if _set_master(self.master, node, name, value, kind):
                 self._dirty_master = True
                 self._flush_soon()
             return
         if (name in _LEVELS or name in _FADER_TOGGLES) and _set_level(
-                self.levels, path, name, value, kind):
+                self.levels, node, name, value, kind):
             self._dirty_levels = True
             self._flush_soon()
-        if name in _LEVELS or len(path) != 1:
+        if name in _LEVELS or node is None or len(node) != 2:
             return
         if name in _MIX:
-            output = _set_mix(self.matrix, path[0], name, value, kind)
+            output = _set_mix(self.matrix, node, name, value, kind)
             if output is None:
                 return
             self._dirty_mix.add(output)
         else:
-            rec = self._record_for(path[0], name)
+            rec = self._record_for(node, name)
             if rec is None or not _set(rec, name, value, kind):
                 return
             self._dirty.add(rec["name"])
@@ -287,13 +289,14 @@ class DeskState:
             # preset a cross-point per write.
             self._flush = wx.CallLater(30, self._flush_dirty)
 
-    def _record_for(self, selector, name):
+    def _record_for(self, node, name):
         if name in _INPUTS:
-            channel = devices.get_active_device().channel_for_input_path([selector])
+            channel = devices.get_active_device().channel_for_input_key(node)
             return self._records.get(channel["name"]) if channel else None
-        base = rcp_transfer.SEL_CHANNEL_FX if name in _FX_ON or name in _FX_PARAMS \
-            else rcp_transfer.SEL_CHANNEL
-        return self._records.get(self._strip_names.get(selector - base))
+        block = "EFFECTS_PARAMETERS" if name in _FX_ON or name in _FX_PARAMS else "CHANNEL"
+        if node[0] != block:
+            return None
+        return self._records.get(self._strip_names.get(node[1]))
 
     def _flush_dirty(self):
         names, self._dirty = self._dirty, set()
@@ -380,22 +383,23 @@ def _set(rec, name, value, kind):
     return True
 
 
-def _set_mix(matrix, selector, name, value, kind):
+def _set_mix(matrix, node, name, value, kind):
     """Put one pushed mix value on `matrix`. Returns the output it changed, or None."""
     if matrix is None or not matrix.get("ok"):
         return None
-    spec = devices.get_active_device().matrix
     if name == "outputMixMinus":
-        output = selector - rcp_transfer.SEL_OUTPUT_MIXMINUS_BASE
+        if node[0] != "MIXMINUSES":
+            return None
+        output = node[1]
         if kind != "int" or output not in matrix["modes"]:
             return None
         holder, key = matrix["modes"], output
     else:
-        # RCSYNCMIX carries mixDisabled too, at selectors past the MIX block's.
-        cell = selector - rcp_transfer.CROSS_POINT_BASE
-        if kind != "bool" or not 0 <= cell < spec.cell_count:
+        # RCSYNCMIX carries mixDisabled too, on nodes of its own name.
+        cell = rcp_transfer.cross_point_of(node)
+        if kind != "bool" or cell is None:
             return None
-        source, output = divmod(cell, rcp_transfer.CROSS_POINT_SOURCE_STRIDE)
+        output, source = cell
         holder = matrix["excluded"].get(output)
         if holder is None or source not in holder:
             return None
@@ -406,43 +410,42 @@ def _set_mix(matrix, selector, name, value, kind):
     return output
 
 
-def _set_level(levels, path, name, value, kind):
+def _set_level(levels, node, name, value, kind):
     """Put one pushed value on the Levels page's state. Returns whether anything changed."""
-    if levels is None:
+    if levels is None or node is None:
         return False
     if name == "faderLevel":
-        # Addressed at the fader itself: PHYSICALINTERFACE.FADER[FADER_NODE_BASE + index].
-        if kind != "int" or len(path) != 2 or path[0] != 0:
+        # Addressed at the fader itself: PHYSICALINTERFACE.FADER[index].
+        if kind != "int" or node[:3] != ("PHYSICALINTERFACE", 0, "FADER"):
             return False
-        holder = _fader(levels, path[1] - devices.FADER_NODE_BASE)
+        holder = _fader(levels, node[3])
         key, value = "percent", _percent(value / rcp_transfer.FADER_LEVEL_MAX)
     elif name in _FADER_TOGGLES:
-        if kind != "bool" or len(path) != 1:
+        if kind != "bool" or node[0] != "CHANNEL":
             return False
-        holder, key = _fader(levels, path[0] - rcp_transfer.SEL_CHANNEL), _FADER_TOGGLES[name]
+        holder, key = _fader(levels, node[1]), _FADER_TOGGLES[name]
         # None is an empty fader, which has nothing to mute or solo.
         if holder is None or holder[key] is None:
             return False
     elif name in _OUTPUT_LEVELS:
         group, key, wanted = _OUTPUT_LEVELS[name]
-        if kind != wanted or path != [rcp_transfer.SEL_OUTPUT_GLOBAL]:
+        if kind != wanted or node != rcp_transfer.OUTPUT:
             return False
         holder = levels[group]
         if wanted == "float":
             value = _percent(value)
     elif name == "headphoneType":
-        selectors = [sel for sel, _label in devices.get_active_device().headphones.outputs]
-        if kind != "int" or len(path) != 1 or path[0] not in selectors:
+        outputs = [i for i, _label in devices.get_active_device().headphones.outputs]
+        if kind != "int" or node[0] != "HEADPHONE" or node[1] not in outputs:
             return False
-        holder, key = levels["headphone_types"], selectors.index(path[0])
+        holder, key = levels["headphone_types"], outputs.index(node[1])
     elif name == "mixLevelWithAnchor":
         mix = levels["mix"]
-        cell = path[0] - rcp_transfer.CROSS_POINT_BASE if len(path) == 1 else -1
-        # RCSYNCMIX carries the same name at selectors past the MIX block's.
-        if (kind != "str" or not mix.get("ok")
-                or not 0 <= cell < devices.get_active_device().matrix.cell_count):
+        cell = rcp_transfer.cross_point_of(node)
+        # RCSYNCMIX carries the same name, on nodes of its own name.
+        if kind != "str" or not mix.get("ok") or cell is None:
             return False
-        source, output = divmod(cell, rcp_transfer.CROSS_POINT_SOURCE_STRIDE)
+        output, source = cell
         holder = mix["levels"].get(output)
         if holder is None or source not in holder:
             return False
@@ -455,10 +458,10 @@ def _set_level(levels, path, name, value, kind):
     return True
 
 
-def _set_master(master, path, name, value, kind):
+def _set_master(master, node, name, value, kind):
     """Put one pushed value on the Master Mix page's state. Returns whether anything changed."""
-    selector, key, wanted = _MASTER[name]
-    if master is None or kind != wanted or path != [selector] or master[key] == value:
+    block, key, wanted = _MASTER[name]
+    if master is None or kind != wanted or node != block or master[key] == value:
         return False
     master[key] = value
     return True

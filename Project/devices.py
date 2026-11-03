@@ -129,20 +129,13 @@ class PadSpec:
         return self.pads_per_bank * self.user_banks
 
 
-# Where the desk keeps a fader's LEVEL: PHYSICALINTERFACE (root child 0) holds the pots first, then
-# one FADER node per fader, so fader `i` is tree path [0, FADER_NODE_BASE + i]. Read off a live Duo
-# dump - four POT nodes at [0,0..3] then nine FADER nodes at [0,4..12] - and it
-# reproduces the Pro II's three long-confirmed addresses exactly. See FaderSpec.level_selectors.
-FADER_NODE_BASE = 0x04
-
-
 @dataclass(frozen=True)
 class FaderSpec:
     """Fader-assignment layout for one device (consumed by server.py's fader functions).
 
     The fader LAYOUT is the channelInputSource int vector: vector POSITION = fader
-    (index 0 = fader 1), VALUE = the channel/source CODE on that fader, written at
-    selector 0x1C + index (RODECASTER_PROTOCOL.txt section 6). This is the ONLY place
+    (index 0 = fader 1), VALUE = the channel/source CODE on that fader, written on
+    CHANNEL[index] (RODECASTER_PROTOCOL.txt section 6). This is the ONLY place
     the per-device fader shape lives.
       count          : number of faders the desk actually EXPOSES (Pro II 9, Duo 9). This is
                        what the UI lists and the highest index a channel can be assigned to.
@@ -185,25 +178,17 @@ class FaderSpec:
     capture_len: Optional[int] = None
 
     @property
-    def level_selectors(self) -> dict:
-        """{fader index (0-based): faderLevel address} for the faders whose LEVEL software may set.
+    def level_faders(self) -> tuple:
+        """The fader indices (0-based) whose LEVEL software may set: the virtual ones.
 
-        DERIVED, not a table, and that is the point. A fader's level lives at
-        `PHYSICALINTERFACE.FADER[FADER_NODE_BASE + index]`, tree path `[0, base + index]`, and the
-        desk lays exactly `count` of those out in a row. So the address is arithmetic on the fader
-        index, with nothing per-device left to get wrong.
+        A fader's level lives on PHYSICALINTERFACE.FADER[index] (`rcp_transfer.fader_key`), one
+        FADER node per fader, so nothing per-device is needed beyond which faders are virtual.
 
         ONLY THE VIRTUAL FADERS ARE OURS. The physical ones are analog pots, so writing them would
         fight the hardware - and the desk says so itself: on a Duo the four physical nodes read a
         flat 0 while the five virtual ones carry a real level.
-
-        A hand-kept dict of "observed selectors" is empty on any desk nobody has captured, so the
-        whole feature would refuse there. The Pro II's three (6:0x0A, 7:0x0B, 8:0x0C) are exactly
-        what this returns: each is the SECOND index of a two-level path, which is why they look
-        device-specific when written down as one-level selectors. `test_duo_parity.py` asserts
-        those three against this derivation.
         """
-        return {i: FADER_NODE_BASE + i for i in range(self.physical, self.count)}
+        return tuple(range(self.physical, self.count))
 
     @property
     def vector_length(self) -> int:
@@ -349,30 +334,24 @@ class InputStripSpec:
 class HeadphoneTypeSpec:
     """Per-output 'headphone type' (amp profile) setting for one device.
 
-    headphoneType is a GLOBAL int property (rcp_transfer.build_global_prop_int). The SELECTOR
-    picks WHICH headphone output; the VALUE picks the amp profile. Confirmed selectors:
-    0x09 = Headphone 1 (from the original Pro II reversing) and 0x0A = Headphone 2 (captured on
-    the Duo fw-1.7.3 output-write pass). Both desks share these selectors byte-for-byte
-    (the whole output block is identical), so both expose HP1 + HP2. The write path is gated by the
-    "output_write" cap, and 0x09/0x0A are KNOWN selectors, so writing them is not a stray-append hazard.
+    headphoneType is an int on HEADPHONE[index] (`rcp_transfer.headphone_key`). The INDEX picks
+    WHICH headphone output; the VALUE picks the amp profile. Confirmed: HEADPHONE[0] = Headphone 1
+    (the original Pro II reversing) and HEADPHONE[1] = Headphone 2 (captured on the Duo fw-1.7.3
+    output-write pass). Both desks lay the output blocks out identically, so both expose HP1 + HP2.
+    The write path is gated by the "output_write" cap.
 
-      outputs : (selector, label) per addressable headphone output, in UI order.
+      outputs : (HEADPHONE index, label) per addressable headphone output, in UI order.
       values  : (int, label) per selectable amp type, in UI order.
 
     NOT CONFIRMED:
       * value 2 = "Low sensitivity" - the RODE app's label; the value itself is unverified.
-      * HP2 (0x0A) on the PRO II specifically (confirmed on the Duo; the Pro II shares the selector).
-      * The Pro II's Headphone 3/4 outputs (inferred 0x0B/0x0C) are deliberately NOT listed: their
-        selectors are unconfirmed, so listing them would risk writing an unmapped selector (a stray).
-    All are reversible global-int writes; confirm during a supervised live test before relying on them.
+      * HP2 on the PRO II specifically (confirmed on the Duo).
+      * The Pro II's Headphone 3/4 outputs (HEADPHONE[2] and [3]) are deliberately NOT listed: what
+        they do has not been confirmed.
+    All are reversible int writes; confirm during a supervised live test before relying on them.
     """
     outputs: tuple = ()
     values: tuple = ()
-
-    @property
-    def output_selectors(self) -> tuple:
-        """The addressable headphone-output selectors, in UI order (index 0 == Headphone 1)."""
-        return tuple(sel for sel, _lab in self.outputs)
 
     @property
     def value_codes(self) -> frozenset:
@@ -385,10 +364,10 @@ class HeadphoneTypeSpec:
         return {code: lab for code, lab in self.values}
 
 
-# Both desks share the confirmed HP1 (0x09) + HP2 (0x0A) selectors and the same 3-value amp enum.
-# Kept as one spec used by both device models (see HeadphoneTypeSpec for the confirmation caveats).
+# Both desks share the confirmed HP1 + HP2 outputs and the same 3-value amp enum. Kept as one spec
+# used by both device models (see HeadphoneTypeSpec for the confirmation caveats).
 HEADPHONE_TYPES = HeadphoneTypeSpec(
-    outputs=((0x09, "Headphone 1"), (0x0A, "Headphone 2")),
+    outputs=((0, "Headphone 1"), (1, "Headphone 2")),
     values=((0, "NTH-100"), (1, "High sensitivity"), (2, "Low sensitivity")),
 )
 
@@ -561,8 +540,7 @@ CHANNELS_DUO = (
 # so restore writes only 9: writing slot 9 would show the layout tidy a duplicated source.
 PRO2_FADERS = FaderSpec(
     count=9, physical=6, capture_len=10,
-    # Faders 1-6 are analog pots; virtual faders 7-9 carry a settable level at the addresses
-    # FaderSpec.level_selectors derives. 10 assignable sources over 9 faders, so one is always
+    # Faders 1-6 are analog pots; virtual faders 7-9 carry a settable level (FaderSpec.level_faders). 10 assignable sources over 9 faders, so one is always
     # off-fader.
     assignable=_assignable_view(CHANNELS_PRO2),
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
@@ -605,8 +583,7 @@ PRO2_FADERS = FaderSpec(
 # byte-for-byte by an independent live read. So the empty strip (idx8 = -1) and the duplicated USB2
 # (idx9 = 9, also at idx7) are the genuine SHIPPED default on a 10-strip Duo, NOT stray residue,
 # which is what makes it a trustworthy reset target. 'reset faders' is enabled on the Duo (writes -1
-# via signed build_global_prop_int and idx9 via the device-aware set_fader_source bound; both
-# live-tested).
+# as a signed int and idx9 via the device-aware set_fader_source bound; both live-tested).
 DUO_FADERS = FaderSpec(
     count=9, physical=4, vector_len=10,
     assignable=_assignable_view(CHANNELS_DUO),
@@ -670,15 +647,15 @@ class DeviceModel:
     name: str
     matrix: MatrixSpec
     # Capability flags. Each gates a WRITE path proven on THIS device; reads need no cap. A desk
-    # without one refuses rather than writing Pro II-decoded selectors blindly, because an unmapped
-    # selector does not error, it appends a stray.
+    # without one refuses rather than writing a property it has never seen act there, because a
+    # write that misses does not error, it can append a stray.
     #   "input_mic_write" - gain/phantom/type/polarity and line Level
     #   "matrix_read"     - the routing-matrix read formula
     #   "matrix_write"    - cross-point and output-mode writes
     #   "processing"      - the per-strip processing and effects chain
     #   "channel_read"    - the per-channel read map
-    #   "output_write"    - the global output block: multitrack, monitor/BT auto-mute (0x0D),
-    #                       headphone type (0x09/0x0A), master Compellor and output delay (0x0E)
+    #   "output_write"    - the OUTPUT block: multitrack, monitor/BT auto-mute; HEADPHONE[0..1]:
+    #                       headphone type; MASTERCHANNEL: master Compellor and output delay
     #   "pad_write"       - SMART-pad create/clear/edit (region-B pool GC, effectsIdx==padIdx,
     #                       handle = pad count)
     #   "fader_write"     - setting a channel on a fader, vacating one (-1), and resetting to
@@ -686,15 +663,11 @@ class DeviceModel:
     #   "unit_settings"   - display/haptics/REC-button/listen (rcp_transfer.UNIT_SETTING_SEL)
     #   The rest are explained where each desk's set is built.
     caps: frozenset
-    # Root-child index of INPUTSOURCE[0]: a 30-entry table, indexed by SOURCE CODE, that both desks
-    # publish and that holds EVERY input value for EVERY channel. 0x26E on each, read off a live dump
-    # of each desk rather than assumed shared. See input_path.
-    input_table_base: int = 0x26E
     # Per-device READ MAP: the UI channels this desk exposes, built by _ui_channel_view. Each entry
     # is a dict of name, label, kind ("mic"|"line"|"bus"), stereo and source_code.
     #   source_code - the channelInputSource code. THE ONE PER-CHANNEL NUMBER: its position in the
     #                 live fader vector is the processing strip, and it indexes the INPUTSOURCE
-    #                 table, where every input value is read and written (see input_path). There is
+    #                 table, where every input value is read and written (see input_key). There is
     #                 deliberately NO second "input_slot" field: it would hold the same value as
     #                 source_code on both desks, and two names for one number is what makes a
     #                 POSITIONAL input read look reasonable.
@@ -718,22 +691,22 @@ class DeviceModel:
     # node at 0x48 + source_code, and that node is DEAD STORAGE: a write lands and reads back, and
     # the audio engine never reads it. Byte-for-byte agreement with the official app is not evidence
     # that a write does anything. The proof is in PROJECT_GUIDE part 2. The Pro II's old selectors
-    # (mics 0x6E-0x71, lines 0x75-0x78, trailer 0x02) are this same rule, 0x26E + code, and
-    # test_input_read.py asserts them against the derivation.
+    # (mics 0x6E-0x71, lines 0x75-0x78, trailer 0x02) are this same rule: INPUTSOURCE starts at
+    # root child 0x26E on that firmware.
 
-    def input_path(self, ch: dict) -> list:
-        """THE tree path of a channel's input values: INPUTSOURCE[source_code]. Read and write."""
-        return [self.input_table_base + int(ch["source_code"])]
+    def input_key(self, ch: dict) -> tuple:
+        """THE node of a channel's input values: INPUTSOURCE[source_code], a 30-entry table indexed
+        by SOURCE CODE that both desks publish. Read and write, through the desk's own layout."""
+        return ("INPUTSOURCE", int(ch["source_code"]))
 
-    def channel_for_input_path(self, path) -> Optional[dict]:
-        """The UI channel a pushed input address belongs to, or None. The reverse of input_path.
+    def channel_for_input_key(self, key) -> Optional[dict]:
+        """The UI channel an INPUTSOURCE key belongs to, or None. The reverse of input_key.
 
         The announcer needs this: when the DESK moves a gain it pushes the change at the address it
         owns, and the spoken line has to name the channel it belongs to."""
-        try:
-            code = int(list(path)[0]) - self.input_table_base
-        except Exception:
+        if not key or len(key) != 2 or key[0] != "INPUTSOURCE":
             return None
+        code = int(key[1])
         return next((c for c in self.every_ui_channel
                      if c.get("source_code") == code), None)
 
@@ -749,7 +722,7 @@ class DeviceModel:
     def every_ui_channel(self) -> tuple:
         """Every channel this desk can ever carry, whatever mode it is in, WITHOUT any relabel.
 
-        FOR RESOLVING, NOT FOR DISPLAY, and that distinction is what `channel_for_input_path`
+        FOR RESOLVING, NOT FOR DISPLAY, and that distinction is what `channel_for_input_key`
         needs: an address that resolves to Game is Game whatever mode we happen to think we are
         in, so a push must never fail to name a channel because a cached flag says otherwise. Take
         the LABEL from `ui_channels_for` instead: displaying the label of the wide set makes the
@@ -787,7 +760,7 @@ class DeviceModel:
 
 # --- Read maps (see DeviceModel.ui_channels) ----------------------------------
 # INPUT values (mic gain/phantom/polarity/type, line Level) are read and written BY ADDRESS at the
-# channel's INPUTSOURCE entry, never by array position - see DeviceModel.input_path.
+# channel's INPUTSOURCE entry, never by array position - see DeviceModel.input_key.
 #
 # PROCESSING and EFFECTS are per-STRIP, i.e. per FADER POSITION, not per source, so a channel's strip
 # is resolved from the LIVE fader vector (channels._strip_index), on both desks: with USB 1 moved
@@ -877,12 +850,11 @@ PRO2 = DeviceModel(
     # FaderSpec.stereo_pairs too, so an empty pair table refuses on its own.
     # "level_write": the VIRTUAL fader levels and the monitor speaker level (RODECASTER_PROTOCOL
     # 6.1).
-    # "recorder": start, pause and stop, through requestRecordState on RECORDER 0x03, a selector the
-    # desk pushes while its REC button is pressed.
-    # "network_write": wifi on/off, joining a network and Bluetooth discoverability, on NETWORK
-    # 0x10.
+    # "recorder": start, pause and stop, through requestRecordState on RECORDER, a node the desk
+    # pushes while its REC button is pressed.
+    # "network_write": wifi on/off, joining a network and Bluetooth discoverability, on NETWORK.
     # "shows": the desk's own backup - export, import, software factory reset and delete, on
-    # SHOWCONTROL 0x28E.
+    # SHOWCONTROL.
     # "callme": hosting and answering a CallMe call, on the SIPCALLING node found by walking the
     # tree. Heard both ways with a browser guest.
     # "storage_write": ejecting and erasing the card or drive, on the STORAGEVOLUME nodes.
@@ -908,25 +880,25 @@ PRO2 = DeviceModel(
 DUO = DeviceModel(
     product_id=PID_DUO,
     name="RODECaster Duo",
-    # Same scheme as the Pro II, by routing capture and a reversible live write: read index
-    # 13 * source + output, cross-point write selector 0x4C + index, output-mode selector
-    # 0x31 + output. cell_count is the MIX block's 390.
+    # Same scheme as the Pro II, by routing capture and a reversible live write: a cross-point is
+    # MIX[13 * source + output], an output's mode MIXMINUSES[output]. cell_count is the MIX
+    # block's 390.
     matrix=MatrixSpec(cell_count=390, output_count=13,
                       source_indices=_matrix_index_view(CHANNELS_DUO), row_stride=13,
                       sources=DUO_MATRIX_SOURCES,
                       expanded_sources=DUO_MATRIX_EXPANDED_SOURCES,
                       expanded_relabel=_relabel_view(CHANNELS_DUO), outputs=DUO_MATRIX_OUTPUTS),
     # What establishes each on this desk:
-    # "processing": console capture on six channels, 0x1C + strip with the empty strips leaving
-    # gaps, and echoOn on Mic 2 at 0x27 = 0x26 + strip 1.
-    # "output_write": RODE app capture, every selector byte-identical to the Pro II's.
+    # "processing": console capture on six channels, CHANNEL[strip] with the empty strips leaving
+    # gaps, and echoOn on Mic 2 at EFFECTS_PARAMETERS[1].
+    # "output_write": RODE app capture, every address byte-identical to the Pro II's.
     # "pad_write": a reversible live create/clear proved the three firmware behaviours a read
     # cannot: clear GCs the bound region-B object, a bare create does not append to the pool, and
     # handle = pad count. Then the web endpoints end to end.
     # "fader_write": set a source on the empty strip, vacate it with -1, write slot 9, and reset to
     # DUO_FADERS.default_vector, each read back byte-clean.
     # "unit_settings": every rcp_transfer.UNIT_SETTING_SEL property resolves to a node of the right
-    # block (GUI 0x07, OUTPUT 0x0D, SYSTEM 0x0F), and one from each block wrote, read back and
+    # block (GUI, OUTPUT, SYSTEM), and one from each block wrote, read back and
     # restored byte-clean (DevTools/test_duo_caps_live.py).
     # "network_write", "recorder", "shows": tree then engine. The engine answers a `wifi` False by
     # clearing the desk's IP address, consumes a requestRecordState and self-clears it, and refuses
@@ -968,13 +940,12 @@ for _dev in DEVICES.values():
     if _m.outputs:
         assert all(0 <= o["index"] < _m.output_count for o in _m.outputs), (
             f"{_dev.name}: a matrix.outputs index is outside 0..{_m.output_count - 1}")
-    # Headphone spec must list at least one output + at least one value, and every output selector
-    # must be one of the KNOWN headphoneType selectors (guards against a future edit adding an
-    # unconfirmed selector - which would risk a stray append when written). 0x09/0x0A only.
+    # Headphone spec must list at least one output + at least one value, and only the CONFIRMED
+    # outputs, Headphone 1 and 2 (HEADPHONE[0] and [1]).
     _hp = _dev.headphones
     assert _hp.outputs and _hp.values, f"{_dev.name}: headphones spec must list outputs + values"
-    assert all(sel in (0x09, 0x0A) for sel in _hp.output_selectors), (
-        f"{_dev.name}: a headphone output selector is not a known headphoneType selector (0x09/0x0A)")
+    assert all(i in (0, 1) for i, _lab in _hp.outputs), (
+        f"{_dev.name}: a headphone output is not one of the confirmed two")
 del _dev, _m, _hp
 
 # The default when no device is connected / product id is unknown: Pro II, so all

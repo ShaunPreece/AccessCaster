@@ -20,6 +20,7 @@ import _bootstrap  # puts Project/ on the path; import FIRST
 import _testkit
 import devices
 import model_tree
+import pad_records
 import profiles
 import rcp_transfer
 import server
@@ -88,12 +89,12 @@ for label, path, captured in [
 check_true("build_global_prop_int addresses by path",
            rcp_transfer.build_global_prop_int("x", 0x1C, 0)[5:10]
            == model_tree.encode_path([0x1C]), "global address drifted")
-check_true("build_channel_prop_int addresses by path",
-           rcp_transfer.build_channel_prop_int("x", 0, 0x6E, 0x02)[5:11]
-           == model_tree.encode_path([0x026E]), "channel address drifted")
-check_true("build_pad_prop_int addresses by path",
-           rcp_transfer.build_pad_prop_int("padIdx", 15, 0x01)[5:13].hex() == "010102029a020101",
-           "pad address no longer matches the captured bytes")
+check_true("a two-byte index addresses by path",
+           rcp_transfer.build_record("x", "int", 0, [0x026E])[5:11]
+           == model_tree.encode_path([0x026E]), "two-byte address drifted")
+check_true("a pad record addresses by path",
+           rcp_transfer.build_record("padIdx", "int", 15, [0x29A, 0x01])[5:13].hex()
+           == "010102029a020101", "pad address no longer matches the captured bytes")
 try:
     rcp_transfer._selftest()
     _selftest_error = ""
@@ -109,8 +110,8 @@ check_true("index zero is emitted as one byte, as our proven pad writes do",
            model_tree.encode_path([0x29A, 0]).hex() == "010102029a020100",
            model_tree.encode_path([0x29A, 0]).hex())
 check_true("and that is exactly what the pad builder sends",
-           rcp_transfer.build_pad_prop_int("padIdx", 0, 0x00)[5:13].hex() == "010102029a020100",
-           rcp_transfer.build_pad_prop_int("padIdx", 0, 0x00)[5:13].hex())
+           pad_records.write_record("padIdx", "int", 0, 0x00)[5:13].hex() == "010102029a020100",
+           pad_records.write_record("padIdx", "int", 0, 0x00)[5:13].hex())
 
 check_true("a negative index is refused rather than encoded",
            _raises(lambda: model_tree.encode_path([-1])), True)

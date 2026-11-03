@@ -30,11 +30,17 @@ root child 0x029A = SOUNDPADS, then child n = PAD[n].
 
 PAD[n] is not a root child, so counting nodes in dump order does not give an address past it.
 
+A POSITION IS NEVER WRITTEN DOWN, IT IS LOOKED UP. `Layout` names every fixed node by block and
+copy, ("CHANNEL", 3), and answers its path on the tree it was built from. A firmware that grows one
+block moves every block after it, and a write to a stale position lands on a different, valid node
+or appends a stray that only a factory reset clears.
+
 NOTHING HERE WRITES TO THE DEVICE.
 """
 from __future__ import annotations
 
 import struct
+from collections import Counter
 
 
 class Node:
@@ -64,36 +70,141 @@ class Node:
         return f"<{self.name} path={self.path()} props={len(self.props)} kids={len(self.kids)}>"
 
 
-def encode_path(path) -> bytes:
+def encode_index(i: int, empty_zero: bool = False) -> bytes:
+    """One index of a path: a length byte, then the index little-endian in that many bytes.
+
+    THE LENGTH RULE: the fewest bytes that hold it, MINIMUM ONE, so zero is `01 00`. The grammar
+    also allows a zero-length count for 0 (`00`), which the desk itself pushes and RODE's app sends;
+    `empty_zero` asks for that form, and only the records proven in it use it (see `encode_path`).
+    """
+    i = int(i)
+    if i < 0:
+        raise ValueError(f"negative index: {i}")
+    if i == 0 and empty_zero:
+        return b"\x00"
+    n = 1 if i <= 0xFF else 2 if i <= 0xFFFF else 4
+    return bytes([n]) + i.to_bytes(n, "little")
+
+
+def encode_path(path, empty_zero: bool = False) -> bytes:
     """The report-3 ADDRESS BYTES for a tree path: `01 01 <levels> [<len><index LE>] x levels`.
 
     THE ONE ADDRESS FORMAT. Every address shape `rcp_transfer` builds is a special case of this
     (decoded and checked byte-for-byte):
 
-        01 01 01 01 1c            global, selector 0x1C      -> path [0x1C]
-        01 01 01 02 6e 02         "channel address", Pro II  -> path [0x26E]
-        01 01 01 02 48 01         the same, Duo              -> path [0x148]
+        01 01 01 01 1c            CHANNEL[0]                 -> path [0x1C]
+        01 01 01 02 6e 02         INPUTSOURCE[0]             -> path [0x26E]
         01 01 02 02 9a 02 01 <n>  a pad                      -> path [0x29A, n]
-        01 01 02 02 9a 02 00      the "internal pad" case    -> path [0x29A, 0]
+        01 01 02 02 9a 02 00      the pad edit cursor        -> path [0x29A, 0], empty_zero
+        01 01 02 00 01 <n>        a fader's level            -> path [0, n], empty_zero
 
-    The Duo's trailing 0x01 against the Pro II's 0x02 is the HIGH BYTE of a two-byte index: the two
-    desks hold that node at different positions. The internal pad is child 0.
+    A two-byte index is why an address can look like a selector with a "trailer": `02 6e 02` is
+    0x026E, and the last byte is its high byte.
 
-    THE LENGTH RULE: an index is emitted in the fewest bytes that hold it, MINIMUM ONE. Zero is sent
-    as `01 00`, which every pad write uses and the hardware has proven. The grammar also allows a
-    zero-length count for 0, and RODE's app sends it (`...9a 02 00`), but that form has never been
-    emitted from here; do not switch to it on the one address family where a bad write can append a
-    stray that only a factory reset clears.
+    `empty_zero` sends a zero index as a zero-length count. The hardware has proven each form only
+    where it is used: `01 00` on every pad write, the empty form on the edit cursor and on
+    faderLevel, which the desk ignores in any other address shape. Do not move a record from one
+    form to the other on the one address family where a bad write can append a stray that only a
+    factory reset clears.
     """
     out = bytearray([0x01, 0x01, len(path)])
     for i in path:
-        i = int(i)
-        if i < 0:
-            raise ValueError(f"negative index in path: {path}")
-        n = 1 if i <= 0xFF else 2 if i <= 0xFFFF else 4
-        out.append(n)
-        out += i.to_bytes(n, "little")
+        out += encode_index(i, empty_zero)
     return bytes(out)
+
+
+class AddressUnknown(LookupError):
+    """The tree has no such node, or the node does not carry the property to be written there."""
+
+
+# Root children whose OWN children are fixed by the firmware too, so a `Layout` names them. Every
+# other list below the root (pads, recordings, shows, scan results, effect objects) grows and shrinks
+# while the desk runs, so its positions are read from a fresh dump at the moment of use.
+FIXED_CHILDREN = ("PHYSICALINTERFACE",)
+
+
+class Layout:
+    """WHERE EVERY FIXED NODE SITS in one parsed tree: the lookup every write address and every
+    pushed address goes through.
+
+    A node is named by a KEY, never by a number: `("CHANNEL", 3)` is the fourth CHANNEL among the
+    root's children, and `("PHYSICALINTERFACE", 0, "FADER", 6)` the seventh FADER inside it,
+    wherever this firmware puts them. The copy counts over nodes of that name only, so a block
+    appended elsewhere moves no key.
+
+    `path(key, prop)` REFUSES what the tree does not have: a missing block, a copy past the last,
+    and a property the node does not carry. The last is the stray guard. Every property the app
+    writes is published on its node before the first write, on both desks, so a name the node lacks
+    is the wrong node.
+
+    Holds paths and property names only, not the tree, so it outlives the dump it was read from.
+    """
+
+    __slots__ = ("_by_key", "_by_path", "_counts")
+
+    def __init__(self, root: Node):
+        self._by_key = {}       # key -> (path tuple, frozenset of property names)
+        self._by_path = {}      # path tuple -> key
+        self._counts = Counter()
+        seen = Counter()
+        for kid in root.kids:
+            key = (kid.name, seen[kid.name])
+            seen[kid.name] += 1
+            self._add(key, (kid.index,), kid)
+            if kid.name in FIXED_CHILDREN:
+                inner = Counter()
+                for g in kid.kids:
+                    sub = key + (g.name, inner[g.name])
+                    inner[g.name] += 1
+                    self._add(sub, (kid.index, g.index), g)
+
+    def _add(self, key: tuple, path: tuple, node: Node) -> None:
+        self._by_key[key] = (path, frozenset(p for p, _v, _k in node.props))
+        self._by_path[path] = key
+        self._counts[key[:-1]] += 1
+
+    def __eq__(self, other) -> bool:
+        """Same nodes at the same paths. Property sets are left out: a stray adds a name, not a node."""
+        return isinstance(other, Layout) and self._by_path == other._by_path
+
+    __hash__ = None
+
+    def path(self, key: tuple, prop: str | None = None) -> list:
+        """The tree path of `key`, checked to carry `prop` when one is named. Raises AddressUnknown."""
+        entry = self._by_key.get(tuple(key))
+        if entry is None:
+            raise AddressUnknown(f"this desk has no {format_key(key)} "
+                                 f"(it has {self.count(*key[:-1])} of that block)")
+        path, props = entry
+        if prop is not None and prop not in props:
+            raise AddressUnknown(f"{format_key(key)} carries no {prop}: writing it there would "
+                                 f"append a stray")
+        return list(path)
+
+    def locate(self, path) -> tuple | None:
+        """The key at a tree path, or None. The reverse of `path`, for naming a pushed address."""
+        try:
+            return self._by_path.get(tuple(int(i) for i in path))
+        except (TypeError, ValueError):
+            return None
+
+    def count(self, *block) -> int:
+        """How many copies of a block there are: `count("MIX")`, or
+        `count("PHYSICALINTERFACE", 0, "FADER")` for one inside a fixed parent."""
+        return self._counts.get(tuple(block), 0)
+
+    def has(self, key: tuple, prop: str | None = None) -> bool:
+        try:
+            self.path(key, prop)
+            return True
+        except AddressUnknown:
+            return False
+
+
+def format_key(key) -> str:
+    """("CHANNEL", 3) -> "CHANNEL[3]"; a nested key joins with a dot."""
+    key = tuple(key)
+    return ".".join(f"{key[i]}[{key[i + 1]}]" for i in range(0, len(key) - 1, 2))
 
 
 def _count(blob: bytes, i: int):

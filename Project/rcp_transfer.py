@@ -35,6 +35,7 @@ import desk_drives  # which drive letter is the desk's own volume
 import devices  # per-device matrix and fader shape
 import diagnostics  # the app's own account of every record it sends
 import model_tree  # the tree grammar, and with it the ONE address format
+import rcp_read  # the attached desk's layout, which every write address is looked up in
 import rcp_hid  # write-generation counter (invalidates cached model reads)
 import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
@@ -53,33 +54,94 @@ def _frame(payload: bytes) -> bytes:
 
 # ---- THE ADDRESS, in one place ----------------------------------------------
 #
-# EVERY ADDRESS THIS FILE BUILDS IS A PATH THROUGH THE MODEL TREE, so do not hand-write a shape as
-# its own special case. Against the tree grammar they are all one format (`model_tree.encode_path`):
+# EVERY ADDRESS IS A PATH THROUGH THE MODEL TREE (`model_tree.encode_path`), and every path a write
+# uses is LOOKED UP on the attached desk's own tree by a key that names the node, `("OUTPUT", 0)`,
+# `("MIX", 13 * source + output)`. No position is written down here: a firmware that grows one block
+# moves every block after it, and a write to a stale position lands on a different, valid node or
+# appends a stray that only a factory reset clears. `address_of` refuses a key the desk does not
+# have, and a property its node does not carry.
 #
-#   global      01 01 01 01 <sel>          -> path [sel]
-#   "channel"   01 01 01 02 <lo> <hi>      -> path [lo | hi<<8]
-#   pad         01 01 02 02 9a 02 01 <n>   -> path [SOUNDPADS, n]
-#
-# A GLOBAL SELECTOR IS A CHILD INDEX, NOT A BYTE, so the builders pass it to `build_address` whole.
-# `encode_path` emits an index in the fewest bytes that hold it, so 0x0F stays `01 0f` and 258
-# becomes `02 02 01`, which is how the desk itself addresses a cross-point above source 13. Masking
-# to 0xFF would truncate silently, and a truncated selector is a write to a DIFFERENT, valid node.
-# The pad builders keep their mask because a pad index cannot reach 256.
-SOUNDPADS_INDEX = 0x29A          # the SOUNDPADS node's position among the root's children
+# A position INSIDE a block is still arithmetic the code owns, because it is the block's own shape:
+# a cross-point is MIX copy `13 * source + output`, a fader's level is FADER copy `index`.
+
+def address_of(key, prop: str | None = None) -> list:
+    """THE WRITE ADDRESS: the tree path of the node `key` names, on the attached desk, checked to
+    carry `prop`. Raises model_tree.AddressUnknown rather than guess."""
+    return rcp_read.layout().path(key, prop)
 
 
-def build_address(path) -> bytes:
+def build_address(path, empty_zero: bool = False) -> bytes:
     """The address bytes for a tree path. The ONE place an address is formed."""
-    return model_tree.encode_path(path)
+    return model_tree.encode_path(path, empty_zero)
 
+
+def value_block(kind: str, value) -> bytes:
+    """A property's value block: `01 <vlen> <type> <payload>`.
+
+    int    01 05 01 <i32 LE, SIGNED>   the desk stores an empty fader as channelInputSource -1
+    bool   01 01 <02 on / 03 off>      enabled is 0x02 and disabled 0x03, NOT 1 and 0
+    float  01 09 04 <f64 LE>           every processing parameter, as the RODE app sends it
+    str    01 <vlen> 05 <ascii> 00     null-terminated
+    """
+    if kind == "int":
+        return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
+    if kind == "bool":
+        return bytes([0x01, 0x01, 0x02 if value else 0x03])
+    if kind == "float":
+        return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", float(value))
+    if kind == "str":
+        body = str(value).encode("ascii") + b"\x00"
+        return bytes([0x01, 1 + len(body), 0x05]) + body
+    raise ValueError(f"no value block for kind {kind!r}")
+
+
+def build_record(name: str, kind: str, value, path, empty_zero: bool = False) -> bytes:
+    """THE RECORD PRIMITIVE: one property write at a tree path, framed for report 3."""
+    return _frame(build_address(list(path), empty_zero) + name.encode("ascii") + b"\x00"
+                  + value_block(kind, value))
+
+
+def build_at(key, name: str, kind: str, value) -> bytes:
+    """One property write on the node `key` names, addressed through the attached desk's tree."""
+    return build_record(name, kind, value, address_of(key, name))
+
+
+def write_at(key, name: str, kind: str, value) -> int:
+    """Build and send one keyed property write. Returns bytes written."""
+    return send_record(build_at(key, name, kind, value))
+
+
+# The selector forms below write to a POSITION THE CALLER NAMES. They are for probes that mean to
+# address one selector deliberately and for the byte-for-byte selftest; app code addresses by key.
 
 def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
-    """Build a 256-byte report-id-3 record setting a global integer property.
+    """An integer property at root child `selector`."""
+    return build_record(name, "int", value, [selector])
 
-    The value is SIGNED int32: the desk stores an empty fader as channelInputSource -1
-    (0xFFFFFFFF) and `model_tree` decodes ints signed, so the write side matches."""
-    value_block = bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-    return _frame(build_address([selector]) + name.encode("ascii") + b"\x00" + value_block)
+
+def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
+    """A string property at root child `selector`."""
+    return build_record(name, "str", value, [selector])
+
+
+def build_global_prop_bool(name: str, on: bool, selector: int) -> bytes:
+    """A compact boolean property at root child `selector`."""
+    return build_record(name, "bool", on, [selector])
+
+
+def build_global_prop_float(name: str, selector: int, value: float) -> bytes:
+    """A 64-bit float property at root child `selector`."""
+    return build_record(name, "float", value, [selector])
+
+
+def build_path_prop_int(name: str, value: int, path) -> bytes:
+    """An integer property at a tree path the caller read off a fresh dump."""
+    return build_record(name, "int", value, path)
+
+
+def build_path_prop_bool(name: str, on: bool, path) -> bytes:
+    """A compact boolean property at a tree path the caller read off a fresh dump."""
+    return build_record(name, "bool", on, path)
 
 
 # Source CODES: the value a channelInputSource write carries, and the row of the routing matrix.
@@ -105,121 +167,67 @@ def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
 # holds it (see server._follow_chains).
 
 
-# ---- PAD-ADDRESSED RECORDS ---------------------------------------------------
-# `selector` is the pad's stream position under SOUNDPADS, and it is NOT a stable pad address: the
-# desk reassigns it whenever the set of sound pads changes. The stable identity of a physical pad
-# is padIdx (grid position - 1) and its folder on the FAT volume (pads/<grid position>/). A config
-# write binds the selector to the target pad by sending padIdx under it first.
-
-def build_pad_prop_string(name: str, value: str, selector: int = 0x01) -> bytes:
-    """Build a 256-byte report-id-3 record setting a pad-addressed string property.
-
-    The default selector 0x01 is the one `_selftest`'s expected bytes are built with."""
-    value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated
-    value_block = bytes([0x01, 1 + len(value_b), 0x05]) + value_b
-    addr = build_address([SOUNDPADS_INDEX, selector & 0xFF])
-    return _frame(addr + name.encode("ascii") + b"\x00" + value_block)
+# The single blocks the app writes to, as keys.
+SYSTEM = ("SYSTEM", 0)           # transferModeType, systemMidiControl, haptics, REC button
+NETWORK = ("NETWORK", 0)         # wifi and Bluetooth
+OUTPUT = ("OUTPUT", 0)           # multitrack, auto-mutes, monitor level, listen mode
+MASTER = ("MASTERCHANNEL", 0)    # the master Compellor and output delay
+GUI = ("GUI", 0)                 # the display and button brightness, the selected pad bank
+RECORDER = ("RECORDER", 0)
+RECORDINGS = ("RECORDINGS", 0)
+SHOWCONTROL = ("SHOWCONTROL", 0)
+SOUNDPADS = ("SOUNDPADS", 0)
+PADEFFECTS = ("PADEFFECTS", 0)
 
 
-def build_pad_prop_int(name: str, value: int, selector: int = 0x01) -> bytes:
-    """Build a 256-byte report-id-3 record setting a pad-addressed integer property (padIdx,
-    which binds `selector` to a pad, is the main user)."""
-    value_block = bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little")
-    addr = build_address([SOUNDPADS_INDEX, selector & 0xFF])
-    return _frame(addr + name.encode("ascii") + b"\x00" + value_block)
+def channel_key(strip: int) -> tuple:
+    """A processing strip: CHANNEL[strip]. A fader IS a strip, so a fader's channelInputSource and
+    a strip's processing chain are on the same node."""
+    return ("CHANNEL", int(strip))
 
 
-def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
-    """Build a 256-byte report-id-3 record setting a global STRING property (wifiSSID / wifiPSK on
-    NETWORK 0x10, the CallMe and Icecast strings).
-
-    It joins two separately verified halves: the global address of build_global_prop_int and the
-    string value block of build_pad_prop_string. The combination is proven
-    per property, so read back the first write on any new one."""
-    value_b = value.encode("ascii") + b"\x00"   # the value is null-terminated
-    value_block = bytes([0x01, 1 + len(value_b), 0x05]) + value_b
-    return _frame(build_address([selector]) + name.encode("ascii") + b"\x00" + value_block)
+def channel_fx_key(strip: int) -> tuple:
+    """A strip's echo and reverb: the root's EFFECTS_PARAMETERS[strip]. The pads' effect objects
+    are the same block name under PADEFFECTS, a different parent, so they are not counted."""
+    return ("EFFECTS_PARAMETERS", int(strip))
 
 
-SEL_SYSTEM = 0x0F  # SYSTEM block: transferModeType, systemMidiControl, haptics, REC button
-SEL_NETWORK = 0x10 # NETWORK block: wifi and Bluetooth (confirmed)
+def input_key(source_code: int) -> tuple:
+    """A channel's INPUT values (gain, phantom, polarity, mic type): INPUTSOURCE[source code], read
+    and written there on every desk. See devices.DeviceModel.input_key."""
+    return ("INPUTSOURCE", int(source_code))
 
 
-def build_global_prop_bool(name: str, on: bool, selector: int = SEL_SYSTEM) -> bytes:
-    """Build a global report-3 record for a compact boolean property: 01 01 <02 on / 03 off>.
-
-    Enabled is 0x02 and disabled is 0x03, NOT 1/0."""
-    value_block = bytes([0x01, 0x01, 0x02 if on else 0x03])
-    return _frame(build_address([selector]) + name.encode("ascii") + b"\x00" + value_block)
+def output_key(output_index: int) -> tuple:
+    """An output's routing mode: MIXMINUSES[output index], in CROSS_POINT_OUTPUT_INDEX order."""
+    return ("MIXMINUSES", int(output_index))
 
 
-def build_global_prop_float(name: str, selector: int, value: float) -> bytes:
-    """Build a global report-3 record carrying a 64-bit float property: 01 09 04 <f64 LE>.
-    Byte-for-byte the format the RODE app uses for every channel-processing parameter."""
-    value_block = bytes([0x01, 0x09, 0x04]) + struct.pack("<d", float(value))
-    return _frame(build_address([selector]) + name.encode("ascii") + b"\x00" + value_block)
+def headphone_key(index: int) -> tuple:
+    """A headphone output's amp profile: HEADPHONE[index], 0 = Headphone 1."""
+    return ("HEADPHONE", int(index))
 
 
-# Mic-input addressing lives in devices.DeviceModel.input_path: it is derived from the channel's
-# source code, on every desk, and there is no selector table to keep anywhere.
-
-
-# The "trailer" after a channel selector is NOT a trailer and NOT a per-device constant. The address
-# is length-prefixed and LITTLE-ENDIAN, so `02 6e 02` is "2 bytes, 0x026E", INPUTSOURCE[0] on the Pro
-# II; this byte is the HIGH BYTE. The Duo's is 0x01 because its INPUTSOURCE sits at 0x148. The names
-# stay because the byte-for-byte selftests use them, but do not reason from the word "trailer".
-CHANNEL_ADDR_TRAILER_PRO2 = 0x02
-CHANNEL_ADDR_TRAILER_DUO = 0x01
-
-
-def build_path_prop_int(name: str, value: int, path) -> bytes:
-    """A report-3 integer property at a TREE PATH. Value block 01 05 01 <4-byte LE, signed>.
-
-    The path form is the primitive and the selector/trailer pair below is a view onto it. Anything
-    addressing a node it resolved through the tree should call this and skip the split."""
-    value_block = bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-    return _frame(build_address(list(path)) + name.encode("ascii") + b"\x00" + value_block)
-
-
-def build_path_prop_bool(name: str, on: bool, path) -> bytes:
-    """A report-3 compact-boolean property at a TREE PATH. Value block 01 01 <0x02 on / 0x03 off>."""
-    value_block = bytes([0x01, 0x01, 0x02 if on else 0x03])
-    return _frame(build_address(list(path)) + name.encode("ascii") + b"\x00" + value_block)
-
-
-def build_channel_prop_int(name: str, value: int, chan_sel: int,
-                           trailer: int = CHANNEL_ADDR_TRAILER_PRO2) -> bytes:
-    """A channel-addressed integer property: address 01 01 01 02 <chan_sel> <trailer>.
-
-    Pro II mic inputs are 0x6e (Mic 1) and 0x6f (Mic 2). The Duo selectors in the selftest (0x48,
-    0x4f, trailer 0x01) are well formed, but the Duo's audio engine ignores that node: see
-    devices.DeviceModel.input_path. Nothing in the app addresses a Duo input this way."""
-    return build_path_prop_int(name, value, [(chan_sel & 0xFF) | ((trailer & 0xFF) << 8)])
-
-
-def build_channel_prop_bool(name: str, on: bool, chan_sel: int,
-                            trailer: int = CHANNEL_ADDR_TRAILER_PRO2) -> bytes:
-    """A channel-addressed compact-boolean property: address 01 01 01 02 <chan_sel> <trailer>."""
-    return build_path_prop_bool(name, on, [(chan_sel & 0xFF) | ((trailer & 0xFF) << 8)])
+def fader_key(fader_index: int) -> tuple:
+    """A fader's LEVEL: PHYSICALINTERFACE.FADER[index]. The FADER nodes follow four POT nodes,
+    which is why the level's second path index reads as 0x04 + fader."""
+    return ("PHYSICALINTERFACE", 0, "FADER", int(fader_index))
 
 
 def set_midi_control(on: bool) -> int:
     """Enable/disable bi-directional MIDI control (the RODE app's Device Config > System > MIDI).
     A direct global property; no Transfer Mode needed."""
-    return send_record(build_global_prop_bool("systemMidiControl", on))
+    return write_at(SYSTEM, "systemMidiControl", "bool", on)
 
 
 # ----------------------------------------------------------------------------
 # ROUTING / OUTPUT settings (see RODECASTER_PROTOCOL.txt section 5):
-#   outputMixMinus     PER-OUTPUT, selector 0x31 + output index (CROSS_POINT_OUTPUT_INDEX order);
+#   outputMixMinus     PER-OUTPUT, MIXMINUSES[output index] (CROSS_POINT_OUTPUT_INDEX order);
 #                      int 0=Main Mix, 1=Mix-Minus, 2=Custom.
-#   recordingMultitrackMode / outputMonAutoMute / outputBTAutoMute : OUTPUT block, selector 0x0d.
-#   headphoneType      per headphone output, selector 0x09 for Headphone 1.
+#   recordingMultitrackMode / outputMonAutoMute / outputBTAutoMute : the OUTPUT block.
+#   headphoneType      per headphone output, HEADPHONE[index].
 # ----------------------------------------------------------------------------
 
-SEL_OUTPUT_GLOBAL = 0x0D            # OUTPUT block (multitrack, auto-mutes, monitor level)
-SEL_OUTPUT_MIXMINUS_BASE = 0x31     # outputMixMinus selector = base + output index
-SEL_HEADPHONE_TYPE = 0x09           # headphoneType Headphone 1 (default)
 MULTITRACK_MODES = {0: "Off", 1: "Pre-Fader", 2: "Post-Fader"}
 # recordingCompressionQuality. TWO members, and the enum is the whole range: see set_recording_format
 # for why anything else must be refused rather than passed through.
@@ -228,28 +236,26 @@ RECORDING_FORMATS = {0: "WAV", 1: "MP3"}
 
 def set_output_routing(output_index: int, mode: int) -> int:
     """outputMixMinus for one output: 0=Main Mix, 1=Mix-Minus, 2=Custom."""
-    return send_record(build_global_prop_int(
-        "outputMixMinus", SEL_OUTPUT_MIXMINUS_BASE + output_index, mode))
+    return write_at(output_key(output_index), "outputMixMinus", "int", mode)
 
 
 # ----------------------------------------------------------------------------
 # ROUTING MATRIX cross-points (an output's Custom mix). Full detail and the index tables are in
 # RODECASTER_PROTOCOL.txt section 5.
 #
-# Each cross-point (output o, source s) has its own global selector:
-#       selector = CROSS_POINT_BASE + 13*source_index + output_index
+# Each cross-point (output o, source s) is its own MIX node:
+#       MIX[13*source_index + output_index]
 # Output is the fast axis (stride 1); source is the slow axis (stride 13 = 13 destinations). The
 # source index is the channelInputSource source CODE (DeviceModel.source_codes), not the fader order.
 #
-# Three property writes ride that selector:
+# Three property writes ride that node:
 #   mixUnlinkRequest / mixLinkRequest : value = CONSTANT compound payload
-#       01 07 08 01 01 02 01 01 02   (it is NOT the address - the selector is).
+#       01 07 08 01 01 02 01 01 02   (it is NOT the address - the node is).
 #   mixDisabled : compact bool 0x02 = excluded, 0x03 = included.
 #   mixLevelWithAnchor : ASCII '<level>|<anchor>', only effective on an UNLINKED cross-point.
 # Setting the output back to Main Mix (set_output_routing(o, 0)) discards the whole custom matrix.
 # ----------------------------------------------------------------------------
 
-CROSS_POINT_BASE = 76          # 0x4c
 CROSS_POINT_OUTPUT_STRIDE = 1  # output is the fast axis
 CROSS_POINT_SOURCE_STRIDE = 13 # source is the slow axis (13 destinations)
 
@@ -265,19 +271,25 @@ CROSS_POINT_OUTPUT_INDEX = {
 }
 
 
-def cross_point_selector(output_index: int, source_index: int) -> int:
-    """Selector for the (output, source) matrix cross-point.
+def cross_point_key(output_index: int, source_index: int) -> tuple:
+    """The (output, source) matrix cross-point: MIX[13*source + output].
 
-    IT IS AN INDEX, NOT A BYTE: Virtual A (source 14) lands at 258 and Virtual B at 271, and
-    `build_address` encodes those as a two-byte index exactly as the desk does on the push side.
-    The ceiling here is the address format's own (an index wider than two bytes is not a MIX node,
-    it is a bad sum); WHICH indices the connected desk exposes is `_check_cross_point`'s job."""
-    sel = (CROSS_POINT_BASE
-           + CROSS_POINT_SOURCE_STRIDE * source_index
-           + CROSS_POINT_OUTPUT_STRIDE * output_index)
-    if not 0 <= sel <= 0xFFFF:
-        raise ValueError(f"cross-point selector {sel} is not a possible node index")
-    return sel
+    Its path can pass 255 (Virtual A, source 14, sits at 258 on the Pro II), and `build_address`
+    encodes that as a two-byte index exactly as the desk does on the push side. WHICH cells the
+    connected desk exposes is `_check_cross_point`'s job; the layout refuses a cell past the grid."""
+    cell = CROSS_POINT_SOURCE_STRIDE * int(source_index) + CROSS_POINT_OUTPUT_STRIDE * int(output_index)
+    if cell < 0:
+        raise ValueError(f"cross-point cell {cell} is not a MIX node")
+    return ("MIX", cell)
+
+
+def cross_point_of(key) -> tuple | None:
+    """(output index, source index) for a MIX key, or None for any other key. The reverse of
+    `cross_point_key`, for naming a pushed cross-point."""
+    if not key or len(key) != 2 or key[0] != "MIX":
+        return None
+    source, output = divmod(int(key[1]), CROSS_POINT_SOURCE_STRIDE)
+    return output, source
 
 
 def _check_cross_point(output_index: int, source_index: int, allow_inferred: bool) -> None:
@@ -305,12 +317,21 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
             f"{dev.name} (exposed {sorted(valid_sources)}).")
 
 
-def build_mix_link_request(selector: int, link: bool) -> bytes:
-    """mixLinkRequest (link=True) / mixUnlinkRequest (link=False) on a cross-point, with the
+# The link request's value, verbatim: a composite of two complete value blocks.
+_MIX_LINK_REQUEST_VALUE = bytes([0x01, 0x07, 0x08, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02])
+
+
+def build_mix_link_request(path, link: bool) -> bytes:
+    """mixLinkRequest (link=True) / mixUnlinkRequest (link=False) on a cross-point's path, with the
     constant request payload. Byte-for-byte what the app sends for a cross-point's chain icon."""
     name_b = (b"mixLinkRequest" if link else b"mixUnlinkRequest")
-    value_block = bytes([0x01, 0x07, 0x08, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02])
-    return _frame(build_address([selector]) + name_b + b"\x00" + value_block)
+    return _frame(build_address(list(path)) + name_b + b"\x00" + _MIX_LINK_REQUEST_VALUE)
+
+
+def build_cross_point_link(key, link: bool) -> bytes:
+    """`build_mix_link_request` on the cross-point `key` names."""
+    name = "mixLinkRequest" if link else "mixUnlinkRequest"
+    return build_mix_link_request(address_of(key, name), link)
 
 
 def set_cross_point_linked(output_index: int, source_index: int, linked: bool,
@@ -318,7 +339,7 @@ def set_cross_point_linked(output_index: int, source_index: int, linked: bool,
     """Link one cross-point to its channel fader (True) or give it a level of its own (False).
     Idempotent on the desk, so it is safe to send without reading the current state first."""
     _check_cross_point(output_index, source_index, allow_inferred)
-    return send_record(build_mix_link_request(cross_point_selector(output_index, source_index),
+    return send_record(build_cross_point_link(cross_point_key(output_index, source_index),
                                               link=linked))
 
 
@@ -330,9 +351,9 @@ def set_cross_point_excluded(output_index: int, source_index: int, excluded: boo
     link/unlink request then mixDisabled, both on the cross-point selector. Returns total bytes
     written; read mixDisabled back to confirm."""
     _check_cross_point(output_index, source_index, allow_inferred)
-    sel = cross_point_selector(output_index, source_index)
-    n = send_record(build_mix_link_request(sel, link=not excluded))
-    n += send_record(build_global_prop_bool("mixDisabled", excluded, sel))
+    key = cross_point_key(output_index, source_index)
+    n = send_record(build_cross_point_link(key, link=not excluded))
+    n += write_at(key, "mixDisabled", "bool", excluded)
     return n
 
 
@@ -344,14 +365,12 @@ def _level_str(level: float) -> str:
     return s if s else "0"
 
 
-def build_cross_point_level(selector: int, level: float, anchor: int = 0) -> bytes:
-    """mixLevelWithAnchor on a cross-point: the ASCII string '<level>|<anchor>'.
+def cross_point_level_value(level: float, anchor: int = 0) -> str:
+    """mixLevelWithAnchor's value: the ASCII string '<level>|<anchor>'.
 
     level = normalised fader position 0.0 .. 1.0; anchor = 0 for an unlinked (absolute)
     cross-point."""
-    s = f"{_level_str(level)}|{int(anchor)}".encode("ascii")
-    value_block = bytes([0x01, len(s) + 2, 0x05]) + s + b"\x00"
-    return _frame(build_address([selector]) + b"mixLevelWithAnchor" + b"\x00" + value_block)
+    return f"{_level_str(level)}|{int(anchor)}"
 
 
 def set_cross_point_level(output_index: int, source_index: int, level: float,
@@ -360,20 +379,15 @@ def set_cross_point_level(output_index: int, source_index: int, level: float,
     UNLINKED (a linked one follows the channel fader); set_cross_point_excluded(..., False) leaves
     it linked, so call set_cross_point_linked(..., False) first."""
     _check_cross_point(output_index, source_index, allow_inferred)
-    sel = cross_point_selector(output_index, source_index)
-    return send_record(build_cross_point_level(sel, level))
+    return write_at(cross_point_key(output_index, source_index), "mixLevelWithAnchor", "str",
+                    cross_point_level_value(level))
 
 
 # --- FADER ASSIGNMENT (which channel sits on which fader) ---------------------
 # The fader layout IS the channelInputSource vector: position = fader (0-based), value = the source
-# CODE on that fader. The app reorders by writing channelInputSource on a per-FADER selector,
-# 0x1c + fader index; no systemChannelSelected pre-write is needed. The mic faders are writable
-# too. See RODECASTER_PROTOCOL.txt section 6.
-# THE CHANNEL BLOCK, CHANNEL[strip] at SEL_CHANNEL + strip index. A fader IS a strip, so a fader's
-# channelInputSource and a strip's processing chain are on the same selector. The channel EFFECTS
-# (echo and reverb) are a separate block at SEL_CHANNEL_FX + strip index. Both desks.
-SEL_CHANNEL = 0x1C
-SEL_CHANNEL_FX = 0x26
+# CODE on that fader. The app reorders by writing channelInputSource on CHANNEL[fader index]; no
+# systemChannelSelected pre-write is needed. The mic faders are writable too. See
+# RODECASTER_PROTOCOL.txt section 6.
 
 
 def set_fader_source(fader_index: int, source_code: int) -> int:
@@ -386,14 +400,12 @@ def set_fader_source(fader_index: int, source_code: int) -> int:
     count = devices.get_active_device().fader.vector_length
     if not 0 <= fader_index < count:
         raise ValueError(f"fader_index must be 0-{count - 1}, got {fader_index}")
-    return send_record(build_global_prop_int(
-        "channelInputSource", SEL_CHANNEL + fader_index, int(source_code)))
+    return write_at(channel_key(fader_index), "channelInputSource", "int", int(source_code))
 
 
 def set_multitrack_mode(mode: int) -> int:
     """recordingMultitrackMode: 0=Off, 1=Pre-Fader, 2=Post-Fader."""
-    return send_record(build_global_prop_int(
-        "recordingMultitrackMode", SEL_OUTPUT_GLOBAL, mode))
+    return write_at(OUTPUT, "recordingMultitrackMode", "int", mode)
 
 
 def set_recording_format(value: int) -> int:
@@ -405,8 +417,7 @@ def set_recording_format(value: int) -> int:
     """
     if value not in RECORDING_FORMATS:
         raise ValueError(f"recording format must be 0 (WAV) or 1 (MP3), got {value}")
-    return send_record(build_global_prop_int(
-        "recordingCompressionQuality", SEL_OUTPUT_GLOBAL, int(value)))
+    return write_at(OUTPUT, "recordingCompressionQuality", "int", int(value))
 
 
 def set_recording_processing_bypass(on: bool) -> int:
@@ -414,7 +425,7 @@ def set_recording_processing_bypass(on: bool) -> int:
 
     It applies to MULTITRACK ONLY, and the mixed track always carries the processing (RODE's guide
     says both), so with multitrack Off this setting changes nothing you can hear."""
-    return send_record(build_global_prop_bool("recordingProcessingBypass", on, SEL_OUTPUT_GLOBAL))
+    return write_at(OUTPUT, "recordingProcessingBypass", "bool", on)
 
 
 def set_usb_multitrack_mode(mode: int) -> int:
@@ -434,8 +445,9 @@ def set_usb_multitrack_mode(mode: int) -> int:
     desk is off the bus about 60 ms after the write, so anything sent in the next couple of seconds
     is lost with "no control interface". See `rcp_hid.wait_for_reenumeration`; a write the desk
     ignores because it already holds that value costs a fraction of a second here and no more."""
+    rec = build_at(OUTPUT, "outputMultiMode", "int", int(mode))
     before = find_control_interface()
-    n = send_record(build_global_prop_int("outputMultiMode", SEL_OUTPUT_GLOBAL, int(mode)))
+    n = send_record(rec)
     rcp_hid.wait_for_reenumeration(before)
     return n
 
@@ -444,27 +456,24 @@ def set_usb_multitrack_bypass(on: bool) -> int:
     """outputMultiBypass: the USB stream's half of the processing bypass, exactly as
     `set_recording_processing_bypass` is the recorder's. Separate tracks only; the mix pair the
     desk sends on channels 1 and 2 keeps its processing either way."""
-    return send_record(build_global_prop_bool("outputMultiBypass", on, SEL_OUTPUT_GLOBAL))
+    return write_at(OUTPUT, "outputMultiBypass", "bool", on)
 
 
 def set_monitor_auto_mute(on: bool) -> int:
-    return send_record(build_global_prop_bool("outputMonAutoMute", on, SEL_OUTPUT_GLOBAL))
+    return write_at(OUTPUT, "outputMonAutoMute", "bool", on)
 
 
 def set_bt_auto_mute(on: bool) -> int:
-    return send_record(build_global_prop_bool("outputBTAutoMute", on, SEL_OUTPUT_GLOBAL))
-
-
-SEL_MASTER_PROC = 0x0E              # master output-processing block (the Compellor, output delay)
+    return write_at(OUTPUT, "outputBTAutoMute", "bool", on)
 
 
 def set_master_compellor(on: bool) -> int:
     """Toggle the master output Compellor (the output compressor / leveler). Speech that pumps up
     and down is the pad AUTODUCK, not this."""
-    return send_record(build_global_prop_bool("masterCompellorOn", on, SEL_MASTER_PROC))
+    return write_at(MASTER, "masterCompellorOn", "bool", on)
 
 
-# Master Compellor PARAMS - NORMALISED 0..1 floats on the master block 0x0E (the UI shows dB/ms but
+# Master Compellor PARAMS - NORMALISED 0..1 floats on the MASTERCHANNEL block (the UI shows dB/ms but
 # stores normalised; factory Threshold/Attack/Release/Gain = 0.67/0.50/0.38/0.22).
 MASTER_COMPELLOR_PARAM = {
     "threshold": "masterCompellorThreshold", "attack": "masterCompellorAttack",
@@ -474,116 +483,109 @@ MASTER_COMPELLOR_PARAM = {
 
 def set_master_compellor_param(param: str, value01: float) -> int:
     """Set a Master Compellor param (threshold / attack / release / gain) as a normalised 0..1
-    float on the master block 0x0E."""
+    float on the MASTERCHANNEL block."""
     prop = MASTER_COMPELLOR_PARAM.get(param)
     if prop is None:
         raise ValueError(f"unknown compellor param {param!r}; known: {list(MASTER_COMPELLOR_PARAM)}")
-    return send_record(build_global_prop_float(prop, SEL_MASTER_PROC, max(0.0, min(1.0, float(value01)))))
+    return write_at(MASTER, prop, "float", max(0.0, min(1.0, float(value01))))
 
 
 def set_output_delay(on: bool, seconds: float | None = None) -> int:
     """Output Delay (A/V sync for livestreaming): masterDelayOn, then masterDelaySeconds (float
-    SECONDS, 0..2.0) if `seconds` is given, both on the master block 0x0E."""
-    n = send_record(build_global_prop_bool("masterDelayOn", on, SEL_MASTER_PROC))
+    SECONDS, 0..2.0) if `seconds` is given, both on the MASTERCHANNEL block."""
+    n = write_at(MASTER, "masterDelayOn", "bool", on)
     if seconds is not None:
-        n += send_record(build_global_prop_float("masterDelaySeconds", SEL_MASTER_PROC,
-                                                 max(0.0, min(2.0, float(seconds)))))
+        n += write_at(MASTER, "masterDelaySeconds", "float", max(0.0, min(2.0, float(seconds))))
     return n
 
 
 # ----------------------------------------------------------------------------
 # VIRTUAL FADER LEVEL + MONITOR LEVEL (RODECASTER_PROTOCOL.txt 6.1).
 #
-# faderLevel needs an ADDRESS LAYOUT OF ITS OWN. The global `01 01 01 01 <sel>` and the
-# channel-address `01 01 01 02 <sel> <trailer>` are both silently ignored. What works mirrors the
-# record the DEVICE ITSELF pushes when the encoder moves a fader:
-#     01 01 02 00 01 <selector>  faderLevel 00  01 05 01 <int32 LE>
-# Selectors are 0x04 + fader index, and only the VIRTUAL faders are ours to write (the physical ones
-# are analog pots). They live per-device in devices.FaderSpec.level_selectors, all observed on the
-# wire; server.py resolves them, so no caller passes a guessed selector here.
+# faderLevel lives on PHYSICALINTERFACE.FADER[fader] (`fader_key`), a two-level path, and is
+# written in the form the DEVICE ITSELF pushes when the encoder moves a fader, with the zero first
+# index sent as a zero-length count:
+#     01 01 02 00 01 <fader node>  faderLevel 00  01 05 01 <int32 LE>
+# A one-level address at the same number is silently ignored. Only the VIRTUAL faders are ours to
+# write (the physical ones are analog pots): devices.FaderSpec.level_faders lists them.
 FADER_LEVEL_MAX = 127            # faderMax; faderLevel / 127 IS that source's cross-point level
 
 
-def build_fader_level(selector: int, value: int) -> bytes:
-    """Build the faderLevel record for one fader. `value` is 0..FADER_LEVEL_MAX."""
+def build_fader_level(path, value: int) -> bytes:
+    """The faderLevel record at a fader's path. `value` is 0..FADER_LEVEL_MAX."""
     v = max(0, min(FADER_LEVEL_MAX, int(value)))
-    value_block = bytes([0x01, 0x05, 0x01]) + v.to_bytes(4, "little", signed=True)
-    payload = (bytes([0x01, 0x01, 0x02, 0x00, 0x01, selector & 0xFF])
-               + b"faderLevel" + b"\x00" + value_block)
-    return _frame(payload)
+    return build_record("faderLevel", "int", v, path, empty_zero=True)
 
 
-def set_fader_level(selector: int, value: int) -> int:
-    """Set one VIRTUAL fader's level (0..127) on an OBSERVED selector (see build_fader_level)."""
-    return send_record(build_fader_level(selector, value))
+def set_fader_level(fader_index: int, value: int) -> int:
+    """Set one VIRTUAL fader's level (0..127). `fader_index` is 0-based."""
+    return send_record(build_fader_level(address_of(fader_key(fader_index), "faderLevel"), value))
 
 
 def set_monitor_level(level01: float) -> int:
     """Set the monitor speaker level, 0.0..1.0 (outputMonLevel), the property the desk's own
     encoder writes."""
     v = max(0.0, min(1.0, float(level01)))
-    return send_record(build_global_prop_float("outputMonLevel", SEL_OUTPUT_GLOBAL, v))
+    return write_at(OUTPUT, "outputMonLevel", "float", v)
 
 
-def set_headphone_type(value: int, selector: int = SEL_HEADPHONE_TYPE) -> int:
+def set_headphone_type(value: int, output: int = 0) -> int:
     """headphoneType amp profile: 0=NTH-100, 1=High Sensitivity (louder), 2=Low Sensitivity.
-    `selector` picks the headphone output: 0x09=Headphone 1 (default), 0x0A=Headphone 2. The server
-    resolves the selector from the active device's HeadphoneTypeSpec, so callers never pass an
-    unmapped selector here."""
-    return send_record(build_global_prop_int("headphoneType", selector, value))
+    `output` picks the headphone output, 0 = Headphone 1; callers take it from the active device's
+    HeadphoneTypeSpec, which lists only the confirmed ones."""
+    return write_at(headphone_key(output), "headphoneType", "int", value)
 
 
 # ----------------------------------------------------------------------------
 # UNIT SETTINGS - the display, haptics, REC button, listen mode, clock, lockouts.
 #
-# A selector addresses a BLOCK of settings and the property NAME picks the field inside it. Three
-# blocks cover them all: 0x07 GUI (the display), 0x0D OUTPUT and 0x0F SYSTEM. RODECASTER_PROTOCOL.txt
-# section 11.1 has the detail.
+# A key addresses a BLOCK of settings and the property NAME picks the field inside it. Three
+# blocks cover them all: GUI (the display), OUTPUT and SYSTEM. RODECASTER_PROTOCOL.txt section 11.1
+# has the detail.
 #
-# Every entry is a confirmed write. Most are the RODE app's own selectors; the DERIVED ones come from
-# the block rule (DevTools/selector_map.py), and DevTools/probe_derived_write.py confirms a new one:
-# write, read back and restore, with the model unchanged in length and occurrence counts. Several
-# have no control in the RODE app at all, which never makes a setting unwritable.
-SEL_GUI = 0x07                   # GUI block: the display and button brightness settings
+# Every entry is a confirmed write. Most are the RODE app's own; the DERIVED ones come from the block
+# rule (DevTools/selector_map.py), and DevTools/probe_derived_write.py confirms a new one: write,
+# read back and restore, with the model unchanged in length and occurrence counts. Several have no
+# control in the RODE app at all, which never makes a setting unwritable.
 
-# prop -> (selector, kind). `kind` picks the record builder. Values are NOT range-checked here; the
+# prop -> (block key, kind). `kind` picks the value block. Values are NOT range-checked here; the
 # server owns the value domain (it is UI copy as much as protocol) and this table is just the address.
 UNIT_SETTING_SEL = {
-    # OUTPUT block (0x0D) - captured
-    "outputPrefader": (SEL_OUTPUT_GLOBAL, "bool"),          # False = After-fader Listen
-    "outputMonFixed": (SEL_OUTPUT_GLOBAL, "bool"),          # Fixed Output Level
-    # GUI block (0x07) - captured, except activeButtonsBrightness (derived; the app's Buttons
+    # OUTPUT block - captured
+    "outputPrefader": (OUTPUT, "bool"),          # False = After-fader Listen
+    "outputMonFixed": (OUTPUT, "bool"),          # Fixed Output Level
+    # GUI block - captured, except activeButtonsBrightness (derived; the app's Buttons
     # slider writes only the inactive one)
-    "metering": (SEL_GUI, "int"),                           # 0 Default / 1 Broadcast meter style
-    "screenBrightness": (SEL_GUI, "int"),                   # 0..255
-    "autoBrightness": (SEL_GUI, "bool"),
-    "screenDimAfterSeconds": (SEL_GUI, "int"),              # seconds; 0 = never
-    "inactiveButtonsBrightness": (SEL_GUI, "int"),          # 0..255
-    "activeButtonsBrightness": (SEL_GUI, "int"),            # 0..255
-    # SYSTEM block (0x0F) - captured
-    "systemHapticSetting": (SEL_SYSTEM, "int"),             # 0 none / 1 on hold / 2 always
-    "systemRecButtonSetting": (SEL_SYSTEM, "int"),          # 0 press to pause / 1 press to stop
+    "metering": (GUI, "int"),                           # 0 Default / 1 Broadcast meter style
+    "screenBrightness": (GUI, "int"),                   # 0..255
+    "autoBrightness": (GUI, "bool"),
+    "screenDimAfterSeconds": (GUI, "int"),              # seconds; 0 = never
+    "inactiveButtonsBrightness": (GUI, "int"),          # 0..255
+    "activeButtonsBrightness": (GUI, "int"),            # 0..255
+    # SYSTEM block - captured
+    "systemHapticSetting": (SYSTEM, "int"),             # 0 none / 1 on hold / 2 always
+    "systemRecButtonSetting": (SYSTEM, "int"),          # 0 press to pause / 1 press to stop
     # ---- DERIVED from the block rule.
-    # OUTPUT block (0x0D)
-    "outputMonMute": (SEL_OUTPUT_GLOBAL, "bool"),           # mute the monitor SPEAKERS
-    "outputBTMute": (SEL_OUTPUT_GLOBAL, "bool"),            # mute what a paired phone hears
-    "outputBTLevel": (SEL_OUTPUT_GLOBAL, "float"),          # 0..1, the Bluetooth OUTPUT level
-    # SYSTEM block (0x0F): HOW THE CLOCK IS SHOWN, not what time it is. The time itself is not
+    # OUTPUT block
+    "outputMonMute": (OUTPUT, "bool"),           # mute the monitor SPEAKERS
+    "outputBTMute": (OUTPUT, "bool"),            # mute what a paired phone hears
+    "outputBTLevel": (OUTPUT, "float"),          # 0..1, the Bluetooth OUTPUT level
+    # SYSTEM block: HOW THE CLOCK IS SHOWN, not what time it is. The time itself is not
     # writable from here at all - the unit sets its own over the network. Daylight saving and the
     # timezone are stored and only applied by the touchscreen, so both are profile-only.
-    "systemDateTime24h": (SEL_SYSTEM, "bool"),              # 24-hour clock vs 12-hour
-    "systemDateTimeDaylightSavings": (SEL_SYSTEM, "bool"),
-    "systemDateTimeOnHome": (SEL_SYSTEM, "bool"),           # show the clock on the home screen
+    "systemDateTime24h": (SYSTEM, "bool"),              # 24-hour clock vs 12-hour
+    "systemDateTimeDaylightSavings": (SYSTEM, "bool"),
+    "systemDateTimeOnHome": (SYSTEM, "bool"),           # show the clock on the home screen
     # IN THIS TABLE FOR PROFILE SAVE/RESTORE ONLY, and DELIBERATELY NOT ON THE DEVICE PAGE: it is
     # measured display-only, so offering it would be a control that lies. The reason sits next to
     # the decision, in server.UNIT_SETTINGS_NOT_ON_PAGE.
-    "systemDateTimezone": (SEL_SYSTEM, "int"),              # an INDEX into the unit's own list
-    # SYSTEM block (0x0F): the lockouts. Reversible from here by the same write, and each one was
+    "systemDateTimezone": (SYSTEM, "int"),              # an INDEX into the unit's own list
+    # SYSTEM block: the lockouts. Reversible from here by the same write, and each one was
     # set and cleared on hardware, but they are the entries most able to make a working desk feel
     # broken, so whatever offers them has to say what they do in plain words.
-    "disableAllHeadphoneOutputs": (SEL_SYSTEM, "bool"),
-    "disableAllLineoutOutputs": (SEL_SYSTEM, "bool"),
-    "disableAllPhysicalButtons": (SEL_SYSTEM, "bool"),
+    "disableAllHeadphoneOutputs": (SYSTEM, "bool"),
+    "disableAllLineoutOutputs": (SYSTEM, "bool"),
+    "disableAllPhysicalButtons": (SYSTEM, "bool"),
 }
 
 
@@ -596,13 +598,12 @@ def set_unit_setting(prop: str, value) -> int:
     entry = UNIT_SETTING_SEL.get(prop)
     if entry is None:
         raise ValueError(f"unknown unit setting {prop!r}; known: {sorted(UNIT_SETTING_SEL)}")
-    selector, kind = entry
+    key, kind = entry
     if kind == "bool":
-        return send_record(build_global_prop_bool(prop, bool(value), selector))
+        return write_at(key, prop, "bool", bool(value))
     if kind == "float":
-        return send_record(build_global_prop_float(
-            prop, selector, max(0.0, min(1.0, float(value)))))
-    return send_record(build_global_prop_int(prop, selector, int(value)))
+        return write_at(key, prop, "float", max(0.0, min(1.0, float(value))))
+    return write_at(key, prop, "int", int(value))
 
 
 # ---- THE SEND LAYER --------------------------------------------------------
@@ -645,11 +646,11 @@ def send_records_paced(records: list[bytes], delay: float = 0.12) -> int:
 
 # ---- TRANSFER MODE ---------------------------------------------------------
 
-# remountPadStorage as the RODE app sends it, verbatim: its value block (01 01 02 00) carries a
-# trailing byte no standard bool encoding has.
-REMOUNT_PAD_STORAGE = bytes.fromhex(
-    "031a000000010101010f72656d6f756e7450616453746f726167650001010200"
-).ljust(BULK_LEN, b"\x00")
+def build_remount_pad_storage() -> bytes:
+    """remountPadStorage = True on the SYSTEM block, which makes the unit (re)mount its pad volume.
+    Byte-for-byte the RODE app's record: the zero after its value is padding, outside the length
+    the record declares."""
+    return build_at(SYSTEM, "remountPadStorage", "bool", True)
 
 
 # A pad create enters and leaves transfer mode for itself, which is right for ONE pad and wasteful
@@ -699,7 +700,7 @@ def _set_transfer_mode_raw(on: bool) -> int:
         for root in roots:
             dismount_volume(root)
         _session_pad_root = None
-    rec = build_global_prop_int("transferModeType", SEL_SYSTEM, 2 if on else 0)
+    rec = build_at(SYSTEM, "transferModeType", "int", 2 if on else 0)
     # Logged as its own event as well as the record below it: entering transfer mode
     # re-presents a USB mass-storage gadget, so it is the one write whose
     # position in the timeline is worth being able to find without decoding anything.
@@ -720,7 +721,7 @@ def set_transfer_mode(on: bool) -> int:
 
 def remount_pad_storage() -> int:
     """Tell the unit to (re)mount its pad-storage FAT volume (makes the drive letter appear)."""
-    return send_record(REMOUNT_PAD_STORAGE)
+    return send_record(build_remount_pad_storage())
 
 
 def flush_volume(root: str) -> None:
@@ -950,186 +951,74 @@ def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0)
 
 
 def _selftest() -> None:
-    """Prove the builders reproduce the RODE app's captured bytes, no hardware."""
-    # padFilePath assignment (pad 2 -> sound.wav).
-    expected = bytes.fromhex(
-        "033f000000010102029a02010170616446696c6550617468000129052f4170706c"
-        "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
-        "7600"
-    ).ljust(BULK_LEN, b"\x00")
-    got = build_pad_prop_string("padFilePath", "/Application/emmc-data/pads/2/sound.wav")
-    assert got == expected, (
-        "build_pad_prop_string mismatch:\n"
-        f"  expected {expected[:64].hex()}\n  got      {got[:64].hex()}"
-    )
-    # padFilePath clear (empty value).
-    expected_clear = bytes.fromhex(
-        "0318000000010102029a02010170616446696c65506174680001020500"
-    ).ljust(BULK_LEN, b"\x00")
-    got_clear = build_pad_prop_string("padFilePath", "")
-    assert got_clear == expected_clear, (
-        "empty padFilePath mismatch:\n"
-        f"  expected {expected_clear[:32].hex()}\n  got      {got_clear[:32].hex()}"
-    )
-    # padIdx pad-addressed int (padIdx=15 under selector 0x17).
-    expected_idx = bytes.fromhex(
-        "0316000000010102029a020117706164496478000105010f000000"
-    ).ljust(BULK_LEN, b"\x00")
-    got_idx = build_pad_prop_int("padIdx", 15, 0x17)
-    assert got_idx == expected_idx, (
-        "build_pad_prop_int mismatch:\n"
-        f"  expected {expected_idx[:32].hex()}\n  got      {got_idx[:32].hex()}"
-    )
-    # systemMidiControl ON/OFF.
-    expected_midi_on = bytes.fromhex(
-        "031a000000010101010f73797374656d4d696469436f6e74726f6c00010102"
-    ).ljust(BULK_LEN, b"\x00")
-    expected_midi_off = bytes.fromhex(
-        "031a000000010101010f73797374656d4d696469436f6e74726f6c00010103"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool("systemMidiControl", True) == expected_midi_on, "midi ON mismatch"
-    assert build_global_prop_bool("systemMidiControl", False) == expected_midi_off, "midi OFF mismatch"
-    # inputMicrophoneGain Mic 1 = 56 dB and Mic 2 = 51 dB.
-    exp_gain1 = bytes.fromhex(
-        "0321000000010101026e02696e7075744d6963726f70686f6e654761696e0001050138000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputMicrophoneGain", 56, 0x6E) == exp_gain1, "mic1 gain mismatch"
-    exp_gain2 = bytes.fromhex(
-        "0321000000010101026f02696e7075744d6963726f70686f6e654761696e0001050133000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputMicrophoneGain", 0x33, 0x6F) == exp_gain2, "mic2 gain mismatch"
-    # inputPower (P48) Mic 1 ON.
-    exp_p48 = bytes.fromhex(
-        "0318000000010101026e02696e707574506f7765720001050101000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputPower", 1, 0x6E) == exp_p48, "p48 mismatch"
-
-    # --- DUO channel-address format (trailing 0x01, selector 0x48 + source_code) ---
-    # The format is in RODECASTER_PROTOCOL.txt section 4.1.
-    # inputPower Mic1 (sel 0x48) = off:
-    exp_duo_p48 = bytes.fromhex(
-        "0318000000010101024801696e707574506f7765720001050100000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputPower", 0, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_p48, \
-        "duo inputPower mismatch"
-    # inputMicrophoneGain Mic1 (sel 0x48) = 54 dB (0x36):
-    exp_duo_gain = bytes.fromhex(
-        "0321000000010101024801696e7075744d6963726f70686f6e654761696e0001050136000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputMicrophoneGain", 54, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_gain, \
-        "duo inputMicrophoneGain mismatch"
-    # inputDigitalGain USB1 (sel 0x4f) = -11 dB (signed LE f5ffffff):
-    exp_duo_dig = bytes.fromhex(
-        "031e000000010101024f01696e7075744469676974616c4761696e00010501f5ffffff"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputDigitalGain", -11, 0x4F, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_dig, \
-        "duo inputDigitalGain mismatch"
-
-    # --- DUO polarity + mic-type (channel form) and the two Mic1 processing/global-form props
-    # (channelBypassProcessing + channelCurrentFxPreset).
-    # inputPhaseFlip Mic1 (channel sel 0x48, trailer 0x01) = ON:
-    exp_duo_phase = bytes.fromhex(
-        "0318000000010101024801696e7075745068617365466c697000010102"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_bool("inputPhaseFlip", True, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_phase, \
-        "duo inputPhaseFlip mismatch"
-    # inputMicrophoneType Mic1 (channel sel 0x48, trailer 0x01) = 3 Condenser:
-    exp_duo_mtype = bytes.fromhex(
-        "0321000000010101024801696e7075744d6963726f70686f6e65547970650001050103000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_channel_prop_int("inputMicrophoneType", 3, 0x48, CHANNEL_ADDR_TRAILER_DUO) == exp_duo_mtype, \
-        "duo inputMicrophoneType mismatch"
-    # channelBypassProcessing Mic1 (global/processing form, sel 0x1C) = ON:
-    exp_duo_bypass = bytes.fromhex(
-        "0320000000010101011c6368616e6e656c42797061737350726f63657373696e6700010102"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool("channelBypassProcessing", True, 0x1C) == exp_duo_bypass, \
-        "duo channelBypassProcessing mismatch"
-    # DUO: NON-Mic1 processing selectors.
-    # channelBypassProcessing rides the GLOBAL/processing form at sel = SEL_CHANNEL (0x1C)
-    # + STRIP index, where strip index = channelInputSource.index(source_code), not the
-    # channel's carousel position:
-    #   Mic1 s0->0x1C, USB1 s1->0x1D, Chat s2->0x1E, USB2 s3->0x1F, Headset s6->0x22,
-    #   Bluetooth s8->0x24. Strips 4, 5 and 7 are empty, so carousel addressing fails this check.
-    _duo_proc_name = "6368616e6e656c42797061737350726f63657373696e67"  # "channelBypassProcessing"
-    for _sel in (0x1D, 0x1E, 0x1F, 0x22, 0x24):
-        _exp = bytes.fromhex("0320000000" + "01010101" + f"{_sel:02x}" + _duo_proc_name
-                             + "00010102").ljust(BULK_LEN, b"\x00")
-        assert build_global_prop_bool("channelBypassProcessing", True, _sel) == _exp, \
-            f"duo channelBypassProcessing strip-selector 0x{_sel:02x} mismatch"
-    # channelCurrentFxPreset Mic1 (global/processing form, sel 0x1C) = 1 Podcast Studio:
-    exp_duo_preset = bytes.fromhex(
-        "0323000000010101011c6368616e6e656c43757272656e7446785072657365740001050101000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_int("channelCurrentFxPreset", 0x1C, 1) == exp_duo_preset, \
-        "duo channelCurrentFxPreset mismatch"
-    # DUO: EFFECTS on a NON-Mic1 strip. echoOn rides the
-    # GLOBAL/effects form at sel = SEL_CHANNEL_FX (0x26) + STRIP index; Mic2 sits on strip 1 -> 0x27.
-    exp_duo_fx_on = bytes.fromhex(
-        "030f000000" + "01010101" + "27" + "6563686f4f6e" + "00010102"    # echoOn=True, sel 0x27
-    ).ljust(BULK_LEN, b"\x00")
-    exp_duo_fx_off = bytes.fromhex(
-        "030f000000" + "01010101" + "27" + "6563686f4f6e" + "00010103"    # echoOn=False, sel 0x27
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool("echoOn", True, 0x27) == exp_duo_fx_on, \
-        "duo echoOn strip-1 fx-selector 0x27 (ON) mismatch"
-    assert build_global_prop_bool("echoOn", False, 0x27) == exp_duo_fx_off, \
-        "duo echoOn strip-1 fx-selector 0x27 (OFF) mismatch"
-
-    # DUO: MASTER / GLOBAL OUTPUT writes. The selectors are
-    # byte-identical to the Pro II, which is what the "output_write" cap rests on:
-    # recordingMultitrackMode 0x0D (int), outputBTAutoMute 0x0D (bool), masterCompellorOn 0x0E
-    # (bool), headphoneType 0x09 (Headphone 1) / 0x0A (Headphone 2) (int).
-    exp_duo_mt = bytes.fromhex(
-        "0324000000" + "01010101" + "0d"
-        + "7265636f7264696e674d756c7469747261636b4d6f6465" + "00" + "010501" + "01000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_int("recordingMultitrackMode", 0x0D, 1) == exp_duo_mt, \
-        "duo recordingMultitrackMode 0x0D mismatch"
-    exp_duo_btmute = bytes.fromhex(
-        "0319000000" + "01010101" + "0d" + "6f757470757442544175746f4d757465" + "00" + "010102"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool("outputBTAutoMute", True, 0x0D) == exp_duo_btmute, \
-        "duo outputBTAutoMute 0x0D mismatch"
-    exp_duo_comp = bytes.fromhex(
-        "031a000000" + "01010101" + "0e" + "6d6173746572436f6d70656c6c6f724f6e" + "00" + "010103"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool("masterCompellorOn", False, 0x0E) == exp_duo_comp, \
-        "duo masterCompellorOn 0x0E mismatch"
-    exp_duo_hp1 = bytes.fromhex(
-        "031a000000" + "01010101" + "09" + "6865616470686f6e6554797065" + "00" + "010501" + "01000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_int("headphoneType", 0x09, 1) == exp_duo_hp1, \
-        "duo headphoneType 0x09 (Headphone 1) mismatch"
-    exp_duo_hp2 = bytes.fromhex(
-        "031a000000" + "01010101" + "0a" + "6865616470686f6e6554797065" + "00" + "010501" + "01000000"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_int("headphoneType", 0x0A, 1) == exp_duo_hp2, \
-        "duo headphoneType 0x0A (Headphone 2) mismatch"
-
-    # CROSS-POINT ADDRESS WIDTH. A selector is a child index, so one over 255 must widen the
-    # address rather than wrap: Music (source 13, output 0) is 245 and stays `01 f5`, Virtual A
-    # (14) is 258 and becomes `02 02 01`, Virtual B (15) is 271 and becomes `02 0f 01`. Both
-    # halves are asserted because a mask would pass the first and silently redirect the second
-    # to a node 256 lower - a valid write to the wrong cross-point.
-    exp_xp_music = bytes.fromhex(
-        "0314000000" + "01010101" + "f5" + "6d697844697361626c6564" + "00" + "010102"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool(
-        "mixDisabled", True, cross_point_selector(0, 13)) == exp_xp_music, \
-        "cross-point source 13 should still address in ONE byte"
-    exp_xp_va = bytes.fromhex(
-        "0315000000" + "01010102" + "0201" + "6d697844697361626c6564" + "00" + "010102"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_global_prop_bool(
-        "mixDisabled", True, cross_point_selector(0, 14)) == exp_xp_va, \
-        "cross-point source 14 (Virtual A) should address in TWO bytes"
-    exp_xp_vb = bytes.fromhex(
-        "0322000000" + "01010102" + "0f01" + "6d69784c6576656c57697468416e63686f72" + "00"
-        + "010705" + "302e357c30" + "00"
-    ).ljust(BULK_LEN, b"\x00")
-    assert build_cross_point_level(cross_point_selector(0, 15), 0.5) == exp_xp_vb, \
-        "cross-point source 15 (Virtual B) level should address in TWO bytes"
+    """Prove the record primitive reproduces the RODE app's captured bytes, no hardware. Each path
+    is the one in the capture; that the KEYS resolve to these paths on a real tree is
+    DevTools/test_addressing.py's job."""
+    pad = 0x29A
+    cases = [
+        # padFilePath assignment (pad 2 -> sound.wav), and its clear (empty value).
+        ("033f000000010102029a02010170616446696c6550617468000129052f4170706c"
+         "69636174696f6e2f656d6d632d646174612f706164732f322f736f756e642e7761"
+         "7600",
+         build_record("padFilePath", "str", "/Application/emmc-data/pads/2/sound.wav", [pad, 1])),
+        ("0318000000010102029a02010170616446696c65506174680001020500",
+         build_record("padFilePath", "str", "", [pad, 1])),
+        # padIdx = 15 under stream position 0x17.
+        ("0316000000010102029a020117706164496478000105010f000000",
+         build_record("padIdx", "int", 15, [pad, 0x17])),
+        # systemMidiControl on and off.
+        ("031a000000010101010f73797374656d4d696469436f6e74726f6c00010102",
+         build_record("systemMidiControl", "bool", True, [0x0F])),
+        ("031a000000010101010f73797374656d4d696469436f6e74726f6c00010103",
+         build_record("systemMidiControl", "bool", False, [0x0F])),
+        # inputMicrophoneGain Mic 1 = 56 dB and Mic 2 = 51 dB, and Mic 1 phantom on: INPUTSOURCE,
+        # whose two-byte index is the "selector plus trailer" of the old reading.
+        ("0321000000010101026e02696e7075744d6963726f70686f6e654761696e0001050138000000",
+         build_record("inputMicrophoneGain", "int", 56, [0x26E])),
+        ("0321000000010101026f02696e7075744d6963726f70686f6e654761696e0001050133000000",
+         build_record("inputMicrophoneGain", "int", 51, [0x26F])),
+        ("0318000000010101026e02696e707574506f7765720001050101000000",
+         build_record("inputPower", "int", 1, [0x26E])),
+        # Signed int: inputDigitalGain -11 dB (captured from the RODE app on a Duo, at 0x14F).
+        ("031e000000010101024f01696e7075744469676974616c4761696e00010501f5ffffff",
+         build_record("inputDigitalGain", "int", -11, [0x14F])),
+        ("0318000000010101024801696e7075745068617365466c697000010102",
+         build_record("inputPhaseFlip", "bool", True, [0x148])),
+        # Processing on CHANNEL[0], effects on EFFECTS_PARAMETERS[1].
+        ("0320000000010101011c6368616e6e656c42797061737350726f63657373696e6700010102",
+         build_record("channelBypassProcessing", "bool", True, [0x1C])),
+        ("0323000000010101011c6368616e6e656c43757272656e7446785072657365740001050101000000",
+         build_record("channelCurrentFxPreset", "int", 1, [0x1C])),
+        ("030f000000010101012765" "63686f4f6e00010102",
+         build_record("echoOn", "bool", True, [0x27])),
+        # OUTPUT, MASTERCHANNEL and HEADPHONE[1].
+        ("0324000000010101010d7265636f7264696e674d756c7469747261636b4d6f646500010501" "01000000",
+         build_record("recordingMultitrackMode", "int", 1, [0x0D])),
+        ("0319000000010101010d6f757470757442544175746f4d75746500010102",
+         build_record("outputBTAutoMute", "bool", True, [0x0D])),
+        ("031a000000010101010e6d6173746572436f6d70656c6c6f724f6e00010103",
+         build_record("masterCompellorOn", "bool", False, [0x0E])),
+        ("031a000000010101010a6865616470686f6e65547970650001050101000000",
+         build_record("headphoneType", "int", 1, [0x0A])),
+        # A cross-point index passes 255 and must WIDEN, not wrap: source 13 output 0 is 245 and
+        # stays `01 f5`, Virtual A (258) and Virtual B (271) take two bytes. A mask would pass the
+        # first and silently redirect the others to a node 256 lower.
+        ("0314000000010101" "01f5" "6d697844697361626c6564" "00010102",
+         build_record("mixDisabled", "bool", True, [245])),
+        ("0315000000010101" "020201" "6d697844697361626c6564" "00010102",
+         build_record("mixDisabled", "bool", True, [258])),
+        ("0322000000010101" "020f01" "6d69784c6576656c57697468416e63686f72" "00010705302e357c3000",
+         build_record("mixLevelWithAnchor", "str", cross_point_level_value(0.5), [271])),
+        # faderLevel on fader 7, in the form the desk pushes: the zero first index has no bytes.
+        ("031800000001010200010a6661646572" "4c6576656c0001050140000000",
+         build_fader_level([0, 0x0A], 64)),
+        # remountPadStorage, as the RODE app sends it.
+        ("031a000000010101010f72656d6f756e7450616453746f726167650001010200",
+         build_record("remountPadStorage", "bool", True, [0x0F])),
+    ]
+    for want, got in cases:
+        want = bytes.fromhex(want).ljust(BULK_LEN, b"\x00")
+        assert got == want, f"record mismatch:\n  expected {want[:48].hex()}\n  got      {got[:48].hex()}"
 
 
 _USAGE = "usage: rcp_transfer.py enter | exit | remount | selftest | midi on|off"

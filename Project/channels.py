@@ -10,7 +10,7 @@ LAYERING (mirrors soundpad.py over pad_records.py):
   channels.py      - THIS FILE.
 
 TWO ADDRESSING SCHEMES, and every write here uses exactly one. INPUT values live at the channel's
-INPUTSOURCE node (DeviceModel.input_path), keyed by source code. The CHAIN lives on the fader STRIP
+INPUTSOURCE node (DeviceModel.input_key), keyed by source code. The CHAIN lives on the fader STRIP
 the channel currently sits on, keyed by its position in the live fader vector.
 """
 
@@ -26,15 +26,15 @@ import rcp_transfer as _t  # low-level byte builders + send layer (build_*, send
 # ============================================================================
 # MIC INPUT CHANNELS (gain / phantom / polarity / type) - the XLR preamp block
 # ----------------------------------------------------------------------------
-# Every input write goes to INPUTSOURCE[source_code] (DeviceModel.input_path), on every desk.
+# Every input write goes to INPUTSOURCE[source_code] (DeviceModel.input_key), on every desk.
 # DO NOT reintroduce a per-device input selector table (MIC_CHANNEL_SEL / INPUT_DIGITAL_GAIN_SEL):
 # it is a second encoding of the same rule, and a per-device copy can encode a DIFFERENT and inert
 # address, which is how a mic gain comes to report success while changing no audio.
 # ============================================================================
 
 
-def _mic_path(channel: int) -> list:
-    """Tree path of a 1-based mic channel's input values on the CONNECTED device.
+def _mic_key(channel: int) -> tuple:
+    """The node key of a 1-based mic channel's input values on the CONNECTED device.
 
     Raises a clear error if this desk's input-mic writes are not enabled, so the app disables the
     control rather than writing to an address nothing has confirmed.
@@ -48,7 +48,7 @@ def _mic_path(channel: int) -> list:
                if c.get("kind") == "mic" and int(c["source_code"]) + 1 == channel), None)
     if ch is None:
         raise ValueError(f"mic channel {channel} out of range for the {dev.name}")
-    return dev.input_path(ch)
+    return dev.input_key(ch)
 
 
 # Mic input type / voicing: inputMicrophoneType (int), at the same address as the gain. All 11
@@ -77,10 +77,10 @@ CHANNEL_PROP = {
                                                    "back out, so restore it explicitly."},
     # A STRING of AARRGGBB hex, read off the live desk: 'ffd43580' on Mic 1, 'ff59dd20' on Mic 2,
     # 'ff000000' on the unused slots. Registering it as an int would write the wrong record shape.
-    # There is no string channel-property WRITER (build_channel_prop_int / _bool are all there is),
-    # so it is readable and backed up but not restorable.
+    # Restoring it has never been tried on hardware, so it is readable and backed up but not
+    # restorable.
     "inputColour":         {"kind": "str",  "note": "channel strip colour, AARRGGBB hex string "
-                                                   "(decoded). No string writer yet."},
+                                                   "(decoded). Not restored."},
     # inputType IS DERIVED FROM inputMicrophoneType. Proven on Mic 3 (nothing plugged in)
     # by stepping the mic type and reading it back each time:
     #     Line-in (0)    -> inputType 2
@@ -100,7 +100,7 @@ CHANNEL_PROP = {
 def set_mic_gain(channel: int, db: int) -> int:
     """Set a mic channel's input gain in dB (app: Audio Setup > channel gear > Level). channel 1-4
     (Pro II) / 1-2 (Duo). Decoded property 'inputMicrophoneGain'. Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_int("inputMicrophoneGain", db, _mic_path(channel)))
+    return _t.write_at(_mic_key(channel), "inputMicrophoneGain", "int", db)
 
 
 def mic_gain(blob: bytes, channel: int):
@@ -114,20 +114,20 @@ def mic_gain(blob: bytes, channel: int):
     the "put it straight back" value from the cache writes the app's last displayed gain over every
     freshly-restored one.
     """
-    v = _r.path_value(blob, _mic_path(channel), "inputMicrophoneGain", None)
+    v = _r.keyed_value(blob, _mic_key(channel), "inputMicrophoneGain", None)
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
 def set_phantom(channel: int, on: bool) -> int:
     """Enable/disable 48V phantom power (P48) on a mic channel. Property 'inputPower'
     (int 1=on, 0=off). Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_int("inputPower", 1 if on else 0, _mic_path(channel)))
+    return _t.write_at(_mic_key(channel), "inputPower", "int", 1 if on else 0)
 
 
 def set_polarity(channel: int, invert: bool) -> int:
     """Invert (flip) a mic channel's polarity/phase. Property 'inputPhaseFlip' (compact bool).
-    Uses the INPUT selector like gain/P48 - WRITE-VERIFIED via read-back. Sent in normal mode."""
-    return _t.send_record(_t.build_path_prop_bool("inputPhaseFlip", invert, _mic_path(channel)))
+    On the INPUT node like gain/P48 - WRITE-VERIFIED via read-back. Sent in normal mode."""
+    return _t.write_at(_mic_key(channel), "inputPhaseFlip", "bool", invert)
 
 
 def set_mic_type(channel: int, type_value: int) -> int:
@@ -143,12 +143,12 @@ def set_mic_type(channel: int, type_value: int) -> int:
 
     Line-in and Instrument are the two that leave the gain alone - they are not microphone voicings.
     Instrument instead sets inputInstrumentGain to 20 and leaves it there when you move off it."""
-    return _t.send_record(_t.build_path_prop_int("inputMicrophoneType", type_value, _mic_path(channel)))
+    return _t.write_at(_mic_key(channel), "inputMicrophoneType", "int", type_value)
 
 
 def set_instrument_gain(channel: int, value: int) -> int:
     """Instrument-input gain on a mic/combo channel (property 'inputInstrumentGain')."""
-    return _t.send_record(_t.build_path_prop_int("inputInstrumentGain", int(value), _mic_path(channel)))
+    return _t.write_at(_mic_key(channel), "inputInstrumentGain", "int", int(value))
 
 
 # ============================================================================
@@ -313,20 +313,20 @@ def _channel_strip(channel) -> int:
     return _strip_index(entry)
 
 
-def proc_selector(channel) -> int:
-    """Map a channel to its processing selector (SEL_CHANNEL + strip index), DEVICE-AWARE.
+def proc_key(channel) -> tuple:
+    """Map a channel to its processing node, CHANNEL[strip index], DEVICE-AWARE.
 
     `channel` may be a device ui-channel name ("Mic1", "Bluetooth", "Headset", ...), a 1-based
     PROC_CHANNEL_ORDER index, or a 1-based mic number. The strip is the channel's LIVE fader
     position, matching the read path.
     """
-    return _t.SEL_CHANNEL + _channel_strip(channel)
+    return _t.channel_key(_channel_strip(channel))
 
 
-def fx_selector(channel) -> int:
-    """Effects selector (SEL_CHANNEL_FX + strip index), using the SAME strip resolution as
-    proc_selector so effects and processing always agree. Confirmed on the Duo: Mic2 -> 0x27."""
-    return _t.SEL_CHANNEL_FX + _channel_strip(channel)
+def fx_key(channel) -> tuple:
+    """Effects node, EFFECTS_PARAMETERS[strip index], using the SAME strip resolution as proc_key
+    so effects and processing always agree."""
+    return _t.channel_fx_key(_channel_strip(channel))
 
 
 # Whitelist of processing parameters we have decoded (all float64, normalised 0..1). Only names the RODE
@@ -361,9 +361,9 @@ PRESET_FLOAT_PROPS = PROCESSING_PROPS | PRESET_EXTRA_FLOAT_PROPS
 def _require_processing() -> None:
     """Guard the channel processing/effects WRITE path by the active device's "processing" cap.
 
-    proc_selector()/fx_selector() resolve the strip from the LIVE fader position, matching the read
-    path. The cap gates the whole write path so a desk whose processing scheme is not verified
-    refuses rather than writing a wrong selector (the stray-append hazard)."""
+    proc_key()/fx_key() resolve the strip from the LIVE fader position, matching the read path.
+    The cap gates the whole write path so a desk whose processing scheme is not verified refuses
+    rather than writing to a wrong node (the stray-append hazard)."""
     dev = devices.get_active_device()
     if "processing" not in dev.caps:
         raise RuntimeError(
@@ -376,21 +376,21 @@ def set_channel_processing(channel: int, prop: str, value: float) -> int:
 
     channel: 1-based index into PROC_CHANNEL_ORDER or a channel name (1-4 = Mic 1-4; also
     Bluetooth/USB1/Chat/USB2/CallMe1). prop: a name in PRESET_FLOAT_PROPS. value: NORMALISED
-    0.0..1.0 (the unit maps it to the real dB/Hz/ms). Each channel has its OWN selector via
-    proc_selector; the property name picks the parameter."""
+    0.0..1.0 (the unit maps it to the real dB/Hz/ms). Each channel has its OWN node via
+    proc_key; the property name picks the parameter."""
     _require_processing()
     if prop not in PRESET_FLOAT_PROPS:
         raise ValueError(f"unknown/unsupported processing property: {prop}")
     v = max(0.0, min(1.0, float(value)))
-    return _t.send_record(_t.build_global_prop_float(prop, proc_selector(channel), v))
+    return _t.write_at(proc_key(channel), prop, "float", v)
 
 
 def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> int:
-    """Apply a full processing preset to any processing channel (see proc_selector).
+    """Apply a full processing preset to any processing channel (see proc_key).
 
     `props` maps property name -> value: every float name is written as a normalised 0..1 float;
     channelAdvancedProcessing and each <module>On flag as a bool, channelCurrentFxPreset as an int.
-    All land on the channel's OWN selector, exactly as the RODE app does when you pick a preset.
+    All land on the channel's OWN node, exactly as the RODE app does when you pick a preset.
 
     MODULES ARE PART OF A PRESET. Without them it is a silent no-op: applied to a strip whose
     modules are switched off it writes all 33 parameters, reports the preset name, and sounds
@@ -411,25 +411,25 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     -1 the moment any parameter is written.
     Returns total bytes written."""
     _require_processing()
-    sel = proc_selector(channel)
+    key = proc_key(channel)
     mode, modules, marker, float_vals = [], [], [], {}
     for name, val in props.items():
         if name == CHAIN_PRESET_MARKER_PROP:
-            marker.append(_t.build_global_prop_int(name, sel, int(val)))
+            marker.append(_t.build_at(key, name, "int", int(val)))
         elif name == CHAIN_ADVANCED_PROP:
-            mode.append(_t.build_global_prop_bool(name, bool(val), sel))
+            mode.append(_t.build_at(key, name, "bool", bool(val)))
         elif name in PROCESSING_MODULE_BOOLS:
-            modules.append(_t.build_global_prop_bool(name, bool(val), sel))
+            modules.append(_t.build_at(key, name, "bool", bool(val)))
         elif name in PRESET_FLOAT_PROPS:
             float_vals[name] = max(0.0, min(1.0, float(val)))
         else:
             raise ValueError(f"unsupported preset property: {name}")
-    floats = [_t.build_global_prop_float(name, sel, float_vals[name])
+    floats = [_t.build_at(key, name, "float", float_vals[name])
               for name in _float_write_order(list(float_vals))]
     return _t.send_records_paced(mode + modules + floats + marker, delay=delay)
 
 
-# Per-channel PROCESSING module on/off toggles (compact BOOL on the channel's processing selector).
+# Per-channel PROCESSING module on/off toggles (compact BOOL on the channel's processing node).
 # Decoded. The Aphex aural-exciter + Big Bottom share ONE enable (aphexOn).
 PROCESSING_MODULE_ON = {
     "hpf": "hpfOn", "eq": "eqOn", "compressor": "compressorOn", "noiseGate": "noiseGateOn",
@@ -453,55 +453,53 @@ CHAIN_PRESET_MARKER_PROP = "channelCurrentFxPreset"
 
 def set_channel_advanced(channel: int, on: bool) -> int:
     """Set a strip's processing MODE: True = advanced (modules + params), False = simple (the three
-    VoxLab knobs). Compact bool on the channel's own processing selector, i.e. the same record shape
+    VoxLab knobs). Compact bool on the channel's own processing node, i.e. the same record shape
     as any module toggle. Writing this flips the mode and changes NO
     parameter (the RODE app's "disabling Advanced will reset all parameters" warning is the APP
     clearing them itself, not the firmware)."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_bool(CHAIN_ADVANCED_PROP, bool(on),
-                                                   proc_selector(channel)))
+    return _t.write_at(proc_key(channel), CHAIN_ADVANCED_PROP, "bool", bool(on))
 
 
 def set_channel_preset_marker(channel: int, index: int) -> int:
     """Set which preset NAME a strip displays (channelCurrentFxPreset; -1 = custom). Write this LAST,
     after every parameter, or the device will blank it again."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_int(CHAIN_PRESET_MARKER_PROP, proc_selector(channel),
-                                                  int(index)))
+    return _t.write_at(proc_key(channel), CHAIN_PRESET_MARKER_PROP, "int", int(index))
 
 
 def set_processing_module(channel: int, module: str, on: bool) -> int:
     """Enable/disable a per-channel PROCESSING module on any processing channel (mics + BT/USB1/
-    Chat/USB2/CallMe1; see proc_selector). `module` is a key in PROCESSING_MODULE_ON (hpf / eq /
+    Chat/USB2/CallMe1; see proc_key). `module` is a key in PROCESSING_MODULE_ON (hpf / eq /
     compressor / noiseGate / deesser / aphex / pan / eqHigh / eqMid / eqLow), or the raw <module>On
-    property name. Compact bool on the channel's processing selector."""
+    property name. Compact bool on the channel's processing node."""
     _require_processing()
-    sel = proc_selector(channel)
+    key = proc_key(channel)
     prop = PROCESSING_MODULE_ON.get(module)
     if prop is None:
         if module in PROCESSING_MODULE_ON.values():
             prop = module
         else:
             raise ValueError(f"unknown processing module {module!r}; known: {list(PROCESSING_MODULE_ON)}")
-    return _t.send_record(_t.build_global_prop_bool(prop, on, sel))
+    return _t.write_at(key, prop, "bool", on)
 
 
 def set_processing_enabled(channel: int, on: bool) -> int:
     """Master per-channel PROCESSING on/off (the panel's 'Processing' toggle). The device property is
-    INVERTED: channelBypassProcessing (compact bool) on the channel's processing selector - True =
+    INVERTED: channelBypassProcessing (compact bool) on the channel's processing node - True =
     bypassed/OFF. So processing ON => channelBypassProcessing False. Do NOT name it
     set_channel_processing: that collides with the float param setter."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_bool("channelBypassProcessing", not on, proc_selector(channel)))
+    return _t.write_at(proc_key(channel), "channelBypassProcessing", "bool", not on)
 
 
-# CHANNEL MUTE. `channelOutputMute` is a compact bool on the channel's own processing selector
-# (SEL_CHANNEL + strip), i.e. byte-for-byte the same record shape as any module toggle above.
+# CHANNEL MUTE. `channelOutputMute` is a compact bool on the channel's own processing node
+# (CHANNEL[strip]), i.e. byte-for-byte the same record shape as any module toggle above.
 # The firmware PROPAGATES it into the mix matrix (every mixMute cell for that source follows), so
 # it is a REAL mute, not a stored flag, and clearing it puts everything back. It does NOT take the
 # input-address format: written there it looks unwritable.
 #
-# Gated by the same "processing" cap as the module toggles, because it is the same selector family.
+# Gated by the same "processing" cap as the module toggles, because it is the same node.
 # The Duo behaves the same: a mute moves 14 properties, its own plus the 13 matrix cross-points
 # for the source.
 MUTE_PROP = "channelOutputMute"
@@ -510,17 +508,17 @@ MUTE_PROP = "channelOutputMute"
 def set_channel_mute(channel, on: bool) -> int:
     """Mute or unmute a channel (the unit's own mute button, from software).
 
-    `channel` is anything proc_selector accepts (1-4 = Mic 1-4, or a channel name), so the write
+    `channel` is anything proc_key accepts (1-4 = Mic 1-4, or a channel name), so the write
     follows the channel to whichever fader STRIP it is currently on, exactly as processing does.
     Muting here is the same mute as the desk's button: it silences that channel in every mix that
     follows the fader, not just the monitor. A cross-point unlinked at a manual level keeps playing."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_bool(MUTE_PROP, bool(on), proc_selector(channel)))
+    return _t.write_at(proc_key(channel), MUTE_PROP, "bool", bool(on))
 
 
 # CHANNEL SOLO / LISTEN. `channelCueEnable` is the desk's Solo (RODE call it "Listen"): it replaces
-# the headphone feed with just the soloed channels. Same record shape and same selector family as the
-# mute above - a compact bool on SEL_CHANNEL + strip. The RODE app has no control for it, which
+# the headphone feed with just the soloed channels. Same record shape and same node as the
+# mute above - a compact bool on CHANNEL[strip]. The RODE app has no control for it, which
 # means no capture route, never that it is unwritable.
 #
 # A write moves channelCueEnable for that strip and nothing else in the model, and appends no
@@ -535,12 +533,12 @@ CUE_PROP = "channelCueEnable"
 def set_channel_solo(channel, on: bool) -> int:
     """Solo ("Listen") a channel, or clear it: the unit's own Solo button, from software.
 
-    `channel` is anything proc_selector accepts, so the write follows the channel to whichever fader
+    `channel` is anything proc_key accepts, so the write follows the channel to whichever fader
     STRIP it is currently on. This only changes what you HEAR in the headphones - the mixes, the
     recording and anything being streamed are untouched - which is the opposite of the mute above and
     is worth saying plainly wherever it is offered."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_bool(CUE_PROP, bool(on), proc_selector(channel)))
+    return _t.write_at(proc_key(channel), CUE_PROP, "bool", bool(on))
 
 
 def read_solos(blob: bytes | None = None) -> list:
@@ -561,7 +559,7 @@ def clear_all_solos(blob: bytes | None = None) -> int:
     cleared = 0
     for strip, on in enumerate(read_solos(blob)):
         if on:
-            _t.send_record(_t.build_global_prop_bool(CUE_PROP, False, proc_selector_for_strip(strip)))
+            _t.write_at(proc_key_for_strip(strip), CUE_PROP, "bool", False)
             cleared += 1
     return cleared
 
@@ -571,12 +569,12 @@ def clear_all_solos(blob: bytes | None = None) -> int:
 # strip inside the desk, this one is the desk telling the mic itself to stop sending.
 #
 # THE ADDRESS IS THE SAME FAMILY, and that is measured, not assumed. Read off a live Duo: ten
-# occurrences, CHANNEL[strip] at 0x1C..0x25, which is byte-for-byte the same set
+# occurrences, CHANNEL[strip] for every strip, which is byte-for-byte the same set
 # of nodes channelOutputMute and channelCueEnable sit on. Both desks publish ten. So it is a compact
-# bool on proc_selector(channel) like every other toggle here, and it needs no capture: a capture
+# bool on proc_key(channel) like every other toggle here, and it needs no capture: a capture
 # would only re-derive an address the tree already gives.
 #
-# IT DOES NOT BELONG IN CHANNEL_PROP, which lists the properties addressed at the INPUT selector: a
+# IT DOES NOT BELONG IN CHANNEL_PROP, which lists the properties addressed at the INPUT node: a
 # 30-entry table indexed by SOURCE CODE, a different block and a different index, where a write goes
 # to an address the audio engine does not read.
 #
@@ -588,16 +586,15 @@ WIRELESS_MUTE_PROP = "channelWirelessMute"
 def set_channel_wireless_mute(channel, on: bool) -> int:
     """Mute or unmute a RODE wireless mic paired to a channel, from software.
 
-    `channel` is anything proc_selector accepts, so the write follows the channel to whichever fader
+    `channel` is anything proc_key accepts, so the write follows the channel to whichever fader
     STRIP it is currently on, exactly as the mute and the solo do."""
     _require_processing()
-    return _t.send_record(_t.build_global_prop_bool(WIRELESS_MUTE_PROP, bool(on),
-                                                    proc_selector(channel)))
+    return _t.write_at(proc_key(channel), WIRELESS_MUTE_PROP, "bool", bool(on))
 
 
 def channel_strip_index(channel) -> int:
     """The 0-based fader STRIP a channel currently sits on (device-aware, same resolution as
-    proc_selector). Public because the server needs it to key the announcer's per-strip caches -
+    proc_key). Public because the server needs it to key the announcer's per-strip caches -
     mute state arrives from the desk keyed by strip, and our own writes have to agree."""
     return _channel_strip(channel)
 
@@ -612,15 +609,15 @@ def strip_on_fader(channel) -> int | None:
         return None
 
 
-# Per-channel "always on" EFFECTS (Echo + Reverb) live on a SEPARATE selector base from the processing
-# modules: fx base 0x26 + STRIP index, resolved by fx_selector exactly as processing is. Mic
+# Per-channel "always on" EFFECTS (Echo + Reverb) live on a SEPARATE block from the processing
+# modules: EFFECTS_PARAMETERS[STRIP index], resolved by fx_key exactly as processing is. Mic
 # channels only in the app's UI. Confirmed strip-indexed on the Duo: Mic 2's echoOn on 0x27.
 CHANNEL_FX_ON = {"echo": "echoOn", "reverb": "reverbOn"}
 
 
 def set_channel_effect(channel: int, effect: str, on: bool) -> int:
     """Enable/disable a per-channel always-on EFFECT (echo / reverb), channel 1-4. Compact bool on the
-    channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's LIVE strip index
+    channel-FX node fx_key(channel) = EFFECTS_PARAMETERS[the channel's LIVE strip index]
     (device-aware), so a mic moved off its default fader still hits the right strip."""
     _require_processing()
     if not 1 <= channel <= 4:
@@ -628,11 +625,11 @@ def set_channel_effect(channel: int, effect: str, on: bool) -> int:
     prop = CHANNEL_FX_ON.get(effect)
     if prop is None:
         raise ValueError(f"unknown channel effect {effect!r}; known: {list(CHANNEL_FX_ON)}")
-    return _t.send_record(_t.build_global_prop_bool(prop, on, fx_selector(channel)))
+    return _t.write_at(fx_key(channel), prop, "bool", on)
 
 
 # The adjustable PARAMS for each channel effect: GLOBAL float64
-# (normalised 0..1) on the same strip selector as the on/off. Names match the pad-FX names
+# (normalised 0..1) on the same strip node as the on/off. Names match the pad-FX names
 # (echoMix = Level, reverbModel = size/type, etc.).
 CHANNEL_FX_PARAMS = {
     "echo": ["echoMix", "echoLowCut", "echoHighCut", "echoDelay", "echoDecay"],
@@ -643,7 +640,7 @@ _CHANNEL_FX_PARAM_SET = {p for ps in CHANNEL_FX_PARAMS.values() for p in ps}
 
 def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
     """Set one channel-effect PARAM (echo*/reverb*) on a mic channel 1-4, value normalised 0..1.
-    Global float64 on the channel-FX selector fx_selector(channel) = fx base 0x26 + the channel's
+    Float64 on the channel-FX node fx_key(channel) = EFFECTS_PARAMETERS[the channel's
     LIVE strip index (device-aware); byte-for-byte the app's own write."""
     _require_processing()
     if not 1 <= channel <= 4:
@@ -651,13 +648,13 @@ def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
     if param not in _CHANNEL_FX_PARAM_SET:
         raise ValueError(f"unknown channel-effect param {param!r}")
     v = max(0.0, min(1.0, float(value01)))
-    return _t.send_record(_t.build_global_prop_float(param, fx_selector(channel), v))
+    return _t.write_at(fx_key(channel), param, "float", v)
 
 
 # Per-channel "Level" (dB) for the NON-MIC channels. The app's channel panel shows a -/+ Level for
 # Bluetooth/USB1/Chat/USB2 (and Headset on the Duo); the device property is inputDigitalGain (signed
-# int dB), NOT the 0x1c processing line. It sits on the channel's INPUTSOURCE node beside mic gain
-# and everything else input-shaped, so it is addressed by DeviceModel.input_path like the rest.
+# int dB), NOT the CHANNEL processing node. It sits on the channel's INPUTSOURCE node beside mic
+# gain and everything else input-shaped, so it is addressed by DeviceModel.input_key like the rest.
 
 
 def line_level_channels(dev=None) -> list:
@@ -680,7 +677,7 @@ def set_channel_level(channel_name: str, db: int) -> int:
     if ch is None:
         raise ValueError(
             f"set_channel_level only for {line_level_channels(dev)}; got {channel_name!r}")
-    return _t.send_record(_t.build_path_prop_int("inputDigitalGain", int(db), dev.input_path(ch)))
+    return _t.write_at(dev.input_key(ch), "inputDigitalGain", "int", int(db))
 
 
 # ============================================================================
@@ -744,7 +741,7 @@ def mic_channel_number(ch: dict) -> int:
 def input_value(blob: bytes, ch: dict, prop: str, dev=None):
     """One INPUT property for one channel, read at the same address the matching write goes to.
 
-    ONE lookup, because there is one address: INPUTSOURCE[source_code] (DeviceModel.input_path).
+    ONE lookup, because there is one address: INPUTSOURCE[source_code] (DeviceModel.input_key).
 
     NO per-device "override" node is tried first. On a Duo that override is the dead MIX block, so
     after any write the app READS BACK ITS OWN INERT COPY and reports it as the desk's setting,
@@ -756,7 +753,7 @@ def input_value(blob: bytes, ch: dict, prop: str, dev=None):
     Returns None when this desk does not publish that value for that channel (a bus has no input).
     """
     dev = dev or devices.get_active_device()
-    return _r.path_value(blob, dev.input_path(ch), prop, None)
+    return _r.keyed_value(blob, dev.input_key(ch), prop, None)
 
 
 def read_mixer() -> dict:
@@ -832,49 +829,68 @@ def _float_write_order(props) -> list:
     return knobs + rest + derived
 
 
-def proc_selector_for_strip(strip_idx: int) -> int:
-    """Processing selector for a STRIP index (0-based), not a channel."""
-    return _t.SEL_CHANNEL + int(strip_idx)
+def proc_key_for_strip(strip_idx: int) -> tuple:
+    """Processing node for a STRIP index (0-based), not a channel."""
+    return _t.channel_key(strip_idx)
 
 
-def fx_selector_for_strip(strip_idx: int) -> int:
-    """Effects selector for a STRIP index (0-based), not a channel."""
-    return _t.SEL_CHANNEL_FX + int(strip_idx)
+def fx_key_for_strip(strip_idx: int) -> tuple:
+    """Effects node for a STRIP index (0-based), not a channel."""
+    return _t.channel_fx_key(strip_idx)
 
 
 def read_chains(blob: bytes | None = None, strips: int | None = None) -> list:
     """Every strip's full chain, from ONE model dump. Returns a list indexed by STRIP:
     {"bools": {...}, "floats": {...}, "fx_bools": {...}, "fx_floats": {...}, "marker": int|None}.
 
-    Read-only. Values are exactly what the device reports, so two chains can be diffed directly."""
+    Read-only. Values are exactly what the device reports, so two chains can be diffed directly.
+
+    READ PER NODE, BY THE KEY ITS WRITE USES, never by position in the dump: the pads' effect
+    objects are EFFECTS_PARAMETERS blocks too, and a strip's node can carry fewer properties than
+    its neighbours, so the Nth occurrence of a name is not strip N's."""
     if blob is None:
         blob = _r.read_model_stable()
-
-    def vec(prop, kind=None):
-        return _r.values(blob, prop, kind)
-
-    bools = {p: vec(p) for p in CHAIN_BOOL_PROPS}
-    floats = {p: vec(p, "float") for p in CHAIN_FLOAT_PROPS}
-    fx_bools = {p: vec(p) for p in CHAIN_FX_BOOL_PROPS}
-    fx_floats = {p: vec(p, "float") for p in CHAIN_FX_FLOAT_PROPS}
-    markers = vec(CHAIN_PRESET_MARKER_PROP, "int")
+    if not blob:
+        return []
     if strips is None:
-        # The strip count is whatever the per-strip arrays actually carry (10 on both desks).
-        strips = max([len(v) for v in bools.values()] + [len(markers)] or [0])
+        strips = _r.layout_of(blob).count("CHANNEL")
 
-    def at(lst, i):
-        return lst[i] if 0 <= i < len(lst) else None
+    def props(key):
+        node = _r.keyed_node(blob, key)
+        return {p: (v, k) for p, v, k in node.props} if node is not None else {}
+
+    def val(found, prop, kind=None):
+        v, k = found.get(prop, (None, None))
+        return v if kind is None or k == kind else None
 
     out = []
     for i in range(strips):
+        proc, fx = props(proc_key_for_strip(i)), props(fx_key_for_strip(i))
         out.append({
-            "bools": {p: at(bools[p], i) for p in CHAIN_BOOL_PROPS},
-            "floats": {p: at(floats[p], i) for p in CHAIN_FLOAT_PROPS},
-            "fx_bools": {p: at(fx_bools[p], i) for p in CHAIN_FX_BOOL_PROPS},
-            "fx_floats": {p: at(fx_floats[p], i) for p in CHAIN_FX_FLOAT_PROPS},
-            "marker": at(markers, i),
+            "bools": {p: val(proc, p) for p in CHAIN_BOOL_PROPS},
+            "floats": {p: val(proc, p, "float") for p in CHAIN_FLOAT_PROPS},
+            "fx_bools": {p: val(fx, p) for p in CHAIN_FX_BOOL_PROPS},
+            "fx_floats": {p: val(fx, p, "float") for p in CHAIN_FX_FLOAT_PROPS},
+            "marker": val(proc, CHAIN_PRESET_MARKER_PROP, "int"),
         })
     return out
+
+
+def fit_chain(chain: dict, strip_idx: int) -> dict:
+    """`chain` with only the properties strip `strip_idx` carries, for writing there.
+
+    THE STRIPS ARE NOT ALIKE. On a Duo the tenth strip's effects node carries echo and reverb on/off
+    and none of their parameters, so a chain moved there must leave those out: the desk has nowhere
+    to keep them, and a write of one would append a stray."""
+    book = _r.layout()
+    pkey, fkey = proc_key_for_strip(strip_idx), fx_key_for_strip(strip_idx)
+
+    def keep(group, key):
+        return {p: v for p, v in (chain.get(group) or {}).items() if book.has(key, p)}
+
+    return {"bools": keep("bools", pkey), "floats": keep("floats", pkey),
+            "fx_bools": keep("fx_bools", fkey), "fx_floats": keep("fx_floats", fkey),
+            "marker": chain.get("marker") if book.has(pkey, CHAIN_PRESET_MARKER_PROP) else None}
 
 
 def chain_diff(desired: dict, current: dict) -> list:
@@ -922,24 +938,25 @@ def chain_diff(desired: dict, current: dict) -> list:
 def write_chain(strip_idx: int, desired: dict, current: dict | None = None,
                 delay: float = 0.02) -> dict:
     """Write a chain onto ONE strip, sending only what differs from `current` (pass None for a full
-    write). Returns {"written": <count>, "props": [names]}. Caller must hold the HID lock."""
+    write). Only what the strip carries is written (`fit_chain`). Returns {"written": <count>,
+    "props": [names]}. Caller must hold the HID lock."""
     _require_processing()
-    ops = chain_diff(desired, current)
+    ops = chain_diff(fit_chain(desired, strip_idx), current)
     if not ops:
         return {"written": 0, "props": []}
-    psel, fsel = proc_selector_for_strip(strip_idx), fx_selector_for_strip(strip_idx)
+    pkey, fkey = proc_key_for_strip(strip_idx), fx_key_for_strip(strip_idx)
     recs = []
     for kind, prop, val in ops:
         if kind == "bool":
-            recs.append(_t.build_global_prop_bool(prop, bool(val), psel))
+            recs.append(_t.build_at(pkey, prop, "bool", bool(val)))
         elif kind == "fx_bool":
-            recs.append(_t.build_global_prop_bool(prop, bool(val), fsel))
+            recs.append(_t.build_at(fkey, prop, "bool", bool(val)))
         elif kind == "float":
-            recs.append(_t.build_global_prop_float(prop, psel, max(0.0, min(1.0, float(val)))))
+            recs.append(_t.build_at(pkey, prop, "float", max(0.0, min(1.0, float(val)))))
         elif kind == "fx_float":
-            recs.append(_t.build_global_prop_float(prop, fsel, max(0.0, min(1.0, float(val)))))
+            recs.append(_t.build_at(fkey, prop, "float", max(0.0, min(1.0, float(val)))))
         elif kind == "int":
-            recs.append(_t.build_global_prop_int(prop, psel, int(val)))
+            recs.append(_t.build_at(pkey, prop, "int", int(val)))
     _t.send_records_paced(recs, delay=delay)
     return {"written": len(recs), "props": [p for _k, p, _v in ops]}
 

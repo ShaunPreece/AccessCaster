@@ -153,7 +153,7 @@ check("skipped, and nothing written", (verdict, writes), ("skipped (never probed
 
 print("\nA CAPTURE'S PROPERTY WRITES ARE FOUND AT ANY ADDRESS DEPTH")
 sent = [capture_analyze.UsbPacket(n, False, 0x05, 5, 1, rec) for n, rec in enumerate((
-    rcp_transfer.build_channel_prop_int("inputMicrophoneGain", 40, 0x6E),
+    rcp_transfer.build_path_prop_int("inputMicrophoneGain", 40, [0x26E]),
     rcp_transfer.build_path_prop_int("padColourIndex", 3, [0x29A, 5])))]
 check("a mic's two-byte channel address and a pad's two-level path",
       list(capture_analyze.host_writes(sent).values()),

@@ -238,8 +238,13 @@ if mic is None:
     raise SystemExit("No mic other than Mic 1 is on a fader, so there is nothing safe to test.")
 line = lines[0]
 mic_n = c.mic_channel_number(mic)
-mic_path = tuple(dev.input_path(mic))
-line_path = tuple(dev.input_path(line))
+def at(key) -> tuple:
+    """The path the attached desk's own layout gives a key."""
+    return tuple(rcp_transfer.address_of(key))
+
+
+mic_path = at(dev.input_key(mic))
+line_path = at(dev.input_key(line))
 
 # ---- input_mic_write -------------------------------------------------------------------------
 if "input_mic_write" in dev.caps:
@@ -261,7 +266,7 @@ if "input_mic_write" in dev.caps:
 # ---- processing ------------------------------------------------------------------------------
 if "processing" in dev.caps:
     strip = c._strip_index(mic)
-    proc_path = (rcp_transfer.SEL_CHANNEL + strip,)
+    proc_path = at(rcp_transfer.channel_key(strip))
     blob, snap = snapshot()
     cur = snap.get((proc_path, "CHANNEL", "hpfOn"))
     probe(f"processing: {mic['label']} high-pass filter on/off (strip {strip})",
@@ -299,8 +304,8 @@ if "processing" in dev.caps:
     pads = next((e for e in dev.ui_channels if e.get("kind") == "bus"), None)
     if pads is not None:
         pads_strip = c._strip_index(pads)
-        pads_path = (rcp_transfer.SEL_CHANNEL + pads_strip,)
-        pads_row = [(rcp_transfer.cross_point_selector(o, pads["source_code"]),)
+        pads_path = at(rcp_transfer.channel_key(pads_strip))
+        pads_row = [at(rcp_transfer.cross_point_key(o, pads["source_code"]))
                     for o in range(dev.matrix.output_count)]
         cur = snap.get((pads_path, "CHANNEL", c.MUTE_PROP))
 
@@ -436,22 +441,20 @@ elif "stereo_link" in dev.caps:
             for strip in (seat, up_at):
                 if strip is None:
                     continue
-                sel = rcp_transfer.SEL_CHANNEL + strip
-                was = before.get(((sel,), "CHANNEL", c.MUTE_PROP))
+                key = rcp_transfer.channel_key(strip)
+                was = before.get((at(key), "CHANNEL", c.MUTE_PROP))
                 if was is not None:
-                    rcp_transfer.send_record(
-                        rcp_transfer.build_global_prop_bool(c.MUTE_PROP, bool(was), sel))
+                    rcp_transfer.write_at(key, c.MUTE_PROP, "bool", bool(was))
                     time.sleep(0.25)
 
         # The pair code's own cross-point levels belong to the desk: each link sets them from the
         # lower mic's fader and the unlink leaves them, '-1|0' placeholders included. Writing a
         # value back is no restore: '-1|0' is stored relative to the anchor, as -0.149606.
-        pair_cells = {rcp_transfer.cross_point_selector(o, code)
+        pair_cells = {at(rcp_transfer.cross_point_key(o, code))
                       for o in range(rcp_transfer.CROSS_POINT_SOURCE_STRIDE)}
         _b, snap_now = snapshot()
         pair_levels = {k for k in snap_now
-                       if k[1] == "MIX" and k[2] == "mixLevelWithAnchor"
-                       and len(k[0]) == 1 and k[0][0] in pair_cells}
+                       if k[1] == "MIX" and k[2] == "mixLevelWithAnchor" and k[0] in pair_cells}
         probe(f"stereo_link: link and unlink {label}",
               None, link, True, False, ignore={"sipSlotCallDisconnect"},
               restore_extra=restore_mutes, one_way=pair_levels)
@@ -465,14 +468,12 @@ if "level_write" in dev.caps:
 
     # A VIRTUAL fader, and one that actually has a source on it - an empty strip (-1) moves no
     # cross-points, so it would prove only that the byte landed, which a dead address proves too.
-    idx = next((i for i in sorted(dev.fader.level_selectors)
-                if i < len(vec) and vec[i] >= 0), None)
+    idx = next((i for i in dev.fader.level_faders if i < len(vec) and vec[i] >= 0), None)
     if idx is None:
         print("\n=== level_write: SKIPPED, no virtual fader has a source on it ===")
     else:
-        sel = dev.fader.level_selectors[idx]
+        node = at(rcp_transfer.fader_key(idx))
         source = vec[idx]
-        node = (0, sel)
         cur = levels.get((node, "FADER", "faderLevel"))
         target = 40 if cur != 40 else 60
         # THE ENGINE IS THE WITNESS, not the read-back. A fader's level IS its source's cross-point
@@ -480,30 +481,30 @@ if "level_write" in dev.caps:
         # value/127 exactly. That is the difference between "the byte landed" and "the audio moved".
         want = f"{target / rcp_transfer.FADER_LEVEL_MAX:.6f}"
         # Every cell of the row, not only the outputs the desk exposes: the anchor moves on all 13.
-        row = [rcp_transfer.cross_point_selector(out, source)
+        row = [at(rcp_transfer.cross_point_key(out, source))
                for out in range(rcp_transfer.CROSS_POINT_SOURCE_STRIDE)]
 
         # The ANCHOR (after the '|') is the fader position, so it moves on every cell. The level
         # before it follows only on a linked cell; an unlinked one keeps its manual level.
         def check_row(after):
             bad = [p for p in row
-                   if not str(after.get(((p,), "MIX", "mixLevelWithAnchor"), "")).partition("|")[2]
+                   if not str(after.get((p, "MIX", "mixLevelWithAnchor"), "")).partition("|")[2]
                    .startswith(want)]
             check_true(f"the ENGINE moved the anchor of all {len(row)} of source {source}'s "
                        f"cross-points to {want} ({target}/127) on its own", not bad,
                        f"it moved only {len(row) - len(bad)}")
 
-        probe(f"level_write: virtual fader {idx} (source {source}) at [0,0x{sel:02x}]",
+        probe(f"level_write: virtual fader {idx} (source {source}) at {list(node)}",
               (node, "FADER", "faderLevel"),
-              lambda v: rcp_transfer.set_fader_level(sel, v), target, cur,
+              lambda v: rcp_transfer.set_fader_level(idx, v), target, cur,
               expect_extra=len(row), after_write=check_row)
 
     mon = [v for v in rr.values(rr.read_model_stable(fresh=True), "outputMonLevel")
            if isinstance(v, float)]
     if mon:
         cur = mon[0]
-        probe("level_write: monitor speaker level (outputMonLevel on OUTPUT 0x0d)",
-              ((0x0D,), "OUTPUT", "outputMonLevel"),
+        probe("level_write: monitor speaker level (outputMonLevel on OUTPUT)",
+              (at(rcp_transfer.OUTPUT), "OUTPUT", "outputMonLevel"),
               rcp_transfer.set_monitor_level, 0.25 if abs(cur - 0.25) > 0.01 else 0.5, cur)
 
 # ---- matrix_write ------------------------------------------------------------------------------
@@ -511,7 +512,7 @@ if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
     # THE OUTPUT MUST BE IN CUSTOM MODE or the cross-point write stores a value that changes no
     # routing. Output 1 is Headphone 2, which has nothing plugged into it on this desk.
     src_i, out_i = mic["source_code"], 1
-    sel = rcp_transfer.cross_point_selector(out_i, src_i)
+    (sel,) = at(rcp_transfer.cross_point_key(out_i, src_i))
     print(f"\n=== matrix_write: source {src_i} -> output {out_i}, selector {sel:#04x} ===")
     b0, base = snapshot()
     mode0 = rr.read_output_modes(b0)[out_i]
@@ -554,7 +555,7 @@ if "matrix_write" in dev.caps and (not ONLY or "matrix" in ONLY):
 # ---- matrix_write: the cross-point LEVEL ------------------------------------------------------
 if "matrix_write" in dev.caps and (not ONLY or "level" in ONLY):
     src_i, out_i = mic["source_code"], 1
-    sel = rcp_transfer.cross_point_selector(out_i, src_i)
+    (sel,) = at(rcp_transfer.cross_point_key(out_i, src_i))
     key = ((sel,), "MIX", "mixLevelWithAnchor")
     print(f"\n=== matrix_write: cross-point LEVEL, selector {sel:#04x} ===")
     b0, base = snapshot()
@@ -564,7 +565,7 @@ if "matrix_write" in dev.caps and (not ONLY or "level" in ONLY):
     try:
         rcp_transfer.set_output_routing(out_i, 2)
         time.sleep(0.8)
-        rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=False))
+        rcp_transfer.send_record(rcp_transfer.build_mix_link_request([sel], link=False))
         time.sleep(0.8)
         rcp_transfer.set_cross_point_level(out_i, src_i, 0.25)
         time.sleep(0.8)
@@ -577,7 +578,7 @@ if "matrix_write" in dev.caps and (not ONLY or "level" in ONLY):
                    abs((cellv.get("level") or 0) - 0.25) < 0.01 and cellv.get("linked") is False,
                    str(cellv))
     finally:
-        rcp_transfer.send_record(rcp_transfer.build_mix_link_request(sel, link=True))
+        rcp_transfer.send_record(rcp_transfer.build_mix_link_request([sel], link=True))
         time.sleep(0.8)
         rcp_transfer.set_output_routing(out_i, mode0)
     _b, back = settled()
@@ -637,7 +638,7 @@ if "pad_write" in dev.caps and (not ONLY or "pad" in ONLY):
 # ---- output_write ----------------------------------------------------------------------------
 if "output_write" in dev.caps:
     blob, snap = snapshot()
-    key = ((rcp_transfer.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
+    key = (at(rcp_transfer.OUTPUT), "OUTPUT", "outputMonMute")
     cur = snap.get(key)
     if cur is not None:
         probe("output_write: monitor speaker mute",
@@ -654,9 +655,9 @@ if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
     print("\n=== unit_settings: every address resolves on this desk ===")
     b0, _ = snapshot()
     bad = []
-    for prop, (sel, _kind) in sorted(rcp_transfer.UNIT_SETTING_SEL.items()):
-        if rr.path_value(b0, [sel], prop, rr.MISSING) is rr.MISSING:
-            bad.append(f"{prop} (sel {sel:#04x})")
+    for prop, (key, _kind) in sorted(rcp_transfer.UNIT_SETTING_SEL.items()):
+        if rr.keyed_value(b0, key, prop, rr.MISSING) is rr.MISSING:
+            bad.append(f"{prop} ({key[0]})")
     check_true(f"all {len(rcp_transfer.UNIT_SETTING_SEL)} resolve to a node that carries them",
                not bad, f"{len(bad)} setting(s) are NOT on this desk: {', '.join(bad)}")
 
@@ -665,7 +666,7 @@ if "unit_settings" in dev.caps and (not ONLY or "unit" in ONLY):
     # this property taking the encoder's job away, and it matters to a user, not just to this suite:
     # switching the monitor output to fixed level opens the speakers up. Put the mute back by name.
     def restore_mon_mute(before):
-        key = ((rcp_transfer.SEL_OUTPUT_GLOBAL,), "OUTPUT", "outputMonMute")
+        key = (at(rcp_transfer.OUTPUT), "OUTPUT", "outputMonMute")
         want = before.get(key)
         if want is not None:
             rcp_transfer.set_unit_setting("outputMonMute", want)
@@ -693,15 +694,15 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
     import recorder as rec
     print("\n=== recorder: both selectors resolve on this desk ===")
     b0, snap0 = snapshot()
-    missing = [f"{p} (RECORDER {rec.SEL_RECORDER:#04x})"
+    missing = [f"{p} (RECORDER)"
                for p in ("recordState", "recordTimeMs", "requestRecordState",
                          "requestDropMarker", "recordBytesPerSecond")
-               if rr.path_value(b0, [rec.SEL_RECORDER], p, rr.MISSING) is rr.MISSING]
-    missing += [f"{p} (RECORDINGS {rec.SEL_RECORDINGS:#04x})"
+               if rr.keyed_value(b0, rcp_transfer.RECORDER, p, rr.MISSING) is rr.MISSING]
+    missing += [f"{p} (RECORDINGS)"
                 for p in ("requestDeleteUID", "recordingTotalCount")
-                if rr.path_value(b0, [rec.SEL_RECORDINGS], p, rr.MISSING) is rr.MISSING]
-    check_true(f"RECORDER {rec.SEL_RECORDER:#04x} and RECORDINGS {rec.SEL_RECORDINGS:#04x} both "
-               f"carry their properties", not missing, f"not on this desk: {', '.join(missing)}")
+                if rr.keyed_value(b0, rcp_transfer.RECORDINGS, p, rr.MISSING) is rr.MISSING]
+    check_true("RECORDER and RECORDINGS both carry their properties", not missing,
+               f"not on this desk: {', '.join(missing)}")
 
     state = rec.read_state(b0)
     print("\n=== recorder: the engine consumes a record request ===")
@@ -761,9 +762,9 @@ if "shows" in dev.caps and (not ONLY or "show" in ONLY):
     want = ("showControlExport", "showControlImport", "showControlNewFromDefault",
             "showControlDelete", "showControlLastError")
     gone = [p for p in want
-            if rr.path_value(b0, [sh.SEL_SHOWCONTROL], p, rr.MISSING) is rr.MISSING]
-    check_true(f"SHOWCONTROL {sh.SEL_SHOWCONTROL:#04x} carries all {len(want)} commands and the "
-               f"error field", not gone, f"not on this desk: {', '.join(gone)}")
+            if rr.keyed_value(b0, rcp_transfer.SHOWCONTROL, p, rr.MISSING) is rr.MISSING]
+    check_true(f"SHOWCONTROL carries all {len(want)} commands and the error field", not gone,
+               f"not on this desk: {', '.join(gone)}")
 
     print("\n=== shows: the engine answers an export it cannot do ===")
     vols = [v for v in rec.read_volumes(b0) if v["can_record"] and v["inserted"]]

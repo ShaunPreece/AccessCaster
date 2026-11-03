@@ -30,9 +30,6 @@ import rcp_read
 import rcp_transfer
 from _desk import count_changes, stray_counts
 
-SEL = rcp_transfer.SEL_NETWORK
-
-
 def slots(blob, prefix, n=10):
     """The scan-result slots, in order, blanks included so a change of shape is visible."""
     return [rcp_read.block_value(blob, "NETWORK", f"{prefix}{i}") or "" for i in range(1, n + 1)]
@@ -54,8 +51,8 @@ def run_scan(kind: str, prop: str, prefix: str, wait: float) -> bool:
     if kind == "wifi":
         print(f"  WIFISCANRESULT before: {blocks_before or 'nothing'}")
 
-    print(f"  writing {prop} = True on selector 0x{SEL:02X}")
-    rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(prop, True, SEL))
+    print(f"  writing {prop} = True on NETWORK")
+    rcp_transfer.write_at(rcp_transfer.NETWORK, prop, "bool", True)
 
     # Polls for the whole wait rather than stopping at the first change, so the timing of each
     # result form is seen.

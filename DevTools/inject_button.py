@@ -4,7 +4,7 @@ The device reports button presses as report-04 pushes. Replayed as report-03 (ho
 emulate the press:
   mute : 'mutePressed'   compact-bool  (down=02, up=03) -> device toggles Mic mute
   solo : 'soloPressed'   compact-bool  (down=02, up=03) -> device toggles channel cue
-  bank : 'selectedBank'  global int on SEL_GUI          -> sets the pad bank
+  bank : 'selectedBank'  int on the GUI block          -> sets the pad bank
 Both presses sit at path [0, 0x63], the first SOLOMUTEBUTTON.
 
 Usage:
@@ -48,7 +48,7 @@ def main() -> int:
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 0
         before = [v for v, k in rr.find_all(rr.read_model_stable(), "selectedBank")]
         print(f"selectedBank before: {before}")
-        t.send_record(t.build_global_prop_int("selectedBank", t.SEL_GUI, n))
+        t.write_at(t.GUI, "selectedBank", "int", n)
         time.sleep(0.3)
         after = [v for v, k in rr.find_all(rr.read_model_stable(), "selectedBank")]
         print(f"selectedBank after:  {after}  (asked for {n})")

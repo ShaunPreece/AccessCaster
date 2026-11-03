@@ -445,7 +445,7 @@ _INDEX_CACHE_MAX = 2
 class _Index:
     """A parsed dump: the tree, the properties in stream order, and name + path lookups."""
 
-    __slots__ = ("root", "flat", "by_name", "by_path")
+    __slots__ = ("root", "flat", "by_name", "by_path", "_layout")
 
     def __init__(self, root):
         self.root = root                  # None for an empty blob
@@ -455,11 +455,19 @@ class _Index:
         # is what lets a read be addressed exactly the way the matching write is. by_name throws the
         # address away, which is fine for "every occurrence" and wrong for "this channel's value".
         self.by_path: dict = {}
+        self._layout = None
         for node in (model_tree.walk(root) if root is not None else ()):
             self.by_path[tuple(node.path())] = node
             for pname, val, kind in node.props:
                 self.flat.append((node.name, pname, val, kind))
                 self.by_name.setdefault(pname, []).append((val, kind))
+
+    @property
+    def layout(self):
+        """This dump's `model_tree.Layout`, built on first use. None for an empty blob."""
+        if self._layout is None and self.root is not None:
+            self._layout = model_tree.Layout(self.root)
+        return self._layout
 
 
 class ModelUnreadable(ValueError):
@@ -635,6 +643,111 @@ def path_value(blob: bytes, path, name: str, default=None):
     return default
 
 
+def keyed_node(blob: bytes, key):
+    """The node a `model_tree.Layout` key names in THIS dump, or None. Reads by the same key the
+    matching write is addressed by, located on the dump being read rather than on a remembered
+    position."""
+    idx = _index(blob)
+    if idx.layout is None or not idx.layout.has(key):
+        return None
+    return idx.by_path.get(tuple(idx.layout.path(key)))
+
+
+def keyed_value(blob: bytes, key, name: str, default=None):
+    """`path_value` by key: the value of `name` on the node `key` names, or `default`."""
+    node = keyed_node(blob, key)
+    if node is None:
+        return default
+    for pname, val, _kind in node.props:
+        if pname == name:
+            return val
+    return default
+
+
+# ---- THE ADDRESS BOOK OF THE ATTACHED DESK ------------------------------------------------
+# Every write is addressed through `layout()`: the attached desk's own tree, never a position
+# written down in the code. It is learned from a stable dump and kept for as long as the desk stays
+# on the bus (`rcp_hid.connection_epoch`), because the root's layout is fixed by the firmware and a
+# firmware change restarts the desk. Every later stable dump re-checks it, so a desk whose layout
+# changed under the app is noticed at the next read rather than at a write.
+_layout_lock = threading.Lock()
+_layout_held = {"book": None, "epoch": -1}
+_layout_pinned = None
+
+
+def _learn_layout(blob: bytes):
+    """Take the layout of a parsed live dump as the attached desk's. Returns it, or None."""
+    try:
+        book = _index(blob).layout
+    except ModelUnreadable:
+        return None
+    if book is None:
+        return None
+    with _layout_lock:
+        held = _layout_held["book"]
+        if held is not None and held != book:
+            diagnostics.event("model.layout_changed", "the desk's blocks moved; addresses re-read")
+        _layout_held.update(book=book, epoch=rcp_hid.connection_epoch())
+    return book
+
+
+def layout():
+    """THE ATTACHED DESK'S `model_tree.Layout`, which every write address is resolved through.
+
+    Reads a stable dump when none is held for this connection. Raises RuntimeError when the desk
+    gives no readable model: a write that cannot be addressed from the desk's own tree is refused,
+    never sent to a remembered position.
+    """
+    if _layout_pinned is not None:
+        return _layout_pinned
+    with _layout_lock:
+        book, epoch = _layout_held["book"], _layout_held["epoch"]
+    if book is not None and epoch == rcp_hid.connection_epoch():
+        return book
+    blob = read_model_stable(fresh=True)
+    book = _learn_layout(blob) if blob else None
+    if book is None:
+        raise RuntimeError("the desk's model could not be read, so there is no address to write to")
+    return book
+
+
+def known_layout():
+    """The last layout learned, or None, WITHOUT reading the desk. For a listener naming a pushed
+    address: it must not start a dump of its own, and a name from the previous connection is still
+    the right name unless the firmware changed. Before any stable dump it takes the last cached
+    dump's, which costs a parse and no read."""
+    if _layout_pinned is not None:
+        return _layout_pinned
+    with _layout_lock:
+        book = _layout_held["book"]
+    if book is None:
+        with _cache_lock:
+            blob = _cache["blob"]
+        if blob:
+            book = _learn_layout(blob)
+    return book
+
+
+def push_key(path):
+    """The `model_tree.Layout` key a PUSHED address names, from `known_layout`, or None when no
+    layout is known yet or the address names no fixed node."""
+    book = known_layout()
+    return book.locate(path) if book is not None else None
+
+
+def pin_layout(book):
+    """Use `book` as the attached desk's layout until unpinned with None. Returns the previous pin.
+    FOR OFFLINE TESTS ONLY, the counterpart to `devices.force_device`."""
+    global _layout_pinned
+    previous, _layout_pinned = _layout_pinned, book
+    return previous
+
+
+def layout_of(blob: bytes):
+    """The `model_tree.Layout` of a dump. Raises ModelUnreadable if it does not parse."""
+    return _index(blob).layout
+
+
 def snapshot_properties(blob: bytes) -> dict:
     """{property name: [value, ...]} for EVERY property in a dump, values in stream order."""
     out: dict[str, list] = {}
@@ -726,6 +839,7 @@ def read_model_stable(max_try: int = 6, fresh: bool = False) -> bytes:
         key = _stable_key(b)
         if key is not None and key == prev_key:
             _cache_put(b, stable=True)
+            _learn_layout(b)
             if n > 2:
                 diagnostics.event("model.stable", "settled after several reads", reads=n)
             return b

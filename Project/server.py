@@ -2270,7 +2270,7 @@ def read_network_status() -> dict:
 # ----------------------------------------------------------------------------
 # NETWORK WRITES. Joining wifi and making the unit discoverable, with no touchscreen.
 #
-# NETWORK IS SELECTOR 0x10: `btVisible` written there reads back in the NETWORK block (not the
+# THE NETWORK BLOCK: `btVisible` written there reads back in the NETWORK block (not the
 # SYSTEM duplicate), leaves no stray, and makes the unit discoverable. `wifiSSID` and `wifiPSK`
 # write as strings, and with the radio on the unit holds a DHCP address about 15 seconds later.
 # The RODE app's Network screen being read-only says nothing about what the bus can write.
@@ -2395,14 +2395,13 @@ def _wifi_state(blob) -> dict:
 
 
 def action_set_wifi(on: bool) -> dict:
-    """Turn the wifi radio on or off. `wifi` is an ordinary bool on NETWORK 0x10."""
+    """Turn the wifi radio on or off. `wifi` is an ordinary bool on NETWORK."""
     gate = _network_write_gate()
     if gate is not None:
         return gate
     try:
         with _hid_lock:
-            rcp_transfer.send_record(
-                rcp_transfer.build_global_prop_bool("wifi", bool(on), rcp_transfer.SEL_NETWORK))
+            rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", bool(on))
             time.sleep(1.0)
             state = _wifi_state(rcp_read.read_model_stable(fresh=True))
     except Exception as exc:
@@ -2489,14 +2488,13 @@ def action_join_wifi(ssid: str, password: str) -> dict:
                         "message": f"{ssid} needs a password. Type it in the Password box, then "
                                    f"join again."}
         with _hid_lock:
-            sel = rcp_transfer.SEL_NETWORK
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_string("wifiSSID", ssid, sel))
+            net = rcp_transfer.NETWORK
+            rcp_transfer.write_at(net, "wifiSSID", "str", ssid)
             time.sleep(0.4)
             if password:
-                rcp_transfer.send_record(
-                    rcp_transfer.build_global_prop_string("wifiPSK", password, sel))
+                rcp_transfer.write_at(net, "wifiPSK", "str", password)
                 time.sleep(0.4)
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_bool("wifi", True, sel))
+            rcp_transfer.write_at(net, "wifi", "bool", True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not send the network details: {exc}"}
     finally:
@@ -2528,16 +2526,14 @@ def action_set_bt_visible(on: bool) -> dict:
 
     THE DUPLICATE MATTERS HERE. `btVisible` exists in SYSTEM as well as NETWORK, and only the
     NETWORK copy drives the radio - writing the SYSTEM one flips a stored value and leaves the unit
-    invisible, with nothing in the read-back to say so. So the write goes to 0x10 and the read-back
+    invisible, with nothing in the read-back to say so. So the write goes to NETWORK and the read-back
     is taken BY BLOCK, never by "first occurrence in the stream"."""
     gate = _network_write_gate()
     if gate is not None:
         return gate
     try:
         with _hid_lock:
-            rcp_transfer.send_record(
-                rcp_transfer.build_global_prop_bool("btVisible", bool(on),
-                                                   rcp_transfer.SEL_NETWORK))
+            rcp_transfer.write_at(rcp_transfer.NETWORK, "btVisible", "bool", bool(on))
             time.sleep(1.0)
             blob = rcp_read.read_model_stable(fresh=True)
         now = bool(rcp_read.block_value(blob, "NETWORK", "btVisible"))
@@ -2608,12 +2604,11 @@ def wifi_scan_slots(blob) -> list:
 
 
 def _cycle_wifi_radio():
-    sel = rcp_transfer.SEL_NETWORK
     with _hid_lock:
-        rcp_transfer.send_record(rcp_transfer.build_global_prop_bool("wifi", False, sel))
+        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", False)
     time.sleep(WIFI_RADIO_OFF_S)
     with _hid_lock:
-        rcp_transfer.send_record(rcp_transfer.build_global_prop_bool("wifi", True, sel))
+        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", True)
 
 
 def _wait_for_scan() -> list:
@@ -2690,8 +2685,7 @@ def action_disconnect_wifi() -> dict:
         if not ssid and not state["ip"]:
             return {"ok": True, "wifi": state, "message": "The unit is not set up for any network."}
         with _hid_lock:
-            rcp_transfer.send_record(
-                rcp_transfer.build_global_prop_string("wifiSSID", "", rcp_transfer.SEL_NETWORK))
+            rcp_transfer.write_at(rcp_transfer.NETWORK, "wifiSSID", "str", "")
         if state["on"]:
             _cycle_wifi_radio()
         time.sleep(WIFI_RADIO_OFF_S)
@@ -2726,7 +2720,7 @@ def _cap_gate(cap: str, refusal) -> dict | None:
 
 
 def _network_write_gate():
-    """The NETWORK block, 0x10. Proven on both the Pro II and the Duo, so this gate refuses no desk
+    """The NETWORK block. Proven on both the Pro II and the Duo, so this gate refuses no desk
     we know; it stays for the next one. See _cap_gate."""
     return _cap_gate("network_write", lambda name:
                      f"AccessCaster can read the network settings on the {name} but not change "
@@ -2936,8 +2930,8 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
 # --- Channels view: every processing-capable strip the device exposes (on the Pro II the four
 # --- mics, BT/USB1/Chat/USB2, and the SMART pads bus) ------------------------------------------
 # One adaptive panel per channel, mirroring the RODE app: mic channels add gain/phantom/polarity/
-# mic-type/effects; line channels have Level + processing. Selectors are resolved per channel from
-# the active device (channels.proc_selector).
+# mic-type/effects; line channels have Level + processing. Nodes are resolved per channel from
+# the active device (channels.proc_key).
 
 
 def _ui_chan(name):
@@ -3146,8 +3140,8 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
                 return {"ok": False,
                         "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to mute. Put a channel on it first.")}
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-                channels.MUTE_PROP, bool(on), channels.proc_selector_for_strip(int(fader))))
+            rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.MUTE_PROP,
+                                  "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     announcer.publish_mute(int(fader), bool(on))
@@ -3185,8 +3179,8 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
                 return {"ok": False,
                         "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to solo.")}
-            rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-                channels.CUE_PROP, bool(on), channels.proc_selector_for_strip(int(fader))))
+            rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.CUE_PROP,
+                                  "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
     announcer.publish_solo(int(fader), bool(on))
@@ -3801,7 +3795,7 @@ def action_set_channel_effect(name: str, effect: str, on: bool) -> dict:
 
 def action_set_channel_effect_param(name: str, param: str, value01: float) -> dict:
     """Set one channel-effect param (echo*/reverb*) on a mic channel. value01 is 0.0..1.0
-    (decoded: global float64 on selector 0x26+(ch-1), byte-for-byte the RODE app's write)."""
+    (decoded: float64 on the strip's EFFECTS_PARAMETERS node, byte-for-byte the RODE app's write)."""
     ch = _ui_chan(name)
     if ch is None or ch["kind"] != "mic":
         return {"ok": False, "message": "Echo and reverb are available on mic channels only."}
@@ -4240,8 +4234,8 @@ _check_input_strip_specs()
 # --- FADER ASSIGNMENT (which channel sits on which fader) ---------------------
 # The fader layout IS the channelInputSource vector (see RODECASTER_PROTOCOL.txt section 6):
 # index 0 = fader 1 ... value = channel code on that fader.
-# We read the layout from the vector and write it with rcp_transfer.set_fader_source (selector
-# 0x1c + index). The per-device SHAPE (vector length, physical/virtual split, assignable channel
+# We read the layout from the vector and write it with rcp_transfer.set_fader_source
+# (CHANNEL[index]). The per-device SHAPE (vector length, physical/virtual split, assignable channel
 # list + labels, factory-default vector) lives in devices.FaderSpec: the Pro II has 9
 # faders and Mic 1-4; the Duo has a 10-entry vector, code 2 = Headset (not Mic 3), no Mic3/Mic4,
 # and NO confirmed default so its 'reset faders' refuses instead of writing a guessed layout.
@@ -4325,10 +4319,11 @@ def _follow_chains(old_vec, new_vec, chains_before) -> str:
         spec = _active_faders()
         bad = []
         for code, src, dst in moves:
-            if dst >= len(after) or channels.chain_diff(chains_before[src], after[dst]):
+            if dst >= len(after) or channels.chain_diff(channels.fit_chain(chains_before[src], dst),
+                                                        after[dst]):
                 bad.append(_channel_name(code, spec))
         for code, dst, chain in returns:
-            if dst >= len(after) or channels.chain_diff(chain, after[dst]):
+            if dst >= len(after) or channels.chain_diff(channels.fit_chain(chain, dst), after[dst]):
                 bad.append(_channel_name(code, spec))
                 channels.park_chain(device_id, code, chain)   # put it back; it did not land
         if bad:
@@ -4439,13 +4434,13 @@ def _follow_levels(old_vec, new_vec, levels_before, spec) -> str:
             src = old_at.get(code)
             if src is None or src == dst:
                 continue
-            if src not in spec.level_selectors or dst not in spec.level_selectors:
+            if src not in spec.level_faders or dst not in spec.level_faders:
                 continue
             was = levels_before[src] if src < len(levels_before) else None
             now = levels_before[dst] if dst < len(levels_before) else None
             if not isinstance(was, int) or was == now:
                 continue
-            rcp_transfer.set_fader_level(spec.level_selectors[dst], was)
+            rcp_transfer.set_fader_level(dst, was)
             moved.append((code, dst, was))
         if not moved:
             return ""
@@ -4536,8 +4531,7 @@ def _settle_mutes(new_vec, wanted: dict) -> list:
         strip = next((i for i, c in enumerate(new_vec) if c == code), None)
         if strip is None or strip >= len(mutes) or bool(mutes[strip]) == muted:
             continue
-        rcp_transfer.send_record(rcp_transfer.build_global_prop_bool(
-            channels.MUTE_PROP, muted, channels.proc_selector_for_strip(strip)))
+        rcp_transfer.write_at(channels.proc_key_for_strip(strip), channels.MUTE_PROP, "bool", muted)
         if not muted:
             opened.append(code)
     return opened
@@ -4870,9 +4864,9 @@ def action_set_fader(fader_index: int, code: int) -> dict:
 # matter. Both are confirmed writes; see RODECASTER_PROTOCOL.txt 6.1.
 def _level_write_gate():
     """Fader and monitor LEVEL writes. The one gate with a second condition beyond the cap: the
-    device must also carry confirmed faderLevel selectors, so it cannot use _cap_gate alone."""
+    device must also have a virtual fader, so it cannot use _cap_gate alone."""
     dev = devices.get_active_device()
-    if "level_write" not in dev.caps or not dev.fader.level_selectors:
+    if "level_write" not in dev.caps or not dev.fader.level_faders:
         return {"ok": False,
                 "message": (f"Setting fader and monitor levels is not verified on the {dev.name} "
                             f"yet, so it is disabled here rather than writing an unconfirmed "
@@ -4910,7 +4904,7 @@ def _fader_levels(blob: bytes) -> dict:
     outs = rcp_read.snapshot_properties(blob)
     vec = _read_fader_vector(blob, spec)
     faders = []
-    for idx in sorted(spec.level_selectors):
+    for idx in spec.level_faders:
         val = raw[idx] if idx < len(raw) else None
         faders.append({
             "index": idx,
@@ -4959,7 +4953,7 @@ def _window_levels(blob: bytes) -> dict:
         auto_mute={which: rcp_read.block_value(blob, "OUTPUT", spec["prop"])
                    for which, spec in _AUTO_MUTE.items()},
         headphone_types=_headphone_types(blob),
-        model={"faders": sorted(_active_faders().level_selectors),
+        model={"faders": list(_active_faders().level_faders),
                "monitor_mix": monitor_mix_model(),
                "auto_mute": [[which, spec["label"]] for which, spec in _AUTO_MUTE.items()],
                "headphones": {
@@ -4995,8 +4989,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
     if gate is not None:
         return gate
     spec = _active_faders()
-    sel = spec.level_selectors.get(int(fader))
-    if sel is None:
+    if int(fader) not in spec.level_faders:
         return {"ok": False,
                 "message": (f"{_fader_label(int(fader), spec)} has no level control here. Only the "
                             f"virtual faders do: the others are physical faders you move by hand.")}
@@ -5008,7 +5001,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
         with _hid_lock:
             if vec is None:
                 vec = _read_fader_vector(spec=spec)
-            rcp_transfer.set_fader_level(sel, round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
+            rcp_transfer.set_fader_level(int(fader), round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the level: {exc}"}
     # Tell the announcer: the echo is not a dependable cache, so without this the next encoder press
@@ -6589,30 +6582,28 @@ def _active_headphones():
 
 
 def _headphone_types(blob: bytes) -> list:
-    """Each exposed headphone output's amp type. The dump carries one headphoneType per output
-    (4 on the Duo: HP1, HP2, HP3, HP4), mapped POSITIONALLY to the device's exposed outputs: HP1
-    (0x09) is dump position 0 and HP2 (0x0A) position 1."""
-    types = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
-    return [types[i] if i < len(types) else None
-            for i in range(len(_active_headphones().outputs))]
+    """Each exposed headphone output's amp type, read on its own HEADPHONE node: the node its write
+    goes to."""
+    return [rcp_read.keyed_value(blob, rcp_transfer.headphone_key(i), "headphoneType")
+            for i, _label in _active_headphones().outputs]
 
 
 def action_set_headphone_type(value: int, output: int = 0) -> dict:
     """Set a headphone output's amp type. `output` is an INDEX into the active device's headphone
     outputs (0 = Headphone 1, 1 = Headphone 2), `value` an amp-type code from that device's
     HeadphoneTypeSpec (0=NTH-100, 1=High sensitivity, 2=Low sensitivity). The server resolves the
-    real selector from the spec so the client never passes an unmapped selector."""
+    output from the spec, so the client never names one that is not confirmed."""
     gate = _output_write_gate()
     if gate is not None:
         return gate
     spec = _active_headphones()
     if not 0 <= output < len(spec.outputs):
         return {"ok": False, "message": f"Headphone output {output} is not available on this device."}
-    selector, out_label = spec.outputs[output]
+    index, out_label = spec.outputs[output]
     if value not in spec.value_codes:
         return {"ok": False, "message": "That headphone type is not a valid value for this device."}
     with _hid_lock:
-        rcp_transfer.set_headphone_type(value, selector)
+        rcp_transfer.set_headphone_type(value, index)
     return {"ok": True, "message": f"{out_label} type set to {spec.value_label[value]}."}
 
 
@@ -6688,8 +6679,8 @@ def _matrix_write_gate():
 
 def _output_write_gate():
     """Master/global output writes: multitrack, monitor and BT auto-mute, headphone type, master
-    Compellor, output delay. All are global named-property writes at fixed selectors
-    (0x0D / 0x09 / 0x0E) decoded on the Pro II and not yet verified on the Duo."""
+    Compellor, output delay: named properties on the OUTPUT, HEADPHONE and MASTERCHANNEL
+    blocks."""
     return _cap_gate("output_write", lambda name:
                      f"Changing the master output settings is not enabled on the {name} yet, so "
                      f"these controls are read-only here.")
@@ -8086,7 +8077,7 @@ def _restore_silence_warnings(prof, blob) -> list:
         def level_of(i, table):
             return table[i] if table and i < len(table) and isinstance(table[i], int) else None
 
-        for i in sorted(spec.level_selectors):
+        for i in spec.level_faders:
             code = want[i] if want and i < len(want) else (now_vec[i] if i < len(now_vec) else None)
             if code is None or code < 0:
                 continue

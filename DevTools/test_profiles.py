@@ -451,8 +451,8 @@ def apply_pro2(prof):
 print("\nRESTORE on the Pro II: the levels land")
 calls, res = apply_pro2(profile())
 check("one level write per VIRTUAL fader (7, 8, 9)", len(args_of(calls, "set_fader_level")), 3)
-check("each virtual fader's confirmed selector + its saved raw level",
-      args_of(calls, "set_fader_level"), [(0x0A, 100), (0x0B, 64), (0x0C, 127)])
+check("each virtual fader + its saved raw level",
+      args_of(calls, "set_fader_level"), [(6, 100), (7, 64), (8, 127)])
 check("the monitor speaker level is written as its raw 0..1 float",
       [round(a[0], 3) for a in args_of(calls, "set_monitor_level")], [0.03])
 check("nothing was reported as unrestorable", res["errs"], [])
@@ -507,13 +507,13 @@ check("NO level write is attempted for a bus", args_of(bus_calls, "set_channel_l
 check("and nothing is reported as unrestorable", bus_res["errs"], [])
 
 print("\nRESTORE: headphone type, one per output")
-check("both headphone outputs written, each on its own selector",
-      args_of(calls, "set_headphone_type"), [(1, 0x09), (2, 0x0A)])
+check("both headphone outputs written, each on its own output",
+      args_of(calls, "set_headphone_type"), [(1, 0), (2, 1)])
 check_true("'Low sensitivity' (2) is applied, not silently dropped",
-           (2, 0x0A) in args_of(calls, "set_headphone_type"))
+           (2, 1) in args_of(calls, "set_headphone_type"))
 calls_bad, _ = apply_pro2(profile(headphone_types=[0, 99]))
 check("a value the device does not offer is skipped, not written",
-      args_of(calls_bad, "set_headphone_type"), [(0, 0x09)])
+      args_of(calls_bad, "set_headphone_type"), [(0, 0)])
 
 print("\nRESTORE: the multitrack pair, both destinations, mode AND bypass")
 # The point of these four: a profile that put the multitrack MODE back but not its processing
@@ -578,21 +578,20 @@ check("no level writes", args_of(calls_old, "set_fader_level") + args_of(calls_o
 check("and nothing is reported as failed", res_old["errs"], [])
 
 print("\nRESTORE on the Duo: levels ARE written")
-# The Duo's faderLevel addresses are DERIVED (FaderSpec.level_selectors) and the desk confirms them
-# by acting on them, so a profile restores them here exactly as on a Pro II. What matters is WHICH:
-# the five VIRTUAL faders, indices 4-8 -> 0x08..0x0c. The four physical ones are analog pots and
-# must get nothing.
+# The desk confirms the Duo's fader levels by acting on them, so a profile restores them here exactly
+# as on a Pro II. What matters is WHICH: the five VIRTUAL faders, indices 4-8. The four physical
+# ones are analog pots and must get nothing.
 with as_device(devices.DUO), recorder() as duo_calls:
     duo_res = profiles.apply(profile(), fader_count=10,
                                  fader_code_set=devices.DUO.fader.code_set)
     duo_calls = list(duo_calls)
 check("the five VIRTUAL faders are written, and only those",
-      sorted(a[0] for a in args_of(duo_calls, "set_fader_level")), [0x08, 0x09, 0x0A, 0x0B, 0x0C])
+      sorted(a[0] for a in args_of(duo_calls, "set_fader_level")), [4, 5, 6, 7, 8])
 check_true("the monitor level is written too", args_of(duo_calls, "set_monitor_level"))
 check("levels are not reported as unrestorable",
       [e for e in duo_res["errs"] if "level" in e], [])
-check("headphone type still restores (both desks share the confirmed selectors)",
-      args_of(duo_calls, "set_headphone_type"), [(1, 0x09), (2, 0x0A)])
+check("headphone type still restores (both desks share the confirmed outputs)",
+      args_of(duo_calls, "set_headphone_type"), [(1, 0), (2, 1)])
 
 print("\nRESTORE: the unit's own settings")
 UNIT = {"screenBrightness": 180, "autoBrightness": 0, "screenDimAfterSeconds": 1800,

@@ -15,13 +15,23 @@ and `push` builds the frame the desk pushes.
 from __future__ import annotations
 
 import contextlib
+import os
 from unittest import mock
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import devices
+import layout_fixture
 import model_tree
+import rcp_read
 
 FAILURES: list[str] = []
+
+# AN OFFLINE SUITE ADDRESSES ITS WRITES ON A SAVED LAYOUT, the Pro II's on 1.7.7, never on whatever
+# desk happens to be attached: `rcp_read.layout` would otherwise dump the real desk to build one.
+# A live suite keeps the real desk's.
+if (os.environ.get("ACCESSCASTER_NO_DEVICE_WRITE")
+        and not os.environ.get("ACCESSCASTER_ALLOW_DEVICE_WRITE")):
+    rcp_read.pin_layout(layout_fixture.load(layout_fixture.PRO2_177))
 
 
 def _record(label: str, ok: bool, detail: str = "") -> bool:
@@ -79,6 +89,21 @@ def as_device(dev: devices.DeviceModel):
         yield dev
     finally:
         devices.force_device(previous)
+
+
+def addr(key) -> list:
+    """The path the pinned layout gives a `model_tree.Layout` key: where a push for it arrives."""
+    return rcp_read.layout().path(key)
+
+
+@contextlib.contextmanager
+def on_layout(name: str):
+    """Address writes on a saved layout (`layout_fixture`) for the block."""
+    previous = rcp_read.pin_layout(layout_fixture.load(name))
+    try:
+        yield
+    finally:
+        rcp_read.pin_layout(previous)
 
 
 @contextlib.contextmanager

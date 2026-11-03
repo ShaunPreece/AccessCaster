@@ -7,14 +7,14 @@ into a unit that never started. This module makes the transport writable from so
 readable, and the state arrives as a PUSH, so a press on the unit itself is caught too.
 
 WHAT THE DESK DOES:
-  * `requestRecordState` on RECORDER selector 0x03 is the command. 2 = record, 1 = pause, 0 = stop.
+  * `requestRecordState` on the RECORDER node is the command. 2 = record, 1 = pause, 0 = stop.
     It is a REQUEST: the firmware consumes it and resets it to 3, so reading it back tells you
     nothing about whether you are recording. Read `recordState` for that.
   * `recordState` is the RESULT: 0 ready, 1 paused, 2 recording, 3 no destination. It reads 3
     until a card or drive is mounted.
   * PAUSE REALLY PAUSES, and it is measured rather than assumed. A take of 14.1 s wall-clock with a
     3.2 s pause in the middle produced a 10.8 s file: the paused seconds are not in the recording.
-  * The desk PUSHES `recordState` on report 0x04 with selector 0x03 within ~30 ms of the change,
+  * The desk PUSHES `recordState` on report 0x04 at the RECORDER node within ~30 ms of the change,
     whether the change came from us or from the unit's own REC button. That is what the Watcher
     below listens to, and it is why the app can report the state without polling a 1.5 s model dump.
 
@@ -22,7 +22,7 @@ ELAPSED TIME IS NOT THE UNIT'S. `recordTimeMs` stays 0 right through a recording
 the push stream, so elapsed time is COUNTED HERE from the state changes we saw, and reported as
 unknown when we did not see the start.
 
-MARKERS: `requestDropMarker` (RECORDER 0x03) writes a standard WAV cue point into the recording at
+MARKERS: `requestDropMarker` (on RECORDER) writes a standard WAV cue point into the recording at
 the moment of the write. Nothing over USB shows it: the desk consumes the write and pushes the field
 back cleared, and the recording's own record carries identical flags either way, so the only place a
 marker can be seen is the file itself. A take with no markers has no cue chunk. Both the int and the
@@ -40,10 +40,6 @@ import rcp_hid
 import rcp_read
 import rcp_transfer
 from wording import describe_duration, spoken_datetime
-
-# RECORDER block. Read straight off the wire (recordState and requestRecordState both
-# arrived carrying this selector), so it is a confirmed address, not a derived one.
-SEL_RECORDER = 0x03
 
 READY = 0
 PAUSED = 1
@@ -468,14 +464,13 @@ def describe(blob: bytes) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Writing. One command field, one selector, and the caller reads `recordState` back to find out
+# Writing. One command field, one node, and the caller reads `recordState` back to find out
 # what actually happened - which is the only honest way round, since the request field self-clears.
 
 def send_command(value: int) -> None:
     """Write `requestRecordState`. Nothing is verified here: see server.action_record, which reads
     the state back rather than trusting the write."""
-    rcp_transfer.send_record(
-        rcp_transfer.build_global_prop_int("requestRecordState", SEL_RECORDER, int(value)))
+    rcp_transfer.write_at(rcp_transfer.RECORDER, "requestRecordState", "int", int(value))
 
 
 def drop_marker() -> None:
@@ -486,17 +481,15 @@ def drop_marker() -> None:
     the file - a standard WAV cue point, confirmed on the drive (see the module docstring). So the
     honest report is "sent", with the position we believe it landed at, rather than "done".
 
-    SENT AS A FLOAT (`build_global_prop_float`, value block `01 09 04`), which is the closest of
+    SENT AS A FLOAT (value block `01 09 04`), which is the closest of
     our builders to the field's own type - the desk echoes it back as `01 09 06`, an eight-byte
     form we have no builder for. Both this and the plain int form were confirmed landing in the
     same session, so the exact value type is not what the firmware is keying on."""
-    rcp_transfer.send_record(
-        rcp_transfer.build_global_prop_float("requestDropMarker", SEL_RECORDER, 1.0))
+    rcp_transfer.write_at(rcp_transfer.RECORDER, "requestDropMarker", "float", 1.0)
 
 
 # ---------------------------------------------------------------------------
-# DELETING A RECORDING: `requestDeleteUID` in the RECORDINGS block, root child 0x28F, which is past
-# the one-byte global form and so is sent in the TWO-BYTE form (`01 01 01 02 <lo> <hi>`).
+# DELETING A RECORDING: `requestDeleteUID` in the RECORDINGS block.
 #
 # `requestDeleteUID` = N removes Recording N from the drive and nothing else: `recordingUID` and
 # `recordingContent` each lose one occurrence and no other property moves. Two more facts:
@@ -505,14 +498,12 @@ def drop_marker() -> None:
 #   - THE FIELD SELF-CLEARS, so the write never confirms itself. `server.action_delete_recording`
 #     re-reads the recordings list and reports what it finds.
 #
-# SHOWCONTROL (0x28E) also carries a `requestDeleteUID`: an inert stray left by an address probe.
-SEL_RECORDINGS = 0x28F
-
+# SHOWCONTROL also carries a `requestDeleteUID` on the Pro II here: an inert stray left by an
+# address probe.
 
 def build_delete_request(uid: int) -> bytes:
-    """The record that asks the unit to delete recording `uid`. Two-byte address; see above."""
-    return rcp_transfer.build_channel_prop_int(
-        "requestDeleteUID", int(uid), SEL_RECORDINGS & 0xFF, SEL_RECORDINGS >> 8)
+    """The record that asks the unit to delete recording `uid`."""
+    return rcp_transfer.build_at(rcp_transfer.RECORDINGS, "requestDeleteUID", "int", int(uid))
 
 
 def delete_recording(uid: int) -> None:
@@ -652,6 +643,6 @@ def _state_from_push(report: bytes):
     if rec is None:
         return None
     path, name, value, kind = rec
-    if name != "recordState" or path != [SEL_RECORDER] or kind != "int":
+    if name != "recordState" or rcp_read.push_key(path) != rcp_transfer.RECORDER or kind != "int":
         return None
     return value

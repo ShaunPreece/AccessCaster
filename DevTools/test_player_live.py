@@ -32,7 +32,7 @@ import rcp_read
 import rcp_transfer as _t
 from _desk import push_handle, pushes
 
-SEL_PLAYER = 0x04
+PLAYER = ("PLAYER", 0)
 FIELDS = ("playerState", "playerFilePath", "playerProgress", "playerCurrentPositionTime",
           "playerFileSize", "playerSpeed")
 
@@ -84,7 +84,7 @@ def main() -> int:
     target = files[0]
     print(f"\nLOADING {target}")
     try:
-        _t.send_record(_t.build_global_prop_string("playerFilePath", target, SEL_PLAYER))
+        _t.write_at(PLAYER, "playerFilePath", "str", target)
         time.sleep(1.2)
         loaded, _ = read()
         show("LOADED", loaded)
@@ -96,7 +96,7 @@ def main() -> int:
         print(f"\nPLAY (playerState = {args.state})")
         live: dict[str, set] = {"playerProgress": set(), "playerCurrentPositionTime": set()}
         with push_handle("player test") as dev:
-            _t.send_record(_t.build_global_prop_int("playerState", SEL_PLAYER, args.state))
+            _t.write_at(PLAYER, "playerState", "int", args.state)
             for at, path, name, value in pushes(dev, args.seconds):
                 if name.startswith("player"):
                     print(f"  +{at:5.1f}s {path} {name} = {value!r}", flush=True)
@@ -106,10 +106,9 @@ def main() -> int:
         print(f"\n  progress {'MOVED - the unit is playing' if moved else 'never moved'}")
     finally:
         print("\nrestoring...")
-        _t.send_record(_t.build_global_prop_int("playerState", SEL_PLAYER, 0))
+        _t.write_at(PLAYER, "playerState", "int", 0)
         time.sleep(1.0)
-        _t.send_record(_t.build_global_prop_string("playerFilePath",
-                                                   str(before["playerFilePath"] or ""), SEL_PLAYER))
+        _t.write_at(PLAYER, "playerFilePath", "str", str(before["playerFilePath"] or ""))
         time.sleep(1.0)
         after, blob2 = read()
         show("AFTER", after)

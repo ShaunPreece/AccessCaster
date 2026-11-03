@@ -55,8 +55,7 @@ DENY = {
     "updateViaUSB": "part of the firmware update path.",
     "downloadInitiateRequested": "starts a firmware download.",
     "systemBetaMode": "changes which firmware track the unit is on.",
-    "remountPadStorage": "an action the app sends as a fixed raw record "
-                         "(rcp_transfer.REMOUNT_PAD_STORAGE), not a value write.",
+    "remountPadStorage": "an action (rcp_transfer.remount_pad_storage), not a value write.",
     "rcSyncModeRequest": "puts the unit into a sync mode we have not decoded.",
     "systemSerialNumber": "identity, not a setting.",
     "systemFirmwareVersion": "reported by the unit, not ours to set.",
@@ -88,15 +87,15 @@ def read_one(prop: str):
 
 def derive(prop: str, blob: bytes):
     """(selector, header, refusal) for a property. The selector is None, and the refusal says why,
-    when the property occurs more than once or its block has no confirmed selector."""
+    when the property occurs more than once or its block has no confirmed write."""
     where, count = selector_map.sections(blob)
     header = where.get(prop)
     if count.get(prop, 0) != 1:
         return None, header, f"{prop} occurs {count.get(prop, 0)} times; this tool only handles " \
                              f"single-instance properties (an indexed block uses base + index)"
-    sel = selector_map.HEADER_SELECTOR.get(header)
+    sel = selector_map.header_selectors(blob).get(header)
     if sel is None:
-        return None, header, f"{prop} is under header {header!r}, which has no confirmed selector. " \
+        return None, header, f"{prop} is under header {header!r}, which has no confirmed write. " \
                              f"Guessing it is how a stray gets appended - do not."
     return sel, header, None
 
@@ -115,13 +114,9 @@ def test_value(kind, current):
 
 
 def write_one(prop: str, sel: int, kind: str, value):
-    if kind == "bool":
-        return _t.send_record(_t.build_global_prop_bool(prop, bool(value), sel))
-    if kind == "float":
-        return _t.send_record(_t.build_global_prop_float(prop, sel, float(value)))
-    if kind == "int":
-        return _t.send_record(_t.build_global_prop_int(prop, sel, int(value)))
-    raise ValueError(f"no writer for a {kind!r} value")
+    if kind not in ("bool", "float", "int"):
+        raise ValueError(f"no writer for a {kind!r} value")
+    return _t.send_record(_t.build_record(prop, kind, value, [sel]))
 
 
 def probe(prop: str, forced=None) -> dict:

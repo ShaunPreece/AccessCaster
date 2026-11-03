@@ -38,8 +38,8 @@ DUO_VEC = [0, 1, 10, 11, 2, 7, 8, 9, -1, 9]
 
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property: sel = 0x1C + strip index."""
-    return push([rcp_transfer.SEL_CHANNEL + strip_idx], prop,
+    """A pushed STATE property on CHANNEL[strip index]."""
+    return push(_testkit.addr(rcp_transfer.channel_key(strip_idx)), prop,
                 bytes([0x01, 0x01, 0x02 if on else 0x03]))
 
 
@@ -121,18 +121,18 @@ print("\nGAIN NAMES COME FROM THE ADDRESS THE CHANGE WAS PUSHED AT")
 # the low byte up in a per-device selector table instead is what leaves a gain turned ON THE DESK
 # matching nothing and never spoken at all, because the Duo's table holds the dead MIX selectors.
 with as_device(devices.DUO):
-    check("Duo Mic 2 gain at INPUTSOURCE[1]", announcer._gain_label([0x26F], True), "Mic 2 gain")
+    check("Duo Mic 2 gain at INPUTSOURCE[1]", announcer._gain_label(rcp_read.push_key([0x26F]), True), "Mic 2 gain")
     check("Duo Headset level at INPUTSOURCE[2]",
-          announcer._gain_label([0x270], False), "Headset input level")
-    check("the DEAD MIX address names nothing", announcer._gain_label([0x149], True), None)
+          announcer._gain_label(rcp_read.push_key([0x270]), False), "Headset input level")
+    check("the DEAD MIX address names nothing", announcer._gain_label(rcp_read.push_key([0x149]), True), None)
     check("a source this desk does not have names nothing (Pro II Mic 4)",
-          announcer._gain_label([0x271], True), None)
+          announcer._gain_label(rcp_read.push_key([0x271]), True), None)
     check("a mic address asked as a line names nothing",
-          announcer._gain_label([0x26F], False), None)
+          announcer._gain_label(rcp_read.push_key([0x26F]), False), None)
     check("an unparseable address names nothing", announcer._gain_label(None, True), None)
 with as_device(devices.PRO2):
-    check("Pro II Mic 1 gain at INPUTSOURCE[0]", announcer._gain_label([0x26E], True), "Mic 1 gain")
-    check("Pro II Mic 4 gain at INPUTSOURCE[3]", announcer._gain_label([0x271], True), "Mic 4 gain")
+    check("Pro II Mic 1 gain at INPUTSOURCE[0]", announcer._gain_label(rcp_read.push_key([0x26E]), True), "Mic 1 gain")
+    check("Pro II Mic 4 gain at INPUTSOURCE[3]", announcer._gain_label(rcp_read.push_key([0x271]), True), "Mic 4 gain")
 
 print("\nTHE PUSHED ADDRESS IS READ IN FULL, NOT JUST ITS LOW BYTE")
 # 0x026E needs two bytes. Reading only the low one calls it selector 0x6E, which is an ordinary
@@ -142,21 +142,14 @@ for want, addr in (([0x26E], b"\x01\x01\x01\x02\x6e\x02"), ([0x6E], b"\x01\x01\x
     frame = (b"\x04" + len(rec).to_bytes(4, "little") + rec).ljust(256, b"\x00")
     check(f"address {addr.hex(' ')} decodes to {want}", rcp_read.parse_push(frame)[0], want)
 
-print("\nFADER LEVEL ADDRESSES ARE DERIVED, AND THE PRO II'S THREE ARE UNCHANGED")
-# The Pro II's confirmed selectors, asserted against the derivation. These three values pin that
-# deriving them for both desks moves no byte on a Pro II.
-check("Pro II virtual faders still address 0x0a/0x0b/0x0c",
-      dict(devices.PRO2.fader.level_selectors), {6: 0x0A, 7: 0x0B, 8: 0x0C})
-# The Duo has FIVE virtual faders where the Pro II has three, so its set starts two lower. Read off
-# the tree and confirmed by the engine's own response.
-check("Duo virtual faders address 0x08..0x0c",
-      dict(devices.DUO.fader.level_selectors), {4: 0x08, 5: 0x09, 6: 0x0A, 7: 0x0B, 8: 0x0C})
+print("\nONLY THE VIRTUAL FADERS HAVE A SETTABLE LEVEL")
+# The Pro II has three virtual faders and the Duo FIVE, read off the tree and confirmed by the
+# engine's own response. Their addresses are test_addressing's.
+check("Pro II: faders 7 to 9", devices.PRO2.fader.level_faders, (6, 7, 8))
+check("Duo: faders 5 to 9", devices.DUO.fader.level_faders, (4, 5, 6, 7, 8))
 for _dev in (devices.PRO2, devices.DUO):
-    _sel = _dev.fader.level_selectors
-    check(f"{_dev.name}: only the VIRTUAL faders are writable",
-          sorted(_sel), list(range(_dev.fader.physical, _dev.fader.count)))
-    check(f"{_dev.name}: no physical fader has an address",
-          any(i < _dev.fader.physical for i in _sel), False)
+    check(f"{_dev.name}: no physical fader is writable",
+          any(i < _dev.fader.physical for i in _dev.fader.level_faders), False)
 
 print("\nLEVEL WRITES AND CHAIN-FOLLOW ARE ON FOR BOTH DESKS")
 with as_device(devices.DUO):
@@ -228,7 +221,7 @@ check_true("every setting the page offers has an address in the table",
 with as_device(devices.DUO):
     for ident in ("Mic3", 3, "Mic4", 4):
         try:
-            channels.proc_selector(ident)
+            channels.proc_key(ident)
             check(f"Duo refuses a chain write to {ident!r}", "no error", "ValueError")
         except ValueError:
             check(f"Duo refuses a chain write to {ident!r}", "ValueError", "ValueError")

@@ -107,8 +107,7 @@ def main(cancel_at: int, max_s: float) -> int:
     second = later.get("updateDownloadProgress", (None, None))[1]
     if second not in (0, None) and second != first:
         print(f"STILL DOWNLOADING after the cancel ({first} then {second}): switching the wifi off.")
-        rcp_transfer.send_record(
-            rcp_transfer.build_global_prop_bool("wifi", False, rcp_transfer.SEL_NETWORK))
+        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", False)
         later = state()
     changed = {k: (values.get(k), v) for k, (_p, v) in later.items() if values.get(k) != v}
     print("changed from before:", changed or "nothing", flush=True)

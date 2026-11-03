@@ -1,16 +1,15 @@
 """A CROSS-POINT ABOVE SOURCE 13 ON THE REAL DESK: does a TWO-BYTE selector land?
 
-`cross_point_selector` is `76 + 13*source + output`, so Virtual A (source 14) is 258 and Virtual B
-is 271. Those do not fit in the one-byte address every other global write uses, and the point of
-this test is that a two-byte index addresses the same node the tree says it should.
+A cross-point is MIX[13*source + output], so on the Pro II Virtual A (source 14) is root child 258
+and Virtual B 271. Those do not fit in the one-byte address every other global write uses, and the
+point of this test is that a two-byte index addresses the same node the tree says it should.
 
 WHAT IT PROVES, AND WHY A READ-BACK IS NOT OPTIONAL HERE. A write to a selector the desk does not
 recognise does not fail: it APPENDS a stray property that only a factory reset clears. So absence
 of complaint proves nothing, and this checks three separate things:
 
-  1. The tree agrees. The MIX instance at `13*source + output` must sit at root child
-     `cross_point_selector(output, source)`. That is the selector CONFIRMED rather than derived
-     from the arithmetic that produced it.
+  1. The tree agrees. The MIX instance at `13*source + output`, found by walking the dump, sits
+     at the path the app's lookup (`rcp_transfer.address_of`) writes to.
   2. The write lands. `mixDisabled` reads back True on that node and False again after the restore.
   3. Nothing strayed. Every property name occurs as many times at the end as at the start.
 
@@ -65,7 +64,7 @@ ap.add_argument("--output", type=int, default=0, help="matrix output index (0 = 
 args = ap.parse_args()
 
 INDEX = t.CROSS_POINT_SOURCE_STRIDE * args.source + t.CROSS_POINT_OUTPUT_STRIDE * args.output
-sel = t.cross_point_selector(args.output, args.source)
+sel = t.address_of(t.cross_point_key(args.output, args.source))[0]
 addr = t.build_address([sel]).hex(" ")
 print(f"=== cross-point source {args.source} -> output {args.output}: "
       f"MIX instance {INDEX}, selector {sel} ({sel:#06x}), address {addr} ===")
@@ -74,7 +73,7 @@ before, counts_before, path = snapshot()
 ON_FADER = args.source in {v for v, _k in rcp_read.find_all(rcp_read.read_model_stable(fresh=True),
                                                             "channelInputSource")}
 print(f"  source {args.source} is {'on a fader' if ON_FADER else 'on no fader'}")
-check("the tree puts that MIX instance at the selector this code builds", path, [sel])
+check("the tree puts that MIX instance at the path the lookup writes to", path, [sel])
 print(f"  baseline {before}")
 
 # The restore RE-LINKS, which throws away a manual level. A cell that starts out unlinked is

@@ -37,8 +37,8 @@ def make_orphan():
     handle = pr.free_handle(sp.current_pad_count())
     sub = sp.free_effect_subhandle(SLOT)
     pre = pr.build_blank(SLOT, handle, sub)
-    mid = [pr.write_record("padType", "int", 3, handle, pr.FRAME_PAD),
-           pr.write_record("padName", "str", "Orphan test", handle, pr.FRAME_PAD)]
+    mid = [pr.write_record("padType", "int", 3, handle, pr.PAD_BLOCK),
+           pr.write_record("padName", "str", "Orphan test", handle, pr.PAD_BLOCK)]
     with t.transfer_session():
         time.sleep(1.2)
         sp.send_create_full(pre, mid, lambda: None, [])

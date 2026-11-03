@@ -88,11 +88,8 @@ import rcp_read
 import rcp_transfer
 import wording
 
-# The two blocks. SHOWS holds one SHOW node per exported file; SHOWCONTROL holds the commands.
-# Both are past what the one-byte global address can carry, so writes use the two-byte channel form
-# (`01 01 01 02 <lo> <hi>`), exactly as recorder.build_delete_request does for RECORDINGS 0x28F.
-# 0x28E is a confirmed selector; RECORDINGS at 0x28F sits one slot above it.
-SEL_SHOWCONTROL = 0x28E
+# The two blocks. SHOWS holds one SHOW node per exported file; SHOWCONTROL
+# (`rcp_transfer.SHOWCONTROL`) holds the commands.
 BLOCK_SHOW = "SHOW"
 
 # `showControlLastError` codes. CODE 1's CAUSE IS NOT KNOWN, and it is NOT "the uuid matches the
@@ -277,13 +274,11 @@ def describe(blob: bytes) -> dict:
 
 
 def _send_bool(name: str, on: bool) -> None:
-    rcp_transfer.send_record(rcp_transfer.build_channel_prop_bool(
-        name, bool(on), SEL_SHOWCONTROL & 0xFF, SEL_SHOWCONTROL >> 8))
+    rcp_transfer.write_at(rcp_transfer.SHOWCONTROL, name, "bool", bool(on))
 
 
 def _send_int(name: str, value: int) -> None:
-    rcp_transfer.send_record(rcp_transfer.build_channel_prop_int(
-        name, int(value), SEL_SHOWCONTROL & 0xFF, SEL_SHOWCONTROL >> 8))
+    rcp_transfer.write_at(rcp_transfer.SHOWCONTROL, name, "int", int(value))
 
 
 def send_export() -> None:

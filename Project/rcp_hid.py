@@ -163,11 +163,22 @@ _iface_scan_no = 0
 _iface_cached_no = 0
 
 
+_connection_epoch = 0
+
+
 def forget_interfaces() -> None:
     """Drop the remembered interface list, so the next lookup scans the bus. Call it on any sign
     the desk has left or changed."""
-    global _iface_cache
+    global _iface_cache, _connection_epoch
     _iface_cache = None
+    _connection_epoch += 1
+
+
+def connection_epoch() -> int:
+    """Moves whenever the desk may have left or changed (`forget_interfaces`). Anything learned
+    from one desk, such as `rcp_read.layout`, is valid only while this holds still: a firmware
+    install, a replug and a different desk all pass through here."""
+    return _connection_epoch
 
 
 def _scan() -> list[RodeInterface]:

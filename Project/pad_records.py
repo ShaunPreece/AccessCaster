@@ -17,24 +17,24 @@ A create is one held-open HID session (`soundpad` sends it):
                                 engines' on-flags on S (voice FX)
   exit transfer mode
 
-Frames:
-  pad write : 01 01 02 02 9a 02 01 <H> <name> 00 <value block>
-  fx write  : 01 01 02 02 9d 02 01 <S> <name> 00 <value block>
-  handoff   : 03 01 01 02 <9a|9d> 02 01 <H> <keyword> 00 00 00
-value blocks: int 01 05 01 <i32 LE> | float 01 09 04 <f64 LE> | bool 01 01 <02 on | 03 off>
-            | string 01 <vlen> 05 <bytes> 00  (vlen = 1 + len(bytes) + 1)
+Records, as they read on a Pro II, whose SOUNDPADS is root child 0x29A and PADEFFECTS 0x29D. Both
+are looked up on the attached desk (`rcp_transfer.SOUNDPADS` / `PADEFFECTS`), never written down:
+  pad write : 01 01 02 02 9a 02 01 <H> <name> 00 <value block>    path [SOUNDPADS, H]
+  fx write  : 01 01 02 02 9d 02 01 <S> <name> 00 <value block>    path [PADEFFECTS, S]
+  handoff   : 03 01 01 02 <9a|9d> 02 01 <H> <keyword> 00 00 00    `child_command`
+Value blocks are `rcp_transfer.value_block`.
 
-Only a voice-FX pad writes the 0x9d effects block. A sound, mixer or trigger pad owns no effect
+Only a voice-FX pad writes the PADEFFECTS block. A sound, mixer or trigger pad owns no effect
 object, and writing one appends an orphan that only a factory reset removes (`docs/SOUNDPADS.md`).
 """
 from __future__ import annotations
 
-import struct
+import model_tree
+from rcp_transfer import (PADEFFECTS, SOUNDPADS, _frame, address_of, build_record,
+                          build_remount_pad_storage)
 
-from rcp_transfer import REMOUNT_PAD_STORAGE, _frame
-
-FRAME_PAD = 0x9A
-FRAME_FX = 0x9D
+PAD_BLOCK = SOUNDPADS
+FX_BLOCK = PADEFFECTS
 
 PAD_FILE_PATH_FMT = "/Application/emmc-data/pads/{n}/{name}"
 
@@ -58,36 +58,36 @@ EFFECT_FLAG = {
 }
 
 
-def _vb_int(value: int) -> bytes:
-    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
+def child_path(handle: int, block=PAD_BLOCK) -> list:
+    """The tree path of child `handle` of SOUNDPADS or PADEFFECTS on the attached desk."""
+    return address_of(block) + [int(handle)]
 
 
-def _vb_float(value: float) -> bytes:
-    return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", float(value))
-
-
-def _vb_bool(on: bool) -> bytes:
-    return bytes([0x01, 0x01, 0x02 if on else 0x03])
-
-
-def _vb_str(value: str) -> bytes:
-    body = value.encode("ascii") + b"\x00"
-    return bytes([0x01, 1 + len(body), 0x05]) + body
-
-
-_ENC = {"int": _vb_int, "float": _vb_float, "bool": _vb_bool, "str": _vb_str}
-
-
-def write_record(name: str, kind: str, value, handle: int, frame: int = FRAME_PAD) -> bytes:
+def write_record(name: str, kind: str, value, handle: int, block=PAD_BLOCK) -> bytes:
     """One pad- or fx-addressed property write on the given handle."""
-    addr = bytes([0x01, 0x01, 0x02, 0x02, frame, 0x02, 0x01, handle & 0xFF])
-    return _frame(addr + name.encode("ascii") + b"\x00" + _ENC[kind](value))
+    return build_record(name, kind, value, child_path(handle, block))
 
 
-def handoff_record(keyword: str, handle: int, frame: int) -> bytes:
+# A child command names a parent and one of its children: `<op> 01 01 <parent> <child>`.
+CREATE_CHILD = 0x03    # with a keyword, the PAD / EFFECTS_PARAMETERS handoff that binds a handle
+REMOVE_CHILD = 0x04    # the select-begin that ends a pad clear
+
+
+def child_command(op: int, handle: int, block=PAD_BLOCK, keyword: str = "",
+                  cursor: bool = False) -> bytes:
+    """A child command on SOUNDPADS or PADEFFECTS. `cursor` addresses the desk's edit cursor
+    instead of a position, sending the child index as a zero-length count (see soundpad's cursor
+    builders for when that is needed)."""
+    (parent,) = address_of(block)
+    head = bytes([op, 0x01, 0x01]) + model_tree.encode_index(parent)
+    head += model_tree.encode_index(0 if cursor else handle, empty_zero=cursor)
+    tail = keyword.encode("ascii") + bytes([0x00, 0x00, 0x00]) if keyword else b""
+    return _frame(head + tail)
+
+
+def handoff_record(keyword: str, handle: int, block) -> bytes:
     """The PAD / EFFECTS_PARAMETERS handle-binding record."""
-    return _frame(bytes([0x03, 0x01, 0x01, 0x02, frame, 0x02, 0x01, handle & 0xFF])
-                  + keyword.encode("ascii") + bytes([0x00, 0x00, 0x00]))
+    return child_command(CREATE_CHILD, handle, block, keyword)
 
 
 # Phase 1: the RODE app's defaults, in its order. None marks the two fields stamped with the
@@ -166,7 +166,7 @@ _EFFECTS = [
 
 
 def build_phase1(target_idx: int, handle: int) -> list[bytes]:
-    return [write_record(name, kind, target_idx if value is None else value, handle, FRAME_PAD)
+    return [write_record(name, kind, target_idx if value is None else value, handle, PAD_BLOCK)
             for name, kind, value in _PHASE1]
 
 
@@ -182,18 +182,18 @@ def build_effects(target_idx: int, fx_subhandle: int,
             value = target_idx
         elif name in overrides:
             value = overrides[name]
-        out.append(write_record(name, kind, value, fx_subhandle, FRAME_FX))
+        out.append(write_record(name, kind, value, fx_subhandle, FX_BLOCK))
     return out
 
 
 def build_blank(target_idx: int, handle: int, fx_subhandle: int | None = None,
                 param_overrides: dict | None = None) -> list[bytes]:
     """handoff PAD + phase 1 (45 records), plus handoff EFFECTS + effects (66 in all) when an
-    `fx_subhandle` is given. Only a voice-FX pad passes one: the effects block is the only 0x9d
+    `fx_subhandle` is given. Only a voice-FX pad passes one: the effects block is the only PADEFFECTS
     traffic in a create."""
-    recs = [handoff_record("PAD", handle, FRAME_PAD)] + build_phase1(target_idx, handle)
+    recs = [handoff_record("PAD", handle, PAD_BLOCK)] + build_phase1(target_idx, handle)
     if fx_subhandle is not None:
-        recs += ([handoff_record("EFFECTS_PARAMETERS", fx_subhandle, FRAME_FX)]
+        recs += ([handoff_record("EFFECTS_PARAMETERS", fx_subhandle, FX_BLOCK)]
                  + build_effects(target_idx, fx_subhandle, param_overrides))
     return recs
 
@@ -217,7 +217,7 @@ def build_sound_create(target_idx: int, folder: int, name: str, colour: int, *, 
         write_record("padColourIndex", "int", colour, handle),
     ]
     post = [
-        REMOUNT_PAD_STORAGE,
+        build_remount_pad_storage(),
         write_record("padFilePath", "str", PAD_FILE_PATH_FMT.format(n=folder, name=filename), handle),
         write_record("padName", "str", name, handle),
     ]
@@ -242,7 +242,7 @@ def build_mixer_create(target_idx: int, name: str, colour: int, mode: int,
     """
     pre = build_blank(target_idx, handle)
     mid = [
-        REMOUNT_PAD_STORAGE,
+        build_remount_pad_storage(),
         write_record("padType", "int", 3, handle),
         write_record("padMixerMode", "int", mode, handle),
         write_record("padMixerTriggerMode", "int", trigger_mode, handle),
@@ -268,7 +268,7 @@ def build_trigger_create(target_idx: int, name: str, colour: int, *, handle: int
     """
     pre = build_blank(target_idx, handle)
     mid = [
-        REMOUNT_PAD_STORAGE,
+        build_remount_pad_storage(),
         write_record("padType", "int", 4, handle),
     ]
     if custom:
@@ -342,6 +342,6 @@ def build_fx_create_recipe(target_idx: int, name: str, colour: int, recipe: dict
         write_record("padName", "str", name, handle),
         write_record("padColourIndex", "int", colour, handle),
     ]
-    post = [write_record(flag, "bool", True, fx_subhandle, FRAME_FX) for flag in onflags]
+    post = [write_record(flag, "bool", True, fx_subhandle, FX_BLOCK) for flag in onflags]
     post.append(write_record("padName", "str", name, handle))
     return pre, mid, post

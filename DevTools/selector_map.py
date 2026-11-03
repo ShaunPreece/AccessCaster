@@ -6,8 +6,9 @@
 THE RULE (established). In the model stream every property sits under an ALL-CAPS
 SECTION HEADER, and the header identifies the BLOCK the property belongs to. A write selector
 addresses that BLOCK; the property NAME picks the field inside it. So header -> selector, and once
-one property in a block has a known selector, every single-instance property under that header
-shares it.
+one property in a block has been confirmed writable, every single-instance property under that
+header shares its address. The selector itself is the block's position in the dump's own tree
+(`model_tree.Layout`), never a number written down here.
 
 The map is checked against ANCHORS, the properties whose selectors are confirmed independently,
 and agrees with every one. It also predicts: `activeButtonsBrightness` (GUI, never captured) takes
@@ -33,32 +34,30 @@ from collections import Counter
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import rcp_read
-import rcp_transfer
-import recorder
 
-# Header -> selector, each anchored by at least one property whose selector is confirmed. A block
-# the app writes takes its selector from the app's own constant, so a correction is made once.
-HEADER_SELECTOR = {
-    "RECBUTTON": 0x02,      # recButtonPressed
-    "RECORDER": recorder.SEL_RECORDER,                  # recordState / requestRecordState
-    "ENCODER": 0x06,        # encoderColour (a device push names its own selector)
-    "GUI": rcp_transfer.SEL_GUI,                        # screenBrightness / metering
-    "OUTPUT": rcp_transfer.SEL_OUTPUT_GLOBAL,           # recordingMultitrackMode, outputMonLevel
-    "MASTERCHANNEL": rcp_transfer.SEL_MASTER_PROC,      # masterCompellorOn + its params
-    "SYSTEM": rcp_transfer.SEL_SYSTEM,                  # systemMidiControl, transferModeType
-    # NETWORK IS 0x10, NOT 0x13: btVisible written on 0x10 reads back in the NETWORK block (not the
-    # SYSTEM duplicate), leaves no stray, and a phone then pairs and plays audio through the desk.
-    # 0x13 is STREAMERXMIXPRESET[1], as a btDoScan stray there shows; a flat count of blocks
-    # predicts 0x13 and is wrong.
+# The blocks a write is CONFIRMED on, each anchored by at least one property seen acting there.
+CONFIRMED_BLOCKS = {
+    "RECBUTTON",            # recButtonPressed
+    "RECORDER",             # recordState / requestRecordState
+    "ENCODER",              # encoderColour (a device push names its own node)
+    "GUI",                  # screenBrightness / metering
+    "OUTPUT",               # recordingMultitrackMode, outputMonLevel
+    "MASTERCHANNEL",        # masterCompellorOn + its params
+    "SYSTEM",               # systemMidiControl, transferModeType
+    # NETWORK, NOT STREAMERXMIXPRESET[1]: btVisible written on NETWORK reads back in the NETWORK
+    # block (not the SYSTEM duplicate), leaves no stray, and a phone then pairs and plays audio
+    # through the desk. A flat count of blocks predicts the other, and a btDoScan stray there shows
+    # it is wrong.
     # TWO CAUTIONS specific to this block, neither of them about the address:
     #   * many of its fields are ACTIONS, not settings (btDoScan, btDoPair, btDoConnect, btDoUnPair,
     #     wifiScan). A read-back may show nothing changed even when the action ran, so judge those by
     #     what the RADIO does, not by the field.
     #   * wifiPSK is a password. It is readable and must never be logged, echoed to the browser, or
     #     put in a profile.
-    "NETWORK": rcp_transfer.SEL_NETWORK,
+    "NETWORK",
 }
-# The properties the map is checked against, so a regression shows up as a disagreement.
+# The properties the map is checked against, with the selector each was captured on, so a
+# regression shows up as a disagreement.
 ANCHORS = {
     "screenBrightness": 0x07, "autoBrightness": 0x07, "inactiveButtonsBrightness": 0x07,
     "screenDimAfterSeconds": 0x07, "metering": 0x07, "activeButtonsBrightness": 0x07,
@@ -79,6 +78,12 @@ def sections(blob: bytes) -> tuple[dict, Counter]:
     return where, count
 
 
+def header_selectors(blob: bytes) -> dict:
+    """{confirmed block: its root position in THIS dump}."""
+    book = rcp_read.layout_of(blob)
+    return {h: book.path((h, 0))[0] for h in CONFIRMED_BLOCKS if book.has((h, 0))}
+
+
 def main() -> None:
     if len(sys.argv) > 1:
         with open(sys.argv[1], "rb") as f:
@@ -86,6 +91,7 @@ def main() -> None:
     else:
         blob = rcp_read.read_model_stable()
     where, count = sections(blob)
+    HEADER_SELECTOR = header_selectors(blob)
 
     print("ANCHOR CHECK (every property whose selector we already know)")
     bad = 0

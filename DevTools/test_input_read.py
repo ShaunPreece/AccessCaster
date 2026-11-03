@@ -1,13 +1,13 @@
 """Unit tests for the ADDRESSED input read. NO DEVICE, no HID, no writes.
 
 The per-input values (mic gain, phantom, polarity, mic type, line level, ...) are read and written at
-ONE address on every desk: INPUTSOURCE[source_code], derived by DeviceModel.input_path.
+ONE address on every desk: INPUTSOURCE[source_code], DeviceModel.input_key.
 
 Two plausible readings are wrong, and the tests pin both out. A read by POSITION out of a values()
 list reports one Duo mic's gain as another's. A read at the Duo's MIX node (0x48 + source code)
 finds a copy the audio engine never reads, so a write there reads back as success while changing
 nothing. Hence two groups of checks below that look like belt and braces and are not: every Pro II
-selector is asserted against the derivation, and a stale Duo MIX copy is asserted to be IGNORED.
+selector is asserted against the lookup, and a stale Duo MIX copy is asserted to be IGNORED.
 
 These tests build synthetic model dumps rather than using a captured one: a real dump carries the
 wifi PSK, and a synthetic tree can put a value in exactly the awkward place that breaks a positional
@@ -26,7 +26,7 @@ import devices
 import fake_model
 import model_tree
 import rcp_read as rr
-from _testkit import check
+from _testkit import addr, check, on_layout
 from fake_model import node  # the model grammar's encoder, shared by the offline suites
 
 
@@ -47,11 +47,14 @@ def dump(children: dict, n_children: int) -> bytes:
     return b"\x53\x2f\x02\x00\x02" + node("Rodecaster", {}, kids)
 
 
+INPUT_TABLE = 0x26E    # where both desks hold INPUTSOURCE[0] on the firmware the fixtures carry
+
+
 def inputsource_table(dev, per_code: dict) -> dict:
     """The 30-entry INPUTSOURCE table as root children, values keyed by SOURCE CODE."""
     out = {}
     for code in range(30):
-        out[dev.input_table_base + code] = ("INPUTSOURCE", per_code.get(code, {}))
+        out[INPUT_TABLE + code] = ("INPUTSOURCE", per_code.get(code, {}))
     return out
 
 
@@ -67,8 +70,9 @@ print("THE SANITY CHECK: the synthetic dump parses and addresses resolve")
 blob = dump(inputsource_table(PRO2, {0: {"inputMicrophoneGain": 44}}), N_KIDS)
 root, _used, _tail = model_tree.parse(blob)
 check("the tree parses", root.name, "Rodecaster")
-check("a node resolves at its address", rr.node_at(blob, [PRO2.input_table_base]).name, "INPUTSOURCE")
-check("and carries its property", rr.path_value(blob, [PRO2.input_table_base], "inputMicrophoneGain"), 44)
+check("a node resolves at its address", rr.node_at(blob, [INPUT_TABLE]).name, "INPUTSOURCE")
+check("and carries its property", rr.path_value(blob, [INPUT_TABLE], "inputMicrophoneGain"), 44)
+check("and by its key", rr.keyed_value(blob, ("INPUTSOURCE", 0), "inputMicrophoneGain"), 44)
 check("an address with no node returns the default", rr.path_value(blob, [0x9999], "anything", "d"), "d")
 
 print("\nMISSING TELLS 'ABSENT' APART FROM A REAL None / 0 / False")
@@ -87,27 +91,28 @@ for name, want in [("Mic1", 41), ("Mic2", 42), ("Mic3", 43), ("Mic4", 44)]:
     check(f"{name} reads its own gain", c.input_value(blob, ch_of(PRO2, name), "inputMicrophoneGain", PRO2), want)
 check("USB1 reads its own level", c.input_value(blob, ch_of(PRO2, "USB1"), "inputDigitalGain", PRO2), -7)
 check("Bluetooth reads its own level", c.input_value(blob, ch_of(PRO2, "Bluetooth"), "inputDigitalGain", PRO2), -10)
-print("\nTHE PRO II'S CONFIRMED SELECTORS, REPRODUCED EXACTLY BY THE DERIVATION")
-# THE PRO II'S CONFIRMED SELECTORS, every value asserted against the derivation, so it cannot move
-# a Pro II write by one byte.
+print("\nTHE PRO II'S CONFIRMED SELECTORS, REPRODUCED EXACTLY BY THE LOOKUP")
+# THE PRO II'S CONFIRMED SELECTORS, every value asserted against the lookup on the Pro II's own
+# layout, so it cannot move a Pro II write by one byte.
 PRO2_SELECTORS = {"Mic1": 0x6E, "Mic2": 0x6F, "Mic3": 0x70, "Mic4": 0x71,
                   "USB1": 0x75, "Chat": 0x76, "USB2": 0x77, "Bluetooth": 0x78}
 for name, sel in PRO2_SELECTORS.items():
     check(f"Pro II {name} still addresses 0x{sel:02X} with the 0x02 high byte",
-          PRO2.input_path(ch_of(PRO2, name)), [sel | (0x02 << 8)])
+          addr(PRO2.input_key(ch_of(PRO2, name))), [sel | (0x02 << 8)])
 
 print("\nDUO: THE SAME RULE")
 # 0x48 + source_code with a 0x01 high byte is real and writable on a Duo, and DEAD: the audio
 # engine never reads it. Nothing may address it.
-for name, dead_sel in (("Mic1", 0x48), ("Mic2", 0x49), ("Headset", 0x4A),
-                       ("USB1", 0x4F), ("Chat", 0x50), ("USB2", 0x51), ("Bluetooth", 0x52)):
-    ch = ch_of(DUO, name)
-    check(f"Duo {name} is addressed at INPUTSOURCE, not the dead MIX node",
-          DUO.input_path(ch), [DUO.input_table_base + ch["source_code"]])
-    check(f"Duo {name} does NOT address 0x{dead_sel:02X}",
-          DUO.input_path(ch) == [dead_sel | (0x01 << 8)], False)
-check("both desks derive the SAME address for a shared source code",
-      DUO.input_path(ch_of(DUO, "USB1")), PRO2.input_path(ch_of(PRO2, "USB1")))
+with on_layout(_testkit.layout_fixture.DUO_173):
+    for name, dead_sel in (("Mic1", 0x48), ("Mic2", 0x49), ("Headset", 0x4A),
+                           ("USB1", 0x4F), ("Chat", 0x50), ("USB2", 0x51), ("Bluetooth", 0x52)):
+        ch = ch_of(DUO, name)
+        check(f"Duo {name} is addressed at INPUTSOURCE, not the dead MIX node",
+              addr(DUO.input_key(ch)), [INPUT_TABLE + ch["source_code"]])
+        check(f"Duo {name} does NOT address 0x{dead_sel:02X}",
+              addr(DUO.input_key(ch)) == [dead_sel | (0x01 << 8)], False)
+check("both desks name the SAME node for a shared source code",
+      DUO.input_key(ch_of(DUO, "USB1")), PRO2.input_key(ch_of(PRO2, "USB1")))
 
 print("\nDUO: every input reads from the table")
 factory = inputsource_table(DUO, {
@@ -152,7 +157,7 @@ for dev in (PRO2, DUO):
     check(f"{dev.name}: mic channel numbers are source_code + 1",
           [c.mic_channel_number(e) for e in mics], [e["source_code"] + 1 for e in mics])
     check(f"{dev.name}: every channel's address round-trips back to itself",
-          [(dev.channel_for_input_path(dev.input_path(e)) or {}).get("name") for e in dev.ui_channels],
+          [(dev.channel_for_input_key(dev.input_key(e)) or {}).get("name") for e in dev.ui_channels],
           [e["name"] for e in dev.ui_channels])
     check(f"{dev.name}: no entry carries a stale input_slot",
           any("input_slot" in e for e in dev.ui_channels), False)

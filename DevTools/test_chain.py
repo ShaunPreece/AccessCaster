@@ -18,7 +18,7 @@ import channels as c
 import devices
 from _testkit import as_device, check, patched
 
-# PIN THE DESK AND ITS FADER LAYOUT. `proc_selector` resolves a channel to the strip it is sitting
+# PIN THE DESK AND ITS FADER LAYOUT. `proc_key` resolves a channel to the strip it is sitting
 # on RIGHT NOW, so without this the order checks below read the attached desk's live layout and
 # fail on any desk that has Mic 2 off its fader - which says nothing about the write order this
 # file exists to pin. Offline tests must not depend on what happens to be plugged in.

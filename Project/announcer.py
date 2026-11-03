@@ -89,7 +89,7 @@ _RECONNECT_SPEAK_AFTER_S = 1.0
 
 # MUTE / SOLO STATE.
 # Pressing mute or solo pushes, unasked and about 70 ms after the button edge, the STATE property
-# `channelOutputMute` / `channelCueEnable`, addressed at SEL_CHANNEL + strip index. So the
+# `channelOutputMute` / `channelCueEnable`, addressed at CHANNEL[strip index]. So the
 # announcer can say WHICH channel and WHETHER it is now muted, instead of the bare word "Mute" - and
 # it catches a mute from any source (button, touchscreen, MIDI), not just a press edge. Still
 # strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
@@ -262,10 +262,6 @@ _ENC_DEAD_S = 0.45     # a turn with no level change within this was a turn agai
 # for that state, so each change is logged as `desk.state` to line up against a dead turn.
 _TRACED_STATE = ("systemChannelSelected", "systemMixSelected", "padActiveEdit", "encoderColour")
 _ENC_DEAD_GAP_S = 4.0  # and do not repeat that message more often than this
-# A pushed cross-point selector is CROSS_POINT_BASE + 13*source + output (rcp_transfer), and the
-# matrix row IS the source code, so one selector gives the source directly.
-_XPOINT_BASE = rcp_transfer.CROSS_POINT_BASE
-_XPOINT_STRIDE = rcp_transfer.CROSS_POINT_SOURCE_STRIDE
 
 
 def _source_label(source_code: int) -> str:
@@ -321,10 +317,10 @@ def handle_report(b: bytes, st: dict) -> None:
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
     fval = val if kind == "float" else None
-    # The strip a one-level push at SEL_CHANNEL + strip is addressed at, else -1.
-    strip = path[0] - rcp_transfer.SEL_CHANNEL if len(path) == 1 else -1
-    if not 0 <= strip < 16:
-        strip = -1
+    # The node the push is addressed at, named by the desk's own layout, and the strip when that
+    # node is CHANNEL[strip], else -1.
+    node = rcp_read.push_key(path)
+    strip = node[1] if node and node[0] == "CHANNEL" and node[1] < 16 else -1
     if name in _TRACED_STATE:
         traced = st.setdefault("traced", {})
         if traced.get(name, object()) != val:
@@ -359,18 +355,16 @@ def handle_report(b: bytes, st: dict) -> None:
         return
     if name == "mixLevelWithAnchor":
         # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
-        # flush_pending speak it once the pushes stop. A cross-point selector is
-        # CROSS_POINT_BASE + 13*source + output, which passes 255 at source 14, so Virtual A and
-        # Virtual B are addressed with a two-byte index: use the whole path element, never a byte.
-        if not levels_on or kind != "str" or "|" not in val or len(path) != 1:
-            return
-        if path[0] < _XPOINT_BASE:
+        # flush_pending speak it once the pushes stop. The cross-point's MIX node gives the source,
+        # and the matrix row IS the source code.
+        cell = rcp_transfer.cross_point_of(node)
+        if not levels_on or kind != "str" or "|" not in val or cell is None:
             return
         try:
             lvl = float(val.split("|", 1)[0])
         except ValueError:
             return
-        _note_level(st, "fader", (path[0] - _XPOINT_BASE) // _XPOINT_STRIDE, lvl)
+        _note_level(st, "fader", cell[1], lvl)
         return
     if name == "encoderSignal":
         # Raw rotation, a COMPOSITE whose first member is the signed step (+1 clockwise, -1 anti).
@@ -395,12 +389,11 @@ def handle_report(b: bytes, st: dict) -> None:
         # The gain the encoder moves while a channel is selected. BOTH kinds matter: a MIC strip
         # moves inputMicrophoneGain, a line strip (USB 1, Chat, USB 2, Bluetooth) moves
         # inputDigitalGain. Miss the second and a working turn on USB 1 announces "not linked" while
-        # the system audio audibly changes. Pushed at the channel's INPUTSOURCE node, whose index is
-        # two bytes (0x26E + source_code).
+        # the system audio audibly changes. Pushed at the channel's INPUTSOURCE node.
         if not levels_on or ival is None:
             return
         st["enc_turn_at"] = None              # the turn DID do something: it moved a gain
-        who = _gain_label(path, name == "inputMicrophoneGain")
+        who = _gain_label(node, name == "inputMicrophoneGain")
         if who and st.get("gain_said") != (who, ival):
             # Record it either way, so a suppressed echo is not spoken by a later duplicate push.
             st["gain_said"] = (who, ival)
@@ -416,9 +409,9 @@ def handle_report(b: bytes, st: dict) -> None:
     if name == "faderLevel":
         # The VIRTUAL fader level, 0-127. This is the encoder's own report of
         # what it just moved, and its address names the FADER directly
-        # (PHYSICALINTERFACE.FADER[base + index]), so it is the cleanest signal for re-seating the
+        # (PHYSICALINTERFACE.FADER[index]), so it is the cleanest signal for re-seating the
         # ring - the cross-point pushes that follow say the same thing by source.
-        idx = (path[1] - devices.FADER_NODE_BASE) if len(path) == 2 and path[0] == 0 else -1
+        idx = node[3] if node and node[:3] == ("PHYSICALINTERFACE", 0, "FADER") else -1
         if ival is not None and 0 <= idx < 16:
             _ring_seat(st, "fader", idx, max(0.0, min(1.0, ival / _FADER_LEVEL_MAX)))
         return
@@ -435,7 +428,7 @@ def handle_report(b: bytes, st: dict) -> None:
     # seated on the encoder ring: the ring cycles what the ENCODER selects, and a headphone knob is
     # not on it.
     if name == "potLevel":
-        idx = path[1] if len(path) == 2 and path[0] == 0 else -1
+        idx = node[3] if node and node[:3] == ("PHYSICALINTERFACE", 0, "POT") else -1
         if levels_on and ival is not None and 0 <= idx < _POT_COUNT:
             _note_level(st, "headphone", idx, max(0.0, min(1.0, ival / _POT_LEVEL_MAX)))
         return
@@ -642,17 +635,16 @@ def _selected_phrase(strip_idx: int) -> str:
     return f"{who} selected. Nothing here for the encoder to adjust"
 
 
-def _gain_label(path, is_mic: bool):
-    """Name the channel whose GAIN just moved, from the ADDRESS the change was pushed at.
+def _gain_label(node, is_mic: bool):
+    """Name the channel whose GAIN just moved, from the NODE the change was pushed at.
 
     Mic strips carry 'gain'; line strips carry 'level', which is what the app and the desk call them,
     so the spoken phrase matches the control the operator knows.
 
-    THE ADDRESS IS THE WHOLE PATH, not the low selector byte, matched against
-    DeviceModel.input_path: the announcer and the writer read the same rule, so they cannot drift.
-    A per-device selector table would miss every gain turned on a Duo's own controls."""
+    Matched against DeviceModel.input_key: the announcer and the writer read the same rule, so they
+    cannot drift. A per-device selector table would miss every gain turned on a Duo's own controls."""
     dev = devices.get_active_device()
-    entry = dev.channel_for_input_path(path)
+    entry = dev.channel_for_input_key(node)
     if entry is None:
         return None
     if is_mic:
@@ -923,7 +915,7 @@ def mark_self_gain(key, is_mic: bool) -> None:
         entry = next((c for c in (dev.ui_channels or ()) if matches(c)), None)
         if entry is None:
             return
-        who = _gain_label(dev.input_path(entry), is_mic)
+        who = _gain_label(dev.input_key(entry), is_mic)
         if who:
             mark_self_write(("gain", who))
     except Exception:

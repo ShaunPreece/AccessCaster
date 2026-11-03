@@ -22,7 +22,7 @@ import rcp_transfer
 import server
 import settings_file
 import speech
-from _testkit import check, check_true, patched, push
+from _testkit import addr, check, check_true, patched, push
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # would fail on the Duo's different channel set and look like a regression. Offline tests must not
@@ -52,9 +52,8 @@ def v_str(text: str) -> bytes:
 
 
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
-    """A pushed STATE property at SEL_CHANNEL + strip index, as the desk pushes it (mute on
-    channel 2 is selector 0x1D)."""
-    return push([rcp_transfer.SEL_CHANNEL + strip_idx], prop, v_bool(on))
+    """A pushed STATE property at CHANNEL[strip index], as the desk pushes it."""
+    return push(addr(rcp_transfer.channel_key(strip_idx)), prop, v_bool(on))
 
 
 def press_packet(name: str, down: bool = True, button: int = 1) -> bytes:
@@ -169,8 +168,8 @@ check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmut
 
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
-# channelInputSource is pushed with the same 0x1C+strip selector; value = the new source code.
-said, _ = run([push([rcp_transfer.SEL_CHANNEL + 1], "channelInputSource", v_int(10))],
+# channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code.
+said, _ = run([push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10))],
               cold_cache=False)
 check("the layout change itself is silent", said, [])
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
@@ -233,10 +232,10 @@ def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
     """A pushed fader position: mixLevelWithAnchor on the cross-point selector for (source, output),
     value the ASCII string 'level|anchor'. The desk sends one per cross-point, 13 per source.
 
-    THE SELECTOR IS NOT ALWAYS ONE BYTE. CROSS_POINT_BASE + 13*source + output passes 255 at
-    source 14, so Virtual A and Virtual B arrive with a two-byte index and the width byte says so."""
-    sel = rcp_transfer.CROSS_POINT_BASE + 13 * source_code + output
-    return push([sel], "mixLevelWithAnchor", v_str(f"{level:g}|{level:g}"))
+    THE INDEX IS NOT ALWAYS ONE BYTE. MIX[13*source + output] passes root child 255 at source 14,
+    so Virtual A and Virtual B arrive with a two-byte index and the width byte says so."""
+    path = addr(rcp_transfer.cross_point_key(output, source_code))
+    return push(path, "mixLevelWithAnchor", v_str(f"{level:g}|{level:g}"))
 
 
 def monlevel_packet(level: float) -> bytes:
@@ -538,7 +537,7 @@ channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9
 
 
 def fader_level_packet(fader_idx: int, value127: int) -> bytes:
-    return push([0, devices.FADER_NODE_BASE + fader_idx], "faderLevel", v_int(value127))
+    return push(addr(rcp_transfer.fader_key(fader_idx)), "faderLevel", v_int(value127))
 
 
 st = fresh_st()
@@ -829,8 +828,8 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
     RECORDS.clear()
     channels.set_channel_mute("Mic2", True)
     rec = RECORDS[0] if RECORDS else b""
-    # The record shape is the module-toggle shape: global address, compact bool, selector
-    # SEL_CHANNEL + strip. Mic 2 is on strip 1 in this layout, so 0x1D.
+    # The record shape is the module-toggle shape: compact bool on CHANNEL[strip]. Mic 2 is on
+    # strip 1 in this layout, so 0x1D on the Pro II.
     check("one record sent", len(RECORDS), 1)
     check_true("addressed as a global property on 0x1C + strip (Mic 2 -> 0x1D)",
                b"\x01\x01\x01\x01\x1d" + b"channelOutputMute\x00\x01\x01\x02" in rec)
@@ -1065,9 +1064,9 @@ check("the vacated fader beside it is not claimed by anything",
       announcer.channel_label(1), "Channel 2")
 
 print("\nA CROSS-POINT SELECTOR PAST 255 IS STILL DECODED")
-# The selector is CROSS_POINT_BASE + 13*source + output, which leaves byte range at source 14, so
+# The cross-point is MIX[13*source + output], whose path leaves byte range at source 14, so
 # Virtual A and Virtual B are addressed with two bytes. Their low bytes alone are 2 and 15, both
-# below the cross-point base, so reading one byte discards the push and the fader moves in silence -
+# below the MIX block, so reading one byte discards the push and the fader moves in silence -
 # no level, no name. Only codes 14 and 15 reach that far, and only in Expanded.
 channels.publish_usb_expanded(True)
 channels.publish_strip_vector([0, 12, 13, 14, 15, 11, 7, 8, 9])

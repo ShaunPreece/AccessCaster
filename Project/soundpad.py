@@ -328,12 +328,12 @@ def preview_write(edits: dict, more, name: str | None = PREVIEW_NAME) -> None:
             recs = []
             for grid in dict.fromkeys(grid for grid, _param in edits):
                 pos, _sub = targets[grid]
-                recs.append(pr.write_record("padActive", "bool", True, pos, pr.FRAME_PAD))
+                recs.append(pr.write_record("padActive", "bool", True, pos, pr.PAD_BLOCK))
             for (grid, param), (value, kind) in edits.items():
                 pos, sub = targets[grid]
-                recs.append(pr.write_record(param, kind, value, pos, pr.FRAME_PAD)
+                recs.append(pr.write_record(param, kind, value, pos, pr.PAD_BLOCK)
                             if param == "padEffectInput"
-                            else pr.write_record(param, kind, value, sub, pr.FRAME_FX))
+                            else pr.write_record(param, kind, value, sub, pr.FX_BLOCK))
             t.send_records_paced(recs, delay=0.1)
             if time.monotonic() >= deadline:
                 break
@@ -741,16 +741,14 @@ def free_effect_subhandle(target_idx: int) -> int:
 # LOW-LEVEL HID RECORD BUILDERS + THE ONE-SESSION CREATE SENDER
 # ----------------------------------------------------------------------------------------------
 
-def build_pad_bool(name: str, on: bool, sel: int, frame: int = pr.FRAME_PAD) -> bytes:
-    """Compact bool on child `sel` of the pad (0x9a) or effects (0x9d) node:
-    01 01 02 02 <frame> 02 01 <sel> <name> 00 01 01 <02=on/03=off>."""
-    return t._frame(bytes([0x01, 0x01, 0x02, 0x02, frame, 0x02, 0x01, sel & 0xFF]) + name.encode()
-                   + bytes([0x00, 0x01, 0x01, 0x02 if on else 0x03]))
+def build_pad_bool(name: str, on: bool, sel: int, block=pr.PAD_BLOCK) -> bytes:
+    """Compact bool on child `sel` of SOUNDPADS or PADEFFECTS."""
+    return pr.write_record(name, "bool", on, sel, block)
 
 
-def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
-    """select-begin on child `sel`: 04 01 01 02 <frame> 02 01 <sel>."""
-    return t._frame(bytes([0x04, 0x01, 0x01, 0x02, frame, 0x02, 0x01, sel & 0xFF]))
+def build_select_begin(sel: int, block=pr.PAD_BLOCK) -> bytes:
+    """select-begin on child `sel`: `04 01 01 <parent> 01 <sel>`."""
+    return pr.child_command(pr.REMOVE_CHILD, sel, block)
 
 
 # CURSOR-addressed variants (addressing mode 0x00 = the device's current model-edit cursor,
@@ -760,14 +758,14 @@ def build_select_begin(sel: int, frame: int = pr.FRAME_PAD) -> bytes:
 # parks the edit cursor at position 0, then these cursor-addressed records remove exactly that
 # one record.
 def build_pad_bool_cursor(name: str, on: bool) -> bytes:
-    """Pad bool on the edit CURSOR: 01 01 02 02 9a 02 00 <name> 00 01 01 <02/03>."""
-    return t._frame(bytes([0x01, 0x01, 0x02, 0x02, 0x9a, 0x02, 0x00]) + name.encode()
-                   + bytes([0x00, 0x01, 0x01, 0x02 if on else 0x03]))
+    """Pad bool on the edit CURSOR: path [SOUNDPADS, 0] with the zero sent as a zero-length count,
+    `01 01 02 02 9a 02 00` on a Pro II."""
+    return t.build_record(name, "bool", on, pr.child_path(0), empty_zero=True)
 
 
 def build_select_begin_cursor() -> bytes:
-    """select-begin on the edit CURSOR: 04 01 01 02 9a 02 00 (no position byte)."""
-    return t._frame(bytes([0x04, 0x01, 0x01, 0x02, 0x9a, 0x02, 0x00]))
+    """select-begin on the edit CURSOR: `04 01 01 02 9a 02 00` on a Pro II (no position byte)."""
+    return pr.child_command(pr.REMOVE_CHILD, 0, cursor=True)
 
 
 def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
@@ -1354,7 +1352,7 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
         value, err = _coerce_pad_value(name, value, kind, spec)
         if err:
             return {"ok": False, "message": err}
-        recs.append(pr.write_record(name, kind, value, pos, pr.FRAME_PAD))
+        recs.append(pr.write_record(name, kind, value, pos, pr.PAD_BLOCK))
         said = (spec.get("said") or spec["label"]) if spec else name
         labels.append(f"{said} is now {_spoken_value(name, value)}")
         values[name] = value
@@ -1765,9 +1763,9 @@ def _delete_effect_object(index: int) -> None:
     with _transfer_mode(1.0):
         dev = rcp_hid.open_handle(iface, "effect object delete")
         try:
-            for r in (build_pad_bool("voiceDisguiseOn", True, index, pr.FRAME_FX),
-                      build_pad_bool("voiceDisguiseOn", False, index, pr.FRAME_FX),
-                      build_select_begin(index, pr.FRAME_FX)):
+            for r in (build_pad_bool("voiceDisguiseOn", True, index, pr.FX_BLOCK),
+                      build_pad_bool("voiceDisguiseOn", False, index, pr.FX_BLOCK),
+                      build_select_begin(index, pr.FX_BLOCK)):
                 rcp_hid.write_report(dev, r)
                 time.sleep(0.08)
             time.sleep(0.3)
@@ -1784,11 +1782,11 @@ def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
     handle = pr.free_handle(current_pad_count())
     pre = pr.build_blank(target_idx, handle)
     mid = [
-        pr.write_record("padType", "int", 2, handle, pr.FRAME_PAD),
-        pr.write_record("padActive", "bool", True, handle, pr.FRAME_PAD),
-        pr.write_record("padEffectTriggerMode", "int", 1, handle, pr.FRAME_PAD),
-        pr.write_record("padName", "str", name, handle, pr.FRAME_PAD),
-        pr.write_record("padColourIndex", "int", 8, handle, pr.FRAME_PAD),
+        pr.write_record("padType", "int", 2, handle, pr.PAD_BLOCK),
+        pr.write_record("padActive", "bool", True, handle, pr.PAD_BLOCK),
+        pr.write_record("padEffectTriggerMode", "int", 1, handle, pr.PAD_BLOCK),
+        pr.write_record("padName", "str", name, handle, pr.PAD_BLOCK),
+        pr.write_record("padColourIndex", "int", 8, handle, pr.PAD_BLOCK),
     ]
     _send_create(pre, mid, [])
 
@@ -2326,8 +2324,8 @@ def select_bank(bank: int) -> None:
 
     AN ORDINARY HID WRITE, and that is the whole answer to the MIDI bank-select question. MIDI
     reaches only the bank the desk is currently on, and RODE's MIDI spec offers CC 0 / CC 1 for the
-    bank marked "verify" - which is not needed, because `selectedBank` is an int on the GUI block
-    (selector 0x07), the same mapped node as `metering`. Proven with the ENGINE as the judge rather
+    bank marked "verify" - which is not needed, because `selectedBank` is an int on the GUI block,
+    the same mapped node as `metering`. Proven with the ENGINE as the judge rather
     than a read-back: with the
     bank at 0 a MIDI press fired padIdx 0, and after this write with bank 1 the identical message
     fired padIdx 6, which is bank 2's first pad on a Duo.
@@ -2340,7 +2338,7 @@ def select_bank(bank: int) -> None:
     banks = devices.get_active_device().pad.system_bank
     if not 0 <= int(bank) < banks:
         raise ValueError(f"bank {bank} is outside this desk's {banks} banks")
-    t.send_record(t.build_global_prop_int("selectedBank", t.SEL_GUI, int(bank)))
+    t.write_at(t.GUI, "selectedBank", "int", int(bank))
 
 
 def current_bank(blob=None):

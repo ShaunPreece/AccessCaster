@@ -280,7 +280,7 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     session, held open while more edits arrive (server._PreviewWriter queues them, newest wins).
 3.7 EDIT A PAD-LEVEL PROPERTY IN PLACE  [generic, 2026-06-17] soundpad.set_pad_property(grid, name,
     value, kind) - the UI-agnostic editing layer (set_pad_replay and the other setters go through it): resolve the
-    pad's 0-based stream position, write ONE FRAME_PAD (0x9a) record in transfer mode, exit. No
+    pad's 0-based stream position, write ONE SOUNDPADS record (0x9a on a Pro II) in transfer mode, exit. No
     clear/create, no region-B touch -> pool-safe + silent. A PAD_PROP registry lists the SAFE,
     value-confirmed properties (each with kind/label/min-max/applies_to) and is what a future
     "Advanced per-pad" UI renders, so the layout is decoupled from the code. Every edit goes

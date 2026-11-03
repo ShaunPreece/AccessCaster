@@ -141,6 +141,11 @@ root-child position.
 skip nested containers it cannot see, and every wrong conclusion we reached about the address space
 came from doing that.
 
+So the app writes no position down at all. It names a node by block and copy, `("CHANNEL", 3)` or
+`("MIX", 13 * source + output)`, and looks the path up on the attached desk's own tree
+(`model_tree.Layout`, held by `rcp_read.layout`). A firmware that grows one block moves every block
+after it; the lookup follows, where a written-down number would land on a different node.
+
 ## How we found it, in the order we would do it again
 
 1. **Capture the official app talking to the device.** USBPcap plus Wireshark, with the RODE app
@@ -362,6 +367,37 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   COMMIT. The remaining overhead is them, so the only thing left to win is the thing that makes it
   work.
 
+- **EVERY WRITE ADDRESS IS LOOKED UP ON THE DESK'S OWN TREE; APP CODE NAMES NO POSITION.** A write
+  goes through `rcp_transfer.address_of(key, prop)` (or `build_at` / `write_at` over it), which asks
+  `rcp_read.layout()`: the attached desk's `model_tree.Layout`, learned from a stable dump and kept
+  while `rcp_hid.connection_epoch` holds still, re-checked on every later stable dump. A position
+  inside a block (a cross-point's `13 * source + output`, a fader's copy) stays arithmetic in the
+  code; the block's own position never does. `DevTools/test_addressing.py` drives every write path
+  against the saved Pro II 1.7.6 and 1.7.7 and Duo 1.7.3 layouts, checks each record is
+  byte-identical to the address used before the lookup, checks every record follows a moved block,
+  and fails on any `build_global_prop_*` or literal path in `Project/` outside `rcp_transfer`.
+  - **THE LOOKUP IS THE STRAY GUARD.** It refuses a key the desk lacks and a property the node does
+    not carry (`model_tree.AddressUnknown`). Every property the app writes is published on its node
+    before the first write, on both desks, so a missing name means the wrong node.
+  - **NO READABLE MODEL, NO WRITE.** With no layout and no dump, `rcp_read.layout` raises rather
+    than fall back to a remembered position.
+  - **A LISTENER NAMES A PUSH WITH `rcp_read.push_key`**, which uses the last layout known, or the
+    cached dump's, and never dumps: a listener thread must not start a model read of its own.
+  - **AN OFFLINE SUITE ADDRESSES ON A SAVED LAYOUT.** `_testkit` pins `layout_fixture.PRO2_177`;
+    `on_layout` switches desk. A fixture holds block and property NAMES only: a model dump holds the
+    wifi password and cannot be committed. Regenerate one with `DevTools/layout_fixture.py <dump>
+    <name>` when a desk's firmware changes.
+  - **THE STRIPS ARE NOT ALIKE.** On the Duo (1.7.3) `EFFECTS_PARAMETERS[9]`, the tenth strip's
+    effects node, carries `echoOn`, `reverbOn` and `effectsIdx` and none of the 17 effect
+    parameters; the Pro II's carries all 20. `channels.write_chain` writes only what the strip
+    carries (`fit_chain`), and chain-follow's read-back compares against the fitted chain. Unfitted,
+    a chain moved there writes 17 properties that node does not have.
+- **READ A STRIP'S CHAIN PER NODE, NEVER BY POSITION IN THE DUMP.** The pads' effect objects are
+  EFFECTS_PARAMETERS blocks too (children of PADEFFECTS), so the Nth `reverbMix` in the stream is
+  strip N's only while every earlier strip carries one: read that way, a Duo's tenth strip returns
+  the first pad effect object's values. `channels.read_chains` reads each strip's CHANNEL and
+  EFFECTS_PARAMETERS node by key (`rcp_read.keyed_node`).
+
 - **THE BLOCK RULE PLUS A READ-BACK TEST REPLACES CAPTURE, and this is the single most useful thing
   the project has learned.** If one property in a block is addressable, the whole block is. Measured
   28th August 2026: sixteen properties filed as touchscreen-only went from BLOCKED to shipped in one
@@ -534,13 +570,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`build_global_prop_int(name, selector, value)` takes the SELECTOR SECOND**, unlike
   `build_global_prop_bool(name, on, selector)`. Getting them the wrong way round writes an arbitrary
   value on an arbitrary selector; on 29th August 2026 that turned a haptics write into selector 2,
-  value 15. Use `rcp_transfer.set_unit_setting(prop, value)`, which looks the selector up by name and
-  refuses anything not in `UNIT_SETTING_SEL`.
-- **A selector past 0xFF needs NO special builder.** Every global builder passes it to
-  `build_address` whole and `encode_path` widens the index, so `build_global_prop_bool(prop, on,
-  258)` addresses root child 258. `build_channel_prop_int/bool(prop, value, lo, hi)` splits it by
-  hand instead, which is why `SEL_SHOWCONTROL` and `SEL_RECORDINGS` go through those; either shape
-  reaches the same node.
+  value 15. Those selector forms are for probes now; the app writes by key, and
+  `rcp_transfer.set_unit_setting(prop, value)` refuses anything not in `UNIT_SETTING_SEL`.
+- **An index past 0xFF needs NO special builder.** `build_record` passes the path to
+  `build_address` whole and `encode_path` widens each index, so root child 258 is `02 02 01`, the
+  form the desk itself uses for RECORDINGS (0x28F) and SHOWCONTROL (0x28E) on the Pro II.
 - **"The RODE app has no control for it" means there is no CAPTURE ROUTE. It has never once meant
   unwritable.** That inference has been wrong six times.
 - **A value reading back is NOT evidence the value is valid.** `recordingCompressionQuality` stores
@@ -586,7 +620,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   constant.
 - **The report-04 event channel is NOT selector-free.** `cmutePressed` is selector 0x63 +
   `mutePressed`. Injecting the record button does nothing; use `requestRecordState`.
-- **Read back the first write on any NEW string property.** `build_global_prop_string` combines two
+- **Read back the first write on any NEW string property.** A string write combines two
   separately-proven halves, and the combination itself is only proven per property.
 - **`wifiPSK` WAS READABLE off the desk, and on 1.7.6 reads empty** (10th October 2026, a Pro II
   joined to a password-protected network), so "has a password saved" never shows there. Older
@@ -1060,27 +1094,25 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   file, because the unlink can be days later) and `_unlink_mutes` hands it back if the pair's mute
   is unchanged since the link; a pair muted or opened while linked passes that choice to both.
   Without the parked record, a muted-plus-open link followed by an unlink mutes the open mic.
-- **A CROSS-POINT SELECTOR LEAVES BYTE RANGE AT SOURCE 14.** It is
-  `CROSS_POINT_BASE + 13*source + output`, so Game (12) is 232 and Music (13) is 245 but Virtual A
+- **A CROSS-POINT'S PATH LEAVES BYTE RANGE AT SOURCE 14.** It is MIX[13*source + output], and MIX
+  starts at root child 76 on the Pro II, so Game (12) is 232 and Music (13) is 245 but Virtual A
   (14) is 258 and Virtual B (15) is 271, and the desk addresses those two with a TWO-byte index.
-  Read as one byte both come back as 1, below the base, so the push is silently discarded and the
+  Read as one byte both come back as 1, below the MIX block, so the push is silently discarded and the
   fader moves with no level and no name - while mute and listen, addressed by strip index, still
   speak, which is the signature that tells the two apart. Take the address as a whole path element
   from `rcp_read.parse_push`, never as a byte. Only codes 14 and 15 reach that far, and only in
   Expanded, which is why this was invisible until a virtual channel was first put on a fader.
 - **THE WRITE SIDE WIDENS THE SAME WAY, AND A GLOBAL SELECTOR IS AN INDEX RATHER THAN A BYTE.**
-  `build_global_prop_int` / `_bool` / `_string` / `_float`, `build_mix_link_request` and
-  `build_cross_point_level` hand the selector to `build_address` whole, so `encode_path` emits
+  Every record builder hands its path to `build_address` whole, so `encode_path` emits
   `01 0f` for 15 and `02 02 01` for 258 - the same two-byte form the desk pushes. Masking to 0xFF
   truncated SILENTLY, which is worse than raising: 258 became 2, a valid node 256 cross-points
   away. Proven on the Pro II for both Virtual A (258) and Virtual B (271): `mixDisabled` written,
   read back, restored, and the model's node, property and MIX counts unchanged, so no stray
-  (`DevTools/test_cross_point_wide_live.py`, 1st October 2026). The pad builders keep their mask
-  because a pad index cannot reach 256, and `SEL_SHOWCONTROL` / `SEL_RECORDINGS` are unaffected:
-  they split the index by hand through `build_channel_prop_*` and always did.
+  (`DevTools/test_cross_point_wide_live.py`, 1st October 2026).
 - **EVERY CROSS-POINT WRITE GOES THROUGH A `rcp_transfer.set_cross_point_*` HELPER**
   (`_linked`, `_excluded`, `_level`), each of which runs `_check_cross_point` first. Sending
-  `build_mix_link_request` raw skips that gate, so an index the connected desk lacks reaches the wire.
+  `build_cross_point_link` raw skips that gate, so a cell the connected desk does not offer reaches
+  the wire.
 - **READING OR WRITING THE GRID USES `MatrixSpec.all_sources`; ONLY THE DISPLAY LIST FOLLOWS THE
   MODE.** The desk publishes all 30 source rows whichever mode it is in, so rows 12 to 15 are
   ordinary MIX nodes with real state at all times. `all_sources` / `all_source_indices` is that
@@ -1146,7 +1178,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   because a pair code in `assignable` would let the UI offer "Mic 1 + 2" as a drop target and let
   `_tidy_fader_target` gap-fill with it. Pinned by `test_announcer.py`.
 - **`channelWirelessMute` IS IN THE CHANNEL BLOCK, PER STRIP, NOT IN THE INPUT TABLE.** It sits on
-  exactly the nodes `channelOutputMute` and `channelCueEnable` sit on (`rcp_transfer.SEL_CHANNEL + strip`, ten
+  exactly the nodes `channelOutputMute` and `channelCueEnable` sit on (`rcp_transfer.channel_key(strip)`, ten
   of them, read off a live tree 2nd September 2026), so it is written with
   `channels.set_channel_wireless_mute` like any other toggle there. `CHANNEL_PROP` listed it among
   the properties addressed at the INPUT selector until then, which is a different block indexed by
@@ -1566,9 +1598,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `outputMonAutoMute` and `outputBTAutoMute` are read by block in `routing_model` for this reason.
 - **A positional read must pass `kind=None`** so it gets EVERY occurrence including the
   undecodable `(None, "?")` ones. Dropping those shifts every index past them.
-- **EVERY INPUT VALUE, ON EVERY DESK, LIVES AT `INPUTSOURCE[source_code]` = path `0x26E + code`.**
-  Mic gain, phantom, polarity, mic type, instrument gain, line level, input type and strip colour.
-  Read it with `channels.input_value`, write it at `DeviceModel.input_path`, derive nothing else.
+- **EVERY INPUT VALUE, ON EVERY DESK, LIVES AT `INPUTSOURCE[source_code]`** (root child
+  `0x26E + code` on both desks' current firmware). Mic gain, phantom, polarity, mic type,
+  instrument gain, line level, input type and strip colour. Read it with `channels.input_value`,
+  write it at `DeviceModel.input_key`, derive nothing else.
   There is no per-device selector table any more and there must not be one again: the two that
   existed were a second encoding of this rule, and the Duo's copies of them encoded a different and
   inert address. Never read one of these by POSITION either - indexing a `values()` list by channel

@@ -141,7 +141,7 @@ RESTORED_BY = {
     "channelInputSource": "profiles.apply, first of all (the layout decides where every "
                           "per-strip write lands). Gated on the fader_write cap.",
     "faderLevel": "profiles.apply, straight after the layout. Only the slots this device has a "
-                  "confirmed selector for (FaderSpec.level_selectors); gated on the level_write cap.",
+                  "virtual fader (FaderSpec.level_faders); gated on the level_write cap.",
     "outputMonLevel": "profiles.apply (rcp_transfer.set_monitor_level), gated on level_write.",
     # --- per channel ----------------------------------------------------------------------
     "inputMicrophoneGain": ("profiles.apply -> channels.set_mic_gain, written AFTER the mic "

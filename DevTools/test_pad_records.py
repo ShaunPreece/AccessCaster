@@ -30,7 +30,8 @@ def int_after(rec, name):
 
 
 def fx_records(recs):
-    return [r for r in recs if r[9] == pr.FRAME_FX]
+    fx_root = pr.address_of(pr.FX_BLOCK)[0]
+    return [r for r in recs if r[5] == 0x01 and _testkit.decode_record(r)[0][0] == fx_root]
 
 
 print("Captured bytes")
@@ -43,8 +44,8 @@ check_true("write_record reproduces the captured padFilePath record",
            pr.write_record("padFilePath", "str", pr.PAD_FILE_PATH_FMT.format(n=2, name="sound.wav"),
                       1) == captured_path)
 check_true("the remount record is the captured one, framed to 256 bytes",
-           len(pr.REMOUNT_PAD_STORAGE) == 256
-           and pr.REMOUNT_PAD_STORAGE[10:27] == b"remountPadStorage")
+           pr.build_remount_pad_storage() == bytes.fromhex(
+               "031a000000010101010f72656d6f756e7450616453746f726167650001010200").ljust(256, b"\x00"))
 
 print("Frozen output")
 sound = pr.build_sound_create(8, 9, "Chimes", 8, handle=0x12)

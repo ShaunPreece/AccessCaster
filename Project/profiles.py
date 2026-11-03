@@ -513,19 +513,19 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     # VIRTUAL FADER LEVELS + THE MONITOR SPEAKER LEVEL. These go straight AFTER the layout and
     # before anything else, for the same reason the layout goes first: faderLevel is addressed per
     # STRIP, so the level has to land on the strip the saved layout just put that channel on.
-    # Gated on the device's own "level_write" cap AND on it having confirmed level selectors (the
-    # Duo has neither yet), so an unmapped selector is never written - the same refusal the Routing
-    # page's level sliders make. Older profiles carry neither key and skip the whole block.
+    # Gated on the device's own "level_write" cap AND on it having a virtual fader, the same
+    # refusal the Routing page's level sliders make. Older profiles carry neither key and skip the
+    # whole block.
     dev = devices.get_active_device()
-    lvl_sel = dev.fader.level_selectors if "level_write" in dev.caps else {}
+    lvl_faders = dev.fader.level_faders if "level_write" in dev.caps else ()
     saved_levels = r.get("fader_levels") or []
     mon_level = r.get("monitor_level")
-    if lvl_sel:
+    if lvl_faders:
         step("Restoring fader and monitor levels.")
-        for idx, sel in sorted(lvl_sel.items()):
+        for idx in lvl_faders:
             if idx < len(saved_levels) and saved_levels[idx] is not None:
-                w(f"fader {idx + 1} level", lambda sel=sel, v=saved_levels[idx]:
-                  rcp_transfer.set_fader_level(sel, int(v)))
+                w(f"fader {idx + 1} level", lambda idx=idx, v=saved_levels[idx]:
+                  rcp_transfer.set_fader_level(idx, int(v)))
         if mon_level is not None:
             w("monitor speaker level", lambda v=mon_level: rcp_transfer.set_monitor_level(float(v)))
     elif saved_levels or mon_level is not None:
@@ -711,9 +711,9 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
                 continue
             if int(hp_val) not in hp_spec.value_codes:
                 continue
-            sel, out_label = hp_spec.outputs[out_i]
-            w(f"{out_label} type", lambda sel=sel, v=hp_val:
-              rcp_transfer.set_headphone_type(int(v), sel))
+            hp_index, out_label = hp_spec.outputs[out_i]
+            w(f"{out_label} type", lambda i=hp_index, v=hp_val:
+              rcp_transfer.set_headphone_type(int(v), i))
         if r.get("compellor_on") is not None:
             w("Compellor", lambda v=r["compellor_on"]: rcp_transfer.set_master_compellor(bool(v)))
         for pk, profkey in (("threshold", "compellor_threshold"), ("attack", "compellor_attack"),
