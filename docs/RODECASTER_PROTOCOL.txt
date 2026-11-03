@@ -1406,10 +1406,50 @@ software replaces the operational controls directly, not by puppeteering the kno
   updateDownloadProgress, updateInstalledProgress (10000 at rest), updateDownloaded,
   updateComplete. updateCheckRequested = True is the touchscreen's Check for Update:
   the desk pushes updateChecking True, then about 0.6 s later updateChecking False
-  and updateCheckRequested False. With nothing newer, nothing else moves. What an
-  available update looks like has not been seen. updateInitiateRequested would
-  install one and has never been written; it sits beside updateRebootRequested,
-  which is confirmed to reboot the desk.
+  and updateCheckRequested False. With nothing newer, nothing else moves.
+
+8.1b FIRMWARE UPDATE: DOWNLOAD AND INSTALL (Pro II, 1.7.6 offered 1.7.7, 3rd November 2026)
+--------------------------------------------------------------------------------
+  The desk updates itself over its own network connection; nothing is flashed from
+  the host. The sequence is read from the engine (rc_audio_mixer); steps 1 and 2 are
+  measured, 3 and 4 are not yet.
+
+  1. CHECK. RODE's manifest is update.rode.com/manifest.json (a "testing" manifest
+     is used instead when /usr/bin/testing-release exists, and the beta entry when
+     systemBetaMode is set). A newer os-version sets osUpdateAvailable and selects a
+     full OS install (archive.tar.gz, about 140 MB); a newer app-version alone sets
+     appUpdateAvailable and selects an application install (application.zip).
+     updateVersion names the version. The check is skipped while a download is
+     staged. Offered 1.7.7 on 1.7.6: osUpdateAvailable True, appUpdateAvailable False.
+  2. DOWNLOAD. downloadInitiateRequested = True. updateDownloadProgress is pushed at
+     every percent, 0 to 100 (not 0 to 10000), then updateDownloaded True. 1.7.7 took
+     about 30 s. downloadCancelRequested = True resets the progress to 0 and deletes
+     the staging directory; it does NOT clear updateDownloaded. Sent at 20 percent,
+     the cancel held the engine for about two and a half minutes: the desk stayed on
+     USB, but every model dump came back with no root node until it let go.
+  3. INSTALL. updateInitiateRequested = True. An OS install checks the MD5, pushes
+     updateInstalledProgress 5000, runs /usr/bin/rode-update.sh onto the spare system
+     partition, copies across /var/lib/bluetooth, the time zone link and
+     /etc/NetworkManager/system-connections (the saved wifi networks), then pushes
+     updateInstalledProgress 10000 and updateComplete True. It does NOT restart the
+     desk. An application install unpacks, marks the binaries executable and
+     restarts at once.
+  4. RESTART. updateRebootRequested = True.
+
+  THE REQUEST FLAGS ARE NOT CLEARED. downloadInitiateRequested and
+  downloadCancelRequested read True after use, for good. The engine acts on a change
+  to True, so write False before each request. Writing False is inert.
+
+  updateResetAfterFWURequested TURNS A RESTART INTO A FACTORY WIPE. While it reads
+  True, updateRebootRequested runs the device reset instead: Bluetooth pairings,
+  saved wifi networks, the touchscreen's settings and the CallMe sign-in are deleted
+  and a partition is zeroed. updateResetDeviceRequested runs the same wipe directly;
+  updateResetAppRequested restarts the touchscreen application alone. Read
+  updateResetAfterFWURequested before any restart request.
+
+  During an update over USB (updateViaUSB, the route RODE's desktop app takes) the
+  engine stages /Application/update-staging/usb-update.img, formats it FAT and
+  exposes it as a USB gadget, which is the PID 0x0030 identity in section 1.
 
 8.2 CALLME: HOSTING, ANSWERING AND CALL STATE (Pro II, fw 1.7.6, 2nd October 2026)
 --------------------------------------------------------------------------------

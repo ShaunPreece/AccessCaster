@@ -13,7 +13,8 @@ import server
 from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch
-from native.dialogs import JobDialog, confirm, report
+from native.dialogs import JobDialog, confirm, follow_job, report
+from native.firmware_dialog import FirmwareDialog
 from native.pages import Page, group, page_box, read_only, set_text
 from native.wifi_dialogs import JoinDialog, NetworksDialog
 
@@ -388,7 +389,7 @@ class StatePage(_Reader, wx.Panel):
 
 class HardwarePage(_Reader, scrolled.ScrolledPanel):
     """Storage and the recorder, the firmware and wired network, and the USB facts for
-    troubleshooting. Nothing here can be changed, bar asking for a firmware check."""
+    troubleshooting. Nothing here can be changed, bar the firmware check and install."""
 
     def __init__(self, section):
         super().__init__(section.frame.host)
@@ -403,11 +404,10 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
         box_sizer, box = group(parent, sizer, "Firmware and wired network")
         self.firmware = read_only(box, box_sizer, "Firmware", height=None)
         self.wired = read_only(box, box_sizer, "Wired network", height=None)
-        # Checking only: an install restarts the unit, which may be carrying this computer's
-        # audio, the screen reader included.
         self.check = _button(box, box_sizer, "Check for a firmware update", self._on_check)
-        a11y.describe(self.check, "Asks the unit to check with RODE. Installing is done on the "
-                                  "unit's screen or in RODE's own app.")
+        # Shown only while the unit offers an update, and named after it.
+        self.install = _button(box, box_sizer, "Install firmware", self._on_install)
+        self.install.Hide()
 
         box_sizer, box = group(parent, sizer, "USB interfaces (technical)")
         self.connection = read_only(box, box_sizer, "Connection", height=None)
@@ -429,6 +429,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
             set_text(self.firmware, firmware_line(state.get("firmware"),
                                                   state.get("firmware_update")))
             set_text(self.wired, wired_text(state.get("wired_connected")))
+            self._show_install(state.get("firmware_update"))
         set_text(self.connection, connection_text(status))
         set_text(self.hardware_id, status.get("hardware_id") or "Unknown")
         set_text(self.info, "0x" + status["info_hex"] if status.get("info_hex") else "Unknown")
@@ -446,9 +447,44 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
         if reply.get("ok"):
             set_text(self.firmware, firmware_line(reply.get("firmware"),
                                                   reply.get("firmware_update")))
+            self._show_install(reply.get("firmware_update"))
             self.section.state.read()       # the summary names a waiting update
         report(self, ("Firmware check", "Firmware check failed"), reply)
         self.check.SetFocus()
+
+    def _show_install(self, update):
+        version = (update or {}).get("version") if (update or {}).get("available") else ""
+        label = f"Install firmware {version}" if version else "Install firmware"
+        if self.install.GetLabel() != label:
+            self.install.SetLabel(label)
+        if self.install.IsShown() != bool(version):
+            self.install.Show(bool(version))
+            self.Layout()
+            self.FitInside()
+
+    def _on_install(self, _event):
+        call(self, server.read_firmware_install, done=self._ask_install)
+
+    def _ask_install(self, ready):
+        if not ready.get("ok") or ready.get("refusal"):
+            self.frame.say(ready.get("refusal") or ready.get("message")
+                           or "The unit could not be read.")
+            return
+        version = ready["version"]
+        dialog = FirmwareDialog(self, version, ready.get("firmware"), server.FIRMWARE_BACKUP_NAME)
+        with dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                self.install.SetFocus()
+                return
+            backup_first = dialog.wants_backup()
+        reply = follow_job(self, f"Installing firmware {version}",
+                           "Backing the unit up, then updating it." if backup_first
+                           else f"Updating the unit to firmware {version}.",
+                           lambda: server.action_firmware_install(backup_first),
+                           lambda _started: server.firmware_job_status)
+        report(self, ("Firmware updated", "Firmware not updated"), reply)
+        self.check.SetFocus()
+        self.frame.desk_rewritten()
 
 
 class UnitPage(_Reader, scrolled.ScrolledPanel):

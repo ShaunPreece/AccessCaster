@@ -18,10 +18,12 @@ BEFORE YOU WRITE ANYTHING TO A DESK
 -----------------------------------
 
 **Never sweep properties.** The desk publishes `powerOffRequest`,
-`updateInitiateRequested`, `updateRebootRequested`, `updateResetDeviceRequested` and
+`downloadInitiateRequested`, `updateInitiateRequested`, `updateRebootRequested`,
+`updateResetDeviceRequested`, `updateResetAfterFWURequested`, `systemBetaMode` and
 `disableAllPhysicalButtons`. "Write each one and read it back" would reboot the unit,
-start a firmware update, or lock its front panel. `updateRebootRequested` is confirmed
-to reboot the desk.
+download or install a firmware update, erase it, move it onto RODE's beta firmware, or
+lock its front panel. `updateRebootRequested` is confirmed to reboot the desk, and with
+`updateResetAfterFWURequested` set that reboot erases it.
 
 **Never write on an unconfirmed selector.** Selectors are reused across regions, so a
 wrong address does not politely miss: the record lands on some object anyway, and can

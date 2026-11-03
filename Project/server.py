@@ -45,6 +45,7 @@ import callme  # RODE's remote guests: hosting, answering, call state
 import channels
 import commands  # the catalogue of what a shortcut can do, from the spec tables
 import devices  # per-device model (matrix labels, caps) keyed by product id
+import desk_firmware  # installing a firmware update through the desk's own updater
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
@@ -166,7 +167,7 @@ def _client_watchdog():
         if _httpd is None:
             continue
         # Both job states, because either can be the one holding the desk.
-        busy = _profile_job.busy() or _show_job.busy()
+        busy = _profile_job.busy() or _show_job.busy() or _firmware_job.busy()
         reason = _lifecycle_stop_reason(time.monotonic(), start, _client_seen, _last_ping, _quit_at,
                                         job_running=busy)
         if reason:
@@ -432,17 +433,15 @@ def read_device_state() -> dict:
 
 
 # ----------------------------------------------------------------------------
-# FIRMWARE UPDATES: telling the user one exists. Installing is NOT offered: an update reboots the
-# desk, which is the unit the user's screen reader is probably speaking through, and the install
-# could not be tested until RODE ship something newer.
+# FIRMWARE UPDATES: telling the user one exists. Installing one is desk_firmware.py, through
+# action_firmware_install.
 #
 # All on the SYSTEM node. `updateCheckRequested` is the touchscreen's Check for Update: the desk
-# raises `updateChecking` and clears both within about a second. What an AVAILABLE update looks like
-# has not been seen yet; `appUpdateAvailable` / `osUpdateAvailable` and `updateVersion` are the
-# fields the desk publishes for it.
+# raises `updateChecking` and clears both within about a second. An available update sets
+# `osUpdateAvailable` (a full image) or `appUpdateAvailable` (the application alone), and
+# `updateVersion` names it.
 _UPDATE_CHECK_WAIT_S = 20.0
-_UPDATE_HOW = ("Install it on the unit's screen under Settings, System, Information, or with "
-               "RODE's own app.")
+_UPDATE_HOW = "Install it with Install firmware, under Device, Hardware."
 
 
 def _firmware_version(blob: bytes):
@@ -471,6 +470,66 @@ def _firmware_update_sentence(upd: dict) -> str:
         return ("The unit could not reach RODE's update server. It needs wifi or a network cable "
                 "to check.")
     return ""
+
+
+def read_firmware_install() -> dict:
+    """Whether the unit's waiting firmware update can be installed now: `version`, and `refusal`
+    as a sentence when it cannot."""
+    try:
+        with _hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+    state = desk_firmware.read(blob)
+    recording = recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED)
+    try:
+        in_call = any(slot.get("state") not in (None, "Idle")
+                      for slot in callme.read(blob).get("slots") or [])
+    except Exception:
+        in_call = False
+    refusal = desk_firmware.refusal(state, _desk_network(blob)["online"], recording, in_call)
+    for job, busy in ((_profile_job, "A backup is running."),
+                      (_restore_job, "A restore is running."),
+                      (_show_job, "A show command is running.")):
+        if not refusal and job.busy():
+            refusal = busy + " Try again when it finishes."
+    return {"ok": True, "version": desk_firmware.offered(state),
+            "firmware": _firmware_version(blob) or "", "refusal": refusal}
+
+
+def action_firmware_install(backup_first: bool = True) -> dict:
+    """Install the firmware update the unit offers: a backup first, unless declined, then the
+    unit's own download, install and restart (desk_firmware.install). Refuses before anything is
+    written if the update cannot run now."""
+    ready = read_firmware_install()
+    if not ready.get("ok"):
+        return ready
+    if ready["refusal"]:
+        return {"ok": False, "message": ready["refusal"]}
+    target = ready["version"]
+
+    def work(job):
+        if backup_first:
+            backed = _backup_unit(job, FIRMWARE_BACKUP_NAME)
+            if not backed.get("ok"):
+                return {"ok": False,
+                        "message": "The backup did not finish, so the update was not started and "
+                                   "nothing on the unit has changed. "
+                                   + (backed.get("message") or "")}
+        res = desk_firmware.install(desk_firmware.Desk(_hid_lock), job.step, target)
+        if res.get("version"):
+            with _session_state_lock:
+                _session_state["firmware"] = res["version"]
+        if res.get("ok") and backup_first:
+            res["message"] += (f" Your settings were backed up first as {FIRMWARE_BACKUP_NAME}, "
+                               "on the Backups page.")
+        return res
+    return _firmware_job.start(work, message=f"Updating the unit to firmware {target}.",
+                               started=f"Updating the unit to firmware {target}.")
+
+
+def firmware_job_status() -> dict:
+    return _firmware_job.status()
 
 
 def action_check_firmware() -> dict:
@@ -7183,26 +7242,30 @@ def action_backup_now(name: str) -> dict:
         return {"ok": False, "message": "Backup name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
 
-    def work(job):
-        show = None
-        note = ""
-        if "shows" in devices.get_active_device().caps and _removable_volume_ready():
-            got = _export_and_wait(job.step, "Backing the unit up to its own drive...")
-            if got.get("ok"):
-                s = got["show"]
-                show = {"snapshot": s.get("snapshot"), "uuid": s.get("uuid"), "name": s.get("name")}
-            else:
-                # The profile is still worth having, so carry on rather than losing the lot. Say so
-                # plainly: a backup that quietly did half of what was asked is worse than a slow one.
-                note = (" The unit's own backup did not appear on the drive, so this is a settings "
-                        "and pads backup only. Check there is a drive in with room on it.")
-        res = _do_snapshot(safe, True, job.tick, show=show)
-        if not res.get("ok"):
-            return res
-        res["message"] = _backup_wording(safe, show) + note
-        return res
-    return _profile_job.start(work,
+    return _profile_job.start(lambda job: _backup_unit(job, safe),
                               message="Backing up, please wait.", started="Backing up.")
+
+
+def _backup_unit(job, safe: str) -> dict:
+    """The body of a backup, run inside `job`: the unit's own copy when there is a drive, then the
+    settings and pads on this computer. See `action_backup_now`."""
+    show = None
+    note = ""
+    if "shows" in devices.get_active_device().caps and _removable_volume_ready():
+        got = _export_and_wait(job.step, "Backing the unit up to its own drive...")
+        if got.get("ok"):
+            s = got["show"]
+            show = {"snapshot": s.get("snapshot"), "uuid": s.get("uuid"), "name": s.get("name")}
+        else:
+            # The profile is still worth having, so carry on rather than losing the lot. Say so
+            # plainly: a backup that quietly did half of what was asked is worse than a slow one.
+            note = (" The unit's own backup did not appear on the drive, so this is a settings "
+                    "and pads backup only. Check there is a drive in with room on it.")
+    res = _do_snapshot(safe, True, job.tick, show=show)
+    if not res.get("ok"):
+        return res
+    res["message"] = _backup_wording(safe, show) + note
+    return res
 
 
 def _backup_wording(safe: str, show) -> str:
@@ -7522,6 +7585,11 @@ def restore_profile(name: str, clean: bool = False) -> dict:
 # changed cannot tell "working" from "died".
 _show_job = _BackgroundJob("A show command is already running.", "The show command failed",
                            rewrites_desk=True)
+# A firmware update (read_firmware_install, action_firmware_install).
+_firmware_job = _BackgroundJob("A firmware update is already running.",
+                               "The firmware update failed")
+# The backup an update takes first, replaced by the next update's.
+FIRMWARE_BACKUP_NAME = "Before firmware update"
 
 
 def _shows_write_gate():

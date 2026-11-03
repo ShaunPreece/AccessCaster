@@ -2779,10 +2779,28 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **`updateRebootRequested` = True on the SYSTEM block REBOOTS THE DESK** (Duo, 3rd September 2026:
   off the bus at t+12 s, back at t+38 s, firmware unchanged, flag self-clearing). It is the reboot
   trigger the NTP work wanted, and it is a repeatable way to exercise a re-enumeration - so every use
-  is a fresh roll of the 1-in-5 above. It stays on the never-sweep list BECAUSE it works. Its
-  neighbours `updateInitiateRequested`, `updateResetDeviceRequested`, `updateResetAfterFWURequested`
-  and `updateResetAppRequested` are untested and are NOT the same thing; check `updateDownloaded` and
-  `updateVersion` are empty before going near any of them.
+  is a fresh roll of the 1-in-5 above. It stays on the never-sweep list BECAUSE it works.
+- **`updateResetAfterFWURequested` TURNS THAT RESTART INTO A FACTORY WIPE** (read from the engine,
+  3rd November 2026): while it reads True, `updateRebootRequested` runs the device reset instead,
+  deleting the wifi networks, Bluetooth pairings, CallMe sign-in and touchscreen settings.
+  `updateResetDeviceRequested` runs the same wipe directly. Never write either, and read the first
+  before any restart request: `desk_firmware._restart` and `refusal` both do.
+- **THE UPDATE REQUEST FLAGS STAY TRUE AFTER USE** (`downloadInitiateRequested` and
+  `downloadCancelRequested`, measured 3rd November 2026). The engine acts on a change to True, so a
+  second request written True onto True does nothing. `desk_firmware` writes each False first;
+  False is inert. `downloadCancelRequested` leaves `updateDownloaded` True, so a later download's
+  end may push nothing: `desk_firmware._download` reads it back after 99 percent and quiet.
+- **A CANCEL DURING A DOWNLOAD HOLDS THE DESK'S ENGINE FOR ABOUT TWO AND A HALF MINUTES** (measured
+  3rd November 2026, sent at 20 percent): the desk stays on USB but every model dump comes back with
+  no root node until it lets go. `desk_firmware` never sends `downloadCancelRequested`; a download
+  left behind installs nothing.
+- **`updateDownloadProgress` IS A PERCENTAGE, 0 TO 100**, pushed at every percent (measured);
+  `updateInstalledProgress` is the one on 0 to 10000. A cancel threshold written for 10000 let the
+  1.7.7 download run to the end.
+- **AN OS INSTALL DOES NOT RESTART THE DESK; AN APPLICATION INSTALL DOES** (engine). After
+  `updateComplete` the desk is given `LEAVES_BY_ITSELF_S` to restart on its own, then asked.
+- **NEVER WRITE `systemBetaMode`**: it moves the desk onto RODE's beta manifest, and a beta OS
+  cannot be undone either.
 
 ## The encoder
 

@@ -16,7 +16,8 @@ import _testkit
 import server
 import wx
 from _testkit import check, check_in, check_not_in, check_true
-from native import device_section, wifi_dialogs
+from native import device_section, firmware_dialog, wifi_dialogs
+from native.firmware_dialog import FirmwareDialog
 
 app = wx.App()
 
@@ -154,6 +155,24 @@ check("nothing is spoken on its own", frame.said, [])
 check_in("the report is on the page", "Muted: Mic 2.", state.report.GetValue())
 state.shown({"ok": False, "message": "No desk."})
 check("an unread desk's status is the reason", frame.status[-1], "No desk.")
+
+# ---- the firmware install ----------------------------------------------------------------------
+frame = FakeFrame()
+hw = device_section.DeviceSection(frame).hardware
+check("with no update offered there is no install button", hw.install.IsShown(), False)
+hw._show_install({"available": True, "version": "1.7.7"})
+check("an offered update shows its button, named after it",
+      (hw.install.IsShown(), hw.install.GetLabel()), (True, "Install firmware 1.7.7"))
+hw._show_install({"available": False})
+check("and it goes once nothing is offered", hw.install.IsShown(), False)
+hw._ask_install({"ok": True, "version": "1.7.7", "refusal": "The unit is recording."})
+check("a refusal is spoken and asks nothing", frame.said[-1], "The unit is recording.")
+with FirmwareDialog(frame.window, "1.7.7", "1.7.6", "Before firmware update") as ask:
+    buttons = [c for c in ask.GetChildren() if isinstance(c, (wx.Button, wx.CheckBox))]
+    check("the question lands on Cancel", buttons[0].GetId(), wx.ID_CANCEL)
+    check("and backs up first unless unticked", ask.wants_backup(), True)
+    check_in("it says there is no way back", "no way back",
+             firmware_dialog.question_text("1.7.7", "1.7.6"))
 
 # ---- unit settings ---------------------------------------------------------------------------
 frame = FakeFrame()

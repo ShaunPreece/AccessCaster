@@ -305,6 +305,21 @@ class PushListener:
                 continue
             return val
 
+    def wait_any(self, names, timeout: float):
+        """(name, value) of the next push of any of `names`, or None on timeout or on the reader
+        dying. For following a job the desk reports through several properties at once."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                _path, got, val, _kind = self._q.get(
+                    timeout=max(0.0, min(0.1, deadline - time.monotonic())))
+            except queue.Empty:
+                if self.lost or time.monotonic() >= deadline:
+                    return None
+                continue
+            if got in names:
+                return got, val
+
     def wait_until_quiet(self, idle: float = 0.75, timeout: float = 20.0) -> float:
         """Block until the desk has pushed nothing for `idle` seconds. Returns how long that took.
 
