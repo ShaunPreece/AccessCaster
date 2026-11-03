@@ -211,7 +211,7 @@ class TrayApp:
         read in it. Notepad is on every Windows machine and reads correctly with a screen reader.
 
         The log is flushed line by line, so what opens is current to the last two seconds."""
-        diagnostics.flush()
+        diagnostics.flush(force=True)
         path = diagnostics.log_path()
         if not os.path.exists(path):
             # Nothing has been written yet (the log starts with the server). Show the folder

@@ -11,8 +11,8 @@ def question_text(version, current):
             "The unit downloads the update itself, installs it and restarts, which takes about "
             "five minutes. The update keeps your settings, SMART pads, recordings, wifi and "
             "Bluetooth pairings.\n\n"
-            "Rarely, an update makes the unit run its first-time setup again. That setup can only "
-            "be done by touch on the unit's screen, so have someone sighted nearby if you can.\n\n"
+            "It is possible, but rare, that a firmware update could require touchscreen setup "
+            "after the update.\n\n"
             "While the unit restarts its audio stops for a minute or two, so a screen reader "
             "speaking through it goes quiet until it is back. Do not switch the unit off while it "
             "updates.")

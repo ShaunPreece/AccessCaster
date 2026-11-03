@@ -22,7 +22,7 @@ THREE PROPERTIES IT HAS TO HAVE, and each one is a decision rather than a defaul
 
   * EVERY LINE IS ON DISK WITHIN TWO SECONDS. A fault that ends with the power lead being pulled
     loses whatever is still in a buffer, which is the part worth reading. Each line is flushed as
-    it is written, and a flusher thread closes the repeat groups.
+    it is written, and a flusher thread closes a repeat group once it has gone quiet.
   * REPEATS COLLAPSE. The page polls, the recorder watches and the announcer reopens its handle,
     so an honest line-per-event log is thousands of identical lines with the signal buried in it.
     The FIRST of anything is always written the moment it happens; identical events after it
@@ -248,14 +248,19 @@ class phase:
         return False
 
 
-def flush() -> None:
-    """Close any open repeat group so the file on disk is complete. Called by the flusher thread,
-    so a power cut two seconds after the last event still loses nothing."""
+def flush(force: bool = False) -> None:
+    """Close the open repeat group once it has gone quiet, so the file on disk is complete. Called
+    by the flusher thread every `_FLUSH_EVERY_S`. A group still repeating is left open: closed on
+    every tick, an event that recurs every two seconds or slower never folds at all. A power cut
+    loses at most the count of a repeat still under way; its first line is already on disk.
+    `force` closes it regardless, for shutdown."""
     if not _active:
         return
     try:
         with _lock:
-            _close_group()
+            if force or (_pending is not None
+                         and time.time() - _pending["last"] >= _FLUSH_EVERY_S + 1.0):
+                _close_group()
     except Exception:
         pass
 

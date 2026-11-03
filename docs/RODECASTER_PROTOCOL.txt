@@ -1421,7 +1421,8 @@ software replaces the operational controls directly, not by puppeteering the kno
      full OS install (archive.tar.gz, about 140 MB); a newer app-version alone sets
      appUpdateAvailable and selects an application install (application.zip).
      updateVersion names the version. The check is skipped while a download is
-     staged. Offered 1.7.7 on 1.7.6: osUpdateAvailable True, appUpdateAvailable False.
+     staged, and then nothing is pushed at all: a real check raises updateChecking
+     within about a second. Offered 1.7.7 on 1.7.6: osUpdateAvailable True, appUpdateAvailable False.
   2. DOWNLOAD. downloadInitiateRequested = True. updateDownloadProgress is pushed at
      every percent, 0 to 100 (not 0 to 10000), then updateDownloaded True. 1.7.7 took
      about 30 s. downloadCancelRequested = True resets the progress to 0 and deletes

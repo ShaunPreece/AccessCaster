@@ -4,9 +4,9 @@ The desk does the work, exactly as from its touchscreen: it downloads RODE's ima
 network connection and installs it. Nothing is flashed from this computer. The sequence, from the
 engine (`rc_audio_mixer`), run end to end on a Pro II from 1.7.6 to 1.7.7 in 4.5 minutes:
 
-  1. `updateCheckRequested` True: the desk reads RODE's manifest. A newer OS sets
-     `osUpdateAvailable` (the full image, about 140 MB); a newer application alone sets
-     `appUpdateAvailable`. `updateVersion` names it.
+  1. `updateCheckRequested` True: the desk reads RODE's manifest, unless it holds a download,
+     when it skips the check without a word. A newer OS sets `osUpdateAvailable` (the full image,
+     about 140 MB); a newer application alone sets `appUpdateAvailable`. `updateVersion` names it.
   2. `downloadInitiateRequested` True: the download. `updateDownloadProgress` is pushed at each
      percent, 0 to 100 (about 30 seconds for 1.7.7 on a home connection), then `updateDownloaded`.
      `downloadCancelRequested` True stops it and deletes what was staged, but sent mid-download it
@@ -48,6 +48,7 @@ REQUESTS = ("downloadInitiateRequested", "downloadCancelRequested", "updateIniti
 # The identity a desk takes while it is being flashed over USB. It answers nothing.
 FLASHING_PID = 0x0030
 
+CHECK_STARTS_S = 3.0          # a real check raises `updateChecking` within about a second
 CHECK_WAIT_S = 20.0
 DOWNLOAD_STALL_S = 120.0       # no progress for this long is a dead download
 FINISHED_QUIET_S = 15.0        # 99 percent then this long with no `updateDownloaded`: read it
@@ -167,7 +168,12 @@ def _check(desk, step, target):
             desk.write(state, name, False)
     with desk.listener() as listen:
         desk.write(state, "updateCheckRequested", True)
-        listen.wait_for("updateChecking", CHECK_WAIT_S, match=lambda v: v is False)
+        # The desk skips the check while it holds a download, and then says nothing at all.
+        if listen.wait_for("updateChecking", CHECK_STARTS_S, match=lambda v: v is True):
+            listen.wait_for("updateChecking", CHECK_WAIT_S, match=lambda v: v is False)
+        else:
+            diagnostics.event("firmware.check_skipped", "the unit holds a download already")
+            step(f"The unit already has firmware {target} waiting, so it is not checked again.")
     state = desk.state()
     v = values(state)
     if v.get("updateNoInternet"):
@@ -209,7 +215,9 @@ def _download(desk, step, state, target):
                 diagnostics.event("firmware.download", "progress", percent=value)
                 if value // 10 > said:
                     said = value // 10
-                    step(f"Downloading firmware {target}: {value} percent.")
+                    # Named in full at the first, the middle and the last; a bare figure between.
+                    step(f"Downloading firmware {target}: {value} percent." if said in (1, 5, 9)
+                         else f"{value} percent.")
     step(f"Firmware {target} has downloaded.")
 
 

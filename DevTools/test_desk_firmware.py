@@ -49,20 +49,26 @@ class Listener:
         return self._next(names)
 
     def wait_for(self, name, timeout, match=None):
-        got = self._next((name,))
-        return got[1] if got else None
+        while True:
+            got = self._next((name,))
+            if got is None:
+                return None
+            if match is None or match(got[1]):
+                return got[1]
 
 
 class Desk:
     """A desk that answers each request the way the engine does, unless told otherwise."""
 
-    def __init__(self, values, leaves_by_itself=True, comes_back="1.7.7", download=True):
+    def __init__(self, values, leaves_by_itself=True, comes_back="1.7.7", download=True,
+                 checks=True):
         self.values = values
         self.writes = []
         self.events = []
         self.leaves_by_itself = leaves_by_itself
         self.comes_back = comes_back
         self.download = download
+        self.checks = checks
         self.gone = False
         self.back_after = 0
 
@@ -76,8 +82,8 @@ class Desk:
         self.values[name] = value
         if not value:
             return
-        if name == "updateCheckRequested":
-            self.events.append(("updateChecking", False))
+        if name == "updateCheckRequested" and self.checks:
+            self.events += [("updateChecking", True), ("updateChecking", False)]
         elif name == "downloadInitiateRequested" and self.download:
             self.events += [("updateDownloadProgress", n) for n in range(0, 100, 7)]
             self.events += [("updateDownloadProgress", 99), ("updateDownloaded", True)]
@@ -138,10 +144,21 @@ asked = [name for name, value in desk.writes if value]
 check("then check, download and install, in that order",
       asked, ["updateCheckRequested", "downloadInitiateRequested", "updateInitiateRequested"])
 check("a desk that restarts by itself is not asked to", "updateRebootRequested" in asked, False)
-check("download progress is reported as each ten is passed",
-      "Downloading firmware 1.7.7: 42 percent." in steps, True)
+check("download progress is reported as each ten is passed", "42 percent." in steps, True)
 check("each ten is said once, and nought not at all", sum("percent" in s for s in steps), 9)
+check("the first, middle and last name the firmware, the rest are bare figures",
+      [s for s in steps if s.startswith("Downloading firmware 1.7.7:")],
+      ["Downloading firmware 1.7.7: 14 percent.", "Downloading firmware 1.7.7: 56 percent.",
+       "Downloading firmware 1.7.7: 91 percent."])
+check("a real check says nothing about skipping", any("not checked again" in s for s in steps),
+      False)
 check_in("the restart is announced", "audio stops", " ".join(steps))
+
+# ---- a desk holding a download skips the check without a word ------------------------------------
+desk = Desk(base(), checks=False)
+res, steps = run(desk)
+check_in("the skip is said", "already has firmware 1.7.7 waiting", " ".join(steps))
+check("and the update carries on", res["ok"], True)
 
 # ---- a desk that stays put after the install is asked to restart ---------------------------------
 desk = Desk(base(), leaves_by_itself=False)

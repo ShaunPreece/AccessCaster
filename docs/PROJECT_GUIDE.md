@@ -2697,6 +2697,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   ANY LIFECYCLE OR DEVICE FAULT.** `Project/diagnostics.py` tees every `print` into it along with
   the jobs, the records sent, the handles opened and closed, transfer mode, and the desk going
   quiet. Tray menu > Diagnostic log opens it.
+- **THE FLUSHER CLOSES A REPEAT GROUP ONLY ONCE IT HAS GONE QUIET** (`diagnostics.flush`). Closed on
+  every two-second tick, an event recurring every two seconds or slower never folded: the recorder
+  watcher wrote "no control interface" 34 times in the minute a firmware restart took.
+  `test_diagnostics.py` pins it.
 - **THE LOG IS STARTED IN EXACTLY ONE PLACE, `server._bring_up_server`,** and that is what keeps it
   a single-writer file: every entry point (tray, `python server.py`, the dev server) goes through
   there, so only the process that actually owns the server ever writes to it. Starting it in each
