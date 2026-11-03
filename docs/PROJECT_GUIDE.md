@@ -1460,7 +1460,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   - Any announcer state that compares a pushed value against memory must be SEEDED at startup, or
     the desk's first resting push reads as a change (the phantom "Levels" and "Bank 1").
   - Any cache the announcer keeps must be told about OUR writes explicitly
-    (`announcer.publish_level`, `announcer.publish_mute`).
+    (`announcer.publish_level`, `announcer.publish_mute`), and so must the window's desk state
+    when the write did not come from the window (`server._mirror_strip`, for a strip mute or solo
+    from a shortcut or an encoder hold).
 - **The exception, proven 28th August 2026: it DOES push our own property writes back on report 04.**
   That is why the announcer needs the 1.5 s echo-suppression window per target. The two facts sit at
   different layers; do not collapse them.
@@ -1741,7 +1743,22 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   sign-in. On close the window hides BEFORE its page, so Windows records the focused control as it
   deactivates; hiding the page then stops its polls, which start and stop on the page's EVT_SHOW.
   `present` shows the page first, so activation lands the focus back on that control. A closed
-  window says nothing (`say`).
+  window says nothing (`say`). With `keep_in_tray` off, closing quits instead, through the same
+  `_request_quit` as the tray's Quit.
+- **A QUITTING COPY HOLDS THE SINGLE-INSTANCE LOCK UNTIL ITS PROCESS ENDS**, after its icon window
+  has gone. A launch that finds the lock held and no window therefore waits for it
+  (`tray._claim_when_free`) before calling it another account's copy; without that, quitting and
+  reopening straight away showed the other-account warning.
+- **AN AUDIO OUTPUT LEFT OPEN HOLDS THE PROCESS'S EXIT UP BY ABOUT FIVE SECONDS** (measured 3rd
+  November 2026: 5.1 s with the speech output open, 0.6 s closed). The speech output stays open
+  for `wave_player.CLOSE_AFTER_S` after a phrase, so `stop_service` closes it (`speech.stop`). A new
+  thread that holds an audio device must be closed there too.
+- **QUIT REFUSES WHILE THE DESK IS PART-WAY THROUGH A CHANGE** (`server.desk_work_in_progress`:
+  any `_BackgroundJob`, or `rcp_transfer.transfer_active`). A pad sound cut off mid-copy leaves an
+  entry only a factory reset clears. A new long job must be added to that list. A session end
+  (Windows shutting down, or the installer's Restart Manager) is NOT refused: it goes straight to
+  `_quit`, because a refusal there cannot hold anything open. So an app update checks instead,
+  before it downloads and again before it hands over (`update_dialogs._Follower`).
 - **THE PROCESS RUNS ITS OWN `wx.GUIEventLoop`, NOT `app.MainLoop`** (`tray.main`). wxPython's
   `MainLoop` returns at once when no window exists, so a sign-in start would exit, and it ends
   when the last window is destroyed. Quit ends the loop with `ScheduleExit`: `Exit` is ignored
@@ -2649,6 +2666,16 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   at an entry `announcer._at_limit` then read. **This is why there is no "Free the encoder" control**: it
   wrote `systemChannelSelected` = -1 to undo something the desk already undoes, on the strength of a
   docstring claiming a power cycle was the only way back. Do not rebuild it.
+
+- **AN ENCODER HOLD MUTES THE ENCODER'S RING TARGET, NEVER A CHANNEL-BUTTON SELECTION.** On a
+  virtual fader it toggles `channelOutputMute`; on the monitor level, `outputMonMute`. With a
+  channel button holding the encoder, a hold of three seconds mutes nothing (Pro II,
+  3rd November 2026), so `encoder_hold` does that one itself: it toggles the selected strip's mute
+  and speaks it with `announcer.announce_mute`. No echo of that write reaches the announcer, so it
+  cannot rely on one (Pro II, 3rd November 2026). The announcer speaks both mutes (`_OUTPUT_MUTES` for the monitor), counts
+  either one during a press as a hold, and seats its ring position from it (`_ring_place`): a hold
+  moves no level, so without that a hold straight after a restart leaves the next press saying only
+  "Select".
 
 - **SAY WHAT A CHANNEL HAS, NEVER WHAT IT LACKS**, in the dead-turn message as well as the selection
   one. It used to assert "has nothing for the encoder to adjust" for any turn the ring did not see,

@@ -661,6 +661,8 @@ def build_remount_pad_storage() -> bytes:
 # so the per-pad code keeps its own enter/exit calls and they simply stop taking effect. The holder
 # enters once at the top and exits once on the way out, unconditionally, success or not.
 _transfer_hold = 0
+# Whether the desk was last told to enter transfer mode, for `transfer_active`.
+_transfer_on = False
 
 
 class transfer_session:
@@ -693,7 +695,8 @@ class transfer_session:
 
 def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
-    global _session_pad_root
+    global _session_pad_root, _transfer_on
+    _transfer_on = on
     if not on:
         roots = ([_session_pad_root] if _session_pad_root
                  else sorted(desk_drives.on_desk(_drive_roots())))
@@ -706,6 +709,11 @@ def _set_transfer_mode_raw(on: bool) -> int:
     # position in the timeline is worth being able to find without decoding anything.
     diagnostics.event("transfer.enter" if on else "transfer.exit")
     return send_record(rec)
+
+
+def transfer_active() -> bool:
+    """Whether the desk is in transfer mode: a pad's sound is being written, read or tidied."""
+    return _transfer_on
 
 
 def set_transfer_mode(on: bool) -> int:

@@ -54,6 +54,7 @@ import win32api
 import win32con
 import win32gui
 import win32process
+from native.dialogs import TextDialog
 from native.frame import MainFrame
 from paths import resource_path
 from selfupdate import phrases as update_phrases
@@ -103,6 +104,9 @@ _OTHER_ACCOUNT = ("AccessCaster is already running in another Windows account on
 # How long a second launch waits for this session's copy to show its icon window, when the lock
 # is held but no window is found yet: a copy that has only just started.
 _FIND_RUNNING_S = 3.0
+# How long it then waits for the lock to come free: a copy that has just quit holds it until its
+# process ends, a moment after its icon window has gone.
+_QUITTING_COPY_S = 10.0
 
 _user32 = ctypes.windll.user32
 _user32.GetLastActivePopup.argtypes = [wintypes.HWND]
@@ -173,7 +177,7 @@ class TrayApp:
         if self._quitting:
             return 0
         if not self.frame:
-            self.frame = MainFrame()
+            self.frame = MainFrame(self._request_quit)
             self.frame.present()
             self.frame.tree.SetFocus()
             if not self._starting:
@@ -216,7 +220,7 @@ class TrayApp:
         wc.lpfnWndProc = {
             WM_TRAY: self._on_tray,
             win32con.WM_COMMAND: self._on_command,
-            win32con.WM_CLOSE: lambda h, m, w, l: self._quit() or 0,
+            win32con.WM_CLOSE: lambda h, m, w, l: self._request_quit() or 0,
             WM_OPEN_WINDOW: lambda h, m, w, l: self.open_window() or 0,
             WM_SHOW_WINDOW: lambda h, m, w, l: self._show_window(),
             win32con.WM_QUERYENDSESSION: lambda h, m, w, l: 1,
@@ -319,7 +323,7 @@ class TrayApp:
             else:
                 app_updates.check_from_tray()
         elif cmd == ID_QUIT:
-            self._quit()
+            self._request_quit()
         return 0
 
     # -- actions ---------------------------------------------------------------------------------
@@ -363,6 +367,26 @@ class TrayApp:
         if self.frame:
             self.frame.reread("settings")
 
+    def _request_quit(self) -> None:
+        """Quit, unless the desk is part-way through being changed (`server.desk_work_in_progress`):
+        the window then says what is running, and the app stays. Windows ending the session quits
+        regardless, through `_quit`."""
+        busy = server.desk_work_in_progress()
+        if busy is None:
+            self._quit()
+            return
+        diagnostics.event("app.quit_refused", busy)
+        self.open_window()
+        if self.frame:
+            wx.CallAfter(self._still_working, busy)
+
+    def _still_working(self, busy: str) -> None:
+        dialog = TextDialog(self.frame, "Still working",
+                            f"{busy} Quit again once it finishes, so the unit is not left half "
+                            "written.", [(wx.ID_OK, "OK")], default=wx.ID_OK, escape=wx.ID_OK)
+        with dialog:
+            dialog.ShowModal()
+
     def _quit(self) -> None:
         """Quit: the window, the icon, then the service. Safe to call more than once."""
         if self._quitting:
@@ -385,6 +409,16 @@ class TrayApp:
         # Not `Exit`, which is ignored unless this loop is the active one: Quit can arrive inside a
         # dialog's loop, which ends first.
         self.loop.ScheduleExit()
+
+
+def _claim_when_free(wait_s: float) -> bool:
+    """Take the single-instance lock once a quitting copy lets it go, trying for up to `wait_s`."""
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        if instance.claim():
+            return True
+    return False
 
 
 def _running_instance(wait_s: float = 0.0):
@@ -421,12 +455,15 @@ def main() -> int:
     open_window = not autostart.started_at_login()
 
     # Single instance, across every account. The lock held, the copy is either this session's,
-    # which shows its window while this one goes, or another account's, which is refused.
+    # which shows its window while this one goes, one that is quitting, whose lock is waited for,
+    # or another account's, which is refused.
+    running = None
     if not instance.claim():
         running = _running_instance(_FIND_RUNNING_S)
-        if running is None:
+        if running is None and not _claim_when_free(_QUITTING_COPY_S):
             _refuse_other_account(open_window)
             return 1
+    if running is not None:
         if open_window:
             # This process was just started by the user, so it holds the foreground right, and
             # hands it to the running copy before asking it to raise its window.

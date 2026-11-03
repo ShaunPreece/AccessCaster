@@ -7,10 +7,15 @@ The hand-off waits for the dialog: once the download is verified, the server doe
 `proceed`, which is called once the dialog cannot be stopped and the closing sentence has had time
 to be read, since the installer closes this app. A screen reader cannot say when it has finished,
 so the wait is estimated from the sentence's length.
+
+The installer closes this app as Windows does at shutdown, which nothing can refuse, so an update
+neither starts nor hands over while the desk is part-way through a change
+(`server.desk_work_in_progress`).
 """
 import wx
 
 import app_updates
+import server
 from native.calls import call
 from native.dialogs import JobDialog, _paragraphs, report
 
@@ -92,6 +97,10 @@ class _Follower:
 
     def begin(self, dialog):
         self.dialog = dialog
+        busy = server.desk_work_in_progress()
+        if busy:
+            dialog.finish({"ok": False, "message": f"{busy} Install the update once it finishes."})
+            return
         call(dialog, app_updates.install, self.version, done=self._started)
 
     def _started(self, reply):
@@ -110,6 +119,13 @@ class _Follower:
         if self.stage == app_updates.CHECKING:
             self.dialog.say(job["message"])
         elif self.stage == app_updates.READY:
+            busy = server.desk_work_in_progress()
+            if busy:
+                # Cancelling keeps the verified installer, so the next attempt skips the download.
+                call(self.dialog, app_updates.cancel)
+                self.dialog.finish({"ok": False, "message": f"{busy} Install the update again "
+                                    "once it finishes. The download is kept."})
+                return
             # Nothing can stop it from here: the installer is about to close this app.
             self.dialog.hold()
             self.dialog.say(job["message"])

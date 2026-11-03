@@ -175,20 +175,28 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
 
 
 class GeneralPage(wx.Panel):
-    """Starting with Windows, and saving this app's settings to a file or restoring them."""
+    """Starting with Windows, keeping running in the tray, and saving this app's settings to a
+    file or restoring them."""
 
     def __init__(self, section):
         super().__init__(section.frame.host)
         self.Hide()
         self.section = section
         self.frame = section.frame
-        self.data = None             # the last `server.read_autostart`
+        self.data = None             # the last `server.read_general`
         sizer, parent = page_box(self, "General")
         self.autostart = Switch(self, parent, sizer,
                                 "Start AccessCaster when you sign in to Windows",
                                 server.action_set_autostart,
                                 lambda: (self.data or {}).get("enabled"), lambda _on: None,
                                 guard=self._autostart_refused, accepted=lambda _r: self.read())
+        self.keep_in_tray = Switch(
+            self, parent, sizer, "Keep running in the system tray when the window is closed",
+            server.action_set_keep_in_tray, lambda: (self.data or {}).get("keep_in_tray"),
+            self._remember_tray,
+            description="Your keyboard shortcuts and spoken announcements only work while "
+                        "AccessCaster is running. Off, closing the window quits it.",
+            guard=lambda: None if self.data is not None else "Not read yet.")
         box_sizer, box = group(parent, sizer, "Move this app's settings")
         self.export = self._button(box, box_sizer, "Save this app's settings to a file",
                                    self._on_export)
@@ -210,6 +218,10 @@ class GeneralPage(wx.Panel):
         sizer.Add(button, 0, wx.ALL, 6)
         return button
 
+    def _remember_tray(self, on):
+        if self.data is not None:
+            self.data["keep_in_tray"] = on
+
     def _autostart_refused(self):
         if self.data is None:
             return "Not read yet."
@@ -223,9 +235,10 @@ class GeneralPage(wx.Panel):
                 "It starts in the system tray, so your shortcuts work from the moment you sign "
                 "in.")
             self.autostart.show()
+            self.keep_in_tray.show()
             if announce:
                 self.frame.say("General settings read.")
-        call(self, server.read_autostart, done=done)
+        call(self, server.read_general, done=done)
 
     def _on_export(self, _event):
         call(self, server.action_export_app_settings,

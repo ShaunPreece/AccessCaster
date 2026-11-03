@@ -16,6 +16,7 @@ import time
 
 import wx
 
+import app_window
 import channels
 import devices
 import diagnostics
@@ -100,8 +101,9 @@ class DeskState:
     fader write's reply changed the layout, `fn("levels", None)` when a push changed anything in
     `levels`, `fn("master", None)` when a push changed anything in `master`, and
     `fn("recorder", state)` with each recording state the desk pushes (`recorder.READY` and the
-    rest), which it pushes for its own REC button and for a card or drive going in or out. The
-    recorder is not held here: the Recording section reads it for itself."""
+    rest), which it pushes for its own REC button and for a card or drive going in or out, and
+    `fn("lost", None)` when the desk drops off the bus. The recorder is not held here: the
+    Recording section reads it for itself."""
 
     def __init__(self, owner):
         self.owner = owner
@@ -129,12 +131,15 @@ class DeskState:
         self._subscribers.append(fn)
 
     def start(self):
+        app_window.pushed = self._pushed
         self._thread = threading.Thread(target=self._listen, name="window-desk-listener",
                                         daemon=True)
         self._thread.start()
         self.refresh()
 
     def stop(self):
+        if app_window.pushed == self._pushed:
+            app_window.pushed = None
         self._stop.set()
         for timer in [self._reread, self._flush, *self._preset_timers.values()]:
             if timer is not None:
@@ -234,6 +239,7 @@ class DeskState:
             except Exception:
                 rcp_hid.close_handle(dev, "window listener")
                 dev, lost = None, True
+                wx.CallAfter(self._notify, "lost", None)
                 self._stop.wait(0.5)
                 continue
             if not report or report[0] != 0x04:
@@ -243,6 +249,11 @@ class DeskState:
                 wx.CallAfter(self._apply, *push)
         if dev is not None:
             rcp_hid.close_handle(dev, "window listener")
+
+    def _pushed(self, path, name, value, kind):
+        """`app_window.pushed`: one of our own writes, applied as the desk's push of it would be."""
+        if name in _RELEVANT:
+            wx.CallAfter(self._apply, path, name, value, kind)
 
     def _apply(self, path, name, value, kind):
         if self._stop.is_set():
@@ -340,6 +351,7 @@ def _read_channels():
     reply = server.read_window_state()
     if reply.get("ok"):
         reply["strips"] = channels.last_known_strip_vector()
+        reply["device_name"] = devices.get_active_device().name
     return reply
 
 

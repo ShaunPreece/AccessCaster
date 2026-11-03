@@ -719,7 +719,7 @@ def describe(expanded: Optional[bool] = None) -> dict:
 # moves, through IMMNotificationClient, and that is the signal to reconcile on - whenever it
 # happens, mode write or not.
 _WATCH_SETTLE_S = 1.5            # endpoint changes arrive in bursts; reconcile once the burst ends
-_WATCH_POLL_S = 60.0             # how often an idle watcher looks at `stop`
+_WATCH_POLL_S = 1.0              # how often an idle watcher looks at `stop`, so Quit unregisters
 
 
 class _EndpointNotifier(comtypes.COMObject):

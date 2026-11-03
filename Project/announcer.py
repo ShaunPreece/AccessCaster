@@ -95,6 +95,9 @@ _RECONNECT_SPEAK_AFTER_S = 1.0
 # strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
 # BUTTON, which names no channel, so it is only the fallback when no state follows.
 _STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
+# A whole output's mute, addressed at the OUTPUT block rather than a strip. The monitor's is what an
+# encoder hold on the monitor level toggles.
+_OUTPUT_MUTES = {"outputMonMute": "Monitor speakers", "outputBTMute": "Bluetooth output"}
 # HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
 # these at once (both members' mute and cue), and each edge of a momentary pad brings its own burst,
 # so speaking them turns a two-second talkback push into eight announcements describing a state the
@@ -148,20 +151,21 @@ def _say(text: str) -> None:
 def _tone(name: str) -> bool:
     """Play a desk-change cue; False when held, so the caller's spoken fallback is held too."""
     return False if _desk_speech_held() else speech.tone(name)
-# PRESS AND HOLD ON THE ENCODER MUTES THE SELECTED CHANNEL. Measured: a short press runs
-# 475 ms down-to-up and mutes nothing; a hold pushes `channelOutputMute = True` 765 ms after the
-# press edge, WHILE STILL HELD, and mutes the channel selected BEFORE the press. So the desk does
-# not advance its encoder ring on a hold. RODE's user guide documents press-and-hold only on the REC
-# button, so it is not there either.
+# PRESS AND HOLD ON THE ENCODER TOGGLES THE MUTE OF WHAT THE ENCODER IS ON: a virtual fader's
+# channel (`channelOutputMute`), or the monitor speakers (`outputMonMute`). With a channel button
+# holding the encoder, a hold mutes nothing. Measured: a short press runs about 200 to 475 ms
+# down-to-up and mutes nothing; a hold pushes the mute about 750 ms after the press edge, WHILE
+# STILL HELD, and the desk does not advance its encoder ring. RODE's user guide documents
+# press-and-hold only on the REC button.
 #
 # Two consequences, both of which this handling exists for:
 #  1. ANNOUNCING THE NEXT RING POSITION ON THE PRESS EDGE IS WRONG ON A HOLD: you hear the next
-#     channel named and then the previous one announced as muted, and our ring position silently
+#     target named and then the previous one announced as muted, and our ring position silently
 #     desyncs from the desk's, so every later prediction is one out until a real movement re-seats
 #     it. So we wait for the RELEASE edge, which the desk does push, and only advance on a short
 #     press.
-#  2. What tells the two apart is the mute push itself, not a stopwatch: any `channelOutputMute`
-#     arriving between our press and release means the desk took the gesture. The duration below is
+#  2. What tells the two apart is the mute push itself, not a stopwatch: either mute arriving
+#     between our press and release means the desk took the gesture. The duration below is
 #     only a backstop for a desk that pushes no state (the Duo is unobserved here), set well clear of
 #     both measurements.
 _ENC_HOLD_S = 0.9
@@ -391,7 +395,7 @@ def handle_report(b: bytes, st: dict) -> None:
         if ival is None or ival == st.get("chan_sel"):
             return
         st["chan_sel"] = ival
-        _say("Levels. Encoder sets fader and monitor levels" if ival < 0
+        _say("Virtual faders and monitor. Encoder changes their levels" if ival < 0
                  else _selected_phrase(ival))
         return
     if name in ("inputMicrophoneGain", "inputDigitalGain"):
@@ -428,6 +432,20 @@ def handle_report(b: bytes, st: dict) -> None:
         if levels_on and fval is not None:
             _ring_seat(st, "monitor", 0, fval)
             _note_level(st, "monitor", 0, fval)
+        return
+    if name in _OUTPUT_MUTES:
+        known = st.setdefault("output_muted", {})
+        if bval is None or known.get(name) == bval:
+            return
+        known[name] = bval
+        if st.get("enc_down_at"):
+            st["enc_hold"] = True
+            if name == "outputMonMute":
+                _ring_place(st, "monitor", 0)
+        if is_self_echo(("output_mute", name)):
+            return
+        if not (mute_tones and _tone("muted" if bval else "unmuted")):
+            _say(f"{_OUTPUT_MUTES[name]} {'muted' if bval else 'unmuted'}")
         return
     # THE HEADPHONE KNOBS. They are physical pots with NO TACTILE INDICATOR, so there is no way to
     # know where one is set by touch, which is exactly the case software has to answer. The desk
@@ -473,6 +491,11 @@ def handle_report(b: bytes, st: dict) -> None:
         if what == "mute":
             if st.get("enc_down_at"):
                 st["enc_hold"] = True
+                # A hold mutes the ring target only while no channel button holds the encoder;
+                # with one, the mute is encoder_hold's, of the selected channel.
+                selected = st.get("chan_sel")
+                if selected is None or selected < 0:
+                    _ring_place(st, "fader", strip)
             # A TONE IF THEY HAVE ASKED FOR ONE, and the sentence if the tone cannot be played. Mute
             # is the announcement that arrives too late as words: you press it mid-sentence, and by
             # the time "Mic 2 muted" has been said the moment has gone. The cue does not name the
@@ -760,6 +783,12 @@ def _ring_seat(st: dict, kind: str, idx: int, level: float) -> None:
     """A real movement just told us what is selected: re-seat our ring position and cache the level.
     This is what makes a wrong prediction self-correcting."""
     st.setdefault("known", {})[(kind, idx)] = level
+    _ring_place(st, kind, idx)
+
+
+def _ring_place(st: dict, kind: str, idx: int) -> None:
+    """Set our ring position to (kind, idx) when it is on the ring. An encoder hold's mute says where
+    the encoder is as surely as a level change does."""
     for i, entry in enumerate(_encoder_ring()):
         if entry == (kind, idx):
             st["enc_pos"] = i
@@ -980,6 +1009,16 @@ def publish_mute(strip_idx: int, on: bool) -> None:
         st.setdefault("muted", {})[int(strip_idx)] = bool(on)
     except (TypeError, ValueError):
         pass
+
+
+def announce_mute(strip_idx: int, on: bool) -> None:
+    """Speak a mute this app made in answer to a gesture on the desk (`encoder_hold`), as the desk's
+    own mute is spoken, and cache it as `publish_mute` does. Silent while the announcer is off."""
+    publish_mute(strip_idx, on)
+    if live_state is None:
+        return
+    if not (mute_tones and _tone("muted" if on else "unmuted")):
+        _say(f"{channel_label(strip_idx)} {'muted' if on else 'unmuted'}")
 
 
 def publish_solo(strip_idx: int, on: bool) -> None:

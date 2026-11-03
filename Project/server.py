@@ -22,6 +22,7 @@ import time
 import webbrowser
 
 import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
+import app_window
 import app_settings  # this app's own settings file: export and import, no file access
 import app_updates  # keeping AccessCaster itself up to date: check, decide, download, install
 import autogain  # sets a mic's gain by measuring it
@@ -33,6 +34,7 @@ import devices  # per-device model (matrix labels, caps) keyed by product id
 import desk_firmware  # installing a firmware update through the desk's own updater
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
+import encoder_hold  # an encoder hold mutes the channel a channel button selected
 import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import model_tree
@@ -2900,11 +2902,42 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     announcer.publish_mute(strip, on)
+    _mirror_strip(strip, channels.MUTE_PROP, on)
     if not on:
         return {"ok": True, "message": f"{ch['label']} unmuted."}
     with _hid_lock:
         msg = _mute_reach_message(ch["label"], [int(ch["source_code"])])
     return {"ok": True, "message": msg}
+
+
+def _mirror_strip(strip: int, name: str, on: bool) -> None:
+    """Hand a strip's mute or solo that this app wrote to the window (`app_window.pushed`), as the
+    desk's own push would arrive. Without it the window shows the old state until its next full
+    read."""
+    book = rcp_read.known_layout()
+    if app_window.pushed is None or book is None:
+        return
+    try:
+        path = book.path(rcp_transfer.channel_key(strip))
+    except Exception:
+        return
+    app_window.pushed(path, name, bool(on), "bool")
+
+
+def _encoder_hold_mute(strip: int) -> None:
+    """`encoder_hold`'s write: toggle the mute of the channel a channel button has given the encoder,
+    and speak it as the desk's own hold is spoken."""
+    if _strip_toggle_gate("Muting") is not None:
+        return
+    with _hid_lock:
+        mutes = rcp_read.values(rcp_read.read_model_stable(fresh=True), channels.MUTE_PROP)
+        if not 0 <= strip < len(mutes) or not isinstance(mutes[strip], bool):
+            return
+        on = not mutes[strip]
+        rcp_transfer.write_at(channels.proc_key_for_strip(strip), channels.MUTE_PROP, "bool", on)
+    announcer.announce_mute(strip, on)
+    _mirror_strip(strip, channels.MUTE_PROP, on)
+    diagnostics.event("encoder_hold.mute", announcer.channel_label(strip), on=on)
 
 
 def _strip_toggle_gate(what: str):
@@ -2954,6 +2987,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     announcer.publish_mute(int(fader), bool(on))
+    _mirror_strip(int(fader), channels.MUTE_PROP, on)
     who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
     if not on:
         return {"ok": True, "muted": False, "message": f"{who} unmuted."}
@@ -2993,6 +3027,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
     announcer.publish_solo(int(fader), bool(on))
+    _mirror_strip(int(fader), channels.CUE_PROP, on)
     who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
     return {"ok": True, "soloed": bool(on),
             "message": (f"{who} soloed; the headphones now carry "
@@ -3020,6 +3055,7 @@ def action_set_channel_solo(name: str, on: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
     announcer.publish_solo(strip, on)
+    _mirror_strip(strip, channels.CUE_PROP, on)
     return {"ok": True, "message": (f"{ch['label']} soloed; the headphones now carry "
                                     f"{_solo_summary(strip, True)}. Nothing else has changed: the "
                                     f"mixes, the recording and anything you are streaming are "
@@ -5200,6 +5236,7 @@ def action_set_output_mute(which: str, on: bool) -> dict:
     gate = _level_write_gate()
     if gate is not None:
         return gate
+    announcer.mark_self_write(("output_mute", prop))
     try:
         with _hid_lock:
             rcp_transfer.set_unit_setting(prop, bool(on))
@@ -5655,6 +5692,7 @@ def _seed_usb_expanded() -> None:
 
 _virtual_devices_busy = threading.Lock()
 _virtual_devices_watch_stop = threading.Event()
+_virtual_devices_watch = None
 # Held for a follow-up's whole run, retries included, and taken BEFORE its thread starts, so the
 # reply to a mode write never goes out with the switch looking finished. It is what keeps a second
 # follow-up from starting, and what the Routing page reads as "a USB switch is still in progress".
@@ -8830,11 +8868,26 @@ def action_import_app_settings(payload) -> dict:
             "message": app_settings.describe_import(report) + "".join(notes)}
 
 
-def read_autostart() -> dict:
-    """Whether AccessCaster starts when this user signs in. See autostart.py for why it is the
-    installer's own registry value rather than one of ours."""
-    st = autostart.state()
-    return {"ok": True, **st}
+def read_general() -> dict:
+    """The General settings: whether AccessCaster starts when this user signs in (see autostart.py
+    for why that is the installer's own registry value rather than one of ours), and
+    `keep_in_tray`."""
+    return {"ok": True, **autostart.state(), "keep_in_tray": keep_in_tray()}
+
+
+def keep_in_tray() -> bool:
+    """Whether closing the window leaves the app running in the tray, the default, rather than
+    quitting it."""
+    return settings_file.load().get("keep_in_tray", True) is not False
+
+
+def action_set_keep_in_tray(on: bool) -> dict:
+    if on is None:
+        return {"ok": False, "message": "Say whether to keep running in the tray or not."}
+    settings_file.update(keep_in_tray=bool(on))
+    return {"ok": True, "keep_in_tray": bool(on),
+            "message": ("Closing the window will leave AccessCaster running in the tray." if on
+                        else "Closing the window will quit AccessCaster.")}
 
 
 def action_set_autostart(on: bool) -> dict:
@@ -9061,9 +9114,12 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     # And keep agreeing with it. The pass above, and the one after every mode write, each act on a
     # single sample, so a bind that lands a moment later leaves Windows holding endpoints this app
     # switched off itself. Windows announces every endpoint change; this listens and repairs.
-    threading.Thread(target=virtual_devices.watch_endpoints,
-                     args=(_virtual_devices_repair, _virtual_devices_watch_stop),
-                     daemon=True, name="virtual-devices-watch").start()
+    global _virtual_devices_watch
+    _virtual_devices_watch = threading.Thread(
+        target=virtual_devices.watch_endpoints,
+        args=(_virtual_devices_repair, _virtual_devices_watch_stop),
+        daemon=True, name="virtual-devices-watch")
+    _virtual_devices_watch.start()
     if shortcuts:
         # Failures are reported and never fatal: no shortcut is worth refusing to start the app.
         try:
@@ -9078,6 +9134,9 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     # how a press of the unit's own REC button is noticed. Read-only, its own handle, and idle
     # unless the recorder changes state.
     _recorder_watcher()
+    # A hold on the encoder while a channel button holds it mutes that channel, as the desk's own
+    # hold does for the encoder's ring target.
+    encoder_hold.Watcher(_encoder_hold_mute).start()
     # AccessCaster's own update: says what the last one did, then checks now and then. Silent
     # unless a version is found, and never from a source run.
     app_updates.start()
@@ -9096,6 +9155,23 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
         print(f"Startup read skipped: {exc}")
 
 
+def desk_work_in_progress() -> str | None:
+    """What is part-way through, as a sentence, or None. Quitting in the middle of one of these can
+    leave the desk half written: a pad's sound cut off mid-copy leaves an entry only a factory
+    reset clears."""
+    for job, running in ((_firmware_job, "A firmware update is running."),
+                         (_restore_job, "A restore is running."),
+                         (_pad_restore_job, "A pad restore is running."),
+                         (_show_job, "A backup, restore or reset is running on the unit."),
+                         (_profile_job, "A backup is running."),
+                         (_driver_job, "The driver install is running.")):
+        if job.busy():
+            return running
+    if rcp_transfer.transfer_active():
+        return "SMART pad sounds are being copied."
+    return None
+
+
 def stop_service(reason: str) -> None:
     """What the app lets go of on the way out. Safe to call more than once.
 
@@ -9103,11 +9179,15 @@ def stop_service(reason: str) -> None:
     program with nothing left running to act on them. Then any Hold-mode pad a shortcut is holding,
     which would otherwise keep playing with nothing left to release it, and any live preview still
     engaged on a mic. The endpoint watcher unregisters its callback rather than leaving Windows'
-    audio service holding a pointer into a process that is going away."""
+    audio service holding a pointer into a process that is going away, and the speech output
+    closes, since a device left open holds the process's exit up."""
     diagnostics.event("app.stopping", reason)
     _virtual_devices_watch_stop.set()
+    if _virtual_devices_watch is not None:
+        _virtual_devices_watch.join(timeout=2.0)
     if _hotkeys is not None:
         _hotkeys.stop()
     pad_shortcuts.release_held()
     _cleanup_preview_on_exit()
+    speech.stop()
     diagnostics.stop(reason)

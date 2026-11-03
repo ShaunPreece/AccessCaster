@@ -12,7 +12,8 @@ Arrowing the tree shows each page and leaves the focus in the tree. Selecting a 
 pages shows its first page.
 
 The window belongs to the tray (`tray.TrayApp`), which runs the service. Closing it hides it, and
-the tray shows it again with `present`; only Quit destroys it.
+the tray shows it again with `present`; only Quit destroys it. With `server.keep_in_tray` off,
+closing asks the tray to quit (`quit_app`).
 """
 import wx
 
@@ -45,9 +46,13 @@ SECTIONS = [
 ]
 
 
+APP_TITLE = "AccessCaster"
+
+
 class MainFrame(Speaker, wx.Frame):
-    def __init__(self):
-        super().__init__(None, title="AccessCaster", size=(980, 680))
+    def __init__(self, quit_app):
+        super().__init__(None, title=APP_TITLE, size=(980, 680))
+        self._quit_app = quit_app
         root = wx.Panel(self)
         # A static text created just before a control names it, the standard Win32 labelling.
         tree_label = wx.StaticText(root, label="Categories")
@@ -63,11 +68,12 @@ class MainFrame(Speaker, wx.Frame):
 
         # Never shown: the window the screen-reader notifications are raised from.
         sink = wx.StaticText(root, label="", size=(1, 1))
-        self._notifier = announce.Notifier(sink, "AccessCaster")
+        self._notifier = announce.Notifier(sink, APP_TITLE)
 
         self.desk = DeskState(self)
+        self.desk.subscribe(self._desk_event)
         self.sections = [section(self) for section in SECTIONS]
-        tree_root = self.tree.AddRoot("AccessCaster")
+        tree_root = self.tree.AddRoot(APP_TITLE)
         self._branches = []
         for section in self.sections:
             self._branches.append(self.tree.AppendItem(tree_root, section.title))
@@ -151,6 +157,18 @@ class MainFrame(Speaker, wx.Frame):
         # A closed window says nothing: the user has left it.
         if self.IsShown():
             self._notifier.say(text, recent)
+
+    def _desk_event(self, event, reply):
+        """The title names the desk while one is connected."""
+        if event == "read":
+            name = reply.get("device_name") if reply.get("ok") else None
+            title = f"{APP_TITLE}, {name}" if name else APP_TITLE
+        elif event == "lost":
+            title = APP_TITLE
+        else:
+            return
+        if self.GetTitle() != title:
+            self.SetTitle(title)
 
     def set_status(self, text):
         if self.status.GetStatusText() != text:
@@ -307,6 +325,11 @@ class MainFrame(Speaker, wx.Frame):
 
     def _on_close(self, event):
         if event.CanVeto():
+            if not server.keep_in_tray():
+                # Quit closes the window with force, which comes back here unvetoable.
+                event.Veto()
+                wx.CallAfter(self._quit_app)
+                return
             # To the tray. The window goes first, so Windows records where the focus was as it
             # deactivates; hiding the page then stops its polls (CallMe, the driver line, the
             # recording clock), which start and stop with their page's EVT_SHOW.

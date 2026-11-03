@@ -145,14 +145,12 @@ topics = help_section.topics()
 keys = [key for key, _title, _text in topics]
 check("About comes first", topics[0][1], "About")
 check_true("with the version running", topics[0][2].startswith(f"Version {__version__}."))
-check_true("the Help topic is split into a topic per part",
-           sum(1 for key in keys if key.startswith("help-")) >= 10)
 check_true("each named by its heading",
            any(title.startswith("Channels and Processing") for _k, title, _t in topics))
-check("a part's key drops its shortcut", "help-channels-and-processing" in keys, True)
-check_in("Known issues keeps its parts in its text",
-         "The unit can drop off the USB connection when you reset it",
-         dict((key, text) for key, _title, text in topics)["known-issues"])
+check("a key drops its shortcut", "channels-and-processing" in keys, True)
+check_in("Troubleshooting keeps its parts in its text",
+         "My desk has stopped responding",
+         dict((key, text) for key, _title, text in topics)["troubleshooting"])
 check_true("a term reads with its description",
            any("The landmark: The touchscreen." in text for _k, _t, text in topics))
 check_true("no list item keeps its dash", not any(line.startswith("- ")

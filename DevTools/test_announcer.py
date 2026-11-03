@@ -242,6 +242,31 @@ def monlevel_packet(level: float) -> bytes:
     return push([0x0A], "outputMonLevel", v_float(level))
 
 
+print("OUTPUT MUTES")
+# The monitor's mute, which an encoder hold on the monitor level toggles. Addressed at the OUTPUT
+# block, not a strip, so it must not be read as a channel's mute.
+said, st_o = run([push([0x0A], "outputMonMute", v_bool(True))], cold_cache=False)
+check("monitor mute is spoken", said, ["Monitor speakers muted"])
+said, _ = run([push([0x0A], "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
+check("a repeat of the same state is not spoken again", said, [])
+said, _ = run([push([0x0A], "outputMonMute", v_bool(False))], st=st_o, cold_cache=False)
+check("monitor unmute is spoken", said, ["Monitor speakers unmuted"])
+announcer.mark_self_write(("output_mute", "outputMonMute"))
+said, _ = run([push([0x0A], "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
+check("the app's own monitor mute is not spoken back", said, [])
+hold_st = {"bank": None, "pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
+run([push([0x0A], "outputMonMute", v_bool(True))], st=hold_st, cold_cache=False)
+check("a monitor mute during an encoder press marks it a hold", hold_st["enc_hold"], True)
+# The hold's mute says where the encoder is, so the next press can name what it moves on to even
+# when no level has moved since the app started.
+check("a monitor hold places the ring on the monitor", hold_st["enc_pos"],
+      announcer._encoder_ring().index(("monitor", 0)))
+fader_hold = {"bank": None, "pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
+run([state_packet("channelOutputMute", 6, True)], st=fader_hold, cold_cache=False)
+check("a virtual fader hold places the ring on that fader", fader_hold["enc_pos"],
+      announcer._encoder_ring().index(("fader", 6)))
+
+
 def fresh_st():
     return {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0,
             "known": {}, "muted": {}, "enc_pos": None, "enc_down_at": None, "enc_hold": False,
@@ -681,11 +706,12 @@ check("a mic strip says gain", SPOKEN, ["Mic 1 selected. Encoder sets its gain"]
 SPOKEN.clear()
 announcer.handle_report(chansel_packet(-1), st)
 check("and deselecting says the encoder is back on levels",
-      SPOKEN, ["Levels. Encoder sets fader and monitor levels"])
+      SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
 
 # A PHANTOM "LEVELS" ANNOUNCEMENT AT STARTUP. The pushed stream reports CHANGES, so an ABSENT
 # st["chan_sel"] makes the desk's first push of the resting value (-1, nothing selected) read as
-# one, and "Levels. Encoder sets fader and monitor levels" is spoken with nobody touching anything.
+# one, and "Virtual faders and monitor. Encoder changes their levels" is spoken with nobody
+# touching anything.
 # announcer.seed_layout seeds it for this reason: seeded state stays SILENT for an unchanged value.
 SPOKEN.clear()
 seeded = fresh_st()
@@ -699,7 +725,7 @@ SPOKEN.clear()
 unseeded = fresh_st()                        # unseeded: the state that produces the spurious phrase
 announcer.handle_report(chansel_packet(-1), unseeded)
 check("UNSEEDED state is what speaks out of nowhere",
-      SPOKEN, ["Levels. Encoder sets fader and monitor levels"])
+      SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
 
 # THE SAME SHAPE OF BUG, SECOND PROPERTY: st["bank"] also starts None, so the desk's first push of
 # the RESTING bank reads as a change and "Bank 1" speaks at startup. Both are seeded from the
@@ -736,6 +762,21 @@ finally:
     announcer.live_state = None
 announcer.publish_level("fader", 6, 0.5)             # must be a safe no-op when off
 check("publishing with the announcer off is a no-op", announcer.live_state, None)
+
+# A mute the app makes for a hold on the desk is spoken, because the desk does not report it back.
+SPOKEN.clear()
+live = fresh_st()
+announcer.live_state = live
+try:
+    with patched((announcer, {"mute_tones": False})):
+        announcer.announce_mute(0, True)
+    check("a hold's mute is spoken", SPOKEN, [f"{announcer.channel_label(0)} muted"])
+    check("and cached for the encoder ring", live["muted"][0], True)
+finally:
+    announcer.live_state = None
+SPOKEN.clear()
+announcer.announce_mute(0, False)
+check("with the announcer off, nothing is said", SPOKEN, [])
 
 # A MIC strip: gain in dB.
 st = fresh_st()

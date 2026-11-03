@@ -147,6 +147,8 @@ _wake = threading.Event()
 _interrupt = wave_player.Signal()
 _thread = None
 _thread_lock = threading.Lock()
+# Set by `stop`: the speech thread closes the output device and ends, and nothing more is spoken.
+_stopping = threading.Event()
 
 
 def _release(item: _Item | None) -> None:
@@ -307,10 +309,12 @@ def _speech_thread() -> None:
     global _pending
     pythoncom.CoInitialize()
     engine = _Engine()
-    while True:
+    while not _stopping.is_set():
         if not _wake.wait(1.0):
             engine.idle()
             continue
+        if _stopping.is_set():
+            break
         with _pending_lock:
             item, _pending = _pending, None
             _wake.clear()
@@ -324,6 +328,20 @@ def _speech_thread() -> None:
             engine.reset()
         finally:
             _release(item)
+    engine.reset()
+    pythoncom.CoUninitialize()
+
+
+def stop() -> None:
+    """Close the output device and end the speech thread, waiting briefly for it. The device stays
+    open for `wave_player.CLOSE_AFTER_S` after a phrase, and one still open when the process ends
+    holds its exit up by about five seconds."""
+    _stopping.set()
+    _wake.set()
+    _interrupt.set()
+    thread = _thread
+    if thread is not None:
+        thread.join(timeout=2.0)
 
 
 def _submit(item: _Item, logged: str) -> None:
@@ -341,6 +359,9 @@ def _submit(item: _Item, logged: str) -> None:
     announcing that speech is BACK are safe: each one sets the flag before it speaks.
     """
     global _pending, _thread
+    if _stopping.is_set():
+        _release(item)
+        return
     if not enabled.is_set():
         diagnostics.event("say", logged + "  [suppressed: announcements off]")
         _release(item)

@@ -110,7 +110,7 @@ with as_device(devices.DUO):
           ["Channel 4 selected. Nothing here for the encoder to adjust"])
     channels.publish_strip_vector(list(DUO_VEC))
     said, _ = run([int_packet("systemChannelSelected", 0x0F, -1)])
-    check("deselected", said, ["Levels. Encoder sets fader and monitor levels"])
+    check("deselected", said, ["Virtual faders and monitor. Encoder changes their levels"])
     # Mic 2 on the Duo is combo-linked and is still a mic, so it must still say 'gain'.
     check("Duo Mic 2 is a mic channel",
           next(c['kind'] for c in devices.DUO.ui_channels if c['name'] == 'Mic2'), 'mic')

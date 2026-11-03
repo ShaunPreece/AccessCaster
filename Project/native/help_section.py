@@ -1,7 +1,7 @@
 """Help and About: the help, a page per topic, read from help/help.txt.
 
-The tree is the table of contents: a topic per `#` heading, and for the Help topic a topic per
-`##` part as well. A topic is plain text in a read-only box, a paragraph to a line with a blank
+The tree is the table of contents: a topic per `#` heading, its `##` parts kept in its text. A
+topic is plain text in a read-only box, a paragraph to a line with a blank
 line between, which a screen reader moves through by line or by paragraph.
 
 The file's format, which the website's guide importer (`importAppGuide.py`) reads as well:
@@ -16,15 +16,13 @@ import webbrowser
 
 import wx
 
-from native.pages import Page, page_box, read_only
+from native.pages import Page, read_only
 from paths import resource_path
 from version import __version__
 
 TITLE = "Help and About"
 SUPPORT_URL = "https://www.slightperception.com/support"
 CREDIT = "Version {}. Developed by Shaun Preece."
-# The topic whose parts are topics of their own; the others keep their parts in their text.
-SPLIT_TOPIC = "Help"
 SUPPORT_TOPIC = "Support this project"
 
 
@@ -74,16 +72,13 @@ def topics(path=None):
             sections[-1][3].append(line)
         elif line.strip():
             raise ValueError(f"help.txt line {number}: text before the first heading")
-    result, parent = [], None
+    result = []
     for level, title, start, body in sections:
         paragraphs = _blocks(body, start)
         if level == 1:
-            parent = title
             result.append([slug(title), title, paragraphs])
-        elif parent is None:
+        elif not result:
             raise ValueError(f"help.txt line {start - 1}: a part before the first topic")
-        elif parent == SPLIT_TOPIC:
-            result.append([f"{slug(parent)}-{slug(title)}", title, paragraphs])
         else:
             result[-1][2].extend([title] + paragraphs)
     if result:
@@ -96,11 +91,14 @@ class HelpPage(wx.Panel):
     def __init__(self, frame, title, text, support=False):
         super().__init__(frame.host)
         self.Hide()
-        sizer, parent = page_box(self, title)
-        box = read_only(parent, sizer, title, height=420, width=560, scroll=True)
+        # No group box: the text box carries the topic's name, and a group named the same would
+        # only make the screen reader say it twice.
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(sizer)
+        box = read_only(self, sizer, title, height=420, width=560, scroll=True)
         box.SetValue(text)
         if support:
-            button = wx.Button(parent, label="Open the support page in your browser")
+            button = wx.Button(self, label="Open the support page in your browser")
             button.Bind(wx.EVT_BUTTON, lambda _e: webbrowser.open(SUPPORT_URL))
             sizer.Add(button, 0, wx.ALL, 6)
 

@@ -45,6 +45,7 @@ PORTABLE = (
     "callme_auto_extend",
     "callme_ringtone",
     "app_update_days",
+    "keep_in_tray",
 )
 
 # WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice, an audio output and a
