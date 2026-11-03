@@ -61,12 +61,13 @@ class Stopped(Exception):
 
 
 def read(blob: bytes) -> dict:
-    """{name: (path, value)} for every update property the dump carries."""
+    """{name: (path, value)} for every update property the dump carries. A name carried twice
+    keeps its first meaningful value: `systemFirmwareVersion` can be blank in one place."""
     root = model_tree.parse(blob)[0]
     out = {}
     for node in model_tree.walk(root):
         for name, value, _kind in node.props:
-            if name in PROPS and name not in out:
+            if name in PROPS and (name not in out or out[name][1] in (None, "")):
                 out[name] = (node.path(), value)
     return out
 
