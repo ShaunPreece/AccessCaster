@@ -1411,8 +1411,9 @@ software replaces the operational controls directly, not by puppeteering the kno
 8.1b FIRMWARE UPDATE: DOWNLOAD AND INSTALL (Pro II, 1.7.6 offered 1.7.7, 3rd November 2026)
 --------------------------------------------------------------------------------
   The desk updates itself over its own network connection; nothing is flashed from
-  the host. The sequence is read from the engine (rc_audio_mixer); steps 1 and 2 are
-  measured, 3 and 4 are not yet.
+  the host. The sequence is read from the engine (rc_audio_mixer) and was run end to
+  end on this desk: 1.7.6 to 1.7.7 in 4.5 minutes, every setting, wifi network, pad
+  and block address unchanged.
 
   1. CHECK. RODE's manifest is update.rode.com/manifest.json (a "testing" manifest
      is used instead when /usr/bin/testing-release exists, and the beta entry when
@@ -1432,9 +1433,15 @@ software replaces the operational controls directly, not by puppeteering the kno
      partition, copies across /var/lib/bluetooth, the time zone link and
      /etc/NetworkManager/system-connections (the saved wifi networks), then pushes
      updateInstalledProgress 10000 and updateComplete True. It does NOT restart the
-     desk. An application install unpacks, marks the binaries executable and
-     restarts at once.
-  4. RESTART. updateRebootRequested = True.
+     desk. Measured: updateComplete arrived 64 s after the request, and no
+     updateInstalledProgress push was seen. An application install unpacks, marks the
+     binaries executable and restarts at once.
+  4. RESTART. updateRebootRequested = True. Measured: nothing restarted the desk in
+     the 45 s after updateComplete; asked, it left USB 12 s later and was back on its
+     normal identity (PID 0x0037, never 0x0030) 68 s after that, reporting 1.7.7.
+
+  A DOWNLOAD LEFT UNINSTALLED PUTS A PROMPT ON THE TOUCHSCREEN: "Update has finished
+  downloading. Would you like to install?", with Abort and Install, until answered.
 
   THE REQUEST FLAGS ARE NOT CLEARED. downloadInitiateRequested and
   downloadCancelRequested read True after use, for good. The engine acts on a change

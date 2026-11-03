@@ -2,7 +2,7 @@
 
 The desk does the work, exactly as from its touchscreen: it downloads RODE's image over its own
 network connection and installs it. Nothing is flashed from this computer. The sequence, from the
-engine (`rc_audio_mixer`) and measured on a Pro II offered 1.7.7 by 1.7.6:
+engine (`rc_audio_mixer`), run end to end on a Pro II from 1.7.6 to 1.7.7 in 4.5 minutes:
 
   1. `updateCheckRequested` True: the desk reads RODE's manifest. A newer OS sets
      `osUpdateAvailable` (the full image, about 140 MB); a newer application alone sets
@@ -15,8 +15,10 @@ engine (`rc_audio_mixer`) and measured on a Pro II offered 1.7.7 by 1.7.6:
   3. `updateInitiateRequested` True: the install. An OS install verifies the image's MD5, pushes
      `updateInstalledProgress` 5000, writes the new system partition carrying over the Bluetooth
      pairings, the time zone and the saved wifi networks, then pushes 10000 and `updateComplete`.
-     It does not restart the desk. An application-only install unpacks and restarts on its own.
-  4. `updateRebootRequested` True: the restart onto the new firmware.
+     It does not restart the desk (1.7.7: `updateComplete` 64 s after the request, and no progress
+     push seen). An application-only install unpacks and restarts on its own.
+  4. `updateRebootRequested` True: the restart onto the new firmware. 1.7.7 left USB 12 s later and
+     came back on its normal identity 68 s after that.
 
 THE REQUEST FLAGS ARE NOT CLEARED BY THE DESK: the download and its cancel stay True once written.
 The engine acts on a change to True, so every request is written False first.

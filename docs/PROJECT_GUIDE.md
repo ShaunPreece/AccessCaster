@@ -27,7 +27,8 @@ the hardware, which is what this file is for.
 
 Nothing here is official. RODE publish no protocol documentation; all of it was worked out from
 captured USB traffic, the RODE app's own binary, and the published firmware image. It is accurate as
-of firmware 1.7.6 on a RODECaster Pro II and 1.7.3 on a RODECaster Duo.
+of firmware 1.7.7 on a RODECaster Pro II and 1.7.3 on a RODECaster Duo. 1.7.7 changes nothing
+here: its tree is 1.7.6's, block for block, plus one property (`cloudUploadMultitrackRequestUID`).
 
 --------------------------------------------------------------------------------
 # PART 1: HOW IT WORKS
@@ -2797,8 +2798,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **`updateDownloadProgress` IS A PERCENTAGE, 0 TO 100**, pushed at every percent (measured);
   `updateInstalledProgress` is the one on 0 to 10000. A cancel threshold written for 10000 let the
   1.7.7 download run to the end.
-- **AN OS INSTALL DOES NOT RESTART THE DESK; AN APPLICATION INSTALL DOES** (engine). After
-  `updateComplete` the desk is given `LEAVES_BY_ITSELF_S` to restart on its own, then asked.
+- **AN OS INSTALL DOES NOT RESTART THE DESK; AN APPLICATION INSTALL DOES** (engine, and measured
+  on 1.7.7: nothing restarted it in the 45 s after `updateComplete`). After `updateComplete` the
+  desk is given `LEAVES_BY_ITSELF_S` to restart on its own, then asked.
+- **A DOWNLOAD LEFT UNINSTALLED PUTS AN INSTALL PROMPT ON THE TOUCHSCREEN** until it is answered,
+  so a test of the download half leaves a question on the unit's screen for whoever is next.
 - **NEVER WRITE `systemBetaMode`**: it moves the desk onto RODE's beta manifest, and a beta OS
   cannot be undone either.
 

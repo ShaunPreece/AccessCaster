@@ -25,8 +25,8 @@ shorter list is usually this desk's storage or its firmware, not a missing capab
 password in plain text, so values are never written here and this file is safe to share.
 `wifiPSK` appears as a NAME, which is all a reader needs to know it exists.
 
-Read from a **RODECaster Pro 2**, firmware 1.7.6.
-**499 properties, 57 block types.**
+Read from a **RODECaster Pro 2**, firmware 1.7.7.
+**498 properties, 56 block types.**
 
 The occurrence count hints at SCOPE and moves with ordinary use, so treat it as a shape
 rather than a number: x1 is global, and a count matching a block's instance count below
@@ -74,10 +74,9 @@ nothing at rest.
 - `RCSYNCMIXMINUES` x17
 - `RECBUTTON` x1
 - `RECORDER` x1
-- `RECORDING` x1
 - `RECORDINGS` x1
 - `Rodecaster` x1
-- `SHOW` x5
+- `SHOW` x3
 - `SHOWCONTROL` x1
 - `SHOWS` x1
 - `SIPADVANCED` x1
@@ -175,6 +174,7 @@ nothing at rest.
 - `channelTalkbackEnable` - bool, x10
 - `channelWirelessMute` - bool, x10
 - `cloudUploadCancelUID` - int, x1
+- `cloudUploadMultitrackRequestUID` - int, x1
 - `cloudUploadRequestUID` - int, x1
 - `compressorAttack` - float, x10
 - `compressorGain` - float, x10
@@ -356,7 +356,7 @@ nothing at rest.
 - `padProgress` - float, x24
 - `padRCVSyncPadType` - int, x24
 - `padRecordClear` - pair, x1
-- `padRecordIdx` - int, x1  **PROVED INACTIVE**: PADRECORDER stores and never acts.
+- `padRecordIdx` - int, x1  **PROVED INACTIVE**: PADRECORDER stores and never acts; measured while a stray existed and not re-proved, because PADRECORDER is not to be probed again: see "Recording to a pad from the touchscreen reboots the desk".
 - `padRecordMemoryFull` - pair, x1
 - `padRecordSeconds` - float, x1
 - `padRecordState` - int, x1
@@ -416,12 +416,10 @@ nothing at rest.
 - `recordState` - int, x1
 - `recordTimeMs` - int, x1
 - `recordingCompressionQuality` - int, x1
-- `recordingContent` - str, x1
 - `recordingMultitrackMode` - int, x1
 - `recordingProcessingBypass` - bool, x1
 - `recordingTotalCount` - int, x1
 - `recordingTotalDuration` - float, x1
-- `recordingUID` - int, x1
 - `remountPadStorage` - bool, x1
 - `requestDeleteUID` - int, x1
 - `requestDropMarker` - int64, x1
@@ -456,13 +454,13 @@ nothing at rest.
 - `showControlNewFromDefaultMuted` - bool, x1
 - `showControlProgress` - float, x1
 - `showControlUpdating` - bool, x1
-- `showIcon` - int, x5
-- `showLastModification` - int64, x5
-- `showName` - str, x5
-- `showSnapshotIndex` - int, x5
-- `showStorageType` - int, x5
-- `showUID` - int, x5
-- `showUUID` - str, x5
+- `showIcon` - int, x3
+- `showLastModification` - int64, x3
+- `showName` - str, x3
+- `showSnapshotIndex` - int, x3
+- `showStorageType` - int, x3
+- `showUID` - int, x3
+- `showUUID` - str, x3
 - `sipAccountAuthUsername` - str, x1
 - `sipAccountDomain` - str, x1
 - `sipAccountPassword` - str, x1
