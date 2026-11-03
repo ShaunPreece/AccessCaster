@@ -32,10 +32,17 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.63.0"
+__version__ = "2.63.1"
 
 # (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
 HISTORY = [
+    ("2.63.1", [
+        ("Troubleshooting in the help",
+         "Known issues and If the unit stops responding are now one help topic, Troubleshooting, "
+         "as questions and answers: my desk has stopped responding, I can't hear a channel, my "
+         "screen reader has gone silent, and more. Going back to the encoder's levels now says "
+         "Virtual faders and monitor."),
+    ]),
     ("2.63.0", [
         ("AccessCaster now tells you when there is a new version",
          "Once a day AccessCaster checks whether a newer version exists, and if one does, Windows "
