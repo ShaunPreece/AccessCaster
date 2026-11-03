@@ -105,6 +105,7 @@ class JobDialog(SpeakingDialog):
         self._ticks = ticks
         self._begin = begin
         self._stop = stop
+        self._stopping_words = "Cancelling." if stop_label == "Cancel" else "Stopping."
         self._stopping = False
         self._finished = False
         self._held = False
@@ -204,7 +205,7 @@ class JobDialog(SpeakingDialog):
             self.finish(None)
             return
         self._stopping = True
-        self.say("Stopping.")
+        self.say(self._stopping_words)
         call(self, self._stop)
 
 

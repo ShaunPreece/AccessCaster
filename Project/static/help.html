@@ -166,7 +166,7 @@
       <!-- THERE IS NO LIMITATIONS TAB. Its content is the short list in the intro above, which is
            the only copy. The four gaps only worth stating beside the control they affect live in
            the Help guide instead: headphone 3 and 4 under Routing, the touchscreen factory reset
-           under Profiles, Remote Desktop under Level warnings, and the timezone under Unit
+           under Profiles, Remote Desktop under Warn when the main mix clips, and the timezone under Unit
            settings. -->
       <div class="cat-tab" data-tab-key="help" data-tab-title="Help" hidden>
       <h2 id="help-heading">Help: what each page is for</h2>
@@ -362,12 +362,12 @@
           by eye: talk, watch a meter, turn the knob. Press it, and when you hear the tone talk
           normally for fifteen seconds; a second, ten-second take checks the result. The app
           measures what arrived and sets the gain to match, telling you what it changed and
-          offering an undo. Speak at the volume you will actually use, not louder.
+          offering an undo. Speak at the volume you will actually use, not louder. Cancel, or
+          Escape, at any point leaves the gain as it was.
         </dd>
         <dt>Check this channel's level</dt>
         <dd>
-          On every channel except Chat. It speaks the level as it goes, for half a minute unless you
-          have changed the length on the Level warnings tab, and then tells you the loudest it got.
+          On every channel except Chat. It speaks the level as it goes, for half a minute, and then tells you the loudest it got.
           The fader position is taken out of the reading, so it answers "is this channel arriving at
           a sensible level" rather than telling you where you have the fader set. The fader does have
           to be up far enough for the channel to reach the Chat mix, which is what the check listens
@@ -1078,13 +1078,12 @@
       </dl>
 
       <h3>App settings (Alt+8)</h3>
-      <p>Everything about AccessCaster itself rather than the unit: how it speaks, its keys, its
-        level warnings, reaching it from another device, starting it, saving these settings, and
+      <p>Everything about AccessCaster itself rather than the unit: how it speaks, its keys,
+        reaching it from another device, starting it, saving these settings, and
         its own updates. None of it is in a backup of the unit.</p>
       <dl class="help-list">
         <dt>Tabs</dt>
-        <dd>Six: Announcements, Keyboard shortcuts, Level warnings, Remote access, General and
-          Updates. Arrow left and right along the strip, Home and End for the ends. Nothing here
+        <dd>Five: Announcements, Keyboard shortcuts, Remote access, General and Updates. Arrow left and right along the strip, Home and End for the ends. Nothing here
           reads the unit, and the tab you leave off on is remembered.</dd>
         <dt>Announcements</dt>
         <dd>Headed "Announce Interactions on Mixer" once you are on the tab. It speaks each
@@ -1195,20 +1194,14 @@
           same switch as the one on the Device page under Unit settings, so you can turn it off
           there when you are done. Restoring a backup can switch it off again, and the next pad you press turns it
           back on.</dd>
-        <dt>Level warnings</dt>
-        <dd>The watch that speaks up while you work, and the Windows level it depends on. If you
-          want to check one channel before a take, use "Check this channel's level" on the Channels
-          page instead: this tab watches a whole stream. Pick which of the unit's audio
-          streams to watch, set the Windows recording level for it, which is a hidden multiplier on
-          everything measured, then turn on a background watch that stays quiet unless it has news:
-          it can say when the stream clips, and when it goes silent or
-          comes back, with how long a gap counts as silence. It can also speak the level on a timer,
-          which is off by default and is meant for setting gains rather than for use during a
-          recording. Two things to know. It reads the unit as a USB AUDIO DEVICE, through Windows,
-          not over the control connection, so it is not the unit's own meter and will not match it
-          exactly. And it is the only part of this app that does not work over Remote Desktop:
-          Windows gives each session its own audio devices, so from a remote session the unit's
-          streams are not there to read. The page says so when that happens.</dd>
+        <dt>Warn when the main mix clips</dt>
+        <dd>A switch on the Announcements tab. It watches the unit's main mix in the background and
+          says "Main mix clipping" when it reaches full scale, once per loud passage. To set a gain,
+          use Set gain automatically or "Check this channel's level" on the Channels page instead.
+          Like every announcement it is silent during a recording, unless announcements stay on
+          while recording, so it is mostly a warning before and between takes, or while streaming.
+          It reads the unit as a USB AUDIO DEVICE, through Windows, so it does not work over Remote
+          Desktop: Windows gives each session its own audio devices.</dd>
         <dt>Remote access</dt>
         <dd>AccessCaster serves its page to your whole network so you can control the desk from a phone in another
           room, which is genuinely useful and stays. The access link is what stops that being open
@@ -1222,7 +1215,7 @@
           already read your network's traffic.</dd>
         <dt>General</dt>
         <dd>
-          Your keyboard shortcuts, announcement preferences, level warnings and CallMe contacts belong to
+          Your keyboard shortcuts, announcement preferences and CallMe contacts belong to
           the app, so no backup of the desk carries them and reinstalling would lose them: "Save this app's
           settings to a file" writes them all into one small file you can keep somewhere safe or
           copy to another computer, and "Restore these settings" reads one back, with your shortcuts

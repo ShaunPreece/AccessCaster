@@ -39,6 +39,7 @@ PORTABLE = (
     "announcer_record_tones",      # an export from before the three-way choice
     "announcer_startup_summary",
     "record_mute_announcer",
+    "clip_warning",
     "meter_warn_clip",
     "meter_warn_silence",
     "meter_silence_after",

@@ -11,6 +11,9 @@ NO DEVICE NEEDED. What this pins is the reasoning, not the plumbing:
   * the check lives ONLY on the channel, so there is no Device > Levels endpoint left behind for a
     page to call.
 
+and for the main mix clip warning (App settings, Announcements): it watches the main recording
+stream, never a playback one, says nothing but clipping, and its switch is saved and reported.
+
     python DevTools/test_level_check.py
 """
 from __future__ import annotations
@@ -220,5 +223,51 @@ check_in("and is called a short sound", "short sound", short["reason"])
 check_not_in("not a missing microphone", "plugged in", short["reason"])
 none = autogain.verdict({"loud_db": -60.0, "max_db": -60.0})
 check_in("nothing at all says to check the microphone", "plugged in", none["reason"])
+print("\nTHE MAIN MIX CLIP WARNING")
+streams = {"streams": [
+    {"id": "out", "name": "Speakers (RODECaster Pro II Main Stereo)", "flow": "playback"},
+    {"id": "chat", "name": "Microphone (RODECaster Pro II Chat)", "flow": "recording"},
+    {"id": "main", "name": "Microphone (RODECaster Pro II Main Stereo)", "flow": "recording"}]}
+check("it watches the main recording stream, never what this computer plays to the unit",
+      server._main_mix_stream(streams)["id"], "main")
+check("with no main stream, the first recording stream",
+      server._main_mix_stream({"streams": streams["streams"][:2]})["id"], "chat")
+check("with no recording stream, nothing",
+      server._main_mix_stream({"streams": streams["streams"][:1]}), None)
+made = {}
+
+
+class FakeClipWatcher:
+    def __init__(self, endpoint_id, say, **kw):
+        made.update(kw, endpoint=endpoint_id)
+        self.running = True
+
+    def start(self):
+        return True
+
+    def stop(self):
+        self.running = False
+
+
+with patched((server.meters, {"desk_streams": lambda: dict(streams, ok=True, reason=""),
+                              "Watcher": FakeClipWatcher})):
+    check("a start opens it", server._clip_start(), "")
+check("on the main stream", made["endpoint"], "main")
+check("saying nothing about silence or the level, and playing no sound of its own",
+      (made["warn_silence"], made.get("speak_every", 0.0), made["clip_sound"]),
+      (False, 0.0, False))
+check("and called the main mix out loud", made["label"], "Main mix")
+server._clip_stop()
+saved = {}
+with patched((server.settings_file, {"update": lambda **kw: saved.update(kw)}),
+             (server.meters, {"desk_streams": lambda: {"ok": False, "streams": [],
+                                                       "reason": "Remote Desktop."}})):
+    on = server.action_set_clip_warning(True)
+    off = server.action_set_clip_warning(False)
+check("the switch is saved", saved, {"clip_warning": False})
+check_in("on with no audio says when it will start", "once the unit's audio is available",
+         on["message"])
+check("off says so", off["message"], "Clipping will not be announced.")
+server._clip_wake.clear()
 print("")
 sys.exit(_testkit.finish())

@@ -123,11 +123,11 @@ section = type("S", (), {"frame": frame})()
 announcements = app_settings_section.AnnouncementsPage(section)
 check("before a read a switch refuses", announcements._unread(),
       "The announcement settings have not been read yet.")
-announcements.show({"on": True, "levels": False, "mute_tones": False,
+announcements.show({"on": True, "levels": False, "mute_tones": False, "clip_warning": True,
                     "record_feedback": "tone", "remember": False, "volume": 60, "voice": "Zira",
                     "output": "", "voices": ["David", "Zira"], "outputs": []})
 check("each switch shows its setting", [s.box.GetValue() for s in announcements.switches],
-      [True, False, False, False])
+      [True, False, False, True, False])
 check("recording's sound is a choice of three, showing the setting",
       (announcements.record_feedback.control.GetCount(),
        announcements.record_feedback.control.GetStringSelection()), (3, "Play a tone"))
@@ -139,34 +139,6 @@ check("the chosen voice is selected", announcements.voice.control.GetSelection()
 check("no outputs refuses a choice and says why", announcements._no_choice("outputs"),
       "Windows reported no outputs to this computer, so there is nothing to choose.")
 check("the volume is read in percent", announcements.volume._value_words(), "60 percent")
-
-# ---- level warnings --------------------------------------------------------------------------
-levels = app_settings_section.LevelsPage(section)
-
-
-def meters(level=None, available=True):
-    return {"ok": True, "available": available, "reason": "" if available else "Remote Desktop.",
-            "streams": [{"id": "s1", "name": "Chat", "label": "Chat, from the unit"}],
-            "chosen": "s1", "chosen_present": True, "mix_note": "",
-            "settings": {"warn_clip": True, "clip_sound": True, "warn_silence": False,
-                         "silence_after": 5.0, "speak_every": 0.0, "clip_db": 0.0},
-            "live": {"running": False}, "input_level": level}
-
-
-levels.show(meters())
-check("with no Windows level its controls are hidden", levels.level.control.IsShown(), False)
-check("and the line saying why is shown", levels.no_level.IsShown(), True)
-check("the stream chosen is selected", levels.stream.control.GetSelection(), 0)
-check("a setting in seconds lands on its box", levels.options[4].control.GetValue(), 5)
-levels.show(meters(level={"db": -3.0, "min_db": -40.0, "max_db": 10.0, "muted": False,
-                          "fixed": True, "note": "Set on the desk's fader."}))
-check("a stream with a level shows it", levels.level.control.IsShown(), True)
-check("at the level Windows reports", levels.level.control.GetValue(), -3.0)
-check("a fixed level refuses with the reason", levels._level_refused(),
-      "Set on the desk's fader.")
-levels.show(meters(available=False))
-check("nothing to meter is said on the page", levels.status.GetValue(), "Remote Desktop.")
-check("and the stream list refuses with it", levels._no_streams(), "Remote Desktop.")
 
 # ---- help ------------------------------------------------------------------------------------
 topics = help_section.topics()

@@ -1898,6 +1898,16 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   focus. It is read again `SUMMARY_AFTER_MS` after the last desk event in `SUMMARY_EVENTS`; add an
   event there if the summary gains a fact it carries. The web page keeps its spoken summary until
   it is retired.
+- **THE CLIP WARNING WATCHES A RECORDING ENDPOINT AND SPEAKS ONLY THROUGH `speech.say`**
+  (`server._main_mix_stream`, `_clip_start`). The desk's playback endpoint reads this computer's
+  own audio, so a watch on it hears the screen reader and its own words. `speech.say` follows the
+  announcer, so the warning is silent while a recording suspends it; `meters.clip_alert` plays on
+  the default output, usually the desk, and would land in the take, so `clip_sound` stays False.
+- **THE WINDOW FITS ITS DISPLAY, AND ITS STATUS BAR IS NOT ELLIPSIZED** (`MainFrame._fit_to_screen`,
+  the `CreateStatusBar` style). NVDA+End finds a status bar at the window's bottom-left corner;
+  with that corner off the screen it reads its own copy of the bottom line instead, which keeps the
+  tail of longer text drawn there before. wx's default ellipsizing puts a shortened copy in the
+  native control, and that copy is what a screen reader reads.
 - **THE NATIVE HELP IS READ FROM `static/help.html`** (`help_section.topics`), the web page's own
   file, so the two cannot drift. Retiring the web page must keep that file, or move the parser with
   it. A topic is one `h3` of the Help tab: a new `h3` there is a new page in the tree.

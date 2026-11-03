@@ -1,5 +1,5 @@
 """App settings: everything about AccessCaster itself rather than the unit. Announcements, keyboard
-shortcuts, level warnings, starting with Windows and moving the settings, and updates.
+shortcuts, starting with Windows and moving the settings, and updates.
 
 None of these reads the desk (bar the shortcut catalogue, read when Add is pressed), so the section
 reads every page when the service is up and on F5, and a page after any write whose reply does not
@@ -16,17 +16,14 @@ import server
 import speech
 from native import a11y
 from native.calls import call
-from native.controls import Choice, Decimal, Number, Slider, Switch
+from native.controls import Choice, Slider, Switch
 from native.dialogs import confirm, report
 from native.pages import Page, group, page_box, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
 from native.update_dialogs import decide
 
 TITLE = "App settings"
-NO_LEVEL = "Choose a stream above and its Windows level will appear here."
 CHECKING_AFTER_MS = 500
-LEVEL_HINT = ("Zero means no change. Set your gain on the unit. Affects every application on this "
-              "computer.")
 
 
 class AppSettingsSection:
@@ -37,14 +34,11 @@ class AppSettingsSection:
         self.frame = frame
         self.announcements = AnnouncementsPage(self)
         self.shortcuts = ShortcutsPage(self)
-        self.levels = LevelsPage(self)
         self.general = GeneralPage(self)
         self.updates = UpdatesPage(self)
-        self.views = [self.announcements, self.shortcuts, self.levels, self.general,
-                      self.updates]
+        self.views = [self.announcements, self.shortcuts, self.general, self.updates]
         self.pages = [Page("speak", "Announcements", self.announcements),
                       Page("shortcuts", "Keyboard shortcuts", self.shortcuts),
-                      Page("levels", "Level warnings", self.levels),
                       Page("general", "General", self.general),
                       Page("updates", "Updates", self.updates)]
 
@@ -76,6 +70,10 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
          announcer.action_set_announce_mute_tones,
          "Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does "
          "not say which channel."),
+        ("clip_warning", "Warn when the main mix clips", server.action_set_clip_warning,
+         "Says Main mix clipping when the unit's main mix reaches full scale. Like every "
+         "announcement, it is silent during a recording unless announcements stay on while "
+         "recording."),
         ("remember", "Start with announcements the way I left them",
          announcer.action_set_announce_remember,
          "Without this, announcements switch back on every time the app starts."),
@@ -176,191 +174,6 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         call(self, speech.action_refresh_speech_devices, done=done)
 
 
-class LevelsPage(scrolled.ScrolledPanel):
-    """The stream the background watch listens to, Windows' own level for it, and the watch."""
-
-    def __init__(self, section):
-        super().__init__(section.frame.host)
-        self.Hide()
-        self.section = section
-        self.frame = section.frame
-        self.data = None             # the last `server.read_meters`
-        sizer, parent = page_box(self, "Level warnings")
-        self._sizer = sizer
-        self.status = read_only(parent, sizer, "Level warnings status", height=60)
-        self.status.SetValue("Reading the unit's audio streams.")
-
-        box_sizer, box = group(parent, sizer, "Which stream to watch")
-        self.stream = Choice(self, box, box_sizer, "Audio device to watch", [],
-                             server.action_set_meter_stream, *self.field("chosen"),
-                             description="To check one channel, use Check this channel's level "
-                                         "on the Channels page.",
-                             guard=self._no_streams, accepted=lambda _r: self.read())
-
-        box_sizer, box = group(parent, sizer, "Windows level")
-        self._level_sizer = box_sizer
-        self.no_level = read_only(box, box_sizer, "Windows level status", height=None)
-        self.no_level.SetValue(NO_LEVEL)
-        self.level = Decimal(self, box, box_sizer, "Windows level, dB", -96.0, 12.0, 0.5, 1,
-                             server.action_set_input_level, *self.level_field("db"),
-                             guard=self._level_refused, accepted=self._level_set)
-        self.unity = wx.Button(box, label="Set it to no change")
-        self.unity.Bind(wx.EVT_BUTTON, self._on_unity)
-        box_sizer.Add(self.unity, 0, wx.ALL, 6)
-        self.muted = Switch(self, box, box_sizer, "Muted in Windows",
-                            server.action_set_input_mute, *self.level_field("muted"),
-                            description="A muted input reads zero everywhere, and nothing "
-                                        "recorded from it has any sound.",
-                            guard=self._no_level)
-
-        box_sizer, box = group(parent, sizer, "Warn me while I work")
-        self.watch = Switch(self, box, box_sizer, "Watch this stream and warn me",
-                            server.action_meter_watch,
-                            lambda: ((self.data or {}).get("live") or {}).get("running"),
-                            lambda _on: None, guard=self._no_streams,
-                            accepted=lambda _r: self.read())
-        self.options = [
-            self._option(box, box_sizer, "warn_clip", "Say when it is clipping"),
-            self._option(box, box_sizer, "clip_sound", "Play a sound when it clips"),
-            Number(self, box, box_sizer, "Warn me at, dB", -20, 0,
-                   lambda v: server.action_set_meter_option("clip_db", float(v)),
-                   *self.setting("clip_db", whole=True),
-                   description="Zero is where sound is actually damaged. The unit's own limiter "
-                               "holds processed speech just under that, so a lower setting will "
-                               "fire on every sentence."),
-            self._option(box, box_sizer, "warn_silence",
-                         "Say when it goes silent, and when it comes back"),
-            Number(self, box, box_sizer, "Seconds of silence before it says so", 1, 60,
-                   lambda v: server.action_set_meter_option("silence_after", float(v)),
-                   *self.setting("silence_after", whole=True),
-                   description="Five is long enough to ignore a pause for breath."),
-            Number(self, box, box_sizer, "Speak the level every, seconds, 0 for never", 0, 600,
-                   lambda v: server.action_set_meter_option("speak_every", float(v)),
-                   *self.setting("speak_every", whole=True),
-                   description="Leave at 0 while you are talking. Try 10 or 20 while setting "
-                               "gains."),
-        ]
-        self._show_level()
-        self.SetupScrolling(scroll_x=False)
-
-    def _option(self, box, box_sizer, name, label):
-        return Switch(self, box, box_sizer, label,
-                      lambda on: server.action_set_meter_option(name, 1.0 if on else 0.0),
-                      *self.setting(name))
-
-    def field(self, key):
-        def current():
-            return self.data.get(key) if self.data else None
-
-        def remember(value):
-            if self.data:
-                self.data[key] = value
-        return current, remember
-
-    def setting(self, key, whole=False):
-        def current():
-            value = ((self.data or {}).get("settings") or {}).get(key)
-            return round(value) if whole and value is not None else value
-
-        def remember(value):
-            if self.data:
-                self.data["settings"][key] = value
-        return current, remember
-
-    def level_field(self, key):
-        def current():
-            return ((self.data or {}).get("input_level") or {}).get(key)
-
-        def remember(value):
-            if self.data and self.data.get("input_level"):
-                self.data["input_level"][key] = value
-        return current, remember
-
-    def _no_streams(self):
-        if self.data is None:
-            return "The audio streams have not been read yet."
-        if not self.data.get("available"):
-            return self.data.get("reason") or "There is nothing to meter at the moment."
-        return None
-
-    def _no_level(self):
-        if self._no_streams():
-            return self._no_streams()
-        return None if self.data.get("input_level") else NO_LEVEL
-
-    def _level_refused(self):
-        refusal = self._no_level()
-        if refusal:
-            return refusal
-        level = self.data["input_level"]
-        if level.get("fixed"):
-            return level.get("note") or "Windows cannot change this device's level."
-        return None
-
-    def _level_set(self, reply):
-        # The level shown is the one read back: a driver can refuse a level silently.
-        if reply.get("level") and self.data:
-            self.data["input_level"].update(reply["level"])
-            self.level.show()
-
-    def _on_unity(self, _event):
-        refusal = self._level_refused()
-        if refusal:
-            self.frame.say(refusal)
-            return
-
-        def done(reply):
-            self._level_set(reply)
-            self.frame.reply(self.unity, reply)
-        call(self, server.action_set_input_level, 0.0, done=done)
-
-    def read(self, announce=False):
-        def done(reply):
-            self.show(reply)
-            if announce:
-                self.frame.say("Level warnings read.")
-        call(self, server.read_meters, done=done)
-
-    def show(self, data):
-        self.data = data
-        # Unavailable is a normal state: over Remote Desktop the unit's audio belongs to another
-        # session, and while the unit is a drive its audio device is gone.
-        text = (data.get("mix_note") or "") if data.get("available") else (
-            data.get("reason") or "No streams to meter.")
-        set_text(self.status, text)
-        self._sizer.Show(self.status.GetContainingSizer(), bool(text))
-        self.stream.set_items([(s["id"], s.get("label") or s["name"])
-                               for s in data.get("streams") or []])
-        if not data.get("chosen_present"):
-            data["chosen"] = None
-        self.stream.show()
-        self._show_level()
-        live = data.get("live") or {}
-        self.watch.acc.description = (
-            "Watches in the background and speaks only when something needs saying. "
-            + (live.get("error") or (f"Watching {live['name']}." if live.get("running")
-                                     else "Not watching.")))
-        self.watch.show()
-        for option in self.options:
-            option.show()
-        self.Layout()
-
-    def _show_level(self):
-        level = (self.data or {}).get("input_level")
-        self.no_level.GetContainingSizer().ShowItems(not level)
-        self.level.control.GetContainingSizer().ShowItems(bool(level))
-        self._level_sizer.Show(self.unity, bool(level))
-        self._level_sizer.Show(self.muted.box, bool(level))
-        if level:
-            self.level.set_range(level.get("min_db", -96.0), level.get("max_db", 12.0))
-            self.level.acc.description = LEVEL_HINT + (
-                f" {level['note']}" if level.get("note") else "")
-            self.level.show()
-            self.muted.show()
-        self.Layout()
-        self.FitInside()
-
-
 class GeneralPage(wx.Panel):
     """Starting with Windows, and saving this app's settings to a file or restoring them."""
 
@@ -379,9 +192,9 @@ class GeneralPage(wx.Panel):
         box_sizer, box = group(parent, sizer, "Move this app's settings")
         self.export = self._button(box, box_sizer, "Save this app's settings to a file",
                                    self._on_export)
-        a11y.describe(self.export, "Your keyboard shortcuts, announcement preferences, level "
-                                   "warnings and CallMe contacts belong to AccessCaster rather "
-                                   "than to the unit, so no backup of the unit carries them. This "
+        a11y.describe(self.export, "Your keyboard shortcuts, announcement preferences and "
+                                   "CallMe contacts belong to AccessCaster rather than to the "
+                                   "unit, so no backup of the unit carries them. This "
                                    "writes one small file you can copy to another computer. It "
                                    "holds nothing about the desk, so it is safe to email to "
                                    "yourself.")
@@ -438,8 +251,8 @@ class GeneralPage(wx.Panel):
         # Restoring replaces the shortcuts in use, and is undone only by an export of what was
         # there, which is exactly what may not exist.
         if not confirm(self, "Restore this app's settings?",
-                       "This replaces your keyboard shortcuts and your announcement and "
-                       "level-warning preferences with the ones in that file. The unit itself is "
+                       "This replaces your keyboard shortcuts and your announcement "
+                       "preferences with the ones in that file. The unit itself is "
                        "not touched at all.", "Restore settings"):
             return
         call(self, _import_file, path, done=self._restored)

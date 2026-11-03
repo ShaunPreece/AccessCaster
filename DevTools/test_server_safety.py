@@ -184,7 +184,7 @@ with patched(
     check("and the restore is confirmed", iso.restored, True)
 
 
-print("\nAUTO GAIN STOPPED BEFORE ANYTHING WAS SAID")
+print("\nAUTO GAIN CANCELLED")
 
 
 class _Isolation:
@@ -201,25 +201,49 @@ class _Isolation:
 
 
 def stopped_silent_take(endpoint_id, seconds, should_stop=None):
-    server._autogain_set(cancel=True)          # Stop pressed during the take
+    server._autogain_set(cancel=True)          # Cancel pressed during the take
     return {"seconds": 0.0, "samples": 0, "loud": 0.0, "loud_db": -120.0, "max": 0.0,
             "max_db": -120.0, "muted": False, "ceiling": 1.0}
 
 
-server._autogain = {"phase": "starting", "channel": "Mic1", "done": False, "cancel": False}
-with patched(
-        (server, {"_read_gain_and_processing": lambda mic: (30, False),
-                  "_chat_endpoint_to_unity": lambda endpoint_id: {},
-                  "_ChatIsolation": _Isolation}),
-        (server.autogain, {"chat_endpoint": lambda: {"id": "chat"},
-                           "measure_endpoint": stopped_silent_take}),
-        (server.meters, {"cue": lambda name: None})):
-    server._autogain_run("Mic1", 1, 5.0)
-gain_result = server._autogain_state()
-check("a take stopped before anything was said changes nothing", gain_result.get("phase"), "failed")
-check("and says it was stopped, not that the microphone may be faulty",
-      gain_result.get("message"), "Stopped. The gain was not changed.")
-server._autogain = None
+def quiet_take(endpoint_id, seconds, should_stop=None):
+    """Talking, but 20 dB under target: enough for a verdict that raises the gain."""
+    return {"seconds": seconds, "samples": int(seconds * 20), "loud": 0.03, "loud_db": -30.0,
+            "max": 0.06, "max_db": -24.0, "muted": False, "ceiling": 1.0}
+
+
+def autogain_run(takes):
+    """Run auto gain on a fake Mic 1 at 30 dB, the takes answered in turn by `takes`, and return
+    its end state and every gain written."""
+    writes = []
+    answers = iter(takes)
+    server._autogain = {"phase": "starting", "channel": "Mic1", "done": False, "cancel": False}
+    with patched(
+            (server, {"_read_gain_and_processing": lambda mic: (30, False),
+                      "_chat_endpoint_to_unity": lambda endpoint_id: {},
+                      "_ChatIsolation": _Isolation, "_AUTOGAIN_LEAD_S": 0.0,
+                      "_AUTOGAIN_LEAD_PER_WORD_S": 0.0,
+                      "_autogain_write_gain": lambda mic, db: writes.append(db)}),
+            (server.autogain, {"chat_endpoint": lambda: {"id": "chat"},
+                               "measure_endpoint": lambda *a, **k: next(answers)(*a, **k)}),
+            (server.meters, {"cue": lambda name: None})):
+        server._autogain_run("Mic1", 1, 5.0)
+    state = server._autogain_state()
+    server._autogain = None
+    return state, writes
+
+
+gain_result, writes = autogain_run([stopped_silent_take])
+check("a take cancelled before anything was said changes nothing", gain_result.get("phase"),
+      "failed")
+check("and says it was cancelled, not that the microphone may be faulty",
+      gain_result.get("message"), "Cancelled. The gain was not changed.")
+check("and writes no gain", writes, [])
+
+gain_result, writes = autogain_run([quiet_take, stopped_silent_take])
+check("a cancel during the check take ends the run as failed", gain_result.get("phase"), "failed")
+check("and puts back the gain the first take set",
+      (len(writes), writes[-1] if writes else None), (2, 30))
 
 
 print("\nANNOUNCER LOOPS")

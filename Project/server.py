@@ -3318,9 +3318,11 @@ _AUTOGAIN_SECONDS = 15.0
 # The second, shorter take that checks the new gain. Ten seconds is enough for a few sentences and
 # short enough that nobody minds being asked twice.
 _AUTOGAIN_VERIFY_S = 10.0
-# Between a take's instruction and its start tone: long enough for a screen reader to finish
-# saying it, after the page's next poll has picked it up.
-_AUTOGAIN_LEAD_S = 2.5
+# Between a take's instruction and its start tone: long enough for the page's next poll to pick it
+# up and a screen reader to finish saying it. It grows with the instruction: on NVDA a ten-word one
+# needs about 3.5 s.
+_AUTOGAIN_LEAD_S = 1.0
+_AUTOGAIN_LEAD_PER_WORD_S = 0.25
 _autogain_lock = threading.Lock()
 _autogain = None            # the running or finished job, as a plain dict
 
@@ -3424,63 +3426,35 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         # The lock is taken first. `as` binds only once __enter__ succeeds, and a failed __enter__
         # restores for itself.
         with _hid_lock, _ChatIsolation(mic - 1) as iso:
-            # THE INSTRUCTION, THEN THE TONE, THEN THE TAKE. The tone finishes before the take
-            # starts, not because it would otherwise be measured (it plays out on USB 1, and the
-            # isolated mix excludes everything except the microphone) but because the person
-            # should not start talking over their own start signal. Only an acoustic path through
-            # monitor speakers could put it in the take.
-            _autogain_lead("Talk at the tone, normally, as you would on air.")
-            meters.cue("start")
-            _autogain_set(phase="listening", seconds=seconds, started=time.monotonic(),
-                          message="Listening.")
-            result = autogain.measure_endpoint(
-                endpoint["id"], seconds,
-                should_stop=lambda: _autogain_state().get("cancel"))
-            meters.cue("stop")
-            # Stop during the take ends the run after it: the check take would stop at once and
-            # read as a microphone that failed.
-            stopped = bool(_autogain_state().get("cancel"))
-            # POST-FADER, corrected: the cross-point carries the channel at its own level, so
-            # the gain we derive must not move with the fader.
-            result = autogain.correct_for_level(result, iso.level)
-
-            decision = autogain.verdict(result)
+            result = _autogain_take("Talk at the tone.",
+                                    "listening", seconds, endpoint["id"], iso)
+            decision = autogain.verdict(result) if result is not None else None
             target = gain_before
-            if decision["ok"]:
+            if decision and decision["ok"]:
                 target = max(GAIN_MIN_DB, min(GAIN_MAX_DB,
                                               int(round(gain_before + decision["delta_db"]))))
                 if target != gain_before:
-                    channels.set_mic_gain(mic, target)
-                    announcer.mark_self_gain(mic, True)
-                    with _session_state_lock:
-                        _session_state["channels"][mic]["gain_db"] = target
-                    time.sleep(0.4)
-            if decision["ok"] and not stopped:
+                    _autogain_write_gain(mic, target)
                 # CHECK ITS OWN WORK: set the gain from the results, then measure again.
                 # Without the second take the result is a PREDICTION rather than a measurement,
                 # and nothing tells the user whether it landed. The isolation is still open, so
                 # it costs nothing but the ten seconds.
-                _autogain_lead("Talk again at the tone, for ten seconds, so it can check.")
-                meters.cue("start")
-                _autogain_set(phase="verifying", seconds=_AUTOGAIN_VERIFY_S,
-                              started=time.monotonic(), message="Listening.")
-                check = autogain.correct_for_level(
-                    autogain.measure_endpoint(
-                        endpoint["id"], _AUTOGAIN_VERIFY_S,
-                        should_stop=lambda: _autogain_state().get("cancel")),
-                    iso.level)
-                meters.cue("stop")
+                check = _autogain_take("Talk again at the tone.",
+                                       "verifying", _AUTOGAIN_VERIFY_S, endpoint["id"], iso)
+            # CANCEL MEANS NOTHING CHANGES, at any point: a take cut short is not evidence about
+            # the microphone, so a gain already set from the first take is put back.
+            cancelled = _autogain_cancelled()
+            if cancelled and target != gain_before:
+                _autogain_write_gain(mic, gain_before)
+        if cancelled:
+            _autogain_set(phase="failed", done=True, message="Cancelled. The gain was not changed.")
+            return
         _autogain_set(phase="working", message="Working it out.")
 
         if not decision["ok"]:
-            # A take the person stopped is not evidence about their microphone.
-            message = "Stopped. The gain was not changed." if stopped else decision["reason"]
-            _autogain_set(phase="failed", done=True, result=result, message=message)
+            _autogain_set(phase="failed", done=True, result=result, message=decision["reason"])
             return
         words = _autogain_words(name, gain_before, target, result, win, check)
-        if stopped:
-            words += (" You stopped it early, so the gain was set from a shortened take and not "
-                      "checked.")
         _autogain_set(phase="done", done=True, gain_after=target, result=result, check=check,
                       message=words)
     except Exception as exc:
@@ -3500,12 +3474,47 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
                            "sound unprocessed.")
 
 
+def _autogain_cancelled() -> bool:
+    return bool(_autogain_state().get("cancel"))
+
+
+def _autogain_take(instruction: str, phase: str, seconds: float, endpoint_id: str, iso):
+    """One take: the instruction, then the tone, then `seconds` of listening. Returns the
+    measurement, corrected for the fader, or None if the run was cancelled before it ended.
+
+    The tone finishes before the take starts, not because it would otherwise be measured (it plays
+    out on USB 1, and the isolated mix excludes everything except the microphone) but because the
+    person should not start talking over their own start signal."""
+    _autogain_lead(instruction)
+    if _autogain_cancelled():
+        return None
+    meters.cue("start")
+    _autogain_set(phase=phase, seconds=seconds, started=time.monotonic(), message="Listening.")
+    result = autogain.measure_endpoint(endpoint_id, seconds, should_stop=_autogain_cancelled)
+    meters.cue("stop")
+    if _autogain_cancelled():
+        return None
+    # POST-FADER, corrected: the cross-point carries the channel at its own level, so the gain
+    # derived from it must not move with the fader.
+    return autogain.correct_for_level(result, iso.level)
+
+
+def _autogain_write_gain(mic: int, db: int) -> None:
+    """Set the mic's gain as auto gain's own change, so the announcer does not report it."""
+    channels.set_mic_gain(mic, db)
+    announcer.mark_self_gain(mic, True)
+    with _session_state_lock:
+        _session_state["channels"][mic]["gain_db"] = db
+    time.sleep(0.4)
+
+
 def _autogain_lead(instruction: str) -> None:
     """Say what to do before the start tone, not after it: the tone is the signal to begin, so
-    the instruction has to have been heard by then. Stop ends the wait early."""
+    the instruction has to have been heard by then. Cancel ends the wait early."""
     _autogain_set(phase="ready", message=instruction)
-    end = time.monotonic() + _AUTOGAIN_LEAD_S
-    while time.monotonic() < end and not _autogain_state().get("cancel"):
+    end = (time.monotonic() + _AUTOGAIN_LEAD_S
+           + _AUTOGAIN_LEAD_PER_WORD_S * len(instruction.split()))
+    while time.monotonic() < end and not _autogain_cancelled():
         time.sleep(0.1)
 
 
@@ -3656,7 +3665,8 @@ def _autogain_words(name: str, before: int, after: int, result: dict, win: str,
     IT REPORTS THE SECOND TAKE, not a prediction. A closing line like "talk again and it should sit
     around minus 9" promises a result nothing has measured AND reads as an instruction to speak while
     nothing is listening. By the time this runs the second take has happened, so it says what was
-    actually heard."""
+    actually heard. What was done to the Windows level (`win`) comes last: before the result, its
+    "no change" reads as the result."""
     label = (_ui_chan(name) or {}).get("label", name)
     was = f"You were peaking at {meters.dbfs(result['loud'])}."
     if after == before:
@@ -3665,17 +3675,18 @@ def _autogain_words(name: str, before: int, after: int, result: dict, win: str,
         way = "down" if after < before else "up"
         head = f"{label} gain turned {way} from {before} to {after} dB. {was}"
     if not check:
-        return f"{win}{head}"
+        return f"{head} {win}".strip()
     now = check["loud_db"]
     at = f"Checking again, you peaked at {meters.dbfs(check['loud'])}."
     if check["loud_db"] < autogain.MIN_USABLE_DBFS:
-        return f"{win}{head} {at} That was too quiet to confirm - nothing was heard on the check."
+        return (f"{head} {at} That was too quiet to confirm - nothing was heard on the check. "
+                f"{win}").strip()
     off = now - autogain.TARGET_DBFS
     if abs(off) <= 3.0:
-        return f"{win}{head} {at} That is right."
+        return f"{head} {at} That is right. {win}".strip()
     way = "loud" if off > 0 else "quiet"
-    return (f"{win}{head} {at} Still about {abs(off):.0f} dB too {way}. Run it again, speaking as "
-            f"you did the first time, or set the gain yourself.")
+    return (f"{head} {at} Still about {abs(off):.0f} dB too {way}. Run it again, speaking as "
+            f"you did the first time, or set the gain yourself. {win}").strip()
 
 
 def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
@@ -5374,6 +5385,100 @@ def action_meter_watch(on: bool) -> dict:
                                    + ("Clipping will be announced. " if prefs["warn_clip"] else "")
                                    + ("Going quiet will be announced. "
                                       if prefs["warn_silence"] else "")}
+
+
+# ---- CLIP WARNING ------------------------------------------------------------------------------
+# The window's one background meter: a switch under Announcements that says "Main mix clipping"
+# when the desk's main recording stream reaches full scale. Fixed thresholds, no stream to choose.
+# Its words go through speech.say, so they follow the announcer, recordings included.
+#
+# A SUPERVISOR KEEPS IT RUNNING: the endpoint goes away whenever the desk does (a USB drop, Transfer
+# Mode), the watcher's thread then ends, and the next pass opens it again.
+_CLIP_RETRY_S = 10.0
+_clip_watcher = None
+_clip_lock = threading.Lock()
+_clip_wake = threading.Event()
+_clip_supervisor = None
+
+
+def _clip_warning_on() -> bool:
+    return bool(settings_file.load().get("clip_warning", False))
+
+
+def _main_mix_stream(found: dict):
+    """The desk's main recording endpoint, or its first recording endpoint, or None."""
+    inputs = [s for s in found.get("streams") or []
+              if s.get("flow") == meters.FLOW_NAMES[meters.CAPTURE]]
+    main = [s for s in inputs if "main stereo" in s["name"].lower()]
+    return (main or inputs or [None])[0]
+
+
+def _clip_start() -> str:
+    """Open the watcher on the main mix. Returns "" once it runs, else why it could not."""
+    global _clip_watcher
+    found = meters.desk_streams()
+    if not found["ok"]:
+        return found["reason"] or "The unit's audio is not available."
+    stream = _main_mix_stream(found)
+    if stream is None:
+        return "The unit is offering no recording stream."
+    w = meters.Watcher(stream["id"], speech.say, clip_at=_clip_level(True, 0.0),
+                       warn_silence=False, clip_sound=False, label="Main mix")
+    if not w.start():
+        return w.error or "The meter could not start."
+    with _clip_lock:
+        _clip_watcher = w
+    return ""
+
+
+def _clip_stop() -> None:
+    global _clip_watcher
+    with _clip_lock:
+        w, _clip_watcher = _clip_watcher, None
+    if w is not None:
+        w.stop()
+
+
+def _clip_supervise() -> None:
+    """Keep the watcher matching the setting, retrying every `_CLIP_RETRY_S` while the desk's
+    audio is away. A failure is logged once until it changes."""
+    said = ""
+    while True:
+        with _clip_lock:
+            running = bool(_clip_watcher and _clip_watcher.running)
+        if _clip_warning_on():
+            if not running:
+                why = _clip_start()
+                if why and why != said:
+                    diagnostics.event("meters.clip_watch", "could not start", reason=why)
+                said = why
+        elif running:
+            _clip_stop()
+        _clip_wake.wait(_CLIP_RETRY_S)
+        _clip_wake.clear()
+
+
+def start_clip_warning() -> None:
+    """Start the supervisor. It opens nothing while the setting is off."""
+    global _clip_supervisor
+    if _clip_supervisor is None:
+        _clip_supervisor = threading.Thread(target=_clip_supervise, daemon=True,
+                                            name="clip-warning")
+        _clip_supervisor.start()
+
+
+def action_set_clip_warning(on: bool) -> dict:
+    """Turn the main mix clip warning on or off."""
+    on = bool(on)
+    settings_file.update(clip_warning=on)
+    _clip_wake.set()
+    if not on:
+        return {"ok": True, "clip_warning": False, "message": "Clipping will not be announced."}
+    found = meters.desk_streams()
+    later = "" if found["ok"] else (f" It starts once the unit's audio is available: "
+                                    f"{found['reason']}")
+    return {"ok": True, "clip_warning": True,
+            "message": "The main mix will be announced when it clips." + later}
 
 
 def _level_check_summary(w) -> str:
@@ -9207,6 +9312,7 @@ def read_announce() -> dict:
             "volume": speech.volume,
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
+            "clip_warning": _clip_warning_on(),
             "running": bool(announcer._thread and announcer._thread.is_alive())}
 
 
@@ -10364,6 +10470,8 @@ def _bring_up_server(open_browser=True, watchdog=True, announce=True, shortcuts=
         # The control announcer has its own read-only HID handle, so it never blocks the writes.
         # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=greeting)
+    if announce:
+        start_clip_warning()
     # SEED THE EXPANDED FLAG BEFORE ANY PAGE ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader dropdown then omits Game, Music, A and B and the write gate
     # refuses them, so on a desk that IS in Expanded the four cannot be assigned until something

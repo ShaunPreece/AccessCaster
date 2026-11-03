@@ -80,14 +80,29 @@ class MainFrame(Speaker, wx.Frame):
         outer.Add(sink, 0)
         root.SetSizer(outer)
         # The desk summary (DeviceSection): a native status bar, which a screen reader reads on
-        # demand and does not speak as it changes.
-        self.status = self.CreateStatusBar()
+        # demand and does not speak as it changes. Without wx's default ellipsizing, which hands the
+        # native control a copy cut to the window's width, and that copy is what SB_GETTEXT, and so
+        # the screen reader, returns.
+        self.status = self.CreateStatusBar(style=wx.STB_SIZEGRIP | wx.FULL_REPAINT_ON_RESIZE)
         self.status.SetStatusText("Reading the unit.")
 
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self._on_select)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
         self.Bind(wx.EVT_CLOSE, self._on_close)
         self.tree.SelectItem(self._branches[0])
+        self._fit_to_screen()
+
+    def _fit_to_screen(self):
+        """Keep the whole window on its display. NVDA+End finds the status bar at the window's
+        bottom-left corner; on a display shorter than the window that corner is under the taskbar,
+        and NVDA falls back to its own copy of the bottom line, which keeps the tail of longer text
+        drawn there before."""
+        index = wx.Display.GetFromWindow(self)
+        area = wx.Display(index if index != wx.NOT_FOUND else 0).GetClientArea()
+        width = min(self.GetSize().width, area.width)
+        height = min(self.GetSize().height, area.height)
+        self.SetSize(area.x + (area.width - width) // 2, area.y + (area.height - height) // 2,
+                     width, height)
 
     # ---- the service -----------------------------------------------------------------------
 

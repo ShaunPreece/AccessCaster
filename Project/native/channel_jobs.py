@@ -45,14 +45,17 @@ class AutoGain:
             "starts at a tone.\n\n"
             f"This switches {self.label} processing off while it listens and puts it back "
             "afterwards, sets the Windows recording level to no change, and rewrites the gain. The "
-            "gain can be undone at the end.",
+            "gain can be undone at the end.\n\n"
+            "While it runs, press Escape or Enter to cancel at any time. The gain is then left as "
+            "it was.",
             [(wx.ID_OK, "Start"), (wx.ID_CANCEL, "Cancel")],
             default=wx.ID_CANCEL, escape=wx.ID_CANCEL)
         with question:
             if question.ShowModal() != wx.ID_OK:
                 return
         job = JobDialog(self.page, "Setting the gain", "Getting ready. Do not talk yet.",
-                        self._begin, server.action_autogain_stop, ticks=False)
+                        self._begin, server.action_autogain_stop, stop_label="Cancel",
+                        ticks=False)
         with job:
             st = job.run() or {}
         if not st.get("ok"):
