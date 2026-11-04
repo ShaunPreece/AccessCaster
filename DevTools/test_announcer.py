@@ -490,12 +490,8 @@ announcer.flush_pending(st)
 check("and nothing is said inside the wait", SPOKEN, [])
 st["enc_turn_at"] = time.monotonic() - (announcer._ENC_DEAD_S + 0.05)
 announcer.flush_pending(st)
-check("a turn that moved nothing says so", SPOKEN, ["Encoder not linked to anything"])
-
-SPOKEN.clear()
-st["enc_turn_at"] = time.monotonic() - (announcer._ENC_DEAD_S + 0.05)
-announcer.flush_pending(st)
-check("not repeated within the quiet gap", SPOKEN, [])
+# With no channel selected the encoder is put back without a word (encoder_home).
+check("a turn that moved nothing with no channel selected says nothing", SPOKEN, [])
 
 # When we know WHICH channel is holding the encoder, name it - and name what that channel HAS, never
 # what it lacks. A phrase like "SMART pads is selected and has nothing..." breaks that, and lands on
@@ -650,9 +646,6 @@ check("so nothing says 'not linked'", SPOKEN, [])
 SPOKEN.clear()
 announcer.handle_report(encsig_packet(1), st)
 check("an upward turn at 0 is still watched", st.get("enc_turn_at") is not None, True)
-st["enc_turn_at"] = time.monotonic() - (announcer._ENC_DEAD_S + 0.05)
-announcer.flush_pending(st)
-check("and reported when nothing moves", SPOKEN, ["Encoder not linked to anything"])
 
 # Same at the top of the range.
 st = fresh_st()
@@ -724,6 +717,15 @@ SPOKEN.clear()
 announcer.handle_report(chansel_packet(-1), st)
 check("and deselecting says the encoder is back on levels",
       SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
+
+# THE APP'S OWN DOUBLE PRESS (server.action_reset_encoder) says one sentence of its own, so the two
+# selection pushes it causes are not spoken over it.
+SPOKEN.clear()
+announcer.mark_self_write("channel_selected")
+announcer.handle_report(chansel_packet(0), st)
+announcer.handle_report(chansel_packet(-1), st)
+check("our own select and deselect are not spoken", SPOKEN, [])
+announcer._self_writes.pop("channel_selected", None)
 
 # A PHANTOM "LEVELS" ANNOUNCEMENT AT STARTUP. The pushed stream reports CHANGES, so with no
 # selection known the desk's first push of the resting value (-1, nothing selected) reads as one, and

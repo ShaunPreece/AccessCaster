@@ -38,6 +38,7 @@ writes to the file. That is also what keeps it a SINGLE-WRITER file.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import faulthandler
 import os
@@ -283,6 +284,21 @@ def _roll() -> None:
     _fh = open(path, "a", encoding="utf-8", errors="replace")
     _size = 0
     _bind_faulthandler()
+
+
+@contextlib.contextmanager
+def handled_native_exceptions():
+    """faulthandler off around a native call that raises and catches a Windows exception of its
+    own. faulthandler hears every exception with the error bit set, handled or not, and logs each
+    as a fatal one with every thread's stack."""
+    was = faulthandler.is_enabled()
+    if was:
+        faulthandler.disable()
+    try:
+        yield
+    finally:
+        if was:
+            _bind_faulthandler()
 
 
 def _bind_faulthandler() -> None:

@@ -139,12 +139,18 @@ def main() -> int:
                        pad_shortcuts.fire(str(fx)), want=f"{name} off.")
 
         print("\nBANK STEPPING")
-        soundpad.select_bank(0)
+        filled = pad_shortcuts._filled_banks()
+        soundpad.select_bank(filled[0])
         time.sleep(0.4)
-        check_said("bank down at the first bank refuses",
-                   pad_shortcuts.bank_step("down"), contains="first bank")
-        check_said("bank up moves", pad_shortcuts.bank_step("up"), want="Bank 2.")
-        check_said("and the desk model followed it", pad_shortcuts.current_bank(), want=1)
+        check_said("bank down at the first bank with pads refuses",
+                   pad_shortcuts.bank_step("down"), contains="first bank with pads")
+        if len(filled) > 1:
+            check_said("bank up moves to the next bank with pads",
+                       pad_shortcuts.bank_step("up"), want=f"Bank {filled[1] + 1}.")
+            check_said("and the desk model followed it", pad_shortcuts.current_bank(),
+                       want=filled[1])
+        else:
+            print("only one bank has pads on it; skipping the step up")
 
         print("\nREFUSALS")
         check_said("a slot the desk does not have",

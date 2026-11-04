@@ -284,52 +284,6 @@ class FaderSpec:
 
 
 @dataclass(frozen=True)
-class InputStripSpec:
-    """Flexible input-source strips for the older by-NAME routing view.
-
-    This is the older representation of fader assignment, consumed by server.read_routing_live's
-    `input_sources`. It exposes the reassignable strips by a fixed NAME and offers a small source
-    palette to drop onto them. The device-aware fader_model (FaderSpec) is the primary, INDEX-based
-    view.
-
-      strips  : (key, vec_index, label) per reassignable strip. `vec_index` is the strip's
-                position in the channelInputSource vector, written with set_fader_source.
-      sources : (code, label) source palette. `code` is a source code (DeviceModel.source_codes).
-
-    A device that uses ONLY the index-based fader_model leaves this EMPTY (the default). The Duo
-    does, because its flexible strips sit at different vector positions. With an empty spec the
-    by-name read reports nothing.
-    """
-    strips: tuple = ()
-    sources: tuple = ()
-
-    @property
-    def strip_vec_index(self) -> dict:
-        """{strip key: channelInputSource vector index}."""
-        return {k: idx for k, idx, _lab in self.strips}
-
-    @property
-    def strip_label(self) -> dict:
-        """{strip key: UI label}."""
-        return {k: lab for k, _idx, lab in self.strips}
-
-    @property
-    def source_palette(self) -> list:
-        """The droppable-source palette as [{code, label}] in display order."""
-        return [{"code": code, "label": lab} for code, lab in self.sources]
-
-    @property
-    def source_label(self) -> dict:
-        """{source code: label} for the palette."""
-        return {code: lab for code, lab in self.sources}
-
-    @property
-    def valid_source_codes(self) -> frozenset:
-        """The set of source codes a strip may be set to (for validating a write)."""
-        return frozenset(code for code, _lab in self.sources)
-
-
-@dataclass(frozen=True)
 class HeadphoneTypeSpec:
     """Per-output 'headphone type' (amp profile) setting for one device.
 
@@ -614,32 +568,6 @@ DUO_FADERS = FaderSpec(
 )
 
 
-# --- Input-strip specs (see InputStripSpec). Defined before DeviceModel so it can default to the
-# Pro II shape. --------------------------------------------------------------------------------------
-# Pro II: the five reassignable strips sit on faders 5 to 9 (vector indices 4 to 8); mics 1 to 4
-# (faders 1 to 4) are fixed XLR inputs and are not listed.
-PRO2_INPUT_STRIPS = InputStripSpec(
-    strips=(
-        ("Bluetooth", 4, "Fader 5 source"),
-        ("SMARTpads", 5, "Fader 6 source"),
-        ("USB1", 6, "Fader 7 source (virtual)"),
-        ("Chat", 7, "Fader 8 source (virtual)"),
-        ("USB2", 8, "Fader 9 source (virtual)"),
-    ),
-    sources=(
-        (10, "Bluetooth"),
-        (7, "USB 1 (Main Stereo)"),
-        (8, "Chat"),
-        (9, "USB 2 (Secondary)"),
-        (11, "SMART pads"),
-        (16, "CallMe 1"),
-    ),
-)
-
-# Duo: EMPTY - it reassigns through the index-based FaderSpec only. See InputStripSpec.
-DUO_INPUT_STRIPS = InputStripSpec()
-
-
 @dataclass(frozen=True)
 class DeviceModel:
     product_id: int
@@ -680,7 +608,6 @@ class DeviceModel:
     # The specs below default to the Pro II shape.
     pad: PadSpec = PadSpec(pads_per_bank=8)
     fader: FaderSpec = PRO2_FADERS
-    input_strips: InputStripSpec = PRO2_INPUT_STRIPS
     headphones: HeadphoneTypeSpec = HEADPHONE_TYPES
 
     # --- Where a channel's INPUT values live -------------------------------------------------
@@ -865,7 +792,6 @@ PRO2 = DeviceModel(
     expanded_ui_channels=EXPANDED_UI_CHANNELS,
     pad=PadSpec(pads_per_bank=8),   # 8 pads/bank x 8 banks = 64 slots; system pads 56-63
     fader=PRO2_FADERS,
-    input_strips=PRO2_INPUT_STRIPS,
 )
 
 # --- Duo ----------------------------------------------------------------------------------------
@@ -922,7 +848,6 @@ DUO = DeviceModel(
     # 6 pads/bank x 8 banks = 48 slots; system pads at padIdx 42-47 (bank 8).
     pad=PadSpec(pads_per_bank=6),
     fader=DUO_FADERS,
-    input_strips=DUO_INPUT_STRIPS,
 )
 
 DEVICES = {PID_PRO2: PRO2, PID_DUO: DUO}

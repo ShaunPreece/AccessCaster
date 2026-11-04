@@ -259,17 +259,6 @@ def read_last_error(blob: bytes):
     return rcp_read.block_value(blob, "SHOWCONTROL", "showControlLastError")
 
 
-def describe(blob: bytes) -> dict:
-    """Everything the Shows section of the page needs, from one dump."""
-    shows = read_shows(blob)
-    current = read_current(blob)
-    return {
-        "shows": shows,
-        "current": current,
-        "count": len(shows),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Writing. One command field each, and NOT ONE OF THEM VERIFIES ITSELF (trap 4).
 

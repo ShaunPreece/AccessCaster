@@ -15,6 +15,7 @@ import datetime
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import devices
 import server
@@ -73,6 +74,7 @@ class FakeFrame:
         self.window = wx.Frame(None)
         self.host = wx.Panel(self.window)
         self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
         self.tree = wx.TreeCtrl(self.window)
         self.desk = FakeDesk()
         self.said = []
@@ -454,4 +456,5 @@ with as_device(devices.PRO2):
 
     frame.window.Destroy()
 
+_a11y.check_windows("Pads")
 sys.exit(_testkit.finish())

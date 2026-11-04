@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import server
 import wx
@@ -205,4 +206,5 @@ check_true("no heading line reaches the text", not any(line.startswith("#")
                                                        for _k, _t, text in topics
                                                        for line in text.splitlines()))
 
+_a11y.check_windows("App settings")
 sys.exit(_testkit.finish())

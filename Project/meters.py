@@ -530,27 +530,6 @@ FIXED_LEVEL_NOTE = ("Windows cannot change this device's level. Use the channel'
                     "unit, or this app's own level control.")
 
 
-def _default_endpoint_name(flow: int) -> str:
-    """Windows' default endpoint for one data flow (console role), by friendly name, or ""."""
-    comtypes.CoInitialize()
-    try:
-        enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator, interface=IMMDeviceEnumerator)
-        return _friendly_name(enum.GetDefaultAudioEndpoint(flow, 0))
-    except Exception:
-        return ""
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
-
-
-def default_playback_name() -> str:
-    """Windows' default playback device's friendly name, or "". An unset announcer output means
-    this device, and when it is the desk, speech travels into the mix and the recording."""
-    return _default_endpoint_name(RENDER)
-
-
 def _volume_interface(endpoint_id: str):
     """(device, IAudioEndpointVolume) for one endpoint. COM is per-thread, so the caller owns the
     CoInitialize/CoUninitialize pair around this."""

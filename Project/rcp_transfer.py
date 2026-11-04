@@ -108,29 +108,6 @@ def write_at(key, name: str, kind: str, value) -> int:
     return send_record(build_at(key, name, kind, value))
 
 
-# The selector forms below write to a POSITION THE CALLER NAMES. They are for probes that mean to
-# address one selector deliberately and for the byte-for-byte selftest; app code addresses by key.
-
-def build_global_prop_int(name: str, selector: int, value: int) -> bytes:
-    """An integer property at root child `selector`."""
-    return build_record(name, "int", value, [selector])
-
-
-def build_global_prop_string(name: str, value: str, selector: int) -> bytes:
-    """A string property at root child `selector`."""
-    return build_record(name, "str", value, [selector])
-
-
-def build_global_prop_bool(name: str, on: bool, selector: int) -> bytes:
-    """A compact boolean property at root child `selector`."""
-    return build_record(name, "bool", on, [selector])
-
-
-def build_global_prop_float(name: str, selector: int, value: float) -> bytes:
-    """A 64-bit float property at root child `selector`."""
-    return build_record(name, "float", value, [selector])
-
-
 def build_path_prop_int(name: str, value: int, path) -> bytes:
     """An integer property at a tree path the caller read off a fresh dump."""
     return build_record(name, "int", value, path)

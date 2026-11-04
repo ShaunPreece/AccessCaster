@@ -12,7 +12,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Number, Slider, Switch
 from native.dialogs import SpeakingDialog, confirm
-from native.pages import group, labelled
+from native.pages import group, labelled, reading_box
 
 READ_ONLY = "Editing SMART pads is not enabled on this device yet."
 DEFAULT_MAPPING = ("This pad is on the default mapping, so this does nothing. Turn on the custom "
@@ -335,7 +335,7 @@ class ChangeDialog(SpeakingDialog):
         self.sound_line = wx.BoxSizer(wx.HORIZONTAL)
         self.sound_line.Add(wx.StaticText(self, label="Sound file"), 0,
                             wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
-        self.file = wx.TextCtrl(self, value="None chosen", size=(260, -1), style=wx.TE_READONLY)
+        self.file = reading_box(self, width=260, height=None, value="None chosen")
         a11y.describe(self.file, "WAV or MP3, written to the pad exactly as it is.")
         self.sound_line.Add(self.file, 0, wx.RIGHT, 8)
         self.choose = wx.Button(self, label="Choose a file")

@@ -512,21 +512,50 @@ def slot(target: str) -> dict:
     return fire_pad(bank * per_bank + slot - 1)
 
 
-def bank_step(target: str) -> dict:
-    """Move down or up a pad bank, and say where you have landed.
+def _filled_banks() -> list:
+    """The user banks with a pad on them, 0-based, from the pad map: read again first when a pad
+    edit has made it wrong, or when there is none yet. The system bank is never among them."""
+    if _pads_dirty.is_set():
+        _pads_dirty.clear()
+        refresh_pads()
+    with _pad_lock:
+        entries = dict(_pad_map)
+    if not entries:
+        entries = refresh_pads()
+    spec = devices.get_active_device().pad
+    return sorted({pad_idx // spec.pads_per_bank for pad_idx, (_pos, _name, pad_type, _mode)
+                   in entries.items()
+                   if pad_idx is not None and pad_idx < spec.max_user_pads
+                   and pad_type != soundpad.SYSTEM_PAD_TYPE})
 
-    CLAMPS AT THE ENDS RATHER THAN WRAPPING. Wrapping from the last bank to the first is silent and
+
+def bank_step(target: str) -> dict:
+    """Move to the next or previous bank with a pad on it, and say where you have landed.
+
+    EMPTY BANKS ARE SKIPPED, and so is the system bank: from a shortcut a pad can only be played,
+    and an empty bank has nothing to play. The desk's own bank buttons add one empty spare, which is
+    there for putting a pad on.
+
+    STOPS AT THE ENDS RATHER THAN WRAPPING. Wrapping from the last bank to the first is silent and
     disorienting when you cannot see the desk: you press once more expecting nothing and every
     number key is suddenly a different sound."""
     step = -1 if str(target).strip() == "down" else 1
-    banks = devices.get_active_device().pad.system_bank
     bank = current_bank()
     if bank is None:
         return _said(_BANK_UNKNOWN, ok=False)
-    want = max(0, min(banks - 1, bank + step))
-    if want == bank:
-        return _said(f"Bank {bank + 1} already, and that is the "
-                        f"{'first' if step < 0 else 'last'} bank.")
+    try:
+        filled = _filled_banks()
+    except Exception as exc:
+        return _said(f"The pads could not be read: {exc}", ok=False)
+    if not filled:
+        return _said("There are no pads on any bank yet.", ok=False)
+    ahead = [b for b in filled if (b > bank if step > 0 else b < bank)]
+    if not ahead:
+        where = "last" if step > 0 else "first"
+        if bank in filled:
+            return _said(f"Bank {bank + 1} already, and that is the {where} bank with pads on it.")
+        return _said(f"No bank {'after' if step > 0 else 'before'} this one has pads on it.")
+    want = ahead[0] if step > 0 else ahead[-1]
     _release_held_pads()
     try:
         with _desk():
@@ -536,11 +565,6 @@ def bank_step(target: str) -> dict:
     except Exception as exc:
         return _said(f"The bank would not change: {exc}", ok=False)
     _maybe_refresh_pads()
-    # The system bank is the video switching pads for a paired RODECaster Video, not sounds anyone
-    # assigned, so say so: the number keys still work there and would otherwise fire "Scene A" with
-    # no warning.
-    if want == banks - 1:
-        return _said(f"Bank {want + 1}, the video switching pads.")
     return _said(f"Bank {want + 1}.")
 
 

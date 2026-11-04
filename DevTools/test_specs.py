@@ -85,8 +85,8 @@ for label, path, captured in [
 
 # The builders must still emit those bytes. rcp_transfer._selftest checks the whole records against
 # the captures; this checks the ADDRESS part specifically, so a regression here names itself.
-check_true("build_global_prop_int addresses by path",
-           rcp_transfer.build_global_prop_int("x", 0x1C, 0)[5:10]
+check_true("a root child addresses by path",
+           rcp_transfer.build_record("x", "int", 0, [0x1C])[5:10]
            == model_tree.encode_path([0x1C]), "global address drifted")
 check_true("a two-byte index addresses by path",
            rcp_transfer.build_record("x", "int", 0, [0x026E])[5:11]

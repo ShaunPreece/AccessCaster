@@ -515,9 +515,11 @@ def _run_out(arg: str) -> dict:
                 now = bool(s.get("value"))
         return server.action_set_output_mute(which, not now)
     if what == "automute":
-        live = server.read_routing_live()
-        key = "monitor_auto_mute" if which == "monitor" else "bt_auto_mute"
-        return server.action_set_auto_mute(which, not bool(live.get(key)))
+        try:
+            now = server.read_auto_mute(which)
+        except Exception as exc:
+            return _fail(f"Could not read the auto-mute: {exc}")
+        return server.action_set_auto_mute(which, not now)
     return _fail(f"Unknown output command {what}.")
 
 

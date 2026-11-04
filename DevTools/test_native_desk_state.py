@@ -15,6 +15,7 @@ import re
 import sys
 
 import _bootstrap  # puts Project/ on sys.path
+import _a11y
 import _testkit
 import channels
 import desk_live
@@ -136,4 +137,5 @@ for label, names in (("Hardware", server.HARDWARE_PROPS),
     check(f"{label} follows only published properties", sorted(set(names) - published), [])
 
 owner.Destroy()
+_a11y.check_windows("Desk state")
 sys.exit(_testkit.finish())

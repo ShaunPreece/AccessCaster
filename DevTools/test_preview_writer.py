@@ -106,6 +106,11 @@ with as_device(devices.PRO2):
         reply = writer.submit(17, "echoMix", 0.6, "float")
         check_true("and a failed write is reported by the next one",
                    not reply["ok"] and "no longer there" in reply["message"])
+        # That submit's own write fails too. Wait for it inside the fake: left to run after the
+        # patch is undone, the thread calls the real writer, which opens the desk during shutdown.
+        deadline = time.monotonic() + 2
+        while writer._failure is None and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     writer = server._PreviewWriter()
     writer._pending = {(17, "echoMix"): (0.5, "float"), (5, "robotMix"): (0.2, "float")}

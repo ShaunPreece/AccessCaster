@@ -64,7 +64,7 @@ def run(action, reads):
 
 
 reply, sent = run(server.action_scan_wifi, [net_blob("Home", "10.0.0.2")])
-check("a joined unit is not scanned", (reply["ok"], reply.get("joined"), sent), (False, True, []))
+check("a joined unit is not scanned", (reply["ok"], sent), (False, []))
 check_in("and the refusal says to disconnect", "Disconnect", reply["message"])
 old = net_blob(numbered=["Stale----PSK"])
 one = net_blob(numbered=["A----PSK"])

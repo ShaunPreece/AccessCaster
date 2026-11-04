@@ -84,8 +84,9 @@ def uuid_direct() -> str | None:
 
 
 def uuid_via_app() -> str | None:
-    """The app's own answer, so the `app` layer never opens a competing handle of ours."""
-    return (server.read_show_state().get("current") or {}).get("uuid")
+    """Read under the app's own lock, so the `app` layer never opens a competing handle of ours."""
+    with server._hid_lock:
+        return shows.read_current(rcp_read.read_model_stable(fresh=True)).get("uuid")
 
 
 class Load:
@@ -317,7 +318,7 @@ def main() -> int:
     global server
     server = _desk.service(start="app" in layers)
     if "app" in layers:
-        probe = server.read_show_state()
+        probe = server.read_backup_storage()
         if not probe.get("ok"):
             print(f"The app's service could not read the desk: {probe.get('message')}")
             return 2

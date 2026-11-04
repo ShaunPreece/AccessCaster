@@ -8,7 +8,7 @@ server's business; the list only says what a backup can do.
 
 The backups are read once the desk state has first read the desk, on F5, after every job here, and
 once the desk has pushed a change to the shows or its drive (`FollowDesk`): two model dumps
-(`read_backups`, `read_show_state`), never on show.
+(`read_backups`, `read_backup_storage`), never on show.
 """
 import datetime
 
@@ -35,7 +35,7 @@ APP_SETTINGS = ("Your keyboard shortcuts and other AccessCaster preferences are 
 
 
 def _read():
-    return {"backups": server.read_backups(), "shows": server.read_show_state(),
+    return {"backups": server.read_backups(), "shows": server.read_backup_storage(),
             "baseline": server.baseline_status()}
 
 

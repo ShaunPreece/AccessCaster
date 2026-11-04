@@ -39,8 +39,6 @@ PORTABLE = (
     "announcer_record_tones",      # an export from before the three-way choice
     "record_mute_announcer",
     "clip_warning",
-    "meter_clip_sound",
-    "meter_clip_db",
     "callme_contacts",
     "callme_auto_extend",
     "callme_ringtone",

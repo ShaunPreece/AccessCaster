@@ -1,6 +1,6 @@
 """The show commands driven against a SIMULATED desk, faults included.
 
-WHY THIS EXISTS. All four commands are confirmed on a desk, but the FAULTS cannot be staged on
+WHY THIS EXISTS. All the show commands are confirmed on a desk, but the FAULTS cannot be staged on
 one: a desk that takes a command and silently does nothing, a delete that does not delete, an
 error code nobody has seen. Those are the branches that decide whether the app tells the
 truth. This drives the REAL `server.action_*` functions
@@ -198,13 +198,17 @@ def reset_desk():
 install()
 
 # ---------------------------------------------------------------------------
+# The export every backup runs: Back up the unit now, the reset's backup first, the clean restore.
+def export():
+    return server._export_and_wait(lambda message: None, "Exporting")
+
+
 print("export")
 reset_desk()
-res = run_job(server.action_show_export())
+res = export()
 check("export reports success", res["ok"], True)
 check("a backup really was added", len(DESK.backups), 3)
-check_in("and it says how many there are now", "3 backups", res["message"])
-check_in("and warns that each one costs space", "megabytes", res["message"])
+check("and it names the new one", res["show"]["snapshot"], 3)
 # THE CASE A UUID CHECK GETS WRONG: the new backup shares its uuid with the two already there, so
 # anything detecting it by uuid sees nothing and calls a good export a failure.
 check("the new backup shares the others' uuid", len({b["uuid"] for b in DESK.backups}), 1)
@@ -215,7 +219,7 @@ print("no storage: refuse BEFORE sending, do not ask the impossible")
 # at all, every CLEAN profile restore would do it.
 reset_desk()
 DESK.storage = False
-res = run_job(server.action_show_export())
+res = export()
 check("export refuses when there is nowhere to write", res["ok"], False)
 check("and NOTHING was sent to the desk", DESK.calls, [])
 check_in("and it says why", "no memory card or usb drive", res["message"])
@@ -237,7 +241,7 @@ check_in("and keeps a copy of the factory pads", "Kept the factory pads.", res["
 print("export that silently does nothing")
 reset_desk()
 DESK.export_does_nothing = True
-res = run_job(server.action_show_export())
+res = export()
 check("a silent no-op is reported as a failure", res["ok"], False)
 check_in("and says what to check", "drive", res["message"])
 
@@ -435,12 +439,12 @@ check("no reset was sent", "reset" in DESK.calls, False)
 print("one job at a time")
 reset_desk()
 # A REAL job is held open rather than the state flag being poked, so this exercises the actual
-# claim in _BackgroundJob.start. All four show commands share one job state because they are
+# claim in _BackgroundJob.start. All the show commands share one job state because they are
 # mutually exclusive on the desk.
 _held = threading.Event()
 server._show_job.start(lambda job: (_held.wait(10), {"ok": True, "message": "held"})[1],
                        message="holding the job open")
-busy = server.action_show_export()
+busy = server.action_show_import(1)
 check("a second command is refused while one runs", busy["ok"], False)
 check_in("and says why", "already running", busy["message"])
 _held.set()
@@ -458,11 +462,10 @@ CAPLESS = dataclasses.replace(devices.DUO, name="RODECaster Nocaps",
                               caps=devices.DUO.caps - {"shows"})
 check("the synthetic desk really lacks the cap", "shows" in CAPLESS.caps, False)
 with as_device(CAPLESS):
-    gate = server.action_show_export()
-    check("a desk without the cap refuses to export", gate["ok"], False)
+    gate = server.action_show_reset()
+    check("a desk without the cap refuses to reset", gate["ok"], False)
     check_in("naming the device", "Nocaps", gate["message"])
     check_in("and saying the reset is why it will not guess", "factory reset", gate["message"])
-    check("it refuses to reset", server.action_show_reset()["ok"], False)
     check("it refuses to import", server.action_show_import(1)["ok"], False)
     check("nothing was sent to it", DESK.calls, [])
     # A CLEAN restore is refused up front rather than quietly downgraded to a merge: somebody who
@@ -543,6 +546,6 @@ check("nothing matching arrived", listener.wait_for("showControlExport", 0.5), N
 playing.set()
 check("and the wait ended at its timeout", time.monotonic() - began < 1.0, True)
 
-print("REMEMBER: this proves the decisions, not the bytes. All four commands are confirmed on a "
+print("REMEMBER: this proves the decisions, not the bytes. All the show commands are confirmed on a "
       "desk; the FAULTS above are what only a fake desk can stage.")
 raise SystemExit(_testkit.finish())

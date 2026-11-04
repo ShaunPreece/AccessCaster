@@ -38,10 +38,6 @@ def milliseconds(value):
     return f"{value} milliseconds"
 
 
-def _percent(level):
-    return None if level is None else round(level * 100)
-
-
 class MasterMixPage(scrolled.ScrolledPanel):
     def __init__(self, section, model, previous=None):
         super().__init__(section.frame.host)

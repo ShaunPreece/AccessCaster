@@ -492,10 +492,8 @@ class IncomingPage(wx.Panel):
         self.ringtone = Switch(self, parent, sizer, "Ring for incoming calls",
                                server.action_callme_ringtone, *section.field("ringtone"),
                                guard=section.unread)
-        self.code = labelled(parent, sizer, "Your CallMe code", lambda p: wx.TextCtrl(
-            p, size=(260, -1), style=wx.TE_READONLY))
-        self.link = labelled(parent, sizer, "Guest link", lambda p: wx.TextCtrl(
-            p, size=(460, -1), style=wx.TE_READONLY))
+        self.code = read_only(parent, sizer, "Your CallMe code", height=None, width=260)
+        self.link = read_only(parent, sizer, "Guest link", height=None)
         a11y.describe(self.link, "Opens in any web browser. Nothing to install.")
         self.copy = wx.Button(parent, label="Copy the guest link")
         self.copy.Bind(wx.EVT_BUTTON, self._on_copy)

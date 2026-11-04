@@ -264,6 +264,9 @@ def network_facts(data):
                                if wifi.get("ssid") else "None set") + ".",
             "WiFi connected: " + ("Yes" if wifi.get("connected") else "No") + ".",
             f"WiFi IP address: {wifi.get('ip') or 'None'}.",
+            f"WiFi gateway: {wifi.get('gateway') or 'None'}.",
+            "WiFi address assigned: " + {True: "Automatically (DHCP)", False: "Fixed"}.get(
+                wifi.get("dhcp"), "Unknown") + ".",
             f"WiFi networks last scanned for: {scan(wifi.get('scan'))}"]
     visible = bt.get("visible")
     lines += [

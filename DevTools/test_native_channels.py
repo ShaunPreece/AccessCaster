@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import channels
 import server
@@ -32,6 +33,7 @@ class FakeFrame:
         self.window = wx.Frame(None)
         self.host = wx.Panel(self.window)
         self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
         self.tree = wx.TreeCtrl(self.window)
         self.desk = FakeDesk(data)
         self.said = []
@@ -121,4 +123,5 @@ check_true("and reads the record when it is built", second.tabs[0].built
            and second.tabs[0].mute.box.GetValue() is True)
 
 frame.window.Destroy()
+_a11y.check_windows("Channels")
 sys.exit(_testkit.finish())

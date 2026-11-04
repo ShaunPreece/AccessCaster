@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import server
 import wx
@@ -182,4 +183,5 @@ incoming._on_copy(None)
 check("no link to copy says why", frame.said[-1], callme_section.NO_LINK)
 
 frame.window.Destroy()
+_a11y.check_windows("CallMe")
 sys.exit(_testkit.finish())

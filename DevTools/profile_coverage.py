@@ -310,6 +310,10 @@ NOT_SAVED = {
                               "It self-clears when the desk consumes it, and restoring a "
                               "number here would delete somebody's take. It IS writable, which is "
                               "exactly why the verdict has to be deliberate rather than absent."),
+    "systemChannelSelected": ("ok", "LIVE STATE: which channel button holds the encoder. Written "
+                                    "only as a select and deselect, to put the encoder back on "
+                                    "the virtual faders and monitor; a restore that selected a "
+                                    "channel would take the encoder off them."),
     # ---- the desk's OWN show backup, all four writable ------------------------------------
     # All four are commands, and the verdicts have to be deliberate rather than absent because one
     # of them is a factory reset: a profile that "restored" it would wipe the desk it was restoring.

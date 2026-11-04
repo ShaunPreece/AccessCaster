@@ -100,7 +100,7 @@ CONTEXT_ROLE = {
     "read_channels": "read", "read_matrix_state": "read", "read_matrix_levels": "read",
     "read_output_modes": "read", "read_pads_live": "read", "pad_positions": "read",
     "_fields_by_padidx": "read", "first": "read", "read_device_status": "read",
-    "strip_vector": "read", "read_routing_live": "read",
+    "strip_vector": "read",
     # writes
     "PROCESSING_PROPS": "write", "PRESET_EXTRA_FLOAT_PROPS": "write",
     "PRESET_FLOAT_PROPS": "write", "PROCESSING_MODULE_ON": "write", "CHANNEL_PROP": "write",
@@ -120,7 +120,7 @@ CONTEXT_ROLE = {
     # both (UI specs and device tables describe a property we read AND write)
     "PROCESSING_CONTROLS": "both", "_PRESET_PROPS": "both", "CHANNEL_FX_PARAMS": "both",
     "FX_BUILD_SPEC": "both", "FX_PARAM_LABELS": "both", "FX_PARAMS_BY_EFFECT": "both",
-    "PRO2": "both", "DUO": "both", "PRO2_INPUT_STRIPS": "both", "DUO_INPUT_STRIPS": "both",
+    "PRO2": "both", "DUO": "both",
     "PRO2_UI_CHANNELS": "both", "DUO_UI_CHANNELS": "both",
 }
 # Names the heuristics cannot place from their line alone.

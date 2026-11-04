@@ -374,7 +374,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   code; the block's own position never does. `DevTools/test_addressing.py` drives every write path
   against the saved Pro II 1.7.6 and 1.7.7 and Duo 1.7.3 layouts, checks each record is
   byte-identical to the address used before the lookup, checks every record follows a moved block,
-  and fails on any `build_global_prop_*` or literal path in `Project/` outside `rcp_transfer`.
+  and fails on any literal path in `Project/` outside `rcp_transfer`.
   - **THE LOOKUP IS THE STRAY GUARD.** It refuses a key the desk lacks and a property the node does
     not carry (`model_tree.AddressUnknown`). Every property the app writes is published on its node
     before the first write, on both desks, so a missing name means the wrong node.
@@ -559,18 +559,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **THAT IS ALSO THE CHEAPEST STRAY CHECK THERE IS** - count the BLOCK TYPES a name appears in,
   against that known-legitimate set - and it catches what an occurrence-count diff cannot, because
   it needs no before-snapshot.
-  `systemHapticSetting` in RECBUTTON has a known origin: the `build_global_prop_int` argument-order
-  mistake below, which turned a haptics write into selector 2. The `btVisible` copy was written up
+  `autoReconnect`'s real home is SIPADVANCED, beside the CallMe and Icecast settings: it is not a
+  Bluetooth setting, whatever its neighbours in SYSTEM suggested.
+  `systemHapticSetting` in RECBUTTON has a known origin: a haptics write sent to a selector by
+  number, with its arguments the wrong way round, which landed on selector 2. The `btVisible` copy was written up
   in `server.py` as possibly belonging to a sibling RODE product sharing this schema - reasonable,
   and wrong.
   **A STRAY THEREFORE COSTS MORE THAN A BAD READING: IT GROWS A THEORY.** Nobody doubts a property
   they can see in the dump, so the explanation gets written into the code and outlives the stray.
   When one is found, grep for anything written to explain it.
-- **`build_global_prop_int(name, selector, value)` takes the SELECTOR SECOND**, unlike
-  `build_global_prop_bool(name, on, selector)`. Getting them the wrong way round writes an arbitrary
-  value on an arbitrary selector; on 29th August 2026 that turned a haptics write into selector 2,
-  value 15. Those selector forms are for probes now; the app writes by key, and
-  `rcp_transfer.set_unit_setting(prop, value)` refuses anything not in `UNIT_SETTING_SEL`.
 - **An index past 0xFF needs NO special builder.** `build_record` passes the path to
   `build_address` whole and `encode_path` widens each index, so root child 258 is `02 02 01`, the
   form the desk itself uses for RECORDINGS (0x28F) and SHOWCONTROL (0x28E) on the Pro II.
@@ -2753,8 +2750,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
       encoderSignal | 00 | 01 0b 08 | 01 05 01 <int32 LE> | 01 ...    +1 clockwise, -1 anti
 
   `parse_push` returns it as a list of (value, kind) pairs. Read it as anything else and every turn
-  has a delta of 0, which `announcer._at_limit` treats as "do not know", so turning past 100% says
-  "Encoder not linked to anything". `test_announcer` builds the real composite and pins the delta.
+  has a delta of 0, which `announcer._at_limit` treats as "do not know", so turning past 100% reads
+  as a dead turn. `test_announcer` builds the real composite and pins the delta.
   The desk publishes eight composites: `encoderSignal`, `mixLinkRequest`, `mixUnlinkRequest`,
   `padRecordClear`, `padRecordMemoryFull`, `padRecordStateRequest`, `playerJumpToSample`,
   `sipSlotCallDisconnect`.
@@ -2764,9 +2761,19 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   press, stayed at 0 across two encoder presses, and returned to -1 only on a second press of the
   same channel button. So while a channel is selected the announcer must NOT advance its ring - doing
   so announced USB 1 and then Chat while the desk had never left Mic 1, and left `enc_pos` pointing
-  at an entry `announcer._at_limit` then read. **This is why there is no "Free the encoder" control**: it
-  wrote `systemChannelSelected` = -1 to undo something the desk already undoes, on the strength of a
-  docstring claiming a power cycle was the only way back. Do not rebuild it.
+  at an entry `announcer._at_limit` then read.
+
+- **THE ENCODER'S KNOWN POSITION IS A DOUBLE PRESS, AND -1 ALONE IS NOT ONE.** The touchscreen can
+  hold the encoder on a target with `systemChannelSelected` already -1 (it was turning Mic 1's gain,
+  Pro II, 4th November 2026), so writing -1 changes nothing. Writing 0 and then -1, a channel button
+  pressed twice, put it on the virtual faders and monitor: the next turn moved the monitor level.
+  That is `server.action_reset_encoder`, which `encoder_home` runs on a dead turn with no channel
+  selected, whatever announcements are on, and says nothing: the next turn works. It is not a
+  shortcut: telling someone a key exists is no better than telling them to press the channel button
+  twice. The strip is selected, never turned, so no gain moves.
+  **AN INJECTED `encoderSignal` TURN MOVES WHATEVER THE TOUCHSCREEN HAS SELECTED**, Mic 1's gain
+  included, so a probe that turns it (`DevTools/probe_encoder_bind.py`) runs only with the owner's
+  say-so. A software bank change and back did NOT leave the encoder dead (same day).
 
 - **AN ENCODER HOLD MUTES THE ENCODER'S RING TARGET, NEVER A CHANNEL-BUTTON SELECTION.** On a
   virtual fader it toggles `channelOutputMute`; on the monitor level, `outputMonMute`. With a

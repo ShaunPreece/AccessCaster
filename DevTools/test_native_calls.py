@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import wx
 from _testkit import check, check_true, patched
@@ -48,4 +49,5 @@ check("taps further apart than the delay each send", held(None, presses=3, every
       [1, 2, 3])
 
 frame.Destroy()
+_a11y.check_windows("Calls")
 sys.exit(_testkit.finish())

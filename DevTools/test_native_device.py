@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import server
 import wx
@@ -290,4 +291,5 @@ net.shown(ro)
 check("a read-only desk refuses the network writes", net._guard(),
       device_section.NETWORK_READ_ONLY)
 
+_a11y.check_windows("Device")
 sys.exit(_testkit.finish())

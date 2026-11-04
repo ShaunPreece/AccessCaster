@@ -242,31 +242,6 @@ class Number(_Field):
             self.control.SetValue(value)
 
 
-class Decimal(_Field):
-    """A number box for a value with a fractional step (a level in dB): `step` per arrow press,
-    shown to `digits` places. Otherwise as `Number`."""
-
-    def __init__(self, page, parent, sizer, label, lo, hi, step, digits, send, current, remember,
-                 description="", guard=None, accepted=None):
-        spin = labelled(parent, sizer, label, lambda p: wx.SpinCtrlDouble(
-            p, min=lo, max=hi, inc=step, size=(90, -1),
-            style=wx.SP_ARROW_KEYS | wx.TE_PROCESS_ENTER))
-        spin.SetDigits(digits)
-        super().__init__(page, spin, send, current, remember, description, guard, accepted)
-        spin.Bind(wx.EVT_SPINCTRLDOUBLE, self._on_change)
-
-    def set_range(self, lo, hi):
-        if (self.control.GetMin(), self.control.GetMax()) != (lo, hi):
-            self.control.SetRange(lo, hi)
-
-    def _get(self):
-        return self.control.GetValue()
-
-    def _put(self, value):
-        if value is not None and abs(self.control.GetValue() - value) > 1e-6:
-            self.control.SetValue(value)
-
-
 def set_choices(choice, labels):
     """Replace a wx.Choice's items only when they differ: replacing them under the focus makes the
     screen reader read the list again."""

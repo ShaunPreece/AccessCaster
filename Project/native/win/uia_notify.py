@@ -8,6 +8,8 @@ provider. Shared with Claudio, which carries the same helper.
 import ctypes
 from ctypes import wintypes
 
+import diagnostics
+
 HRESULT = ctypes.c_long
 LRESULT = ctypes.c_ssize_t
 S_OK = 0
@@ -179,7 +181,11 @@ class Notifier:
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if (msg == WM_GETOBJECT
                 and ctypes.c_long(lparam & 0xFFFFFFFF).value == UIA_ROOT_OBJECT_ID):
-            return _uia.UiaReturnRawElementProvider(hwnd, wparam, lparam, self._ptr)
+            # A reader's first WM_GETOBJECT arrives as an input-synchronous call, inside which COM
+            # refuses UIA's outgoing call with 0x8001010d (RPC_E_CANTCALLOUT_ININPUTSYNCCALL). UIA
+            # catches it and carries on; faulthandler would log it as a crash.
+            with diagnostics.handled_native_exceptions():
+                return _uia.UiaReturnRawElementProvider(hwnd, wparam, lparam, self._ptr)
         return _user32.CallWindowProcW(self._old_proc, hwnd, msg, wparam, lparam)
 
     def say(self, text, recent=False):

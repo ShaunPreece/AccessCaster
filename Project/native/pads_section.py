@@ -16,7 +16,7 @@ from native.calls import call
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import (FollowDesk, MessagePage, Page, labelled, page_body, select,
+from native.pages import (FollowDesk, MessagePage, Page, labelled, page_body, read_only, select,
                           set_items, set_text)
 
 TITLE = "SMART pads"
@@ -131,9 +131,8 @@ class PadsPage(wx.Panel):
         # Why pads cannot be changed, when they cannot: a read-only desk, or an effect pool the
         # desk needs tidied first. Hidden when there is nothing to say.
         self.grids = []          # the grid of each list item, as last shown
-        self.note = wx.TextCtrl(parent, size=(460, 80),
-                                style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL)
-        sizer.Add(self.note, 0, wx.ALL, 6)
+        self.note = read_only(parent, sizer, "Why the pads cannot be changed", height=80)
+        self.note_label = self.note.GetPrevSibling()
         self.show()
 
     @property
@@ -157,6 +156,7 @@ class PadsPage(wx.Panel):
         set_text(self.note, " ".join(notes))
         if self.note.IsShown() != bool(notes):
             self.note.Show(bool(notes))
+            self.note_label.Show(bool(notes))
             self.Layout()
 
     def _chosen(self):

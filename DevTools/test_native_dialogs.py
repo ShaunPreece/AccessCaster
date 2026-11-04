@@ -17,6 +17,7 @@ import pkgutil
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import native
 import wx
@@ -125,4 +126,5 @@ check("The update lands on what changed", first_focusable(dialog).GetValue(), "F
 dialog.Destroy()
 
 frame.Destroy()
+_a11y.check_windows("Dialogs")
 sys.exit(_testkit.finish())

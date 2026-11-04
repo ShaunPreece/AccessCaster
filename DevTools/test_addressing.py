@@ -286,8 +286,8 @@ for f in sorted(PROJECT.rglob("*.py")):
     if f.name == "rcp_transfer.py":
         continue
     for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-        if re.search(r"build_global_prop_|build_record\([^)]*\[0x", line):
+        if re.search(r"build_record\([^)]*\[0x", line):
             named.append(f"{f.name}:{n}")
-check("no build_global_prop_* or literal-path record outside rcp_transfer", named, [])
+check("no literal-path record outside rcp_transfer", named, [])
 
 sys.exit(_testkit.finish())

@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import server
 import wx
@@ -222,4 +223,5 @@ check_true("nothing was handed over", dialog.reply is None)
 dialog.Destroy()
 
 frame.window.Destroy()
+_a11y.check_windows("Backups")
 sys.exit(_testkit.finish())

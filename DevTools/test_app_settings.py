@@ -54,7 +54,7 @@ SAMPLE = {
     "hotkeys": REAL_HOTKEYS,
     "announcer_volume": 80,
     "announcer_levels": True,
-    "meter_clip_db": -3.0,
+    "clip_warning": False,
     "announcer_voice": "Hazel",
     "announcer_output": "Speakers (Nonexistent)",
     "applied_presets": {"Mic1": "Broadcast"},
@@ -73,12 +73,12 @@ for key in a.EXCLUDED:
     check(f"{key} is excluded", key not in exported["settings"], True)
 check("the shortcuts DID travel", "hotkeys" in exported["settings"], True)
 check("and so did the ordinary preferences",
-      all(k in exported["settings"] for k in ("announcer_volume", "meter_clip_db")), True)
+      all(k in exported["settings"] for k in ("announcer_volume", "clip_warning")), True)
 check("it is marked as ours", exported["marker"], a.MARKER)
 # A key absent from settings must be absent from the export, not exported as null: a null would
 # stamp over a real value on the machine it is imported onto.
 check("an unset preference is omitted rather than written as null",
-      "meter_clip_sound" not in exported["settings"], True)
+      "callme_ringtone" not in exported["settings"], True)
 
 print("\nA FILE THAT IS NOT OURS IS REFUSED, AND SAYS WHAT TO USE INSTEAD")
 check("a random JSON file is refused", bool(a.validate({"hello": 1})), True)

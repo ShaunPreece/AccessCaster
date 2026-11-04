@@ -240,15 +240,12 @@ _POT_LEVEL_MAX = 127.0
 _POT_COUNT = 4
 # TURNING WITH NOTHING BOUND. The encoder only adjusts a level while the desk has one bound to it,
 # and pressing the BANK buttons moves the screen to the pads page, which unbinds it.
-# In that state the desk still reports the rotation as `encoderSignal` but nothing moves,
-# so silence is technically correct and infuriating in practice. Say so instead: if a turn is followed
-# by no level change, announce that it is not linked. `encoderColour` corroborates it - it read 7 while
-# the encoder was driving a fader and -1 once it went inert - so we use that when the desk offers it.
+# In that state the desk still reports the rotation as `encoderSignal` but nothing moves. With no
+# channel selected, `encoder_home` puts it back on the virtual faders and monitor by itself; with
+# one selected, a turn the ring does not see names that channel, whose button gives the encoder back.
+# What the encoder is bound to is touchscreen state with no property of its own:
+# `systemChannelSelected` can read -1 while it turns a mic gain.
 _ENC_DEAD_S = 0.45     # a turn with no level change within this was a turn against nothing
-# WHAT THE ENCODER IS BOUND TO is touchscreen state with no property of its own, and the desk can
-# leave it bound to nothing with `systemChannelSelected` still at -1. These pushes are the candidates
-# for that state, so each change is logged as `desk.state` to line up against a dead turn.
-_TRACED_STATE = ("systemChannelSelected", "systemMixSelected", "padActiveEdit", "encoderColour")
 _ENC_DEAD_GAP_S = 4.0  # and do not repeat that message more often than this
 
 
@@ -310,9 +307,6 @@ def handle_push(push, st: dict) -> None:
     fval = val if kind == "float" else None
     # The strip when the addressed node is CHANNEL[strip], else -1.
     strip = node[1] if node and node[0] == "CHANNEL" and node[1] < 16 else -1
-    if name in _TRACED_STATE and val != was:
-        diagnostics.event("desk.state", name, value=val)
-
     if name == "selectedBank":
         if ival is not None and ival != was:
             _say(f"Bank {ival + 1}")
@@ -351,7 +345,7 @@ def handle_push(push, st: dict) -> None:
         # -1 = nothing selected, and the encoder is back on the levels ring. Anything else is a STRIP
         # INDEX: that channel is selected and the encoder now moves its gain. The channel buttons
         # emit no press edge of their own - this state change IS the event.
-        if ival is None or ival == was:
+        if ival is None or ival == was or is_self_echo("channel_selected"):
             return
         _say("Virtual faders and monitor. Encoder changes their levels" if ival < 0
                  else _selected_phrase(ival))
@@ -522,8 +516,6 @@ def seed(st: dict) -> None:
         if desk_model.pot_level(i) is not None:
             said[("headphone", i)] = desk_model.pot_level(i)
     st["said"] = said
-    for name in _TRACED_STATE:
-        diagnostics.event("desk.state", name, value=desk_model.first(name), at="start")
 
 
 def _pct(level):
@@ -746,8 +738,7 @@ def flush_pending(st: dict) -> None:
             if sel is not None and sel >= 0:
                 _say(_selected_phrase(sel)
                          + ". Press its channel button again for the fader and monitor levels")
-            else:
-                _say("Encoder not linked to anything")
+
     levels = st.get("levels")
     if levels and (time.monotonic() - st.get("levels_at", 0.0)) > _SETTLE_S:
         said = st.setdefault("said", {})
@@ -906,7 +897,7 @@ _HEARD = (frozenset({"selectedBank", "padActive", "mixLevelWithAnchor", "encoder
                      "systemChannelSelected", "inputMicrophoneGain", "inputDigitalGain",
                      "encoderColour", "faderLevel", "outputMonLevel", "potLevel", "mutePressed",
                      "soloPressed", "encoderPressed"})
-          | set(_STATE_PROPS) | set(_OUTPUT_MUTES) | set(_TRACED_STATE))
+          | set(_STATE_PROPS) | set(_OUTPUT_MUTES))
 
 
 def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:

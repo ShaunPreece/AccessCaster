@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _a11y
 import _testkit
 import announcer
 import recorder
@@ -321,4 +322,5 @@ check("its result has a dialog of its own", reports, ["Erased"])
 check_true("and the recorder is read again", reads)
 
 frame.window.Destroy()
+_a11y.check_windows("Recording")
 sys.exit(_testkit.finish())

@@ -1300,9 +1300,11 @@ and the same events can be INJECTED on report 0x03 (OUT). This is the basis of a
   - recButtonPressed
 
 CHANNEL-SELECT buttons emit no PRESS record (unlike mute and solo); the state
-change pushed as systemChannelSelected IS the event, as above. Do not use
-systemChannelSelected as a WRITE target: it does not reliably drive the screen, and
-it does not redirect processing writes, which are addressed by strip (4.4). An early
+change pushed as systemChannelSelected IS the event, as above. Written 0 and then -1
+(a channel button pressed twice), it puts the ENCODER on the virtual faders and
+monitor, overriding a target the touchscreen chose (Pro II, 4th November 2026). It is
+no other kind of WRITE target: it does not reliably drive the screen, and it does not
+redirect processing writes, which are addressed by strip (4.4). An early
 approach that tried to "select the channel, then write on a shared 0x1c" silently
 wrote everything to Mic1.
 
