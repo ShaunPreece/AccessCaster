@@ -947,9 +947,9 @@ def action_storage_erase(index: int) -> dict:
 # ----------------------------------------------------------------------------
 # CALLME - RODE's remote guests: hosting, answering and call state.
 #
-# The protocol and the wording are callme.py; this is the app side. Like the recorder, the state
-# comes from a PUSH heard by its own Watcher, so `read_callme_live` costs no device read and the
-# window can poll it, while `read_callme` does a dump and re-seeds the Watcher.
+# The protocol and the wording are callme.py; this is the app side. The state is the desk model's,
+# which the Watcher reads and adds its own memory to, so `read_callme_live` costs no device read and
+# the window can poll it, while `read_callme` does a dump, which the model adopts.
 
 _callme_watch = None
 # How long an answer is given to reach Active before the reply goes out without it. Measured at
@@ -984,13 +984,6 @@ def _callme_dump() -> bytes:
         return rcp_read.read_model()
 
 
-def _callme_note_dump(blob: bytes) -> None:
-    """Re-seed the Watcher from a dump this app has just taken."""
-    w = _callme_watcher()
-    if w is not None:
-        w.seed(blob)
-
-
 def _desk_network(blob: bytes) -> dict:
     """How the unit reaches the internet, read BY BLOCK (see read_network_status for why). A wifi
     address means joined; the radio being on does not."""
@@ -1002,22 +995,10 @@ def _desk_network(blob: bytes) -> dict:
             "wired": bool(wired), "online": bool(ip) or bool(wired)}
 
 
-# Whether the unit was online at the last dump this app took. CallMe's live poll reads no dump, and
-# the network changes rarely, so the page's readiness check uses the last one seen.
-_desk_online = None
-
-
-def _note_desk_network(blob: bytes) -> dict:
-    global _desk_online
-    net = _desk_network(blob)
-    _desk_online = net["online"]
-    return net
-
-
 def _callme_payload(d: dict) -> dict:
     """The page's reply: the state, plus the sentences the page shows, all worded here."""
     d = dict(d)
-    d["online"] = _desk_online
+    d["online"] = desk_model.online()
     w = _callme_watcher()
     if w is not None and "missed" not in d:
         d["missed"] = w.missed()        # a dump has no memory of a missed call; the Watcher does
@@ -1076,8 +1057,6 @@ def read_callme() -> dict:
     d = callme.read(blob)
     if not d.get("ok"):
         return d
-    _callme_note_dump(blob)
-    _note_desk_network(blob)
     return _callme_payload(d)
 
 
@@ -1092,15 +1071,13 @@ def read_callme_live() -> dict:
 
 
 def _callme_state_now():
-    """(state, control path) from the Watcher once it is seeded, else from a fresh dump. A hotkey
-    answer should not wait a second and a half for a dump the Watcher makes unnecessary."""
+    """(state, control path) from the Watcher once the model holds CallMe, else from a fresh dump.
+    A hotkey answer should not wait a second and a half for a dump the model makes unnecessary."""
     w = _callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is not None and w.control_path() is not None:
         return snap, w.control_path()
-    blob = _callme_dump()
-    _callme_note_dump(blob)
-    d, ctl, _slots = callme.read_all(blob)
+    d, ctl, _slots = callme.read_all(_callme_dump())
     return d, ctl
 
 
@@ -1127,7 +1104,6 @@ def action_callme_hosting(on: bool) -> dict:
                 settled = d.get("hosting") == on and (not on or d.get("code"))
                 if settled or time.monotonic() > deadline:
                     break
-        _callme_note_dump(blob)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change hosting: {exc}"}
     out = _callme_payload(d)
@@ -1868,7 +1844,7 @@ def device_overview() -> dict:
             # Always reported, unlike the exceptions above: whether the unit is online decides
             # whether CallMe and the firmware check can work at all. `callme_hosting` lets the
             # spoken summary call an offline unit a problem only when guests expect to reach it.
-            "network": dict(_note_desk_network(blob),
+            "network": dict(_desk_network(blob),
                             callme_hosting=bool(rcp_read.first(blob, "sipCallHostingEnabled"))),
             "faders": faders,
             "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,

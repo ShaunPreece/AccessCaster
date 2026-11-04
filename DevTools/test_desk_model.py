@@ -80,6 +80,16 @@ check("the monitor level, the bank, the selected channel, the record state, the 
        desk_model.record_state(), desk_model.firmware()), (0.5, 0, -1, 1, "1.7.7"))
 check_true("trusted once read with the listener up", desk_model.trusted())
 
+print("\nTHE UNIT ONLINE")
+check("unknown while the picture has no NETWORK block", desk_model.online(), None)
+NET = fake_model.node("Rodecaster", {}, [node("NETWORK", {"wifi": True, "wifiIpAddress": ""}),
+                                         node("SYSTEM", {"wiredConnected": False})])
+adopt(NET)
+check("offline with the radio on but no address", desk_model.online(), False)
+desk_model.apply_push((0,), "wifiIpAddress", "192.168.1.20", "str")
+check("online once wifi has an address", desk_model.online(), True)
+adopt(dump(mute1=True))
+
 print("\nA PUSH")
 was = desk_model.apply_push(STRIP1, "channelOutputMute", False, "bool")
 check("is applied, and answers the value it replaced", (desk_model.mutes()[1], was), (False, True))

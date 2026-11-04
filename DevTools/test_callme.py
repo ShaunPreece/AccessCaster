@@ -15,27 +15,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import callme
+import desk_live
+import desk_model
 from _testkit import check, decode_record
+from fake_model import node
 
 CTL = [664]
 SLOTS = [[659], [660], [661]]
 
 
-def watcher(slots=1):
-    """A Watcher seeded by hand, as `seed` would leave it, recording what it says."""
-    said = []
-    w = callme.Watcher(on_say=said.append)
-    w._state = {"ok": True, "hosting": True, "hosting_locked": False, "code": "AB12CD",
-                "link": callme.GUEST_LINK + "AB12CD", "incoming": None,
-                "slots": [callme._slot_view(i + 1, {"sipSlotCallState": "Idle"})
-                          for i in range(slots)]}
-    w._ctl, w._slots = CTL, SLOTS
-    return w, said
-
-
 DETAILS = [('{"id":5,"calltype":"rode","peeruri":"rode:x","peername":"Shaun"}', "str"),
            (True, "bool")]
 CLEARED = [("", "str"), (False, "bool")]
+
+# The fake desk the Watcher answers from: three call slots, then the control node, on a Lite plan.
+DESK_SLOTS = [[0], [1], [2]]
+DESK_CTL = [3]
+KIND = {bool: "bool", int: "int", float: "float", str: "str", list: "pair"}
+
+
+def watcher():
+    """A Watcher over a fake desk in the desk model, nothing ringing and hosting on code AB12CD,
+    recording what it says."""
+    desk_model._reset()
+    slot = {"sipSlotCallState": "Idle", "sipSlotCallAddress": "", "sipSlotCallUUID": "",
+            "sipSlotCallIsHost": False, "sipSlotCallBitrate": 0.0, "sipSlotCallPacketLoss": 0.0}
+    ctl = {"sipIncomingCallAccept": "", "sipIncomingCallDetails": CLEARED,
+           "sipCallHostingEnabled": True, "sipRodeCode": "AB12CD",
+           "sipCallHostingToggleEnabled": True, "sipRemainingWebCalltime": 300,
+           "sipLicenceMode": 0}
+    blob = node("Rodecaster", {}, [node("SIPSLOT", slot) for _ in DESK_SLOTS]
+                + [node("SIPCALLING", ctl)])
+    desk_model.dump_finished(desk_model.dump_starting(), blob)
+    said = []
+    return callme.Watcher(on_say=said.append), said
+
+
+def hear(w, path, name, value):
+    """One push, as the listener delivers it: applied to the model first, then heard."""
+    kind = KIND[type(value)]
+    was = desk_model.apply_push(path, name, value, kind)
+    w.apply(desk_live.Push(tuple(path), name, value, kind, None, was))
 DEFAULT_NAME = "RÃ\u0098DE-CallMe"      # "RØDE-CallMe" as the latin-1 decoder hands it over
 
 print("the answer record")
@@ -86,9 +106,9 @@ check("a line opening with a name is capitalised", callme.sentence("a guest is c
       "A guest is calling.")
 w, said = watcher()
 before = w.snapshot()["slots"][0]["ended"]
-w.apply(SLOTS[0], "sipSlotCallAddress", "rode:ZZ9QQ9")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"404 Not Found"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "rode:ZZ9QQ9")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"404 Not Found"}')
 check("each ending bumps the slot's count", w.snapshot()["slots"][0]["ended"], before + 1)
 
 print("parsing")
@@ -114,42 +134,42 @@ check("the plan, one fact to a line",
 
 print("a call answered on the touchscreen")
 w, said = watcher()
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 check("ringing is announced", said, ["CallMe call from Shaun."])
-w.apply(CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":0}', "str"), (False, "bool")])
-w.apply(CTL, "sipIncomingCallDetails", CLEARED)
-w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":0}', "str"), (False, "bool")])
+hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("answered: not 'missed', then connected", said[1:], ["Connected to Shaun."])
-w.apply(SLOTS[0], "sipSlotCallBitrate", 20457.48)
-w.apply(SLOTS[0], "sipSlotCallPacketLoss", 0.0)
+hear(w, DESK_SLOTS[0], "sipSlotCallBitrate", 20457.48)
+hear(w, DESK_SLOTS[0], "sipSlotCallPacketLoss", 0.0)
 check("quality is never spoken", said[1:], ["Connected to Shaun."])
 check("quality is kept", w.snapshot()["slots"][0]["bitrate_kbps"], 20)
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Remote drop"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Remote drop"}')
 check("the end and why", said[-1], "Call with Shaun ended: the guest hung up.")
 check("quality cleared after", w.snapshot()["slots"][0]["bitrate_kbps"], None)
 
 print("a call answered from this app")
 w, said = watcher()
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 w.note_handled(5)
 w.quiet_connect(0, True)
-w.apply(CTL, "sipIncomingCallDetails", CLEARED)
-w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("the reply says connected, the watcher does not", said, ["CallMe call from Shaun."])
 
 print("a call hung up from this app")
 w, said = watcher()
-w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 said.clear()
 w.quiet_end(0, True)
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop"}')
 check("the reply says hung up, the watcher does not", said, [])
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop"}')
 check("a hang-up on the unit is said in plain words", said[-1],
       "Call with Shaun ended: you hung up.")
 
@@ -183,15 +203,15 @@ check("no details with no call", callme.call_details(idle), [])
 
 print("the one-hour limit")
 w, said = watcher()
-w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 said.clear()
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 check("five minutes' warning is spoken", said,
       ["Call with Shaun ends in five minutes unless you extend it."])
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("an extension on the unit is spoken", said[-1], "Call with Shaun extended.")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 ext = []
 for r in callme.build_extend(SLOTS[0]):
     path, name, value, _k, _e = decode_record(r)
@@ -203,10 +223,10 @@ check("both on the call's slot", {e[:2] for e in ext}, {(tuple(SLOTS[0]), "sipSl
 auto, auto_said = watcher()
 asked = []
 auto._on_expiring = lambda i: asked.append(i) or True
-auto.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-auto.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(auto, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(auto, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 auto_said.clear()
-auto.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+hear(auto, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 check("auto-extend is asked with the slot", asked, [0])
 check("and the warning goes unsaid while it extends", auto_said, [])
 check("an expiring call is still connected", w.snapshot()["slots"][0]["state"] in callme.CONNECTED,
@@ -215,53 +235,56 @@ check("the call line says so",
       callme.call_now({"incoming": None, "slots": [{"slot": 1, "state": "Expiring",
                                                     "peer": "Shaun"}]}),
       "Talking to Shaun, ending within five minutes.")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Idle timeout"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Idle timeout"}')
 check("the end at the hour, in words", said[-1],
       "Call with Shaun ended: it reached the plan's one-hour limit.")
 
 print("calls nobody took")
 w, said = watcher()
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
-w.apply(CTL, "sipIncomingCallDetails", CLEARED)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
 check("a ring that runs out is missed", said[-1], "Missed CallMe call from Shaun.")
 check("and the page's line keeps it afterwards", callme.call_now(w.snapshot()),
       "No call. You missed a call from Shaun.")
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 check("until the next call rings", w.snapshot()["missed"], None)
 w, said = watcher()
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
-w.apply(CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":-1}', "str"), (True, "bool")])
-w.apply(CTL, "sipIncomingCallDetails", CLEARED)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":-1}', "str"), (True, "bool")])
+hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
 check("declined on the unit", said[1:], ["Declined the call from Shaun on the unit."])
 
 print("the audio never opening")
 w, said = watcher()
-w.apply(SLOTS[0], "sipSlotCallAddress", "Shaun")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"rtp stream error"}')
+hear(w, DESK_SLOTS[0], "sipSlotCallAddress", "Shaun")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"rtp stream error"}')
 check("said as a failed connection", said,
       ["Call with Shaun ended: the call's audio could not connect."])
 
 print("hosting and the plan")
 w, said = watcher()
-w.apply(CTL, "sipRodeCode", "ABC123")
+hear(w, DESK_CTL, "sipRodeCode", "ABC123")
 check("a new code updates the link", w.snapshot()["link"], callme.GUEST_LINK + "ABC123")
-w.apply(CTL, "sipCallHostingToggleEnabled", False)
+hear(w, DESK_CTL, "sipCallHostingToggleEnabled", False)
 check("the switch locks during a call", w.snapshot()["hosting_locked"], True)
-w.apply(CTL, "sipRemainingWebCalltime", 295)
-check("minutes follow the push", w.snapshot()["web_minutes_left"], 295)
-v = w.version
-w.apply(SLOTS[1], "sipSlotCallState", '{"state":"Active","reason":""}')
-check("a slot the plan does not have is ignored", w.version, v)
+v = w.snapshot()["version"]
+hear(w, DESK_CTL, "sipRemainingWebCalltime", 295)
+check("minutes follow the model, though the Watcher does not narrate them",
+      (w.snapshot()["web_minutes_left"], w.snapshot()["version"]), (295, v + 1))
+v = w.snapshot()["version"]
+hear(w, DESK_SLOTS[1], "sipSlotCallState", '{"state":"Active","reason":""}')
+check("a slot the plan does not have is ignored", (w.snapshot()["version"], said[-1:]), (v, []))
+desk_model._reset()
 unseeded_said = []
-callme.Watcher(on_say=unseeded_said.append).apply(CTL, "sipIncomingCallDetails", DETAILS)
-check("nothing is spoken before a seed", unseeded_said, [])
+hear(callme.Watcher(on_say=unseeded_said.append), DESK_CTL, "sipIncomingCallDetails", DETAILS)
+check("nothing is spoken before the model holds CallMe", unseeded_said, [])
 
 print("\nCALL LENGTH")
 w, said = watcher()
-w.apply(SLOTS[0], "sipSlotCallUUID", "abc")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallUUID", "abc")
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Connecting","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 s0 = w.snapshot()["slots"][0]
 check("a call seen connecting is timed exactly", (s0["since"] is not None, s0["since_exact"]),
       (True, True))
@@ -270,8 +293,8 @@ check("its length leads the details",
 check("under a minute", callme.describe_length(30), "less than a minute")
 check("a call already up when the app started says 'at least'",
       callme.describe_length(600, exact=False), "at least 10 minutes")
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
-w.apply(SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
+hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("an extension does not restart the count", w.snapshot()["slots"][0]["since"], s0["since"])
 
 print("\nCONTACTS")
@@ -300,15 +323,15 @@ print("a new call rings once, and only once")
 w, said = watcher()
 rang = []
 w._on_ring = lambda call, text: rang.append((call["id"], text)) or True
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 check("the ring hook gets the call and its sentence, once", rang, [(5, "CallMe call from Shaun.")])
 check("and the Watcher does not say it as well, or the first ring would cut it off", said, [])
-w.apply(CTL, "sipIncomingCallDetails", CLEARED)
+hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
 check("a clear does not ring", len(rang), 1)
 w, said = watcher()
 w._on_ring = lambda call, text: False
-w.apply(CTL, "sipIncomingCallDetails", DETAILS)
+hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 check("with the ringtone off, the Watcher says it itself", said, ["CallMe call from Shaun."])
 
 print("ready for calls")

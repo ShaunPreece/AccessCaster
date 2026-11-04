@@ -5,7 +5,7 @@
 
 `encode` takes (block, property, value) triples in stream order. Each run of one block becomes one
 child of the root; a block of None puts the property on the root itself. Values: bool, int (int32),
-float (float64) and str.
+float (float64), str, and a composite as the decoder gives it, [(value, kind)].
 
     python DevTools/fake_model.py      # self-check: an encoded dump parses back to its input
 """
@@ -21,18 +21,24 @@ def _count(n: int) -> bytes:
     return bytes([ln]) + n.to_bytes(ln, "little")
 
 
-def _prop(name: str, value) -> bytes:
+def _payload(value) -> bytes:
     # BOOL BEFORE INT: bool subclasses int, and the int branch would emit True with the wrong kind.
     if isinstance(value, bool):
-        payload = bytes([0x02 if value else 0x03])
-    elif isinstance(value, int):
-        payload = b"\x01" + value.to_bytes(4, "little", signed=True)
-    elif isinstance(value, float):
-        payload = b"\x04" + struct.pack("<d", value)
-    elif isinstance(value, str):
-        payload = b"\x05" + value.encode("latin1") + b"\x00"
-    else:
-        raise TypeError(f"no encoding for {value!r}")
+        return bytes([0x02 if value else 0x03])
+    if isinstance(value, int):
+        return b"\x01" + value.to_bytes(4, "little", signed=True)
+    if isinstance(value, float):
+        return b"\x04" + struct.pack("<d", value)
+    if isinstance(value, str):
+        return b"\x05" + value.encode("latin1") + b"\x00"
+    if isinstance(value, list):         # a composite, as the decoder gives it: [(value, kind)]
+        parts = [_payload(v) for v, _kind in value]
+        return b"\x08" + b"".join(_count(len(p)) + p for p in parts)
+    raise TypeError(f"no encoding for {value!r}")
+
+
+def _prop(name: str, value) -> bytes:
+    payload = _payload(value)
     return name.encode("latin1") + b"\x00" + _count(len(payload)) + payload
 
 

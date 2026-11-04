@@ -1419,7 +1419,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   value, so a one-write version passes the first test and fails every call after.
 - **CallMe has its own Watcher, not a branch of the announcer**, because the announcer stops
   following the desk when announcements are off and a call still has to be tracked and
-  answerable. Its speech goes through `speech.say`, which is where the switch is enforced.
+  answerable. Its speech goes through `speech.say`, which is where the switch is enforced. **The
+  call state it answers with is the desk model's** (`Watcher.snapshot` is `callme.read` over
+  `desk_model.snapshot`); it keeps only what the desk does not: missed calls, call lengths, each
+  slot's `ended` count, and who is ringing and on each slot as heard (see the next rule but one
+  under the model).
 - **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
   `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
   then times out with no clue why. `callme.build_dial` writes the factory empty string first.
@@ -1447,9 +1451,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   anywhere but in `callme.readiness`. While either is wrong the CallMe page is that list alone,
   with a fix beside each; every item must keep a focusable fix, or the page has nothing to Tab to
   (the fault the Recording page's "nothing is ever hidden" rule exists for). Hosting off is not an
-  item: a call out still works. Online
-  comes from the last dump the app took (`server._note_desk_network`), since the page's poll reads
-  none. **ON A FADER COMES FROM THE FADER LAYOUT, NEVER FROM CALLME'S OWN STATE**: the page's from
+  item: a call out still works. Online comes from the desk model (`desk_model.online`), since the
+  page's poll reads no dump. **ON A FADER COMES FROM THE FADER LAYOUT, NEVER FROM CALLME'S OWN STATE**: the page's from
   the window's desk state (`callme_section.problems`), the answer reply's from a read of the layout
   (`server._callme1_on_fader`). The Watcher hears only `sip*`, and the desk does not push a layout
   change this app makes, so a copy kept with CallMe's state goes stale. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
@@ -1496,7 +1499,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A FACT ABOUT THE DESK IS HELD ONCE, IN `desk_model`. Do not keep a copy of one anywhere else**;
   read the model. Every copy that existed (the announcer's mutes, levels, bank and selected channel,
   encoder hold's selection, the pad bank, the recorder's state, the naming layout, the Expanded flag,
-  the server's session state) went stale in its own way. What a consumer keeps is its own
+  the server's session state, CallMe's call state, the online flag) went stale in its own way. What a consumer keeps is its own
   bookkeeping: what was said, a ring position, an elapsed count.
 - **THE MODEL READS NOTHING OF ITS OWN.** It adopts the dumps other readers take, and a caller that
   needs it current reads the desk itself (which is then adopted). A background dump would land
@@ -1515,6 +1518,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   lacks is a stray, not a value.
 - **THE MODEL IS UPDATED BEFORE A SUBSCRIBER HEARS THE PUSH**, so a subscriber that looks at the
   model sees the value it is being told about. Keep `apply_push` ahead of `_fan_out` in the reader.
+  **The flip side: the model may already hold LATER pushes too.** A subscriber that narrates in
+  order reads a transition from the push (`Push.was`), never from the model, and remembers a
+  neighbouring value as it heard it: a call's end can arrive after its slot's address is cleared
+  (`callme.Watcher._peer`).
 - **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `desk_live.PushListener`: a
   subscription on the one listener, no HID lock. A factory reset pushes `currentShowUUID` itself at
   about t+1.75 s. **START IT BEFORE THE WRITE** - the burst starts 0.02 s after, and only pushes

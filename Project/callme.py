@@ -17,6 +17,7 @@ import threading
 import time
 
 import desk_live
+import desk_model
 import diagnostics
 import model_tree
 import rcp_transfer
@@ -502,29 +503,39 @@ def spell(code: str) -> str:
     return " ".join(code)
 
 
+
+
 # ---------------------------------------------------------------------------------------------
-# THE WATCHER: the pushes, heard on a handle of its own
+# THE WATCHER: what the pushes mean, and what the desk does not remember
 # ---------------------------------------------------------------------------------------------
 
-# The pushes the Watcher folds in: the control node's, then a slot's.
-PUSHED = frozenset({
-    "sipIncomingCallDetails", "sipIncomingCallAccept", "sipCallHostingEnabled", "sipRodeCode",
-    "sipCallHostingToggleEnabled", "sipRemainingCalltime", "sipRemainingWebCalltime",
-    "sipSlotCallAddress", "sipSlotCallIsHost", "sipSlotCallUUID", "sipSlotCallState",
-    "sipSlotCallQuality", "sipSlotCallBitrate", "sipSlotCallJitter", "sipSlotCallPacketLoss"})
+# The pushes the Watcher speaks from: the control node's, then a slot's.
+NARRATED = frozenset({
+    "sipIncomingCallDetails", "sipIncomingCallAccept",
+    "sipSlotCallAddress", "sipSlotCallUUID", "sipSlotCallState"})
 
 
 class Watcher:
-    """Follows CallMe pushes on the one listener (`desk_live`) and keeps the live state.
+    """Speaks CallMe as it happens, and answers for the page from the desk model (`desk_model`).
+
+    THE STATE IS THE MODEL'S. `snapshot` is `read` over the model's picture, derived again only
+    when the picture has changed, so the page, the hotkeys and the waits after a write cost no
+    device read and see every change, pushed or read. The Watcher adds only what the desk does not
+    hold: who the last missed call was from, when each call connected, how many calls each slot has
+    ended, and which calls and endings a reply from this app is already saying.
+
+    SPEECH NEEDS EACH PUSH IN THE ORDER IT CAME, which the model cannot give: the listener applies a
+    push to the model before any subscriber hears it, so by the time a call's end is heard the
+    slot's address may already be cleared. A transition is read from the push itself (`Push.was`),
+    and who is ringing and who is on each slot are remembered as they were heard.
 
     NOT A BRANCH OF THE ANNOUNCER: the announcer only runs while announcements are on, and a call
     has to be tracked whether or not anyone wants it spoken. Speech goes through `on_say`, which the
     server points at the announcer's queue, so the announcer switch still decides what is heard.
 
-    SEEDED FROM A DUMP: the slot paths, and anything that changed while nobody was listening, only
-    come from a model read. `read_model` is called each time the listener has the desk open, so a
-    desk that comes back from a replug is re-read before its pushes are trusted, and every full page
-    read re-seeds it too (`seed`). A push that arrives before any seed is dropped."""
+    `read_model` is called each time the listener has the desk open: the model adopts that read,
+    and what the Watcher remembers is seeded from it. Nothing is spoken before the model holds
+    CallMe."""
 
     def __init__(self, on_say=None, read_model=None, on_expiring=None, on_ring=None):
         self._on_say = on_say
@@ -537,51 +548,83 @@ class Watcher:
         # must not block. True means it is extending the call and the warning goes unsaid.
         self._on_expiring = on_expiring
         self._lock = threading.Lock()
-        self._state = None              # the read() shape, kept current from pushes
-        self._ctl = None
-        self._slots = []                # slot paths, in slot order
+        self._blob = None               # the model snapshot `_derived` was read from
+        self._derived = None            # read_all of it, or None while it holds no CallMe
+        self._shown = None              # the last snapshot handed out, to tell when it changes
+        self._ringing = None            # the call ringing, as last heard
+        self._peer = {}                 # slot index -> who is on it, as last heard
+        self._uuid = {}                 # slot index -> its call's id, as last heard
+        self._ended = {}                # slot index -> calls that have ended on it
         self._handled = set()           # call ids answered or declined, whose clear is not news
         self._quiet = set()             # slot indices whose next "Connected" the reply speaks
         self._quiet_end = set()         # slot indices whose next "ended" the reply speaks
         self._since = {}                # call uuid -> (connected at, exact): see since_for
-        # Who the last missed call was from, until the next call rings or goes up. Kept here, not
-        # in _state, because every page read re-seeds _state from a dump, which has no memory.
-        self._missed = None
-        self.version = 0                # bumped on every change the page would show
+        self._missed = None             # who the last missed call was from, until the next call
+        self.version = 0                # bumped whenever the snapshot differs from the last one
         self._follower = None
 
     def start(self) -> None:
-        self._follower = desk_live.Follower(
-            "callme", PUSHED, on_push=lambda push: self.apply(push.path, push.name, push.value),
-            on_connected=self._connected).start()
+        self._follower = desk_live.Follower("callme", NARRATED, on_push=self.apply,
+                                            on_connected=self._connected).start()
 
     def _connected(self, _gap) -> None:
-        # The pushes heard while this dump runs queue behind it and are folded in on top of it.
+        # The pushes heard while this dump runs queue behind it, and the model replays them on top.
         if self._read_model is None:
             return
         try:
-            self.seed(self._read_model())
+            self._read_model()
         except Exception as exc:
             diagnostics.event("callme.seed_failed", "callme watcher", error=f"{exc}")
+            return
+        self.seed()
 
     # -- state ---------------------------------------------------------------------------------
-    def seed(self, blob: bytes) -> None:
-        try:
-            d, ctl, slots = read_all(blob)
-        except Exception as exc:
-            diagnostics.event("callme.seed_failed", str(exc))
-            return
-        if not d.get("ok"):
-            return
-        with self._lock:
-            self._state = d
-            self._ctl = ctl
-            self._slots = slots
+    def _view(self):
+        """(read's state, control path, slot paths) from the model's picture, or None while it
+        holds no CallMe. Caller holds the lock."""
+        blob = desk_model.snapshot()
+        if blob is not self._blob:      # the model hands out one object until its next change
+            self._blob = blob
+            try:
+                d, ctl, slots = read_all(blob) if blob else ({"ok": False}, None, [])
+            except Exception as exc:
+                diagnostics.event("callme.read_failed", "callme watcher", error=f"{exc}")
+                d, ctl, slots = {"ok": False}, None, []
+            self._derived = (d, ctl, slots) if d.get("ok") else None
             # A call already up when first seen started at some unknown earlier time.
             for s in d.get("slots", []):
-                if s.get("state") in CONNECTED and s.get("uuid") and s["uuid"] not in self._since:
+                if s["state"] in CONNECTED and s["uuid"] and s["uuid"] not in self._since:
                     self._since[s["uuid"]] = (time.monotonic(), False)
-            self.version += 1
+        return self._derived
+
+    def seed(self) -> None:
+        """Learn who is ringing and who is on each slot from the model, after a time nobody was
+        listening."""
+        with self._lock:
+            view = self._view()
+            if view is None:
+                return
+            d = view[0]
+            self._ringing = d.get("incoming")
+            self._peer = {i: s["peer"] for i, s in enumerate(d["slots"])}
+            self._uuid = {i: s["uuid"] for i, s in enumerate(d["slots"])}
+
+    def snapshot(self):
+        """The page's state, `read`'s shape plus `missed`, each slot's `ended`, `since` and
+        `since_exact`, and `version`; None while the model holds no CallMe."""
+        with self._lock:
+            view = self._view()
+            if view is None:
+                return None
+            d = json.loads(json.dumps(view[0]))
+            d["missed"] = self._missed
+            for i, s in enumerate(d["slots"]):
+                s["ended"] = self._ended.get(i, 0)
+                s["since"], s["since_exact"] = self._since.get(s["uuid"], (None, None))
+            if d != self._shown:
+                self._shown = d
+                self.version += 1
+            return json.loads(json.dumps(dict(d, version=self.version)))
 
     def quiet_connect(self, slot_index: int, on: bool) -> None:
         """Keep "Connected" unsaid for a call this app is answering, whose reply says it instead.
@@ -591,17 +634,6 @@ class Watcher:
                 self._quiet.add(slot_index)
             else:
                 self._quiet.discard(slot_index)
-
-    def snapshot(self):
-        with self._lock:
-            if self._state is None:
-                return None
-            d = json.loads(json.dumps(self._state))
-            d["version"] = self.version
-            d["missed"] = self._missed
-            for s in d.get("slots", []):
-                s["since"], s["since_exact"] = self._since.get(s.get("uuid"), (None, None))
-            return d
 
     def missed(self):
         """Who the last missed call was from, or None."""
@@ -623,11 +655,14 @@ class Watcher:
 
     def slot_path(self, slot_index: int):
         with self._lock:
-            return self._slots[slot_index] if 0 <= slot_index < len(self._slots) else None
+            view = self._view()
+            slots = view[2] if view is not None else []
+            return slots[slot_index] if 0 <= slot_index < len(slots) else None
 
     def control_path(self):
         with self._lock:
-            return self._ctl
+            view = self._view()
+            return view[1] if view is not None else None
 
     def note_handled(self, call_id) -> None:
         """A call this app answered or declined: the reply already said so, so the watcher must
@@ -636,23 +671,19 @@ class Watcher:
             self._handled.add(call_id)
 
     # -- one push -------------------------------------------------------------------------------
-    def apply(self, path, name: str, value) -> None:
-        """Fold one pushed property into the state and speak what deserves it."""
-        path = list(path) if path is not None else None
+    def apply(self, push) -> None:
+        """Speak what one push (`desk_live.Push`) means."""
+        path = list(push.path) if push.path is not None else None
         say, ring = [], []
         with self._lock:
-            d = self._state
-            if d is None:
+            view = self._view()
+            if view is None or not path:
                 return
-            changed = True
-            if path and self._ctl is not None and list(path) == list(self._ctl):
-                changed = self._apply_control(d, name, value, say, ring)
-            elif path in self._slots:
-                changed = self._apply_slot(d, self._slots.index(path), name, value, say)
-            else:
-                changed = False
-            if changed:
-                self.version += 1
+            d, ctl, slots = view
+            if ctl is not None and path == list(ctl):
+                self._control(push.name, push.value, push.was, say, ring)
+            elif path in slots and slots.index(path) < len(d["slots"]):
+                self._slot(slots.index(path), push.name, push.value, push.was, say)
         for call, text in ring:
             try:
                 taken = bool(self._on_ring(call, text))
@@ -667,119 +698,67 @@ class Watcher:
                 except Exception:
                     pass
 
-    def _apply_control(self, d, name, value, say, ring) -> bool:
+    def _control(self, name, value, was, say, ring) -> None:
         if name == "sipIncomingCallDetails":
-            call = parse_call(value)
-            was = d.get("incoming")
-            d["incoming"] = call
-            if call and (not was or was.get("id") != call["id"]):
+            call, before = parse_call(value), parse_call(was)
+            self._ringing = call
+            if call and (not before or before["id"] != call["id"]):
                 self._missed = None
                 text = f"CallMe call from {call['name']}."
                 if self._on_ring:
                     ring.append((call, text))
                 else:
                     say.append(text)
-            elif not call and was:
+            elif not call and before and before["id"] not in self._handled:
                 # Cleared. An answer or decline from this app, or from the touchscreen (whose
                 # accept push arrives first and marks it handled), has been spoken already. What is
                 # left is a call nobody took: the 120 s ring ran out, or the guest gave up.
-                if was["id"] not in self._handled:
-                    self._missed = was["name"]
-                    say.append(f"Missed CallMe call from {was['name']}.")
-            return True
-        if name == "sipIncomingCallAccept":
+                self._missed = before["name"]
+                say.append(f"Missed CallMe call from {before['name']}.")
+        elif name == "sipIncomingCallAccept":
             try:
-                d_acc = json.loads(composite_text(value) or "{}")
+                accept = json.loads(composite_text(value) or "{}")
             except ValueError:
-                return False
-            call_id = d_acc.get("id")
+                return
+            call_id = accept.get("id")
             if call_id is not None and call_id not in self._handled:
                 self._handled.add(call_id)
-                inc = d.get("incoming") or {}
-                who = inc.get("name") if inc.get("id") == call_id else "the guest"
-                if d_acc.get("sip_slot", -1) < 0:
+                ringing = self._ringing or {}
+                who = ringing.get("name") if ringing.get("id") == call_id else "the guest"
+                if accept.get("sip_slot", -1) < 0:
                     say.append(f"Declined the call from {who} on the unit.")
-            return False
-        if name == "sipCallHostingEnabled" and isinstance(value, bool):
-            d["hosting"] = value
-            if not value:
-                d["code"], d["link"] = "", ""
-            return True
-        if name == "sipRodeCode":
-            code = value if isinstance(value, str) else ""
-            d["code"] = code
-            d["link"] = GUEST_LINK + code if code else ""
-            if code:
-                d["hosting"] = True
-            return True
-        if name == "sipCallHostingToggleEnabled" and isinstance(value, bool):
-            d["hosting_locked"] = not value
-            return True
-        if name == "sipRemainingCalltime":
-            d["minutes_left"] = value
-            return True
-        if name == "sipRemainingWebCalltime":
-            d["web_minutes_left"] = value
-            return True
-        return False
 
-    def _apply_slot(self, d, i, name, value, say) -> bool:
-        slots = d.get("slots") or []
-        if i >= len(slots):
-            return False
-        s = slots[i]
+    def _slot(self, i, name, value, was, say) -> None:
         if name == "sipSlotCallAddress":
-            s["peer"] = peer_name(value)
-            return True
-        if name == "sipSlotCallIsHost" and isinstance(value, bool):
-            s["incoming"] = value
-            return True
-        if name == "sipSlotCallUUID":
-            s["uuid"] = value if isinstance(value, str) else ""
-            return True
-        if name == "sipSlotCallState":
+            self._peer[i] = peer_name(value)
+        elif name == "sipSlotCallUUID":
+            self._uuid[i] = value if isinstance(value, str) else ""
+        elif name == "sipSlotCallState":
             state, reason = parse_slot_state(value)
-            was = s.get("state")
-            s["state"], s["reason"] = state, reason
+            before = parse_slot_state(was)[0] if was is not None else None
             if state in UP:
                 self._missed = None
-            who = s.get("peer") or "the guest"
-            if state == "Expiring" and was != "Expiring":
+            who = self._peer.get(i) or "the guest"
+            if state == "Expiring" and before != "Expiring":
                 if not (self._on_expiring and self._on_expiring(i)):
                     say.append(f"Call with {who} ends in five minutes unless you extend it.")
-            elif state == "Active" and was == "Expiring":
+            elif state == "Active" and before == "Expiring":
                 # Extended, here or on the unit's screen.
                 if i in self._quiet:
                     self._quiet.discard(i)
                 else:
                     say.append(f"Call with {who} extended.")
-            elif state == "Active" and was not in CONNECTED:
-                if s.get("uuid"):
-                    self._since[s["uuid"]] = (time.monotonic(), True)
+            elif state == "Active" and before not in CONNECTED:
+                if self._uuid.get(i):
+                    self._since[self._uuid[i]] = (time.monotonic(), True)
                 if i in self._quiet:
                     self._quiet.discard(i)
                 else:
                     say.append(f"Connected to {who}.")
-            elif state == "Idle" and was in UP:
-                s["ended"] = s.get("ended", 0) + 1
+            elif state == "Idle" and before in UP:
+                self._ended[i] = self._ended.get(i, 0) + 1
                 if i in self._quiet_end:
                     self._quiet_end.discard(i)
                 else:
                     say.append(f"Call with {who} ended"
                                + (f": {end_reason(reason)}." if reason else "."))
-            if state not in CONNECTED:
-                s.update(quality=None, bitrate_kbps=None, jitter_ms=None, packet_loss=None)
-            return True
-        if s.get("state") not in CONNECTED:
-            return False
-        if name == "sipSlotCallQuality":
-            s["quality"] = value
-        elif name == "sipSlotCallBitrate" and isinstance(value, float):
-            s["bitrate_kbps"] = round(value / 1000)
-        elif name == "sipSlotCallJitter" and isinstance(value, float):
-            s["jitter_ms"] = round(value * 1000, 1)
-        elif name == "sipSlotCallPacketLoss" and isinstance(value, float):
-            s["packet_loss"] = value
-        else:
-            return False
-        return True
