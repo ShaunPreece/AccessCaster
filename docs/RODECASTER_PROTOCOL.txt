@@ -825,10 +825,12 @@ WHO PUSHES A LAYOUT CHANGE (Pro II, fw 1.7.7, 4th November 2026, passive listen)
     source already on another fader moves it and leaves that fader EMPTY (-1). Each
     changed strip pushes channelInputSource at its CHANNEL node, and the strip that
     received a new source pushes its regenerated chain floats (below).
-  * RODE'S APP DOES NOT. A drag in its Audio Setup swaps two faders and pushes NO
-    channelInputSource; only one batch of derived chain floats arrived, for one swap
-    of two. A host that keeps its own copy of the layout cannot see that change
-    except by reading the model.
+  * A HOST'S WRITE DOES NOT. Our own channelInputSource writes push no
+    channelInputSource back; what the desk pushes is the derived chain floats it
+    regenerates for each strip whose source changed. RODE's app is a host like any
+    other: a drag in its Audio Setup swaps two faders and pushes NO channelInputSource,
+    and its derived floats arrived for one swap of two. A host that keeps its own
+    copy of the layout cannot see another host's change except by reading the model.
   * NEITHER CARRIES A CHAIN. Both regenerate the moved channel's derived processing
     values (EQ gains, compressor, gate, de-esser, Aphex; and the touchscreen the three
     VoxLab knobs too) from defaults, so moving a channel away and back does not

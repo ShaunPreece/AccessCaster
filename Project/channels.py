@@ -25,6 +25,7 @@ import paths as _paths  # writable data dir for the off-fader chain store
 import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
 import rcp_transfer as _t  # low-level byte builders + send layer (build_*, send_record, send_records_paced)
 import recorder  # outputMultiMode's two halves
+import rode_app  # RODE's app open: its fader moves are not pushed
 
 # ============================================================================
 # MIC INPUT CHANNELS (gain / phantom / polarity / type) - the XLR preamp block
@@ -210,8 +211,9 @@ def usb_expanded_known() -> bool:
 # has to know the live channelInputSource vector. The desk model holds it: the touchscreen pushes
 # every change to it and our own writes reach the model as they are sent, so a full dump (0.44 s on
 # a Pro II) is taken only while the model is not trusted. A fader moved in RODE's app pushes NO
-# channelInputSource; the only sign of one is the regenerated chain values it sometimes pushes for
-# the strip, which `follow_desk` treats as a reason to read the layout again.
+# channelInputSource, so while that app is running (`rode_app`) every write reads the layout; the
+# regenerated chain values the desk pushes for a strip whose source changed are a second sign,
+# which `follow_desk` treats as a reason to read the layout again.
 
 # How long after our own write of a chain value a push of it is taken for that write's echo. The
 # desk echoes most writes, late enough during a slider drag that the echo of one step lands after
@@ -250,9 +252,9 @@ def note_chain_push(push) -> None:
 
 def strip_vector() -> list:
     """The live channelInputSource vector (position = strip/fader, value = source code), for
-    addressing a write: the desk model's while it is trusted, otherwise a fresh read, which the
-    model adopts."""
-    if desk_model.trusted():
+    addressing a write: the desk model's while it is trusted and RODE's app is not open (its
+    fader moves are not pushed), otherwise a fresh read, which the model adopts."""
+    if desk_model.trusted() and not rode_app.is_open():
         vec = desk_model.strip_vector()
         if vec:
             return vec

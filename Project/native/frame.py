@@ -17,6 +17,7 @@ closing asks the tray to quit (`quit_app`).
 """
 import wx
 
+import rode_app
 import server
 from native import announce
 from native.app_settings_section import AppSettingsSection
@@ -25,6 +26,7 @@ from native.callme_section import CallMeSection
 from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
+from native.dialogs import TextDialog
 from native.device_section import DeviceSection
 from native.help_section import HelpSection
 from native.pads_section import PadsSection
@@ -98,6 +100,7 @@ class MainFrame(Speaker, wx.Frame):
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self._on_select)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
         self.Bind(wx.EVT_CLOSE, self._on_close)
+        self.Bind(wx.EVT_ACTIVATE, self._on_activate)
         self.tree.SelectItem(self._branches[0])
         self._fit_to_screen()
 
@@ -149,6 +152,20 @@ class MainFrame(Speaker, wx.Frame):
     def reread(self, route):
         """Read the section `route` again, after a change made outside the window."""
         next(s for s in self.sections if s.route == route).refresh(False)
+
+    def _on_activate(self, event):
+        event.Skip()
+        if event.GetActive():
+            wx.CallAfter(self.warn_rode_app)
+
+    def warn_rode_app(self):
+        """RODE's app is open: say why that matters, once per run of it, and only while this window
+        is in front, where the dialog gets the focus (`rode_app.take_warning`)."""
+        if not self.IsActive() or not rode_app.take_warning():
+            return
+        with TextDialog(self, rode_app.DIALOG_TITLE, rode_app.DIALOG_TEXT, [(wx.ID_OK, "OK")],
+                        default=wx.ID_OK, escape=wx.ID_OK) as dialog:
+            dialog.ShowModal()
 
     def check_updates(self):
         for section in self.sections:

@@ -48,6 +48,7 @@ import app_window
 import autostart
 import diagnostics
 import instance
+import rode_app
 import server
 import speech
 import win32api
@@ -141,6 +142,7 @@ class TrayApp:
         self._create_window()
         self._add_icon()
         app_updates.notify = self._notify
+        rode_app.on_seen = self._rode_app_seen
         app_updates.open_window = lambda: win32gui.PostMessage(self.hwnd, WM_OPEN_WINDOW, 0, 0)
         app_window.show = self._show_from_any_thread
         # Windows ending the session closes the window through wx as well as through the icon's
@@ -351,6 +353,13 @@ class TrayApp:
         nid = (self.hwnd, _TRAY_ICON_ID, win32gui.NIF_INFO, 0, 0, "", text, 10000,
                update_phrases.NOTIFICATION_TITLE, NIIF_INFO | NIIF_RESPECT_QUIET_TIME)
         win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
+
+    def _rode_app_seen(self) -> None:
+        """RODE's app has opened (`rode_app.on_seen`, on its watcher's thread): the warning spoken in
+        the app's own voice, heard whatever is in front, and the window's dialog at once if the
+        window is the one in front."""
+        speech.say(rode_app.NOTICE)
+        wx.CallAfter(lambda: self.frame and self.frame.warn_rode_app())
 
     def _on_end_session(self, hwnd, msg, wparam, lparam):
         """Windows is ending the session, or the installer's Restart Manager is closing the app to

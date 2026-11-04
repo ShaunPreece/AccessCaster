@@ -406,6 +406,12 @@ Each of Game, Music, A and B only appears in Windows while it is on a fader. Ass
 
 A channel button has taken the encoder over. Press that button again to give it back.
 
+## Using RODE's app at the same time
+
+It is best not to. The unit does not tell this app when a fader is moved in RODE's app, so a change made here afterwards could reach the wrong channel. When RODE's app opens, this app says so, and again the next time you come back to this window. While RODE's app is open, this app checks the faders before every change, which makes each change about half a second slower. Quit RODE's app when you have finished with it.
+
+The same is true of any other program that controls the unit: after moving faders in one, press F5 here before changing anything.
+
 # Support this project
 
 AccessCaster is free, and it always will be. I built it because I needed it: the desk is superb and almost none of it was reachable with a screen reader.

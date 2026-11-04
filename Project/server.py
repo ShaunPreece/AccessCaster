@@ -45,6 +45,7 @@ import rcp_hid
 import rcp_read
 import rcp_transfer
 import recorder  # the transport: start/pause/stop, storage volumes, recordings
+import rode_app  # whether RODE's own app is running, which the desk does not report
 import routing_schemes  # saved output-mix schemes (the matrix under a name) + the built-ins
 import settings_file  # settings.json, read and merged
 import shows  # the DESK'S own backup: export/import/factory reset (not profiles)
@@ -8928,6 +8929,7 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     desk_live.start()
     channels.follow_desk()
     pad_shortcuts.follow_desk()
+    rode_app.start()
     if announce and announcer.starts_on():
         # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=greeting)
@@ -9023,5 +9025,6 @@ def stop_service(reason: str) -> None:
     pad_shortcuts.release_held()
     _cleanup_preview_on_exit()
     speech.stop()
+    rode_app.stop()
     desk_live.stop()
     diagnostics.stop(reason)

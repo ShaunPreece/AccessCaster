@@ -1541,11 +1541,17 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `last_known_strip_vector` is the layout as last seen, for naming. Trust rests on every layout
   change reaching the model: the touchscreen pushes each one (and untrusts the model, as a
   `STRUCTURAL` change, until the next dump), our own writes reach it as sent, and a show load
-  calls `desk_model.distrust()`. **RODE's app pushes no fader move**, so `channels.follow_desk`
-  untrusts the model on a derived chain value pushed from elsewhere, its only sign, ignoring our
-  own writes' echoes for `CHAIN_ECHO_S`. That sign came for one swap of two, so a fader moved in
-  RODE's app can still go unseen until the next read: an accepted limit. A new route that moves a
-  fader source without a push must call `distrust()`.
+  calls `desk_model.distrust()`. **No software's fader move is pushed**, RODE's app's included,
+  so while RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
+  and the user is warned once per run of it. `channels.follow_desk` also untrusts the model on a
+  derived chain value pushed from elsewhere, ignoring our own writes' echoes for `CHAIN_ECHO_S`.
+  Other software moving faders is seen only at the next read: an accepted limit, which the help
+  covers. A new route that moves a fader source without a push must call `distrust()`.
+- **THE RODE'S APP WARNING IS SPOKEN, THEN A DIALOG WHEN THE WINDOW IS IN FRONT.** A background
+  process cannot take the focus from the app in front, and the forced ways leave the screen reader
+  in the other app (`server.raise_window`), so a dialog opened when RODE's app is seen would sit
+  unseen behind it. The app's own voice is heard whatever is in front; a tray notification
+  (`tray._notify`) has never been seen to arrive on this Windows 11 PC.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
   `restore_profile(clean=True)` sends `shows.send_new_from_default()` (the software factory reset)
   and takes an export first as the undo. Two consequences people keep missing: the profile and show
