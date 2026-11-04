@@ -1536,10 +1536,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A hidapi HANDLE MUST BE CLOSED BY THE THREAD THAT READS IT.** Closing one from elsewhere while a
   read is in flight segfaults the interpreter (exit 139). The desk listener closes on its own
   thread, and `desk_live.stop` joins it.
-- **`channels.last_known_strip_vector` (the desk model's layout) is for NAMING only.** The TTL'd cache
-  (`channels.strip_vector`) is for addressing a WRITE, where staleness is the dangerous case. Do not
-  merge them until a write can be addressed from a trusted model, which needs the hardware proof
-  that every way a fader's source changes is pushed.
+- **A WRITE IS ADDRESSED FROM THE DESK MODEL ONLY WHILE IT IS TRUSTED.** `channels.strip_vector`
+  takes the model's layout when `desk_model.trusted()`, and a fresh dump otherwise;
+  `last_known_strip_vector` is the layout as last seen, for naming. Trust rests on every layout
+  change reaching the model: the touchscreen pushes each one (and untrusts the model, as a
+  `STRUCTURAL` change, until the next dump), our own writes reach it as sent, and a show load
+  calls `desk_model.distrust()`. **RODE's app pushes no fader move**, so `channels.follow_desk`
+  untrusts the model on a derived chain value pushed from elsewhere, its only sign, ignoring our
+  own writes' echoes for `CHAIN_ECHO_S`. That sign came for one swap of two, so a fader moved in
+  RODE's app can still go unseen until the next read: an accepted limit. A new route that moves a
+  fader source without a push must call `distrust()`.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
   `restore_profile(clean=True)` sends `shows.send_new_from_default()` (the software factory reset)
   and takes an export first as the undo. Two consequences people keep missing: the profile and show
@@ -1599,7 +1605,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   240 s worst case and 172 s measured, AND every push frame was appended, so the blob came back
   contaminated as well as late (264180 and 139485 bytes against a 136170 baseline, both mistaken at
   the time for "an unstable read"). It bit far wider than the pads page, because every per-channel
-  write resolves its strip through `channels.strip_vector`, which dumps when its cache has expired.
+  write resolves its strip through `channels.strip_vector`, which can dump.
   Fixed 2nd September 2026; `DevTools/test_read_under_push_live.py` pins all of it, including a
   deliberate run of the OLD loop so the two faults stay demonstrated rather than remembered.
 - **THE DUMP'S FIRST FRAME OPENS WITH ITS OWN TOTAL LENGTH: four bytes little-endian, counting

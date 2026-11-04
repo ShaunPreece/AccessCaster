@@ -16,14 +16,14 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels as c
 import devices
-from _testkit import as_device, check, patched
+from _testkit import as_device, check, hold_desk, patched
 
 # PIN THE DESK AND ITS FADER LAYOUT. `proc_key` resolves a channel to the strip it is sitting
 # on RIGHT NOW, so without this the order checks below read the attached desk's live layout and
 # fail on any desk that has Mic 2 off its fader - which says nothing about the write order this
 # file exists to pin. Offline tests must not depend on what happens to be plugged in.
 devices.force_device(devices.PRO2)
-c.publish_strip_vector(list(devices.PRO2.fader.default_vector))
+hold_desk(list(devices.PRO2.fader.default_vector))
 
 
 def chain(**over):
@@ -146,7 +146,6 @@ class fake_desk:
             (rcp_read, {"read_model": lambda *a, **k: b""}),
             (server, {"_read_fader_vector": lambda *a, **k: list(self.vec)}),
             (c, {"read_chains": lambda *a, **k: [dict(ch) for ch in self.chains],
-                 "invalidate_strip_vector": lambda *a, **k: None,
                  "write_chain": self._write_chain}),
             (rcp_transfer, {"set_fader_source": self._set_fader})))
         return self

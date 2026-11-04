@@ -501,7 +501,6 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
         for i, code in enumerate(faders):
             if i < fader_count and code is not None and code in fader_code_set:
                 w(f"fader {i + 1}", lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
-        channels.invalidate_strip_vector()   # the layout is the processing strip map
     elif any(c is not None for c in faders):
         failed += 1
         errs.append("fader layout: changing faders is not enabled on this device, not restored")

@@ -15,10 +15,10 @@ the channel currently sits on, keyed by its position in the live fader vector.
 """
 
 import contextlib as _contextlib
-import time as _time  # strip-vector cache expiry only
+import time as _time
 
-import desk_live  # the one listener, whose fader source pushes drop the strip-vector cache
-import desk_model  # the desk as last seen: the naming layout and the USB mode
+import desk_live  # the one listener, whose chain pushes untrust the fader layout
+import desk_model  # the desk as last seen: the fader layout and the USB mode
 import devices  # per-device model (mic selectors, channel order) keyed by product id
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
@@ -205,71 +205,58 @@ def usb_expanded_known() -> bool:
     return desk_model.usb_mode() is not None
 
 
-# ---- fader vector cache (the strip map) -------------------------------------------------------
-# Processing and effects are addressed PER STRIP (fader position), so every such read or write has
-# to know the live channelInputSource vector. Reading it means a full ~600 ms model dump, and
-# rcp_read's own cache is dropped by EVERY write, so resolving it per write would make dragging one
-# EQ slider fire a dump between each step. This cache is keyed on the fader layout alone: it is
-# refreshed for free whenever the app reads all channels (publish_strip_vector below, called from
-# read_channels), dropped explicitly whenever WE change the layout, and otherwise expires on a
-# timer. The timer is the only exposure: a fader source changed on the desk itself, not through us,
-# could take up to STRIP_VECTOR_TTL_S to be noticed.
-STRIP_VECTOR_TTL_S = 15.0
-_strip_vec = {"vec": None, "at": 0.0}
+# ---- the fader layout (the strip map) ---------------------------------------------------------
+# Processing, effects, mutes and solos are addressed PER STRIP (fader position), so every such write
+# has to know the live channelInputSource vector. The desk model holds it: the touchscreen pushes
+# every change to it and our own writes reach the model as they are sent, so a full dump (0.44 s on
+# a Pro II) is taken only while the model is not trusted. A fader moved in RODE's app pushes NO
+# channelInputSource; the only sign of one is the regenerated chain values it sometimes pushes for
+# the strip, which `follow_desk` treats as a reason to read the layout again.
 
-
-def publish_strip_vector(vec) -> None:
-    """Cache a channelInputSource vector we have just read as part of some other read."""
-    if vec:
-        _strip_vec["vec"] = list(vec)
-        _strip_vec["at"] = _time.monotonic()
+# How long after our own write of a chain value a push of it is taken for that write's echo. The
+# desk echoes most writes, late enough during a slider drag that the echo of one step lands after
+# the next step is written, so its value differs from the model's and would read as a change.
+CHAIN_ECHO_S = 1.5
+_chain_written: dict = {}     # (path, name) -> when this app last wrote it
 
 
 def last_known_strip_vector():
-    """The desk model's fader layout, however old, or None before the first read. NAMING ONLY:
-    never use it to address a write, which `strip_vector` is for."""
+    """The desk model's fader layout, however old, or None before the first read. For NAMING:
+    a write is addressed through `strip_vector`, which reads the desk when the model is not
+    trusted."""
     return desk_model.strip_vector()
 
 
 def follow_desk() -> None:
-    """Drop the strip-vector cache when a fader source changes anywhere (the touchscreen, RODE's
-    app, MIDI), so the next processing write re-reads the layout rather than trusting a copy now
-    known to be out of date."""
-    desk_live.Follower("fader sources", {"channelInputSource"}, on_push=note_source_push).start()
+    """Untrust the desk model's fader layout when the desk pushes a changed chain value that this
+    app did not write: a fader moved in RODE's app pushes nothing else."""
+    desk_live.Follower("fader moves", set(DERIVED_FLOAT_PROPS), on_push=note_chain_push,
+                       own_writes=True).start()
 
 
-def note_source_push(push) -> None:
-    """One pushed `channelInputSource`."""
-    if push.was != push.value:
-        invalidate_strip_vector()
-
-
-def invalidate_strip_vector() -> None:
-    """Drop the cached fader layout. Call this after ANY write that moves a fader source."""
-    _strip_vec["vec"] = None
-    _strip_vec["at"] = 0.0
+def note_chain_push(push) -> None:
+    """One pushed, or written, derived chain value."""
+    key = (push.path, push.name)
+    if push.ours:
+        _chain_written[key] = _time.monotonic()
+        return
+    if push.key is None or push.key[0] != "CHANNEL" or push.was is None or push.was == push.value:
+        return
+    at = _chain_written.get(key)
+    if at is not None and _time.monotonic() - at < CHAIN_ECHO_S:
+        return
+    desk_model.distrust()
 
 
 def strip_vector() -> list:
-    """The live channelInputSource vector (position = strip/fader, value = source code)."""
-    vec = _strip_vec["vec"]
-    if vec is not None and (_time.monotonic() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
-        return vec
-    vec = [v for v in _r.values(_r.read_model(), "channelInputSource")]
-    publish_strip_vector(vec)
-    return vec
-
-
-def cached_strip_vector():
-    """The cached fader layout, or None if there is no FRESH one. NEVER touches the device.
-
-    For callers that must not trigger a ~0.5 s model dump and hold no HID lock - the control
-    announcer runs in its own thread off a read-only handle, so it uses this to name a channel and
-    falls back to 'Channel N' when the cache is cold, rather than dumping from the listener thread."""
-    vec = _strip_vec["vec"]
-    if vec is not None and (_time.monotonic() - _strip_vec["at"]) <= STRIP_VECTOR_TTL_S:
-        return vec
-    return None
+    """The live channelInputSource vector (position = strip/fader, value = source code), for
+    addressing a write: the desk model's while it is trusted, otherwise a fresh read, which the
+    model adopts."""
+    if desk_model.trusted():
+        vec = desk_model.strip_vector()
+        if vec:
+            return vec
+    return list(_r.values(_r.read_model(fresh=True), "channelInputSource"))
 
 
 def _strip_index(entry) -> int:
@@ -1071,7 +1058,6 @@ def read_channels(blob: bytes | None = None) -> list:
     preset_marker = vec(CHAIN_PRESET_MARKER_PROP)
     fx_params = {p: vec(p, "float") for p in _CHANNEL_FX_PARAM_SET}
     src_vec = vec("channelInputSource")   # for dynamic proc-index resolution (both desks)
-    publish_strip_vector(src_vec)         # refresh the strip map for free off this dump
 
     def at(lst, i):
         return lst[i] if (i is not None and 0 <= i < len(lst)) else None

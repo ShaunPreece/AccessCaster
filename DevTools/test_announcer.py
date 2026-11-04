@@ -114,13 +114,12 @@ check("strip 0", said, ["Mic 1 muted"])
 said, _ = run([state_packet("channelOutputMute", 9, True)], cold_cache=False)
 check("last slot still names its source", said, ["USB 2 (Secondary) muted"])
 
-print("\nNAMES SURVIVE THE CACHE EXPIRING")
-# The TTL'd cache is what processing WRITES use; it goes cold after 15 s of no reads. Naming takes
-# the desk model's layout, which has no expiry, so an announcement past that point still names the
-# channel rather than saying "Channel 4".
+print("\nNAMES SURVIVE THE MODEL BEING UNTRUSTED")
+# An untrusted desk model makes a WRITE read the layout again; naming takes the layout as last
+# seen, so an announcement still names the channel rather than saying "Channel 4".
 desk(LAYOUT)
-channels.invalidate_strip_vector()
-check("TTL'd cache is cold", channels.cached_strip_vector(), None)
+desk_model.distrust()
+check("the model is untrusted", desk_model.trusted(), False)
 said, _ = run([state_packet("channelOutputMute", 2, True)], cold_cache=False)
 check("still names the channel", said, ["Mic 3 muted"])
 said, _ = run([state_packet("channelOutputMute", 4, True)], cold_cache=False)
@@ -184,14 +183,13 @@ check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmut
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 desk(LAYOUT)
 # channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code. The
-# announcer does not hear it: the listener puts it in the desk model, and the write cache's own
-# follower drops that cache (`channels.follow_desk`).
+# announcer does not hear it: the listener puts it in the desk model, which a fader source change
+# untrusts (`desk_model.STRUCTURAL`), so the next write reads the layout again.
 check("the announcer does not listen for it", "channelInputSource" in announcer._HEARD, False)
 moved = desk_live.decode(push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10)))
-moved = moved._replace(was=desk_model.apply_push(moved.path, moved.name, moved.value, moved.kind))
-channels.note_source_push(moved)
+desk_model.apply_push(moved.path, moved.name, moved.value, moved.kind)
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
-check("TTL'd cache dropped, so writes re-read", channels.cached_strip_vector(), None)
+check("the model is untrusted, so writes re-read", desk_model.trusted(), False)
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
 check("mute on that strip names the NEW source", said, ["Bluetooth muted"])
 

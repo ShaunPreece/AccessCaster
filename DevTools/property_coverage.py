@@ -100,7 +100,7 @@ CONTEXT_ROLE = {
     "read_channels": "read", "read_matrix_state": "read", "read_matrix_levels": "read",
     "read_output_modes": "read", "read_pads_live": "read", "pad_positions": "read",
     "_fields_by_padidx": "read", "first": "read", "read_device_status": "read",
-    "strip_vector": "read", "publish_strip_vector": "read", "read_routing_live": "read",
+    "strip_vector": "read", "read_routing_live": "read",
     # writes
     "PROCESSING_PROPS": "write", "PRESET_EXTRA_FLOAT_PROPS": "write",
     "PRESET_FLOAT_PROPS": "write", "PROCESSING_MODULE_ON": "write", "CHANNEL_PROP": "write",

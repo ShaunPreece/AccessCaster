@@ -46,9 +46,10 @@ READ_TIMEOUT_MS = 60
 #     every frame. A playing pad pushes `padProgress` about 20 times a second, so the line never
 #     goes quiet, and the loop runs to its `max_reads` ceiling: 240 s worst case, 172 s measured on
 #     a Duo. It reaches far wider than the pads page, because every per-channel write resolves its
-#     strip through `channels.strip_vector`, which dumps whenever its cache has expired - so mute,
-#     solo, processing and every EQ parameter could each hang for minutes while a pad played, and
-#     a hung request leaves its control busy, which reads out as "that is not available".
+#     strip through `channels.strip_vector`, which dumps whenever the desk model is not trusted -
+#     so mute, solo, processing and every EQ parameter could each hang for minutes while a pad
+#     played, and a hung request leaves its control busy, which reads out as "that is not
+#     available".
 #   * AND THE BLOB COMES BACK CONTAMINATED. A push frame appended into the dump makes the read the
 #     wrong SIZE and the wrong SHAPE (264180 and 139485 bytes against a 136170 baseline, both just
 #     after a pad was touched). It presents as "an unstable read".

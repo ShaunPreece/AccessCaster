@@ -22,7 +22,7 @@ from _testkit import check
 
 devices.force_device(devices.PRO2)
 # The factory layout, held as if read, so the channel lookups make no read of the desk.
-channels.publish_strip_vector(list(devices.PRO2_FADERS.default_vector))
+_testkit.hold_desk(list(devices.PRO2_FADERS.default_vector))
 
 
 # A stub server: Mic 1 is muted, soloed, processed and on phantom, and the announcer's cache knows

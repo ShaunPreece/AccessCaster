@@ -1783,7 +1783,6 @@ def device_overview() -> dict:
 
     spec = dev.fader
     vec = rcp_read.values(blob, "channelInputSource")
-    channels.publish_strip_vector(vec)
     mutes = rcp_read.values(blob, "channelOutputMute")
     cues = rcp_read.values(blob, "channelCueEnable")
 
@@ -3071,7 +3070,6 @@ def _read_gain_and_processing(mic: int):
     bypass = rcp_read.values(blob, "channelBypassProcessing")
     # Resolve the strip from THIS dump, so the gain and the bypass state describe the same moment.
     vec = rcp_read.values(blob, "channelInputSource")
-    channels.publish_strip_vector(vec)
     try:
         strip = vec.index(entry.get("source_code"))
     except ValueError:
@@ -4171,21 +4169,12 @@ def _follow_levels(old_vec, new_vec, levels_before, spec) -> str:
 def _read_fader_vector(blob=None, spec=None):
     """The current channel code on each fader, from channelInputSource (device-length).
 
-    PUBLISHES what it read, and that is load-bearing. Invalidating the TTL'd cache alone is not
-    enough: that is the cache that ADDRESSES processing writes, while the separate no-expiry NAMING
-    layout (channels.last_known_strip_vector) keeps the pre-write layout, because our own writes are
-    not echoed on the pushed stream the way a change made on the desk is. The symptom is an announcer
-    naming the OLD channel on an encoder press after 'reset faders' while a TURN names it correctly:
-    the turn decodes the source code straight off the cross-point selector, but the press is a
-    prediction that has to look the layout up.
-    Every layout write re-reads through here immediately afterwards, so publishing here keeps both
-    caches honest with no extra dump. The FULL vector is published, not the per-fader-count slice,
-    so the spare 10th strip still names its source."""
+    Every layout write re-reads through here straight afterwards. That dump is what makes the desk
+    model trusted again, since our own write of a fader source untrusts it (`desk_model.STRUCTURAL`)."""
     spec = spec or _active_faders()
     if blob is None:
         blob = rcp_read.read_model()
     cis = rcp_read.values(blob, "channelInputSource")
-    channels.publish_strip_vector(cis)
     return [cis[i] if i < len(cis) else None for i in range(spec.count)]
 
 
@@ -4389,7 +4378,6 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             for i in range(spec.count):
                 if target[i] != vec[i]:
                     rcp_transfer.set_fader_source(i, target[i])
-            channels.invalidate_strip_vector()
             new = _read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = _follow_chains(vec, new, chains_before)
@@ -4525,7 +4513,6 @@ def action_set_fader(fader_index: int, code: int) -> dict:
                     rcp_transfer.set_fader_source(i, target[i])
             # The layout IS the processing/effects strip map (channels._strip_index), so a stale
             # cached vector here would address the next processing write to the old strip.
-            channels.invalidate_strip_vector()
             new = _read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = _follow_chains(vec, new, chains_before)
@@ -4697,7 +4684,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
     pct = max(0, min(100, int(percent)))
     # The reply names the fader's channel from the layout already held: a slider step that dumped
     # the model to name it would cost a second and a half per step.
-    vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
+    vec = channels.last_known_strip_vector()
     try:
         with _hid_lock:
             if vec is None:
@@ -5164,7 +5151,6 @@ def action_reset_faders() -> dict:
             chains_before = channels.read_chains(blob) if _chain_follow_on() else None
             for i, code in enumerate(spec.default_vector):
                 rcp_transfer.set_fader_source(i, code)
-            channels.invalidate_strip_vector()   # the layout is the processing strip map
             new = _read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = _follow_chains(old, new, chains_before)
@@ -5471,7 +5457,6 @@ def _clear_extended_faders() -> list:
         chains_before = channels.read_chains(blob) if _chain_follow_on() else None
         for i in dead:
             rcp_transfer.set_fader_source(i, -1)
-        channels.invalidate_strip_vector()
         new = _read_fader_vector(spec=spec)
         if chains_before is not None:
             _follow_chains(old, new, chains_before)

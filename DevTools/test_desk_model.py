@@ -1,8 +1,9 @@
 """The desk model (Project/desk_model.py), offline, on a synthetic dump.
 
 A dump is adopted with what was pushed while it was read replayed on top; the picture is trusted
-only while the listener is up, on the connection the dump came from, with no structural change since
-it started; this app's writes land only on a fixed node that carries the property; and through the
+only while the listener is up, on the connection the dump came from, with no structural change and no
+`distrust` since it started; a write is addressed from it only while it is trusted, and a chain value
+changed elsewhere untrusts it while our own writes' echoes do not; this app's writes land only on a fixed node that carries the property; and through the
 listener, a subscriber is told the value a push replaced, after the model already holds the new one,
 and hears this app's writes only when it asked for them.
 
@@ -16,6 +17,7 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import channels
 import desk_live
 import desk_model
 import fake_model
@@ -120,6 +122,16 @@ check_true("but leaves the picture untrusted, the read having started before it"
            not desk_model.trusted())
 adopt(dump(source2=8))
 
+print("\nA CHANGE THE DESK DOES NOT PUSH")
+token = desk_model.dump_starting()
+desk_model.distrust()
+check_true("distrust makes the picture untrusted", not desk_model.trusted())
+adopt(dump(source2=8), token)
+check_true("and a dump already under way does not restore it", not desk_model.trusted())
+check("the marker it journals replays as nothing", desk_model.strip_vector(), [0, 1, 8])
+adopt(dump(source2=8))
+check_true("a dump started after it does", desk_model.trusted())
+
 print("\nTHE DESK LEAVING")
 token = desk_model.dump_starting()
 desk_model.set_connected(False)
@@ -174,6 +186,43 @@ pad = rcp_transfer.build_record("padActive", "bool", True, PAD0)
 check("nor is a write to a pad, which is not a fixed node", desk_model.apply_write(pad), None)
 check("and the pad keeps its value", desk_model.values("padActive"), [False, False])
 check("a frame that is not a record is ignored", desk_model.apply_write(b"\x01\x02"), None)
+
+print("\nADDRESSING A WRITE")
+reads = []
+
+
+def read_model(*_a, **k):
+    reads.append(k.get("fresh"))
+    return dump(source2=8)
+
+
+with patched((rcp_read, {"read_model": read_model})):
+    adopt(dump(source2=8))
+    check("a trusted model gives the layout with no read", (channels.strip_vector(), reads),
+          ([0, 1, 8], []))
+    desk_model.distrust()
+    check("an untrusted one reads the desk, fresh", (channels.strip_vector(), reads),
+          ([0, 1, 8], [True]))
+
+
+def chain_push(value, was, ours=False, key=("CHANNEL", 1)):
+    return desk_live.Push(STRIP1, "eqLowGain", value, "float", key, was, ours)
+
+
+channels._chain_written.clear()
+adopt(dump())
+channels.note_chain_push(chain_push(0.5, 0.5))
+check_true("a chain value re-pushed unchanged leaves the model trusted", desk_model.trusted())
+channels.note_chain_push(chain_push(0.5, None))
+check_true("so does one the model did not hold", desk_model.trusted())
+channels.note_chain_push(chain_push(0.6, 0.5, key=("OUTPUT", 0)))
+check_true("and one that is not on a channel strip", desk_model.trusted())
+channels.note_chain_push(chain_push(0.6, 0.5, ours=True))
+channels.note_chain_push(chain_push(0.55, 0.6))
+check_true("the late echo of our own write, mid-drag, leaves it trusted", desk_model.trusted())
+channels._chain_written.clear()
+channels.note_chain_push(chain_push(0.55, 0.6))
+check_true("a changed value this app did not write untrusts it", not desk_model.trusted())
 
 print("\nTHROUGH THE LISTENER")
 

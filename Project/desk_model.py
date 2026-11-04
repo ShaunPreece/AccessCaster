@@ -12,8 +12,8 @@ push and write is journalled with a sequence number, and a dump is adopted with 
 journalled after it started replayed on top, so a change made during the read is not lost to it.
 
 TRUSTED (`trusted`) means the listener has the desk open, a dump has been adopted since the desk
-last appeared (`rcp_hid.connection_epoch`), and no STRUCTURAL change has arrived since that dump
-started. A picture that is not trusted still answers with the last values it had, which is right
+last appeared (`rcp_hid.connection_epoch`), and no STRUCTURAL change has arrived, and nothing has
+called `distrust`, since that dump started. A picture that is not trusted still answers with the last values it had, which is right
 for naming (the last fader layout seen beats "Channel 4") and wrong for acting: a caller about to
 toggle something or address a write checks `trusted()` and reads the desk when it is not, and that
 read is adopted here like any other.
@@ -109,7 +109,7 @@ def dump_finished(token: Token, blob: bytes) -> None:
         complete = _seq - token.seq <= len(_journal)
         dirty = set()
         for seq, path, name, value, kind, may_add in _journal:
-            if seq > token.seq:
+            if seq > token.seq and name is not None:
                 _put(props, names, path, name, value, kind, may_add)
                 dirty.add((path, name))
         _props, _names, _layout, _epoch = props, names, book, token.epoch
@@ -158,6 +158,17 @@ def apply_write(frame: bytes):
         if name in STRUCTURAL and was != value:
             _stale_seq = _seq
     return path, name, value, kind, was
+
+
+def distrust() -> None:
+    """Untrust the picture until a dump that starts after now is adopted: for a change the desk
+    does not push, such as a fader moved in RODE's app or a show load rebuilding the desk. It is
+    journalled, as a marker with no property, so a dump already under way cannot restore trust."""
+    global _seq, _stale_seq
+    with _lock:
+        _seq += 1
+        _journal.append((_seq, None, None, None, None, False))
+        _stale_seq = _seq
 
 
 def set_connected(on: bool) -> None:

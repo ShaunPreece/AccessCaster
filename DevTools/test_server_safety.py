@@ -69,11 +69,10 @@ with as_device(server.devices.PRO2), patched(
                            lambda *a, **k: reads.append(server._hid_lock.locked()) or b""}),
         (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
         (announcer, {"mark_self_level": lambda *a: None})):
-    server.channels.publish_strip_vector([0, 1, 2, 3, 4, 5, 6, 7, 8])
+    _testkit.hold_desk([0, 1, 2, 3, 4, 5, 6, 7, 8])
     res = server.action_set_fader_level(6, 50)
     check("the level is set", res.get("ok"), True)
     check("with a layout held, the reply names the channel without a read", reads, [])
-    server.channels._strip_vec["vec"] = None
     desk_model._reset()
     server.action_set_fader_level(6, 40)
     check("with none held, the read is made under the HID lock", reads, [True])

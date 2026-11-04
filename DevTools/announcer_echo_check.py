@@ -121,7 +121,6 @@ def main() -> int:
 
     vec = [v for v, _k in rcp_read.find_all(rcp_read.read_model_stable(fresh=True),
                                             "channelInputSource")]
-    channels.publish_strip_vector(vec)
     print(f"fader layout: {vec}  -> fader {FADER} carries source code {vec[FADER]}")
 
     if rcp_hid.find_control_interface() is None:

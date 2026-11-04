@@ -20,7 +20,6 @@ import os
 from unittest import mock
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import channels
 import desk_model
 import devices
 import layout_fixture
@@ -167,16 +166,17 @@ def hold(key, name: str, value, kind: str) -> None:
 
 
 def hold_layout(vec) -> None:
-    """The desk model's fader layout, and the write cache with it, as a full read leaves them."""
+    """The desk model's fader layout as a full read leaves it: held, and trusted. A held fader
+    source is a structural change, so the picture is then adopted as a fresh dump of itself."""
     for strip, code in enumerate(vec):
         hold(rcp_transfer.channel_key(strip), "channelInputSource", code, "int")
-    channels.publish_strip_vector(vec)
+    desk_model.dump_finished(desk_model.dump_starting(), desk_model.snapshot())
 
 
 def hold_desk(vec=None) -> None:
     """The desk model freshly read from the pinned layout's shape (`layout_fixture.skeleton`), and
     trusted: every property 0 but the selected channel, which rests at -1 (none), and the fader
-    layout, `vec`, which the write cache holds too."""
+    layout, `vec`."""
     values = {(_key_of("systemChannelSelected"), "systemChannelSelected"): -1}
     for strip, code in enumerate(vec or ()):
         values[(rcp_transfer.channel_key(strip), "channelInputSource")] = code
@@ -184,5 +184,3 @@ def hold_desk(vec=None) -> None:
     desk_model.set_connected(True)
     desk_model.dump_finished(desk_model.dump_starting(),
                              layout_fixture.skeleton(layout_fixture.PRO2_177, values))
-    if vec is not None:
-        channels.publish_strip_vector(vec)

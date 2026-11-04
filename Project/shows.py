@@ -83,6 +83,7 @@ from __future__ import annotations
 import datetime
 import time
 
+import desk_model
 import diagnostics
 import rcp_read
 import rcp_transfer
@@ -290,8 +291,12 @@ def send_export() -> None:
 
 
 def send_import(uid: int) -> None:
-    """Load an exported show. Resolve `uid` from a read taken moments ago (trap 1)."""
+    """Load an exported show. Resolve `uid` from a read taken moments ago (trap 1).
+
+    The desk rebuilds itself from the show, and whether it pushes every change it makes is
+    unmeasured, so the desk model is untrusted until it is read again."""
     _send_int("showControlImport", int(uid))
+    desk_model.distrust()
 
 
 def send_new_from_default() -> None:
@@ -301,8 +306,10 @@ def send_new_from_default() -> None:
     one we offer: the touchscreen reset drops the desk at a SETUP WIZARD that cannot be driven by the
     encoder, which strands a blind operator until somebody sighted taps through it. This does not.
 
-    Wifi, language and the analytics answer live OUTSIDE the show and survive it."""
+    Wifi, language and the analytics answer live OUTSIDE the show and survive it. The desk model
+    is untrusted until it is read again, as after `send_import`."""
     _send_bool("showControlNewFromDefault", True)
+    desk_model.distrust()
 
 
 def send_delete(uid: int) -> None:
