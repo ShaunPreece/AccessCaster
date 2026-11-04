@@ -1,7 +1,9 @@
 """Unit tests for the control announcer's report-04 decoder. NO DEVICE, no HID, no writes.
 
 Feeds synthetic report-04 packets (built to the desk's own frame shapes and selector bytes) into
-announcer.handle_report with speech.say stubbed, and asserts what would be SPOKEN.
+announcer.handle_report with speech.say stubbed, and asserts what would be SPOKEN. The desk's state
+is the desk model's (`desk_model`), set up on the pinned Pro II's shape (`desk`), and every packet
+reaches it first, as the listener's do.
 
 Run: python DevTools/test_announcer.py
 """
@@ -16,14 +18,17 @@ import _testkit
 import announcer
 import channels
 import desk_live
+import desk_model
 import devices
+import layout_fixture
 import pad_shortcuts
+import rcp_hid
 import rcp_read
 import rcp_transfer
 import server
 import settings_file
 import speech
-from _testkit import addr, check, check_true, patched, push
+from _testkit import addr, check, check_true, patched, push, where
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # would fail on the Duo's different channel set and look like a regression. Offline tests must not
@@ -52,6 +57,15 @@ def v_str(text: str) -> bytes:
     return bytes([0x01, len(body)]) + body
 
 
+LAYOUT = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]      # USB 1 on strip 1, Mic 2 up on fader 7 (strip 6)
+desk, at, layout = _testkit.hold_desk, _testkit.hold, _testkit.hold_layout
+
+
+def select(strip: int) -> None:
+    """The channel a channel button has given the encoder, as the desk model holds it."""
+    desk_model.apply_push(where("systemChannelSelected"), "systemChannelSelected", strip, "int")
+
+
 def state_packet(prop: str, strip_idx: int, on: bool) -> bytes:
     """A pushed STATE property at CHANNEL[strip index], as the desk pushes it."""
     return push(addr(rcp_transfer.channel_key(strip_idx)), prop, v_bool(on))
@@ -63,29 +77,30 @@ def press_packet(name: str, down: bool = True, button: int = 1) -> bytes:
 
 
 def bank_packet(bank0: int) -> bytes:
-    return push([0x0A], "selectedBank", v_int(bank0))
+    return push(where("selectedBank"), "selectedBank", v_int(bank0))
 
 
 def run(pkts, st=None, cold_cache=True):
-    """Feed packets and return what was spoken."""
+    """Feed packets and return what was spoken. `cold_cache` starts from a desk model that has
+    never read the desk, so no layout is known."""
     SPOKEN.clear()
     if cold_cache:
-        channels.invalidate_strip_vector()
-    st = st if st is not None else {"bank": None, "pending": None, "at": 0.0}
+        desk_model._reset()
+    st = st if st is not None else {"pending": None, "at": 0.0}
     for p in pkts:
         announcer.handle_report(p, st)
     return list(SPOKEN), st
 
 
 print("MUTE / SOLO STATE")
-# Cold layout cache: must NOT read the device, must fall back to a strip number.
+# No layout known: must NOT read the device, must fall back to a strip number.
 said, _ = run([state_packet("channelOutputMute", 1, True)])
-check("mute on, cold cache", said, ["Channel 2 muted"])
+check("mute on, no layout", said, ["Channel 2 muted"])
 said, _ = run([state_packet("channelOutputMute", 1, False)])
-check("unmute, cold cache", said, ["Channel 2 unmuted"])
+check("unmute, no layout", said, ["Channel 2 unmuted"])
 
-# Warm layout cache: a real layout, USB 1 on strip 1 and Mic 2 pushed to strip 6.
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+# A real layout, USB 1 on strip 1 and Mic 2 pushed to strip 6.
+desk(LAYOUT)
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
 check("mute names the SOURCE on that strip", said, ["USB 1 (Main Stereo) muted"])
 said, _ = run([state_packet("channelOutputMute", 6, True)], cold_cache=False)
@@ -100,10 +115,10 @@ said, _ = run([state_packet("channelOutputMute", 9, True)], cold_cache=False)
 check("last slot still names its source", said, ["USB 2 (Secondary) muted"])
 
 print("\nNAMES SURVIVE THE CACHE EXPIRING")
-# The TTL'd cache is what processing WRITES use; it goes cold after 15 s of no reads. Naming falls
-# back to the last known layout, which has no expiry, so an announcement past that point still names
-# the channel rather than saying "Channel 4".
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+# The TTL'd cache is what processing WRITES use; it goes cold after 15 s of no reads. Naming takes
+# the desk model's layout, which has no expiry, so an announcement past that point still names the
+# channel rather than saying "Channel 4".
+desk(LAYOUT)
 channels.invalidate_strip_vector()
 check("TTL'd cache is cold", channels.cached_strip_vector(), None)
 said, _ = run([state_packet("channelOutputMute", 2, True)], cold_cache=False)
@@ -112,7 +127,7 @@ said, _ = run([state_packet("channelOutputMute", 4, True)], cold_cache=False)
 check("stereo source too", said, ["Bluetooth muted"])
 
 print("\nA MIXER PAD OWNS THE MUTE AND CUE LINES WHILE IT ACTS")
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+desk(LAYOUT)
 # `padActive` is addressed at the pad's STREAM POSITION, one level, same shape as a state push.
 def pad_active(position: int, on: bool) -> bytes:
     return push([position], "padActive", v_bool(on))
@@ -130,10 +145,9 @@ said, _ = run([pad_active(MIXER_POS, False),
                state_packet("channelOutputMute", 0, False),
                state_packet("channelCueEnable", 0, False)], cold_cache=False)
 check("and so is the burst it restores", said, [])
-# The cache still has to be true: the encoder ring quotes it whether or not anything was spoken.
-_, st_q = run([pad_active(MIXER_POS, True), state_packet("channelOutputMute", 1, True)],
-              cold_cache=False)
-check("the mute cache is updated even when silent", st_q["muted"][1], True)
+# The desk model still has to be true: the encoder ring quotes it whether or not anything was said.
+run([pad_active(MIXER_POS, True), state_packet("channelOutputMute", 1, True)], cold_cache=False)
+check("the desk model holds the mute even when silent", desk_model.mutes()[1], True)
 # A SOUND pad moves nothing, so it must not buy silence.
 announcer._mixer_quiet_until = 0.0
 said, _ = run([pad_active(SOUND_POS, True), state_packet("channelOutputMute", 1, True)],
@@ -154,9 +168,9 @@ if not _was_enabled:
     speech.enabled.clear()
 check("the hold says nothing itself: the job's page or window speaks for it", list(SPOKEN), [])
 announcer.hold_desk_speech()
-said, st_h = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
+said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
 check("a second hold says nothing more, and a mute push is silent", said, [])
-check("the mute cache is still updated while held", st_h["muted"][1], True)
+check("the desk model still holds the mute while held", desk_model.mutes()[1], True)
 announcer.release_desk_speech()
 said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
 check("still held while one job is running", said, [])
@@ -168,19 +182,21 @@ said, _ = run([state_packet("channelOutputMute", 1, False)], cold_cache=False)
 check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmuted"])
 
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+desk(LAYOUT)
 # channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code. The
-# announcer does not hear it; the naming layout's own follower does (`channels.follow_desk`).
+# announcer does not hear it: the listener puts it in the desk model, and the write cache's own
+# follower drops that cache (`channels.follow_desk`).
 check("the announcer does not listen for it", "channelInputSource" in announcer._HEARD, False)
-channels.note_source_push(desk_live.decode(
-    push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10))))
+moved = desk_live.decode(push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10)))
+moved = moved._replace(was=desk_model.apply_push(moved.path, moved.name, moved.value, moved.kind))
+channels.note_source_push(moved)
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
 check("TTL'd cache dropped, so writes re-read", channels.cached_strip_vector(), None)
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
 check("mute on that strip names the NEW source", said, ["Bluetooth muted"])
 
 print("\nPRESS EDGES ARE HELD, THEN SUPERSEDED BY THE STATE")
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+desk(LAYOUT)
 # The real sequence: edge, then the state ~70 ms later. Only the state should be spoken.
 for button in (1, 2, 3):
     said, st = run([press_packet("mutePressed", button=button),
@@ -241,38 +257,39 @@ def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
 
 
 def monlevel_packet(level: float) -> bytes:
-    return push([0x0A], "outputMonLevel", v_float(level))
+    return push(addr(rcp_transfer.OUTPUT), "outputMonLevel", v_float(level))
 
 
 print("OUTPUT MUTES")
 # The monitor's mute, which an encoder hold on the monitor level toggles. Addressed at the OUTPUT
 # block, not a strip, so it must not be read as a channel's mute.
-said, st_o = run([push([0x0A], "outputMonMute", v_bool(True))], cold_cache=False)
+MON_MUTE = addr(rcp_transfer.OUTPUT)
+said, st_o = run([push(MON_MUTE, "outputMonMute", v_bool(True))], cold_cache=False)
 check("monitor mute is spoken", said, ["Monitor speakers muted"])
-said, _ = run([push([0x0A], "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
+said, _ = run([push(MON_MUTE, "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
 check("a repeat of the same state is not spoken again", said, [])
-said, _ = run([push([0x0A], "outputMonMute", v_bool(False))], st=st_o, cold_cache=False)
+said, _ = run([push(MON_MUTE, "outputMonMute", v_bool(False))], st=st_o, cold_cache=False)
 check("monitor unmute is spoken", said, ["Monitor speakers unmuted"])
 announcer.mark_self_write(("output_mute", "outputMonMute"))
-said, _ = run([push([0x0A], "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
+said, _ = run([push(MON_MUTE, "outputMonMute", v_bool(True))], st=st_o, cold_cache=False)
 check("the app's own monitor mute is not spoken back", said, [])
-hold_st = {"bank": None, "pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
-run([push([0x0A], "outputMonMute", v_bool(True))], st=hold_st, cold_cache=False)
+at(rcp_transfer.OUTPUT, "outputMonMute", False, "bool")
+hold_st = {"pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
+run([push(MON_MUTE, "outputMonMute", v_bool(True))], st=hold_st, cold_cache=False)
 check("a monitor mute during an encoder press marks it a hold", hold_st["enc_hold"], True)
 # The hold's mute says where the encoder is, so the next press can name what it moves on to even
 # when no level has moved since the app started.
 check("a monitor hold places the ring on the monitor", hold_st["enc_pos"],
       announcer._encoder_ring().index(("monitor", 0)))
-fader_hold = {"bank": None, "pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
+fader_hold = {"pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
 run([state_packet("channelOutputMute", 6, True)], st=fader_hold, cold_cache=False)
 check("a virtual fader hold places the ring on that fader", fader_hold["enc_pos"],
       announcer._encoder_ring().index(("fader", 6)))
 
 
 def fresh_st():
-    return {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0,
-            "known": {}, "muted": {}, "enc_pos": None, "enc_down_at": None, "enc_hold": False,
-            "said": {}, "said_at": {}}
+    return {"pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0, "enc_pos": None,
+            "enc_down_at": None, "enc_hold": False, "said": {}, "said_at": {}}
 
 
 # Spoken AS IT MOVES: waiting for the movement to settle is laggy, and since the speech engine
@@ -354,7 +371,7 @@ def tap(st_, packets=()):
     announcer.handle_report(enc_release, st_)
 
 
-st = {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0}
+st = {"pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0}
 SPOKEN.clear()
 announcer.handle_report(enc_press, st)
 check("the press edge alone says nothing", SPOKEN, [])
@@ -388,14 +405,14 @@ print("\nPRESS AND HOLD IS THE DESK'S MUTE, NOT A RING STEP")
 # Holding pushes channelOutputMute about 765 ms in (a measured figure), while still held, and
 # mutes the channel selected BEFORE the press. Announcing the next ring position on the press
 # edge would name the wrong channel AND leave our ring one step out.
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
+desk(LAYOUT)                                                 # faders 7/8/9 = Mic 2, Chat, USB 2
 st = fresh_st()
 st["enc_pos"] = 0                                            # sitting on fader 7 (Mic 2)
 SPOKEN.clear()
 tap(st, [state_packet("channelOutputMute", 6, True)])        # strip 6 = fader 7 = Mic 2
 check("a hold speaks only the mute", SPOKEN, ["Mic 2 muted"])
 check("and does NOT advance the ring", st["enc_pos"], 0)
-check("and records the mute", st["muted"], {6: True})
+check("and the desk model holds the mute", desk_model.mutes()[6], True)
 
 # The duration backstop, for a desk that pushes no mute state (the Duo is unobserved here).
 st = fresh_st()
@@ -411,8 +428,8 @@ check("ring unmoved by the backstop", st["enc_pos"], 0)
 # is worse than no number at all.
 st = fresh_st()
 st["enc_pos"] = 0
-st["known"][("fader", 7)] = 0.97
-st["muted"] = {7: True}
+at(rcp_transfer.fader_key(7), "faderLevel", 123, "int")      # 97 percent
+at(rcp_transfer.channel_key(7), "channelOutputMute", True, "bool")
 SPOKEN.clear()
 tap(st)
 check("the ring says muted instead of the level", SPOKEN, ["Chat, muted"])
@@ -487,8 +504,8 @@ check("not repeated within the quiet gap", SPOKEN, [])
 # any turn the ring does not see: Mic 1 gets told it has nothing to adjust while the encoder is
 # adjusting its gain. Routing it through announcer._selected_phrase works the claim out from the strip.
 st = fresh_st()
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
-st["chan_sel"] = 5                     # strip 5 = SMART pads
+desk(LAYOUT)
+select(5)                              # strip 5 = SMART pads
 st["enc_turn_at"] = time.monotonic() - (announcer._ENC_DEAD_S + 0.05)
 SPOKEN.clear()
 announcer.flush_pending(st)
@@ -501,8 +518,8 @@ check("and names the way out, which is the channel button",
 # A MIC holding the encoder must never be told it has nothing to adjust: its gain is exactly what the
 # encoder is moving.
 st = fresh_st()
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
-st["chan_sel"] = 0                     # strip 0 = Mic 1
+desk(LAYOUT)
+select(0)                              # strip 0 = Mic 1
 st["enc_turn_at"] = time.monotonic() - (announcer._ENC_DEAD_S + 0.05)
 SPOKEN.clear()
 announcer.flush_pending(st)
@@ -514,8 +531,8 @@ check("and is never told it has nothing to adjust", "nothing" in SPOKEN[0].lower
 # and then Chat while the desk never leaves Mic 1, and leave enc_pos pointing at an entry the
 # encoder is not on - the same value announcer._at_limit reads to decide "is this against a stop".
 st = fresh_st()
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
-st["chan_sel"] = 0
+desk(LAYOUT)
+select(0)
 st["enc_pos"] = 1
 SPOKEN.clear()
 announcer.handle_report(press_packet("encoderPressed", True), st)
@@ -525,7 +542,7 @@ check("and the press says what the encoder is still on", SPOKEN, ["Mic 1 selecte
 
 # With nothing selected it walks the ring exactly as before.
 st = fresh_st()
-st["chan_sel"] = -1
+select(-1)
 st["enc_pos"] = 0
 SPOKEN.clear()
 announcer.handle_report(press_packet("encoderPressed", True), st)
@@ -543,10 +560,10 @@ announcer.flush_pending(st)
 check("so nothing complains afterwards", SPOKEN, [])
 
 st = fresh_st()
+SPOKEN.clear()
 announcer.handle_report(enccolour_packet(-1), st)
-check("colour -1 reads as unbound", st.get("enc_bound"), False)
 announcer.handle_report(enccolour_packet(7), st)
-check("a real colour reads as bound", st.get("enc_bound"), True)
+check("the encoder's colour is logged, never spoken", SPOKEN, [])
 
 st = fresh_st()
 SPOKEN.clear()
@@ -560,7 +577,7 @@ announcer.levels_on = True
 print("\nTHE ENCODER RING: PREDICT WHAT A PRESS SELECTED")
 # The desk's order: fader 7 -> fader 8 -> fader 9 -> monitor -> round again. Once a real
 # movement has seated us, every later press can be announced BEFORE it is turned.
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
+desk(LAYOUT)                                                       # faders 7/8/9 = Mic 2, Chat, USB 2
 
 
 def fader_level_packet(fader_idx: int, value127: int) -> bytes:
@@ -572,25 +589,30 @@ SPOKEN.clear()
 tap(st)
 check("before we know where we are, it just says Select", SPOKEN, ["Select"])
 
-# A real turn on fader 8 (Chat) at 123/127 seats the ring and caches the level.
+# A real turn on fader 8 (Chat) at 123/127 seats the ring, and the desk model holds the level.
 announcer.handle_report(fader_level_packet(7, 123), st)
 check("the movement seats the ring", st["enc_pos"], 1)
-check("and caches the level", round(st["known"][("fader", 7)], 4), round(123 / 127, 4))
+check("and the level is held", round(desk_model.fader_level(7), 4), round(123 / 127, 4))
 
 SPOKEN.clear()
 tap(st)
-# With no level cached yet it names the target and says NOTHING about the level, rather than
-# inventing a zero - the level only appears once we have actually seen it.
-check("next press predicts fader 9 by name", SPOKEN, ["USB 2 (Secondary)"])
+check("next press predicts fader 9, with its level", SPOKEN, ["USB 2 (Secondary) 0 percent"])
 SPOKEN.clear()
 tap(st)
 check("then the monitor", SPOKEN, ["Monitor level"])
 SPOKEN.clear()
 tap(st)
-check("then round to fader 7, named from the layout", SPOKEN, ["Mic 2"])
+check("then round to fader 7, named from the layout", SPOKEN, ["Mic 2 0 percent"])
+# With no level known it names the target and says NOTHING about the level, rather than inventing
+# a zero - the level only appears once the desk has been read.
+desk_model._reset()
+layout(LAYOUT)
+check("a level never read is not invented", announcer._ring_phrase(fresh_st(), 2),
+      "USB 2 (Secondary)")
+desk(LAYOUT)
 
 # Levels it already knows are spoken with the value.
-st["known"][("monitor", 0)] = 0.52
+at(rcp_transfer.OUTPUT, "outputMonLevel", 0.52, "float")
 st["enc_pos"] = 1
 SPOKEN.clear()
 tap(st)
@@ -602,29 +624,23 @@ st["enc_pos"] = 0
 announcer.handle_report(fader_level_packet(8, 64), st)     # actually fader 9 moved
 check("a real movement overrides the guess", st["enc_pos"], 2)
 
-print("\nTHE RING CACHE STAYS CURRENT, AND THE ENDS OF THE RANGE ARE NOT 'NOT LINKED'")
-# TWO FAULTS THE RING CACHE IS CAPABLE OF: keying it by fader index while level announcements
-# update a source-code key makes the press quote a stale level, and treating 0 as absent announces
-# "not linked" when it is simply the floor.
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # faders 7/8/9 = Mic 2, Chat, USB 2
+print("\nTHE RING QUOTES THE DESK MODEL, AND THE ENDS OF THE RANGE ARE NOT 'NOT LINKED'")
+# Treating 0 as absent would announce "not linked" when it is simply the floor.
+desk(LAYOUT)                                                       # faders 7/8/9 = Mic 2, Chat, USB 2
 
 st = fresh_st()
 SPOKEN.clear()
-# A level change arriving by SOURCE code (a cross-point push, which is what our own slider writes
-# produce) must update the FADER-INDEX entry the ring quotes.
-announcer.handle_report(xpoint_packet(1, 0, 0.45), st)          # source 1 = Mic 2, on fader 7
-check("the level is announced", SPOKEN, ["45 percent, Mic 2"])
-check("and the ring cache is updated by fader index", st["known"].get(("fader", 6)), 0.45)
-
+# A level THIS APP writes reaches the ring through the desk model, as the send layer hands it on.
+rcp_hid.note_written(rcp_transfer.build_fader_level(addr(rcp_transfer.fader_key(6)), 57))
+check("our own fader write says nothing", SPOKEN, [])
 st["enc_pos"] = 3                                                 # monitor; next press wraps to 7
-SPOKEN.clear()
 tap(st)
-check("so the press quotes the CURRENT level", SPOKEN, ["Mic 2 45 percent"])
+check("and the next press quotes the level it set", SPOKEN, ["Mic 2 45 percent"])
 
 # Turning down at zero: nothing moves, and that is a floor, not an unbound encoder.
 st = fresh_st()
 st["enc_pos"] = 0
-st["known"][("fader", 6)] = 0.0
+at(rcp_transfer.fader_key(6), "faderLevel", 0, "int")
 SPOKEN.clear()
 announcer.handle_report(encsig_packet(-1), st)
 check("a downward turn at 0 is not treated as a dead turn", st.get("enc_turn_at"), None)
@@ -643,12 +659,13 @@ check("and reported when nothing moves", SPOKEN, ["Encoder not linked to anythin
 # Same at the top of the range.
 st = fresh_st()
 st["enc_pos"] = 1
-st["known"][("fader", 7)] = 1.0
+at(rcp_transfer.fader_key(7), "faderLevel", 127, "int")
 SPOKEN.clear()
 announcer.handle_report(encsig_packet(1), st)
 check("an upward turn at maximum is not a dead turn", st.get("enc_turn_at"), None)
 
-# With no cached level we cannot tell, so we keep watching rather than guess.
+# With no level known we cannot tell, so we keep watching rather than guess.
+desk_model._reset()
 st = fresh_st()
 st["enc_pos"] = 2
 announcer.handle_report(encsig_packet(-1), st)
@@ -668,10 +685,10 @@ def chan_gain_packet(prop: bytes, chan_sel: int, value: int, trailer: int = 0x02
 
 
 def chansel_packet(value: int) -> bytes:
-    return push([0x0F], "systemChannelSelected", v_int(value))
+    return push(where("systemChannelSelected"), "systemChannelSelected", v_int(value))
 
 
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+desk(LAYOUT)
 
 st = fresh_st()
 SPOKEN.clear()
@@ -692,7 +709,7 @@ SPOKEN.clear()
 # SAY WHAT THE CHANNEL HAS, NOT WHAT IT LACKS. "Nothing here for the encoder to adjust" is simply
 # false of the SMART pads: they can sit on the last fader (index 8, virtual) and be ridden daily.
 # The phrase is the same on a physical and a virtual fader ON PURPOSE - a bus has a fader either way.
-channels.publish_strip_vector([0, 7, 2, 3, 10, 1, 8, 9, 11])   # pads on strip 8, the last fader
+layout([0, 7, 2, 3, 10, 1, 8, 9, 11])                      # pads on strip 8, the last fader
 announcer.handle_report(chansel_packet(8), st)
 check("and says the same on a VIRTUAL fader - no device branch to drift",
       SPOKEN, ["SMART pads selected. Fader level only"])
@@ -701,7 +718,7 @@ announcer.handle_report(chansel_packet(6), st)               # strip 6 = Chat, a
 check("a LINE channel on a virtual fader still names its own level, not the ring",
       SPOKEN, ["Chat selected. Encoder sets its input level in decibels"])
 SPOKEN.clear()
-channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])   # back to this block's layout
+layout(LAYOUT)                                             # back to this block's layout
 
 announcer.handle_report(chansel_packet(0), st)          # strip 0 = Mic 1
 check("a mic strip says gain", SPOKEN, ["Mic 1 selected. Encoder sets its gain"])
@@ -710,70 +727,56 @@ announcer.handle_report(chansel_packet(-1), st)
 check("and deselecting says the encoder is back on levels",
       SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
 
-# A PHANTOM "LEVELS" ANNOUNCEMENT AT STARTUP. The pushed stream reports CHANGES, so an ABSENT
-# st["chan_sel"] makes the desk's first push of the resting value (-1, nothing selected) read as
-# one, and "Virtual faders and monitor. Encoder changes their levels" is spoken with nobody
-# touching anything.
-# announcer.seed_layout seeds it for this reason: seeded state stays SILENT for an unchanged value.
+# A PHANTOM "LEVELS" ANNOUNCEMENT AT STARTUP. The pushed stream reports CHANGES, so with no
+# selection known the desk's first push of the resting value (-1, nothing selected) reads as one, and
+# "Virtual faders and monitor. Encoder changes their levels" is spoken with nobody touching anything.
+# The desk model holds the value from the startup read, so the push replaces itself and is silent.
 SPOKEN.clear()
-seeded = fresh_st()
-seeded["chan_sel"] = -1                      # what announcer.seed_layout reads from the startup dump
-announcer.handle_report(chansel_packet(-1), seeded)
+desk(LAYOUT)
+select(-1)                                   # what the startup read leaves in the desk model
+announcer.handle_report(chansel_packet(-1), fresh_st())
 check("a resting push of 'nothing selected' after startup says NOTHING", SPOKEN, [])
 SPOKEN.clear()
-announcer.handle_report(chansel_packet(0), seeded)
+announcer.handle_report(chansel_packet(0), fresh_st())
 check("but a real selection still speaks", SPOKEN, ["Mic 1 selected. Encoder sets its gain"])
 SPOKEN.clear()
-unseeded = fresh_st()                        # unseeded: the state that produces the spurious phrase
-announcer.handle_report(chansel_packet(-1), unseeded)
-check("UNSEEDED state is what speaks out of nowhere",
+desk_model._reset()                          # never read: the state that produces the phrase
+announcer.handle_report(chansel_packet(-1), fresh_st())
+check("a desk never read is what speaks out of nowhere",
       SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
 
-# THE SAME SHAPE OF BUG, SECOND PROPERTY: st["bank"] also starts None, so the desk's first push of
-# the RESTING bank reads as a change and "Bank 1" speaks at startup. Both are seeded from the
-# startup dump by announcer.seed_layout.
+# THE SAME SHAPE OF BUG, SECOND PROPERTY: the desk's first push of the RESTING bank must not read
+# as a change and speak "Bank 1" at startup.
 SPOKEN.clear()
-bank_seeded = fresh_st()
-bank_seeded["bank"] = 0                      # the resting bank, raw (the desk numbers banks from 0)
-announcer.handle_report(bank_packet(0), bank_seeded)
+desk(LAYOUT)                                 # the resting bank, 0, from the startup read
+announcer.handle_report(bank_packet(0), fresh_st())
 check("a resting push of the current bank after startup says NOTHING", SPOKEN, [])
 SPOKEN.clear()
-announcer.handle_report(bank_packet(1), bank_seeded)
+announcer.handle_report(bank_packet(1), fresh_st())
 check("but a real bank change still speaks", SPOKEN, ["Bank 2"])
 SPOKEN.clear()
+desk_model._reset()
 announcer.handle_report(bank_packet(0), fresh_st())
-check("UNSEEDED bank is what speaks out of nowhere", SPOKEN, ["Bank 1"])
+check("a desk never read is what speaks out of nowhere", SPOKEN, ["Bank 1"])
 
-# OUR OWN WRITES ARE NOT ECHOED on the desk's push stream, so anything the announcer caches has to
-# be told about them. That covers the fader LAYOUT and the encoder ring's LEVEL cache alike: without
-# the level half, moving a virtual fader with our slider leaves the next encoder press quoting the
-# level from before the move.
+# THE DESK DOES NOT PUSH ALL OF OUR OWN WRITES BACK, so the send layer hands each one to the desk
+# model (`rcp_hid.note_written`). Without that, moving a virtual fader with our slider leaves the
+# next encoder press quoting the level from before the move.
+desk(LAYOUT)
 SPOKEN.clear()
-live = fresh_st()
-live["known"][("fader", 6)] = 0.20
-announcer.live_state = live
-try:
-    announcer.publish_level("fader", 6, 0.75)
-    check("our own fader-level write updates the ring cache", live["known"][("fader", 6)], 0.75)
-    announcer.publish_level("monitor", 0, 0.42)
-    check("and the monitor level too", live["known"][("monitor", 0)], 0.42)
-    check("publishing a level says NOTHING (the web UI already announces it)", SPOKEN, [])
-    announcer.publish_level("fader", 6, 9.9)
-    check("a level is clamped to 0..1", live["known"][("fader", 6)], 1.0)
-finally:
-    announcer.live_state = None
-announcer.publish_level("fader", 6, 0.5)             # must be a safe no-op when off
-check("publishing with the announcer off is a no-op", announcer.live_state, None)
+rcp_hid.note_written(rcp_transfer.build_fader_level(addr(rcp_transfer.fader_key(6)), 95))
+check("our own fader-level write reaches the ring", round(desk_model.fader_level(6), 2), 0.75)
+rcp_hid.note_written(rcp_transfer.build_at(rcp_transfer.OUTPUT, "outputMonLevel", "float", 0.42))
+check("and the monitor level too", desk_model.monitor_level(), 0.42)
+check("a level we write says NOTHING (the window already announces it)", SPOKEN, [])
 
 # A mute the app makes for a hold on the desk is spoken, because the desk does not report it back.
 SPOKEN.clear()
-live = fresh_st()
-announcer.live_state = live
+announcer.live_state = fresh_st()
 try:
     with patched((announcer, {"mute_tones": False})):
         announcer.announce_mute(0, True)
     check("a hold's mute is spoken", SPOKEN, [f"{announcer.channel_label(0)} muted"])
-    check("and cached for the encoder ring", live["muted"][0], True)
 finally:
     announcer.live_state = None
 SPOKEN.clear()
@@ -809,6 +812,7 @@ check("an unknown channel selector says nothing", SPOKEN, [])
 check("but is still treated as movement", st.get("enc_turn_at"), None)
 
 print("\nSTILL WORKS: BANK AND ENCODER")
+desk(LAYOUT)
 said, st = run([bank_packet(2)], cold_cache=False)
 check("bank change", said, ["Bank 3"])
 SPOKEN.clear()
@@ -822,52 +826,48 @@ said, _ = run([fake_press], cold_cache=False)
 check("a malformed press value is ignored", said, [])
 
 print("\nOUR OWN LAYOUT WRITES REFRESH THE NAMING LAYOUT")
-# THE TRAP: invalidating only the TTL'd cache (the one that addresses processing writes) leaves the
-# no-expiry NAMING layout holding the pre-reset vector, because our own writes are not echoed on the
-# pushed stream the way a change made on the desk is. An encoder PRESS then announces the old
-# channel ("Mic 2") while a TURN announces the new one ("USB 1"): the turn reads the source code off
-# the cross-point selector, the press has to look the layout up.
+# THE TRAP: our own writes are not all echoed on the pushed stream, so a layout this app writes has
+# to reach the desk model as it is sent, or an encoder PRESS announces the old channel ("Mic 2")
+# while a TURN announces the new one ("USB 1"): the turn reads the source code off the cross-point
+# selector, the press has to look the layout up.
 
 OLD_LAYOUT = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]      # before the reset: Mic 2 up on fader 7
 NEW_LAYOUT = [0, 1, 2, 3, 10, 11, 7, 8, 9, 9]      # after the reset: USB 1 on fader 7
-channels.publish_strip_vector(list(OLD_LAYOUT))
+desk(OLD_LAYOUT)
 check("names the OLD channel before the write", announcer._fader_label(6), "Mic 2")
+for strip in (1, 6):
+    rcp_hid.note_written(rcp_transfer.build_at(rcp_transfer.channel_key(strip),
+                                               "channelInputSource", "int", NEW_LAYOUT[strip]))
+check("the writes reach the naming layout", channels.last_known_strip_vector(), NEW_LAYOUT)
+check("so fader 7 now names USB 1", announcer._fader_label(6), "USB 1 (Main Stereo)")
+at(rcp_transfer.fader_key(6), "faderLevel", 64, "int")
+check("and an encoder PRESS says so too", announcer._ring_phrase(fresh_st(), 0),
+      "USB 1 (Main Stereo) 50 percent")
+# MUTE / SOLO and the channel button name the strip through the SAME lookup, so a stale layout
+# mis-names all four paths at once.
+said, _ = run([state_packet("channelOutputMute", 6, True)], cold_cache=False)
+check("mute on fader 7 names USB 1", said, ["USB 1 (Main Stereo) muted"])
+said, _ = run([state_packet("channelCueEnable", 1, True)], cold_cache=False)
+check("solo on fader 2 names Mic 2 again", said, ["Mic 2 solo on"])
+check("and the channel button agrees", announcer._selected_phrase(6),
+      "USB 1 (Main Stereo) selected. Encoder sets its input level in decibels")
 
-_real_find_all = rcp_read.find_all
-with patched((rcp_read, {
-        "read_model": lambda *a, **k: b"stub-dump",
-        "find_all": lambda blob, name: ([(v, "int") for v in NEW_LAYOUT]
-                                        if name == "channelInputSource"
-                                        else _real_find_all(blob, name))})):
-    # This is what every layout write does immediately after writing: re-read to report the result.
-    got = server._read_fader_vector()
-    check("the re-read reports the new layout", got, NEW_LAYOUT[:9])
-    check("and PUBLISHES it for naming", channels.last_known_strip_vector(), NEW_LAYOUT)
-    check("so fader 7 now names USB 1", announcer._fader_label(6), "USB 1 (Main Stereo)")
-    st = {"bank": None, "pending": None, "at": 0.0, "enc_pos": 0,
-          "known": {("fader", 6): 0.5}}
-    check("and an encoder PRESS says so too", announcer._ring_phrase(st, 0),
-          "USB 1 (Main Stereo) 50 percent")
-    check("the write cache is fresh as well", channels.cached_strip_vector(), NEW_LAYOUT)
-    # MUTE / SOLO and the channel button name the strip through the SAME lookup, so a stale layout
-    # mis-names all four paths at once.
-    said, _ = run([state_packet("channelOutputMute", 6, True)], cold_cache=False)
-    check("mute on fader 7 names USB 1", said, ["USB 1 (Main Stereo) muted"])
-    said, _ = run([state_packet("channelCueEnable", 1, True)], cold_cache=False)
-    check("solo on fader 2 names Mic 2 again", said, ["Mic 2 solo on"])
-    check("and the channel button agrees", announcer._selected_phrase(6),
-          "USB 1 (Main Stereo) selected. Encoder sets its input level in decibels")
-
-print("\nMUTING FROM SOFTWARE KEEPS THE ANNOUNCER'S MUTE CACHE HONEST")
-# THE DESK DOES NOT ECHO OUR OWN WRITES. So a mute set from the web UI never appears on the pushed
-# stream, and any announcer cache holding mute state has to be told about it explicitly. Left
-# untold, the encoder ring would quote a healthy percentage for a channel that is now silent, the
+print("\nMUTING FROM SOFTWARE KEEPS THE DESK MODEL HONEST")
+# THE DESK DOES NOT ECHO ALL OF OUR OWN WRITES, so the send layer hands each one to the desk model.
+# Left out, the encoder ring would quote a healthy percentage for a channel that is now silent, the
 # mirror image of quoting a stale level.
 
+
+def sent(rec: bytes) -> int:
+    """`rcp_transfer.send_record`, as the send layer does it: recorded, then handed on."""
+    RECORDS.append(rec)
+    rcp_hid.note_written(rec)
+    return 1
+
+
 RECORDS: list = []
-with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1}),
-             (announcer, {"live_state": None})):
-    channels.publish_strip_vector([0, 1, 2, 3, 10, 11, 7, 8, 9, 9])
+with patched((rcp_transfer, {"send_record": sent}), (announcer, {"live_state": None})):
+    desk([0, 1, 2, 3, 10, 11, 7, 8, 9, 9])
     RECORDS.clear()
     channels.set_channel_mute("Mic2", True)
     rec = RECORDS[0] if RECORDS else b""
@@ -882,7 +882,7 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
                b"channelOutputMute\x00\x01\x01\x03" in (RECORDS[0] if RECORDS else b""))
     # And it follows the CHANNEL, not a fixed slot: with Mic 2 up on fader 7 (strip 6) the write has
     # to land on 0x22, exactly as a processing write on that channel would.
-    channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+    layout(LAYOUT)
     RECORDS.clear()
     channels.set_channel_mute("Mic2", True)
     check_true("the write follows the channel to the strip it is on (fader 7 -> 0x22)",
@@ -900,8 +900,9 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
                 "ok": True, "modes": MIX_MODES,
                 "excluded": {o: {1: False} for o in range(11)}}})):
 
-        # Now the cache. A live announcer state, as announcer._loop publishes it.
-        st = {"bank": None, "pending": None, "at": 0.0, "known": {("fader", 6): 0.9}, "muted": {}}
+        # Now the desk model, with fader 7 at 90 percent.
+        at(rcp_transfer.fader_key(6), "faderLevel", 114, "int")
+        st = fresh_st()
         announcer.live_state = st
         SPOKEN.clear()
         res = server.action_set_channel_mute("Mic2", True)
@@ -909,14 +910,14 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
         check_true("and says it silences every mix, not just what you hear",
                    "every mix" in res.get("message", ""))
         check("the announcer does NOT speak our own write (the UI already did)", SPOKEN, [])
-        check("but its mute cache knows, keyed by STRIP", st["muted"], {6: True})
+        check("but the desk model holds it, keyed by STRIP", desk_model.mutes()[6], True)
         check("so an encoder press quotes the mute, not a stale 90 percent",
               announcer._ring_phrase(st, 0), "Mic 2, muted")
         server.action_set_channel_mute("Mic2", False)
-        check("unmuting clears it again", st["muted"], {6: False})
+        check("unmuting clears it again", desk_model.mutes()[6], False)
         check("and the ring goes back to the level", announcer._ring_phrase(st, 0), "Mic 2 90 percent")
         announcer.live_state = None
-        check_true("publishing with the announcer OFF is a safe no-op",
+        check_true("a mute with the announcer OFF works the same",
                    server.action_set_channel_mute("Mic2", True).get("ok"))
 
         # A mute does not reach a cross-point unlinked at a manual level, so the reply must name that
@@ -939,7 +940,7 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
     # change is announced twice: an unmarked level write comes back as "90 percent, USB 2". These
     # pin the behaviour, including that it is SUPPRESSION and not deafness.
     print("\n-- echo suppression (our own writes are not spoken back)")
-    channels.publish_strip_vector([0, 7, 2, 3, 10, 11, 1, 8, 9, 9])
+    desk(LAYOUT)
     st = fresh_st()
     announcer.live_state = st
     # Earlier sections publish their own levels, and the whole suite runs well inside the 1.5 s
@@ -949,7 +950,7 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
 
     # A LEVEL. Marked by fader INDEX, echoed by SOURCE CODE, so this exercises the translation:
     # fader index 8 carries source code 9 (USB 2).
-    announcer.publish_level("fader", 8, 0.60)
+    announcer.mark_self_level("fader", 8)
     SPOKEN.clear()
     announcer.handle_report(xpoint_packet(9, 0, 0.60), st)
     check("a level set from the app is not spoken back at us", SPOKEN, [])
@@ -970,11 +971,11 @@ with patched((rcp_transfer, {"send_record": lambda rec: RECORDS.append(rec) or 1
           SPOKEN, ["70 percent, USB 2 (Secondary)"])
 
     # A MUTE, keyed by strip index (Mic 2 sits on fader 7 = strip 6 in this layout).
-    announcer.publish_mute(6, True)
+    announcer.mark_self_mute(6)
     SPOKEN.clear()
     announcer.handle_report(state_packet("channelOutputMute", 6, True), st)
     check("the echo of a mute we set is silent too", SPOKEN, [])
-    check("but the cache still follows it, so the ring quotes the truth", st["muted"], {6: True})
+    check("but the desk model follows it, so the ring quotes the truth", desk_model.mutes()[6], True)
     announcer._self_writes[("mute", 6)] = time.monotonic() - (announcer._SELF_ECHO_S + 0.1)
     announcer.handle_report(state_packet("channelOutputMute", 6, False), st)
     check("a mute pressed ON THE DESK still speaks", SPOKEN, ["Mic 2 unmuted"])
@@ -1078,11 +1079,9 @@ print("\nTHE TWO INDEX SPACES ARE REAL: A SOURCE ON NO FADER STILL GETS ANNOUNCE
 # would silence it, which is exactly the regression this guards.
 # SMART pads (source 11) left off the layout. Not CallMe 1: its cross-point selector is
 # 0x4C + 13*16, which is past a single byte, so it cannot even be expressed as a one-byte push.
-channels.publish_strip_vector([0, 1, 2, 3, 10, 7, 8, 9, 16])   # source 11 is on no fader
+desk([0, 1, 2, 3, 10, 7, 8, 9, 16])                          # source 11 is on no fader
 said, st = run([xpoint_packet(11, 0, 0.42)], cold_cache=False)
 check("an OFF-FADER source is still named and spoken", said, ["42 percent, SMART pads"])
-check("and it takes no ring slot, because it has no fader",
-      [k for k in (st.get("known") or {})], [])
 said, _ = run([xpoint_packet(7, 0, 0.42)], cold_cache=False)
 check("a source that IS on a fader still works normally", said, ["42 percent, USB 1 (Main Stereo)"])
 
@@ -1098,7 +1097,7 @@ check("and no assignable source lost its name",
       [announcer._source_label(c) for c in (0, 7, 11)],
       ["Mic 1", "USB 1 (Main Stereo)", "SMART pads"])
 # The whole way through: a cross-point push for a linked pair, spoken.
-channels.publish_strip_vector([4, -1, 2, 3, 10, 7, 8, 9, 11])
+desk([4, -1, 2, 3, 10, 7, 8, 9, 11])
 said, _ = run([xpoint_packet(4, 0, 0.0)], cold_cache=False)
 check("a level push for a linked pair says the pair, not 'Source 4'", said,
       ["0 percent, Mic 1 + 2"])
@@ -1111,8 +1110,8 @@ print("\nA CROSS-POINT SELECTOR PAST 255 IS STILL DECODED")
 # Virtual A and Virtual B are addressed with two bytes. Their low bytes alone are 2 and 15, both
 # below the MIX block, so reading one byte discards the push and the fader moves in silence -
 # no level, no name. Only codes 14 and 15 reach that far, and only in Expanded.
-channels.publish_usb_expanded(True)
-channels.publish_strip_vector([0, 12, 13, 14, 15, 11, 7, 8, 9])
+desk([0, 12, 13, 14, 15, 11, 7, 8, 9])
+at(rcp_transfer.OUTPUT, "outputMultiMode", 5, "int")         # post-fader, Expanded
 check("a one-byte selector is unaffected",
       run([xpoint_packet(12, 0, 0.25)], cold_cache=False)[0], ["25 percent, Game"])
 check("a two-byte selector is spoken, not dropped",
@@ -1121,45 +1120,39 @@ check("and so is the one past it",
       run([xpoint_packet(15, 0, 1.0)], cold_cache=False)[0], ["100 percent, Virtual B"])
 
 # --- THE EXPANDED FLAG MUST BE SEEDED AT STARTUP, not left to whichever page is opened first ------
-# `usb_expanded()` is a published cache and answers False while unpublished. That is not a harmless
-# default: unpublished, the fader dropdown omits Game, Music, A and B and the write gate refuses
-# them, so on a desk that IS in Expanded the four cannot be assigned at all. The announcer seeds it
-# only while announcements are on, which is a user setting, so the startup seed is what publishes
-# it otherwise.
+# `usb_expanded()` answers False while the desk model has never seen the mode. That is not a
+# harmless default: unknown, the fader dropdown omits Game, Music, A and B and the write gate refuses
+# them, so on a desk that IS in Expanded the four cannot be assigned at all. The startup seed reads
+# the desk, which the desk model adopts, whether or not announcements are on.
 print()
 print("The Expanded flag is seeded at startup")
 seed_reads = []
 
 
-def _seed_first(*_a, **_k):
+def _seed_read(**_k):
     seed_reads.append(1)
-    return 5                                            # post-fader + Expanded
+    at(rcp_transfer.OUTPUT, "outputMultiMode", 5, "int")       # what adopting the read leaves
+    return b""
 
 
-SEED_READER = type("R", (), {"first": staticmethod(_seed_first),
-                             "read_model_stable": staticmethod(lambda **k: b"")})()
-_saved = channels._usb_expanded["on"]
-try:
-    channels._usb_expanded["on"] = None
-    check_true("unpublished is distinguishable from False", not channels.usb_expanded_known())
-    check("and an unpublished flag hides Expanded's four from the fader write gate",
+desk_model._reset()
+check_true("unknown is distinguishable from False", not channels.usb_expanded_known())
+check("and an unknown mode hides Expanded's four from the fader write gate",
+      sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}), [])
+desk_model.dump_finished(desk_model.dump_starting(),
+                         layout_fixture.skeleton(layout_fixture.PRO2_177))
+desk_model._reset()
+with patched((server.rcp_read, {"read_model_stable": _seed_read})):
+    server._seed_usb_expanded()
+    check_true("the startup seed reads it", channels.usb_expanded_known())
+    check("and the desk's real mode is what the app then holds", channels.usb_expanded(), True)
+    check("so the four are assignable again",
           sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}),
-          [])
-    with patched((server, {"rcp_read": SEED_READER})):
-        server._seed_usb_expanded()
-        check_true("the startup seed publishes it", channels.usb_expanded_known())
-        check("and the desk's real mode is what it publishes", channels.usb_expanded(), True)
-        check("so the four are assignable again",
-              sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded()))
-                     & {12, 13, 14, 15}),
-              [12, 13, 14, 15])
-        # Idempotent: a second call must not pay for another dump.
-        seed_reads.clear()
-        server._seed_usb_expanded()
-    check("a second seed reads nothing, because something has already published",
-          len(seed_reads), 0)
-finally:
-    channels._usb_expanded["on"] = _saved
+          [12, 13, 14, 15])
+    # Idempotent: a second call must not pay for another dump.
+    seed_reads.clear()
+    server._seed_usb_expanded()
+check("a second seed reads nothing, because the mode is already known", len(seed_reads), 0)
 
 
 print()

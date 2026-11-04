@@ -6,8 +6,9 @@ One list holds every backup, whichever half holds it: a copy on this computer, t
 on its drive, or both under one name (`server.read_backups`). Which half does the work is the
 server's business; the list only says what a backup can do.
 
-The backups are read once the desk state has first read the desk, on F5 and after every job here:
-two model dumps (`read_backups`, `read_show_state`), never on show.
+The backups are read once the desk state has first read the desk, on F5, after every job here, and
+once the desk has pushed a change to the shows or its drive (`FollowDesk`): two model dumps
+(`read_backups`, `read_show_state`), never on show.
 """
 import datetime
 
@@ -19,7 +20,8 @@ from native import a11y
 from native.backup_dialogs import BaselineDialog, ResetDialog
 from native.calls import call
 from native.dialogs import NameDialog, confirm, follow_job, report
-from native.pages import Page, labelled, page_body
+from native.pages import (FollowDesk, Page, labelled, modal_open, page_body, select, set_items,
+                          set_text)
 
 TITLE = "Backups"
 RESET_TITLE = "Start again from factory settings"
@@ -165,6 +167,7 @@ class BackupsSection:
         self.pages = [Page("backups", TITLE, self.page), Page("reset", "Factory settings",
                                                               self.reset)]
         frame.desk.subscribe(self._desk_event)
+        FollowDesk(frame, server.SHOW_STATE_PROPS, self.read)
 
     def refresh(self, announce):
         self.read(announce)
@@ -208,7 +211,7 @@ class BackupsSection:
     def _offer_baseline(self, status):
         # Asked once per desk, and never on top of a dialog already open: it is offered again at
         # the next start.
-        if not status.get("offer") or _modal_open():
+        if not status.get("offer") or modal_open():
             return
         dialog = BaselineDialog(self.frame, status)
         with dialog:
@@ -225,11 +228,6 @@ class BackupsSection:
                                lambda _started: server.profile_save_status)
             report(self.frame, ("Unit backed up", "Backup failed"), reply)
             self.read()
-
-
-def _modal_open():
-    return any(isinstance(window, wx.Dialog) and window.IsModal()
-               for window in wx.GetTopLevelWindows())
 
 
 class BackupsPage(wx.Panel):
@@ -287,24 +285,18 @@ class BackupsPage(wx.Panel):
         key = chosen["key"] if chosen else None
         self.backups = self.data["backups"].get("backups") or []
         labels = [list_label(b) for b in self.backups] or [NO_BACKUPS]
-        if self.list.GetCount() == len(labels):
-            # Item by item, so an unchanged list is not replaced under the screen reader.
-            for index, label in enumerate(labels):
-                if self.list.GetString(index) != label:
-                    self.list.SetString(index, label)
-        else:
-            self.list.Set(labels)
+        set_items(self.list, labels)
         keys = [b["key"] for b in self.backups]
         names = [b["name"] for b in self.backups]
         if prefer in names:
             index = names.index(prefer)
         else:
             index = keys.index(key) if key in keys else 0
-        self.list.SetSelection(index)
+        select(self.list, index)
         self._show_detail()
         self.backup_acc.description = storage_line(self.data["backups"])
         status = self.data["baseline"]
-        self.about.SetValue("\n\n".join([baseline_line(status), HOLDS, APP_SETTINGS]))
+        set_text(self.about, "\n\n".join([baseline_line(status), HOLDS, APP_SETTINGS]))
         baseline = status.get("baseline") if status else None
         wanted = bool(baseline and not baseline.get("pads"))
         if self.add_pads.IsShown() != wanted:

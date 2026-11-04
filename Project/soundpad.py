@@ -1180,6 +1180,12 @@ CENSOR_FIELD = {
 }
 EXTRA_PAD_PROPS = (list(ENV_FIELD.values()) + list(FADE_FIELD.values())
                    + list(CENSOR_FIELD.values()))
+# Every pad property the grid (`read_pads_live`) is built from, for following the desk. The ones a
+# pad pushes as it plays (padActive, padProgress) are not among them.
+PAD_GRID_PROPS = frozenset(
+    ["padIdx", "padType", "padName", "padReplay", "padGain", "padLoop", "padColourIndex",
+     "padMixerMode", "padMixerTriggerMode", "padPlayMode", "padFilePath"]
+    + [s["prop"] for s in BACK_CHANNEL_SOURCES] + TRIGGER_PROPS + EXTRA_PAD_PROPS)
 # One flat {key: property} map for the restore path. The censor FILE PATH is left out on purpose:
 # restoring a path whose audio may not be on the unit would point a pad at nothing, and putting the
 # file there is an upload, not a setting. It is still saved, so nothing is lost.

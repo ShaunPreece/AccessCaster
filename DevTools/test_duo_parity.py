@@ -27,7 +27,7 @@ import rcp_read
 import rcp_transfer
 import server
 import speech
-from _testkit import as_device, check, check_true, push
+from _testkit import as_device, check, check_true, hold_desk, hold_layout, push
 
 SPOKEN: list[str] = []
 speech.say = lambda text: SPOKEN.append(text)          # capture instead of speak
@@ -50,7 +50,7 @@ def int_packet(prop: str, sel: int, value: int) -> bytes:
 
 def run(pkts):
     SPOKEN.clear()
-    st = {"bank": None, "pending": None, "at": 0.0}
+    st = {"pending": None, "at": 0.0}
     for p in pkts:
         announcer.handle_report(p, st)
     return list(SPOKEN), st
@@ -72,7 +72,7 @@ print("\nSPOKEN NAMES USE THE DUO'S OWN SOURCES (code 2 = Headset, NOT Mic 3)")
 with as_device(devices.DUO):
     check("source label 2", announcer._source_label(2), "Headset")
     check("no Mic 3 to name", announcer._source_label(3), "Source 3")
-    channels.publish_strip_vector(list(DUO_VEC))
+    hold_desk(list(DUO_VEC))
     said, _ = run([state_packet("channelOutputMute", 4, True)])
     check("mute on the Headset strip", said, ["Headset muted"])
     said, _ = run([state_packet("channelCueEnable", 3, True)])
@@ -88,7 +88,7 @@ print("\nCHANNEL-BUTTON SELECTION SPEAKS THE RIGHT THING ON THE DUO")
 # systemChannelSelected on selector 0x0f. What the encoder then moves depends on the strip: a mic
 # gives mic gain, a line strip its input level, and a bus its fader level - never 'nothing'.
 with as_device(devices.DUO):
-    channels.publish_strip_vector(list(DUO_VEC))
+    hold_desk(list(DUO_VEC))
     said, _ = run([int_packet("systemChannelSelected", 0x0F, 0)])
     check("Mic 1 selected", said, ["Mic 1 selected. Encoder sets its gain"])
     said, _ = run([int_packet("systemChannelSelected", 0x0F, 4)])
@@ -100,7 +100,7 @@ with as_device(devices.DUO):
     # The SAME on fader 9, the empty virtual strip. The phrase deliberately does NOT vary with
     # physical vs virtual: a bus has a fader either way, and a message that branched on the layout
     # would be one more thing to keep in step for no gain to the listener.
-    channels.publish_strip_vector([0, 1, 10, -1, 2, 7, 8, 9, 11, 9])
+    hold_desk([0, 1, 10, -1, 2, 7, 8, 9, 11, 9])
     said, _ = run([int_packet("systemChannelSelected", 0x0F, 8)])
     check("and the same on the Duo's VIRTUAL fader 9", said,
           ["SMART pads selected. Fader level only"])
@@ -108,7 +108,7 @@ with as_device(devices.DUO):
     said, _ = run([int_packet("systemChannelSelected", 0x0F, 3)])
     check("the strip they came off is now empty and says so", said,
           ["Channel 4 selected. Nothing here for the encoder to adjust"])
-    channels.publish_strip_vector(list(DUO_VEC))
+    hold_layout(list(DUO_VEC))
     said, _ = run([int_packet("systemChannelSelected", 0x0F, -1)])
     check("deselected", said, ["Virtual faders and monitor. Encoder changes their levels"])
     # Mic 2 on the Duo is combo-linked and is still a mic, so it must still say 'gain'.

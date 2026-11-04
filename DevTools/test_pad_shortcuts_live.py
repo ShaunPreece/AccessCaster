@@ -98,7 +98,6 @@ def main() -> int:
             # read-back can never check and the one a wrong bank silently breaks.
             other = 1 if bank == 0 else 0
             soundpad.select_bank(other)
-            pad_shortcuts.note_bank(other)
             time.sleep(0.4)
 
             check_said("pad.fire on a sound pad says playing",
@@ -140,13 +139,12 @@ def main() -> int:
                        pad_shortcuts.fire(str(fx)), want=f"{name} off.")
 
         print("\nBANK STEPPING")
-        pad_shortcuts.note_bank(0)
         soundpad.select_bank(0)
         time.sleep(0.4)
         check_said("bank down at the first bank refuses",
                    pad_shortcuts.bank_step("down"), contains="first bank")
         check_said("bank up moves", pad_shortcuts.bank_step("up"), want="Bank 2.")
-        check_said("and the cache followed it", pad_shortcuts.current_bank(), want=1)
+        check_said("and the desk model followed it", pad_shortcuts.current_bank(), want=1)
 
         print("\nREFUSALS")
         check_said("a slot the desk does not have",

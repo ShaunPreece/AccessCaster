@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import announcer
+import desk_model
 import pad_shortcuts
 import server
 import settings_file
@@ -67,13 +68,13 @@ with as_device(server.devices.PRO2), patched(
         (server.rcp_read, {"read_model":
                            lambda *a, **k: reads.append(server._hid_lock.locked()) or b""}),
         (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
-        (announcer, {"publish_level": lambda *a: None})):
+        (announcer, {"mark_self_level": lambda *a: None})):
     server.channels.publish_strip_vector([0, 1, 2, 3, 4, 5, 6, 7, 8])
     res = server.action_set_fader_level(6, 50)
     check("the level is set", res.get("ok"), True)
     check("with a layout held, the reply names the channel without a read", reads, [])
     server.channels._strip_vec["vec"] = None
-    server.channels._strip_vec_last["vec"] = None
+    desk_model._reset()
     server.action_set_fader_level(6, 40)
     check("with none held, the read is made under the HID lock", reads, [True])
 
@@ -185,9 +186,9 @@ check("and puts back the gain the first take set",
 
 print("\nANNOUNCER LOOPS")
 with patched((server.rcp_transfer, {"find_control_interface": lambda fresh=False: object()}),
-             (announcer, {"seed_layout": lambda st: None})):
+             (announcer, {"seed": lambda st: None})):
     try:
-        newest = {"bank": 1}
+        newest = {"pending": None}
         announcer.live_state = newest
         announcer._loop_gen = 5
         speech.enabled.set()

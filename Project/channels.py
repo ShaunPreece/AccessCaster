@@ -17,12 +17,14 @@ the channel currently sits on, keyed by its position in the live fader vector.
 import contextlib as _contextlib
 import time as _time  # strip-vector cache expiry only
 
-import desk_live  # the one listener, which the naming layout follows
+import desk_live  # the one listener, whose fader source pushes drop the strip-vector cache
+import desk_model  # the desk as last seen: the naming layout and the USB mode
 import devices  # per-device model (mic selectors, channel order) keyed by product id
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
 import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
 import rcp_transfer as _t  # low-level byte builders + send layer (build_*, send_record, send_records_paced)
+import recorder  # outputMultiMode's two halves
 
 # ============================================================================
 # MIC INPUT CHANNELS (gain / phantom / polarity / type) - the XLR preamp block
@@ -109,13 +111,20 @@ def mic_gain(blob: bytes, channel: int):
     writes to.
 
     THE PAIR IS THE POINT. Anything that has to put a gain back must take it from the desk rather
-    than from the app's cached view, and reading it at the write's own address is the only way to
-    be certain it is the same value. `server.wake_channels` is the case that forces it: its callers
-    are a reset and an import, the two moments `_session_state` is guaranteed stale, so sourcing
-    the "put it straight back" value from the cache writes the app's last displayed gain over every
+    than from the desk model, and reading it at the write's own address is the only way to be
+    certain it is the same value. `server.wake_channels` is the case that forces it: its callers
+    are a reset and an import, the two moments the model is least to be trusted, so sourcing the
+    "put it straight back" value from it writes the app's last seen gain over every
     freshly-restored one.
     """
     v = _r.keyed_value(blob, _mic_key(channel), "inputMicrophoneGain", None)
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def mic_gain_known(channel: int):
+    """A mic channel's gain as the desk model last saw it, or None. For saying what changed, never
+    for putting a gain back (`mic_gain`)."""
+    v = desk_model.value(_mic_key(channel), "inputMicrophoneGain")
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
@@ -178,6 +187,24 @@ def _ui_entry_for(dev, channel):
     return None
 
 
+def usb_expanded() -> bool:
+    """Whether the desk is in Expanded, as the desk model last saw it. It decides a NAME and which
+    sources may be offered, never an address, and reads no dump: the announcer's thread and the
+    fader label helper call it.
+
+    False while the model has never seen the mode, which is a safe default only in the sense that it
+    offers FEWER sources and the plainer name. It is NOT a harmless one: unknown, the fader dropdown
+    omits Game, Music, A and B AND the write gate refuses them, so on a desk that is in Expanded the
+    four cannot be assigned at all. The server reads the desk at start (`_seed_usb_expanded`)
+    rather than leaving it to whichever page the user happens to open."""
+    return bool(recorder.split_usb_multitrack(desk_model.usb_mode())[1])
+
+
+def usb_expanded_known() -> bool:
+    """Has the desk model seen the USB mode yet? Lets the startup seed skip a dump it does not need."""
+    return desk_model.usb_mode() is not None
+
+
 # ---- fader vector cache (the strip map) -------------------------------------------------------
 # Processing and effects are addressed PER STRIP (fader position), so every such read or write has
 # to know the live channelInputSource vector. Reading it means a full ~600 ms model dump, and
@@ -191,86 +218,30 @@ STRIP_VECTOR_TTL_S = 15.0
 _strip_vec = {"vec": None, "at": 0.0}
 
 
-# LAST KNOWN layout, with NO expiry. Separate from the TTL'd cache above on purpose: the TTL exists
-# because addressing a processing WRITE to a stale strip is dangerous, whereas the announcer only
-# needs a NAME for a strip, where "the last layout we saw" beats saying "Channel 4". Kept current by
-# publish_strip_vector below and by note_strip_source when the desk reports a change.
-_strip_vec_last = {"vec": None}
-
-
-# WHETHER THE DESK IS IN EXPANDED, no expiry, same contract as _strip_vec_last: it decides a NAME
-# and which sources may be offered, never an address. Held here rather than read on demand because
-# the callers that need it - the announcer's read loop, the fader label helper - must not trigger a
-# model dump, and because Expanded changes only by a write that takes the desk off the USB bus, so
-# a cached answer cannot go quietly stale the way a fader layout can.
-_usb_expanded = {"on": None}
-
-
-def publish_usb_expanded(on) -> None:
-    """Cache the Expanded flag from a read that has just decoded `outputMultiMode`."""
-    if on is not None:
-        _usb_expanded["on"] = bool(on)
-
-
-def usb_expanded() -> bool:
-    """Whether the desk is in Expanded, as last seen.
-
-    False until something has published, which is a safe default only in the sense that it offers
-    FEWER sources and the plainer name. It is NOT a harmless one: unpublished, the fader dropdown
-    omits Game, Music, A and B AND the write gate refuses them, so on a desk that is in Expanded
-    the four cannot be assigned at all. Seed it at startup (`server._bring_up_server`) rather than
-    leaving the first publisher to whichever page the user happens to open."""
-    return bool(_usb_expanded["on"])
-
-
-def usb_expanded_known() -> bool:
-    """Has anything published the mode yet? Lets the startup seed skip a dump it does not need."""
-    return _usb_expanded["on"] is not None
-
-
 def publish_strip_vector(vec) -> None:
     """Cache a channelInputSource vector we have just read as part of some other read."""
     if vec:
         _strip_vec["vec"] = list(vec)
         _strip_vec["at"] = _time.monotonic()
-        _strip_vec_last["vec"] = list(vec)
 
 
 def last_known_strip_vector():
-    """The most recent fader layout we have seen, however old, or None if we have never seen one.
-    NAMING ONLY - never use it to address a write (see _strip_vec_last)."""
-    v = _strip_vec_last["vec"]
-    return list(v) if v is not None else None
-
-
-def note_strip_source(idx: int, code: int) -> bool:
-    """Record a single channelInputSource change seen on the PUSHED report-04 stream.
-
-    Keeps the naming layout current when a fader source is changed somewhere we did not do it (the
-    desk's own touchscreen, the RODE app, MIDI), and invalidates the TTL'd cache so the next
-    processing write re-reads the real layout instead of trusting a copy we now know is out of
-    date. Returns True if this actually changed our picture."""
-    v = _strip_vec_last["vec"]
-    changed = True
-    if v is not None and 0 <= idx < len(v):
-        changed = (v[idx] != code)
-        v[idx] = code
-    if changed:
-        invalidate_strip_vector()
-    return changed
+    """The desk model's fader layout, however old, or None before the first read. NAMING ONLY:
+    never use it to address a write, which `strip_vector` is for."""
+    return desk_model.strip_vector()
 
 
 def follow_desk() -> None:
-    """Keep the naming layout following a fader source changed anywhere (the touchscreen, RODE's
-    app, MIDI), whether or not announcements are on."""
+    """Drop the strip-vector cache when a fader source changes anywhere (the touchscreen, RODE's
+    app, MIDI), so the next processing write re-reads the layout rather than trusting a copy now
+    known to be out of date."""
     desk_live.Follower("fader sources", {"channelInputSource"}, on_push=note_source_push).start()
 
 
 def note_source_push(push) -> None:
-    """One pushed `channelInputSource`, addressed at CHANNEL[strip]."""
-    key = push.key
-    if push.kind == "int" and key and key[0] == "CHANNEL" and key[1] < 16:
-        note_strip_source(key[1], push.value)
+    """One pushed `channelInputSource`."""
+    if push.was != push.value:
+        invalidate_strip_vector()
 
 
 def invalidate_strip_vector() -> None:

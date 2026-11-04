@@ -30,6 +30,7 @@ import _bootstrap  # noqa: F401
 import _testkit
 import announcer
 import desk_live
+import desk_model
 import rcp_hid
 import rcp_transfer
 import server
@@ -97,7 +98,8 @@ class Rig:
 
     def seed(self, st):
         self.seeded += 1
-        st["usb_mode"] = self.seeded_mode      # what a real dump would have found
+        # What adopting a real read would leave in the desk model.
+        desk_model.apply_push((0x0A,), "outputMultiMode", self.seeded_mode, "int")
 
     def tidy(self, spoken):
         self.tidied.append(spoken)
@@ -115,6 +117,7 @@ class Rig:
         self.iface = to_iface
 
     def __enter__(self):
+        desk_model._reset()
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(patched(
             (rcp_transfer, {"find_control_interface": self.find}),
@@ -125,7 +128,7 @@ class Rig:
             # Windows' default audio device, which is the user's screen reader.
             (speech, {"say": self.say}),
             (server, {"_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow}),
-            (announcer, {"seed_layout": self.seed,
+            (announcer, {"seed": self.seed,
                          "_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
         speech.enabled.set()
         self.thread = threading.Thread(target=announcer._loop, args=(None, self.greeting),

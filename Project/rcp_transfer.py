@@ -27,7 +27,6 @@ import ctypes
 import os
 import shutil
 import string
-import struct
 import subprocess
 import time
 
@@ -82,17 +81,15 @@ def value_block(kind: str, value) -> bytes:
     bool   01 01 <02 on / 03 off>      enabled is 0x02 and disabled 0x03, NOT 1 and 0
     float  01 09 04 <f64 LE>           every processing parameter, as the RODE app sends it
     str    01 <vlen> 05 <ascii> 00     null-terminated
+
+    Encoded by `model_tree.encode_value`, the one value encoder; a write is limited to these four
+    kinds, and a string to ASCII.
     """
-    if kind == "int":
-        return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-    if kind == "bool":
-        return bytes([0x01, 0x01, 0x02 if value else 0x03])
-    if kind == "float":
-        return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", float(value))
+    if kind not in ("int", "bool", "float", "str"):
+        raise ValueError(f"no value block for kind {kind!r}")
     if kind == "str":
-        body = str(value).encode("ascii") + b"\x00"
-        return bytes([0x01, 1 + len(body), 0x05]) + body
-    raise ValueError(f"no value block for kind {kind!r}")
+        str(value).encode("ascii")
+    return model_tree.encode_value(value, kind)
 
 
 def build_record(name: str, kind: str, value, path, empty_zero: bool = False) -> bytes:
@@ -621,6 +618,7 @@ def _write_records(records, purpose: str, delay: float = 0.0) -> int:
         for r in records:
             diagnostics.command(r, purpose)
             n += dev.write(r)
+            rcp_hid.note_written(r)
             if delay:
                 time.sleep(delay)
     finally:

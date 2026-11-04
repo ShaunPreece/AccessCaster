@@ -97,6 +97,11 @@ def is_model_dump(blob) -> bool:
     """
     return bool(blob) and _ROOT_MARKER in blob
 
+# The desk model (`desk_model`), which adopts every complete dump: told when one starts, so what is
+# pushed while it is read can be replayed on top, and handed the dump when it ends. None in a
+# process that has no model.
+dump_watcher = None
+
 # What the last dump actually did, for diagnosis. A skipped frame is invisible otherwise, and
 # "the read was fine" is exactly the wrong thing to conclude from silence.
 _last_read: dict = {}
@@ -209,6 +214,8 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     if iface is None:
         raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
     dev = rcp_hid.open_handle(iface, "model dump")
+    watcher = dump_watcher
+    token = watcher.dump_starting() if watcher is not None else None
     buf = bytearray()
     need = None        # 4 + the declared length, once the dump's first frame has told us
     frames = pushes = declared = 0
@@ -252,6 +259,11 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
                       bytes=len(buf), frames=frames, pushes_skipped=pushes,
                       took=f"{time.monotonic() - started:.2f}s")
     blob = bytes(buf)
+    if watcher is not None and need is not None:
+        try:
+            watcher.dump_finished(token, blob)
+        except Exception as exc:    # the picture is never worth failing a dump for
+            diagnostics.event("desk_model.adopt_failed", str(exc))
     # LEARN WHICH DESK THIS IS, from the desk's own word for it. Only when the product id names no
     # desk, which happens whenever `outputMultiMode` is not the default: the id encodes the audio
     # configuration, so it cannot be tabulated, while the serial it comes back under does not

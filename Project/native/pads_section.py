@@ -4,17 +4,20 @@ or what it does changed, each in a dialog named with the pad (`pad_dialogs`); Vo
 
 The pads are not part of the window's desk state: they come from a model dump of their own
 (`server.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on F5,
-and after a change made here. Never on show, like every page.
+after a change made here, and once the desk has pushed a change to a pad (`FollowDesk`). Never on
+show, like every page.
 """
 import wx
 
 import server
+import soundpad
 from native import a11y
 from native.calls import call
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import MessagePage, Page, labelled, page_body
+from native.pages import (FollowDesk, MessagePage, Page, labelled, page_body, select,
+                          set_items, set_text)
 
 TITLE = "SMART pads"
 PADS = "Pads"
@@ -43,6 +46,7 @@ class PadsSection:
                          for _page in PAGES]
         self.pages = [Page(key, title, status) for (key, title), status in zip(PAGES, self.statuses)]
         frame.desk.subscribe(self._desk_event)
+        FollowDesk(frame, soundpad.PAD_GRID_PROPS, self.read)
 
     def start(self):
         self._set_status("Reading the pads from the desk.")
@@ -141,23 +145,16 @@ class PadsPage(wx.Panel):
         index = self.list.GetSelection()
         grid = self.grids[index] if index != wx.NOT_FOUND else None
         pads = self.model["pads"]
-        labels = [list_label(pad) for pad in pads]
-        if self.list.GetCount() == len(labels):
-            # Item by item, so an unchanged list is not replaced under the screen reader.
-            for index, label in enumerate(labels):
-                if self.list.GetString(index) != label:
-                    self.list.SetString(index, label)
-        else:
-            self.list.Set(labels)
+        set_items(self.list, [list_label(pad) for pad in pads])
         self.grids = [pad["grid"] for pad in pads]
-        self.list.SetSelection(self.grids.index(grid) if grid in self.grids else 0)
+        select(self.list, self.grids.index(grid) if grid in self.grids else 0)
         notes = []
         if self.model.get("read_only"):
             notes.append("Editing SMART pads is not enabled on this device yet, so pads can be "
                          "looked at here but not changed.")
         if self.model.get("health_message"):
             notes.append(self.model["health_message"])
-        self.note.SetValue(" ".join(notes))
+        set_text(self.note, " ".join(notes))
         if self.note.IsShown() != bool(notes):
             self.note.Show(bool(notes))
             self.Layout()

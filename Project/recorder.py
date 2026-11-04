@@ -36,6 +36,7 @@ import time
 from datetime import datetime
 
 import desk_live
+import desk_model
 import diagnostics
 import rcp_read
 import rcp_transfer
@@ -515,7 +516,9 @@ def delete_recording(uid: int) -> None:
 # The Watcher: what the unit is doing, live, for free.
 
 class Watcher:
-    """Follows `recordState` pushes on the one listener (`desk_live`).
+    """Follows `recordState` pushes on the one listener (`desk_live`), says each change through
+    `on_change(was, state)`, and counts the elapsed time. The state itself is the desk model's
+    (`desk_model.record_state`).
 
     WHY A LISTENER RATHER THAN POLLING. Reading the state from the model costs a ~1.5 s dump and the
     HID lock, so polling it would fight every write in the app. The unit pushes the state change
@@ -525,16 +528,17 @@ class Watcher:
     ELAPSED TIME IS COUNTED HERE, because the unit will not tell us: `recordTimeMs` is 0 in the dump
     and never pushed. Paused time is excluded, matching what the unit actually records. If the app
     started while a recording was already running we did not see the start, so `elapsed()` returns
-    None and the UI says the time is unknown rather than showing a number that is wrong."""
+    None and the UI says the time is unknown rather than showing a number that is wrong. `_timing`
+    is the state the count was last moved for, so a state the model learned from a dump rather than
+    a push is caught up with, untimed, the next time anyone asks."""
 
     def __init__(self, on_change=None):
         self._on_change = on_change
         self._lock = threading.Lock()
-        self._state = None
+        self._timing = None
         self._since = None          # when the CURRENT recording run started, or None
         self._banked = 0.0          # seconds recorded before the current run (pauses)
         self._timed = False         # did we see this recording START?
-        self._seen_at = 0.0
         self._follower = None
 
     def start(self) -> None:
@@ -543,57 +547,57 @@ class Watcher:
 
     # -- state, as the rest of the app asks for it -------------------------
     def snapshot(self) -> dict:
+        state = desk_model.record_state()
         with self._lock:
-            state, seen_at = self._state, self._seen_at
-            elapsed = self._elapsed_locked()
+            self._advance(state, timed=False)
+            elapsed = self._elapsed_locked(state)
         return {"state": state,
                 "state_label": STATE_LABEL.get(state) if state is not None else None,
                 "elapsed_seconds": elapsed,
                 "elapsed": describe_duration(elapsed) if elapsed is not None else None,
-                "seen": bool(seen_at),
+                "seen": state is not None,
                 "live": True}
 
-    def _elapsed_locked(self):
-        if self._state not in (RECORDING, PAUSED) or not self._timed:
+    def _elapsed_locked(self, state):
+        if state not in (RECORDING, PAUSED) or not self._timed:
             return None
-        run = (time.monotonic() - self._since) if (self._state == RECORDING and self._since) else 0.0
+        run = (time.monotonic() - self._since) if (state == RECORDING and self._since) else 0.0
         return round(self._banked + run, 1)
 
     def note_state(self, state, timed: bool = True) -> None:
-        """Record a state we learned from somewhere other than a push (a model read at startup, or
-        the read-back after our own write). `timed=False` says we did not witness the start, so no
+        """Catch the count up with a state learned from a model read rather than a push (the
+        read-back after our own write). `timed=False` says we did not witness the start, so no
         elapsed time is claimed."""
-        self._apply(state, timed=timed, speak=False)
+        with self._lock:
+            self._advance(state, timed)
 
     def _push(self, push) -> None:
         state = _state_of(push)
-        if state is not None:
-            self._apply(state)
-
-    def _apply(self, state, timed: bool = True, speak: bool = True) -> None:
         if state is None:
             return
         with self._lock:
-            if state == self._state:
-                self._seen_at = time.monotonic()
-                return
-            was = self._state
-            now = time.monotonic()
-            if was == RECORDING and self._since:
-                self._banked += now - self._since
-                self._since = None
-            if state == RECORDING:
-                self._since = now
-                if was not in (RECORDING, PAUSED):
-                    self._banked, self._timed = 0.0, timed
-            elif state in (READY, NO_DESTINATION):
-                self._banked, self._timed = 0.0, False
-            self._state, self._seen_at = state, now
-        if speak and self._on_change:
+            self._advance(state, timed=True)
+        if push.was != state and self._on_change:
             try:
-                self._on_change(was, state)
+                self._on_change(push.was, state)
             except Exception as exc:    # a failed announcement must never take the listener down
                 diagnostics.event("recorder.announce_failed", str(exc))
+
+    def _advance(self, state, timed: bool) -> None:
+        """Move the elapsed count on to `state`. Caller holds `_lock`."""
+        if state is None or state == self._timing:
+            return
+        was, now = self._timing, time.monotonic()
+        if was == RECORDING and self._since:
+            self._banked += now - self._since
+            self._since = None
+        if state == RECORDING:
+            self._since = now
+            if was not in (RECORDING, PAUSED):
+                self._banked, self._timed = 0.0, timed
+        elif state in (READY, NO_DESTINATION):
+            self._banked, self._timed = 0.0, False
+        self._timing = state
 
 
 def _state_of(push):

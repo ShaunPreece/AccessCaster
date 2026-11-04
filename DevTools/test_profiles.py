@@ -404,7 +404,7 @@ RECORDED_TRANSFER = ("set_midi_control", "set_fader_source", "set_fader_level",
                      "set_master_compellor_param", "set_output_delay", "set_unit_setting",
                      "set_recording_processing_bypass", "set_usb_multitrack_mode",
                      "set_usb_multitrack_bypass")
-RECORDED_CHANNELS = ("note_strip_source", "invalidate_strip_vector",
+RECORDED_CHANNELS = ("invalidate_strip_vector",
                      "set_mic_gain", "set_mic_type", "set_phantom", "set_polarity",
                      "set_instrument_gain", "set_channel_level", "set_channel_advanced",
                      "set_processing_enabled", "set_processing_module", "set_channel_processing",

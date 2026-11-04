@@ -13,7 +13,7 @@ from native import a11y
 from native.calls import call
 from native.dialogs import JobDialog, ListDialog, confirm, follow_job, report
 from native.pad_dialogs import READ_ONLY, content, where
-from native.pages import page_body
+from native.pages import page_body, select
 
 TITLE = "Pad maintenance"
 
@@ -119,7 +119,7 @@ class MaintPage(wx.Panel):
         if labels != self.export_choice.GetItems():
             self.export_choice.Set(labels or ["No pad has a sound on it"])
         grids = [pad["grid"] for pad in self.sound_pads]
-        self.export_choice.SetSelection(grids.index(chosen) if chosen in grids else 0)
+        select(self.export_choice, grids.index(chosen) if chosen in grids else 0)
 
     def _refused(self):
         if self.model["read_only"]:

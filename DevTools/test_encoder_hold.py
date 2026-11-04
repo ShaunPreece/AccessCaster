@@ -1,6 +1,6 @@
 """encoder_hold.Watcher's decisions: a hold while a channel button holds the encoder mutes that
-channel, once per hold, and nothing else does; and our own strip writes reach the window. NO DEVICE:
-the follower is never started, and pushes are fed to it directly.
+channel, once per hold, and nothing else does. NO DEVICE: the follower is never started, presses are
+fed to it directly, and the selected channel is pushed into the desk model.
 """
 from __future__ import annotations
 
@@ -9,25 +9,25 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-import app_window
 import desk_live
+import desk_model
 import encoder_hold
-import rcp_transfer
-import server
-from _testkit import addr, check, patched, push
+from _testkit import check, push
 
 
 def v_bool(on: bool) -> bytes:
     return bytes([0x01, 0x01, 0x02 if on else 0x03])
 
 
-def v_int(value: int) -> bytes:
-    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-
-
 def watcher():
     held = []
+    desk_model._reset()
     return encoder_hold.Watcher(held.append), held
+
+
+def select(strip):
+    """The desk pushing the channel a channel button has given the encoder."""
+    desk_model.apply_push((15,), "systemChannelSelected", strip, "int")
 
 
 def hold(w, seconds):
@@ -39,7 +39,7 @@ def hold(w, seconds):
 
 print("ENCODER HOLD")
 w, held = watcher()
-w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(0))))
+select(0)
 hold(w, 1.0)
 check("a hold with a channel selected mutes that channel", held, [0])
 w._check_hold()
@@ -49,12 +49,12 @@ hold(w, 1.0)
 check("the next hold toggles it again", held, [0, 0])
 
 w, held = watcher()
-w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(0))))
+select(0)
 hold(w, 0.3)
 check("a short press does nothing", held, [])
 
 w, held = watcher()
-w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(-1))))
+select(-1)
 hold(w, 1.0)
 check("with no channel selected the desk's own hold is left alone", held, [])
 
@@ -63,20 +63,9 @@ hold(w, 1.0)
 check("before any selection is known, nothing happens", held, [])
 
 w, held = watcher()
-w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(4))))
-w._push(desk_live.decode(push([15], "systemChannelSelected", v_int(-1))))
+select(4)
+select(-1)
 hold(w, 1.0)
 check("a channel button pressed again hands the encoder back", held, [])
-
-print("THE WINDOW HEARS OUR OWN STRIP WRITES")
-# The desk does not push our writes back, so a mute made by the hold (or a shortcut) reaches the
-# window as the push the desk would have sent.
-seen = []
-with patched((app_window, {"pushed": lambda *p: seen.append(p)})):
-    server._mirror_strip(0, "channelOutputMute", True)
-check("a strip mute is handed over as that strip's push", seen,
-      [(addr(rcp_transfer.channel_key(0)), "channelOutputMute", True, "bool")])
-with patched((app_window, {"pushed": None})):
-    server._mirror_strip(0, "channelOutputMute", True)      # no window: nothing to hand to
 
 sys.exit(_testkit.finish())

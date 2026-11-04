@@ -1,8 +1,9 @@
 """AccessCaster - the one listener: a single read-only HID handle hearing everything the desk pushes.
 
 The desk pushes a report-04 frame of its own accord whenever anything on it changes. This module
-holds the app's only long-lived handle for hearing them, decodes each push once, and hands it to
-every subscriber that asked for that property name.
+holds the app's only long-lived handle for hearing them, decodes each push once, applies it to the
+desk model (`desk_model`), and then hands it to every subscriber that asked for that property name,
+so a subscriber that looks at the model sees the value it is being told about.
 
   - EVERY SUBSCRIBER HAS ITS OWN QUEUE, and nothing a subscriber does runs on the reader. Encoder
     hold's mute is a write under the HID lock and CallMe rings and speaks, so a callback on the
@@ -14,6 +15,8 @@ every subscriber that asked for that property name.
   - The queue carries three kinds of event: `Push`, `Connected` and `Lost`. A subscription made
     while the desk is open receives a `Connected` first, so "the desk is there" is learned the same
     way on the first open and on every reopen.
+  - A subscription made with `own_writes` also hears what this app writes, as a `Push` marked
+    `ours`, because the desk does not push all of them back.
 
 THE HANDLE IS REOPENED ON A FRESHLY RESOLVED INTERFACE, never a remembered one: the desk
 re-enumerates on `outputMultiMode`, `engineMode` and `systemMainMode` and comes back under a
@@ -30,6 +33,7 @@ import threading
 import time
 from typing import NamedTuple, Optional
 
+import desk_model
 import diagnostics
 import rcp_hid
 import rcp_read
@@ -47,13 +51,17 @@ CONNECT_WAIT_S = 1.0
 
 
 class Push(NamedTuple):
-    """One property the desk pushed. `key` is the node it is addressed at, named by the desk's own
-    layout (`rcp_read.push_key`), or None when no layout is known or the node is not a fixed one."""
+    """One property the desk pushed, or this app wrote (`ours`). `key` is the node it is addressed
+    at, named by the desk's own layout (`rcp_read.push_key`), or None when no layout is known or
+    the node is not a fixed one. `was` is the desk model's value before it, None when it held none,
+    which is how a subscriber tells a change from the desk re-pushing a value it already had."""
     path: tuple
     name: str
     value: object
     kind: str
     key: Optional[tuple]
+    was: object = None
+    ours: bool = False
 
 
 class Connected(NamedTuple):
@@ -69,11 +77,13 @@ class Lost(NamedTuple):
 
 class Subscription:
     """A queue of the events one consumer asked for. `names` is the push names it wants, or None for
-    every push; `Connected` and `Lost` always arrive."""
+    every push; `Connected` and `Lost` always arrive, and this app's own writes only with
+    `own_writes`."""
 
-    def __init__(self, purpose: str, names=None):
+    def __init__(self, purpose: str, names=None, own_writes: bool = False):
         self.purpose = purpose
         self.names = frozenset(names) if names is not None else None
+        self.own_writes = own_writes
         self.lost = False           # the desk dropped since this subscription was made
         self._q: queue.Queue = queue.Queue()
 
@@ -127,6 +137,7 @@ def stop(timeout: float = 3.0) -> None:
             _thread.join(timeout=timeout)
         _thread = None
         _connected.clear()
+        desk_model.set_connected(False)
 
 
 def connected() -> bool:
@@ -138,9 +149,9 @@ def wait_connected(timeout: float) -> bool:
     return _connected.wait(timeout)
 
 
-def subscribe(purpose: str, names=None) -> Subscription:
+def subscribe(purpose: str, names=None, own_writes: bool = False) -> Subscription:
     """A new subscription, with the listener started if it was not running."""
-    sub = Subscription(purpose, names)
+    sub = Subscription(purpose, names, own_writes)
     with _lock:
         _subscribers.append(sub)
         if _connected.is_set():
@@ -159,8 +170,10 @@ def _broadcast(event) -> None:
     with _lock:
         if isinstance(event, Connected):
             _connected.set()
+            desk_model.set_connected(True)
         elif isinstance(event, Lost):
             _connected.clear()
+            desk_model.set_connected(False)
         for sub in _subscribers:
             sub._put(event)
 
@@ -168,8 +181,20 @@ def _broadcast(event) -> None:
 def _fan_out(push: Push) -> None:
     with _lock:
         for sub in _subscribers:
-            if sub.wants(push.name):
+            if sub.wants(push.name) and (sub.own_writes or not push.ours):
                 sub._put(push)
+
+
+def _written(record: bytes) -> None:
+    """`rcp_hid.write_watcher`: one record this app has written, applied to the desk model and,
+    when it landed there, handed to the subscriptions that asked for our own writes."""
+    got = desk_model.apply_write(record)
+    if got is not None:
+        path, name, value, kind, was = got
+        _fan_out(Push(path, name, value, kind, rcp_read.push_key(path), was, True))
+
+
+rcp_hid.write_watcher = _written
 
 
 def decode(frame: bytes) -> Optional[Push]:
@@ -229,10 +254,12 @@ def _run() -> None:
             diagnostics.event("desk_live.push_undecoded", str(exc))
             continue
         if push is not None:
-            _fan_out(push)
+            was = desk_model.apply_push(push.path, push.name, push.value, push.kind)
+            _fan_out(push._replace(was=was))
     if dev is not None:
         rcp_hid.close_handle(dev, "desk listener")
     _connected.clear()
+    desk_model.set_connected(False)
 
 
 # ---- a subscriber with a thread of its own ----------------------------------------------------
@@ -240,14 +267,16 @@ def _run() -> None:
 class Follower:
     """A subscription whose events are handed to callbacks on a thread of its own.
 
-    `on_push(push)` for each push named in `names`, `on_connected(gap)` and `on_lost()` as the
+    `on_push(push)` for each push named in `names` (and each of this app's own writes of them, with
+    `own_writes`), `on_connected(gap)` and `on_lost()` as the
     events arrive, and `on_tick()` at least every `tick_s` seconds, for a consumer that times
     something between pushes. A callback that raises costs that one event, never the thread."""
 
     def __init__(self, purpose: str, names, on_push=None, on_connected=None, on_lost=None,
-                 on_tick=None, tick_s: float = 0.25):
+                 on_tick=None, tick_s: float = 0.25, own_writes: bool = False):
         self.purpose = purpose
         self._names = names
+        self._own_writes = own_writes
         self._on_push = on_push
         self._on_connected = on_connected
         self._on_lost = on_lost
@@ -258,7 +287,7 @@ class Follower:
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> "Follower":
-        self._sub = subscribe(self.purpose, self._names)
+        self._sub = subscribe(self.purpose, self._names, self._own_writes)
         self._thread = threading.Thread(target=self._run, name=f"follow-{self.purpose}",
                                         daemon=True)
         self._thread.start()

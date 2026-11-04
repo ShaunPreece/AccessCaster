@@ -24,13 +24,9 @@ app = wx.App()
 class FakeDesk:
     def __init__(self):
         self.faders = ON_FADER
-        self.changed = []
 
     def subscribe(self, fn):
         self.listener = fn
-
-    def faders_changed(self, reply):
-        self.changed.append(reply)
 
 
 class FakeFrame:
@@ -114,7 +110,6 @@ with patched(sync, (server, {"action_set_fader": lambda index, code: {
     call_page._on_put(None)
 check("putting CallMe 1 on a fader says where, and who lost it", frame.said[-1],
       "CallMe 1 is on fader 2. Mic 2 is now on no fader.")
-check("the desk state takes the new layout", len(frame.desk.changed), 1)
 check_true("and CallMe is read again", reads)
 frame.desk.faders = ON_FADER
 frame.desk.listener("read", {"ok": True})

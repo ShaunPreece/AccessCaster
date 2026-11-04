@@ -53,7 +53,6 @@ class FadersPage(scrolled.ScrolledPanel):
                     send=lambda on, code=pair["code"]: server.action_set_stereo_link(code, on),
                     current=lambda code=pair["code"]: self._linked(code),
                     remember=lambda _on: None,
-                    accepted=self.section.desk.faders_changed,
                     description=model.get("stereo_note") or "",
                     guard=lambda: LINK_READ_ONLY if model["stereo_read_only"] else None))
 
@@ -118,7 +117,5 @@ class FadersPage(scrolled.ScrolledPanel):
 
     def _done(self, source, reply):
         self.frame.reply(source, reply)
-        if reply.get("ok"):
-            self.section.desk.faders_changed(reply)
-        else:
+        if not reply.get("ok"):
             self._show_fader()

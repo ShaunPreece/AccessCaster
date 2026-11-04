@@ -229,11 +229,7 @@ class SettingsTab(Tab):
 
     def _on_clear_solos(self, event):
         source = event.GetEventObject()
-        def cleared(reply):
-            self.reply(source, reply)
-            if reply.get("ok"):
-                self.page.section.desk.solos_cleared()
-        call(self, server.action_clear_solos, done=cleared)
+        call(self, server.action_clear_solos, done=lambda reply: self.reply(source, reply))
 
     def _fill_mic_types(self, current):
         choices = list(self._mic_types)

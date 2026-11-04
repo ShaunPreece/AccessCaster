@@ -26,6 +26,9 @@ class FakeDesk:
     def subscribe(self, fn):
         self.listener = fn
 
+    def watch(self, names, fn):
+        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
+
 
 class FakeFrame:
     def __init__(self):
@@ -103,6 +106,9 @@ section = backups_section.BackupsSection(frame)
 page = section.page
 check("before a read the list says so", page.list.GetItems(), ["Reading the backups."])
 check("a desk read starts the first read", True, hasattr(frame.desk, "listener"))
+check("the backups follow the shows and the drive",
+      [(names, fn.__self__._read.__self__) for names, fn in frame.desk.watched],
+      [(set(server.SHOW_STATE_PROPS), section)])
 
 section.data = data([])
 page.show()

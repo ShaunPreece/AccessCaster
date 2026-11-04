@@ -303,8 +303,7 @@ class CallPage(wx.Panel):
             if not reply.get("ok"):
                 self.frame.say(reply.get("message") or "That did not work.")
                 return
-            self.section.frame.desk.faders_changed(reply)
-            lost = ("" if gave_up in (reply.get("labels") or [])
+            lost =("" if gave_up in (reply.get("labels") or [])
                     else f" {gave_up} is now on no fader.")
             # Worded here: the server's reply is the Routing page's account of the layout.
             self.frame.say(f"CallMe 1 is on fader {index + 1}.{lost}")

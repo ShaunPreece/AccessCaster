@@ -894,9 +894,9 @@ everything returned to baseline; no stray appended, and the desk was byte-identi
   * It is addressed by STRIP, so a channel moved onto another fader is muted at its
     new strip. Our code resolves that the same way processing does (channels.proc_key).
   * The desk PUSHES this property on report-04 whenever a mute changes, which the
-    announcer already decodes. Any cache holding mute state is still told about our own
-    write explicitly (announcer.publish_mute), because the echo is not dependable
-    enough to be a cache: it can lag, and it is absent while the announcer is off.
+    announcer already decodes. The app applies its own write to its picture of the desk
+    as it is sent (desk_model), because the echo is not dependable enough to be the
+    record of it: it can lag, and some writes are not echoed at all.
     CORRECTED 2026-08-28: this bullet used to assert the desk does NOT echo our own
     writes at all. That is FALSE for levels - three writes made over our HTTP API with
     no hand on the desk came straight back and were announced (DevTools/

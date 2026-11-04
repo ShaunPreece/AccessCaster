@@ -53,7 +53,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
                 self, sources, self.sources_sizer, source["label"],
                 send=lambda on, s=source["index"]: self._send_cross_point(s, on),
                 current=lambda s=source["index"]: self._included(s),
-                remember=lambda _on: None, accepted=self._cross_point_done,
+                remember=lambda _on: None,
                 guard=lambda: READ_ONLY if self.read_only else None)
 
         self._build_schemes(parent, sizer)
@@ -85,14 +85,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
     def _send_cross_point(self, source, on):
         """On a worker thread, so the output is the one `_show_output` last put on the page rather
         than a read of the list."""
-        output = self._output_index
-        reply = server.action_set_cross_point(output, source, not on)
-        return dict(reply, output=output, source=source, excluded=not on)
-
-    def _cross_point_done(self, reply):
-        excluded = (self.matrix.get("excluded") or {}).get(reply["output"])
-        if excluded is not None:
-            excluded[reply["source"]] = reply["excluded"]
+        return server.action_set_cross_point(self._output_index, source, not on)
 
     def _show_output(self):
         """Put the chosen output on every control: its mix, and its sources' names and states."""

@@ -3,7 +3,8 @@
 Each check prints one line and records a failure, and `finish` prints the tally and returns the
 script's exit status. `as_device` and `patched` replace something for the length of a block and put
 it back however the block ends. `decode_record` and `snapshot` read the desk's own record format,
-and `push` builds the frame the desk pushes.
+and `push` builds the frame the desk pushes. `hold_desk`, `hold` and `hold_layout` set up the desk
+model (`desk_model`) as a read and the desk's pushes would leave it.
 
     import _testkit
     from _testkit import check, check_true
@@ -19,10 +20,13 @@ import os
 from unittest import mock
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import channels
+import desk_model
 import devices
 import layout_fixture
 import model_tree
 import rcp_read
+import rcp_transfer
 
 FAILURES: list[str] = []
 
@@ -145,3 +149,40 @@ def snapshot(blob: bytes) -> dict:
         for name, value, _kind in node.props:
             out[(path, node.name, name)] = value
     return out
+
+
+def where(name: str) -> tuple:
+    """The path of the node that carries `name` on the pinned layout."""
+    return next(path for path, props in rcp_read.layout()._by_key.values() if name in props)
+
+
+def _key_of(name: str) -> tuple:
+    """The layout key of the node that carries `name` on the pinned layout."""
+    return next(key for key, (_path, props) in rcp_read.layout()._by_key.items() if name in props)
+
+
+def hold(key, name: str, value, kind: str) -> None:
+    """The desk model holding `value` for `name` on the node `key` names, as a push leaves it."""
+    desk_model.apply_push(tuple(addr(key)), name, value, kind)
+
+
+def hold_layout(vec) -> None:
+    """The desk model's fader layout, and the write cache with it, as a full read leaves them."""
+    for strip, code in enumerate(vec):
+        hold(rcp_transfer.channel_key(strip), "channelInputSource", code, "int")
+    channels.publish_strip_vector(vec)
+
+
+def hold_desk(vec=None) -> None:
+    """The desk model freshly read from the pinned layout's shape (`layout_fixture.skeleton`), and
+    trusted: every property 0 but the selected channel, which rests at -1 (none), and the fader
+    layout, `vec`, which the write cache holds too."""
+    values = {(_key_of("systemChannelSelected"), "systemChannelSelected"): -1}
+    for strip, code in enumerate(vec or ()):
+        values[(rcp_transfer.channel_key(strip), "channelInputSource")] = code
+    desk_model._reset()
+    desk_model.set_connected(True)
+    desk_model.dump_finished(desk_model.dump_starting(),
+                             layout_fixture.skeleton(layout_fixture.PRO2_177, values))
+    if vec is not None:
+        channels.publish_strip_vector(vec)

@@ -501,10 +501,6 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
         for i, code in enumerate(faders):
             if i < fader_count and code is not None and code in fader_code_set:
                 w(f"fader {i + 1}", lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
-                # Keep the NAMING layout current too, not just the write cache: our own writes are
-                # not echoed on the pushed stream, so without this the announcer would keep naming
-                # the pre-restore channel on an encoder press.
-                channels.note_strip_source(i, int(code))
         channels.invalidate_strip_vector()   # the layout is the processing strip map
     elif any(c is not None for c in faders):
         failed += 1

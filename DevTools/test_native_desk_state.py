@@ -1,224 +1,139 @@
-"""The native window's desk state (Project/native/desk_state.py), offline: pushed frames, decoded
-by rcp_read.parse_push as the listener decodes them, land on the right channel's record or output
-mix, and only a real change notifies.
+"""The native window's desk state (Project/native/desk_state.py), offline: a view over the desk model.
+
+A change in the desk model, rebuilt through `server.window_state` as a read is, lands on the right
+channel's record (the same record, updated in place), output mix, levels or master values, and only
+a real change notifies; a structural change asks for a full read, and a recording state is passed
+straight on. A page that reads the desk for itself hears the properties it watches, and
+`pages.FollowDesk` reads it once per burst, never under a dialog, following only names the desk
+publishes.
 
 Run: python DevTools/test_native_desk_state.py
 """
 from __future__ import annotations
 
-import struct
+import re
 import sys
 
-import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
+import _bootstrap  # puts Project/ on sys.path
 import _testkit
+import channels
+import desk_live
+import desk_model
 import devices
-import rcp_read
-import rcp_transfer
 import recorder
+import rcp_transfer
+import server
+import soundpad
 import wx
-from _testkit import addr, as_device, check, check_true, patched, push
-from native import desk_state
+from _testkit import addr, as_device, check, check_true, hold, hold_desk
+from native import desk_state, pages
 
-
-def v_bool(on: bool) -> bytes:
-    return bytes([0x01, 0x01, 0x02 if on else 0x03])
-
-
-def v_int(value: int) -> bytes:
-    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-
-
-def v_float(value: float) -> bytes:
-    return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", value)
-
-
-def record(name, kind):
-    return {"name": name, "label": name, "kind": kind, "muted": False, "solo": False,
-            "processing_on": True, "modules": {"eqOn": False}, "params": {"eqLowGain": 0.5},
-            "level_db": 40 if kind == "mic" else (None if kind == "bus" else -12),
-            "effects": {"echo": False, "echo_params": {"echoMix": 0.5}}}
-
+LAYOUT = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]      # Mic 1 on strip 0, USB 1 on strip 1
 
 app = wx.App()
 owner = wx.Frame(None)
 events = []
 
+
+def rebuilt():
+    """What the store does once a burst's rebuild comes back from its worker thread."""
+    count = len(events)
+    store._built(desk_state._from_model())
+    return events[count:]
+
+
+def pushed(key, name, value, kind):
+    """A push of a value, as the listener hands it on: the desk model first."""
+    path = tuple(addr(key))
+    was = desk_model.apply_push(path, name, value, kind)
+    store._pushed(desk_live.Push(path, name, value, kind, key, was))
+
+
 with as_device(devices.PRO2):
+    hold_desk(LAYOUT)
     store = desk_state.DeskState(owner)
     store.subscribe(lambda event, detail: events.append((event, detail)))
-    # Faders: Bluetooth (source 10) on strip 0, Mic1 (0) on strip 1, the pads bus (11) on strip 2.
-    store._read_done({"ok": True, "strips": [10, 0, 11],
-                      "channels": [record("Mic1", "mic"), record("Bluetooth", "line"),
-                                   record("SMARTpads", "bus")],
-                      "matrix": {"ok": True, "modes": {8: 0, 9: 1},
-                                 "excluded": {8: {0: False, 7: False}, 9: {0: False}}},
-                      "matrix_model": {"outputs": [], "sources": []},
-                      "faders": {"model": {}, "layout": [10, 0, 11], "labels": [], "stereo": []},
-                      "levels": {
-                          "faders": [{"index": 6, "percent": 50, "muted": False, "soloed": False},
-                                     {"index": 7, "percent": 0, "muted": None, "soloed": None}],
-                          "monitor": {"percent": 40, "muted": False},
-                          "bluetooth_out": {"percent": 70, "muted": False},
-                          "auto_mute": {"monitor": True, "bt": False},
-                          "headphone_types": [0, 0],
-                          "mix": {"ok": True, "levels": {0: {0: {"level": 0.5, "linked": True}},
-                                                         8: {0: {"level": 0.5, "linked": True}}}},
-                          "model": {}},
-                      "master": {"usb_multitrack": 0, "usb_expanded": False, "usb_bypass": False,
-                                 "compellor_on": False, "compellor_threshold": 0.67,
-                                 "delay_on": False, "delay_seconds": 0.0, "model": {}}})
+    # A full read, of the desk the model holds.
+    store._read_done(desk_state._named(server.window_state(desk_model.snapshot())))
     check("a full read notifies", events[-1][0], "read")
-    mic, bt, bus = (store._records[n] for n in ("Mic1", "Bluetooth", "SMARTpads"))
+    mic = store._records["Mic1"]
+    usb = store._records["USB1"]
 
-    def feed(path, name, block):
-        rec = rcp_read.parse_push(push(path, name, block))
-        check_true(f"{name} decodes as a push", rec is not None)
-        store._apply(*rec)
+    hold(rcp_transfer.channel_key(0), channels.MUTE_PROP, True, "bool")
+    check("a mute on strip 0 is Mic1's", rebuilt(), [("changed", {"Mic1"})])
+    check("on the record the page holds, updated in place", store._records["Mic1"] is mic, True)
+    check_true("which now reads muted", mic["muted"])
+    check("and not the channel on strip 1", usb["muted"], False)
+    check("a rebuild with nothing changed says nothing", rebuilt(), [])
 
-    def ch(strip):
-        return addr(rcp_transfer.channel_key(strip))
-
-    def fx(strip):
-        return addr(rcp_transfer.channel_fx_key(strip))
-
-    def inp(code):
-        return addr(rcp_transfer.input_key(code))
-
-    feed(ch(1), "channelOutputMute", v_bool(True))
-    check("a mute on strip 1 lands on Mic1", mic["muted"], True)
-    check("and not on the channel on strip 0", bt["muted"], False)
-    feed(ch(0), "channelCueEnable", v_bool(True))
-    check("a solo on strip 0 lands on Bluetooth", bt["solo"], True)
-    feed(ch(1), "channelBypassProcessing", v_bool(True))
-    check("bypass is processing off", mic["processing_on"], False)
-    feed(ch(1), "eqOn", v_bool(True))
-    check("a module's state", mic["modules"]["eqOn"], True)
-    feed(ch(1), "eqLowGain", v_float(0.25))
-    check("a parameter keeps the desk's own 0..1", mic["params"]["eqLowGain"], 0.25)
-    feed(fx(1), "echoOn", v_bool(True))
-    check("an effect is addressed on the effects block", mic["effects"]["echo"], True)
-    feed(fx(1), "echoMix", v_float(0.75))
-    check("an effect parameter", mic["effects"]["echo_params"]["echoMix"], 0.75)
-    feed(inp(0), "inputMicrophoneGain", v_int(55))
-    check("a mic's gain is its level, addressed at its input", mic["level_db"], 55)
-    feed(inp(0), "inputPower", v_int(1))
-    check("phantom", mic["phantom"], True)
-    feed(inp(10), "inputDigitalGain", v_int(-6))
-    check("a line channel's digital gain is its level", bt["level_db"], -6)
-    feed(inp(0), "inputDigitalGain", v_int(3))
-    check("a mic's digital gain is not its level", mic["level_db"], 55)
-    feed(inp(11), "inputDigitalGain", v_int(3))
-    check("the bus has no level", bus["level_db"], None)
-    feed(ch(1), "channelOutputMute", v_int(1))
-    check("a value of the wrong kind is ignored", mic["muted"], True)
-
-    store._flush_dirty()
-    check("one notification names every channel changed", events[-1],
-          ("changed", {"Mic1", "Bluetooth"}))
-    count = len(events)
-    feed(ch(1), "channelOutputMute", v_bool(True))
-    store._flush_dirty()
-    check("an unchanged value notifies nothing", len(events), count)
-    check_true("a chain change compares Mic1 with its preset again",
-               "Mic1" in store._preset_timers)
-
-    mix = store.matrix
-    feed(addr(rcp_transfer.output_key(8)), "outputMixMinus", v_int(2))
-    check("an output's mode lands on its index", mix["modes"][8], 2)
-    feed(addr(rcp_transfer.cross_point_key(8, 7)), "mixDisabled", v_bool(True))
-    check("a cross-point lands on its output and source", mix["excluded"][8][7], True)
-    check("and not on the same source elsewhere", mix["excluded"][8][0], False)
-    feed(addr(("RCSYNCMIX", 7)), "mixDisabled",
-         v_bool(True))
-    check("RCSYNCMIX's cross-points are not the matrix", mix["excluded"][8][0], False)
-    feed(addr(rcp_transfer.output_key(12)), "outputMixMinus", v_int(2))
-    check("a mode for an output not read is ignored", 12 in mix["modes"], False)
-    store._flush_dirty()
-    check("one notification names every output changed", events[-1], ("mix", {8}))
-
-    reads = []
-    with patched((store, {"refresh": lambda: reads.append(True)})):
-        store.faders_changed({"ok": True, "faders": [0, 10, 11],
-                              "labels": ["Mic 1", "Bluetooth", "SMART pads"]})
-    check("a fader write's reply is the new layout", store.faders["layout"], [0, 10, 11])
-    check("and is shown at once", events[-1], ("faders", None))
-    check("then the channels are read again", reads, [True])
-
-    levels = store.levels
-    feed(addr(rcp_transfer.fader_key(6)), "faderLevel", v_int(127))
-    check("a virtual fader's level lands on it, in percent", levels["faders"][0]["percent"], 100)
-    feed(addr(rcp_transfer.fader_key(2)), "faderLevel", v_int(10))
-    check("a fader without a level is ignored", [f["percent"] for f in levels["faders"]], [100, 0])
-    feed(ch(6), "channelOutputMute", v_bool(True))
-    check("a strip's mute lands on its virtual fader", levels["faders"][0]["muted"], True)
-    feed(ch(7), "channelCueEnable", v_bool(True))
-    check("an empty fader has no solo to land on", levels["faders"][1]["soloed"], None)
-    out = addr(rcp_transfer.OUTPUT)
-    feed(out, "outputMonLevel", v_float(0.25))
-    check("the monitor level, in percent", levels["monitor"]["percent"], 25)
-    feed(out, "outputBTMute", v_bool(True))
-    check("the Bluetooth output's mute", levels["bluetooth_out"]["muted"], True)
-    feed(out, "outputBTAutoMute", v_bool(True))
-    check("an auto-mute", levels["auto_mute"]["bt"], True)
-    feed(addr(rcp_transfer.MASTER), "outputMonLevel", v_float(0.9))
-    check("an output value on another block is ignored", levels["monitor"]["percent"], 25)
-    feed(addr(rcp_transfer.headphone_key(1)), "headphoneType", v_int(1))
-    check("a headphone type lands on its output", levels["headphone_types"], [0, 1])
-
-    def v_str(text):
-        raw = text.encode("ascii")
-        return bytes([0x01, len(raw) + 2, 0x05]) + raw + b"\x00"
-
-    feed(addr(rcp_transfer.cross_point_key(8, 0)), "mixLevelWithAnchor", v_str("0.3|0.5"))
-    check("a cross-point level lands on its output and source",
-          levels["mix"]["levels"][8][0], {"level": 0.3, "linked": False})
-    check("and not on the same source elsewhere", levels["mix"]["levels"][0][0]["level"], 0.5)
-    feed(addr(("RCSYNCMIX", 0)), "mixLevelWithAnchor",
-         v_str("0.9|0.9"))
-    check("RCSYNCMIX's levels are not the matrix", levels["mix"]["levels"][0][0]["level"], 0.5)
-    count = len(events)
-    store._flush_dirty()
-    check("one notification for the levels, and none for a strip with no channel record",
-          events[count:], [("levels", None)])
-
-    store.monitor_mix_written(0, 0, 0.8)
-    check("a monitor mix write records the level of its own",
-          levels["mix"]["levels"][0][0], {"level": 0.8, "linked": False})
-    check("and makes the output Custom", (mix["modes"].get(0), events[-1]), (2, ("mix", {0})))
-    store.solos_cleared()
-    check("clearing the solos clears every channel's", bt["solo"], False)
-    check("and every fader's", levels["faders"][0]["soloed"], False)
-
-    master = store.master
-    proc = addr(rcp_transfer.MASTER)
-    feed(proc, "masterCompellorOn", v_bool(True))
-    check("the master Compellor's switch", master["compellor_on"], True)
-    feed(proc, "masterCompellorThreshold", v_float(0.5))
-    check("a Compellor parameter, as the desk's own 0..1", master["compellor_threshold"], 0.5)
-    feed(proc, "masterDelaySeconds", v_float(0.25))
-    check("the output delay's time, in seconds", master["delay_seconds"], 0.25)
-    feed(out, "outputMultiBypass", v_bool(True))
-    check("the USB stream's raw switch, on the OUTPUT block", master["usb_bypass"], True)
-    feed(addr(rcp_transfer.SYSTEM), "masterDelayOn", v_bool(True))
-    check("a master value on another block is ignored", master["delay_on"], False)
-    count = len(events)
-    store._flush_dirty()
-    check("one notification for the master values", events[count:], [("master", None)])
-    feed(proc, "masterCompellorOn", v_bool(True))
-    store._flush_dirty()
-    check("a value the desk already had notifies nothing", events[count + 1:], [])
+    hold(rcp_transfer.output_key(8), "outputMixMinus", 2, "int")
+    check("an output's mode is a change to that output's mix", rebuilt(), [("mix", {8})])
+    hold(rcp_transfer.fader_key(6), "faderLevel", 127, "int")
+    check("a virtual fader's level is a change to the levels", rebuilt(), [("levels", None)])
+    check("in percent", next(f["percent"] for f in store.levels["faders"] if f["index"] == 6), 100)
+    hold(rcp_transfer.MASTER, "masterCompellorOn", True, "bool")
+    check("the master Compellor is a change to the master values", rebuilt(),
+          [("master", None)])
 
     count = len(events)
-    feed(addr(rcp_transfer.RECORDER), "recordState", v_int(recorder.RECORDING))
+    pushed(rcp_transfer.RECORDER, "recordState", recorder.RECORDING, "int")
     check("a recording state is passed on at once", events[count:],
           [("recorder", recorder.RECORDING)])
-    feed(addr(("PLAYER", 0)), "recordState", v_int(recorder.READY))
-    check("a recording state on another block is ignored", events[count + 1:], [])
-
-    feed(ch(0), "channelInputSource", v_int(1))
-    check_true("a fader reassignment asks for a full read", store._reread is not None)
-    check("and changes no record", bt["muted"], False)
+    check_true("and asks for no rebuild", store._rebuild is None)
+    pushed(rcp_transfer.channel_key(1), channels.MUTE_PROP, True, "bool")
+    check_true("a shown property asks for a rebuild", store._rebuild is not None)
+    check_true("but not a full read", store._reread is None)
+    pushed(rcp_transfer.channel_key(0), "channelInputSource", 1, "int")
+    check_true("a fader reassignment asks for a full read as well", store._reread is not None)
     store.stop()
+
+    # A page that reads the desk for itself watches what it shows, through the same follower.
+    watcher = desk_state.DeskState(owner)
+    watcher._read_done(desk_state._named(server.window_state(desk_model.snapshot())))
+    heard = []
+    watcher.watch({"screenBrightness", channels.MUTE_PROP}, lambda: heard.append(True))
+    store = watcher
+    pushed(rcp_transfer.SYSTEM, "screenBrightness", 120, "int")
+    check("a watched property is passed to its watcher", heard, [True])
+    check_true("and asks for no rebuild when the window does not show it", store._rebuild is None)
+    store._pushed(desk_live.Push((0,), "padActive", True, "bool", None, None))
+    check("a property nobody watches is not passed on", heard, [True])
+    pushed(rcp_transfer.channel_key(0), channels.MUTE_PROP, True, "bool")
+    check("a property the window shows as well reaches the watcher", heard, [True, True])
+    check_true("and still rebuilds the window", store._rebuild is not None)
+    watcher.stop()
+
+# FollowDesk: one read once a burst of pushes has stopped, and none while a dialog is open.
+class _Desk:
+    def watch(self, names, fn):
+        self.names, self.fn = names, fn
+
+
+owner.desk = _Desk()
+reads = []
+follow = pages.FollowDesk(owner, {"padName"}, lambda: reads.append(True))
+check("it watches the names it is given", owner.desk.names, {"padName"})
+owner.desk.fn()
+first = follow._timer
+owner.desk.fn()
+check_true("a push in a burst restarts the one timer", follow._timer is first and first.IsRunning())
+follow._due()
+check("and the read is made when it fires", reads, [True])
+pages.modal_open = lambda: True
+follow._due()
+check("a read falling due while a dialog is open waits", reads, [True])
+check_true("for the dialog to close", follow._timer.IsRunning())
+follow._timer.Stop()
+
+# Every property a page follows is one the desk publishes: a misspelt name follows nothing.
+with open(_bootstrap.docs_path("PROPERTY_LIST_PRO2.md"), encoding="utf-8") as f:
+    published = set(re.findall(r"`(\w+)`", f.read()))
+for label, names in (("Hardware", server.HARDWARE_PROPS),
+                     ("Unit settings", server.UNIT_SETTING_PROPS),
+                     ("Wireless connections", server.NETWORK_PROPS),
+                     ("Backups", server.SHOW_STATE_PROPS),
+                     ("SMART pads", soundpad.PAD_GRID_PROPS)):
+    check(f"{label} follows only published properties", sorted(set(names) - published), [])
 
 owner.Destroy()
 sys.exit(_testkit.finish())

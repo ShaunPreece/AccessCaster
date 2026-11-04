@@ -15,8 +15,8 @@ Every path is tested in PAIRS, so a silent result cannot be mistaken for a broke
   UNMARKED - the CONTROL. Whether it speaks is the measurement, not the assumption.
 
 Three paths:
-  LEVEL  a fader level, marked by announcer.publish_level   - the desk DOES echo it.
-  MUTE   a channel mute, marked by announcer.publish_mute   - the desk does NOT echo it as
+  LEVEL  a fader level, marked by announcer.mark_self_level - the desk DOES echo it.
+  MUTE   a channel mute, marked by announcer.mark_self_mute - the desk does NOT echo it as
          channelOutputMute. What it pushes instead is twelve `mixMute` records, one per output mix
          (the firmware propagating the mute into the matrix), and the announcer speaks none of them.
          So there is no second announcement on this path to suppress.
@@ -135,7 +135,7 @@ def main() -> int:
     print(f"{MUTE_CHAN} starts {'muted' if mute_was else 'unmuted'} on strip {strip}; "
           f"Mic {GAIN_CHAN} gain starts at {gain_was} dB (both restored at the end)")
 
-    st = {"bank": None, "pending": None, "at": 0.0}
+    st = {"pending": None, "at": 0.0}
     announcer.live_state = st
     failures, notes = [], []
     try:

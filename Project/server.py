@@ -22,7 +22,6 @@ import time
 import webbrowser
 
 import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
-import app_window
 import app_settings  # this app's own settings file: export and import, no file access
 import app_updates  # keeping AccessCaster itself up to date: check, decide, download, install
 import autogain  # sets a mic's gain by measuring it
@@ -33,6 +32,7 @@ import commands  # the catalogue of what a shortcut can do, from the spec tables
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import desk_firmware  # installing a firmware update through the desk's own updater
 import desk_live  # the one listener: everything the desk pushes, to every subscriber
+import desk_model  # the desk as last seen, kept current by the listener and our own writes
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import encoder_hold  # an encoder hold mutes the channel a channel button selected
@@ -163,79 +163,6 @@ _PROCESSING_SPOKEN = {c["prop"]: (c["label"] if g["group"] in ("Pan", "Tone shap
                       for g in PROCESSING_CONTROLS for c in g["controls"]}
 _PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
 
-# Current known state of the mixer. These are read live from the device (rcp_read),
-# and every value we set is sent to the device, so this dict holds the unit's real
-# state. "read_at" is when we last did a full live read; None until the first
-# read/set, so the UI can say "unknown" honestly before then.
-_session_state_lock = threading.Lock()
-_session_state = {
-    "midi": None,                                  # bool or None (unknown)
-    "channels": {c: {"gain_db": None, "phantom": None, "polarity": None, "mic_type": None}
-                 for c in MIC_CHANNELS},
-    "firmware": None,
-    "read_at": None,                               # epoch seconds of last live read
-}
-
-
-def _state_snapshot() -> dict:
-    with _session_state_lock:
-        read_at = _session_state["read_at"]
-        if read_at:
-            when = time.strftime("%H:%M:%S", time.localtime(read_at))
-            # No "Read from device" button exists; each page re-reads the unit when you open it.
-            note = (f"Read live from the device at {when}. Values you change here "
-                    f"are sent to the unit immediately, and the unit is read again "
-                    f"each time you open a page.")
-        else:
-            note = ("Not read from the device yet. Opening a page reads the unit's "
-                    "current settings.")
-        return {
-            "midi": _session_state["midi"],
-            "channels": {
-                str(c): dict(_session_state["channels"][c]) for c in MIC_CHANNELS
-            },
-            "firmware": _session_state["firmware"],
-            "read_at": read_at,
-            "live_supported": True,
-            "gain_min_db": GAIN_MIN_DB,
-            "gain_max_db": GAIN_MAX_DB,
-            # mic input type/voicing options, as [value, name] pairs. Only the confirmed values:
-            # the full 0..10 map excludes Wireless, which needs a wireless device to capture.
-            "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]),
-            "mic_types_partial": False,
-            "note": note,
-        }
-
-
-def read_live_settings() -> dict:
-    """Live-read mic gain/phantom + MIDI from the device and update session state.
-
-    Read-only on the device. Returns {"ok": bool, ...snapshot...}.
-    """
-    try:
-        with _hid_lock:
-            m = channels.read_mixer()
-    except Exception as exc:
-        return {"ok": False,
-                "message": f"Could not read settings from the device: {exc}"}
-    with _session_state_lock:
-        _session_state["midi"] = m.get("midi")
-        _session_state["firmware"] = m.get("firmware")
-        # read_mixer returns only the CONNECTED device's mics (4 on the Pro II, 2 on the Duo);
-        # iterate those, leaving any mic slots the desk does not have as their initialised None.
-        for c, mc in m.get("mics", {}).items():
-            if c in _session_state["channels"]:
-                _session_state["channels"][c]["gain_db"] = mc.get("gain_db")
-                _session_state["channels"][c]["phantom"] = mc.get("phantom")
-                _session_state["channels"][c]["polarity"] = mc.get("polarity")
-                _session_state["channels"][c]["mic_type"] = mc.get("mic_type")
-        _session_state["read_at"] = time.time()
-    snap = _state_snapshot()
-    snap["ok"] = True
-    snap["message"] = "Read current settings from the device."
-    return snap
-
-
 def _wireless_mics(blob) -> dict:
     """RODE wireless transmitters (Series IV etc.) as the unit reports them.
 
@@ -261,6 +188,15 @@ def _wireless_mics(blob) -> dict:
             "present": bool(tx),
             "any_connected": any(t["connected"] for t in tx),
             "unproven": True}
+
+
+FIRMWARE_UPDATE_PROPS = ("appUpdateAvailable", "osUpdateAvailable", "updateVersion",
+                         "updateNoInternet")      # what `_firmware_update` reads
+# What Device > Hardware shows from `read_device_state`, for following the desk. Storage is
+# followed through recordState, which the desk pushes when a card or drive goes in or out: its
+# `storageVolumeState` is left out because a recording ticks its free space down throughout.
+HARDWARE_PROPS = frozenset(("recordState", "recordingTotalCount", "systemFirmwareVersion",
+                            "wiredConnected") + FIRMWARE_UPDATE_PROPS)
 
 
 def read_device_state() -> dict:
@@ -343,12 +279,9 @@ _UPDATE_HOW = "Install it with Install firmware, under Device, Hardware."
 
 
 def _firmware_version(blob: bytes):
-    """The desk's firmware version, or None. The value the startup read captured comes first:
-    systemFirmwareVersion sits near the tail of a dump whose length varies, so a later dump can
-    end before it."""
-    with _session_state_lock:
-        fw = _session_state.get("firmware")
-    return fw or rcp_read.first(blob, "systemFirmwareVersion")
+    """The desk's firmware version, or None: from `blob`, else the desk model's, for a dump that
+    ended before `systemFirmwareVersion`, which sits near its tail."""
+    return rcp_read.first(blob, "systemFirmwareVersion") or desk_model.firmware()
 
 
 def _firmware_update(blob: bytes) -> dict:
@@ -415,9 +348,6 @@ def action_firmware_install(backup_first: bool = True) -> dict:
                                    "nothing on the unit has changed. "
                                    + (backed.get("message") or "")}
         res = desk_firmware.install(desk_firmware.Desk(_hid_lock), job.step, target)
-        if res.get("version"):
-            with _session_state_lock:
-                _session_state["firmware"] = res["version"]
         if res.get("ok") and backup_first:
             res["message"] += (f" Your settings were backed up first as {FIRMWARE_BACKUP_NAME}, "
                                "on the Backups page.")
@@ -661,12 +591,8 @@ def _recorder_payload(blob: bytes) -> dict:
 
 
 def read_recorder() -> dict:
-    """The Recording page, read from the unit.
-
-    The dump is authoritative, so its state is fed back into the Watcher. That is a self-correction
-    rather than a formality: if the listener ever missed a push (unplugged cable, a packet lost
-    while the handle was reopening) this puts it right, and `note_state` leaves an unchanged state
-    - and therefore the elapsed-time count - completely alone."""
+    """The Recording page, read from the unit. The desk model adopts the dump, so a push the
+    listener missed is put right here, and the Watcher's count catches up with it untimed."""
     try:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
@@ -675,9 +601,6 @@ def read_recorder() -> dict:
     out = _recorder_payload(blob)
     w = _recorder_watcher()
     if w is not None and out.get("state") is not None:
-        # timed=False: a state we learned from a dump says nothing about WHEN it started, so no
-        # elapsed time is claimed for a recording we did not see begin.
-        w.note_state(out["state"], timed=False)
         out["live"] = w.snapshot()
     _note_recorder_context(out)
     out["ok"] = True
@@ -1681,6 +1604,9 @@ def _unit_setting_values(blob: bytes) -> dict:
     return out
 
 
+UNIT_SETTING_PROPS = frozenset([s["prop"] for s in UNIT_SETTINGS] + ["systemMidiControl"])
+
+
 def read_unit_settings() -> dict:
     """The Device page's "Unit settings" group: one dump, every setting, and whether this desk can
     write them.
@@ -2057,6 +1983,14 @@ def read_device_status() -> dict:
                            f"it: {exc}",
                 "interfaces": interfaces,
             }
+
+
+# What Device > Wireless connections shows from `read_network_status`, for following the desk. The
+# wifi scan results are left out: the desk never pushes them (see the scan, below).
+NETWORK_PROPS = frozenset(
+    ["wifi", "wifiSSID", "wifiIpAddress", "wifiIncorrectPSK", "wifiPSK", "btConnectedAddress",
+     "btVisible", "txConnected", "txBatteryLevel", "txRssi"]
+    + [f"btPairedNumber{n}" for n in range(1, 6)] + [f"btScan{n}" for n in range(1, 11)])
 
 
 def read_network_status() -> dict:
@@ -2574,8 +2508,6 @@ def soundpad_model() -> dict:
 def action_set_midi(on: bool) -> dict:
     with _hid_lock:
         rcp_transfer.set_midi_control(on)
-    with _session_state_lock:
-        _session_state["midi"] = on
     return {"ok": True, "message": f"MIDI control turned {'on' if on else 'off'}."}
 
 
@@ -2626,8 +2558,6 @@ def action_set_gain(channel: int, db: int) -> dict:
     with _hid_lock:
         channels.set_mic_gain(channel, db)
     announcer.mark_self_gain(channel, True)     # the desk echoes this; the UI already reports it
-    with _session_state_lock:
-        _session_state["channels"][channel]["gain_db"] = db
     return {"ok": True, "message": f"Mic {channel} gain set to {db} dB."}
 
 
@@ -2636,8 +2566,6 @@ def action_set_phantom(channel: int, on: bool) -> dict:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     with _hid_lock:
         channels.set_phantom(channel, on)
-    with _session_state_lock:
-        _session_state["channels"][channel]["phantom"] = on
     return {"ok": True,
             "message": f"Mic {channel} 48V phantom power turned {'on' if on else 'off'}."}
 
@@ -2647,8 +2575,6 @@ def action_set_polarity(channel: int, on: bool) -> dict:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     with _hid_lock:
         channels.set_polarity(channel, on)
-    with _session_state_lock:
-        _session_state["channels"][channel]["polarity"] = on
     return {"ok": True,
             "message": f"Mic {channel} polarity {'inverted' if on else 'normal'}."}
 
@@ -2693,19 +2619,15 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     the panel on success."""
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    with _session_state_lock:
-        was = _session_state["channels"][channel].get("gain_db")
     # ALL THREE READS INSIDE THE LOCK, like every other read that has to line up with a write of
-    # ours: the readers do not take _hid_lock themselves, the caller does.
+    # ours: the readers do not take _hid_lock themselves, the caller does. The first is adopted by
+    # the desk model, which is where the gain before the change comes from.
     with _hid_lock:
         proc_before = _mic_processing_snapshot(channel)
+        was = channels.mic_gain_known(channel)
         channels.set_mic_type(channel, type_value)
         gain, _proc = _read_gain_and_processing(channel)
         proc_after = _mic_processing_snapshot(channel)
-    with _session_state_lock:
-        _session_state["channels"][channel]["mic_type"] = type_value
-        if gain is not None:
-            _session_state["channels"][channel]["gain_db"] = gain
     name = channels.MIC_TYPE.get(type_value, f"type {type_value}")
     msg = f"Mic {channel} input type set to {name}."
     if gain is not None and gain != was:
@@ -2771,6 +2693,12 @@ def read_window_state() -> dict:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk: {exc}"}
+    return window_state(blob)
+
+
+def window_state(blob: bytes) -> dict:
+    """`read_window_state`'s reply from a dump already in hand: a read's, or the desk model's
+    snapshot (`desk_model.snapshot`), which is how the window follows the desk between reads."""
     reply = _channels_reply(blob, percent=False)
     if reply.get("ok"):
         reply["matrix"] = rcp_read.read_matrix_state(blob)
@@ -2870,9 +2798,8 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
 
     Two details matter. It silences the channel in every mix that follows the fader, not just the
     monitor, and the message names any output it does NOT reach (_mute_reach_message). And the
-    announcer is told about the write: without announcer.publish_mute the encoder ring would keep quoting
-    a level for a channel that is now silent, and the desk's echo of the mute would be spoken on top
-    of the UI's own announcement."""
+    write is marked as ours (announcer.mark_self_mute), or the desk's echo of the mute would be
+    spoken on top of the UI's own announcement."""
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
@@ -2882,27 +2809,12 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
             strip = channels.channel_strip_index(name)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
-    announcer.publish_mute(strip, on)
-    _mirror_strip(strip, channels.MUTE_PROP, on)
+    announcer.mark_self_mute(strip)
     if not on:
         return {"ok": True, "message": f"{ch['label']} unmuted."}
     with _hid_lock:
         msg = _mute_reach_message(ch["label"], [int(ch["source_code"])])
     return {"ok": True, "message": msg}
-
-
-def _mirror_strip(strip: int, name: str, on: bool) -> None:
-    """Hand a strip's mute or solo that this app wrote to the window (`app_window.pushed`), as the
-    desk's own push would arrive. Without it the window shows the old state until its next full
-    read."""
-    book = rcp_read.known_layout()
-    if app_window.pushed is None or book is None:
-        return
-    try:
-        path = book.path(rcp_transfer.channel_key(strip))
-    except Exception:
-        return
-    app_window.pushed(path, name, bool(on), "bool")
 
 
 def _encoder_hold_mute(strip: int) -> None:
@@ -2917,7 +2829,6 @@ def _encoder_hold_mute(strip: int) -> None:
         on = not mutes[strip]
         rcp_transfer.write_at(channels.proc_key_for_strip(strip), channels.MUTE_PROP, "bool", on)
     announcer.announce_mute(strip, on)
-    _mirror_strip(strip, channels.MUTE_PROP, on)
     diagnostics.event("encoder_hold.mute", announcer.channel_label(strip), on=on)
 
 
@@ -2967,8 +2878,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
                                   "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
-    announcer.publish_mute(int(fader), bool(on))
-    _mirror_strip(int(fader), channels.MUTE_PROP, on)
+    announcer.mark_self_mute(int(fader))
     who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
     if not on:
         return {"ok": True, "muted": False, "message": f"{who} unmuted."}
@@ -3007,8 +2917,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
                                   "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
-    announcer.publish_solo(int(fader), bool(on))
-    _mirror_strip(int(fader), channels.CUE_PROP, on)
+    announcer.mark_self_solo(int(fader))
     who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
     return {"ok": True, "soloed": bool(on),
             "message": (f"{who} soloed; the headphones now carry "
@@ -3035,8 +2944,7 @@ def action_set_channel_solo(name: str, on: bool) -> dict:
             strip = channels.channel_strip_index(name)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
-    announcer.publish_solo(strip, on)
-    _mirror_strip(strip, channels.CUE_PROP, on)
+    announcer.mark_self_solo(strip)
     return {"ok": True, "message": (f"{ch['label']} soloed; the headphones now carry "
                                     f"{_solo_summary(strip, True)}. Nothing else has changed: the "
                                     f"mixes, the recording and anything you are streaming are "
@@ -3323,8 +3231,6 @@ def _autogain_write_gain(mic: int, db: int) -> None:
     """Set the mic's gain as auto gain's own change, so the announcer does not report it."""
     channels.set_mic_gain(mic, db)
     announcer.mark_self_gain(mic, True)
-    with _session_state_lock:
-        _session_state["channels"][mic]["gain_db"] = db
     time.sleep(0.4)
 
 
@@ -3558,8 +3464,6 @@ def action_autogain_undo() -> dict:
         with _hid_lock:
             channels.set_mic_gain(mic, int(before))
         announcer.mark_self_gain(mic, True)
-        with _session_state_lock:
-            _session_state["channels"][mic]["gain_db"] = int(before)
     except Exception as exc:
         return {"ok": False, "message": f"Could not put the gain back: {exc}"}
     _autogain_set(gain_after=int(before))
@@ -4787,10 +4691,9 @@ def _window_levels(blob: bytes) -> dict:
 def _window_master(blob: bytes) -> dict:
     """The native Master Mix page's state from one dump: the USB audio mode in its two halves, the
     USB stream's raw switch, the master bus's processing (`rcp_read.master_processing`), and the
-    page's layout as `model`. Publishes the USB mode, as the Routing page's read does."""
+    page's layout as `model`."""
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))
-    channels.publish_usb_expanded(usb_expanded)
     return {
         "usb_multitrack": usb_mode, "usb_expanded": usb_expanded,
         "usb_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
@@ -4826,10 +4729,9 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
             rcp_transfer.set_fader_level(int(fader), round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the level: {exc}"}
-    # Tell the announcer: the echo is not a dependable cache, so without this the next encoder press
-    # can quote the level this fader had BEFORE the slider moved, and the echo that DOES arrive would
-    # otherwise be spoken over the top of the UI's own announcement (see announcer.publish_level).
-    announcer.publish_level("fader", int(fader), pct / 100.0)
+    # The desk echoes it, and the echo would otherwise be spoken over the top of the UI's own
+    # announcement.
+    announcer.mark_self_level("fader", int(fader))
     who = _channel_name(vec[int(fader)] if int(fader) < len(vec) else None, spec)
     return {"ok": True, "percent": pct,
             "message": f"{_fader_label(int(fader), spec)} ({who}) set to {pct} percent."}
@@ -4850,7 +4752,7 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
             rcp_transfer.set_monitor_level(pct / 100.0)
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the monitor level: {exc}"}
-    announcer.publish_level("monitor", 0, pct / 100.0)      # same reason as the fader level above
+    announcer.mark_self_level("monitor", 0)      # same reason as the fader level above
     return {"ok": True, "percent": pct, "message": f"Monitor speaker level set to {pct} percent."}
 
 
@@ -5472,10 +5374,6 @@ def read_routing_live() -> dict:
                      for strip, idx in _active_input_strips().strip_vec_index.items()}
     usb_mode, usb_expanded = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))
-    # Publish it exactly as the strip vector above is published: this is the routing read every
-    # page view makes, so the announcer and the fader labels get the mode for free rather than
-    # dumping the model from a thread that must not.
-    channels.publish_usb_expanded(usb_expanded)
     return {
         "ok": True,
         "input_sources": input_sources,
@@ -5487,7 +5385,7 @@ def read_routing_live() -> dict:
         # label and would get "Channel code 6" for a linked pair.
         "fader_labels": [_channel_name(cis[i] if i < len(cis) else None, _active_faders())
                          for i in range(_active_faders().count)],
-        # After publish_usb_expanded above, so a page built in the other mode rebuilds its lists.
+        # The desk model has adopted this read, so a page built in the other mode rebuilds its lists.
         "fader_channels": _fader_channel_options(_active_faders()),
         "multitrack": first("recordingMultitrackMode"),
         # USB audio, this page's own tab. Read by KIND as well as by name:
@@ -5660,10 +5558,7 @@ def _seed_usb_expanded() -> None:
     try:
         if not channels.usb_expanded_known():
             with _hid_lock:
-                raw = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode",
-                                     "int")
-            if raw is not None:
-                channels.publish_usb_expanded(recorder.split_usb_multitrack(raw)[1])
+                rcp_read.read_model_stable(fresh=True)
         # A desk found in Standard with the Expanded four still on faders: tidy it now.
         if channels.usb_expanded_known() and not channels.usb_expanded():
             _tidy_after_standard(spoken=True)
@@ -6674,8 +6569,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
                 pad_backup = None
     except Exception as exc:
         return {"ok": False, "message": f"Could not read settings from the device: {exc}"}
-    with _session_state_lock:
-        firmware = _session_state.get("firmware")
+    firmware = _firmware_version(blob)
     dev = devices.get_active_device()
     # capture_length, not count: a profile must capture the WHOLE channelInputSource vector,
     # including any slot the desk does not expose as a fader (both known desks have a 10th, measured),
@@ -7108,6 +7002,13 @@ _RESET_STOPPED_NO_BACKUP = ("Stopped before resetting anything, and nothing on t
                             "way back. Check there is a drive in with room on it, and try again.")
 
 
+# What the Backups page shows from `read_show_state` and `read_backups`, for following the desk:
+# the shows on the drive, the loaded one, and recordState for a drive going in or out.
+SHOW_STATE_PROPS = frozenset(("showName", "showUID", "showUUID", "showSnapshotIndex",
+                              "showLastModification", "currentShowName", "currentShowUUID",
+                              "recordState"))
+
+
 def read_show_state() -> dict:
     """The Shows section of the Backups page: what is loaded, and what is on the drive."""
     try:
@@ -7503,7 +7404,7 @@ def wake_channels() -> dict:
                      lambda name: f"Cannot wake the channels on a {name}.")
     if gate is not None:
         return gate
-    # THE GAIN COMES FROM THE DESK, NOT FROM `_session_state`. The "put it straight back" half of
+    # THE GAIN COMES FROM A FRESH READ, NOT FROM THE DESK MODEL. The "put it straight back" half of
     # the nudge has to write the value the desk currently holds: the only callers are a reset and
     # an import, exactly the two moments the cache is guaranteed stale. Sourcing it from the cache
     # would write the gain the app last displayed over the one the restore just put back.
@@ -9113,14 +9014,14 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
     # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
     _callme_watcher()
+    # THE FIRST READ OF THE DESK, adopted by the desk model, so every page and listener starts
+    # from the desk as it is.
     try:
-        seed = read_live_settings()
-        if seed.get("ok"):
-            print(f"Seeded live settings from the device (MIDI "
-                  f"{'on' if _session_state['midi'] else 'off'}, firmware "
-                  f"{_session_state['firmware']}).")
-        else:
-            print(f"Startup read skipped: {seed.get('message')}")
+        with _hid_lock:
+            rcp_read.read_model_stable()
+        midi = desk_model.first("systemMidiControl", "bool")
+        print(f"Read the desk (MIDI {'on' if midi else 'off'}, "
+              f"firmware {desk_model.firmware()}).")
     except Exception as exc:
         print(f"Startup read skipped: {exc}")
 

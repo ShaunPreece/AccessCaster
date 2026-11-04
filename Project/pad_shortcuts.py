@@ -1,11 +1,11 @@
 """The pad shortcuts: firing a pad from a global hotkey, stepping the pad bank, and saying what is
 playing.
 
-WHAT IT KEEPS, and why it keeps it: a pad press has to be instant, and knowing where a pad sits, what
-its play mode is and which bank the desk is on all come from a model dump of about 1.5 seconds. So
-this module caches the pad map and the bank, keeps them honest from the desk's pushes
-(`follow_desk`) and from every pad edit (`pads_stale`), and remembers what it switched on or is
-holding down, because the desk does not echo our own writes.
+WHAT IT KEEPS, and why it keeps it: a pad press has to be instant, and knowing where a pad sits and
+what its play mode is come from a model dump of about 1.5 seconds. So this module caches the pad map,
+keeps it honest from the desk's pushes (`follow_desk`) and from every pad edit (`pads_stale`), and
+remembers what it switched on or is holding down, because the desk does not echo our own writes.
+The bank the desk is on is the desk model's (`desk_model.bank`).
 
 It never imports the server. The one thing it needs from it is the device lock, which the server
 installs as `lock` at import.
@@ -17,6 +17,7 @@ import threading
 import time
 
 import desk_live
+import desk_model
 import devices
 import diagnostics
 import midi_out
@@ -51,48 +52,34 @@ _pad_lock = threading.Lock()
 _pads_on = set()             # padIdx of pads THIS app engaged, so a second press releases them
 _pads_held = set()           # padIdx of HOLD-mode sound pads whose MIDI note we are still holding
 
-# WHICH BANK THE DESK IS ON, cached for the same reason the pad map is: MIDI reaches only the
-# current bank, so firing a pad in another one needs this before it can do anything, and a model
-# dump in front of a keypress is not an airhorn. Kept honest from three directions - every pad-map
-# refresh reads it off the same dump, `follow_desk` notes the desk's own pushes, and our own bank
-# writes note themselves. None means we have genuinely never seen one, which a
-# caller must not silently read as bank 1: that fires the wrong pad.
-_bank = None
-
-
 def follow_desk() -> None:
-    """Keep the bank and what is playing following the desk, whether or not announcements are on:
-    a stale bank makes a number key fire a stranger's sound."""
-    desk_live.Follower("pad shortcuts", {"selectedBank", "padProgress", "padActive"},
-                       on_push=note_push).start()
+    """Keep what is playing following the desk, whether or not announcements are on."""
+    desk_live.Follower("pad shortcuts", {"padProgress", "padActive"}, on_push=note_push).start()
 
 
 def note_push(push) -> None:
     """One push `follow_desk` asked for. Pad playback is addressed at the pad's STREAM POSITION,
     the last path element."""
-    if push.name == "selectedBank" and push.kind == "int":
-        note_bank(push.value)
-    elif push.name == "padProgress" and push.kind == "float" and push.path:
+    if push.name == "padProgress" and push.kind == "float" and push.path:
         note_pad_progress(push.path[-1], push.value)
     elif push.name == "padActive" and push.kind == "bool" and push.path:
         note_pad_active(push.path[-1], push.value)
 
 
-def note_bank(bank) -> None:
-    """Record the bank the desk is on. Safe to call with anything; non-banks are ignored."""
-    global _bank
-    if isinstance(bank, int) and 0 <= bank < devices.get_active_device().pad.system_bank:
-        _bank = bank
-
-
 def current_bank():
-    """The bank the desk is on (0-based), or None if we cannot find out."""
-    if _bank is None:
+    """The bank the desk is on (0-based), or None if we cannot find out. MIDI reaches only the
+    current bank, so firing a pad in another one needs this first. None is never to be read as
+    bank 1: that fires the wrong pad. Reads the pads when the desk model has no bank, which the
+    model then holds."""
+    bank = desk_model.bank()
+    if bank is None:
         try:
             refresh_pads()
         except Exception:
             return None
-    return _bank
+        bank = desk_model.bank()
+    banks = devices.get_active_device().pad.system_bank
+    return bank if bank is not None and 0 <= bank < banks else None
 
 
 # VOICE-FX PADS WITH NOTHING BEHIND THEM, by padIdx. A voice-FX pad's sound lives in a region-B
@@ -115,9 +102,9 @@ mixer_positions = frozenset()
 def refresh_pads() -> dict:
     """Re-read the pad pool and replace the cache. Returns the new map.
 
-    One dump answers four questions - where each pad sits, what its play mode is, which bank the
-    desk is on, and which voice-FX pads have lost their effect object - so the press that follows
-    needs no read of its own."""
+    One dump answers three questions - where each pad sits, what its play mode is, and which
+    voice-FX pads have lost their effect object - so the press that follows needs no read of its
+    own. The desk model adopts the same dump, which is where the bank comes from."""
     global _pad_map, _pads_at, _fx_missing, mixer_positions
     with lock:
         blob = rcp_read.read_model_stable()
@@ -132,7 +119,6 @@ def refresh_pads() -> dict:
     with _pad_lock:
         _pad_map = fresh
     _pads_at = time.monotonic()
-    note_bank(soundpad.current_bank(blob))
     return fresh
 
 
@@ -222,9 +208,8 @@ def _pad_name(position: int):
 # that fires a sound pad has to arm it at the point of use rather than once at startup.
 #
 # UNCONDITIONALLY, AND NEVER READ-THEN-WRITE. Reading first costs a model dump (about 1.5 s) in
-# front of a keypress, and the server's `_session_state["midi"]` does not follow a change made on
-# the desk itself, so the read can be stale in the one direction that matters. The write is
-# idempotent and measured at 0.004 s, so there is nothing to save. Said out loud ONCE, because the
+# front of a keypress, and a remembered value can be stale in the one direction that matters. The
+# write is idempotent and measured at 0.004 s, so there is nothing to save. Said out loud ONCE, because the
 # user did not ask for it and would otherwise have a setting changed silently.
 _midi_armed = False
 
@@ -393,7 +378,6 @@ def _pad_play(pad_idx: int, position: int, name: str, play_mode) -> dict:
             _release_held_pads()
             with _desk():
                 soundpad.select_bank(bank)
-            note_bank(bank)
             time.sleep(_BANK_SETTLE_S)
         # HOLD MODE PLAYS ONLY WHILE THE PAD IS HELD, and a hotkey has no release event to hang a
         # release on: Windows delivers WM_HOTKEY on the press and says nothing when the key comes
@@ -551,7 +535,6 @@ def bank_step(target: str) -> dict:
         return _said(str(exc), ok=False)
     except Exception as exc:
         return _said(f"The bank would not change: {exc}", ok=False)
-    note_bank(want)
     _maybe_refresh_pads()
     # The system bank is the video switching pads for a paired RODECaster Video, not sounds anyone
     # assigned, so say so: the number keys still work there and would otherwise fire "Scene A" with

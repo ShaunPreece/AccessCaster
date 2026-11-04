@@ -261,6 +261,9 @@ The layers, bottom up:
   is `soundpad.py`, which still windows the raw dump with `blob.find` (see the `padType` entry).
 - `rcp_transfer.py` builds every write record, and owns Transfer Mode.
 - `rcp_read.py` serves every lookup from the cached parse.
+- `desk_live.py` is the one listener, the app's only long-lived handle, and `desk_model.py` the one
+  picture of the desk: every dump any reader takes, every push the listener hears and every write
+  the app sends lands there, so a fact about the desk is held once and read from there.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
   `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, `commands.py`, and `announcer.py` (the
   desk's button presses spoken) over `speech.py` (everything the app says) and `settings_file.py`.
@@ -713,8 +716,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE ANNOUNCER SAYS WHEN THE USB MODE MOVED WHILE IT WAS DEAF, AND A PUSH CANNOT DO THIS JOB.**
   The desk can leave Expanded unprompted (measured: off the bus with nothing written to it for
   nine minutes, back two seconds later in Standard with the setting reset), and it changes as it
-  leaves the bus, so any push announcing it is sent into the gap. `announcer.seed_layout` therefore
-  records `outputMultiMode` and the reconnect compares. It names the half that MOVED rather than
+  leaves the bus, so any push announcing it is sent into the gap. The announcer therefore takes
+  `outputMultiMode` from the desk model when the desk is lost (the model keeps it until the desk is
+  read again) and the reconnect compares. It names the half that MOVED rather than
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
   and B inputs go dead and every RODECaster device on the computer is renamed.
 - **THE THIRD STORAGEVOLUME IS THE INTERNAL PAD STORAGE, AND ERASE MUST NEVER REACH IT.** Eject and
@@ -1062,8 +1066,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `action_set_fader_mute` / `action_set_fader_solo`. An empty fader and a stereo-linked pair both
   have no channel name to look up, and a pair is deliberately absent from the assignable channel
   list, so a by-name route could not mute one. They still write the same properties and call the
-  same `announcer.publish_mute` / `announcer.publish_solo` as the Channels page, which is what stops the two
-  pages disagreeing.
+  same `announcer.mark_self_mute` / `announcer.mark_self_solo` as the Channels page, which is what
+  stops the two pages disagreeing.
 - **PER-STRIP MUTE AND SOLO GATE ON `processing`, NEVER ON THE LEVEL GATE** (`_strip_toggle_gate`).
   They are compact bools on the channel's processing selector, so `processing` is the capability
   that decides them. Shipped tied to `_level_write_gate` for an hour on 31st August 2026: the Duo's
@@ -1458,17 +1462,20 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## The desk pushes, and does not echo
 
-- **The desk pushes changes made ON the desk and does NOT echo our own writes.** Two consequences,
-  and both have bitten more than once:
-  - Any announcer state that compares a pushed value against memory must be SEEDED at startup, or
-    the desk's first resting push reads as a change (the phantom "Levels" and "Bank 1").
-  - Any cache the announcer keeps must be told about OUR writes explicitly
-    (`announcer.publish_level`, `announcer.publish_mute`), and so must the window's desk state
-    when the write did not come from the window (`server._mirror_strip`, for a strip mute or solo
-    from a shortcut or an encoder hold).
-- **The exception, proven 28th August 2026: it DOES push our own property writes back on report 04.**
-  That is why the announcer needs the 1.5 s echo-suppression window per target. The two facts sit at
-  different layers; do not collapse them.
+- **The desk pushes changes made ON the desk and does NOT echo all of our own writes** (a software
+  solo pushes nothing). Two consequences, and both have bitten more than once:
+  - Anything that compares a pushed value against what it knew must know it from a READ, or the
+    desk's first resting push reads as a change (the phantom "Levels" and "Bank 1"). The desk model
+    is read at start and the comparison is `push.was`.
+  - Our own writes reach the desk model as they are sent (`rcp_hid.note_written`), and the window's
+    desk state hears them as pushes marked `ours` (`own_writes`), whoever made the write: a
+    shortcut, an encoder hold, a profile.
+- **The exception, proven 28th August 2026: it DOES push most of our own property writes back on
+  report 04.** That is why the announcer needs the 1.5 s echo-suppression window per target. The two
+  facts sit at different layers; do not collapse them. Since our write reaches the desk model first,
+  its echo arrives with `was` equal to its value, so anything that speaks only on a change (the
+  bank, an output mute) is already silent for it: a bank a pad shortcut selects is said by the
+  shortcut, not the announcer.
 - **EVERY PHYSICAL-CONTROL PUSH IS ONE WHOLE RECORD, AND THE DUMP FOLLOWS A MUTE SET AT THE DESK.**
   Measured on the Pro II, fw 1.7.6, 31st October 2026: four minutes of mutes, solos, the encoder, a
   fader and pads gave 1124 pushes, none of them a malformed frame, so `rcp_read.parse_push` (and the
@@ -1482,9 +1489,32 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   and CallMe rings and speaks, so one slow consumer would stall the rest and a write waiting for its
   own push would wait on itself. Do not open another long-lived read handle; subscribe.
 - **ANYTHING THAT MUST STAY CURRENT WITH ANNOUNCEMENTS OFF FOLLOWS THE DESK ITSELF, never through the
-  announcer**, which unsubscribes when switched off. The pad shortcuts' bank and playback
-  (`pad_shortcuts.follow_desk`) and the naming layout (`channels.follow_desk`) are their own
-  followers; fed by the announcer, both went stale with announcements off.
+  announcer**, which unsubscribes when switched off. A fact about the desk is the desk model's,
+  which the listener keeps whatever is subscribed; a follower of its own is for what is not a desk
+  property (`pad_shortcuts.follow_desk`'s playback tracking) or reacts to a change
+  (`channels.follow_desk` dropping the write cache).
+- **A FACT ABOUT THE DESK IS HELD ONCE, IN `desk_model`. Do not keep a copy of one anywhere else**;
+  read the model. Every copy that existed (the announcer's mutes, levels, bank and selected channel,
+  encoder hold's selection, the pad bank, the recorder's state, the naming layout, the Expanded flag,
+  the server's session state) went stale in its own way. What a consumer keeps is its own
+  bookkeeping: what was said, a ring position, an elapsed count.
+- **THE MODEL READS NOTHING OF ITS OWN.** It adopts the dumps other readers take, and a caller that
+  needs it current reads the desk itself (which is then adopted). A background dump would land
+  mid-reset or mid-re-enumeration, which is exactly what `PushListener` exists to avoid.
+- **A DUMP IS ADOPTED WITH WHAT WAS PUSHED DURING IT REPLAYED ON TOP** (`desk_model._journal`), because
+  a dump takes a second and more and the desk keeps changing. A dump begun on an earlier connection
+  (`rcp_hid.connection_epoch`) is never adopted, and only a dump that ended on its declared length
+  is offered.
+- **TRUSTED IS FOR ACTING, THE LAST VALUE IS FOR NAMING.** `desk_model.trusted()` holds while the
+  listener is up, a dump has been adopted on this connection, and no `STRUCTURAL` change (a fader
+  source, the USB mode, a mic type) has arrived since it started. A toggle's direction or a level
+  step reads the desk when it is not trusted (the cough key, `commands._known_level`); a name takes
+  the last layout seen, because "Mic 2" from a stale layout beats "Channel 7".
+- **OUR WRITE IS APPLIED ONLY AT A FIXED NODE THAT ALREADY CARRIES THE PROPERTY** (`apply_write`). A pad
+  edit is written at the edit cursor, whose path is not the pad it edits, and a property the node
+  lacks is a stray, not a value.
+- **THE MODEL IS UPDATED BEFORE A SUBSCRIBER HEARS THE PUSH**, so a subscriber that looks at the
+  model sees the value it is being told about. Keep `apply_push` ahead of `_fan_out` in the reader.
 - **LISTEN FOR THE ANSWER, DO NOT RE-READ THE TREE UNTIL IT APPEARS.** `desk_live.PushListener`: a
   subscription on the one listener, no HID lock. A factory reset pushes `currentShowUUID` itself at
   about t+1.75 s. **START IT BEFORE THE WRITE** - the burst starts 0.02 s after, and only pushes
@@ -1499,8 +1529,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A hidapi HANDLE MUST BE CLOSED BY THE THREAD THAT READS IT.** Closing one from elsewhere while a
   read is in flight segfaults the interpreter (exit 139). The desk listener closes on its own
   thread, and `desk_live.stop` joins it.
-- **`channels.last_known_strip_vector` never expires and is for NAMING only.** The TTL'd cache is for
-  addressing a WRITE, where staleness is the dangerous case. Do not merge them.
+- **`channels.last_known_strip_vector` (the desk model's layout) is for NAMING only.** The TTL'd cache
+  (`channels.strip_vector`) is for addressing a WRITE, where staleness is the dangerous case. Do not
+  merge them until a write can be addressed from a trusted model, which needs the hardware proof
+  that every way a fader's source changes is pushed.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
   `restore_profile(clean=True)` sends `shows.send_new_from_default()` (the software factory reset)
   and takes an export first as the undo. Two consequences people keep missing: the profile and show
@@ -1818,6 +1850,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   (`native.desk_state`), read in full at start, on F5, on a reconnect, after a write that moves
   other values, and after a `STRUCTURAL` push; `show(rec)` puts new values on the same controls
   rather than rebuilding them, so a re-read never moves the focus.
+- **THE WINDOW'S DESK STATE IS A VIEW OVER THE DESK MODEL, BUILT BY THE CODE A READ USES.** A change
+  the window shows, pushed or ours, rebuilds it from `desk_model.snapshot` through
+  `server.window_state`, so there is ONE decoder for a read and a push. Do not put a push's value on
+  a record by hand again, and do not patch the desk state from a write's reply: our write reaches
+  the model as it is sent. The rebuild updates records IN PLACE, because a channel page keeps the
+  record it was built from. A channel page still `remember`s its own writes, because a channel on
+  no fader keeps its chain in the app's own store, which no push or write to the desk announces.
 - **THE DESK STATE BELONGS TO THE UI THREAD.** Its follower's thread only hands a push over with
   `wx.CallAfter`; the records change, and subscribers hear of it, on the thread that draws them.
 - **A SLIDER IGNORES `show` FOR `HANDS_OFF_S` AFTER IT MOVES.** The desk pushes back each value
@@ -1872,19 +1911,19 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   window asks (`channel_tabs.StereoPan`). It shows centre for legs moved since the link, and the
   server starts the link again from those legs on the next move; a second copy of the test would
   let the slider's position and the written legs disagree.
-- **THE OUTPUT MIXES PAGE RECORDS ITS OWN CROSS-POINT WRITES AND RE-READS AFTER A MODE WRITE**
-  (`routing_mixes.OutputMixesPage`): the desk pushes back neither `mixDisabled` nor
-  `outputMixMinus` for our writes, so waiting for the push leaves the page showing the old mix.
+- **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
+  or entering Custom moves the output's cross-points on the desk, which it does not push. Its own
+  cross-point writes need nothing: the desk pushes back neither `mixDisabled` nor `outputMixMinus`
+  for them, but they reach the desk model as they are sent.
   `mixLink`, which is pushed, is not the inclusion: it stays True for a source on no fader.
 - **ITS SOURCE SWITCHES ARE HIDDEN ON ANYTHING BUT A CUSTOM MIX.** Outside Custom the desk ignores
   the cross-points it has stored, so the switches would describe a mix the output does not carry.
-- **A MONITOR MIX LEVEL WRITE MAKES ITS OUTPUT CUSTOM, AND THE WINDOW RECORDS THAT ITSELF**
-  (`DeskState.monitor_mix_written`), for the same reason: `outputMixMinus` is not pushed back. The
-  level is (`mixLevelWithAnchor`, on every cross-point of the source while a fader moves). The
-  per-output reset re-reads instead, since neither its links nor its mode come back.
+- **A MONITOR MIX LEVEL WRITE MAKES ITS OUTPUT CUSTOM** (`server.action_set_monitor_level` writes
+  the mode first), which the desk does not push back; the write reaches the desk model, which is
+  enough. The per-output reset re-reads instead, since what its link requests do to the levels
+  comes back from no write of ours.
 - **A VIRTUAL FADER'S MUTE AND SOLO LIVE ON `levels["faders"]`, NOT ONLY ON A CHANNEL RECORD.** An
-  empty fader or a stereo-linked pair has no channel record, so `_set_level` puts the strip's push
-  on the fader as well; `muted` None is an empty fader and takes no push.
+  empty fader or a stereo-linked pair has no channel record; `muted` None is an empty fader.
 - **A CONTROL THAT CANNOT ACT NOW REFUSES THROUGH ITS GUARD, AND IS NEVER DISABLED**
   (`Switch(guard=)`, the Master Mix page's raw tracks switch while no separate tracks are made). A
   disabled Win32 control leaves the tab order, so it would vanish from under the user.
@@ -1897,8 +1936,23 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   only the newest value, `DELAY_MS` after the arrows stop. Anything that replaces something keeps
   its Confirm button (above).
 - **THE PADS ARE NOT IN THE DESK STATE** (`pads_section.PadsSection`). They come from a model dump
-  of their own, about 1.5 s, read after the desk state's first read, on F5 and after a change made
-  in the window; a change made on the desk shows after F5.
+  of their own, about 1.5 s, read after the desk state's first read, on F5, after a change made in
+  the window, and when the desk pushes a pad change (below).
+- **A PAGE THAT READS THE DESK FOR ITSELF FOLLOWS IT WITH `pages.FollowDesk`**: the pads, the
+  backups, and Device's Hardware, Unit settings and Wireless connections. Each names the properties
+  it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `HARDWARE_PROPS`,
+  `UNIT_SETTING_PROPS`, `NETWORK_PROPS`), watched through the desk state's one follower
+  (`DeskState.watch`), and re-reads once their pushes stop for `AFTER_MS`, never while a modal
+  dialog is open. A RE-READ, NOT THE MODEL, because which of these the desk pushes for a
+  touchscreen change is unmeasured. Keep out of the lists what changes while the desk is merely in
+  use, or the page dumps the desk throughout: `padActive` and `padProgress` (a pad playing),
+  `storageVolumeState` (a recording's free space; `recordState` covers a card going in or out).
+  The wifi scan results are never pushed. A followed Hardware read skips `read_device_status`,
+  which rescans the bus. A name the desk does not publish follows nothing, so
+  `test_native_desk_state` checks every list against `PROPERTY_LIST_PRO2.md`.
+- **A PAGE RE-READ WHILE THE USER IS ON IT SETS ONLY WHAT CHANGED** (`pages.set_text`, `set_items`,
+  `select`, `controls.set_choices`): a screen reader reads a focused control again whenever its
+  value or selection is set, even to the same thing.
 - **A RESTORE OR A FACTORY RESET ENDS WITH `frame.desk_rewritten`, NOT `desk.refresh`**
   (`backups_section`). The pads and the backups are read by their sections, outside the desk state,
   so a desk state refresh alone leaves the Pads pages showing the grid from before.
@@ -2532,9 +2586,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## wake_channels reads the gain from the DESK
 
-- **NEVER FROM `_session_state`.** Its only callers are a factory reset and a show import, i.e.
-  exactly the two moments the app's cache is guaranteed stale, because changing the desk is what
-  they are for. It took the "put it straight back" half of its nudge from that cache, so **every
+- **NEVER FROM THE DESK MODEL.** Its only callers are a factory reset and a show import, i.e.
+  exactly the two moments the app's own picture is least to be trusted, because changing the desk is
+  what they are for. It took the "put it straight back" half of its nudge from that cache, so **every
   successful restore quietly wrote the app's last displayed gain over the restored one** - measured
   21st September 2026, a backup holding Mic 1 at 55 dB restored correctly and then had 45 written
   over it. `channels.mic_gain` is the paired reader, at the same address `set_mic_gain` writes to.
@@ -2880,9 +2934,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   a Pro II. And it is saved into a profile and re-applied by `profiles.apply`, so restoring a
   profile taken while MIDI was off silently kills every pad shortcut. So anything depending on MIDI
   must ENABLE IT AT THE POINT OF USE rather than once at startup - the write is idempotent and
-  measured at 0.004 s, so there is no reason to be clever about it. Do not read-then-write:
-  `_session_state["midi"]` is not updated by a change made on the desk itself, so it can be stale
-  in the one direction that matters.
+  measured at 0.004 s, so there is no reason to be clever about it. Do not read-then-write: a read
+  costs a dump, and a remembered value can be stale in the one direction that matters.
 - **LEAVING THE DESK OPEN TO MIDI IS NOT A HAZARD, measured 2nd September 2026 rather than assumed.**
   The port is USB, so LOCAL ONLY: nothing off the machine can reach it. It is also SHARED, not
   exclusive - two `midiOutOpen` calls on it both succeeded - which mostly helps, because our own

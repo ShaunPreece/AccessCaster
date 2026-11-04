@@ -18,8 +18,10 @@ from datetime import UTC, datetime
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import desk_live
+import desk_model
+import rcp_transfer
 import recorder
-from _testkit import check, check_in
+from _testkit import addr, check, check_in
 from wording import spoken_datetime
 
 # A recordingContent string as the unit sends it. The trailing six fields are unmapped.
@@ -124,32 +126,43 @@ check("the wrong selector is refused",
       state_of(PUSH_RECORDING[:9] + b"\x0f" + PUSH_RECORDING[10:]), None)
 
 print("\nELAPSED TIME (counted here, because the unit will not: recordTimeMs stays 0)")
+
+
+def pushed(watcher, state):
+    """The desk pushing `state`, as the listener hands it on: the desk model first."""
+    path = tuple(addr(rcp_transfer.RECORDER))
+    was = desk_model.apply_push(path, "recordState", state, "int")
+    watcher._push(desk_live.Push(path, "recordState", state, "int", rcp_transfer.RECORDER, was))
+
+
+desk_model._reset()
 said = []
 w = recorder.Watcher(on_change=lambda was, now: said.append(recorder.STATE_SPOKEN.get(now)))
-w._apply(recorder.READY)
-w._apply(recorder.RECORDING)
+pushed(w, recorder.READY)
+pushed(w, recorder.RECORDING)
 time.sleep(0.3)
 check("a recording we started IS timed", w.snapshot()["elapsed_seconds"] is not None, True)
-w._apply(recorder.PAUSED)
+pushed(w, recorder.PAUSED)
 paused_at = w.snapshot()["elapsed_seconds"]
 time.sleep(0.4)
 check("a PAUSE stops the clock, exactly as it stops the recording",
       w.snapshot()["elapsed_seconds"], paused_at)
-w._apply(recorder.RECORDING)
+pushed(w, recorder.RECORDING)
 time.sleep(0.2)
 check("resuming carries on from where it paused, it does not restart",
       w.snapshot()["elapsed_seconds"] > paused_at, True)
-w._apply(recorder.READY)
+pushed(w, recorder.READY)
 check("stopping clears the count", w.snapshot()["elapsed_seconds"], None)
 check("every transition was spoken, and in order",
       said, ["Recording stopped", "Recording started", "Recording paused",
              "Recording started", "Recording stopped"])
 
 print("\nAN ELAPSED TIME WE CANNOT HONESTLY GIVE")
+desk_model._reset()
 w2 = recorder.Watcher()
-# The app started while the unit was ALREADY recording: we learned the state from a model dump, so
-# we never saw it begin. A number here would be wrong, so there is no number.
-w2.note_state(recorder.RECORDING, timed=False)
+# The app started while the unit was ALREADY recording: the desk model learned the state from a
+# dump, so we never saw it begin. A number here would be wrong, so there is no number.
+desk_model.apply_push(tuple(addr(rcp_transfer.RECORDER)), "recordState", recorder.RECORDING, "int")
 check("no start seen, no elapsed claimed", w2.snapshot()["elapsed_seconds"], None)
 check("but the state is still reported", w2.snapshot()["state_label"], "Recording")
 w2.note_state(recorder.RECORDING, timed=False)

@@ -7,7 +7,8 @@ and `read()` (after a job that rewrites the desk). When its pages change it call
 
 A PAGE is one leaf: a `key` that survives a rebuild, a `title` for the tree, and the `window` shown
 on the right. Every page window is a child of `frame.host`. A window with `before_show()` has it
-called while still hidden, each time the tree is about to show it.
+called while still hidden, each time the tree is about to show it. A page that reads the desk for
+itself, rather than through the window's desk state, follows it with `FollowDesk`.
 """
 import wx
 
@@ -117,6 +118,47 @@ def set_items(listbox, labels):
                 listbox.SetString(index, label)
     else:
         listbox.Set(labels)
+
+
+def select(control, index):
+    """Choose `index` in a list or choice only when it is not already chosen, for the same reason
+    as `set_text`."""
+    if control.GetSelection() != index:
+        control.SetSelection(index)
+
+
+def modal_open():
+    return any(isinstance(window, wx.Dialog) and window.IsModal()
+               for window in wx.GetTopLevelWindows())
+
+
+class FollowDesk:
+    """Reads a page that reads the desk for itself again when the desk changes what it shows:
+    `read()` runs once the pushes of `names` have stopped for `AFTER_MS`. It waits while a modal
+    dialog is open, since a dialog can hold a copy of the page's read, and a job behind one (a
+    restore, a pad change) pushes throughout and reads again itself when it ends."""
+
+    AFTER_MS = 1500
+
+    def __init__(self, frame, names, read):
+        self._frame = frame
+        self._read = read
+        self._timer = None
+        frame.desk.watch(names, self._pushed)
+
+    def _pushed(self):
+        if self._timer is not None and self._timer.IsRunning():
+            self._timer.Start(self.AFTER_MS)
+        else:
+            self._timer = wx.CallLater(self.AFTER_MS, self._due)
+
+    def _due(self):
+        if not self._frame or self._frame.IsBeingDeleted():
+            return
+        if modal_open():
+            self._timer.Start(self.AFTER_MS)
+            return
+        self._read()
 
 
 class MessagePage(wx.Panel):

@@ -2,9 +2,10 @@
 connections.
 
 Nothing here is in the desk state. Each page reads its own part of the unit (`read`): every page
-after the desk state's first read and after a job that rewrites the desk, and the page shown on F5.
-The reads at start share one dump through the model cache. The overview also gives the window's
-status bar its summary, read again shortly after the desk state changes.
+after the desk state's first read and after a job that rewrites the desk, the page shown on F5, and
+Hardware, Unit settings and Wireless connections once the desk has pushed a change to what they
+show (`FollowDesk`). The reads at start share one dump through the model cache. The overview also
+gives the window's status bar its summary, read again shortly after the desk state changes.
 """
 import wx
 import wx.lib.scrolledpanel as scrolled
@@ -15,7 +16,7 @@ from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import JobDialog, confirm, follow_job, report
 from native.firmware_dialog import FirmwareDialog
-from native.pages import Page, group, page_body, read_only, set_text
+from native.pages import FollowDesk, Page, group, page_body, read_only, set_text
 from native.wifi_dialogs import JoinDialog, NetworksDialog
 
 TITLE = "Device"
@@ -286,11 +287,6 @@ def _button(parent, sizer, label, handler):
     return button
 
 
-def _hardware_read():
-    return {"ok": True, "state": server.read_device_state(),
-            "status": server.read_device_status()}
-
-
 # ---- the section ----------------------------------------------------------------------------
 
 class DeviceSection:
@@ -311,6 +307,10 @@ class DeviceSection:
                       Page("network", "Wireless connections", self.network)]
         self._summary_timer = None
         frame.desk.subscribe(self._desk_event)
+        for view, names in ((self.hardware, server.HARDWARE_PROPS),
+                            (self.unit, server.UNIT_SETTING_PROPS),
+                            (self.network, server.NETWORK_PROPS)):
+            FollowDesk(frame, names, view.follow)
 
     def _desk_event(self, event, _detail):
         if event == "read" and not self._started:
@@ -339,19 +339,24 @@ class DeviceSection:
 
 
 class _Reader:
-    """A page's read: one at a time, a second asked for while one runs is made after it. `fetch`
-    runs on a worker thread; `shown(reply)` puts a reply on the page and returns what F5 says."""
+    """A page's read: one at a time, a second asked for while one runs is made after it.
+    `fetch(full)` runs on a worker thread, `full` False for a read asked for by the desk's pushes
+    (`follow`); `shown(reply)` puts a reply on the page and returns what F5 says."""
 
     def _init_reader(self):
         self._reading = False
-        self._again = None
+        self._again = None           # a read asked for while one runs: (announce, full)
 
-    def read(self, announce=False):
+    def read(self, announce=False, full=True):
         if self._reading:
-            self._again = bool(self._again) or announce
+            said, whole = self._again or (False, False)
+            self._again = (said or announce, whole or full)
             return
         self._reading = True
-        call(self, self.fetch, done=lambda reply: self._read_done(reply, announce))
+        call(self, self.fetch, full, done=lambda reply: self._read_done(reply, announce))
+
+    def follow(self):
+        self.read(full=False)
 
     def _read_done(self, reply, announce):
         self._reading = False
@@ -360,7 +365,7 @@ class _Reader:
             self.section.frame.say(said)
         if self._again is not None:
             again, self._again = self._again, None
-            self.read(again)
+            self.read(*again)
 
 
 class StatePage(_Reader, wx.Panel):
@@ -376,7 +381,7 @@ class StatePage(_Reader, wx.Panel):
         self.report = read_only(parent, sizer, "Now", height=300, scroll=True)
         self.report.SetValue(UNREAD)
 
-    def fetch(self):
+    def fetch(self, _full):
         return server.device_overview()
 
     def shown(self, reply):
@@ -417,18 +422,28 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
                                        "troubleshooting.")
         self.SetupScrolling(scroll_x=False)
 
-    def fetch(self):
-        return _hardware_read()
+    def fetch(self, full):
+        """The unit's state, and with `full` its USB status, which no push changes and whose read
+        rescans the bus."""
+        reply = {"ok": True, "state": server.read_device_state()}
+        if full:
+            reply["status"] = server.read_device_status()
+        return reply
 
     def shown(self, reply):
         # A failed call is one refusal reply, standing for both halves.
-        state, status = reply.get("state", reply), reply.get("status", reply)
+        if "state" not in reply:
+            state = status = reply
+        else:
+            state, status = reply["state"], reply.get("status")
         set_text(self.status, "\n".join(hardware_lines(state)))
         if state.get("ok"):
             set_text(self.firmware, firmware_line(state.get("firmware"),
                                                   state.get("firmware_update")))
             set_text(self.wired, wired_text(state.get("wired_connected")))
             self._show_install(state.get("firmware_update"))
+        if status is None:
+            return "Status read."
         set_text(self.connection, connection_text(status))
         set_text(self.hardware_id, status.get("hardware_id") or "Unknown")
         set_text(self.info, "0x" + status["info_hex"] if status.get("info_hex") else "Unknown")
@@ -554,7 +569,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         slider.acc.description = spec["detail"]
         return slider
 
-    def fetch(self):
+    def fetch(self, _full):
         return server.read_unit_settings()
 
     def shown(self, reply):
@@ -652,7 +667,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
             return NETWORK_UNREAD
         return None if self.data.get("writable") else NETWORK_READ_ONLY
 
-    def fetch(self):
+    def fetch(self, _full):
         return server.read_network_status()
 
     def shown(self, reply):

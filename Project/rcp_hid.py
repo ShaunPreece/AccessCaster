@@ -59,6 +59,21 @@ def write_generation() -> int:
     return _write_generation
 
 
+# Called with each record once it is written to the desk: `desk_live` installs it, so the desk
+# model and the window learn what this app changed, which the desk does not always push back.
+write_watcher = None
+
+
+def note_written(record: bytes) -> None:
+    """Tell `write_watcher` about one record just written. Every write passes through here."""
+    watcher = write_watcher
+    if watcher is not None:
+        try:
+            watcher(record)
+        except Exception as exc:    # what the app knows is never worth failing a write for
+            diagnostics.event("desk_model.write_unapplied", str(exc))
+
+
 def write_report(dev, record: bytes) -> int:
     """Write one raw record to an ALREADY-OPEN handle and note it as a device write.
 
@@ -70,6 +85,7 @@ def write_report(dev, record: bytes) -> int:
     n = dev.write(record)
     bump_write_generation()
     diagnostics.command(record, "write_report")
+    note_written(record)
     return n
 
 # Report ids (see the module docstring).

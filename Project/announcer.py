@@ -21,6 +21,7 @@ import time
 
 import channels
 import desk_live
+import desk_model
 import devices
 import diagnostics
 import rcp_read
@@ -35,14 +36,15 @@ class Hooks:
     """What the announcer needs from the app around it. The server installs its own at import; these
     defaults do nothing, so the decoder also runs alone in the offline tests and DevTools."""
 
-    lock = threading.Lock()   # the server's device lock, taken for the one seeding dump
+    lock = threading.Lock()   # the server's device lock, taken for a seeding dump
 
     def mixer_positions(self) -> frozenset:
         """The pad positions that hold mixer pads."""
         return frozenset()
 
     def reconnected(self, was_usb, now_usb) -> None:
-        """The desk came back after a real gap, already re-seeded; the USB modes are before and after."""
+        """The desk came back after a real gap, already read again; the USB modes are before and
+        after."""
 
 
 hooks = Hooks()
@@ -216,7 +218,7 @@ _RUN_S = 1.5           # within this of the last update on the same target, say 
 # so it is derived from devices.FaderSpec rather than hardcoded. Pro II (physical 6, count 9) yields
 # exactly the observed ring - faders 7/8/9 then monitor - byte for byte. The Duo (physical 4, count 9)
 # yields faders 5-9 then monitor, which is the same RULE but an UNOBSERVED order on that desk; a wrong
-# guess costs one spoken phrase because the first real movement re-seats us (see _ring_seat).
+# guess costs one spoken phrase because the first real movement re-seats us (see _ring_place).
 _ENCODER_RING_PRO2 = (("fader", 6), ("fader", 7), ("fader", 8), ("monitor", 0))
 
 
@@ -230,7 +232,6 @@ def _encoder_ring() -> tuple:
         return _ENCODER_RING_PRO2
 
 
-_FADER_LEVEL_MAX = 127.0     # faderMax; faderLevel/127 IS the cross-point level, checked exactly
 # The headphone pots. Each POT node under PHYSICALINTERFACE[0] publishes its OWN potMin and potMax
 # (0 and 127 on a Pro II, read off the desk), so this constant is the desk's figure rather than an
 # assumed one - check those two properties before trusting it on a new device.
@@ -270,15 +271,11 @@ def _source_label(source_code: int) -> str:
 
 
 def channel_label(strip_idx: int) -> str:
-    """A speakable name for a strip index, e.g. 'Mic 2', from the known fader layout.
-
-    Never touches the device: the announcer thread holds no HID lock, so a model dump from here
-    would fight the writes. Falls back to the LAST KNOWN layout when the TTL'd cache has expired:
-    nothing refreshes that cache while the operator is only pressing buttons. The layout is seeded
-    once when the announcer starts and kept current from the stream (`channels.follow_desk`).
-    'Channel N' when no layout has been seen or it does not name that slot."""
+    """A speakable name for a strip index, e.g. 'Mic 2', from the desk model's fader layout, however
+    old: the last layout seen beats 'Channel N', which is said when no layout has been seen or it
+    does not name that slot."""
     try:
-        vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
+        vec = desk_model.strip_vector()
         if vec and 0 <= strip_idx < len(vec):
             # labels_for, so a linked pair is named rather than spoken as a bare code, and the
             # Expanded four are named rather than announced as "Source 12".
@@ -292,32 +289,32 @@ def channel_label(strip_idx: int) -> str:
 
 
 def handle_report(b: bytes, st: dict) -> None:
-    """`handle_push` for one raw report-04 frame, for a tool reading a handle of its own. A slice of
-    a model dump decodes as nothing and is ignored."""
+    """`handle_push` for one raw report-04 frame, for a tool reading a handle of its own: the push is
+    applied to the desk model first, as the listener does. A slice of a model dump decodes as
+    nothing and is ignored."""
     push = desk_live.decode(b)
     if push is not None:
-        handle_push(push, st)
+        was = desk_model.apply_push(push.path, push.name, push.value, push.kind)
+        handle_push(push._replace(was=was), st)
 
 
 def handle_push(push, st: dict) -> None:
-    """Speak one push, updating the announcer state dict `st` ({"bank", "pending", "at"})."""
+    """Speak one push. The desk's state is the desk model's, already holding the pushed value, with
+    the value it replaced as `push.was`; `st` is what has been said and what is waiting to be."""
     global _mixer_quiet_until
-    path, name, val, kind, node = push
+    path, name, val, kind, node = push[:5]
+    was = push.was
     # Typed views of the value, so a branch that wants an int never acts on a string or a bool.
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
     fval = val if kind == "float" else None
     # The strip when the addressed node is CHANNEL[strip], else -1.
     strip = node[1] if node and node[0] == "CHANNEL" and node[1] < 16 else -1
-    if name in _TRACED_STATE:
-        traced = st.setdefault("traced", {})
-        if traced.get(name, object()) != val:
-            traced[name] = val
-            diagnostics.event("desk.state", name, value=val)
+    if name in _TRACED_STATE and val != was:
+        diagnostics.event("desk.state", name, value=val)
 
     if name == "selectedBank":
-        if ival is not None and ival != st["bank"]:
-            st["bank"] = ival
+        if ival is not None and ival != was:
             _say(f"Bank {ival + 1}")
         return
     # A pad switched on or off is addressed at the pad's STREAM POSITION, the last path element.
@@ -354,9 +351,8 @@ def handle_push(push, st: dict) -> None:
         # -1 = nothing selected, and the encoder is back on the levels ring. Anything else is a STRIP
         # INDEX: that channel is selected and the encoder now moves its gain. The channel buttons
         # emit no press edge of their own - this state change IS the event.
-        if ival is None or ival == st.get("chan_sel"):
+        if ival is None or ival == was:
             return
-        st["chan_sel"] = ival
         _say("Virtual faders and monitor. Encoder changes their levels" if ival < 0
                  else _selected_phrase(ival))
         return
@@ -376,11 +372,6 @@ def handle_push(push, st: dict) -> None:
                 # Number first, as for any level that moved (see _level_words).
                 _say(f"{ival} d B, {who}")
         return
-    if name == "encoderColour":
-        # -1 = the encoder is bound to nothing; anything else is the colour of what it drives.
-        if ival is not None:
-            st["enc_bound"] = (ival >= 0)
-        return
     if name == "faderLevel":
         # The VIRTUAL fader level, 0-127. This is the encoder's own report of
         # what it just moved, and its address names the FADER directly
@@ -388,18 +379,16 @@ def handle_push(push, st: dict) -> None:
         # ring - the cross-point pushes that follow say the same thing by source.
         idx = node[3] if node and node[:3] == ("PHYSICALINTERFACE", 0, "FADER") else -1
         if ival is not None and 0 <= idx < 16:
-            _ring_seat(st, "fader", idx, max(0.0, min(1.0, ival / _FADER_LEVEL_MAX)))
+            _ring_place(st, "fader", idx)
         return
     if name == "outputMonLevel":
         if levels_on and fval is not None:
-            _ring_seat(st, "monitor", 0, fval)
+            _ring_place(st, "monitor", 0)
             _note_level(st, "monitor", 0, fval)
         return
     if name in _OUTPUT_MUTES:
-        known = st.setdefault("output_muted", {})
-        if bval is None or known.get(name) == bval:
+        if bval is None or bval == was:
             return
-        known[name] = bval
         if st.get("enc_down_at"):
             st["enc_hold"] = True
             if name == "outputMonMute":
@@ -427,28 +416,23 @@ def handle_push(push, st: dict) -> None:
         on, what = bval, _STATE_PROPS[name]
         st["pending"] = None            # the state supersedes the press edge
         who = channel_label(strip)
-        if what == "mute":
-            # Track it: the encoder ring quotes this instead of a level (a muted channel's level is
-            # not the useful fact), and a mute landing mid-press is what identifies the gesture as
-            # the desk's press-and-hold rather than a selection change.
-            st.setdefault("muted", {})[strip] = on
-        # Our own write, echoed back: the UI announced it already (see mark_self_write). After
-        # the cache, so the ring still quotes the truth, and before the press-and-hold inference,
-        # because a software mute is not a gesture on the desk. Solo is marked too
-        # (publish_solo), though this desk pushes nothing back for a software solo, so that
-        # branch is insurance rather than an observed fix.
+        # Our own write, echoed back: the UI announced it already (see mark_self_write). Before
+        # the press-and-hold inference, because a software mute is not a gesture on the desk. Solo
+        # is marked too (mark_self_solo), though this desk pushes nothing back for a software solo,
+        # so that branch is insurance rather than an observed fix.
         if is_self_echo((what, strip)):
             return
-        # A mixer pad is mid-action, so this mute or cue is the pad doing its job. After the cache
-        # above, which must stay true whether or not anything is said.
+        # A mixer pad is mid-action, so this mute or cue is the pad doing its job.
         if time.monotonic() < _mixer_quiet_until:
             return
         if what == "mute":
+            # A mute landing mid-press is what identifies the gesture as the desk's press-and-hold
+            # rather than a selection change.
             if st.get("enc_down_at"):
                 st["enc_hold"] = True
                 # A hold mutes the ring target only while no channel button holds the encoder;
                 # with one, the mute is encoder_hold's, of the selected channel.
-                selected = st.get("chan_sel")
+                selected = desk_model.selected_channel()
                 if selected is None or selected < 0:
                     _ring_place(st, "fader", strip)
             # A TONE IF THEY HAVE ASKED FOR ONE, and the sentence if the tone cannot be played. Mute
@@ -490,7 +474,7 @@ def handle_push(push, st: dict) -> None:
         # leaves `enc_pos` pointing at a ring entry the encoder is not on, which is the same value
         # `_at_limit` reads to decide whether a turn is against a stop. Say what the encoder is
         # still on, and leave the ring position alone.
-        sel_now = st.get("chan_sel")
+        sel_now = desk_model.selected_channel()
         if sel_now is not None and sel_now >= 0:
             _say(_selected_phrase(sel_now))
             return
@@ -508,76 +492,38 @@ def handle_push(push, st: dict) -> None:
         return
 
 
-def seed_layout(st: dict) -> None:
-    """Read the fader layout ONCE when the announcer starts, so the very first mute press can say
-    'Mic 2 muted' rather than 'Channel 7 muted'. Fills in st["known"] (the encoder-ring level cache)
-    and st["muted"].
+def seed(st: dict) -> None:
+    """Make sure the desk model has been read on this connection, and count the levels it holds as
+    already spoken.
 
-    Seeding the mutes matters because the pushed stream only ever reports CHANGES: without this, a
-    channel muted before the announcer started would have the ring quote its level as though it were
-    audible, and stay wrong until someone happened to toggle it.
+    The pushed stream only ever reports CHANGES, and the desk pushes a resting value now and then:
+    unseeded, the first of them ("Monitor 95 percent") would be announced as though something had
+    moved it, on every connect and reconnect. `flush_pending` speaks a level unless it matches
+    st["said"], which this fills in.
 
-    Takes hooks.lock for the one dump (unlike the read loop, which deliberately never does), and
-    gives up quietly on any failure - a missing layout only costs us the channel NAME. Every later
-    refresh is free: any page read republishes it, and `channels.follow_desk` follows changes on
-    the pushed stream."""
-    known = {}
-    try:
-        with hooks.lock:
-            blob = rcp_read.read_model()
-        vec = rcp_read.values(blob, "channelInputSource")
-        channels.publish_strip_vector(vec)
-        # Seed the encoder ring's level cache too, so the FIRST press can already say "Chat 97
-        # percent" instead of just naming it. faderLevel is 0-127 and only the virtual faders hold a
-        # value; outputMonLevel is a 0-1 float.
-        fl = rcp_read.values(blob, "faderLevel")
-        for i, v in enumerate(fl):
-            if isinstance(v, int):
-                known[("fader", i)] = max(0.0, min(1.0, v / _FADER_LEVEL_MAX))
-        mon = rcp_read.values(blob, "outputMonLevel")
-        if mon and isinstance(mon[0], float):
-            known[("monitor", 0)] = mon[0]
-        # The headphone pots, for the same reason and on the same contract: seeded so a resting
-        # value can never be announced as a change. They are read positionally because the four POT
-        # nodes appear in pot order under PHYSICALINTERFACE[0] - the same order the pushed path
-        # gives - and that is the only place `potLevel` occurs.
-        for i, v in enumerate(rcp_read.values(blob, "potLevel")):
-            if isinstance(v, int) and i < _POT_COUNT:
-                known[("headphone", i)] = max(0.0, min(1.0, v / _POT_LEVEL_MAX))
-        mutes = rcp_read.values(blob, "channelOutputMute")
-        st["muted"] = {i: v for i, v in enumerate(mutes) if isinstance(v, bool)}
-        # SEED EVERY VALUE THE HANDLER COMPARES AGAINST: the stream reports CHANGES, and an
-        # unseeded value makes the desk's first push of a resting state ("Levels", "Bank 1") read
-        # as a change and be announced out of nowhere. Seeding makes an unchanged value silent.
-        sel = rcp_read.values(blob, "systemChannelSelected")
-        if sel and isinstance(sel[0], int):
-            st["chan_sel"] = sel[0]
-        for name in _TRACED_STATE:
-            v = rcp_read.values(blob, name)
-            if v:
-                st.setdefault("traced", {})[name] = v[0]
-                diagnostics.event("desk.state", name, value=v[0], at="start")
-        # Stored RAW (the desk numbers banks from 0); the announcement adds 1.
-        bank = [v for v in rcp_read.values(blob, "selectedBank") if isinstance(v, int)]
-        if bank:
-            st["bank"] = bank[0]
-        # THE USB AUDIO MODE is seeded for the opposite reason: not to keep a resting value quiet,
-        # but so a reconnect can tell that it MOVED. The desk
-        # can drop out of Expanded on its own (measured: off the bus unprompted, back two seconds
-        # later in Standard with the setting reset), and the change is invisible - the operator's
-        # extended inputs stop carrying anything and their computer's audio has rearranged
-        # itself. The push cannot carry this: the desk leaves the bus as it changes, so
-        # any push is sent into the gap. Comparing across the reconnect is the only way to see it.
-        st["usb_mode"] = rcp_read.first(blob, "outputMultiMode", "int")
-        channels.publish_usb_expanded(recorder.split_usb_multitrack(st["usb_mode"])[1])
-    except Exception as exc:
-        diagnostics.event("announcer.seed_failed", "the announcer could not read the layout",
-                          error=str(exc))
-    st["known"] = known
-    # WHAT COUNTS AS ALREADY SPOKEN, seeded on the same contract: `flush_pending` speaks a
-    # level unless it matches st["said"], so an empty one opens every connect and reconnect with
-    # "Monitor 95 percent" as though something had moved it.
-    st["said"] = dict(known)
+    Takes hooks.lock for the one dump, when the model needs it, and gives up quietly on any
+    failure: a missing read costs a channel NAME, not the announcer."""
+    if not desk_model.trusted():
+        try:
+            with hooks.lock:
+                rcp_read.read_model(fresh=True)
+        except Exception as exc:
+            diagnostics.event("announcer.seed_failed", "the announcer could not read the desk",
+                              error=str(exc))
+    said = {}
+    vec = desk_model.strip_vector() or []
+    for fader, source in enumerate(vec):
+        level = desk_model.fader_level(fader)
+        if level is not None and source is not None and source >= 0:
+            said[("fader", source)] = level
+    if desk_model.monitor_level() is not None:
+        said[("monitor", 0)] = desk_model.monitor_level()
+    for i in range(_POT_COUNT):
+        if desk_model.pot_level(i) is not None:
+            said[("headphone", i)] = desk_model.pot_level(i)
+    st["said"] = said
+    for name in _TRACED_STATE:
+        diagnostics.event("desk.state", name, value=desk_model.first(name), at="start")
 
 
 def _pct(level):
@@ -600,11 +546,8 @@ def _selected_phrase(strip_idx: int) -> str:
     physical or virtual. Only a strip with NOTHING on it gets "nothing to adjust"."""
     who = channel_label(strip_idx)
     dev = devices.get_active_device()
-    try:
-        vec = channels.cached_strip_vector() or channels.last_known_strip_vector() or []
-        code = vec[strip_idx] if 0 <= strip_idx < len(vec) else None
-    except Exception:
-        code = None
+    vec = desk_model.strip_vector() or []
+    code = vec[strip_idx] if 0 <= strip_idx < len(vec) else None
     # Match on the SOURCE CODE only, never on the strip index. They are different numbers the moment
     # the faders are reassigned, so an index match announces "gain" for a line channel as soon as a
     # line source sits on a strip whose index belongs to a mic.
@@ -649,13 +592,12 @@ def _gain_label(node, is_mic: bool):
 def _at_limit(st: dict, delta: int) -> bool:
     """Would a turn in this direction do nothing because we are already at the end of the range?
 
-    Uses the ring's own cache of where things sit, so it only ever suppresses the "not linked"
-    message when we actually know the level is against a stop."""
+    Only ever suppresses the "not linked" message when the level is known to be against a stop."""
     pos = st.get("enc_pos")
     if pos is None or not delta:
         return False
     ring = _encoder_ring()
-    lvl = (st.get("known") or {}).get(ring[pos % len(ring)])
+    lvl = _ring_level(*ring[pos % len(ring)])
     if lvl is None:
         return False
     return (delta < 0 and lvl <= 0.001) or (delta > 0 and lvl >= 0.999)
@@ -698,51 +640,43 @@ def _moved_phrase(kind: str, source: int, level: float, short: bool = False) -> 
 
 
 def _fader_label(fader_idx: int) -> str:
-    """Name the channel sitting on a FADER (by index), from the known layout - so the encoder ring
-    announces "Chat" rather than "fader 8", and follows the layout if a source is moved."""
-    try:
-        vec = channels.cached_strip_vector() or channels.last_known_strip_vector()
-        if vec and 0 <= fader_idx < len(vec) and vec[fader_idx] is not None and vec[fader_idx] >= 0:
-            return _source_label(vec[fader_idx])
-    except Exception:
-        pass
+    """Name the channel sitting on a FADER (by index), from the desk model's layout - so the encoder
+    ring announces "Chat" rather than "fader 8", and follows the layout if a source is moved."""
+    vec = desk_model.strip_vector()
+    if vec and 0 <= fader_idx < len(vec) and vec[fader_idx] is not None and vec[fader_idx] >= 0:
+        return _source_label(vec[fader_idx])
     return f"Fader {fader_idx + 1}"
+
+
+def _ring_level(kind: str, idx: int):
+    """Where a ring entry sits, 0 to 1, from the desk model, or None when it is not known."""
+    return desk_model.monitor_level() if kind == "monitor" else desk_model.fader_level(idx)
 
 
 def _ring_phrase(st: dict, pos: int) -> str:
     """What to say the moment the encoder is pressed: the thing now selected and, when we know it,
-    where it currently sits. The level comes from our own tracking (seeded at startup and updated
-    from every push), so it costs no device read and no turning.
+    where it currently sits. The level comes from the desk model, so it costs no device read and no
+    turning.
 
-    THIS SIDE WORKS IN FADER INDICES, because that is what the encoder cycles through and what
-    `st["known"]` and `st["muted"]` are keyed by. `_moved_phrase` works in SOURCE CODES. Keep
-    them straight: the translation between the two lives in `_note_level` and nowhere else."""
+    THIS SIDE WORKS IN FADER INDICES, because that is what the encoder cycles through. `_moved_phrase`
+    works in SOURCE CODES. Keep them straight."""
     ring = _encoder_ring()
     kind, idx = ring[pos % len(ring)]
     name = "Monitor level" if kind == "monitor" else _fader_label(idx)
     # A muted channel's level is not the useful fact about it, and quoting a healthy-sounding
-    # percentage for something you cannot hear is actively misleading. Say the mute instead. The
-    # map is seeded from the startup dump and kept current from every pushed
-    # `channelOutputMute`, so it costs no device read. Fader index and strip index are the same
-    # space here: both index the channelInputSource vector.
-    if kind == "fader" and (st.get("muted") or {}).get(idx):
+    # percentage for something you cannot hear is actively misleading. Say the mute instead. Fader
+    # index and strip index are the same space here: both index the channelInputSource vector.
+    if kind == "fader" and desk_model.mutes().get(idx):
         return f"{name}, muted"
-    lvl = (st.get("known") or {}).get((kind, idx))
+    lvl = _ring_level(kind, idx)
     if lvl is None:
         return name
     return _level_words(name, lvl, name_first=True)
 
 
-def _ring_seat(st: dict, kind: str, idx: int, level: float) -> None:
-    """A real movement just told us what is selected: re-seat our ring position and cache the level.
-    This is what makes a wrong prediction self-correcting."""
-    st.setdefault("known", {})[(kind, idx)] = level
-    _ring_place(st, kind, idx)
-
-
 def _ring_place(st: dict, kind: str, idx: int) -> None:
-    """Set our ring position to (kind, idx) when it is on the ring. An encoder hold's mute says where
-    the encoder is as surely as a level change does."""
+    """Set our ring position to (kind, idx) when it is on the ring. A real movement, or an encoder
+    hold's mute, says where the encoder is, which is what makes a wrong prediction self-correcting."""
     for i, entry in enumerate(_encoder_ring()):
         if entry == (kind, idx):
             st["enc_pos"] = i
@@ -750,12 +684,11 @@ def _ring_place(st: dict, kind: str, idx: int) -> None:
 
 
 def _note_level(st: dict, kind: str, source: int, level: float) -> None:
-    """Record a level change, and speak it AT ONCE when it is the first one after an encoder press.
+    """Hold a level change to be spoken, and speak it AT ONCE when it is the first one after an
+    encoder press.
 
-    `source` is a SOURCE CODE (0 for the monitor). THIS IS THE ONE PLACE the two index spaces meet:
-    everything spoken is keyed by source, because a source can be off-fader and still have a level,
-    while the encoder ring's cache is keyed by FADER INDEX because that is what the encoder cycles.
-    The translation below is the only crossing point; do not add another.
+    `source` is a SOURCE CODE (0 for the monitor, the knob's index for a headphone): everything
+    spoken is keyed by source, because a source can be off-fader and still have a level.
 
     The PRESS (`encoderPressed`) carries nothing that says WHICH channel it selected, and the target
     is chosen by touch. So the first movement has to do that job: speaking it immediately means
@@ -767,26 +700,6 @@ def _note_level(st: dict, kind: str, source: int, level: float) -> None:
     st.setdefault("levels", {})[key] = level
     st["levels_at"] = now
     st["enc_turn_at"] = None        # something moved, so that turn was not against nothing
-    # THE CROSSING POINT. The ring's cache is keyed by FADER INDEX (what faderLevel reports and what
-    # the encoder cycles); cross-point pushes arrive keyed by SOURCE CODE. Translate through the
-    # layout, or a level changed from our own sliders leaves the ring quoting an old number on the
-    # next press. A source that is on NO fader simply has no ring entry, which
-    # is correct - and it is still spoken, because speech is keyed by source.
-    known = st.setdefault("known", {})
-    if kind == "monitor":
-        known[("monitor", 0)] = level
-    elif kind == "headphone":
-        # A headphone pot is its own space: it is not a source and it is not on a fader, so there
-        # is nothing to translate and the crossing point below must not be asked to try.
-        known[("headphone", source)] = level
-    else:
-        try:
-            vec = channels.cached_strip_vector() or channels.last_known_strip_vector() or []
-            fidx = vec.index(source)
-        except (ValueError, AttributeError):
-            fidx = None
-        if fidx is not None:
-            known[("fader", fidx)] = level
     if st.get("enc_at") and not st.get("enc_named"):
         st["enc_named"] = True
     said = st.setdefault("said", {})
@@ -829,7 +742,7 @@ def flush_pending(st: dict) -> None:
             #
             # The way out is MEASURED, not assumed: the channel button TOGGLES
             # (systemChannelSelected 0, then -1 on the second press), so that is what is named here.
-            sel = st.get("chan_sel")
+            sel = desk_model.selected_channel()
             if sel is not None and sel >= 0:
                 _say(_selected_phrase(sel)
                          + ". Press its channel button again for the fader and monitor levels")
@@ -848,26 +761,24 @@ def flush_pending(st: dict) -> None:
         levels.clear()
 
 
-# The LIVE announcer state, published so the rest of the server can keep it current, and the record
-# of what WE have just written so the desk's echo of it is not read back at us.
+# The record of what WE have just written, so the desk's echo of it is not read back at us.
 #
-# OUR OWN WRITES *ARE* ECHOED ON THE PUSH STREAM. Hardware proof, against the running app with no
-# hand on the desk: three level writes over the HTTP API come straight back and are announced -
-# "60 percent, USB 2 (Secondary)", "80 percent, Monitor". What the echo is NOT is a
-# reliable cache: it can lag, and it is absent while the announcer is off, which is why the publish
-# helpers below still exist.
+# OUR OWN WRITES *ARE* ECHOED ON THE PUSH STREAM, most of them. Hardware proof, against the running
+# app with no hand on the desk: three level writes come straight back and are announced - "60
+# percent, USB 2 (Secondary)", "80 percent, Monitor".
 #
 # Without the suppression below, every change is said TWICE: the screen reader reads the window's
-# reply and the announcer speaks the echo. The fix is narrow on purpose: suppress the SPEECH for the exact
-# target just written, for a moment, and never the cache updates. A change made ON the desk is
-# unaffected and still speaks at once, which is the whole point of the announcer and why "turn it
-# off while the app has focus" is the wrong shape. The window is refreshed by each write, so dragging
-# a slider stays quiet all the way down, and a hand on that same fader is audible again
-# _SELF_ECHO_S after the last write.
+# reply and the announcer speaks the echo. The fix is narrow on purpose: suppress the SPEECH for the
+# exact target just written, for a moment. A change made ON the desk is unaffected and still speaks
+# at once, which is the whole point of the announcer and why "turn it off while the app has focus"
+# is the wrong shape. Dragging a slider stays quiet all the way down, and a hand on that same fader
+# is audible again _SELF_ECHO_S after the last write.
 #
 # NOT covered, deliberately: a profile RESTORE, which writes the whole desk at once. Narrating that
 # is a different problem (it wants one "restoring" phrase, not 40 suppressions) and it has its own
 # progress reporting already.
+#
+# `live_state` is the running loop's speech state, and None while announcements are off.
 live_state = None
 _SELF_ECHO_S = 1.5
 _self_writes: dict = {}
@@ -914,78 +825,41 @@ def mark_self_gain(key, is_mic: bool) -> None:
         pass
 
 
-def publish_level(kind: str, idx: int, level01: float) -> None:
-    """Tell the announcer about a level WE just wrote, so the encoder ring quotes the new value.
-
-    Cache only, deliberately SILENT: the window already speaks the result, and
-    speaking as well would say everything twice. Keyed exactly as the ring is - ("fader", fader
-    index) or ("monitor", 0) - so no layout translation is needed (that is only for cross-point
-    pushes, which arrive keyed by source code). Safe no-op when the announcer is off.
-
-    It also marks the echo, which DOES need that translation: the desk pushes this write back as a
-    cross-point keyed by source code, and speaking it would be the second announcement of a change
-    the UI has already reported."""
+def mark_self_level(kind: str, idx: int) -> None:
+    """Mark a level WE just wrote, `kind` "fader" with a fader index or "monitor", so the desk's
+    echo is not spoken over the window's own report of it. The echo is a cross-point keyed by
+    SOURCE CODE, so a fader is marked under the source the desk model has on it."""
     if kind == "monitor":
         mark_self_write(("monitor", 0))
-    else:
-        try:
-            vec = channels.cached_strip_vector() or channels.last_known_strip_vector() or []
-            if 0 <= int(idx) < len(vec) and vec[int(idx)] is not None:
-                mark_self_write(("fader", vec[int(idx)]))
-        except (TypeError, ValueError, AttributeError):
-            pass
-    st = live_state
-    if st is None:
         return
-    try:
-        st.setdefault("known", {})[(kind, int(idx))] = max(0.0, min(1.0, float(level01)))
-    except (TypeError, ValueError):
-        pass
+    vec = desk_model.strip_vector() or []
+    if 0 <= int(idx) < len(vec) and vec[int(idx)] is not None:
+        mark_self_write(("fader", vec[int(idx)]))
 
 
-def publish_mute(strip_idx: int, on: bool) -> None:
-    """Tell the announcer about a mute WE just wrote, so the encoder ring keeps quoting the truth.
-
-    Same contract as publish_level: cache only, deliberately SILENT (the window speaks the
-    mute itself), and it marks the echo so the announcer does not say it a second
-    time. The ring says "Mic 2 muted" instead of a level for a muted channel, so without the cache a
-    mute set from here would leave the ring reading out a level nobody can hear, the mirror image of
-    a stale level. Keyed by STRIP index, exactly as the desk's own pushes are,
-    so no translation is needed here. Safe no-op when the announcer is off."""
-    try:
-        mark_self_write(("mute", int(strip_idx)))
-    except (TypeError, ValueError):
-        pass
-    st = live_state
-    if st is None:
-        return
-    try:
-        st.setdefault("muted", {})[int(strip_idx)] = bool(on)
-    except (TypeError, ValueError):
-        pass
+def mark_self_mute(strip_idx: int) -> None:
+    """Mark a mute WE just wrote, keyed by STRIP index exactly as the desk's own pushes are, so the
+    echo is not spoken over the window's own report of it."""
+    mark_self_write(("mute", int(strip_idx)))
 
 
 def announce_mute(strip_idx: int, on: bool) -> None:
     """Speak a mute this app made in answer to a gesture on the desk (`encoder_hold`), as the desk's
-    own mute is spoken, and cache it as `publish_mute` does. Silent while the announcer is off."""
-    publish_mute(strip_idx, on)
+    own mute is spoken, and mark it as `mark_self_mute` does. Silent while the announcer is off."""
+    mark_self_mute(strip_idx)
     if live_state is None:
         return
     if not (mute_tones and _tone("muted" if on else "unmuted")):
         _say(f"{channel_label(strip_idx)} {'muted' if on else 'unmuted'}")
 
 
-def publish_solo(strip_idx: int, on: bool) -> None:
+def mark_self_solo(strip_idx: int) -> None:
     """Mark a solo WE wrote, so a future firmware that echoes it does not get it spoken twice.
 
     Measured: this desk pushes NOTHING back for a software solo, so the mark is a no-op on it. It is
     here anyway because the announcer's solo branch speaks every channelCueEnable push it sees, so a
-    firmware that starts echoing would have a channel announcing its own solo on top of the UI, the
-    same bug the level path already carries a fix for."""
-    try:
-        mark_self_write(("solo", int(strip_idx)))
-    except (TypeError, ValueError):
-        pass
+    firmware that starts echoing would have a channel announcing its own solo on top of the UI."""
+    mark_self_write(("solo", int(strip_idx)))
 
 
 def forget_solos() -> None:
@@ -1049,12 +923,11 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
         speech.say("The control announcer could not open the device.")
         speech.enabled.clear()
         return
-    st = {"bank": None, "pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0,
-          "known": {}, "muted": {}, "enc_pos": None, "enc_down_at": None, "enc_hold": False,
-          "said": {}}
+    st = {"pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0, "enc_pos": None,
+          "enc_down_at": None, "enc_hold": False, "said": {}}
     announced_on = False
-    seed_layout(st)
-    live_state = st              # publish it so our own writes can keep the caches current
+    seed(st)
+    live_state = st
     sub = desk_live.subscribe("announcer", _HEARD)
     try:
         while current():
@@ -1064,6 +937,13 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
             try:
                 if isinstance(event, desk_live.Push):
                     handle_push(event, st)
+                elif isinstance(event, desk_live.Lost):
+                    # THE USB AUDIO MODE BEFORE THE DESK LEFT, so the return can tell that it MOVED.
+                    # The desk can drop out of Expanded on its own (measured: off the bus
+                    # unprompted, back two seconds later in Standard with the setting reset), and
+                    # the change is invisible: the push is sent into the gap. The desk model keeps
+                    # the old mode until the desk is read again on its return.
+                    st["usb_mode"] = desk_model.usb_mode()
                 elif isinstance(event, desk_live.Connected):
                     if not announced_on:
                         # Quiet when the RECORDER is putting announcements back: the stop phrase
@@ -1074,12 +954,11 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
                         _quiet_start.clear()
                         announced_on = True
                     elif event.gap is not None and event.gap >= _RECONNECT_SPEAK_AFTER_S:
-                        # Back after a real gap. Re-seed first: mutes, levels and the fader layout
-                        # can all have moved while we were deaf, and Expanded mode reassigns
-                        # sources as it goes.
-                        was_usb = st.get("usb_mode")
-                        seed_layout(st)
-                        hooks.reconnected(was_usb, st.get("usb_mode"))
+                        # Back after a real gap. Read the desk first: mutes, levels and the fader
+                        # layout can all have moved while we were deaf, and Expanded mode
+                        # reassigns sources as it goes.
+                        seed(st)
+                        hooks.reconnected(st.get("usb_mode"), desk_model.usb_mode())
                 flush_pending(st)
             except Exception as exc:
                 # Decoding is best-effort: a malformed or unexpected push costs us ONE

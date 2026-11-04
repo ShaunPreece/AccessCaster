@@ -26,6 +26,9 @@ class FakeDesk:
     def subscribe(self, fn):
         self.listener = fn
 
+    def watch(self, names, fn):
+        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
+
 
 class FakeFrame:
     def __init__(self):
@@ -144,6 +147,30 @@ section.refresh(True)
 check("F5 reads only the page shown, and says so", reads[-1], ("NetworkPage", True))
 check("and nothing else", len(reads), 6)
 section.network.Hide()
+followed = {type(fn.__self__._read.__self__).__name__: names
+            for names, fn in frame.desk.watched}
+check("Hardware, Unit settings and Wireless connections follow what they show", followed,
+      {"HardwarePage": set(server.HARDWARE_PROPS), "UnitPage": set(server.UNIT_SETTING_PROPS),
+       "NetworkPage": set(server.NETWORK_PROPS)})
+
+# ---- a read the desk's pushes ask for leaves the USB facts alone --------------------------------
+frame = FakeFrame()
+hw = device_section.DeviceSection(frame).hardware
+calls = []
+real = server.read_device_state, server.read_device_status
+server.read_device_state = lambda: calls.append("state") or {"ok": True, "firmware": "1.7.7"}
+server.read_device_status = lambda: calls.append("status") or {"connected": True}
+try:
+    check("a followed read reads the unit's state alone", (sorted(hw.fetch(False)), calls),
+          (["ok", "state"], ["state"]))
+    check("a full read rescans the USB as well", (sorted(hw.fetch(True)), calls[1:]),
+          (["ok", "state", "status"], ["state", "status"]))
+finally:
+    server.read_device_state, server.read_device_status = real
+hw.connection.SetValue("Connected and responding")
+hw.shown({"ok": True, "state": {"ok": True, "firmware": "1.7.8", "firmware_update": {}}})
+check("and putting it on the page leaves the USB facts as they were",
+      (hw.firmware.GetValue(), hw.connection.GetValue()), ("1.7.8", "Connected and responding"))
 
 # ---- the summary goes to the status bar, not to speech -----------------------------------------
 frame = FakeFrame()

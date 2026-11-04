@@ -70,15 +70,13 @@ class MasterMixPage(scrolled.ScrolledPanel):
         return self.section.desk.master
 
     def field(self, key, scale=1):
-        """`current` and `remember` for `key` in the desk state's master values, looked up on every
-        call (a full read replaces them), shown as a whole number of 1/`scale` units."""
+        """`current` and `remember` for `key` in the desk state's master values, shown as a whole
+        number of 1/`scale` units. Nothing is remembered here: the write reaches the desk model as
+        it is sent, and the desk state is rebuilt from it."""
         def current():
             value = self.master[key]
             return value if scale == 1 or value is None else round(value * scale)
-
-        def remember(value):
-            self.master[key] = value if scale == 1 else value / scale
-        return current, remember
+        return current, lambda _value: None
 
     def _add(self, control):
         self._shown.append(control)

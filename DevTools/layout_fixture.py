@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import Counter
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import fake_model
@@ -48,19 +49,30 @@ def from_dump(blob: bytes) -> list:
     return _runs(root.kids, True)
 
 
-def _encode(runs) -> list:
-    nodes = []
+def _encode(runs, values=None, prefix=()) -> list:
+    values = values or {}
+    nodes, seen = [], Counter()
     for name, count, props, kids in runs:
         for _ in range(count):
-            nodes.append(fake_model.node(name, [(p, 0) for p in props], _encode(kids)))
+            key = prefix + (name, seen[name])
+            seen[name] += 1
+            nodes.append(fake_model.node(name, [(p, values.get((key, p), 0)) for p in props],
+                                         _encode(kids, values, key)))
     return nodes
+
+
+def skeleton(name: str, values=None) -> bytes:
+    """A model dump with a saved fixture's shape, for a suite that needs the desk model
+    (`desk_model`) to hold a desk: it addresses exactly as `load(name)` does. Every property is 0
+    but those `values` names, as {(layout key, property): value}."""
+    with open(os.path.join(FIXTURES, f"layout_{name}.json"), encoding="utf-8") as fh:
+        runs = json.load(fh)
+    return fake_model.node("Rodecaster", (), _encode(runs, values or {}))
 
 
 def load(name: str) -> model_tree.Layout:
     """The `model_tree.Layout` of a saved fixture, e.g. load(PRO2_177)."""
-    with open(os.path.join(FIXTURES, f"layout_{name}.json"), encoding="utf-8") as fh:
-        runs = json.load(fh)
-    root, _used, _tail = model_tree.parse(fake_model.node("Rodecaster", (), _encode(runs)))
+    root, _used, _tail = model_tree.parse(skeleton(name))
     return model_tree.Layout(root)
 
 

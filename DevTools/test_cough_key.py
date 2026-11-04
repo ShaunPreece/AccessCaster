@@ -1,4 +1,5 @@
-"""Offline test of the COUGH KEY (commands._cough_key). NO DEVICE: the layout and mutes are held.
+"""Offline test of the COUGH KEY (commands._cough_key). NO DEVICE: the layout and mutes are held in
+the desk model.
 
 What it pins down: a mic on no fader is left out, not refused. The cough key walks every mic, and a
 mic taken off its fader has no strip and so no mute, so one such mic must not stop the key working
@@ -13,34 +14,35 @@ import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
-import announcer
-import channels
 import commands
 import devices
+import rcp_transfer
 import server
-from _testkit import as_device, check, patched
+from _testkit import as_device, check, hold, hold_desk, patched
 
 # The Pro II's factory layout with CallMe on fader 4, so Mic 4 (source 3) is on no fader.
 NO_MIC4 = [0, 1, 2, 16, 10, 11, 7, 8, 9]
 
 
 def press(muted: dict) -> tuple[str, list]:
-    """One press against the cached mutes `muted` ({strip: on}): what is spoken and written."""
+    """One press against the mutes `muted` ({strip: on}) in the desk model: what is spoken and
+    written."""
     writes = []
 
     def set_mute(name, on):
         writes.append((name, on))
         return {"ok": True}
 
-    with patched((announcer, {"live_state": {"muted": muted}}),
-                 (server, {"action_set_channel_mute": set_mute})):
+    for strip, on in muted.items():
+        hold(rcp_transfer.channel_key(strip), "channelOutputMute", on, "bool")
+    with patched((server, {"action_set_channel_mute": set_mute})):
         said = commands._cough_key()["message"]
     return said, writes
 
 
 def main() -> int:
     with as_device(devices.PRO2), patched((commands, {"_muted_mics": []})):
-        channels.publish_strip_vector(NO_MIC4)
+        hold_desk(NO_MIC4)
 
         print("A MIC ON NO FADER IS LEFT OUT")
         said, writes = press({0: False, 1: True, 2: False})

@@ -64,15 +64,15 @@ class LevelsPage(scrolled.ScrolledPanel):
         return self.section.desk.levels
 
     def field(self, *path):
-        """`current` and `remember` for the value at `path` in the desk state's levels, looked up on
-        every call: a full read replaces them."""
-        def holder():
+        """`current` and `remember` for the value at `path` in the desk state's levels. Nothing is
+        remembered here: the write reaches the desk model as it is sent, and the desk state is
+        rebuilt from it."""
+        def current():
             node = self.levels
-            for key in path[:-1]:
+            for key in path:
                 node = node[key]
             return node
-        return (lambda: holder()[path[-1]],
-                lambda value: holder().__setitem__(path[-1], value))
+        return current, lambda _value: None
 
     def _add(self, control):
         self._shown.append(control)
@@ -97,15 +97,13 @@ class LevelsPage(scrolled.ScrolledPanel):
             self, parent, sizer, "Level", 0, 100,
             self._fader_send(server.action_set_fader_level),
             lambda: self._fader_value("percent"), lambda _value: None,
-            words=percent, accepted=self._fader_done("percent"))
+            words=percent)
         self.fader_mute = Switch(
             self, parent, sizer, "Mute", self._fader_send(server.action_set_fader_mute),
-            lambda: self._fader_value("muted"), lambda _on: None,
-            accepted=self._fader_done("muted"))
+            lambda: self._fader_value("muted"), lambda _on: None)
         self.fader_solo = Switch(
             self, parent, sizer, "Solo", self._fader_send(server.action_set_fader_solo),
-            lambda: self._fader_value("soloed"), lambda _on: None,
-            accepted=self._fader_done("soloed"))
+            lambda: self._fader_value("soloed"), lambda _on: None)
         clear = wx.Button(parent, label="Clear all solos")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
         sizer.Add(clear, 0, wx.ALL, 6)
@@ -115,19 +113,10 @@ class LevelsPage(scrolled.ScrolledPanel):
 
     def _fader_send(self, write):
         """`write(fader, value)` for the fader `_show_fader` last put on the page, on a worker
-        thread; the reply carries which one, so it is recorded on that fader whatever is chosen by
-        the time it returns."""
+        thread."""
         def send(value):
-            position = self._fader_position
-            reply = write(self.model["faders"][position], value)
-            return dict(reply, position=position)
+            return write(self.model["faders"][self._fader_position], value)
         return send
-
-    def _fader_done(self, key):
-        def done(reply):
-            if reply.get(key) is not None:
-                self.levels["faders"][reply["position"]][key] = reply[key]
-        return done
 
     def _show_faders(self):
         """The list, named from the fader layout, then the chosen fader."""
@@ -156,12 +145,7 @@ class LevelsPage(scrolled.ScrolledPanel):
 
     def _on_clear_solos(self, event):
         source = event.GetEventObject()
-
-        def cleared(reply):
-            self.frame.reply(source, reply)
-            if reply.get("ok"):
-                self.section.desk.solos_cleared()
-        call(self, server.action_clear_solos, done=cleared)
+        call(self, server.action_clear_solos, done=lambda reply: self.frame.reply(source, reply))
 
     # ---- the monitor speakers and the Bluetooth output -------------------------------------
 
@@ -203,7 +187,7 @@ class LevelsPage(scrolled.ScrolledPanel):
                 self, box, box_sizer, source["label"], 0, 100,
                 lambda pct, s=source["index"]: self._send_mix(s, pct),
                 lambda s=source["index"]: self._mix_percent(s), lambda _value: None,
-                words=percent, accepted=self._mix_done)
+                words=percent)
         reset = wx.Button(box, label="Reset this output to follow the faders")
         reset.Bind(wx.EVT_BUTTON, self._on_mix_reset)
         box_sizer.Add(reset, 0, wx.ALL, 6)
@@ -221,12 +205,7 @@ class LevelsPage(scrolled.ScrolledPanel):
     def _send_mix(self, source, pct):
         """On a worker thread, so the output is the one `_show_mix` last put on the page rather
         than a read of the list."""
-        output = self._mix_index
-        reply = server.action_set_monitor_level(output, source, pct / 100)
-        return dict(reply, output=output, source=source, level=pct / 100)
-
-    def _mix_done(self, reply):
-        self.section.desk.monitor_mix_written(reply["output"], reply["source"], reply["level"])
+        return server.action_set_monitor_level(self._mix_index, source, pct / 100)
 
     def _show_mix(self):
         if not self.mix_sliders:

@@ -252,6 +252,40 @@ def _value(blob: bytes, i: int):
     return payload[1:], f"raw{t:#04x}", end
 
 
+def _encode_count(n: int) -> bytes:
+    """`_count`'s inverse: the fewest bytes that hold `n`, and a zero length for 0."""
+    if n == 0:
+        return b"\x00"
+    ln = 1 if n <= 0xFF else 2 if n <= 0xFFFF else 4
+    return bytes([ln]) + n.to_bytes(ln, "little")
+
+
+def encode_value(value, kind: str) -> bytes:
+    """A value block, `_value`'s inverse: the count, then the payload with its type byte first.
+
+    THE ONE VALUE ENCODER, for a write (`rcp_transfer.value_block`) and for the desk model's
+    snapshot alike. A kind `_value` could not decode (`raw0x..`) goes back as the bytes it kept."""
+    if kind == "int":
+        payload = b"\x01" + int(value).to_bytes(4, "little", signed=True)
+    elif kind == "bool":
+        payload = b"\x02" if value else b"\x03"
+    elif kind == "float":
+        payload = b"\x04" + (struct.pack("<d", float(value)) if value is not None else b"")
+    elif kind == "str":
+        payload = b"\x05" + str(value).encode("latin1") + b"\x00"
+    elif kind == "int64":
+        payload = b"\x06" + int(value).to_bytes(8, "little", signed=True)
+    elif kind == "pair":
+        payload = b"\x08" + b"".join(encode_value(v, k) for v, k in value)
+    elif kind.startswith("raw"):
+        payload = bytes([int(kind[3:], 16)]) + bytes(value)
+    elif kind == "?":
+        payload = b""
+    else:
+        raise ValueError(f"no value block for kind {kind!r}")
+    return _encode_count(len(payload)) + payload
+
+
 def _read_name(blob: bytes, i: int):
     j = blob.find(b"\x00", i)
     if j < 0:
@@ -259,18 +293,21 @@ def _read_name(blob: bytes, i: int):
     return blob[i:j], j + 1
 
 
-def _parse_node(blob: bytes, i: int, parent, index: int) -> tuple:
+def _parse_node(blob: bytes, i: int, parent, index: int, spans) -> tuple:
     name, i = _read_name(blob, i)
     node = Node(name.decode("latin1"))
     node.parent, node.index = parent, index
     nprops, i = _count(blob, i)
     for _ in range(nprops):
         pname, i = _read_name(blob, i)
+        start = i
         val, kind, i = _value(blob, i)
         node.props.append((pname.decode("latin1"), val, kind))
+        if spans is not None:
+            spans.append((node, node.props[-1][0], start, i))
     nkids, i = _count(blob, i)
     for k in range(nkids):
-        kid, i = _parse_node(blob, i, node, k)
+        kid, i = _parse_node(blob, i, node, k, spans)
         node.kids.append(kid)
     return node, i
 
@@ -312,9 +349,10 @@ def parse_record(buf: bytes) -> tuple:
     return path, name.decode("latin1"), val, kind, i
 
 
-def parse(blob: bytes) -> tuple:
+def parse(blob: bytes, spans: list | None = None) -> tuple:
     """(root, bytes consumed, trailing bytes). The root name is preceded by a 5-byte stream header
-    (`53 2f 02 00 02` on this firmware) that is not part of the tree.
+    (`53 2f 02 00 02` on this firmware) that is not part of the tree. `spans`, when given, gets
+    (node, property name, start, end) for every property: where its value block sits in `blob`.
 
     THE FIRST FOUR OF THOSE FIVE BYTES ARE THE DUMP'S OWN LENGTH, little-endian, counting everything
     after them (measured on a live Duo: 136675, stable across every dump). That
@@ -323,7 +361,7 @@ def parse(blob: bytes) -> tuple:
     start = blob.find(b"Rodecaster\x00")
     if start < 0:
         raise ValueError("no root node in this blob")
-    root, end = _parse_node(blob, start, None, 0)
+    root, end = _parse_node(blob, start, None, 0, spans)
     return root, end - start, blob[end:]
 
 

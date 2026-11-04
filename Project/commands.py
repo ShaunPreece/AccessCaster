@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import announcer
 import channels
+import desk_model
 import devices
 import diagnostics
 import pad_shortcuts
@@ -184,11 +185,10 @@ def _cough_key() -> dict:
     Remembering what it muted makes the pair of presses a true round trip whatever mixture the desk
     is in.
 
-    THE STATE COMES FROM THE ANNOUNCER'S LIVE CACHE, seeded from one dump when the announcer starts
-    and kept current by the desk's own pushes (announcer.seed_layout, announcer.publish_mute). That
-    matters: reading the mutes off the desk costs about 1.5 seconds, and a cough key that takes 1.5
-    seconds is not a cough key. With the announcer off there is no cache, so it falls back to the
-    dump: still correct, just slower, and only on the FIRST press of a pair.
+    THE STATE COMES FROM THE DESK MODEL (`desk_model`), kept current by the desk's pushes and our own
+    writes. That matters: reading the mutes off the desk costs about 1.5 seconds, and a cough key
+    that takes 1.5 seconds is not a cough key. While the model is not trusted it reads the desk
+    instead: still correct, just slower, and only on the FIRST press of a pair.
 
     With nothing latched and every mic already muted it says so and writes nothing, rather than
     treating "all muted" as an invitation to open them."""
@@ -206,14 +206,11 @@ def _cough_key() -> dict:
                 return _fail(res.get("message", "The mics could not be opened."))
             opened.append(name)
         return _said(f"{wording.count(len(opened), 'mic')} open again.")
-    st = announcer.live_state
-    muted_now = dict((st or {}).get("muted") or {})
     try:
-        if not muted_now:
+        if not desk_model.trusted():
             with server._hid_lock:
-                blob = rcp_read.read_model_stable()
-            muted_now = {i: bool(v) for i, v
-                         in enumerate(v for v in rcp_read.values(blob, "channelOutputMute"))}
+                rcp_read.read_model_stable(fresh=True)
+        muted_now = desk_model.mutes()
         # A mic on no fader has no mute to press, so it is left out rather than refused.
         strips = {c["name"]: channels.strip_on_fader(c["name"]) for c in mics}
     except Exception as exc:
@@ -306,12 +303,13 @@ def _channel_commands() -> list:
 
 
 def _muted_now(name: str) -> bool:
-    """Whether a channel is muted. The announcer's push-fed cache answers for free; a dump is the
-    fallback when it has nothing, the same trade the cough key makes."""
-    muted = (announcer.live_state or {}).get("muted") or {}
-    strip = channels.channel_strip_index(name)
-    if strip in muted:
-        return bool(muted[strip])
+    """Whether a channel is muted. The desk model answers for free while it is trusted; a read is
+    the fallback, the same trade the cough key makes."""
+    if desk_model.trusted():
+        muted = desk_model.mutes()
+        strip = channels.channel_strip_index(name)
+        if strip in muted:
+            return muted[strip]
     return _channel_read(name).get("muted", False)
 
 
@@ -370,11 +368,10 @@ def _level_commands() -> list:
 
 
 def _known_level(kind: str, idx: int):
-    """A level from the announcer's own cache, 0-1, or None. The cache is fed by the desk's pushes,
-    so it is both free and current whenever the announcer is running."""
-    st = announcer.live_state
-    known = (st or {}).get("known") or {}
-    return known.get((kind, idx))
+    """A level from the desk model, 0-1, or None while the model is not trusted."""
+    if not desk_model.trusted():
+        return None
+    return desk_model.monitor_level() if kind == "monitor" else desk_model.fader_level(idx)
 
 
 def _run_level(arg: str) -> dict:
@@ -403,7 +400,7 @@ def _run_level(arg: str) -> dict:
         if now is None:
             live = server.fader_levels_live()
             for f in live.get("faders", []):
-                if f.get("fader") == fader and isinstance(f.get("percent"), int):
+                if f.get("index") == fader - 1 and isinstance(f.get("percent"), int):
                     now = f["percent"] / 100.0
         if now is None:
             return _fail(f"Fader {fader}'s level could not be read.")

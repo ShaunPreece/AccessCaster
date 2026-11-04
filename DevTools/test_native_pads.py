@@ -64,6 +64,9 @@ class FakeDesk:
     def subscribe(self, fn):
         self.listener = fn
 
+    def watch(self, names, fn):
+        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
+
 
 class FakeFrame:
     def __init__(self):
@@ -127,6 +130,9 @@ with as_device(devices.PRO2):
     section = pads_section.PadsSection(frame)
     check("three pages under SMART pads", [p.title for p in section.pages],
           ["Pads", "Voice effects", "Pad maintenance"])
+    check("the pads follow every pad property the grid is built from",
+          [(names, fn.__self__._read.__self__) for names, fn in frame.desk.watched],
+          [(set(soundpad.PAD_GRID_PROPS), section)])
     section.show({"pads": [], "health_message": "Could not read the pad layout."})
     check("a failed first read says why on every status page",
           [status.text.GetValue() for status in section.statuses],

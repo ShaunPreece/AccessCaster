@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
 import announcer
-import channels
 import rcp_hid
 import rcp_read
 import server  # noqa: F401  (installs the announcer's hooks)
@@ -40,20 +39,19 @@ def main() -> int:
     secs = float(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1][0].isdigit() else 40.0
     do_speak = "--speak" in sys.argv
 
-    # Warm the layout cache so the announcer can NAME channels rather than say "Channel N".
-    # This is the same free refresh the app gets off any read_channels dump.
+    # Read the desk once, which the desk model adopts, so the announcer can NAME channels rather
+    # than say "Channel N".
     try:
         vec = [v for v, _k in rcp_read.find_all(rcp_read.read_model_stable(fresh=True),
                                                 "channelInputSource")]
-        channels.publish_strip_vector(vec)
         print(f"fader layout: {vec}")
     except Exception as exc:
-        print(f"could not warm the layout cache ({exc}); names will fall back to Channel N")
+        print(f"could not read the desk ({exc}); names will fall back to Channel N")
 
     if rcp_hid.find_control_interface() is None:
         print("no device")
         return 1
-    st = {"bank": None, "pending": None, "at": 0.0}
+    st = {"pending": None, "at": 0.0}
     speak(f"Press mute and solo on any channels for the next {int(secs)} seconds.", do_speak)
     print(f"listening {secs:.0f}s ...")
     seen = 0

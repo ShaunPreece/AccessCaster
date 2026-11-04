@@ -18,7 +18,7 @@ from native.calls import call
 from native.controls import Slider, set_choices
 from native.dialogs import JobDialog, TextDialog, confirm
 from native.pad_dialogs import READ_ONLY
-from native.pages import group, labelled, page_body
+from native.pages import group, labelled, page_body, select
 
 TITLE = "Voice effects"
 NONE_SAVED = "You have not created any effects yet."
@@ -175,9 +175,8 @@ class FxPage(scrolled.ScrolledPanel):
         colours = self.model["colours"]
         chosen = self.colour.GetSelection()
         set_choices(self.colour, [c["label"] for c in colours])
-        self.colour.SetSelection(chosen if chosen != wx.NOT_FOUND else
-                                 next((i for i, c in enumerate(colours)
-                                       if c["value"] == DEFAULT_COLOUR), 0))
+        select(self.colour, chosen if chosen != wx.NOT_FOUND else
+               next((i for i, c in enumerate(colours) if c["value"] == DEFAULT_COLOUR), 0))
         channels = (self.frame.desk.channels or {}).get("channels") or []
         mics = [(int(c["name"][3:]), c["label"]) for c in channels
                 if c.get("kind") == "mic" and c["name"][3:].isdigit()] or [(1, "Mic 1")]
@@ -185,7 +184,7 @@ class FxPage(scrolled.ScrolledPanel):
         self.mics = mics
         set_choices(self.mic, [label for _n, label in mics])
         numbers = [n for n, _label in mics]
-        self.mic.SetSelection(numbers.index(chosen) if chosen in numbers else 0)
+        select(self.mic, numbers.index(chosen) if chosen in numbers else 0)
         self._show_saved()
 
     def _show_saved(self, keep=None):
@@ -195,7 +194,7 @@ class FxPage(scrolled.ScrolledPanel):
         labels = names or [NONE_SAVED]
         if [self.saved.GetString(i) for i in range(self.saved.GetCount())] != labels:
             self.saved.Set(labels)
-        self.saved.SetSelection(min(keep, len(labels) - 1))
+        select(self.saved, min(keep, len(labels) - 1))
 
     def relayout(self, change=None):
         if change:
