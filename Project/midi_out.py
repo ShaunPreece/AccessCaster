@@ -131,12 +131,17 @@ def _open_locked():
     if _handle is not None:
         return _handle
     port = find_port()
+    # Windows MIDI Services (midisrv) can stay up with its USB transports unloaded, so the desk is on
+    # the bus with no MIDI port; a replug does not bring it back, a restart of the service does. A
+    # process that opened winmm before that restart then fails every open until it restarts too.
     if port is None:
-        raise RuntimeError(f"the desk's {PORT_NAME!r} MIDI port is not there. Is it plugged in?")
+        raise RuntimeError(f"Windows is not offering the desk's {PORT_NAME!r} MIDI port. "
+                           f"Restarting the Windows MIDI Service, or the computer, brings it back")
     h = wintypes.HANDLE()
     rc = _winmm.midiOutOpen(ctypes.byref(h), port, 0, 0, 0)
     if rc:
-        raise RuntimeError(f"could not open the desk's MIDI port (rc {rc})")
+        raise RuntimeError(f"could not open the desk's MIDI port (error {rc}). If the Windows "
+                           f"MIDI Service was restarted, restart AccessCaster")
     _handle = h
     return _handle
 

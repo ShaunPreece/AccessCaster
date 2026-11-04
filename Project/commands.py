@@ -359,8 +359,8 @@ def _level_commands() -> list:
         _cmd("level.monitor.up", "Levels", f"Monitor level up {LEVEL_STEP} percent"),
         _cmd("level.monitor.down", "Levels", f"Monitor level down {LEVEL_STEP} percent"),
     ]
-    spec = devices.get_active_device().fader
-    for i in range(spec.count):
+    # Only a virtual fader has a level software can set; a physical one is moved by hand.
+    for i in devices.get_active_device().fader.level_faders:
         n = i + 1
         out.append(_cmd(f"level.fader.up:{n}", "Levels", f"Fader {n} up {LEVEL_STEP} percent"))
         out.append(_cmd(f"level.fader.down:{n}", "Levels", f"Fader {n} down {LEVEL_STEP} percent"))
@@ -404,8 +404,9 @@ def _run_level(arg: str) -> dict:
                     now = f["percent"] / 100.0
         if now is None:
             return _fail(f"Fader {fader}'s level could not be read.")
+        # The command names the fader as the desk does, from 1; the action takes its index.
         return server.action_set_fader_level(
-            fader, max(0, min(100, int(round(now * 100)) + step)))
+            fader - 1, max(0, min(100, int(round(now * 100)) + step)))
     return _fail(f"Unknown level command {arg}.")
 
 

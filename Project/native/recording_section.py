@@ -5,7 +5,8 @@ The recorder is not in the desk state. The section reads it (`server.read_record
 dump) after the desk state's first read, on F5, after a job that rewrites the desk, and when the
 desk pushes a recording state the page is not showing (the desk state's "recorder" event): the
 unit's own REC button, and a card or drive going in or out. A command's reply carries the same
-payload, so a press is shown from its reply without another dump.
+payload, so a press is shown from its reply without another dump; its buttons follow the push the
+press causes, which arrives first.
 
 A change made on the unit is not spoken here: the announcer speaks it, and switches itself off for
 the take (`server._recorder_state_changed`).
@@ -23,7 +24,7 @@ from native.pages import Page, labelled, page_body, set_items
 
 TITLE = "Recording"
 UNREAD = "The recorder has not been read yet."
-BUSY = "Still waiting for the unit to answer the last press."
+BUSY = "One moment: the unit is still carrying out your last press."
 NOWHERE = ("The unit has nowhere to record to. Put a memory card in, or a USB drive in the second "
            "USB port.")
 USB_POINTER = ("This is what the unit writes to its card or drive. What it sends this computer "
@@ -76,6 +77,7 @@ class RecordingSection:
         self.sentence = ""           # what the unit is doing, as the server words it
         self.busy = False            # a command from this window has not returned
         self._pushed = None          # the last state pushed while busy
+        self._label = None           # the pressed button's label at the press
         self._reading = False
         self._again = None           # a read asked for while one runs: whether to announce it
         self.recorder = RecorderPage(self)
@@ -98,10 +100,14 @@ class RecordingSection:
             if self.data is None and not self._reading:
                 self.read()
         elif event == "recorder":
-            # A press from this window is shown from its own reply; the push it causes arrives
-            # first, while the command still holds the device.
+            # A press from this window: the push it causes arrives within ~30 ms, about two seconds
+            # before the reply, whose read-back still holds the device. The buttons follow the push
+            # at once; the reply fills in the rest. No push means the state did not change.
             if self.busy:
                 self._pushed = detail
+                if self.data is not None:
+                    self.data["state"] = detail
+                    self.recorder.show_state()
             elif detail != self.state:
                 self.read()
 
@@ -141,6 +147,8 @@ class RecordingSection:
             return
         self.busy = True
         self._pushed = None
+        # Taken now: the push can rename the button before the reply comes back.
+        self._label = source.GetLabel() if isinstance(source, wx.Button) else None
         if working:
             self.frame.say(working)
         work = (lambda: action(*args)) if reread else (lambda: _with_sentence(action, *args))
@@ -148,7 +156,7 @@ class RecordingSection:
 
     def _commanded(self, source, reply, reread):
         self.busy = False
-        label = source.GetLabel() if isinstance(source, wx.Button) else None
+        label = self._label
         if reply.get("recorder"):
             self.show(reply["recorder"], reply.get("sentence") or self.sentence)
         if reply.get("ok") and label is not None and source.GetLabel() != label:
@@ -257,6 +265,9 @@ class RecorderPage(wx.Panel):
         for control in (self.multitrack, self.format, self.bypass, self.mute):
             control.show()
         self._show_bypass()
+        self.show_state()
+
+    def show_state(self):
         self._show_transport()
         self._run_clock()
 

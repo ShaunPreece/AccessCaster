@@ -138,6 +138,30 @@ def main():
     said.clear()
     mgr._run({"id": "x", "command": "refused", "speak": False})
     check_true("and a refusal the command reports", said == ["the desk said no"], str(said))
+    failed = []
+    told = hotkeys.HotkeyManager(speak=said.append, runner=runner, fail=failed.append)
+    said.clear()
+    told._run({"id": "x", "command": "refused", "speak": True})
+    told._run({"id": "y", "command": "one", "speak": True})
+    check_true("a failure goes to `fail`, a success to `speak`",
+               failed == ["the desk said no"] and said == ["ran one"], f"{failed} {said}")
+
+    # With announcements off, a failure is the "failed" cue; during a take, nothing.
+    import announcer  # noqa: PLC0415
+    import server  # noqa: PLC0415
+    import speech  # noqa: PLC0415
+    cues = []
+    was_on = speech.enabled.is_set()
+    speech.enabled.clear()
+    with _testkit.patched((speech, {"tone": lambda name, despite_off=False: cues.append(
+            (name, despite_off)) or True})):
+        server._shortcut_failed("the desk said no")
+        check_true("announcements off plays the failed cue", cues == [("failed", True)], str(cues))
+        with _testkit.patched((announcer, {"suspended_for_record": True})):
+            server._shortcut_failed("the desk said no")
+        check_true("and a take keeps it silent", cues == [("failed", True)], str(cues))
+    if was_on:
+        speech.enabled.set()
 
     # --- deleting --------------------------------------------------------------------------------
     before = len(mgr.state()["shortcuts"])

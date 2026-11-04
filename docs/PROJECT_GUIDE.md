@@ -1542,6 +1542,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   so while RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
   and the user is warned once per run of it. `channels.follow_desk` also untrusts the model on a
   derived chain value pushed from elsewhere, ignoring our own writes' echoes for `CHAIN_ECHO_S`.
+  A read for a reply follows the same rule through `server._desk_now` (the mute's reach check, the
+  encoder hold, the status bar's re-build after a push): a fresh dump per mute made a three-mic
+  cough key take 1.5 s, and the status bar's dump after each change held up the next press.
+  Current state still reads the desk when opened: a card's free space is never pushed.
   Other software moving faders is seen only at the next read: an accepted limit, which the help
   covers. A new route that moves a fader source without a push must call `distrust()`.
 - **THE RODE'S APP WARNING IS SPOKEN, THEN A DIALOG WHEN THE WINDOW IS IN FRONT.** A background
@@ -1995,7 +1999,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `recorder` event, and the section reads the recorder (one dump) only for a state it is not
   showing. A push caused by the window's own press arrives before the press's reply, so it is held
   and read after the reply only if the two disagree; reading at once queues a dump behind the
-  command.
+  command. The transport buttons follow that held push at once (the button label is the
+  confirmation), so the pressed label is taken at the press, not at the reply.
+- **A TRANSPORT PRESS WAITS FOR THE DESK'S `recordState` PUSH, NOT A FIXED TIME**
+  (`server._await_record`, with the HID lock released while it waits). A start answers in about
+  40 ms, a stop in 0.5 to 1.1 s; `_RECORD_ANSWER_S` (3 s) is only waited out by a press the unit
+  ignores. Cut it near 1 s and a slow stop is reported as a press that did not take. A stop pushes
+  no `lastRecordingID` under this listener, and the new take is in the list by the time the state
+  arrives.
 - **THE CALLME PAGES ASK THE SERVER'S LISTENER EVERY SECOND WHILE ONE IS SHOWN**
   (`callme_section.CallMeSection.poll`, `server.read_callme_live`), which reads no desk; a full
   read is a dump. A call's state lives in that listener, so the desk state's pushes do not carry
@@ -2865,7 +2876,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   feedback. Silence is what a broken shortcut sounds like. **EXCEPT where the user has silenced that
   shortcut** (per row, `speak`), and except the announcements shortcut turning announcements OFF,
   which is ALWAYS silent: the reason to press it is that announcements are reaching a recording. **A
-  FAILURE is spoken whatever the flag says** - silencing hides a confirmation, not a fault.
+  FAILURE is spoken whatever the flag says** - silencing hides a confirmation, not a fault. With
+  announcements off it is the "failed" cue instead (`server._shortcut_failed`, `speech.tone`'s
+  `despite_off`), the one sound made then; during a take it stays silent.
 - **THERE ARE TWO WAYS TO FIRE A PAD AND THEY COVER DIFFERENT PAD TYPES. USE MIDI FOR A SOUND PAD
   AND HID FOR THE REST.**
   - **HID, `padActive`** (`soundpad.engage_pad` / `unlatch_pad`): voice-FX pads engage and release,

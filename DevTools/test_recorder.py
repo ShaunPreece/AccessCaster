@@ -231,4 +231,37 @@ check_in("and the mixed track is called out", "mixed track", recorder.BYPASS_HIN
 check_in("with multitrack off, it says nothing happens yet",
          "does nothing", recorder.BYPASS_NEEDS_MULTITRACK)
 
+print("\nA TRANSPORT PRESS WAITS FOR THE DESK'S ANSWER, NOT A FIXED TIME")
+import server  # noqa: E402
+
+
+class Pushes:
+    """A PushListener that hands back queued pushes, and times out once they run out."""
+
+    def __init__(self, *pushes):
+        self.pushes = list(pushes)
+        self.timeouts = []
+
+    def wait_for(self, name, timeout, match=None):
+        self.timeouts.append(timeout)
+        while self.pushes:
+            pushed, value = self.pushes.pop(0)
+            if pushed == name and (match is None or match(value)):
+                return value
+        return None
+
+
+start = time.monotonic()
+heard = server._await_record(Pushes(("recordState", recorder.RECORDING)), recorder.RECORDING)
+check("a start ends at the pushed state", sorted(heard), ["recordState"])
+check("without waiting out the margin", time.monotonic() - start < 0.5, True)
+listen = Pushes(("recordState", recorder.PAUSED), ("recordState", recorder.READY))
+check("a stop is answered by READY, which is 0",
+      sorted(server._await_record(listen, recorder.READY)), ["recordState"])
+check("and a state on the way is not the answer", listen.pushes, [])
+listen = Pushes()
+check("a press the unit ignores hears nothing",
+      server._await_record(listen, recorder.RECORDING), {})
+check("and gives up within the margin", listen.timeouts, [server._RECORD_ANSWER_S])
+
 sys.exit(_testkit.finish())

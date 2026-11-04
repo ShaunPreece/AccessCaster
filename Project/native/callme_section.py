@@ -25,7 +25,7 @@ from native.pages import Page, labelled, page_body, read_only, set_text
 
 TITLE = "CallMe"
 UNREAD = "CallMe has not been read yet."
-BUSY = "Still waiting for the unit to answer the last press."
+BUSY = "One moment: the unit is still carrying out your last press."
 POLL_MS = 1000
 NO_LINK = "There is no guest link while incoming calls are off."
 

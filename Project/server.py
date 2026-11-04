@@ -612,13 +612,21 @@ def action_record(command: str) -> dict:
     # Mark it BEFORE the write: the unit pushes the new state back in about 30 ms, which can beat
     # this function's own reply to the page.
     announcer.mark_self_write(("record",))
+    wanted = {"start": recorder.RECORDING, "resume": recorder.RECORDING,
+              "pause": recorder.PAUSED, "stop": recorder.READY}[cmd]
+    listener = desk_live.PushListener()
     try:
+        listener.start()            # before the write: the desk answers within 30 ms
         with _hid_lock:
             recorder.send_command(recorder.COMMANDS[cmd])
-            time.sleep(_RECORD_SETTLE_S)
+        heard = _await_record(listener, wanted)
+        with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not {cmd} the recording: {exc}"}
+    finally:
+        listener.stop()
+    diagnostics.event("record.answered", cmd, **heard)
 
     state = recorder.read_state(blob)
     if w is not None:
@@ -633,8 +641,6 @@ def action_record(command: str) -> dict:
         announcer_back = announcer.restore_after_record()
     info = _recorder_payload(blob)
     _note_recorder_context(info)
-    wanted = {"start": recorder.RECORDING, "resume": recorder.RECORDING,
-              "pause": recorder.PAUSED, "stop": recorder.READY}[cmd]
     if state == wanted:
         msg = {"start": "Recording.", "resume": "Recording again.",
                "pause": "Paused.", "stop": "Stopped."}[cmd]
@@ -691,10 +697,26 @@ def action_drop_marker() -> dict:
                        + " It will show up in the recording as a marker your editor can find."}
 
 
-# The unit takes a moment to act on a request and settle its own state. Measured at well under a
-# second on every transition (start, pause, resume and stop), so this is a comfortable margin
-# rather than a guess, and the read-back that follows is what actually decides the answer.
+# The unit takes a moment to act on a delete request. Measured at well under a second, so this is
+# a comfortable margin, and the read-back that follows is what actually decides the answer.
 _RECORD_SETTLE_S = 1.2
+# The most a transport press waits for the desk's answer. Only a press the unit ignores waits it
+# out, so it is set well clear of the slowest stop measured (1.06 s): a later answer would be
+# reported as a press that did not take.
+_RECORD_ANSWER_S = 3.0
+
+
+def _await_record(listener, wanted: int) -> dict:
+    """Wait, at most `_RECORD_ANSWER_S`, for the desk to push `recordState` at `wanted`, and return
+    how long it took, for the log. Measured: a start answers in about 40 ms, a stop in 0.5 to 1.1 s,
+    and a stopped take is already in the recordings list by then (no other push marks it).
+
+    A request the unit ignores (nowhere to record to) pushes nothing, so the full margin passes and
+    the read-back reports what the unit is doing instead."""
+    started = time.monotonic()
+    if listener.wait_for("recordState", _RECORD_ANSWER_S, match=lambda v: v == wanted) is None:
+        return {}
+    return {"recordState": round(time.monotonic() - started, 3)}
 
 
 def action_delete_recording(uid: int) -> dict:
@@ -1661,7 +1683,7 @@ def _overview_recording(blob: bytes):
     return None
 
 
-def device_overview() -> dict:
+def device_overview(fresh: bool = True) -> dict:
     """The Device page's opening summary: what is muted, what is soloed, where every fader sits,
     anything unusual about the routing, and the current bank.
 
@@ -1676,11 +1698,16 @@ def device_overview() -> dict:
     faderLevel is NOT the physical position (it does not move while fader 1 travels top to halfway)
     and only the virtual slots carry a value there. The anchor is the channel fader's own position
     and is present on every cross-point in that source's row, physical faders included, so we read
-    it from the row's first cell."""
+    it from the row's first cell.
+
+    `fresh` False builds it from the desk model where that can be trusted (`_desk_now`): for the
+    re-build after each push. Everything here is pushed when it changes, physical fader moves
+    included (as `mixLevelWithAnchor`), except a card's or drive's free space, which only a read
+    brings up to date."""
     dev = devices.get_active_device()
     try:
         with _hid_lock:
-            blob = rcp_read.read_model_stable()
+            blob = rcp_read.read_model_stable() if fresh else _desk_now()
     except Exception as exc:
         return {"ok": False, "device_name": dev.name,
                 "message": f"Could not read the unit: {exc}"}
@@ -2613,6 +2640,17 @@ def action_set_channel_level(name: str, db: int) -> dict:
     return {"ok": True, "message": f"{ch['label']} level set to {db} dB."}
 
 
+def _desk_now() -> bytes:
+    """The desk as a model dump: the desk model's picture while it is trusted and RODE's app, whose
+    changes are not pushed, is closed; otherwise a read, which the model adopts. CALLER HOLDS THE
+    HID LOCK."""
+    if desk_model.trusted() and not rode_app.is_open():
+        snap = desk_model.snapshot()
+        if snap:
+            return snap
+    return rcp_read.read_model_stable(fresh=True)
+
+
 def _mute_reach_message(who: str, sources) -> str:
     """What a mute of `who` (matrix source codes `sources`) actually silences. CALLER HOLDS THE HID
     LOCK.
@@ -2622,7 +2660,7 @@ def _mute_reach_message(who: str, sources) -> str:
     output instead of claiming silence everywhere. A cached dump is enough: muting moves no link
     and no level. If the grid cannot be read, the reply says so rather than guessing either way."""
     try:
-        blob = rcp_read.read_model()
+        blob = _desk_now()
         lv = rcp_read.read_matrix_levels(blob)
         ex = rcp_read.read_matrix_state(blob)
     except Exception:
@@ -2679,7 +2717,7 @@ def _encoder_hold_mute(strip: int) -> None:
     if _strip_toggle_gate("Muting") is not None:
         return
     with _hid_lock:
-        mutes = rcp_read.values(rcp_read.read_model_stable(fresh=True), channels.MUTE_PROP)
+        mutes = rcp_read.values(_desk_now(), channels.MUTE_PROP)
         if not 0 <= strip < len(mutes) or not isinstance(mutes[strip], bool):
             return
         on = not mutes[strip]
@@ -8234,7 +8272,8 @@ def hotkey_manager():
         # has run by the time the reply is handed over.
         mgr = hotkeys.HotkeyManager(speak=speech.say,
                                     runner=commands.run,
-                                    labeller=_hotkey_label)
+                                    labeller=_hotkey_label,
+                                    fail=_shortcut_failed)
         mgr.load(settings_file.load().get("hotkeys") or {},
                  defaults=_hotkey_defaults())
         _hotkeys = mgr
@@ -8245,6 +8284,17 @@ def hotkey_manager():
 # presets), so labels are CACHED: `state()` asks for one per shortcut and the page reads state
 # often. Cleared whenever the catalogue is re-read.
 _hotkey_labels = {}
+
+
+def _shortcut_failed(message: str) -> None:
+    """A shortcut that failed: spoken, or with announcements off, which silence every phrase so no
+    words reach the mix, the "failed" cue, so a press that did nothing never passes for one that
+    worked. Silent while a take holds announcements off (`suspended_for_record`): nothing the app
+    plays may land in the recording."""
+    if speech.enabled.is_set():
+        speech.say(message)
+    elif announcer.suspended_for_record or not speech.tone("failed", despite_off=True):
+        diagnostics.event("say", message[:90] + "  [suppressed: announcements off]")
 
 
 def _hotkey_label(command_id: str) -> str:

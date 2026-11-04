@@ -243,6 +243,23 @@ frame.desk.listener("recorder", recorder.RECORDING)
 section._commanded(rec.transport, {"ok": True, "recorder": payload(state=recorder.RECORDING)}, False)
 check("but not when the reply agrees", reads, [])
 
+
+def pushed_then_replied(command):
+    """The desk's push lands while the read-back still holds the device."""
+    frame.desk.listener("recorder", recorder.RECORDING)
+    seen.append(labels())
+    return fake_record(command)
+
+
+seen = []
+section.show(payload(state=recorder.READY), "")
+said = len(frame.said)
+with patched(sync, (server, {"action_record": pushed_then_replied, **live})):
+    rec._on_transport(press(rec.transport))
+check("the buttons follow the push before the reply", seen, [(STOP, PAUSE)])
+check("and the reply after it is still not spoken", frame.said[said:], [])
+check("nor read again", reads, [])
+
 # ---- deleting, ejecting, reconnecting and erasing --------------------------------------------
 calls = []
 questions = []

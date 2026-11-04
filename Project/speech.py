@@ -344,7 +344,7 @@ def stop() -> None:
         thread.join(timeout=2.0)
 
 
-def _submit(item: _Item, logged: str) -> None:
+def _submit(item: _Item, logged: str, despite_off: bool = False) -> None:
     """Log `item`, then hand it to the speech thread unless announcements are off or this is a test.
     Never blocks: a newer item replaces one still waiting, and cuts off a phrase already playing.
 
@@ -357,12 +357,13 @@ def _submit(item: _Item, logged: str) -> None:
     through: roughly half the speech comes from outside the announcer's read loop (the
     virtual-devices follow-up after a USB mode change, the recorder watcher). The phrases
     announcing that speech is BACK are safe: each one sets the flag before it speaks.
+    `despite_off` is the one exception: the cue of a shortcut that failed (`tone`).
     """
     global _pending, _thread
     if _stopping.is_set():
         _release(item)
         return
-    if not enabled.is_set():
+    if not enabled.is_set() and not despite_off:
         diagnostics.event("say", logged + "  [suppressed: announcements off]")
         _release(item)
         return
@@ -397,17 +398,18 @@ def say_and_wait(text: str) -> None:
     done.wait(_SAY_AND_WAIT_TIMEOUT_S)
 
 
-def tone(name: str) -> bool:
+def tone(name: str, despite_off: bool = False) -> bool:
     """Play the named cue instead of a phrase. True if it was queued, False if we have no such
     tone, in which case the caller must speak: a cue that silently does nothing is worse than the
-    sentence it was replacing. Nothing cuts a cue off."""
+    sentence it was replacing. Nothing cuts a cue off. `despite_off` plays it with announcements
+    off, for a shortcut that failed (`server._shortcut_failed`)."""
     try:
         path = tones.tone_path(name)
     except Exception:
         return False
     if not path:
         return False
-    _submit(_Item(name, cue_path=path), "cue " + name)
+    _submit(_Item(name, cue_path=path), "cue " + name, despite_off)
     return True
 
 

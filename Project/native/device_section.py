@@ -5,7 +5,8 @@ Nothing here is in the desk state. Each page reads its own part of the unit (`re
 after the desk state's first read and after a job that rewrites the desk, the page shown on F5, and
 Hardware, Unit settings and Wireless connections once the desk has pushed a change to what they
 show (`FollowDesk`). The reads at start share one dump through the model cache. The overview also
-gives the window's status bar its summary, read again shortly after the desk state changes.
+gives the window's status bar its summary, built again from the desk model shortly after the desk
+state changes, and read from the desk whenever Current state is opened.
 """
 import wx
 import wx.lib.scrolledpanel as scrolled
@@ -329,7 +330,7 @@ class DeviceSection:
 
     def _summary_due(self):
         if self.state:          # False once the window is gone
-            self.state.read()
+            self.state.read(full=False)
 
     def read(self):
         for view in self.views:
@@ -383,9 +384,17 @@ class StatePage(_Reader, wx.Panel):
         sizer, parent = page_body(self)
         self.report = read_only(parent, sizer, "Now", height=300, scroll=True)
         self.report.SetValue(UNREAD)
+        self.Bind(wx.EVT_SHOW, self._on_show)
 
-    def fetch(self, _full):
-        return server.device_overview()
+    def _on_show(self, event):
+        # Opened, it reads the desk: a card's free space is the one fact here no push updates.
+        event.Skip()
+        if event.IsShown():
+            self.read()
+
+    def fetch(self, full):
+        """`full` reads the desk; a re-build after a push uses the desk model (`fresh=False`)."""
+        return server.device_overview(fresh=full)
 
     def shown(self, reply):
         set_text(self.report, "\n".join(overview_lines(reply)))

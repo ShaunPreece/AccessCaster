@@ -845,7 +845,9 @@ hardware, read-back verified, restored exactly.
   * ONLY the virtual fader slots ever hold a value. On a 9-fader Pro II, faderLevel
     reads e.g. [0,0,0,0,0,0,17,105,120]: indices 6,7,8 = faders 7,8,9. The six
     PHYSICAL faders stay 0, because those are analog pots - their position shows up
-    in mixLevelWithAnchor instead.
+    in mixLevelWithAnchor instead, and moving one PUSHES it, unasked, on every
+    cross-point of that source's row (about 5 a second during a move; Pro II, fw 1.7.7,
+    4th November 2026, passive listen).
   * SCALE is 0..127 (faderMax = 127), and faderLevel/127 IS that source's
     cross-point level: 92/127 = 0.724409 matched the read level exactly, on three
     faders independently.

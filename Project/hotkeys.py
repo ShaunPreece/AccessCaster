@@ -209,8 +209,9 @@ class HotkeyManager:
     "mods" always equals it once set_mods has run. A settings file from before the shared chord can
     hold shortcuts on other modifiers; they keep them until the chord is next changed."""
 
-    def __init__(self, speak=None, runner=None, labeller=None):
+    def __init__(self, speak=None, runner=None, labeller=None, fail=None):
         self._speak = speak or (lambda text: None)
+        self._fail = fail or self._speak      # a failure's message, whatever the row's `speak`
         self._runner = runner or (lambda command: {"ok": True, "message": ""})
         self._labeller = labeller or (lambda command: command)
         self._shortcuts = []          # ordered [{id, command, mods, key, enabled, speak}]
@@ -636,13 +637,15 @@ class HotkeyManager:
         try:
             said = self._runner(row["command"]) or {}
             message = str(said.get("message") or "")
-            # A failure is spoken whatever `speak` says, for the reason given below.
-            if message and (row.get("speak", True) or not said.get("ok", True)):
+            # A failure is told whatever `speak` says, for the reason given below.
+            if message and not said.get("ok", True):
+                self._fail(message)
+            elif message and row.get("speak", True):
                 self._speak(message)
         except Exception as exc:
-            # ALWAYS spoken, whatever the flag says: silencing a shortcut means "I know what this
+            # ALWAYS told, whatever the flag says: silencing a shortcut means "I know what this
             # does, do not narrate it", not "hide it when it breaks".
-            self._speak(f"{self._labeller(row['command'])} failed: {exc}")
+            self._fail(f"{self._labeller(row['command'])} failed: {exc}")
         finally:
             with self._lock:
                 self._busy.discard(row["id"])

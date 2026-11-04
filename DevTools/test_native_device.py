@@ -127,8 +127,9 @@ frame = FakeFrame()
 section = device_section.DeviceSection(frame)
 reads = []
 for view in section.views:
-    view.read = (lambda name: lambda announce=False: reads.append((name, announce)))(
-        type(view).__name__)
+    # A re-build from the desk model (`full` False) is told apart from a read of the desk.
+    view.read = (lambda name: lambda announce=False, full=True: reads.append(
+        (name, announce) if full else (name, announce, "model")))(type(view).__name__)
 frame.desk.listener("read", None)
 check("the desk state's first read reads every page", reads,
       [("StatePage", False), ("HardwarePage", False), ("UnitPage", False),
@@ -139,7 +140,8 @@ check("later desk changes read nothing at once", len(reads), 4)
 check("but the summary is due", section._summary_timer is not None, True)
 section._summary_timer.Stop()
 section._summary_due()
-check("and then reads the overview alone", reads[4:], [("StatePage", False)])
+check("and then re-builds the overview alone, from the desk model", reads[4:],
+      [("StatePage", False, "model")])
 frame.desk.listener("levels", None)
 check("a level change is not in the summary, so it reads nothing", section._summary_timer.IsRunning(),
       False)
@@ -148,6 +150,15 @@ section.refresh(True)
 check("F5 reads only the page shown, and says so", reads[-1], ("NetworkPage", True))
 check("and nothing else", len(reads), 6)
 section.network.Hide()
+asked = []
+with _testkit.patched((server, {"device_overview": lambda fresh=True: asked.append(fresh) or {}})):
+    type(section.state).fetch(section.state, True)
+    type(section.state).fetch(section.state, False)
+check("a read asks the desk, a re-build the desk model", asked, [True, False])
+section.state.Show()
+check("opening Current state reads the desk: free space is never pushed", reads[-1],
+      ("StatePage", False))
+section.state.Hide()
 followed = {type(fn.__self__._read.__self__).__name__: names
             for names, fn in frame.desk.watched}
 check("Hardware, Unit settings and Wireless connections follow what they show", followed,

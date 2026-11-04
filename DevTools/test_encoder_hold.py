@@ -68,4 +68,30 @@ select(-1)
 hold(w, 1.0)
 check("a channel button pressed again hands the encoder back", held, [])
 
+print("\nTHE HOLD'S WRITE TAKES THE MUTE FROM THE DESK MODEL")
+import announcer  # noqa: E402
+import devices  # noqa: E402
+import rcp_read  # noqa: E402
+import rcp_transfer  # noqa: E402
+import rode_app  # noqa: E402
+import server  # noqa: E402
+from _testkit import as_device, hold_desk, patched  # noqa: E402
+from _testkit import hold as hold_value  # noqa: E402
+
+reads, writes = [], []
+fakes = ((rcp_read, {"read_model_stable":
+                     lambda fresh=False: reads.append(fresh) or desk_model.snapshot()}),
+         (rcp_transfer, {"write_at": lambda key, name, kind, on: writes.append((key, on))}),
+         (announcer, {"announce_mute": lambda strip, on: None}))
+with as_device(devices.PRO2), patched(*fakes):
+    hold_desk([0, 1, 2, 3, 10, 11, 7, 8, 9])
+    hold_value(rcp_transfer.channel_key(2), "channelOutputMute", True, "bool")
+    with patched((rode_app, {"is_open": lambda: False})):
+        server._encoder_hold_mute(2)
+    check("a muted channel is unmuted", [on for _key, on in writes], [False])
+    check("without reading the desk", reads, [])
+    with patched((rode_app, {"is_open": lambda: True})):
+        server._encoder_hold_mute(2)
+    check("while RODE's app is open the desk is read first", reads, [True])
+
 sys.exit(_testkit.finish())
