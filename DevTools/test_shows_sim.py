@@ -283,7 +283,7 @@ DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 DESK.import_sets_error = shows.ERROR_REFUSED
 res = run_job(server.action_show_import(9))
 check("a rejection is reported as one", res["ok"], False)
-check_in("saying the unit refused it", "refused", res["message"])
+check_in("saying the desk refused it", "refused", res["message"])
 
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
@@ -309,7 +309,7 @@ DESK.import_sets_error = shows.ERROR_REFUSED      # still refusing: nothing move
 DESK.gain = 99
 res = run_job(server.action_show_import(2))
 check("a refusal under an old code is still reported", res["ok"], False)
-check_in("saying the unit refused it", "refused", res["message"])
+check_in("saying the desk refused it", "refused", res["message"])
 check_in("and that restarting it is the remedy", "restarted", res["message"])
 
 print("the desk leaves the bus part way through an import")
@@ -320,8 +320,8 @@ DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 DESK.goes_quiet_on_import = True
 res = run_job(server.action_show_import(9))
 check("a desk that stopped answering is NOT reported as a success", res["ok"], False)
-check_in("and it says the unit stopped responding", "stopped responding", res["message"])
-check_in("and it says how to get the unit back", "plug it back in", res["message"])
+check_in("and it says the desk stopped responding", "stopped responding", res["message"])
+check_in("and it says how to get the desk back", "plug it back in", res["message"])
 
 print("import that silently does nothing")
 reset_desk()

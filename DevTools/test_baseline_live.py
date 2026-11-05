@@ -55,7 +55,7 @@ try:
     check("so the offer is gone", server.baseline_status()["offer"], False)
     check("but the Profiles page can still capture one", server.baseline_status()["baseline"], None)
 
-    print("\nCAPTURE (settings only, no pads: this test writes nothing to the unit)")
+    print("\nCAPTURE (settings only, no pads: this test writes nothing to the desk)")
     started = server.action_baseline_save(include_pads=False)
     check_true("the capture starts", started.get("ok"), started.get("message"))
     job = wait_for_job(server.profile_save_status, pause=0.3)

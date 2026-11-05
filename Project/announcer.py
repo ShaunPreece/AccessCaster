@@ -878,12 +878,12 @@ def usb_mode_change(was, now) -> str:
     if was_exp != now_exp:
         # Leaving it, the faders are tidied and spoken about separately
         # (`server._tidy_after_standard`), so this says only what is certain.
-        return "USB input is now Expanded." if now_exp else "The unit has left Expanded USB input."
+        return "USB input is now Expanded." if now_exp else "The desk has left Expanded USB input."
     # A value outside the six measured ones is still worth SAYING, just not naming: going silent on
     # an unknown would hide exactly the case nobody has seen before.
     label = recorder.USB_MULTITRACK_LABEL.get(now_mode)
     return (f"USB output to this computer is now {label.lower()}." if label else
-            "The unit's USB audio mode has changed.")
+            "The desk's USB audio mode has changed.")
 
 
 # The first thing said once the desk is open: the app's own start-up names the app, a person

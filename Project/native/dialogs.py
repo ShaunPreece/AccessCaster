@@ -44,6 +44,13 @@ class SpeakingDialog(Speaker, wx.Dialog):
         event.Skip()
 
 
+def modal_dialogs():
+    """The dialogs running a modal loop, outermost first. Each one's loop runs inside the one
+    before, and only the innermost can be ended: `EndModal` on any other is a wx assertion and
+    leaves that dialog's loop running. Creation order stands in for nesting order."""
+    return [w for w in wx.GetTopLevelWindows() if isinstance(w, wx.Dialog) and w.IsModal()]
+
+
 def _paragraphs(dialog, sizer, text):
     """One static text per paragraph, so a screen reader hears the breaks."""
     items = []
@@ -179,8 +186,17 @@ class JobDialog(SpeakingDialog):
         """The job is over: close the dialog, with `result` as what `run` returns."""
         self._finished = True
         self.result = result
-        if self.IsModal():
-            self.EndModal(wx.ID_OK)
+        self._end()
+
+    def _end(self):
+        # A dialog opened over this one while the job ran (the tray's Still working) holds the
+        # innermost loop, so this one ends once that one has closed.
+        if not self or not self.IsModal():
+            return
+        if modal_dialogs()[-1] is not self:
+            wx.CallLater(200, self._end)
+            return
+        self.EndModal(wx.ID_OK)
 
     def _on_key(self, event):
         if event.GetKeyCode() == wx.WXK_ESCAPE:

@@ -6,7 +6,7 @@ reads it, and the spoken outcomes say the right thing. No desk, no driver, no CO
 import _bootstrap  # noqa: F401
 import _testkit
 import virtual_devices as vd
-from _testkit import check_true, patched
+from _testkit import check, check_true, patched
 
 
 def block(connected: int, enabled: int, desk: str, tail: str = "") -> bytes:
@@ -63,7 +63,7 @@ o = vd.Outcome(status=vd.DriverStatus(), faders_ready=9,
 check_true(o.sentence(), o.sentence() == "Windows sound is on System.")
 o = vd.Outcome(status=vd.DriverStatus(),
                default_moved_to="Speakers (RODECaster Pro II Main Stereo)")
-check_true(o.sentence(), o.sentence() == "Windows sound is back on the unit.")
+check_true(o.sentence(), o.sentence() == "Windows sound is back on the desk.")
 o = vd.Outcome(status=vd.DriverStatus(), faders_missing=True)
 check_true(o.sentence(), o.sentence().startswith("RODE's driver is connected but has not created its fader inputs."))
 
@@ -87,5 +87,33 @@ check_true("moving on from a live device clears it", vd._displaced == "")
 note("speakers", [ep("speakers"), ep("main", desk=True)])
 check_true("the user picking the speakers while the desk is live is a choice", vd._displaced == "")
 vd._last_default, vd._displaced = "", ""
+
+
+# WHILE THE SERVICE IS BOUND, ONLY SYSTEM WILL DO: it holds the desk's Main output, which plays nothing.
+class Policy:
+    def __init__(self):
+        self.set = []
+
+    def SetDefaultEndpoint(self, id_, role):
+        self.set.append(id_)
+
+
+def restore(default, eps, connected, parked="", standard=False):
+    policy = Policy()
+    with patched((vd, {"_default_id": lambda enum, role: default})):
+        moved = vd._restore_default(None, policy, eps, connected, parked, standard=standard)
+    return moved, policy.set
+
+
+speakers, main = ep("speakers"), ep("Main Multitrack", desk=True)
+system = ep("System (RØDECaster)", virtual=True)
+check("bound with no System yet: the default stays where Windows put it",
+      restore("speakers", [speakers, main], True, parked="speakers"), ("", []))
+check("bound with System live: it goes to System",
+      restore("speakers", [speakers, main, system], True, parked="speakers"),
+      (system.name, [system.id, system.id]))
+check("back in Standard: it goes to the desk's Main output",
+      restore("speakers", [speakers, ep("Main Stereo", desk=True)], False, parked="speakers",
+              standard=True), ("Main Stereo", ["Main Stereo", "Main Stereo"]))
 
 raise SystemExit(_testkit.finish())

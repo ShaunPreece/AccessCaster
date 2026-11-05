@@ -95,17 +95,17 @@ def refusal(state: dict, online: bool, recording: bool, in_call: bool) -> str:
                            "updateRebootRequested", "updateResetAfterFWURequested")
                if p not in state]
     if missing:
-        return "This unit does not offer installing a firmware update from AccessCaster."
+        return "This desk does not offer installing a firmware update from AccessCaster."
     if v.get("updateResetAfterFWURequested"):
-        return ("The unit is set to erase itself on its next restart, so AccessCaster will not "
-                "install anything that restarts it. Install the update on the unit's screen.")
+        return ("The desk is set to erase itself on its next restart, so AccessCaster will not "
+                "install anything that restarts it. Install the update on the desk's screen.")
     if not offered(state):
-        return "The unit has no firmware update waiting. Check for one first."
+        return "The desk has no firmware update waiting. Check for one first."
     if not online:
-        return ("The unit is not connected to the internet, so it cannot download the update. "
+        return ("The desk is not connected to the internet, so it cannot download the update. "
                 "Connect it to wifi or a network cable first.")
     if recording:
-        return "The unit is recording. Stop the recording before updating the firmware."
+        return "The desk is recording. Stop the recording before updating the firmware."
     if in_call:
         return "A CallMe call is in progress. End it before updating the firmware."
     return ""
@@ -173,15 +173,15 @@ def _check(desk, step, target):
         if listen.wait_for("updateChecking", CHECK_STARTS_S, match=lambda v: v is True):
             listen.wait_for("updateChecking", CHECK_WAIT_S, match=lambda v: v is False)
         else:
-            diagnostics.event("firmware.check_skipped", "the unit holds a download already")
-            step(f"The unit already has firmware {target} waiting, so it is not checked again.")
+            diagnostics.event("firmware.check_skipped", "the desk holds a download already")
+            step(f"The desk already has firmware {target} waiting, so it is not checked again.")
     state = desk.state()
     v = values(state)
     if v.get("updateNoInternet"):
-        raise Stopped("The unit could not reach RODE's update server, so nothing was downloaded "
+        raise Stopped("The desk could not reach RODE's update server, so nothing was downloaded "
                       "or changed. Check its network connection and try again.")
     if offered(state) != target:
-        raise Stopped(f"The unit no longer offers firmware {target}, so nothing was changed. "
+        raise Stopped(f"The desk no longer offers firmware {target}, so nothing was changed. "
                       "Check for an update again.")
     return state
 
@@ -203,11 +203,11 @@ def _download(desk, step, state, target):
             # download left behind installs nothing.
             if got is None:
                 raise Stopped(f"The download of firmware {target} stopped making progress. "
-                              "Nothing was installed. Check the unit's network connection and "
+                              "Nothing was installed. Check the desk's network connection and "
                               "try again.")
             name, value = got
             if name == "updateNoInternet" and value:
-                raise Stopped("The unit lost its internet connection during the download. "
+                raise Stopped("The desk lost its internet connection during the download. "
                               "Nothing was installed.")
             if name == "updateDownloaded" and value:
                 break
@@ -226,7 +226,7 @@ def _install(desk, step, state, target) -> bool:
     """Start the install and wait for it to end. True if the desk restarts by itself: an
     application-only install does, and is over once the desk has gone."""
     app_only = not values(state).get("osUpdateAvailable")
-    step(f"Installing firmware {target}. This takes a few minutes. Do not switch the unit off.")
+    step(f"Installing firmware {target}. This takes a few minutes. Do not switch the desk off.")
     with desk.listener() as listen:
         desk.write(state, "updateInitiateRequested", True)
         deadline = time.monotonic() + INSTALL_WAIT_S
@@ -243,24 +243,24 @@ def _install(desk, step, state, target) -> bool:
                     return False
             if listen.lost or (app_only and desk.present() is None):
                 return True
-    raise Stopped(f"The unit has not said the install of firmware {target} finished. Leave it "
+    raise Stopped(f"The desk has not said the install of firmware {target} finished. Leave it "
                   "switched on for now, and check its screen or check for an update in a few "
                   "minutes.")
 
 
 def _restart(desk, step, target, restarts_itself):
-    step(f"Firmware {target} is installed. The unit is restarting onto it, and its audio stops "
+    step(f"Firmware {target} is installed. The desk is restarting onto it, and its audio stops "
          "until it is back, which takes a minute or two.")
     if restarts_itself or _leaves(desk, LEAVES_BY_ITSELF_S):
         return
     state = desk.state()
     if values(state).get("updateResetAfterFWURequested"):
-        raise Stopped(f"Firmware {target} is installed, but the unit is set to erase itself on "
+        raise Stopped(f"Firmware {target} is installed, but the desk is set to erase itself on "
                       "its next restart, so AccessCaster has not restarted it. Restart it from "
                       "its own screen when you are ready.")
     desk.write(state, "updateRebootRequested", True)
     if not _leaves(desk, LEAVES_AFTER_ASK_S):
-        raise Stopped(f"Firmware {target} is installed, but the unit did not restart when asked. "
+        raise Stopped(f"Firmware {target} is installed, but the desk did not restart when asked. "
                       "Switch it off and on with the red button on the back to finish.")
 
 
@@ -275,15 +275,15 @@ def _leaves(desk, within: float) -> bool:
 
 
 def _confirm(desk, step, target) -> dict:
-    step("Waiting for the unit to come back.")
+    step("Waiting for the desk to come back.")
     deadline = time.monotonic() + BACK_WITHIN_S
     seen = set()
     while time.monotonic() < deadline:
         pid = desk.present()
         if desk.flashing() and FLASHING_PID not in seen:
             seen.add(FLASHING_PID)
-            diagnostics.event("firmware.flashing", "the unit is on USB as 0x0030")
-            step("The unit is still updating. Leave it switched on.")
+            diagnostics.event("firmware.flashing", "the desk is on USB as 0x0030")
+            step("The desk is still updating. Leave it switched on.")
         if pid is not None and pid != FLASHING_PID:
             if pid not in seen:
                 seen.add(pid)
@@ -296,7 +296,7 @@ def _confirm(desk, step, target) -> dict:
             if version:
                 return _result(desk, target, version)
         time.sleep(PRESENCE_POLL_S * 2)
-    raise Stopped(f"The unit has not come back from installing firmware {target}. Leave it "
+    raise Stopped(f"The desk has not come back from installing firmware {target}. Leave it "
                   "switched on for a few more minutes. If it still does not appear, unplug the "
                   "USB cable from the socket nearest the power inlet and plug it back in.")
 
@@ -305,7 +305,7 @@ def _result(desk, target, version) -> dict:
     diagnostics.event("firmware.version", version)
     if version != target:
         return {"ok": False, "version": version,
-                "message": f"The unit is back but reports firmware {version}, not {target}, so "
+                "message": f"The desk is back but reports firmware {version}, not {target}, so "
                            "the update did not take. Its settings are as they were."}
     try:
         state = desk.state()
@@ -316,4 +316,4 @@ def _result(desk, target, version) -> dict:
         diagnostics.event("firmware.tidy_failed", "request flags left as they were",
                           error=str(exc))
     return {"ok": True, "version": version,
-            "message": f"Firmware {version} is installed, and the unit is back."}
+            "message": f"Firmware {version} is installed, and the desk is back."}

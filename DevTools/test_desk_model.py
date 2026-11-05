@@ -224,6 +224,28 @@ channels._chain_written.clear()
 channels.note_chain_push(chain_push(0.55, 0.6))
 check_true("a changed value this app did not write untrusts it", not desk_model.trusted())
 
+print("\nWHAT A DUMP SHOWS CHANGED UNHEARD, WHILE RODE'S APP IS OPEN")
+told = []
+with patched((desk_model, {"revealed_watcher": told.extend})):
+    adopt(dump(bank=1))
+    adopt(dump(bank=2))
+    check("with reveal off, a change in a dump is adopted and not told", told, [])
+    desk_model.reveal(True)
+    adopt(dump(bank=3))
+    check("with it on, it is told with the value it replaced",
+          [(name, value, was) for _p, name, value, _k, was in told], [("selectedBank", 3, 2)])
+    told.clear()
+    token = desk_model.dump_starting()
+    desk_model.apply_push(GUI, "selectedBank", 5, "int")
+    adopt(dump(bank=4), token)
+    check("a change pushed during the read is not told again", told, [])
+    desk_model.distrust()
+    adopt(dump(bank=6, mute1=True))
+    check("nor anything a dump shows an untrusted picture", told, [])
+    adopt(dump(bank=6, mute1=True))
+    check("and a dump that agrees tells nothing", told, [])
+    desk_model.reveal(False)
+
 print("\nTHROUGH THE LISTENER")
 
 

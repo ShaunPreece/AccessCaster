@@ -70,7 +70,7 @@ def data(backups, storage=True, baseline=None, can_backup=True):
     return {"backups": {"ok": True, "backups": backups, "storage": storage, "shows_capable": True,
                         "note": ""},
             "shows": {"ok": True, "writable": True, "can_backup": can_backup,
-                      "backup_blocked_reason": "" if can_backup else "No drive is in the unit."},
+                      "backup_blocked_reason": "" if can_backup else "No drive is in the desk."},
             "baseline": {"ok": True, "connected": True, "baseline": baseline}}
 
 
@@ -78,18 +78,18 @@ def data(backups, storage=True, baseline=None, can_backup=True):
 check("an ordinary backup is its name", backups_section.list_label(backup("Tuesday")), "Tuesday")
 check("the as-found backup says so",
       backups_section.list_label(backup("As found", baseline=True)), "As found, the as-found backup")
-check("one the unit made says so, with its date",
+check("one the desk made says so, with its date",
       backups_section.list_label(backup("Show", kind="unit", modified="Monday at 14:03")),
-      "Show, made on the unit, Monday at 14:03")
+      "Show, made on the desk, Monday at 14:03")
 check_in("a paired backup's detail names both copies", "its own copy on its drive too",
          backups_section.detail(backup("Tuesday", kind="paired", pads=3)))
 check_in("and counts its pads", "with 3 SMART pads",
          backups_section.detail(backup("Tuesday", kind="paired", pads=3)))
-check_in("one the unit made cannot be renamed", "cannot be renamed",
+check_in("one the desk made cannot be renamed", "cannot be renamed",
          backups_section.detail(backup("Show", kind="unit")))
 check("no drive in says where backups go",
       backups_section.storage_line(data([], storage=False)["backups"]),
-      "There is no card or drive in the unit, so backups are saved on this computer only.")
+      "There is no card or drive in the desk, so backups are saved on this computer only.")
 check_in("a baseline without pads warns", "settings only",
          backups_section.baseline_line({"baseline": {"name": "As found", "pads": 0}}))
 
@@ -98,7 +98,7 @@ question = {"plan": {"ok": True, "via": "profile", "warnings": ["Main Stereo goe
 text = backups_section.restore_text("Tuesday", question)
 check_true("the restore question leads with its warning", text.startswith("Warning. Main Stereo"))
 check_in("and says how long the pads take", "allow up to 1 minute 25 seconds", text)
-check_in("a unit-made restore names the hang", "stops responding",
+check_in("a desk-made restore names the hang", "stops responding",
          backups_section.restore_text("Show", {"plan": {"ok": True, "via": "show"}, "info": {}}))
 
 # ---- the page ----------------------------------------------------------------------------------
@@ -161,7 +161,7 @@ check("and the whole desk is read again", frame.rewritten, 1)
 with patched(fakes, (server, {"action_restore_backup": lambda name: {"ok": True, "via": "show",
                                                                      "started": True}})):
     page._ask_restore(page._chosen(), question)
-check("one through the unit's copy follows the show job",
+check("one through the desk's copy follows the show job",
       jobs[-1], ("Restoring backup", server.show_job_status))
 
 deletes = []
@@ -189,7 +189,7 @@ section.data = data([], can_backup=False)
 section.reset.show()
 check_in("the reset says it cannot be undone without a drive", "cannot be undone",
          section.reset.acc.description)
-dialog = backup_dialogs.ResetDialog(frame.window, "No drive is in the unit.")
+dialog = backup_dialogs.ResetDialog(frame.window, "No drive is in the desk.")
 check("the reset's question lands on Cancel", first_focusable(dialog).GetLabel(), "Cancel")
 check_true("with nowhere to put a backup it is not ticked", not dialog.backup_first.GetValue())
 said = []
@@ -197,7 +197,7 @@ with patched((dialogs.SpeakingDialog, {"say": lambda _s, text, recent=False: sai
     dialog.backup_first.SetValue(True)
     dialog._on_tick(None)
 check_true("a tick is refused with the reason",
-           not dialog.backup_first.GetValue() and said == ["No drive is in the unit."])
+           not dialog.backup_first.GetValue() and said == ["No drive is in the desk."])
 check_true("and no backup is asked for", not dialog.wants_backup())
 dialog.Destroy()
 dialog = backup_dialogs.ResetDialog(frame.window, "")

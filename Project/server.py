@@ -210,7 +210,7 @@ def read_device_state() -> dict:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit's live state: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk's live state: {exc}"}
 
     out = {"ok": True}
 
@@ -265,7 +265,7 @@ def _firmware_update_sentence(upd: dict) -> str:
         what = f"Firmware {upd['version']}" if upd.get("version") else "A firmware update"
         return f"{what} is available. {_UPDATE_HOW}"
     if upd.get("no_internet"):
-        return ("The unit could not reach RODE's update server. It needs wifi or a network cable "
+        return ("The desk could not reach RODE's update server. It needs wifi or a network cable "
                 "to check.")
     return ""
 
@@ -277,7 +277,7 @@ def read_firmware_install() -> dict:
         with _hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
     state = desk_firmware.read(blob)
     recording = recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED)
     try:
@@ -312,15 +312,15 @@ def action_firmware_install(backup_first: bool = True) -> dict:
             if not backed.get("ok"):
                 return {"ok": False,
                         "message": "The backup did not finish, so the update was not started and "
-                                   "nothing on the unit has changed. "
+                                   "nothing on the desk has changed. "
                                    + (backed.get("message") or "")}
         res = desk_firmware.install(desk_firmware.Desk(_hid_lock), job.step, target)
         if res.get("ok") and backup_first:
             res["message"] += (f" Your settings were backed up first as {FIRMWARE_BACKUP_NAME}, "
                                "on the Backups page.")
         return res
-    return _firmware_job.start(work, message=f"Updating the unit to firmware {target}.",
-                               started=f"Updating the unit to firmware {target}.")
+    return _firmware_job.start(work, message=f"Updating the desk to firmware {target}.",
+                               started=f"Updating the desk to firmware {target}.")
 
 
 def firmware_job_status() -> dict:
@@ -335,7 +335,7 @@ def action_check_firmware() -> dict:
             blob = rcp_read.read_model_stable(fresh=True)
             found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
             if not found:
-                return {"ok": False, "message": "This unit does not offer a firmware check."}
+                return {"ok": False, "message": "This desk does not offer a firmware check."}
             path = found[0][0].path()
             listener.start()        # before the write: the desk answers within a second
             rcp_transfer.send_record(
@@ -350,7 +350,7 @@ def action_check_firmware() -> dict:
     upd = _firmware_update(blob)
     fw = _firmware_version(blob) or "unknown"
     msg = (_firmware_update_sentence(upd)
-           or f"Your unit is up to date. Firmware {fw} is the latest.")
+           or f"Your desk is up to date. Firmware {fw} is the latest.")
     return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
 
 
@@ -560,9 +560,9 @@ def _recorder_sentence(state, elapsed: str = "") -> str:
                           f"about {low['free_mb']} megabytes.")
         return f"Ready to record{where}.{room_left}"
     if state == recorder.NO_DESTINATION:
-        return ("The unit has nowhere to record to. Put a memory card in, or a USB drive in the "
+        return ("The desk has nowhere to record to. Put a memory card in, or a USB drive in the "
                 "second USB port, and this will say Ready.")
-    return "The unit did not report a recording state."
+    return "The desk did not report a recording state."
 
 
 def read_recorder_live() -> dict:
@@ -660,7 +660,7 @@ def action_record(command: str) -> dict:
         return {"ok": True, "state": state, "recorder": info, "message": msg}
     # It did not do what was asked. Say what it IS doing, and why that is usually the answer.
     return {"ok": False, "state": state, "recorder": info,
-            "message": f"That did not take. The unit says: {_recorder_sentence(info)}"}
+            "message": f"That did not take. The desk says: {_recorder_sentence(info)}"}
 
 
 def action_drop_marker() -> dict:
@@ -742,7 +742,7 @@ def action_delete_recording(uid: int) -> dict:
             before = recorder.read_recordings(rcp_read.read_model_stable(fresh=True))
             target = next((r for r in before if r.get("uid") == int(uid)), None)
             if target is None:
-                return {"ok": False, "message": f"There is no recording with id {uid} on the unit."}
+                return {"ok": False, "message": f"There is no recording with id {uid} on the desk."}
             recorder.delete_recording(int(uid))
             time.sleep(_RECORD_SETTLE_S)
             blob = rcp_read.read_model_stable(fresh=True)
@@ -752,12 +752,12 @@ def action_delete_recording(uid: int) -> dict:
     still = any(r.get("uid") == int(uid) for r in (info.get("recordings") or []))
     if still:
         return {"ok": False, "recorder": info,
-                "message": (f"{target['name']} is still on the unit. The request was sent and the "
-                            f"unit did not act on it.")}
+                "message": (f"{target['name']} is still on the desk. The request was sent and the "
+                            f"desk did not act on it.")}
     return {"ok": True, "recorder": info,
             "message": (f"Deleted {target['name']}, {target['duration']}. "
                         f"{wording.count(len(info.get('recordings') or []), 'recording')} left "
-                        f"on the unit.")}
+                        f"on the desk.")}
 
 
 # ----------------------------------------------------------------------------
@@ -783,7 +783,7 @@ def _storage_target(index: int):
         return None, "That is not a card slot or drive this can change.", None
     nodes = [n for n in model_tree.walk(model_tree.parse(blob)[0]) if n.name == "STORAGEVOLUME"]
     if int(index) >= len(nodes):
-        return None, "The unit does not publish that slot.", None
+        return None, "The desk does not publish that slot.", None
     return vol, nodes[int(index)].path(), blob
 
 
@@ -819,11 +819,11 @@ def action_storage_eject(index: int, on: bool = True) -> dict:
         return {"ok": False, "message": f"Could not change the {recorder.volume_spoken(index)}: "
                                         f"{exc}"}
     if now is None:
-        return _storage_reply(blob, False, f"The unit no longer reports the {vol['spoken']}. If it "
+        return _storage_reply(blob, False, f"The desk no longer reports the {vol['spoken']}. If it "
                                            f"has been unplugged, plug it in again to use it.")
     if on:
         if now["mounted"]:
-            return _storage_reply(blob, False, f"The {vol['spoken']} is still in use: the unit "
+            return _storage_reply(blob, False, f"The {vol['spoken']} is still in use: the desk "
                                                f"did not eject it.")
         return _storage_reply(blob, True, f"The {vol['spoken']} is ejected. You can unplug it "
                                           f"now, or reconnect it here to use it again.")
@@ -979,7 +979,7 @@ def read_callme() -> dict:
     try:
         blob = _callme_dump()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
     d = callme.read(blob)
     if not d.get("ok"):
         return d
@@ -992,7 +992,7 @@ def read_callme_live() -> dict:
     w = _callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
-        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+        return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
     return _callme_payload(snap)
 
 
@@ -1016,7 +1016,7 @@ def action_callme_hosting(on: bool) -> dict:
     try:
         d, path = _callme_state_now()
         if path is None:
-            return {"ok": False, "message": "This unit does not publish CallMe."}
+            return {"ok": False, "message": "This desk does not publish CallMe."}
         if d.get("hosting_locked"):
             return {"ok": False, "message": "Incoming calls cannot be switched while a call is up."}
         with _hid_lock:
@@ -1034,16 +1034,16 @@ def action_callme_hosting(on: bool) -> dict:
         return {"ok": False, "message": f"Could not change hosting: {exc}"}
     out = _callme_payload(d)
     if d.get("hosting") != on:
-        out.update(ok=False, message="The unit did not take that: incoming calls are still "
+        out.update(ok=False, message="The desk did not take that: incoming calls are still "
                                      + ("on." if d.get("hosting") else "off."))
     elif not on:
         out.update(ok=True, message="Incoming calls are off.")
     elif d.get("code"):
-        out.update(ok=True, message=(f"Guests can call in. Your unit's code is "
+        out.update(ok=True, message=(f"Guests can call in. Your desk's code is "
                                      f"{callme.spell(d['code'])}."))
     else:
         out.update(ok=True, message="Incoming calls are on, but RODE's service has not sent a code "
-                                    "yet. Check the unit is online.")
+                                    "yet. Check the desk is online.")
     return out
 
 
@@ -1066,12 +1066,12 @@ def _callme_respond(answer: bool) -> dict:
     try:
         d, path = _callme_state_now()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
     call = d.get("incoming")
     if not call:
         return {"ok": False, "message": "No CallMe call is ringing."}
     if path is None:
-        return {"ok": False, "message": "This unit does not publish CallMe."}
+        return {"ok": False, "message": "This desk does not publish CallMe."}
     slot = -1
     if answer:
         free = [s["slot"] - 1 for s in d.get("slots", []) if s.get("state") == "Idle"]
@@ -1090,7 +1090,7 @@ def _callme_respond(answer: bool) -> dict:
     except Exception as exc:
         if w is not None and answer:
             w.quiet_connect(slot, False)
-        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+        return {"ok": False, "message": f"Could not send that to the desk: {exc}"}
     if not answer:
         return {"ok": True, "message": f"Declined the call from {call['name']}."}
     # WAIT FOR THE CALL TO GO ACTIVE, which is the only honest confirmation: a write the unit
@@ -1106,7 +1106,7 @@ def _callme_respond(answer: bool) -> dict:
         w.quiet_connect(slot, False)
     if state == "Connecting":
         return {"ok": True, "message": f"Answered {call['name']}. Still connecting."}
-    return {"ok": False, "message": (f"Sent the answer for {call['name']}'s call, but the unit has "
+    return {"ok": False, "message": (f"Sent the answer for {call['name']}'s call, but the desk has "
                                      f"not started it.")}
 
 
@@ -1136,7 +1136,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
     w = _callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
-        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+        return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
     up = [s for s in snap.get("slots", []) if s.get("state") in callme.UP]
     if slot:
         up = [s for s in up if s.get("slot") == int(slot)]
@@ -1148,7 +1148,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
     i = target["slot"] - 1
     path = w.slot_path(i)
     if path is None:
-        return {"ok": False, "message": "This unit does not publish that call."}
+        return {"ok": False, "message": "This desk does not publish that call."}
     who = target.get("peer") or "the guest"
     w.quiet_end(i, True)
     try:
@@ -1158,7 +1158,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
                 time.sleep(0.15)
     except Exception as exc:
         w.quiet_end(i, False)
-        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+        return {"ok": False, "message": f"Could not send that to the desk: {exc}"}
     if _callme_wait_for(w, target["slot"], "Idle")[0] == "Idle":
         return {"ok": True, "message": f"Hung up on {who}."}
     w.quiet_end(i, False)
@@ -1178,16 +1178,16 @@ def action_callme_dial(code: str) -> dict:
         return gate
     code = callme.normalise_code(code)
     if not code:
-        return {"ok": False, "message": "Type the other unit's CallMe code, letters and numbers "
+        return {"ok": False, "message": "Type the other desk's CallMe code, letters and numbers "
                                         "only."}
     try:
         d, path = _callme_state_now()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
     if path is None:
-        return {"ok": False, "message": "This unit does not publish CallMe."}
+        return {"ok": False, "message": "This desk does not publish CallMe."}
     if code == (d.get("code") or ""):
-        return {"ok": False, "message": "That is this unit's own code."}
+        return {"ok": False, "message": "That is this desk's own code."}
     if d.get("incoming"):
         return {"ok": False, "message": callme.sentence(
             f"{d['incoming']['name']} is calling you. Answer or decline that first.")}
@@ -1213,7 +1213,7 @@ def action_callme_dial(code: str) -> dict:
                 time.sleep(0.15)
     except Exception as exc:
         w.quiet_end(i, False)
-        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+        return {"ok": False, "message": f"Could not send that to the desk: {exc}"}
     ended_before = slot.get("ended", 0)
     started = time.monotonic()
     while time.monotonic() - started < _CALLME_DIAL_WAIT_S:
@@ -1232,7 +1232,7 @@ def action_callme_dial(code: str) -> dict:
             w.quiet_end(i, False)
             return {"ok": True, "message": f"Calling {who}."}
     w.quiet_end(i, False)
-    return {"ok": False, "message": f"Sent the call to {who}, but the unit has not started it."}
+    return {"ok": False, "message": f"Sent the call to {who}, but the desk has not started it."}
 
 
 def _callme_on_expiring(_slot_index: int) -> bool:
@@ -1316,7 +1316,7 @@ def action_callme_extend(auto: bool = False) -> dict:
     w = _callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
-        return {"ok": False, "message": "The CallMe listener has not read the unit yet."}
+        return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
     expiring = [s for s in snap.get("slots", []) if s.get("state") == "Expiring"]
     if not expiring:
         return {"ok": False, "message": "No call is about to end, so there is nothing to extend."}
@@ -1324,7 +1324,7 @@ def action_callme_extend(auto: bool = False) -> dict:
     i = target["slot"] - 1
     path = w.slot_path(i)
     if path is None:
-        return {"ok": False, "message": "This unit does not publish that call."}
+        return {"ok": False, "message": "This desk does not publish that call."}
     who = target.get("peer") or "the guest"
     w.quiet_connect(i, True)
     try:
@@ -1334,7 +1334,7 @@ def action_callme_extend(auto: bool = False) -> dict:
                 time.sleep(0.15)
     except Exception as exc:
         w.quiet_connect(i, False)
-        return {"ok": False, "message": f"Could not send that to the unit: {exc}"}
+        return {"ok": False, "message": f"Could not send that to the desk: {exc}"}
     if _callme_wait_for(w, target["slot"], "Active")[0] == "Active":
         return {"ok": True, "message": (f"Extended the call with {who}"
                                         + (" automatically." if auto else "."))}
@@ -1408,15 +1408,15 @@ UNIT_SETTINGS = [
      "detail": "Press and hold is unaffected."},
     {"prop": "systemHapticSetting", "label": "Haptic feedback", "kind": "choice",
      "choices": [[0, "Off"], [1, "On press and hold"], [2, "Always on"]],
-     "detail": "Whether the unit buzzes when you touch a control."},
+     "detail": "Whether the desk buzzes when you touch a control."},
     {"prop": "metering", "label": "Meter style", "kind": "choice",
      "choices": [[0, "Default"], [1, "Broadcast"]],
-     "detail": "How the unit's screen draws its meters. Nothing you can hear."},
+     "detail": "How the desk's screen draws its meters. Nothing you can hear."},
     {"prop": "screenBrightness", "label": "Screen brightness", "kind": "int",
      "min": 0, "max": 255, "step": 5,
      "detail": "0 to 255."},
     {"prop": "autoBrightness", "label": "Adjust screen brightness automatically", "kind": "bool",
-     "detail": "The unit sets its screen brightness from the room's light, overriding the "
+     "detail": "The desk sets its screen brightness from the room's light, overriding the "
                "setting above."},
     {"prop": "screenDimAfterSeconds", "label": "Dim the screen after", "kind": "choice",
      "choices": [[0, "Never"], [30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"],
@@ -1427,20 +1427,20 @@ UNIT_SETTINGS = [
      "detail": "0 to 255."},
     {"prop": "inactiveButtonsBrightness", "label": "Button brightness when not lit", "kind": "int",
      "min": 0, "max": 255, "step": 5,
-     "detail": "0 to 255. Turn it down to darken the unit and keep lit buttons lit."},
+     "detail": "0 to 255. Turn it down to darken the desk and keep lit buttons lit."},
     # ---- THE CLOCK (selectors derived and read-back proven). -------------------------------------
     # The timezone and daylight saving are NOT offered: both store a write and leave the clock
     # alone, because the touchscreen applies them. See UNIT_SETTINGS_NOT_ON_PAGE.
     {"prop": "systemDateTime24h", "label": "24-hour clock", "kind": "bool",
      "detail": "Otherwise 12-hour with am and pm."},
-    {"prop": "systemDateTimeOnHome", "label": "Show the clock on the unit's home screen",
+    {"prop": "systemDateTimeOnHome", "label": "Show the clock on the desk's home screen",
      "kind": "bool",
      "detail": "Nothing you can hear; for a sighted co-host."},
     # ---- THE LOCKOUTS (selectors derived and read-back proven). ----------------------------------
     # They are last on the page on purpose: they are the ones that can make a working desk feel
     # broken, so the wording has to say exactly what goes quiet and that this app can always undo
     # it.
-    {"prop": "disableAllPhysicalButtons", "label": "Lock the unit's physical buttons", "kind": "bool",
+    {"prop": "disableAllPhysicalButtons", "label": "Lock the desk's physical buttons", "kind": "bool",
      "detail": "The faders and touchscreen still work, and this app can switch it back off."},
     {"prop": "disableAllHeadphoneOutputs", "label": "Silence every headphone output", "kind": "bool",
      "detail": "Mixes, recording and streaming carry on. Switch it off here to get them back."},
@@ -1464,14 +1464,14 @@ UNIT_SETTINGS_NOT_ON_PAGE = {
                      "than none.",
     "outputBTMute": "Has its own control beside the monitor mute, for the same reason.",
     "outputBTLevel": "Has its own control: the Bluetooth output level, next to the two mutes. It is "
-                     "a level rather than a unit preference, so it belongs with the other levels.",
+                     "a level rather than a desk preference, so it belongs with the other levels.",
     "systemDateTimezone": "DELIBERATELY NOT OFFERED. Measured display-only on this desk (three "
                           "indices, three takes, one UTC second), and at the touchscreen sitting "
-                          "the unit's own Time Zone field would not open either. Writing it would "
+                          "the desk's own Time Zone field would not open either. Writing it would "
                           "change nothing a user could see, so offering it would be a lie. Still "
                           "saved and restored by a profile, because it is real stored state.",
     "systemDateTimeDaylightSavings": "NOT OFFERED, for the same reason as the timezone: a write is "
-                                     "stored and reads back, and the clock on the unit's screen "
+                                     "stored and reads back, and the clock on the desk's screen "
                                      "stays where it was. The touchscreen "
                                      "applies it. Still saved and restored by a profile.",
 }
@@ -1522,7 +1522,7 @@ def read_unit_settings() -> dict:
         with _hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit's settings: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk's settings: {exc}"}
     values = _unit_setting_values(blob)
     settings = [dict(s, value=values.get(s["prop"])) for s in UNIT_SETTINGS]
     # MIDI LIVES ON THIS TAB, not on one of its own for a single switch, so its value is reported
@@ -1547,7 +1547,7 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     and a slider is clamped to its range."""
     spec = UNIT_SETTING_BY_PROP.get(prop)
     if spec is None:
-        return {"ok": False, "message": f"Unknown unit setting: {prop}."}
+        return {"ok": False, "message": f"Unknown desk setting: {prop}."}
     gate = _cap_gate("unit_settings", lambda name:
                      f"These settings can be read but not changed on the {name}: changing them "
                      f"has only been confirmed on a RODECaster Pro 2.")
@@ -1585,10 +1585,10 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
                                               "outputMonMute") or [None])[0]
                 if mute_after is not None and bool(mute_after) != bool(mute_before):
                     rcp_transfer.set_unit_setting("outputMonMute", bool(mute_before))
-                    extra = (" The unit un-muted the monitor speakers when it did that, so the mute "
+                    extra = (" The desk un-muted the monitor speakers when it did that, so the mute "
                              "has been put back on."
                              if mute_before else
-                             " The unit muted the monitor speakers when it did that, so the mute has "
+                             " The desk muted the monitor speakers when it did that, so the mute has "
                              "been taken back off.")
     except Exception as exc:
         return {"ok": False, "message": f"Could not set {spec['label']}: {exc}"}
@@ -1710,7 +1710,7 @@ def device_overview(fresh: bool = True) -> dict:
             blob = rcp_read.read_model_stable() if fresh else _desk_now()
     except Exception as exc:
         return {"ok": False, "device_name": dev.name,
-                "message": f"Could not read the unit: {exc}"}
+                "message": f"Could not read the desk: {exc}"}
 
     spec = dev.fader
     vec = rcp_read.values(blob, "channelInputSource")
@@ -1842,7 +1842,7 @@ def read_device_status() -> dict:
                 # nothing else to go on.
                 "message": "No RODECaster found. Check it is powered on, and that the USB cable "
                            "goes into the socket nearest the power inlet. That is the only one "
-                           "this app can control the unit over; the other USB socket carries "
+                           "this app can control the desk over; the other USB socket carries "
                            "audio only.",
                 "interfaces": interfaces,
             }
@@ -1981,9 +1981,9 @@ def read_network_status() -> dict:
         # behaves differently on the two desks. The fixed IP IS a fact about the desk: `ipAddress`
         # takes no write (PROJECT_GUIDE part 2).
         "still_read_only": (
-            "Scanning for Bluetooth devices is not available here. Make the unit discoverable "
+            "Scanning for Bluetooth devices is not available here. Make the desk discoverable "
             "above and pair from the phone instead. Pairing from here is still being worked on. "
-            "A fixed IP address cannot be set: the unit reports its address but takes no other."),
+            "A fixed IP address cannot be set: the desk reports its address but takes no other."),
         "message": "Read network and firmware from the device.",
     }
 
@@ -2039,7 +2039,7 @@ def action_set_wifi(on: bool) -> dict:
         return {"ok": False, "message": f"Could not change the wifi radio: {exc}"}
     if bool(on) != state["on"]:
         return {"ok": False, "wifi": state,
-                "message": "The unit did not take that: the wifi radio is still "
+                "message": "The desk did not take that: the wifi radio is still "
                            + ("on" if state["on"] else "off") + "."}
     if not on:
         return {"ok": True, "wifi": state, "message": "Wifi is off."}
@@ -2099,11 +2099,11 @@ def action_join_wifi(ssid: str, password: str) -> dict:
         return {"ok": False, "message": "Give the name of the network to join."}
     if not ssid.isascii():
         return {"ok": False,
-                "message": "The unit only takes plain ASCII in a network name, so this one cannot "
+                "message": "The desk only takes plain ASCII in a network name, so this one cannot "
                            "be sent from here."}
     if password and not password.isascii():
         return {"ok": False,
-                "message": "The unit only takes plain ASCII in a password, so this one cannot be "
+                "message": "The desk only takes plain ASCII in a password, so this one cannot be "
                            "sent from here."}
     try:
         if not password:
@@ -2136,12 +2136,12 @@ def action_join_wifi(ssid: str, password: str) -> dict:
     if state.get("wrong_password"):
         return {"ok": False, "wifi": state,
                 "message": f"{ssid} refused the password. The name and password are still stored "
-                           f"on the unit, so try again with the password corrected."}
+                           f"on the desk, so try again with the password corrected."}
     if state.get("ip"):
         return {"ok": True, "wifi": state,
-                "message": f"Joined {ssid}. The unit's address is {state['ip']}."}
+                "message": f"Joined {ssid}. The desk's address is {state['ip']}."}
     return {"ok": False, "wifi": state,
-            "message": f"The unit took the details for {ssid} but has no address yet. It did not "
+            "message": f"The desk took the details for {ssid} but has no address yet. It did not "
                        f"say the password was wrong, so it may still be connecting, or the network "
                        f"may be out of range. Check again in a moment."}
 
@@ -2172,15 +2172,15 @@ def action_set_bt_visible(on: bool) -> dict:
         return {"ok": False, "message": f"Could not change Bluetooth discoverability: {exc}"}
     if now != bool(on):
         return {"ok": False, "visible": now,
-                "message": "The unit did not take that: it is still "
+                "message": "The desk did not take that: it is still "
                            + ("discoverable" if now else "not discoverable") + "."}
     if on:
         return {"ok": True, "visible": True,
-                "message": "The unit is now discoverable. On your phone or computer, look for "
+                "message": "The desk is now discoverable. On your phone or computer, look for "
                            "RODECaster in its Bluetooth list and pair from there. It stops being "
                            "discoverable on its own after a while, so do it now."}
     return {"ok": True, "visible": False,
-            "message": "The unit is no longer discoverable. Anything already paired still works."}
+            "message": "The desk is no longer discoverable. Anything already paired still works."}
 
 
 # ----------------------------------------------------------------------------
@@ -2276,7 +2276,7 @@ def action_scan_wifi() -> dict:
             return {"ok": False, "message": "The wifi is off. Turn it on to scan for networks."}
         if state["ip"]:
             return {"ok": False,
-                    "message": (f"The unit only looks for networks while it is not connected to "
+                    "message": (f"The desk only looks for networks while it is not connected to "
                                 f"one, and it is connected to {state['ssid']}. Disconnect from it "
                                 f"first, or type the name of the network you want.")}
         _cycle_wifi_radio()
@@ -2299,7 +2299,7 @@ def action_scan_wifi() -> dict:
         entry["current"] = bool(current and entry["ssid"] == current)
     return {"ok": True, "networks": found, "current": current,
             "message": (f"Found {wording.count(len(found), 'network')}. "
-                        f"The unit lists ten at most, so a network in range can still be missing "
+                        f"The desk lists ten at most, so a network in range can still be missing "
                         f"from this list.")}
 
 
@@ -2314,7 +2314,7 @@ def action_disconnect_wifi() -> dict:
             state = _wifi_state(rcp_read.read_model_stable(fresh=True))
         ssid = state["ssid"]
         if not ssid and not state["ip"]:
-            return {"ok": True, "wifi": state, "message": "The unit is not set up for any network."}
+            return {"ok": True, "wifi": state, "message": "The desk is not set up for any network."}
         with _hid_lock:
             rcp_transfer.write_at(rcp_transfer.NETWORK, "wifiSSID", "str", "")
         if state["on"]:
@@ -2326,9 +2326,9 @@ def action_disconnect_wifi() -> dict:
         return {"ok": False, "message": f"Could not disconnect from the network: {exc}"}
     if state["ssid"] or state["ip"]:
         return {"ok": False, "wifi": state,
-                "message": f"The unit did not let go of {ssid or 'its network'}."}
+                "message": f"The desk did not let go of {ssid or 'its network'}."}
     return {"ok": True, "wifi": state,
-            "message": (f"Disconnected from {ssid or 'the network'}, and the unit has forgotten "
+            "message": (f"Disconnected from {ssid or 'the network'}, and the desk has forgotten "
                         f"it, so joining it again needs its password.")}
 
 
@@ -2514,11 +2514,11 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     name = channels.MIC_TYPE.get(type_value, f"type {type_value}")
     msg = f"Mic {channel} input type set to {name}."
     if gain is not None and gain != was:
-        msg += f" The unit moved the gain to {gain} dB for this microphone."
+        msg += f" The desk moved the gain to {gain} dB for this microphone."
     moved = sorted(k for k, v in proc_after.items()
                    if k in proc_before and proc_before[k] != v)
     if moved:
-        msg += (f" The unit also replaced this channel's processing with the {name} voicing: "
+        msg += (f" The desk also replaced this channel's processing with the {name} voicing: "
                 f"{wording.count(len(moved), 'setting')} changed, so anything you had "
                 f"set here by hand is gone.")
     return {"ok": True, "message": msg, "gain_db": gain}
@@ -2649,6 +2649,55 @@ def _desk_now() -> bytes:
         if snap:
             return snap
     return rcp_read.read_model_stable(fresh=True)
+
+
+_rode_read_busy = threading.Lock()
+# How long a read for RODE's app waits for a write or a job's read to let the desk go before it
+# skips this look; the next comes `rode_app.POLL_S` later.
+_RODE_READ_WAIT_S = 1.0
+
+
+_rode_was_open = False
+
+
+def _follow_rode_app(open_now: bool) -> None:
+    """`rode_app.on_look`: while RODE's app is open, compare each dump with the desk model, so what
+    it changed, which the desk never pushes, reaches whatever follows the desk
+    (`desk_model.reveal`). NOTHING IS READ ON A TIMER: every reader is sent every dump's frames,
+    and ours arriving every few seconds keep RODE's app on "Synchronizing device" for good. The
+    window reads once when it comes back to the front (`read_for_rode_app`), and the desk is read
+    once more as RODE's app closes, for what it changed since."""
+    global _rode_was_open
+    closed, _rode_was_open = _rode_was_open and not open_now, open_now
+    if closed:
+        _read_unheard()
+    desk_model.reveal(open_now)
+
+
+def read_for_rode_app() -> None:
+    """One read of the desk while RODE's app is open, for what it has changed."""
+    if rode_app.is_open():
+        _read_unheard()
+
+
+def _read_unheard() -> None:
+    """One read, compared with the desk model. Skipped while a job has the desk, while the desk is
+    gone, and while another such read runs."""
+    if not desk_live.connected() or desk_work_in_progress() is not None:
+        return
+    if not _rode_read_busy.acquire(blocking=False):
+        return
+    try:
+        if not _hid_lock.acquire(timeout=_RODE_READ_WAIT_S):
+            return
+        try:
+            rcp_read.read_model(fresh=True)
+        finally:
+            _hid_lock.release()
+    except Exception as exc:
+        diagnostics.event("rode_app.read_failed", str(exc))
+    finally:
+        _rode_read_busy.release()
 
 
 def _mute_reach_message(who: str, sources) -> str:
@@ -3025,7 +3074,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
             gain_before, proc_on = _read_gain_and_processing(mic)
         if gain_before is None:
             _autogain_set(phase="failed", done=True,
-                          message="Could not read that microphone's gain from the unit.")
+                          message="Could not read that microphone's gain from the desk.")
             return
         _autogain_set(gain_before=gain_before, processing_before=proc_on)
 
@@ -3038,7 +3087,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
 
         endpoint = autogain.chat_endpoint()
         if endpoint is None:
-            raise RuntimeError("the unit's Chat audio device is not available on this computer")
+            raise RuntimeError("the desk's Chat audio device is not available on this computer")
         # Windows out of the way on the endpoint measured, and on no other: its level scales the
         # reading and its mute would make the microphone look dead. The meter's chosen stream may
         # be a different endpoint, which is left as the user set it.
@@ -3181,7 +3230,7 @@ class _ChatIsolation:
         m = devices.get_active_device().matrix
         excl = [bool(v) for v in rcp_read.block_values(blob, m.block, "mixDisabled", "bool")]
         if len(excl) != m.cell_count:
-            raise RuntimeError("the unit's mix grid is not the shape this expects "
+            raise RuntimeError("the desk's mix grid is not the shape this expects "
                                "(a phone caller may be connected)")
         got = {src: excl[m.row_stride * src + self.chat] for src in self.sources}
         lv = rcp_read.read_matrix_levels(blob)
@@ -3394,7 +3443,7 @@ def action_set_channel_advanced(name: str, on: bool) -> dict:
     return {"ok": True,
             "message": (f"{ch['label']} set to advanced processing; the modules and their "
                         f"parameters are in charge." if on else
-                        f"{ch['label']} set to simple processing; the unit works the chain out "
+                        f"{ch['label']} set to simple processing; the desk works the chain out "
                         f"from Depth, Sparkle and Punch.")}
 
 
@@ -4113,7 +4162,7 @@ def fader_model() -> dict:
         # browsing the list performs the swap. Each fader applies on Enter.
         "note": ("Choose which channel sits on each fader." + phys_note + " Putting a channel "
                  "on a fader that already holds it elsewhere swaps the two. Nothing is sent to the "
-                 "unit until you press Enter."),
+                 "desk until you press Enter."),
     }
 
 
@@ -4212,7 +4261,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
     spec = _active_faders()
     pair = spec.pair_map.get(int(pair_code))
     if pair is None:
-        return {"ok": False, "message": f"{pair_code} is not a stereo pair on this unit."}
+        return {"ok": False, "message": f"{pair_code} is not a stereo pair on this desk."}
     lower, upper = pair
     label = spec.pair_label.get(int(pair_code), f"pair {pair_code}")
     chain_note = mute_note = ""
@@ -4669,10 +4718,10 @@ def _clip_start() -> str:
     global _clip_watcher
     found = meters.desk_streams()
     if not found["ok"]:
-        return found["reason"] or "The unit's audio is not available."
+        return found["reason"] or "The desk's audio is not available."
     stream = _main_mix_stream(found)
     if stream is None:
-        return "The unit is offering no recording stream."
+        return "The desk is offering no recording stream."
     w = meters.Watcher(stream["id"], speech.say, clip_at=_CLIP_AT,
                        warn_silence=False, clip_sound=False, label="Main mix")
     if not w.start():
@@ -4726,7 +4775,7 @@ def action_set_clip_warning(on: bool) -> dict:
     if not on:
         return {"ok": True, "clip_warning": False, "message": "Clipping will not be announced."}
     found = meters.desk_streams()
-    later = "" if found["ok"] else (f" It starts once the unit's audio is available: "
+    later = "" if found["ok"] else (f" It starts once the desk's audio is available: "
                                     f"{found['reason']}")
     return {"ok": True, "clip_warning": True,
             "message": "The main mix will be announced when it clips." + later}
@@ -4856,7 +4905,7 @@ def _chan_check_source(name: str):
     """The matrix source a channel name refers to, or (None, reason)."""
     src = next((s for s in _active_matrix().sources_for(True) if s["key"] == name), None)
     if src is None:
-        return None, f"{name} is not a channel this unit exposes to the mixes."
+        return None, f"{name} is not a channel this desk exposes to the mixes."
     # CHAT IS THE ONE CHANNEL THIS CANNOT DO, and the reason is the mechanism rather than a rule:
     # the isolation listens on the Chat OUTPUT, and the Chat output is mix-minus - it deliberately
     # excludes the Chat source so a caller does not hear themselves. So there is nothing to hear.
@@ -4890,7 +4939,7 @@ def action_channel_level_check(name: str = "") -> dict:
     endpoint = autogain.chat_endpoint()
     if endpoint is None:
         return {"ok": False, "running": False,
-                "message": "The unit's Chat audio device is not available on this computer, so "
+                "message": "The desk's Chat audio device is not available on this computer, so "
                            "there is no way to listen to one channel on its own."}
     # Windows out of the way on the endpoint actually being metered: its level scales every reading
     # and its mute would make a working microphone read as silence. Said in the reply, not silently.
@@ -5622,7 +5671,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                        and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
                     attempts += 1
                     if attempts == 1:
-                        speech.say("RODE's driver missed the unit. Reconnecting it; the audio drops "
+                        speech.say("RODE's driver missed the desk. Reconnecting it; the audio drops "
                                  "again for a moment.")
                     _virtual_devices_retrying.set()
                     try:
@@ -5656,7 +5705,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                 # asking for one reads as "this will fix it" when it may well not.
                 where = (f" Windows sound stays on {parking.name} until it does."
                          if parking is not None else "")
-                speech.say("RODE's driver has not connected to the unit, so the extra inputs are "
+                speech.say("RODE's driver has not connected to the desk, so the extra inputs are "
                          "not there." + where)
         finally:
             _virtual_devices_busy.release()
@@ -5781,7 +5830,7 @@ def action_set_auto_mute(which: str, on: bool) -> dict:
     now = bool(now)
     if now != bool(on):
         return {"ok": False, "on": now,
-                "message": (f"The unit did not take that: {spec['label'].lower()} is still "
+                "message": (f"The desk did not take that: {spec['label'].lower()} is still "
                             f"{'on' if now else 'off'}.")}
     return {"ok": True, "on": now, "message": spec["on" if now else "off"]}
 
@@ -6434,14 +6483,14 @@ def _backup_unit(job, safe: str) -> dict:
     show = None
     note = ""
     if "shows" in devices.get_active_device().caps and _removable_volume_ready():
-        got = _export_and_wait(job.step, "Backing the unit up to its own drive...")
+        got = _export_and_wait(job.step, "Backing the desk up to its own drive...")
         if got.get("ok"):
             s = got["show"]
             show = {"snapshot": s.get("snapshot"), "uuid": s.get("uuid"), "name": s.get("name")}
         else:
             # The profile is still worth having, so carry on rather than losing the lot. Say so
             # plainly: a backup that quietly did half of what was asked is worse than a slow one.
-            note = (" The unit's own backup did not appear on the drive, so this is a settings "
+            note = (" The desk's own backup did not appear on the drive, so this is a settings "
                     "and pads backup only. Check there is a drive in with room on it.")
     res = _do_snapshot(safe, True, job.tick, show=show)
     if not res.get("ok"):
@@ -6455,7 +6504,7 @@ def _backup_wording(safe: str, show) -> str:
     what both wordings lead with; the unit's own copy is an extra, and its absence is not a fault."""
     if show:
         return (f"Backed up as {safe}: your settings and pads on this computer, plus a copy of "
-                f"the whole unit on its own drive.")
+                f"the whole desk on its own drive.")
     return f"Backed up as {safe}: your settings and pads, on this computer."
 
 
@@ -6468,7 +6517,7 @@ def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = Fal
                                         "spaces, dashes or underscores."}
     return _profile_job.start(
         lambda job: _do_snapshot(safe, include_pads, job.tick, baseline=baseline),
-        message="Reading the unit's settings, please wait.",
+        message="Reading the desk's settings, please wait.",
         started="Saving the profile.")
 
 
@@ -6561,7 +6610,7 @@ def action_baseline_skip() -> dict:
     """Decline the first-run capture. Remembered per desk so it is asked once, not every launch."""
     _note_baseline_asked()
     return {"ok": True, "message": "No baseline was captured. You can still capture one from the "
-                                   "Backups page at any time, though it will then record the unit "
+                                   "Backups page at any time, though it will then record the desk "
                                    "as it is now rather than as you found it."}
 
 
@@ -6570,7 +6619,7 @@ def action_baseline_save(include_pads: bool = True) -> dict:
     dialog as an ordinary profile save; only the name, the marking and the protections differ."""
     existing = profiles.find_baseline()
     if existing:
-        return {"ok": False, "message": f"This unit already has a baseline, {existing['name']}, "
+        return {"ok": False, "message": f"This desk already has a baseline, {existing['name']}, "
                                         f"and there can only be one. Nothing was changed."}
     _note_baseline_asked()          # asked and answered, whichever way the capture then goes
     return snapshot_profile(_baseline_name(), include_pads=include_pads, baseline=True)
@@ -6649,7 +6698,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         if gate is not None:
             return {"ok": False,
                     "message": ("A clean restore resets the desk first, and that is not available "
-                                "on this unit. " + gate["message"] + " Restore without the reset "
+                                "on this desk. " + gate["message"] + " Restore without the reset "
                                 "instead: it puts your settings back but leaves anything the "
                                 "profile does not cover as it is.")}
 
@@ -6788,7 +6837,7 @@ def _shows_write_gate():
                      f"risk it.")
 
 
-_NO_BACKUP_STORAGE = ("There is no memory card or USB drive in the unit, so there is nowhere to "
+_NO_BACKUP_STORAGE = ("There is no memory card or USB drive in the desk, so there is nowhere to "
                       "save a backup.")
 _RESET_STOPPED_NO_BACKUP = ("Stopped before resetting anything, and nothing on the desk has changed: "
                             "the backup did not appear on the drive, so there would have been no "
@@ -6810,7 +6859,7 @@ def read_backup_storage() -> dict:
         with _hid_lock:
             blob = rcp_read.read_model()
     except Exception as exc:
-        return {"ok": False, "message": f"Could not read the unit's storage: {exc}"}
+        return {"ok": False, "message": f"Could not read the desk's storage: {exc}"}
     dest = recorder.destination(recorder.read_volumes(blob))
     return {"ok": True, "writable": "shows" in devices.get_active_device().caps,
             "can_backup": bool(dest),
@@ -6897,7 +6946,7 @@ def _export_and_wait(step, label: str) -> dict:
     found, _ = shows.wait_for(appeared, read=_locked_dump)
     if not found:
         return {"ok": False, "count": len(before),
-                "message": ("The unit took the command but no new backup has appeared on the "
+                "message": ("The desk took the command but no new backup has appeared on the "
                             "drive. Check there is a drive in and that it has room.")}
     return {"ok": True, "show": found, "count": len(before) + 1}
 
@@ -6969,7 +7018,7 @@ def _reset_and_wait(step) -> dict:
         if answered:
             # The desk is present and talking, so nothing needs replugging and nothing is lost.
             return {"ok": False,
-                    "message": ("The unit took the command but its show has not changed, so the "
+                    "message": ("The desk took the command but its show has not changed, so the "
                                 "reset does not look like it happened. Nothing has been lost; "
                                 "check the Shows list in a moment.")}
         # Not answering: the command has almost certainly applied, and nothing about it can be
@@ -6978,13 +7027,13 @@ def _reset_and_wait(step) -> dict:
                 "message": ("The desk stopped answering before it could confirm the reset"
                             + (", and the connection dropped. " if listener_lost else ". ")
                             + "The reset itself was almost certainly carried out, but nothing can "
-                              "be checked while the unit is not responding. Unplug the USB cable "
+                              "be checked while the desk is not responding. Unplug the USB cable "
                               "in the socket nearest the power inlet, wait a few seconds and plug "
                               "it back in, then look at the Shows list. If it still does not come "
                               "back, try that once or twice more, and if it will not appear at "
                               "all, disconnect the power, hold the red button on the back for "
                               "sixty seconds, then reconnect the power supply on its own and "
-                              "switch the unit on. Nothing is lost either way.")}
+                              "switch the desk on. Nothing is lost either way.")}
     wake_channels()              # a reset leaves the same silent-channel fault; see wake_channels
     # THE OTHER THING A RESET LEAVES BROKEN - the voice-FX pads' effect definitions - IS HEALED BY
     # THE CALLER, NOT HERE, and deliberately. soundpad.heal_fx_pool rebuilds six pads at about
@@ -7091,7 +7140,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # command and Windows drops it a minute later.
             if blob_after is None:
                 return {"ok": False,
-                        "message": ("The unit stopped responding during the restore and is no "
+                        "message": ("The desk stopped responding during the restore and is no "
                                     "longer answering. Unplug its USB cable and plug it back in, "
                                     "then check the Device page before trusting any setting.")}
             # Nothing moved and the unit raised no error. That is only benign for a backup of the
@@ -7105,10 +7154,10 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
                 return {"ok": False, "message": shows.error_message(err_after)}
             if target_uuid == loaded_uuid:
                 return {"ok": True,
-                        "message": (f"The unit already matched \"{shown}\", so nothing "
+                        "message": (f"The desk already matched \"{shown}\", so nothing "
                                     f"needed to change.")}
             return {"ok": False,
-                    "message": (f"The unit took the command but has not loaded "
+                    "message": (f"The desk took the command but has not loaded "
                                 f"\"{shown}\" yet. Check the list in a moment.")}
         # THE ENGINE CAN COME BACK WITH A CHANNEL SILENT. See wake_channels: the model looks
         # perfect, so this cannot be conditional on detecting anything.
@@ -7153,7 +7202,7 @@ def wake_channels() -> dict:
         blob = None
     if not rcp_read.is_model_dump(blob):
         return {"ok": False, "woken": [],
-                "message": "The unit is not answering, so its mic channels could not be woken."}
+                "message": "The desk is not answering, so its mic channels could not be woken."}
     woken = []
     for ch in MIC_CHANNELS:
         try:
@@ -7171,7 +7220,7 @@ def wake_channels() -> dict:
         except Exception as exc:          # one channel failing must not leave the rest unwoken
             diagnostics.event("wake.channel_failed", str(exc), mic=ch)
     return {"ok": True, "woken": woken,
-            "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the unit's audio "
+            "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the desk's audio "
                         f"engine picks them up again." if woken
                         else "No mic channels needed waking.")}
 
@@ -7236,7 +7285,7 @@ def backup_restore_plan(name: str) -> dict:
         # read it, so the honest answer is to say so rather than to imply we checked.
         return {"ok": True, "name": name, "via": "show", "paired": True,
                 "seconds_per_pad": PAD_RESTORE_SECONDS, "pads": 0,
-                "warnings": ["This backup was made by the unit itself, so there is no way to "
+                "warnings": ["This backup was made by the desk itself, so there is no way to "
                              "tell you what it contains before it is restored. It may move "
                              "channels between faders or change their levels."]}
     loaded = profiles.load(name)
@@ -7291,7 +7340,7 @@ def read_backups() -> dict:
             on_drive = shows.read_shows(blob)
             storage = bool(recorder.destination(recorder.read_volumes(blob)))
         except Exception as exc:
-            note = f"The unit's own backups could not be read: {exc}"
+            note = f"The desk's own backups could not be read: {exc}"
     by_snapshot = {s.get("snapshot"): s for s in on_drive}
 
     out, claimed = [], set()
@@ -7323,7 +7372,7 @@ def read_backups() -> dict:
             # several can share a name. The modification date is the only thing that tells them
             # apart, which is why it is part of the label rather than a detail line.
             "key": "show:%s" % s.get("snapshot"),
-            "name": s.get("name") or "Made on the unit",
+            "name": s.get("name") or "Made on the desk",
             "kind": "unit",
             "pads": None,
             "saved_at": None,
@@ -7584,7 +7633,7 @@ def _show_delete_work(snapshot: int, step) -> dict:
     done, _ = shows.wait_for(gone, read=_locked_dump)
     if not done:
         return {"ok": False,
-                "message": f"The unit took the command but \"{match['name']}\" is still on the "
+                "message": f"The desk took the command but \"{match['name']}\" is still on the "
                            f"drive."}
     return {"ok": True, "message": f"Deleted \"{match['name']}\" and gave the space back."}
 
@@ -7601,8 +7650,8 @@ def _delete_show_then_profile(snapshot: int, name: str):
         gone = delete_profile(name, force=True)
         if not gone.get("ok"):
             return gone
-        tail = (" The unit's own copy went too." if res.get("ok")
-                else " The unit's own copy could not be deleted, so it is still on the drive.")
+        tail = (" The desk's own copy went too." if res.get("ok")
+                else " The desk's own copy could not be deleted, so it is still on the drive.")
         return {"ok": True, "message": (gone.get("message") or "Deleted.") + tail}
     return _run_show_job("Deleting the backup", work)
 
@@ -8373,7 +8422,7 @@ def hotkey_commands() -> dict:
             groups.append({"category": cat, "commands": rows})
     msg = f"{len(items)} things can be put on a shortcut."
     if not complete:
-        msg += " The unit could not be read, so pads and presets are not listed."
+        msg += " The desk could not be read, so pads and presets are not listed."
     return {"ok": True, "groups": groups, "count": len(items), "complete": complete,
             "message": msg}
 
@@ -8703,6 +8752,7 @@ def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STA
     desk_live.start()
     channels.follow_desk()
     pad_shortcuts.follow_desk()
+    rode_app.on_look = _follow_rode_app
     rode_app.start()
     if announce and announcer.starts_on():
         # App settings can still turn it off.
@@ -8773,7 +8823,7 @@ def desk_work_in_progress() -> str | None:
     for job, running in ((_firmware_job, "A firmware update is running."),
                          (_restore_job, "A restore is running."),
                          (_pad_restore_job, "A pad restore is running."),
-                         (_show_job, "A backup, restore or reset is running on the unit."),
+                         (_show_job, "A backup, restore or reset is running on the desk."),
                          (_profile_job, "A backup is running."),
                          (_driver_job, "The driver install is running.")):
         if job.busy():

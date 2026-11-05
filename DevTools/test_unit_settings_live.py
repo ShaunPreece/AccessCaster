@@ -60,7 +60,7 @@ SKIP = {"outputMonFixed": "changes what the monitor output sends; not tried unas
 def unit_values():
     d = server.read_unit_settings()
     if not d.get("ok"):
-        raise SystemExit("could not read the unit settings: " + str(d.get("message")))
+        raise SystemExit("could not read the desk settings: " + str(d.get("message")))
     return {s["prop"]: s["value"] for s in d["settings"]}, d
 
 
@@ -202,7 +202,7 @@ def run() -> None:
     # EVERY setting the profile carries, not just the ones the page shows: a setting that drifted
     # matters most where nobody can see it. Compared against the profile taken at the start, which
     # is the like-for-like reference.
-    check("every unit setting is back where it started", post_unit, pre_unit)
+    check("every desk setting is back where it started", post_unit, pre_unit)
 
     # Value-level diff, for information: some properties move on their own (the light sensor,
     # timers, telemetry), so this is printed rather than asserted.

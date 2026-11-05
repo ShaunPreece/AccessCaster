@@ -7,17 +7,17 @@ from native import a11y
 from native.dialogs import SpeakingDialog, _paragraphs
 
 RESET_TEXT = (
-    "This puts every setting and every SMART pad back to how the unit left the factory, including "
-    "RODE's eight factory pad sounds, which the unit rebuilds from its own firmware. That is the "
+    "This puts every setting and every SMART pad back to how the desk left the factory, including "
+    "RODE's eight factory pad sounds, which the desk rebuilds from its own firmware. That is the "
     "only way to get those sounds back, so if what you actually want is your own settings "
-    "returned, restore a backup instead: it is quicker and it does not need the unit to "
+    "returned, restore a backup instead: it is quicker and it does not need the desk to "
     "reconnect.\n\n"
     "Your wifi, the language and the analytics answer are not part of it and are left alone, and "
     "the recordings on the drive are untouched. The monitor speaker level goes back to its "
     "default, so turn speakers down before you start.\n\n"
     # No rate is quoted: the one measured is from too few trials to state as a figure.
-    "Resetting rebuilds the unit's USB connection, and it sometimes does not come back on its "
-    "own. If the app stops finding the unit afterwards, unplug the USB cable in the socket nearest "
+    "Resetting rebuilds the desk's USB connection, and it sometimes does not come back on its "
+    "own. If the app stops finding the desk afterwards, unplug the USB cable in the socket nearest "
     "the power inlet, wait a few seconds and plug it back in. The reset itself will still have "
     "happened and nothing is lost.")
 
@@ -34,16 +34,16 @@ class ResetDialog(SpeakingDialog):
         text = RESET_TEXT
         if blocked:
             text += (f"\n\n{blocked} So this cannot be backed up first, and it cannot be undone. "
-                     "Put a memory card or a USB drive in the unit first if you want a way back.")
+                     "Put a memory card or a USB drive in the desk first if you want a way back.")
         _paragraphs(self, sizer, text)
-        self.backup_first = wx.CheckBox(self, label="Back the unit up first, so this can be undone")
+        self.backup_first = wx.CheckBox(self, label="Back the desk up first, so this can be undone")
         self.backup_first.SetValue(not blocked)
         a11y.describe(self.backup_first, blocked or (
             "Takes about a second and about 24 megabytes on the recordings drive. Without it there "
-            "is no way back to how the unit is now."))
+            "is no way back to how the desk is now."))
         self.backup_first.Bind(wx.EVT_CHECKBOX, self._on_tick)
         sizer.Add(self.backup_first, 0, wx.ALL, 12)
-        go = wx.Button(self, wx.ID_OK, label="Reset the unit")
+        go = wx.Button(self, wx.ID_OK, label="Reset the desk")
         cancel = wx.Button(self, wx.ID_CANCEL, label="Cancel")
         cancel.SetDefault()
         # The tab order starts on Cancel, so that is where the focus lands.
@@ -73,16 +73,16 @@ class BaselineDialog(wx.Dialog):
     remembered, and wx.ID_CANCEL for Escape, which is not, so the offer comes again next time."""
 
     def __init__(self, parent, status):
-        super().__init__(parent, title="Back up this unit as you found it")
+        super().__init__(parent, title="Back up this desk as you found it")
         sizer = wx.BoxSizer(wx.VERTICAL)
         _paragraphs(self, sizer, (
             f"This looks like the first time AccessCaster has seen this "
-            f"{status.get('device_name') or 'unit'}. Before anything is changed, it can save the "
-            f"unit's current settings as a backup called {status.get('suggested_name') or ''}, so "
+            f"{status.get('device_name') or 'desk'}. Before anything is changed, it can save the "
+            f"desk's current settings as a backup called {status.get('suggested_name') or ''}, so "
             "there is always a way back to how it is right now.\n\n"
-            "Starting again from factory settings only ever gets you to how the unit left the "
+            "Starting again from factory settings only ever gets you to how the desk left the "
             "factory, which is not the same as how it came to you, so once a setting is changed "
-            "this is the only way back. It is only offered once per unit."))
+            "this is the only way back. It is only offered once per desk."))
         save = wx.Button(self, wx.ID_OK, label="Back up now")
         self.include_pads = wx.CheckBox(self, label="Include SMART pads (sounds and layout)")
         self.include_pads.SetValue(True)

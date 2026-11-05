@@ -35,11 +35,11 @@ def _raises(fn):
     return False
 
 
-print("unit settings: address table vs the Device page")
+print("desk settings: address table vs the Device page")
 
 # THE CHECK THIS FILE WAS WRITTEN FOR.
 off = server.unit_settings_off_page()
-check_true("every writable unit setting is on the page or deliberately off it",
+check_true("every writable desk setting is on the page or deliberately off it",
            not off,
            "these are writable but neither on the Device page nor listed in "
            f"UNIT_SETTINGS_NOT_ON_PAGE, so nobody has decided about them: {off}")

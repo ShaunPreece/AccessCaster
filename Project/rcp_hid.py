@@ -408,7 +408,7 @@ class RodeCaster:
         iface = find_control_interface(prefer_pid, prefer_interface)
         if iface is None:
             raise RuntimeError(
-                "No RODECaster control interface found. Is the unit connected "
+                "No RODECaster control interface found. Is the desk connected "
                 "and powered on?"
             )
         return cls.open_path(iface, purpose)

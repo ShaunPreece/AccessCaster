@@ -84,7 +84,7 @@ class ShortcutsPage(wx.Panel):
         # Partly ticked while some of the pad scheme is bound. Ticking adds what is missing;
         # unticking deletes it.
         self.pad_set = wx.CheckBox(parent, label="Use the SMART pad keys", style=wx.CHK_3STATE)
-        a11y.describe(self.pad_set, "The number keys play the pads of the bank the unit is on, "
+        a11y.describe(self.pad_set, "The number keys play the pads of the bank the desk is on, "
                                     "Dash and Equals change bank, and P says what is playing.")
         self.pad_set.Bind(wx.EVT_CHECKBOX, self._on_pad_set)
         sizer.Add(self.pad_set, 0, wx.ALL, 6)
@@ -202,7 +202,7 @@ class ShortcutsPage(wx.Panel):
         row = self._chosen()
         if not confirm(self, "Delete this shortcut?",
                        f'This removes the shortcut for "{row["label"]}" and gives its keys back to '
-                       "whatever else uses them. Nothing on the unit changes, and you can add it "
+                       "whatever else uses them. Nothing on the desk changes, and you can add it "
                        "again.", "Delete"):
             return
         # The neighbour, chosen before the list changes, so the focus has somewhere to go.

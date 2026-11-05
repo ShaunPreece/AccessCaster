@@ -6,15 +6,15 @@ from native.dialogs import SpeakingDialog, _paragraphs
 
 
 def question_text(version, current):
-    return (f"Firmware {version} replaces {current or 'the firmware'} on the unit. RODE offers no "
+    return (f"Firmware {version} replaces {current or 'the firmware'} on the desk. RODE offers no "
             "way back to an older version.\n\n"
-            "The unit downloads the update itself, installs it and restarts, which takes about "
+            "The desk downloads the update itself, installs it and restarts, which takes about "
             "five minutes. The update keeps your settings, SMART pads, recordings, wifi and "
             "Bluetooth pairings.\n\n"
             "It is possible, but rare, that a firmware update could require touchscreen setup "
             "after the update.\n\n"
-            "While the unit restarts its audio stops for a minute or two, so a screen reader "
-            "speaking through it goes quiet until it is back. Do not switch the unit off while it "
+            "While the desk restarts its audio stops for a minute or two, so a screen reader "
+            "speaking through it goes quiet until it is back. Do not switch the desk off while it "
             "updates.")
 
 
@@ -25,11 +25,11 @@ class FirmwareDialog(SpeakingDialog):
         super().__init__(parent, f"Install firmware {version}")
         sizer = wx.BoxSizer(wx.VERTICAL)
         _paragraphs(self, sizer, question_text(version, current))
-        self.backup_first = wx.CheckBox(self, label="Back the unit up first")
+        self.backup_first = wx.CheckBox(self, label="Back the desk up first")
         self.backup_first.SetValue(True)
         a11y.describe(self.backup_first,
                       f"Saves your settings and SMART pads on this computer as {backup_name}, "
-                      "and a copy on the unit's drive if one is in. It takes a minute or two.")
+                      "and a copy on the desk's drive if one is in. It takes a minute or two.")
         sizer.Add(self.backup_first, 0, wx.ALL, 12)
         go = wx.Button(self, wx.ID_OK, label=f"Install firmware {version}")
         cancel = wx.Button(self, wx.ID_CANCEL, label="Cancel")

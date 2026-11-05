@@ -26,7 +26,7 @@ from native.callme_section import CallMeSection
 from native.calls import call
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
-from native.dialogs import TextDialog
+from native.dialogs import modal_dialogs
 from native.device_section import DeviceSection
 from native.help_section import HelpSection
 from native.pads_section import PadsSection
@@ -95,7 +95,7 @@ class MainFrame(Speaker, wx.Frame):
         # native control a copy cut to the window's width, and that copy is what SB_GETTEXT, and so
         # the screen reader, returns.
         self.status = self.CreateStatusBar(style=wx.STB_SIZEGRIP | wx.FULL_REPAINT_ON_RESIZE)
-        self.status.SetStatusText("Reading the unit.")
+        self.status.SetStatusText("Reading the desk.")
 
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self._on_select)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
@@ -156,16 +156,20 @@ class MainFrame(Speaker, wx.Frame):
     def _on_activate(self, event):
         event.Skip()
         if event.GetActive():
-            wx.CallAfter(self.warn_rode_app)
+            wx.CallAfter(self._activated)
 
-    def warn_rode_app(self):
-        """RODE's app is open: say why that matters, once per run of it, and only while this window
-        is in front, where the dialog gets the focus (`rode_app.take_warning`)."""
-        if not self.IsActive() or not rode_app.take_warning():
+    def _activated(self):
+        # Another program forcing this window to the front (SetForegroundWindow, as a self drive
+        # does) activates it even while a dialog has it disabled, unlike Alt+Tab, and the focus
+        # is then nowhere: hand it to the dialog in front.
+        shown = modal_dialogs()
+        if shown:
+            shown[-1].Raise()
             return
-        with TextDialog(self, rode_app.DIALOG_TITLE, rode_app.DIALOG_TEXT, [(wx.ID_OK, "OK")],
-                        default=wx.ID_OK, escape=wx.ID_OK) as dialog:
-            dialog.ShowModal()
+        if rode_app.is_open():
+            # Back from RODE's app, most likely: what it changed, which the desk never pushes, is
+            # read now (`server.read_for_rode_app`).
+            call(self, server.read_for_rode_app)
 
     def check_updates(self):
         for section in self.sections:

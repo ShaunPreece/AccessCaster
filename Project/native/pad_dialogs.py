@@ -209,9 +209,9 @@ class SettingsDialog(SpeakingDialog):
             self._add(Switch(self, self, sizer, "Use my own sound instead of the beep",
                              self._write(server.action_set_pad_flag, "censor_custom"),
                              *self.field("censor", "custom"), guard=self._guard,
-                             description=(f"The sound on the unit for this pad is {file}." if file
-                                          else "No sound of your own is on the unit for this pad, "
-                                               "so it plays nothing. Put one on the unit itself; "
+                             description=(f"The sound on the desk for this pad is {file}." if file
+                                          else "No sound of your own is on the desk for this pad, "
+                                               "so it plays nothing. Put one on the desk itself; "
                                                "this app cannot.")))
         if pad["back_channel"] is not None:
             box_sizer, box = group(self, sizer, "Who is in the Back Channel")
@@ -231,7 +231,7 @@ class SettingsDialog(SpeakingDialog):
                          self._write(server.action_set_pad_trigger, "custom"),
                          *self.field("trigger", "custom"), guard=self._guard,
                          accepted=self._custom_set,
-                         description="Switching it off forgets your numbers, as the unit itself "
+                         description="Switching it off forgets your numbers, as the desk itself "
                                      "does."))
         for f in spec["fields"]:
             send = self._write(server.action_set_pad_trigger, f["key"])

@@ -571,7 +571,7 @@ def set_unit_setting(prop: str, value) -> int:
     a factory reset clears."""
     entry = UNIT_SETTING_SEL.get(prop)
     if entry is None:
-        raise ValueError(f"unknown unit setting {prop!r}; known: {sorted(UNIT_SETTING_SEL)}")
+        raise ValueError(f"unknown desk setting {prop!r}; known: {sorted(UNIT_SETTING_SEL)}")
     key, kind = entry
     if kind == "bool":
         return write_at(key, prop, "bool", bool(value))
@@ -588,7 +588,7 @@ def _write_records(records, purpose: str, delay: float = 0.0) -> int:
     write_guard.refuse_in_tests("write to the device")
     iface = find_control_interface()
     if iface is None:
-        raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
+        raise RuntimeError("no control interface (is the desk connected? close the RODE app)")
     dev = rcp_hid.open_handle(iface, purpose)
     n = 0
     try:

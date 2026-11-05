@@ -188,7 +188,7 @@ print("\nA USB MODE THAT MOVED WHILE WE WERE DEAF IS SAID, NOT SWALLOWED")
 # Leaving Expanded says only that: the faders it empties are said by _tidy_after_standard, which
 # the reconnect starts on its own thread because it writes.
 check("leaving Expanded says so", announcer.usb_mode_change(5, 2),
-      "The unit has left Expanded USB input.")
+      "The desk has left Expanded USB input.")
 check("entering it says so", announcer.usb_mode_change(2, 5), "USB input is now Expanded.")
 check("an output-mode change names the new mode",
       announcer.usb_mode_change(0, 2),
@@ -204,7 +204,7 @@ with rig:
     rig.re_enumerate(EXPANDED, gap=0.3)
     time.sleep(0.5)
     check("the reconnect reports the change instead of just saying it is back",
-          rig.said[-1], "The unit has left Expanded USB input.")
+          rig.said[-1], "The desk has left Expanded USB input.")
     check("and starts the spoken fader tidy", rig.tidied, [True])
     check("and the virtual-devices follow-up, as an arrival", rig.followed, [(2, True)])
 

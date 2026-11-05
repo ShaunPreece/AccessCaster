@@ -213,7 +213,7 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     """
     iface = find_control_interface()
     if iface is None:
-        raise RuntimeError("no control interface (is the unit connected? close the RODE app)")
+        raise RuntimeError("no control interface (is the desk connected? close the RODE app)")
     dev = rcp_hid.open_handle(iface, "model dump")
     watcher = dump_watcher
     token = watcher.dump_starting() if watcher is not None else None

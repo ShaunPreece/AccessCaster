@@ -62,7 +62,7 @@ def confirm_summary(running, index, today):
 # Under the release notes, so it is the last thing read before the buttons.
 CONFIRM_AFTER = ("Installing closes AccessCaster for a moment, runs the "
                  "installer and starts it again. Shortcut keys and "
-                 "announcements pause until it is back. Nothing on the unit "
+                 "announcements pause until it is back. Nothing on the desk "
                  "changes.")
 
 

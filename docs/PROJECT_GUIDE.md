@@ -877,8 +877,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **WINDOWS' DEFAULT OUTPUT IS MOVED ONLY WHEN IT WAS ON THE DESK OR IS DEAD.** Turning Expanded on
   renames the desk's Main output, so the endpoint Windows was using stays listed and silent and
   Windows falls back to whatever it can find, the laptop speakers included. `_restore_default`
-  prefers `System (RØDECaster)` while the driver is connected, then the desk's Main output, and
-  moves the console and multimedia roles together, leaving communications alone. A default that is
+  moves it to `System (RØDECaster)` while the driver is connected and to the desk's Main output
+  only while it is not, and moves the console and multimedia roles together, leaving
+  communications alone. **NEVER THE DESK'S MAIN OUTPUT WHILE THE DRIVER IS BOUND:** the service
+  holds its render pin, so a stream there opens and plays nothing, and every screen reader and
+  announcement following the default goes silent. A bind read before `System` exists (an arrival
+  from the touchscreen or RODE's app, nothing parked) waits for it (`_wait_for_system`), and
+  leaves the default alone if it never comes. A default that is
   alive and elsewhere was chosen by the user and stays. **So leaving Expanded parks as well**
   (`_write_usb_mode_parked`): `System` goes before the desk's Main output comes back, Windows falls
   back to the laptop speakers, and unparked that fallback reads as the user's choice and stays.
@@ -1539,7 +1544,13 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   change reaching the model: the touchscreen pushes each one (and untrusts the model, as a
   `STRUCTURAL` change, until the next dump), our own writes reach it as sent, and a show load
   calls `desk_model.distrust()`. **No software's fader move is pushed**, RODE's app's included,
-  so while RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
+  and no other write of RODE's app is either (captured on 1.7.7: `screenDimAfterSeconds` at [7]
+  and `masterCompellorOn` at [14], each one clean record, no report-04 frame back), so a page that
+  follows pushes cannot see a change made there. **NEVER READ THE DESK ON A TIMER WHILE RODE'S
+  APP IS OPEN:** every reader is sent every dump's frames, and one read every 3 s kept RODE's app
+  on "Synchronizing device" for good (measured). Instead, while it is open, `desk_model.reveal`
+  compares every read with the picture and hands on what changed as pushes, and the window reads
+  once when it comes back to the front (`server.read_for_rode_app`). While RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
   and the user is warned once per run of it. `channels.follow_desk` also untrusts the model on a
   derived chain value pushed from elsewhere, ignoring our own writes' echoes for `CHAIN_ECHO_S`.
   A read for a reply follows the same rule through `server._desk_now` (the mute's reach check, the
@@ -1548,11 +1559,14 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Current state still reads the desk when opened: a card's free space is never pushed.
   Other software moving faders is seen only at the next read: an accepted limit, which the help
   covers. A new route that moves a fader source without a push must call `distrust()`.
-- **THE RODE'S APP WARNING IS SPOKEN, THEN A DIALOG WHEN THE WINDOW IS IN FRONT.** A background
-  process cannot take the focus from the app in front, and the forced ways leave the screen reader
-  in the other app (`server.raise_window`), so a dialog opened when RODE's app is seen would sit
-  unseen behind it. The app's own voice is heard whatever is in front; a tray notification
-  (`tray._notify`) has never been seen to arrive on this Windows 11 PC.
+- **RODE'S APP OPENING IS SPOKEN, AND NOTHING ELSE.** No dialog: a write is already safe (the
+  faders are read before it) and what RODE's app changed is caught on return, so a warning would
+  only be in the way. A background process cannot take the focus from the app in front, so the
+  app's own voice is the one channel heard whatever is in front; a tray notification
+  (`tray._notify`) has never been seen to arrive on this Windows 11 PC. **The desk is read once
+  more as RODE's app closes** (`server._follow_rode_app`), still compared: a change made there
+  just before it quit is otherwise never seen, since the window reads on return only while RODE's
+  app is open.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
   `restore_profile(clean=True)` sends `shows.send_new_from_default()` (the software factory reset)
   and takes an export first as the undo. Two consequences people keep missing: the profile and show
@@ -1829,6 +1843,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   when the last window is destroyed. Quit ends the loop with `ScheduleExit`: `Exit` is ignored
   while a dialog's loop is the active one, and the process then never ends. Quit ends any modal
   dialog first, for the same reason.
+- **ONLY THE INNERMOST MODAL LOOP CAN BE ENDED** (`dialogs.modal_dialogs`). `EndModal` on a dialog
+  with another modal open over it is a wx assertion that leaves its loop running: the window stays
+  disabled, the job's clock keeps ticking, and the process outlives its own Quit. The tray's Still
+  working opens over a running `JobDialog`, so `JobDialog.finish` waits for any dialog over it to
+  close, and Quit (`tray._close_window`) ends dialogs newest first, one per loop return.
 - **THE TRAY'S OWN WINDOW TAKES THE PROCESS'S FIRST `ShowWindow`** (`_create_window`). The first
   call takes the show state the launcher asked for, whatever it passes, so a hidden launch would
   hide the main window while wx records it as shown, and no later `Show` brings it up.
@@ -1959,7 +1978,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   of their own, about 1.5 s, read after the desk state's first read, on F5, after a change made in
   the window, and when the desk pushes a pad change (below).
 - **A PAGE THAT READS THE DESK FOR ITSELF FOLLOWS IT WITH `pages.FollowDesk`**: the pads, the
-  backups, and Device's Hardware, Unit settings and Wireless connections. Each names the properties
+  backups, and Device's Hardware, Desk settings and Wireless connections. Each names the properties
   it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `HARDWARE_PROPS`,
   `UNIT_SETTING_PROPS`, `NETWORK_PROPS`), watched through the desk state's one follower
   (`DeskState.watch`), and re-reads once their pushes stop for `AFTER_MS`, never while a modal

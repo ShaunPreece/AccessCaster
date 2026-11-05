@@ -64,7 +64,7 @@ def run(action, reads):
 
 
 reply, sent = run(server.action_scan_wifi, [net_blob("Home", "10.0.0.2")])
-check("a joined unit is not scanned", (reply["ok"], sent), (False, []))
+check("a joined desk is not scanned", (reply["ok"], sent), (False, []))
 check_in("and the refusal says to disconnect", "Disconnect", reply["message"])
 old = net_blob(numbered=["Stale----PSK"])
 one = net_blob(numbered=["A----PSK"])
@@ -91,7 +91,7 @@ check_in("and says the password is gone", "password", reply["message"])
 reply, sent = run(server.action_disconnect_wifi, [net_blob("Home", radio=False), net_blob(radio=False)])
 check("with the radio off it only clears the name", (reply["ok"], len(sent)), (True, 1))
 reply, sent = run(server.action_disconnect_wifi, [net_blob("Home", "10.0.0.2")])
-check("a unit that keeps its network is reported, not passed off", reply["ok"], False)
+check("a desk that keeps its network is reported, not passed off", reply["ok"], False)
 reply, sent = run(server.action_disconnect_wifi, [net_blob()])
 check("with no network there is nothing to send", (reply["ok"], sent), (True, []))
 

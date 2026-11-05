@@ -90,7 +90,7 @@ class DriverStatus:
         if not self.enabled:
             return "RODE's Virtual Devices driver is switched off in its tray icon."
         if not self.connected:
-            return "RODE's Virtual Devices driver is running but not connected to the unit."
+            return "RODE's Virtual Devices driver is running but not connected to the desk."
         return f"RODE's Virtual Devices driver is connected to the {self.desk}."
 
 
@@ -387,7 +387,7 @@ class Outcome:
             # Short names: this lands among Windows and the driver announcing the same arrival.
             name = self.default_moved_to
             parts.append("Windows sound is on System." if name.startswith("System") else
-                         "Windows sound is back on the unit." if "RODECaster" in name else
+                         "Windows sound is back on the desk." if "RODECaster" in name else
                          f"Windows sound is on {name}.")
         if self.error:
             parts.append(self.error)
@@ -399,7 +399,7 @@ class Outcome:
 # program is recording from that input (the Sound control panel's Recording tab meters every
 # input, which counts) the service says connected and creates no Fader endpoints at all.
 FADERS_MISSING = ("RODE's driver is connected but has not created its fader inputs. Close anything "
-                  "recording from the unit's Main Multitrack input, the Sound control panel "
+                  "recording from the desk's Main Multitrack input, the Sound control panel "
                   "included, then set what this computer receives to just the mix and back "
                   "again.")     # the desk ignores a write of the value it holds, so "apply
                                 # again" would re-enumerate nothing
@@ -464,6 +464,22 @@ def _note_default(enum) -> None:
 def _desk_main(eps: list) -> Optional["Endpoint"]:
     return next((e for e in eps if e.flow == "playback" and e.state == "active"
                  and e.desk and "Main" in e.name), None)
+
+
+def _system_output(eps: list) -> Optional["Endpoint"]:
+    return next((e for e in eps if e.flow == "playback" and e.state == "active"
+                 and e.virtual and e.name.startswith("System")), None)
+
+
+def _wait_for_system(enum, timeout_s: float) -> list:
+    """Re-list endpoints until the driver's System output is live, or the time is up. Returns the
+    list."""
+    at = time.monotonic()
+    eps = _endpoints(enum)
+    while _system_output(eps) is None and time.monotonic() - at < timeout_s:
+        time.sleep(0.25)
+        eps = _endpoints(enum)
+    return eps
 
 
 def _wait_for_desk_main(enum, timeout_s: float) -> list:
@@ -542,6 +558,10 @@ def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
         out.faders_ready = len(faders)
         out.faders_missing = bool(expect_connected and status.connected and not faders)
     if move_default:
+        if status.connected and _system_output(eps) is None:
+            # Bound before its System output exists (an arrival nobody parked for, read straight
+            # after the bind), or listed before the flips above took effect.
+            eps = _wait_for_system(enum, FADERS_APPEAR_S)
         out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
                                                 standard=expect_connected is False)
 
@@ -554,8 +574,9 @@ def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
     alive and somewhere else was chosen by the user and stays. Once Expanded is on, the desk's Main
     output is renamed and its old endpoint stays listed and dead, so Windows falls back to whatever
     it can find, which on a laptop is the built-in speakers; RODE's own instruction is to select
-    `System (RØDECaster)` then, and that is the preference here, with the desk's Main output as the
-    fallback when the driver's endpoint is not there. A PARKED default stays parked until the
+    `System (RØDECaster)` then, and nothing else will do while the service is bound: it holds the
+    render pin behind the desk's Main output, so a stream there opens and plays nothing. The desk's
+    Main output is the target only while the service is not bound. A PARKED default stays parked until the
     service binds, because moving it onto the desk's Main output is what keeps the service from
     binding; in Standard (`standard`) there is no bind to wait for, and it goes back to the desk.
     Console and multimedia roles move together; communications is left alone, because a call
@@ -568,12 +589,7 @@ def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
     if (current is not None and current.state == "active" and not is_parked
             and not (current.desk or current.virtual)):
         return ""
-    live_playback = [e for e in eps if e.flow == "playback" and e.state == "active"]
-    target = None
-    if connected:
-        target = next((e for e in live_playback if e.virtual and e.name.startswith("System")), None)
-    if target is None:
-        target = _desk_main(live_playback)
+    target = _system_output(eps) if connected else _desk_main(eps)
     if target is None or (current is not None and current.id == target.id):
         return ""
     policy.SetDefaultEndpoint(target.id, E_CONSOLE)

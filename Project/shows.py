@@ -113,13 +113,13 @@ ERROR_REFUSED = 1
 # plausibly report the same code, so the wording covers that too.
 ERROR_NO_STORAGE = 8
 ERROR_TEXT = {
-    ERROR_REFUSED: ("The unit refused to restore that backup, and does not say why. Once it has "
+    ERROR_REFUSED: ("The desk refused to restore that backup, and does not say why. Once it has "
                     "refused one, it refuses every restore until it is restarted: switch it off "
                     "and on again with a firm press of the red button on the back, then try "
                     "again."),
-    ERROR_NO_STORAGE: ("The unit has nowhere to put a backup. Put a memory card in, or a USB drive "
+    ERROR_NO_STORAGE: ("The desk has nowhere to put a backup. Put a memory card in, or a USB drive "
                        "in the second USB port, and try again. If storage IS in, it may be full or "
-                       "the unit may not be able to write to it."),
+                       "the desk may not be able to write to it."),
 }
 
 # How long to wait for a command to finish. An export measured about a second and an import a few,
@@ -355,5 +355,5 @@ def error_message(code) -> str:
     text = ERROR_TEXT.get(int(code))
     if text:
         return text
-    return (f"The unit refused it and reported error {int(code)}, which this app has not seen "
+    return (f"The desk refused it and reported error {int(code)}, which this app has not seen "
             f"before and cannot explain.")

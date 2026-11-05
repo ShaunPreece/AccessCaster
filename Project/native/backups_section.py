@@ -25,13 +25,13 @@ from native.pages import (FollowDesk, Page, labelled, modal_open, page_body, sel
 
 TITLE = "Backups"
 RESET_TITLE = "Start again from factory settings"
-NO_BACKUPS = "No backups yet. Back the unit up first."
-HOLDS = ("A backup holds the unit's settings and your SMART pads: channels, processing, routing, "
-         "faders, the unit's own settings, and every pad with its sound. Two things are left out "
+NO_BACKUPS = "No backups yet. Back the desk up first."
+HOLDS = ("A backup holds the desk's settings and your SMART pads: channels, processing, routing, "
+         "faders, the desk's own settings, and every pad with its sound. Two things are left out "
          "on purpose: which channels are muted, since putting a mute back could silence someone at "
          "the worst moment, and passwords, so wifi and phone-call credentials are never stored.")
 APP_SETTINGS = ("Your keyboard shortcuts and other AccessCaster preferences are not part of a "
-                "backup of the unit. App settings saves them to a file.")
+                "backup of the desk. App settings saves them to a file.")
 
 
 def _read():
@@ -58,7 +58,7 @@ def _restore_question(name):
 
 def list_label(backup):
     if backup["kind"] == "unit":
-        return f"{backup['name']}, made on the unit" + (
+        return f"{backup['name']}, made on the desk" + (
             f", {backup['modified']}" if backup.get("modified") else "")
     return f"{backup['name']}, the as-found backup" if backup["baseline"] else backup["name"]
 
@@ -66,7 +66,7 @@ def list_label(backup):
 def detail(backup):
     """What a backup holds and where, in what it can do rather than which half it is."""
     if backup["kind"] == "unit":
-        text = ("Made on the unit itself, so it holds everything and puts the whole desk back in "
+        text = ("Made on the desk itself, so it holds everything and puts the whole desk back in "
                 "seconds. There is no copy on this computer, and it cannot be renamed.")
     else:
         pads = backup.get("pads") or 0
@@ -75,10 +75,10 @@ def detail(backup):
         if backup.get("saved_at"):
             text += ", saved " + wording.spoken_datetime(
                 datetime.datetime.fromtimestamp(backup["saved_at"]))
-        text += (". The unit has its own copy on its drive too." if backup["kind"] == "paired"
+        text += (". The desk has its own copy on its drive too." if backup["kind"] == "paired"
                  else ".")
     if backup["baseline"]:
-        text += " This is the as-found backup: how the unit was before anything changed it."
+        text += " This is the as-found backup: how the desk was before anything changed it."
     return text
 
 
@@ -89,9 +89,9 @@ def storage_line(backups):
     if not backups.get("shows_capable"):
         return "Backups are saved on this computer."
     if backups.get("storage"):
-        return ("Backups are saved on this computer, and the unit keeps its own copy on its drive "
+        return ("Backups are saved on this computer, and the desk keeps its own copy on its drive "
                 "too.")
-    return "There is no card or drive in the unit, so backups are saved on this computer only."
+    return "There is no card or drive in the desk, so backups are saved on this computer only."
 
 
 def baseline_line(status):
@@ -99,9 +99,9 @@ def baseline_line(status):
     baseline = (status or {}).get("baseline")
     if not baseline:
         if status and status.get("connected"):
-            return ("No as-found backup of this unit has been taken on this computer, so there is "
-                    "no way back if a change goes wrong. Back up the unit now takes one.")
-        return "No as-found backup, and no unit connected to take one from."
+            return ("No as-found backup of this desk has been taken on this computer, so there is "
+                    "no way back if a change goes wrong. Back up the desk now takes one.")
+        return "No as-found backup, and no desk connected to take one from."
     when = ""
     if baseline.get("saved_at"):
         when = ", taken " + wording.spoken_datetime(
@@ -120,18 +120,18 @@ def restore_text(label, question):
     warnings = plan.get("warnings") or []
     warn = ("Warning. " + " ".join(warnings) + "\n\n") if warnings else ""
     if plan.get("via") == "show":
-        return (warn + f"This puts the whole unit back from its own copy of {label}: every "
+        return (warn + f"This puts the whole desk back from its own copy of {label}: every "
                 "setting, the routing, the fader layout and all your SMART pads, exactly as they "
                 "were. It takes a few seconds, and it moves the monitor speaker level, so turn "
                 "speakers down first.\n\n"
-                "The unit sometimes stops responding after restoring its own copy, and has to be "
+                "The desk sometimes stops responding after restoring its own copy, and has to be "
                 "unplugged from the USB socket nearest the power inlet, or have its power pulled, "
                 "before it comes back. Nothing is lost when that happens: the restore itself goes "
                 "through. But if your screen reader plays through the RODECaster, you will lose "
                 "speech until it is back.")
-    text = (warn + f"This puts your saved settings back onto the unit from this computer's copy "
-            f"of {label}. Anything the unit does not accept is skipped and reported afterwards. "
-            "The SMART pads saved in it are put back and any other pad on the unit is left alone; "
+    text = (warn + f"This puts your saved settings back onto the desk from this computer's copy "
+            f"of {label}. Anything the desk does not accept is skipped and reported afterwards. "
+            "The SMART pads saved in it are put back and any other pad on the desk is left alone; "
             "to make the grid match exactly, clear all pads first. It cannot be undone except by "
             "restoring another backup.")
     if info.get("ok"):
@@ -221,12 +221,12 @@ class BackupsSection:
             call(self.frame, server.action_baseline_skip,
                  done=lambda reply: self.frame.say(reply.get("message") or "No backup was taken."))
         elif answer == wx.ID_OK:
-            reply = follow_job(self.frame, "Backing up the unit as found",
-                               "Saving the unit's settings, then each SMART pad in turn."
-                               if include_pads else "Saving the unit's settings.",
+            reply = follow_job(self.frame, "Backing up the desk as found",
+                               "Saving the desk's settings, then each SMART pad in turn."
+                               if include_pads else "Saving the desk's settings.",
                                lambda: server.action_baseline_save(include_pads),
                                lambda _started: server.profile_save_status)
-            report(self.frame, ("Unit backed up", "Backup failed"), reply)
+            report(self.frame, ("Desk backed up", "Backup failed"), reply)
             self.read()
 
 
@@ -241,7 +241,7 @@ class BackupsPage(wx.Panel):
         self.frame = section.frame
         self.backups = []            # the backups as listed; empty when the list holds NO_BACKUPS
         sizer, parent = page_body(self)
-        self.backup = wx.Button(parent, label="Back up the unit now")
+        self.backup = wx.Button(parent, label="Back up the desk now")
         self.backup_acc = a11y.describe(self.backup, "")
         self.backup.Bind(wx.EVT_BUTTON, self._on_backup)
         sizer.Add(self.backup, 0, wx.ALL, 6)
@@ -325,7 +325,7 @@ class BackupsPage(wx.Panel):
         return backup["key"] if backup["kind"] == "unit" else backup["name"]
 
     def _on_backup(self, _event):
-        dialog = NameDialog(self, "Back up the unit", "Name for this backup",
+        dialog = NameDialog(self, "Back up the desk", "Name for this backup",
                             self.section.last_name, "Save",
                             NameDialog.RULE + " A backup of the same name is replaced.")
         with dialog:
@@ -334,7 +334,7 @@ class BackupsPage(wx.Panel):
             name = dialog.name()
         self.section.last_name = name
         reply = follow_job(self, "Backing up",
-                           "Backing the unit up: its own copy if there is a drive in, then the "
+                           "Backing the desk up: its own copy if there is a drive in, then the "
                            "settings and each SMART pad on this computer.",
                            lambda: server.action_backup_now(name),
                            lambda _started: server.profile_save_status)
@@ -357,7 +357,7 @@ class BackupsPage(wx.Panel):
                        "Restore"):
             return
         handle = self._handle(backup)
-        reply = follow_job(self, "Restoring backup", f"Restoring {backup['name']} to the unit.",
+        reply = follow_job(self, "Restoring backup", f"Restoring {backup['name']} to the desk.",
                            lambda: server.action_restore_backup(handle),
                            # The two halves report through different jobs, and the start says
                            # which one is running.
@@ -372,7 +372,7 @@ class BackupsPage(wx.Panel):
             return
         backup = self._chosen()
         if not backup["renameable"]:
-            self.frame.say("This backup was made on the unit, which names its own backups, so it "
+            self.frame.say("This backup was made on the desk, which names its own backups, so it "
                            "cannot be renamed here.")
             return
         old = backup["name"]
@@ -392,14 +392,14 @@ class BackupsPage(wx.Panel):
             return
         backup = self._chosen()
         if backup["kind"] == "unit":
-            text = (f"This permanently deletes {backup['name']}, the backup the unit made, from "
-                    "the unit's drive. It cannot be undone.")
+            text = (f"This permanently deletes {backup['name']}, the backup the desk made, from "
+                    "the desk's drive. It cannot be undone.")
         else:
             text = (f"This permanently deletes the backup {backup['name']} from this computer, "
                     "including any pad sounds saved with it"
-                    + (", and the unit's own copy on its drive" if backup["kind"] == "paired"
+                    + (", and the desk's own copy on its drive" if backup["kind"] == "paired"
                        else "")
-                    + ". It cannot be undone, and it changes nothing else on the unit.")
+                    + ". It cannot be undone, and it changes nothing else on the desk.")
         if not confirm(self, f"Delete {backup['name']}?", text, "Delete"):
             return
         self._delete(backup, force=False)
@@ -430,7 +430,7 @@ class BackupsPage(wx.Panel):
 
     def _on_add_pads(self, _event):
         reply = follow_job(self, "Adding SMART pads to the backup",
-                           "Copying each pad's sound off the unit in turn.",
+                           "Copying each pad's sound off the desk in turn.",
                            server.action_baseline_add_pads,
                            lambda _started: server.profile_save_status)
         report(self, ("Pads added to the backup", "Could not add the pads"), reply)
@@ -460,24 +460,24 @@ class ResetPage(wx.Panel):
     def show(self):
         shows = self.shows
         # Whether it can be undone depends on there being somewhere for the backup to go.
-        undo = ("The unit backs itself up first, so this can be undone by restoring that backup."
+        undo = ("The desk backs itself up first, so this can be undone by restoring that backup."
                 if not shows or shows.get("can_backup", True)
-                else "There is no memory card or USB drive in the unit, so it cannot back itself "
+                else "There is no memory card or USB drive in the desk, so it cannot back itself "
                      "up first, which means this cannot be undone.")
         self.acc.description = (
-            "Puts every setting and every SMART pad back to how the unit left the factory. Your "
+            "Puts every setting and every SMART pad back to how the desk left the factory. Your "
             "wifi, the language and the analytics answer are left alone, and so are the recordings "
-            f"on the drive. {undo} It does not use the unit's touchscreen setup wizard, so "
+            f"on the drive. {undo} It does not use the desk's touchscreen setup wizard, so "
             "nothing is left needing a sighted person to tap through.")
 
     def _on_reset(self, _event):
         shows = self.shows
         if shows is None:
-            self.frame.say("The unit is still being read.")
+            self.frame.say("The desk is still being read.")
             return
         if not shows.get("ok") or shows.get("writable") is False:
             self.frame.say(shows.get("message") if not shows.get("ok")
-                           else "This unit cannot be reset from AccessCaster.")
+                           else "This desk cannot be reset from AccessCaster.")
             return
         blocked = "" if shows.get("can_backup") else (
             shows.get("backup_blocked_reason") or "There is nowhere to save a backup.")
@@ -486,11 +486,11 @@ class ResetPage(wx.Panel):
             if dialog.ShowModal() != wx.ID_OK:
                 return
             backup_first = dialog.wants_backup()
-        reply = follow_job(self, "Resetting the unit",
-                           "Backing the unit up, then resetting it." if backup_first
-                           else "Resetting the unit to factory settings.",
+        reply = follow_job(self, "Resetting the desk",
+                           "Backing the desk up, then resetting it." if backup_first
+                           else "Resetting the desk to factory settings.",
                            lambda: server.action_show_reset(backup_first),
                            lambda _started: server.show_job_status)
-        report(self, ("Unit reset", "Reset failed"), reply)
+        report(self, ("Desk reset", "Reset failed"), reply)
         self.button.SetFocus()
         self.frame.desk_rewritten()

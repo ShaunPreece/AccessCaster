@@ -6,6 +6,8 @@ THE PICTURE IS BUILT FROM WHAT THE APP ALREADY DOES, and reads nothing of its ow
     subscriber that looks here sees the value it was told about;
   - every write this app sends is applied as it goes out (`rcp_hid.write_watcher`), because the desk
     does not echo all of them: a software solo pushes nothing.
+No other software's write is pushed either, RODE's app's included, so while it is open (`reveal`)
+each adopted dump is compared with the picture and what changed unheard is handed on as pushes.
 
 A DUMP IS A SNAPSHOT OF A DESK THAT KEEPS CHANGING while it is read, for a second and more. Every
 push and write is journalled with a sequence number, and a dump is adopted with everything
@@ -72,6 +74,10 @@ _blob = b""                      # the adopted dump
 _spans: dict = {}                # (path, name) -> (start, end) of its value block in `_blob`
 _dirty: set = set()              # (path, name) changed since the dump was adopted
 _snap: Optional[bytes] = None    # `snapshot`, until the next change
+_reveal = False                  # `reveal`
+# Called with [(path, name, value, kind, was)] for what an adopted dump showed the desk changed
+# without a push saying so, while `reveal` is on. Set by `desk_live`, which hands them on as pushes.
+revealed_watcher = None
 
 
 # ---- what feeds it ---------------------------------------------------------------------------
@@ -112,10 +118,42 @@ def dump_finished(token: Token, blob: bytes) -> None:
             if seq > token.seq and name is not None:
                 _put(props, names, path, name, value, kind, may_add)
                 dirty.add((path, name))
+        unheard = _unheard(props, dirty, token) if _reveal else []
         _props, _names, _layout, _epoch = props, names, book, token.epoch
         _blob, _spans, _dirty, _snap = blob, spans, dirty, None
         # A journal that overflowed during the read cannot say what the read missed.
         _read_seq = token.seq if complete else -1
+    if unheard and revealed_watcher is not None:
+        try:
+            revealed_watcher(unheard)
+        except Exception as exc:
+            print(f"desk_model: revealed changes not handed on: {exc}", file=sys.stderr)
+
+
+def reveal(on: bool) -> None:
+    """While on, every dump adopted on a trusted picture is compared with it, and what the desk
+    changed without pushing goes to `revealed_watcher`. For while RODE's app is open: the desk
+    pushes none of its writes, so the picture cannot follow them any other way."""
+    global _reveal
+    _reveal = on
+
+
+def _unheard(props, told, token: Token) -> list:
+    """What `props`, a dump just read, holds differently from the picture, leaving out what was
+    journalled during the read (`told`, already heard) and everything when the picture is not
+    trusted: then a difference is the picture's gap, not news. Caller holds `_lock`."""
+    if not (_epoch == token.epoch and 0 <= _read_seq and _stale_seq <= _read_seq):
+        return []
+    out = []
+    for path, held in _props.items():
+        now = props.get(path)
+        if now is None:
+            continue
+        for name, (was, _kind) in held.items():
+            got = now.get(name)
+            if got is not None and got[0] != was and (path, name) not in told:
+                out.append((path, name, got[0], got[1], was))
+    return out
 
 
 def apply_push(path, name: str, value, kind: str):
@@ -336,8 +374,9 @@ def online() -> Optional[bool]:
 def _reset() -> None:
     """Forget everything. For offline tests."""
     global _props, _names, _layout, _epoch, _read_seq, _stale_seq, _seq, _connected
-    global _blob, _spans, _dirty, _snap
+    global _blob, _spans, _dirty, _snap, _reveal
     with _lock:
+        _reveal = False
         _props, _names, _layout = {}, {}, None
         _blob, _spans, _dirty, _snap = b"", {}, set(), None
         _epoch, _read_seq, _stale_seq, _seq, _connected = -1, -1, 0, 0, False

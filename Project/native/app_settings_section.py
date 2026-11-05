@@ -62,7 +62,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
     SWITCHES = [
         ("on", "Announce button presses aloud", announcer.action_set_announce,
          "Mutes, solos, bank changes, channel buttons and the encoder, including changes made on "
-         "the unit itself."),
+         "the desk itself."),
         ("levels", "Announce fader and monitor levels aloud", announcer.action_set_announce_levels,
          "Says the name and level of whatever you turn: a fader, the monitor, or the channel the "
          "encoder is set to."),
@@ -71,7 +71,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
          "Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does "
          "not say which channel."),
         ("clip_warning", "Warn when the main mix clips", server.action_set_clip_warning,
-         "Says Main mix clipping when the unit's main mix reaches full scale. Like every "
+         "Says Main mix clipping when the desk's main mix reaches full scale. Like every "
          "announcement, it is silent during a recording unless announcements stay on while "
          "recording."),
         ("remember", "Start with announcements the way I left them",
@@ -94,7 +94,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
             list(announcer.RECORD_FEEDBACK.items()), announcer.action_set_announce_record_feedback,
             *self.field("record_feedback"),
             description="A tone is one long beep for recording, two for paused, three for "
-                        "stopped, whether you press record here, with a shortcut or on the unit.",
+                        "stopped, whether you press record here, with a shortcut or on the desk.",
             guard=self._unread)
         self.voice = Choice(self, parent, sizer, "Announcement voice", [("", "Windows default voice")],
                             speech.action_set_announce_voice, *self.field("voice"),
@@ -201,7 +201,7 @@ class GeneralPage(wx.Panel):
                                    self._on_export)
         a11y.describe(self.export, "Your keyboard shortcuts, announcement preferences and "
                                    "CallMe contacts belong to AccessCaster rather than to the "
-                                   "unit, so no backup of the unit carries them. This "
+                                   "desk, so no backup of the desk carries them. This "
                                    "writes one small file you can copy to another computer. It "
                                    "holds nothing about the desk, so it is safe to email to "
                                    "yourself.")
@@ -264,7 +264,7 @@ class GeneralPage(wx.Panel):
         # there, which is exactly what may not exist.
         if not confirm(self, "Restore this app's settings?",
                        "This replaces your keyboard shortcuts and your announcement "
-                       "preferences with the ones in that file. The unit itself is "
+                       "preferences with the ones in that file. The desk itself is "
                        "not touched at all.", "Restore settings"):
             return
         call(self, _import_file, path, done=self._restored)

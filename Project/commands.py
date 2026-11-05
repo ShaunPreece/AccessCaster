@@ -47,7 +47,7 @@ LEVEL_STEP = 5
 # The order categories appear in. The add dialog offers a category first, because the catalogue runs
 # to well over a hundred entries on a full desk and one flat list of that is unusable by ear.
 CATEGORIES = ["App", "Channels", "Levels", "Recording", "CallMe", "Pads", "Outputs", "Mixes",
-              "Unit"]
+              "Desk"]
 
 
 def _cmd(cid, category, label):
@@ -196,7 +196,7 @@ def _cough_key() -> dict:
     global _muted_mics
     mics = [c for c in channels.active_ui_channels() if c.get("kind") == "mic"]
     if not mics:
-        return _fail("This unit has no mic channels.")
+        return _fail("This desk has no mic channels.")
     if _muted_mics:
         names, _muted_mics = _muted_mics, []
         opened = []
@@ -238,10 +238,10 @@ def _say_state() -> dict:
     muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
     is itself the answer and takes one sentence to hear."""
     import server
-    speech.say("Reading the unit.")   # silent whenever the announcer is
+    speech.say("Reading the desk.")   # silent whenever the announcer is
     ov = server.device_overview()
     if not ov.get("ok"):
-        return _fail(ov.get("message", "The unit could not be read."))
+        return _fail(ov.get("message", "The desk could not be read."))
     bits = []
     rec = ov.get("recording")
     if rec:
@@ -332,7 +332,7 @@ def _run_chan(arg: str) -> dict:
         return server.action_clear_solos()
     ch = channels.ui_channel_map().get(name)
     if ch is None:
-        return _fail(f"This unit has no channel called {name}.")
+        return _fail(f"This desk has no channel called {name}.")
     if what == "mute":
         return server.action_set_channel_mute(name, not _muted_now(name))
     # Solo, processing and phantom have no push-fed cache, so each reads the channel first. About a
@@ -530,9 +530,9 @@ def _run_out(arg: str) -> dict:
 
 def _unit_commands() -> list:
     return [
-        _cmd("unit.midi", "Unit", "MIDI control on or off"),
-        _cmd("unit.wifi", "Unit", "Wifi on or off"),
-        _cmd("unit.bt", "Unit", "Make the unit discoverable over Bluetooth, or stop"),
+        _cmd("unit.midi", "Desk", "MIDI control on or off"),
+        _cmd("unit.wifi", "Desk", "Wifi on or off"),
+        _cmd("unit.bt", "Desk", "Make the desk discoverable over Bluetooth, or stop"),
     ]
 
 
@@ -548,7 +548,7 @@ def _run_unit(arg: str) -> dict:
     if arg == "bt":
         now = bool((net.get("bluetooth") or {}).get("visible"))
         return server.action_set_bt_visible(not now)
-    return _fail(f"Unknown unit command {arg}.")
+    return _fail(f"Unknown desk command {arg}.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -670,7 +670,7 @@ def _run_preset(arg: str) -> dict:
     name, _, preset = rest.partition(":")
     ch = channels.ui_channel_map().get(name)
     if ch is None or ch.get("kind") != "mic":
-        return _fail(f"{name} is not a microphone channel on this unit.")
+        return _fail(f"{name} is not a microphone channel on this desk.")
     return server.action_apply_mic_preset(channels.mic_channel_number(ch), preset)
 
 

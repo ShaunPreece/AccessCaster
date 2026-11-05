@@ -89,6 +89,45 @@ for ticks in (True, False):
     else:
         check("a job told not to tick never starts", started, [])
 
+# A dialog opened over a running job (the tray's Still working) holds the innermost loop, so a job
+# finishing meanwhile has to wait for it to close: ending the job's loop first is a wx assertion
+# that leaves it running.
+order = []
+
+
+def open_over(job):
+    over = dialogs.TextDialog(frame, "Still working", "A backup is running.", [(wx.ID_OK, "OK")],
+                              default=wx.ID_OK, escape=wx.ID_OK)
+
+    def finish_under():
+        job.finish({"ok": True})
+        order.append("finished")
+        wx.CallLater(300, lambda: (order.append("closed"), over.EndModal(wx.ID_OK)))
+
+    wx.CallAfter(finish_under)
+    over.ShowModal()
+    over.Destroy()
+
+
+def unstick():
+    # Turns a regression into a failure instead of a hang.
+    for window in reversed(dialogs.modal_dialogs()):
+        order.append("stuck")
+        window.EndModal(wx.ID_CANCEL)
+        return
+
+
+loop = FakeLoop()
+dialog = dialogs.JobDialog(frame, "Backing up", "Backing up.", open_over, stop=None,
+                           closable=False)
+watchdog = wx.CallLater(5000, unstick)
+with patched((dialogs.speech, {"start_loop": lambda name, delay: loop})):
+    result = dialog.run()
+watchdog.Stop()
+dialog.Destroy()
+check("a job finished under another dialog ends once that one closes",
+      (result, order, loop.stopped), ({"ok": True}, ["finished", "closed"], True))
+
 dialog = dialogs.DeletePresetDialog(frame, ["Show"])
 check_true("Delete a preset lands on its list", first_focusable(dialog) is dialog.list)
 dialog.Destroy()

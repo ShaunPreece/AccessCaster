@@ -98,7 +98,7 @@ class _Matrix:
 def excluded(out, src, on):
     writes.append((src, on))
     if len(writes) == 3:
-        raise OSError("the unit stopped answering")
+        raise OSError("the desk stopped answering")
 
 
 with patched(
@@ -115,7 +115,7 @@ with patched(
         raised = None
     except OSError as exc:
         raised = str(exc)
-    check("the failed write is reported", raised, "the unit stopped answering")
+    check("the failed write is reported", raised, "the desk stopped answering")
     check("and what had changed is put back",
           writes[3:], [(0, False), (1, False), (2, False), (3, False)])
     check("and the restore is confirmed", iso.restored, True)

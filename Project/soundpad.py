@@ -1542,7 +1542,7 @@ def set_pad_flag(grid: int, name: str, on: bool) -> dict:
                                CENSOR_FIELD["file"]).get(grid - 1)
         if not path:
             res["message"] = (res.get("message", "") + " NOTE: this pad has no custom sound on the "
-                              "unit yet, so it has nothing to play until one is set on the unit "
+                              "desk yet, so it has nothing to play until one is set on the desk "
                               "itself. Switch this back off to use the built-in beep.")
     return res
 
@@ -2377,7 +2377,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
     live = read_pads_live()
     pad = next((p for p in live["pads"] if p["grid"] == int(grid)), None)
     if pad is None:
-        return {"ok": False, "message": f"There is no pad {grid} on this unit."}
+        return {"ok": False, "message": f"There is no pad {grid} on this desk."}
     place = pad_place(grid).capitalize()
     if not pad["present"]:
         return {"ok": False, "message": f"{place} is empty, so there is no sound to export."}
@@ -2391,13 +2391,13 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         t.remount_pad_storage()
         root = t.find_pad_volume()
         if root is None:
-            return {"ok": False, "message": "The unit's pad storage did not appear, so nothing "
+            return {"ok": False, "message": "The desk's pad storage did not appear, so nothing "
                                             "was exported. Try again in a moment."}
         src = _pad_audio_source(root, int(grid), wanted)
         if src is None:
             return {"ok": False,
                     "message": f"{place} says it plays {wanted or 'a file'}, but that file is "
-                               f"not on the unit's storage."}
+                               f"not on the desk's storage."}
         # Name the copy after the PAD, not after the desk's internal filename, and keep the real
         # extension. A folder of Music_Bed.wav and audio_3.wav tells you nothing about which pad
         # each came from.
@@ -2408,7 +2408,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         size_mb = round(os.path.getsize(dst) / (1024 * 1024), 1)
         return {"ok": True, "path": dst, "folder": dest_dir, "size_mb": size_mb,
                 "message": (f"{place}, {pad['name']}, exported to {dst} ({size_mb} MB). "
-                            f"The pad on the unit is unchanged.")}
+                            f"The pad on the desk is unchanged.")}
 
 
 def _pad_audio_source(root: str, grid: int, wanted: str | None):
@@ -2546,7 +2546,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
                         shutil.copyfile(src, os.path.join(dst_dir, fn))
                     except OSError as exc:
                         raise RuntimeError(
-                            f"could not read pad {e['grid']} ({e['name']}) from the unit's "
+                            f"could not read pad {e['grid']} ({e['name']}) from the desk's "
                             f"storage: {fn}: {exc}") from exc
                 e["file"] = fn
                 copied += 1
@@ -2873,7 +2873,7 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
                                       "pad storage did not mount, so no sound pad could be "
                                       "compared", sound_pads=len(sound))
                     if progress:
-                        progress("Could not read the unit's pad storage, so every sound pad will "
+                        progress("Could not read the desk's pad storage, so every sound pad will "
                                  "be rebuilt.")
                 else:
                     for e in sound:
@@ -2977,7 +2977,7 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
             else:
                 skipped.append(f"pad {grid} (type {ptype} not restorable)"); continue
             if not wait_for_pad_present(grid - 1):
-                raise RuntimeError("the pad did not appear on the unit after it was created")
+                raise RuntimeError("the pad did not appear on the desk after it was created")
             # Re-apply the saved cosmetics/behaviour the create path does not already set.
             if e.get("colour") is not None:
                 check(set_pad_property(grid, "padColourIndex", int(e["colour"])), "colour")

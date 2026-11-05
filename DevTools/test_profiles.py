@@ -113,9 +113,9 @@ try:
     r1 = profiles.load("test1hp")["prof"]["routing"]
     check("a device with one headphone output records one type", r1["headphone_types"], [1])
 
-    print("\nSAVE: the unit's own settings (display, buttons, haptics, REC button, listen mode)")
+    print("\nSAVE: the desk's own settings (display, buttons, haptics, REC button, listen mode)")
     unit = prof[profiles.UNIT_KEY]
-    check("every unit setting in the address table is recorded",
+    check("every desk setting in the address table is recorded",
           sorted(unit), sorted(rcp_transfer.UNIT_SETTING_SEL))
     check("screenBrightness is the SCREEN's value, not hwScreenBrightness's",
           unit["screenBrightness"], 180)
@@ -247,8 +247,8 @@ check("a different play mode is caught", m(SAVED_SOUND, live(play_mode=2)), Fals
 check("a different loop flag is caught", m(SAVED_SOUND, live(loop=True)), False)
 check("a different replay flag is caught", m(SAVED_SOUND, live(replay=False)), False)
 check("a different pad type is caught", m(SAVED_SOUND, live(type=3)), False)
-check("an empty pad on the unit is caught", m(SAVED_SOUND, live(present=False)), False)
-check("a missing pad on the unit is caught", m(SAVED_SOUND, None), False)
+check("an empty pad on the desk is caught", m(SAVED_SOUND, live(present=False)), False)
+check("a missing pad on the desk is caught", m(SAVED_SOUND, None), False)
 check("a real gain difference is caught", m(SAVED_SOUND, live(gain=-5.0)), False)
 check_true("but gain is compared at the 1dp the live read reports, not on raw floats",
            m(dict(SAVED_SOUND, gain=-6.04), live(gain=-6.0)))
@@ -333,13 +333,13 @@ try:
     (root / "pads" / "5" / "airhorn.wav").write_bytes(b"RIFF" + b"\x01" * 4096)
     check("a different length is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "shorter.wav")), False)
-    check("a name the unit does not have is caught",
+    check("a name the desk does not have is caught",
           a(str(root), 5, "other.wav", str(backup / "5" / "airhorn.wav")), False)
     check("a profile entry with no filename is caught",
           a(str(root), 5, None, str(backup / "5" / "airhorn.wav")), False)
     check("a backup whose local copy is missing is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "gone.wav")), False)
-    check("a grid with no file on the unit is caught",
+    check("a grid with no file on the desk is caught",
           a(str(root), 7, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
     # Leftovers. A pad folder can hold a file from an earlier replacement. Which file the pad PLAYS
     # is what matters, and only the desk can say - padFilePath, passed in as live_file.
@@ -592,11 +592,11 @@ check("levels are not reported as unrestorable",
 check("headphone type still restores (both desks share the confirmed outputs)",
       args_of(duo_calls, "set_headphone_type"), [(1, 0), (2, 1)])
 
-print("\nRESTORE: the unit's own settings")
+print("\nRESTORE: the desk's own settings")
 UNIT = {"screenBrightness": 180, "autoBrightness": 0, "screenDimAfterSeconds": 1800,
         "outputPrefader": 1, "systemHapticSetting": 2}
 calls_unit, res_unit = apply_pro2(dict(profile(), **{profiles.UNIT_KEY: UNIT}))
-check("every saved unit setting is written back",
+check("every saved desk setting is written back",
       sorted(args_of(calls_unit, "set_unit_setting")),
       sorted((k, v) for k, v in UNIT.items()))
 check("nothing was reported as unrestorable", res_unit["errs"], [])
@@ -622,10 +622,10 @@ check("a setting with no confirmed address is SKIPPED, not guessed at",
       args_of(calls_future, "set_unit_setting"), [("screenBrightness", 10)])
 old_unit = profile() # an older profile has no unit block at all
 calls_nounit, res_nounit = apply_pro2(old_unit)
-check("an older profile writes no unit settings and reports no failure",
+check("an older profile writes no desk settings and reports no failure",
       (args_of(calls_nounit, "set_unit_setting"), res_nounit["errs"]), ([], []))
 
-print("\nRESTORE on the Duo: the unit settings ARE written")
+print("\nRESTORE on the Duo: the desk settings ARE written")
 # The Duo holds the "unit_settings" cap on all 20 selectors resolving against its OWN TREE plus one
 # confirmed write per block, so a profile taken on a Duo restores its Device page rather
 # than skipping it. The mutes are held back, on both desks, because a restore must never silently
@@ -635,9 +635,9 @@ with as_device(devices.DUO), recorder() as duo_unit_calls:
                                       fader_code_set=devices.DUO.fader.code_set)
     duo_unit_calls = list(duo_unit_calls)
 duo_unit_written = dict(args_of(duo_unit_calls, "set_unit_setting"))
-check_true("the Duo restores its unit settings", bool(duo_unit_written))
+check_true("the Duo restores its desk settings", bool(duo_unit_written))
 check_true("and that is not reported as a failure",
-           not any("unit settings" in e for e in duo_unit_res["errs"]))
+           not any("desk settings" in e for e in duo_unit_res["errs"]))
 check("a saved output mute is still NOT written back on the Duo either",
       sorted(p for p in duo_unit_written if "Mute" in p), [])
 

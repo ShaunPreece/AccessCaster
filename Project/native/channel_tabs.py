@@ -206,19 +206,19 @@ class SettingsTab(Tab):
         self.mute.acc.description = (
             "Silences this channel everywhere, including the recording."
             + (no_strip_note(rec, "mute") or (
-                " The unit did not report this channel's mute state, so this shows unmuted."
+                " The desk did not report this channel's mute state, so this shows unmuted."
                 if rec.get("muted") is None else "")))
         self.solo.acc.description = (
             "Only this channel in your headphones. Announcements go quiet while anything is "
             "soloed."
             + (no_strip_note(rec, "solo") or (
-                " The unit did not report this channel's solo state, so this shows off."
+                " The desk did not report this channel's solo state, so this shows off."
                 if rec.get("solo") is None else "")))
         if self.wireless is not None:
             self.wireless.acc.description = (
                 "No wireless mics detected." if self._no_wireless() else
                 "Mutes a paired RODE wireless transmitter at the mic, not the channel here."
-                + (" The unit did not report this, so the switch shows unmuted."
+                + (" The desk did not report this, so the switch shows unmuted."
                    if rec.get("wireless_muted") is None else ""))
         if self.mic_type is not None:
             self._fill_mic_types(rec.get("mic_type"))

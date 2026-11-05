@@ -285,12 +285,12 @@ def desk_streams() -> dict:
         return {"ok": False, "streams": [], "all_desk": desk, "remote": True,
                 "reason": ("Level meters need the RODECaster's audio streams, and Windows gives "
                            "each Remote Desktop session its own audio devices: from a remote "
-                           "session the unit's streams are not there to read. Everything else in "
-                           "this app works over Remote Desktop because it talks to the unit over "
+                           "session the desk's streams are not there to read. Everything else in "
+                           "this app works over Remote Desktop because it talks to the desk over "
                            "USB directly. Run the app at the computer itself to use the meters.")}
     return {"ok": False, "streams": [], "all_desk": desk, "remote": False,
             "reason": ("Windows is not reporting any RODECaster audio streams. That usually means "
-                       "the unit's USB audio is not connected.")}
+                       "the desk's USB audio is not connected.")}
 
 
 # How often a running Watcher re-reads the Windows endpoint volume.
@@ -512,7 +512,7 @@ def level_note(volume_db: float) -> str:
     if volume_db > 1.0:
         return (f"Windows is adding {volume_db:.1f} dB to this input, so it will clip in Windows "
                 f"before the desk does. Use Set it to no change below, then set your gain on the "
-                f"unit itself.")
+                f"desk itself.")
     if volume_db < -3.0:
         return (f"Windows is taking {abs(volume_db):.1f} dB off this input, so everything reads "
                 f"lower here than the desk is really sending.")
@@ -527,7 +527,7 @@ OFFERED_LEVEL_MAX_DB = 30.0
 
 # For an endpoint Windows cannot level (RODE's Virtual Devices outputs): says where the level is.
 FIXED_LEVEL_NOTE = ("Windows cannot change this device's level. Use the channel's fader on the "
-                    "unit, or this app's own level control.")
+                    "desk, or this app's own level control.")
 
 
 def _volume_interface(endpoint_id: str):
@@ -684,9 +684,9 @@ def verdict(peak: float, active_fraction: float, volume_db: float = 0.0,
     reports; this decides."""
     boosted = volume_db > 1.0
     down = (f"Turn down the Windows level above, which is adding {volume_db:.1f} dB to this input"
-            if boosted else "Turn the gain down on the unit")
-    up = ("Turn up the gain on the unit" if not boosted
-          else "Turn up the gain on the unit rather than the Windows level")
+            if boosted else "Turn the gain down on the desk")
+    up = ("Turn up the gain on the desk" if not boosted
+          else "Turn up the gain on the desk rather than the Windows level")
     if peak <= SILENCE:
         return "Nothing came through at all."
     if peak >= clip_at * trusted_ceiling(ceiling):

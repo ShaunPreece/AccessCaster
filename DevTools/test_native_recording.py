@@ -114,7 +114,7 @@ check("the chosen recording survives a read", takes._chosen()["uid"], 4)
 section.show(payload(state=recorder.NO_DESTINATION, vols=[volume(0, "Memory card"),
                                                           volume(1, "USB drive")]), "")
 check("no card or drive says so in the list", takes.list.GetString(0),
-      "Nothing to list: there is no card or drive in the unit.")
+      "Nothing to list: there is no card or drive in the desk.")
 check("and leaves nothing to delete", takes._chosen(), None)
 
 # ---- the raw switch waits for separate tracks ------------------------------------------------
@@ -156,10 +156,10 @@ PAUSE, RESUME = recording_section.PAUSE, recording_section.RESUME
 live = {"read_recorder_live": lambda: {"ok": True, "message": "Recording. 1 minute so far."}}
 with patched(sync, (server, {"action_record": fake_record, **live})):
     section.show(payload(state=recorder.READY), "")
-    check("a ready unit offers Start recording and Pause", labels(), (START, PAUSE))
+    check("a ready desk offers Start recording and Pause", labels(), (START, PAUSE))
     said = len(frame.said)
     rec._on_transport(press(rec.transport))
-    check("Start recording on a ready unit starts", commands[-1], "start")
+    check("Start recording on a ready desk starts", commands[-1], "start")
     check("the reply's payload is shown", section.state, recorder.RECORDING)
     check("and the button becomes Stop recording", labels(), (STOP, PAUSE))
     check("the new label is the confirmation: nothing is spoken over it", frame.said[said:], [])
@@ -169,7 +169,7 @@ with patched(sync, (server, {"action_record": fake_record, **live})):
     check("Pause during a take pauses", commands[-1], "pause")
     check("and becomes Resume", labels(), (STOP, RESUME))
     rec._on_pause(press(rec.pause))
-    check("Resume on a paused unit carries on", commands[-1], "resume")
+    check("Resume on a paused desk carries on", commands[-1], "resume")
     check("and becomes Pause again", labels(), (STOP, PAUSE))
     section.show(payload(state=recorder.PAUSED), "")
     rec._on_transport(press(rec.transport))
@@ -194,9 +194,9 @@ check("a failed press is spoken", frame.said[-1], "That did not take.")
 
 # A state the unit's own REC button changed renames the buttons too.
 section.show(payload(state=recorder.RECORDING), "")
-check("a take started on the unit offers Stop recording", labels(), (STOP, PAUSE))
+check("a take started on the desk offers Stop recording", labels(), (STOP, PAUSE))
 section.show(payload(state=recorder.PAUSED), "")
-check("and a pause on the unit offers Resume", labels(), (STOP, RESUME))
+check("and a pause on the desk offers Resume", labels(), (STOP, RESUME))
 
 # ---- the Now line's clock --------------------------------------------------------------------
 ticking = {"read_recorder_live": lambda: {"ok": True, "state": recorder.RECORDING,
@@ -278,7 +278,7 @@ check("the list follows the reply", takes.list.GetCount(), 1)
 check_true("and the recorder is read again", reads)
 section.show(payload(takes=[take(5, "REC0005")], can_delete=False, delete_note="Not here."), "")
 takes._on_delete(None)
-check("a unit that cannot delete says why", frame.said[-1], "Not here.")
+check("a desk that cannot delete says why", frame.said[-1], "Not here.")
 
 section.show(payload(), "")
 with patched(sync, (server, {"action_storage_eject": lambda index, on: calls.append(
@@ -300,7 +300,7 @@ storage._on_erase(None)
 check("Erase refuses mid-take", frame.said[-1], "Stop the recording first.")
 section.show(payload(storage_writable=False), "")
 storage._on_eject(None)
-check("a unit whose storage cannot be changed says so", frame.said[-1],
+check("a desk whose storage cannot be changed says so", frame.said[-1],
       recording_section.NO_STORAGE_WRITE)
 
 

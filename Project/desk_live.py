@@ -197,6 +197,16 @@ def _written(record: bytes) -> None:
 rcp_hid.write_watcher = _written
 
 
+def _revealed(changes) -> None:
+    """`desk_model.revealed_watcher`: what a dump showed the desk changed without pushing, handed
+    to the subscriptions as the pushes it never sent."""
+    for path, name, value, kind, was in changes:
+        _fan_out(Push(path, name, value, kind, rcp_read.push_key(path), was))
+
+
+desk_model.revealed_watcher = _revealed
+
+
 def decode(frame: bytes) -> Optional[Push]:
     """The push in one report-04 frame, or None for anything else, a model dump's slice included."""
     rec = rcp_read.parse_push(frame)

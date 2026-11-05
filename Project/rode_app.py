@@ -1,12 +1,12 @@
 """AccessCaster - whether RODE's own app is running on this computer.
 
-The desk pushes no fader move made by software (RODECASTER_PROTOCOL.txt section 6), so while RODE's
-app is open the desk model cannot keep the fader layout current from pushes: every write addressed
-by the layout reads the desk first (`channels.strip_vector`). The user is warned once per run of
-RODE's app: spoken in the app's own voice when it is first seen (`on_seen`), and a dialog the next
-time the window comes to the front (`take_warning`), because a background program cannot take the
-focus from the one in front. A tray notification is not used: on Windows 11 one has been raised
-without error and never appeared.
+The desk pushes no write made by other software (RODECASTER_PROTOCOL.txt, "Who pushes a layout
+change"), so while RODE's app is open the desk model cannot keep current from pushes: every write
+addressed by the layout reads the desk first (`channels.strip_vector`), and every read is compared
+with the desk model (`on_look`) so what RODE's app changed reaches everything that follows the
+desk. When RODE's app is first seen in a run of it, that is said in the app's own voice
+(`on_seen`, `NOTICE`), heard whatever is in front. A tray notification is not used: on Windows 11
+one has been raised without error and never appeared.
 
 RODE's app is one process, and its Quit button ends it. The virtual device driver's own processes
 (RODECasterVADService, RodecasterSystray) run all the time and control no fader, so only the app
@@ -24,23 +24,17 @@ import diagnostics
 EXE = "RODECaster App.exe"
 POLL_S = 3.0
 
-NOTICE = ("RODE's app is open. Using it alongside AccessCaster is not advised. Until you quit it, "
-          "AccessCaster checks the faders before every change, which makes changes slower.")
-DIALOG_TITLE = "RODE's app is open"
-DIALOG_TEXT = ("Using RODE's app and AccessCaster at the same time is not advised. The unit does "
-               "not tell AccessCaster when a fader is moved in RODE's app, so a change made here "
-               "could reach the wrong channel.\n\n"
-               "While RODE's app is open, AccessCaster checks the faders before every change to "
-               "prevent that, which makes each change about half a second slower. Quit RODE's app "
-               "when you have finished with it.")
+NOTICE = "RODE's app is open. AccessCaster catches up with its changes when you come back to it."
 
-# Called on the watcher's thread when RODE's app is first seen in a run of it: the tray's spoken
-# warning.
+# Called on the watcher's thread when RODE's app is first seen in a run of it: the tray speaking
+# `NOTICE`.
 on_seen = None
+# Called on the watcher's thread after every look, with whether RODE's app is open: the server
+# comparing reads with the desk model while it is (`server._follow_rode_app`).
+on_look = None
 
 _lock = threading.Lock()
 _open = False
-_warning_owed = False
 _stop = threading.Event()
 _thread = None
 
@@ -100,25 +94,12 @@ def is_open() -> bool:
     return _open
 
 
-def take_warning() -> bool:
-    """Whether the dialog is owed: True once per run of RODE's app, then False until it is next
-    opened."""
-    global _warning_owed
-    with _lock:
-        owed, _warning_owed = _warning_owed, False
-    return owed
-
-
 def note(seen: bool) -> None:
     """One look at whether RODE's app is running. The watcher's poll; offline tests call it
     directly."""
-    global _open, _warning_owed
+    global _open
     with _lock:
         was, _open = _open, seen
-        if seen and not was:
-            _warning_owed = True
-        elif was and not seen:
-            _warning_owed = False
     if seen == was:
         return
     diagnostics.event("rode_app.open" if seen else "rode_app.closed", EXE)
@@ -140,6 +121,8 @@ def start() -> None:
         while True:
             try:
                 note(running())
+                if on_look is not None:
+                    on_look(_open)
             except Exception as exc:
                 diagnostics.event("rode_app.check_failed", str(exc))
             if _stop.wait(POLL_S):

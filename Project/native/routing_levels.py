@@ -226,7 +226,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         mix = self.levels["mix"]
         if not mix.get("ok") or not matrix.get("ok"):
             self.mix_output_acc.description = (mix.get("reason") or matrix.get("reason")
-                                               or "The unit's mix levels could not be read.")
+                                               or "The desk's mix levels could not be read.")
             return
         self.mix_output_acc.description = MODE_WORDS.get(matrix["modes"].get(self._mix_index),
                                                          FOLLOWING)

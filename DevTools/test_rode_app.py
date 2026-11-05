@@ -1,8 +1,9 @@
 """RODE's app being open (Project/rode_app.py), offline.
 
-Seen once per run of it: the spoken warning's hook fires as it opens, the window's warning is owed
-once until it closes, and while it is open a write addressed by the fader layout reads the desk
-rather than trusting the desk model, because RODE's app's fader moves are not pushed.
+Seen once per run of it: the spoken notice's hook fires as it opens; while it is open a write
+addressed by the fader layout reads the desk rather than trusting the desk model, and every read is
+compared with the model, because no write of RODE's app is pushed; and as it closes the desk is
+read once more, still compared, for what it changed since.
 
     python DevTools/test_rode_app.py
 """
@@ -16,6 +17,7 @@ import channels
 import desk_model
 import rcp_read
 import rode_app
+import server
 from _testkit import check, check_true, hold_desk, patched
 
 LAYOUT = [0, 7, 2, 3, 10, 11, 1, 16, 9, 9]
@@ -23,31 +25,38 @@ LAYOUT = [0, 7, 2, 3, 10, 11, 1, 16, 9, 9]
 seen = []
 rode_app.on_seen = lambda: seen.append("seen")
 rode_app.note(False)
-rode_app.take_warning()
 
 print("RODE'S APP OPENING AND CLOSING")
-check("nothing is owed while it is closed", (rode_app.is_open(), rode_app.take_warning()),
-      (False, False))
+check("it reads as closed", rode_app.is_open(), False)
 rode_app.note(True)
-check("opening fires the warning hook once", seen, ["seen"])
+check("opening fires the notice hook once", seen, ["seen"])
 check_true("and it reads as open", rode_app.is_open())
 rode_app.note(True)
 check("staying open fires nothing more", seen, ["seen"])
-check("the window's warning is owed once", (rode_app.take_warning(), rode_app.take_warning()),
-      (True, False))
 rode_app.note(False)
 check("closing fires nothing", seen, ["seen"])
 rode_app.note(True)
-check("a second run is warned of again", (seen, rode_app.take_warning()), (["seen", "seen"], True))
-rode_app.note(True)
+check("a second run is told of again", seen, ["seen", "seen"])
 rode_app.note(False)
-check("a warning not yet given is dropped when it closes", rode_app.take_warning(), False)
 
-print("\nTHE WARNING HOOK FAILING")
+print("\nTHE NOTICE HOOK FAILING")
 rode_app.on_seen = lambda: 1 / 0
 rode_app.note(True)
 check_true("costs nothing but itself", rode_app.is_open())
 rode_app.note(False)
+
+print("\nCOMPARING READS, AND THE READ AS IT CLOSES")
+reads_done = []
+with patched((server, {"_read_unheard": lambda: reads_done.append(desk_model._reveal)})):
+    server._follow_rode_app(True)
+    server._follow_rode_app(True)
+    check("while it is open, reads are compared and nothing is read on a timer",
+          (desk_model._reveal, reads_done), (True, []))
+    server._follow_rode_app(False)
+    check("as it closes, one read, still compared, then comparing stops",
+          (reads_done, desk_model._reveal), ([True], False))
+    server._follow_rode_app(False)
+    check("and nothing more while it stays closed", reads_done, [True])
 
 print("\nADDRESSING A WRITE")
 reads = []

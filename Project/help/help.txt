@@ -1,10 +1,10 @@
 # About
 
-AccessCaster lets you use your RODECaster (Pro 2 or Duo) audio desk without the RODE software, and to a large degree without ever touching the unit's touchscreen.
+AccessCaster lets you use your RODECaster (Pro 2 or Duo) audio desk without the RODE software, and to a large degree without ever touching the desk's touchscreen.
 
 As a blind screen reader user, I found the official RODE software was not usable enough for me: I needed help every time I wanted to set the desk up or change a setting.
 
-With AccessCaster I can control and adjust almost all of the desk's features, including processing, routing, recording, SMART pad management, and device settings such as wifi and Bluetooth connections, all of it accessible with a screen reader. I have also added features the desk does not give you at all: spoken announcements for every button on the unit, fader positions read out as you move them, and keyboard shortcuts you can put on over 100 of the app's commands, such as starting a recording or loading a mic processing preset.
+With AccessCaster I can control and adjust almost all of the desk's features, including processing, routing, recording, SMART pad management, and device settings such as wifi and Bluetooth connections, all of it accessible with a screen reader. I have also added features the desk does not give you at all: spoken announcements for every button on the desk, fader positions read out as you move them, and keyboard shortcuts you can put on over 100 of the app's commands, such as starting a recording or loading a mic processing preset.
 
 The app was built with Claude Code, and took many months of capturing the USB traffic between the RODE app and my own RODECaster Pro 2 to work out how the desk communicates. I run regular code audits in order to keep it as clean and efficient as possible, and I now use this app exclusively to run my desk. Even if you are not a screen reader user and have no interest in accessibility, I think you'll find the app's UI and design far easier and quicker to use.
 
@@ -12,37 +12,37 @@ What you can do from the app:
 
 - Mute, solo and set the level of every channel, including muting a RODE wireless mic at the transmitter.
 - Set each channel's gain, phantom power and input settings, or let the app set a mic's gain while you talk.
-- All of the unit's processing on every channel, with presets, plus voice effects and the master output's processing.
+- All of the desk's processing on every channel, with presets, plus voice effects and the master output's processing.
 - Fader assignment, output routing and monitor mixes, with presets you can save and recall.
-- What the unit and this computer send each other over USB, including four separate channels from this computer.
+- What the desk and this computer send each other over USB, including four separate channels from this computer.
 - The recorder: start, pause, stop and markers, what gets recorded and in what format, and deleting, ejecting or erasing.
 - SMART pads: sounds, voice effects, mixer and MIDI pads, with trimming, fades and your own custom voice effects.
 - CallMe: host, answer, make and end calls, with the call's quality and your plan's minutes.
 - Backups, restores, and a factory reset without the touchscreen setup.
-- The unit's own settings, wifi, Bluetooth and firmware updates.
+- The desk's own settings, wifi, Bluetooth and firmware updates.
 
 And extra features AccessCaster has added:
 
-- Spoken announcements for every button, bank, encoder turn and fader move on the unit.
+- Spoken announcements for every button, bank, encoder turn and fader move on the desk.
 - Keyboard shortcuts that work in any program, from over 100 commands.
 - Playing SMART pads from the keyboard.
 - Level meters in words, telling you when something clips or goes silent.
 - A summary of the whole desk's current state in one place.
 
-Some things still need the unit's touchscreen, for now:
+Some things still need the desk's touchscreen, for now:
 
-- Searching for Bluetooth devices. Make the unit discoverable on the Device page and pair from your phone instead.
+- Searching for Bluetooth devices. Make the desk discoverable on the Device page and pair from your phone instead.
 - Pairing a RODE wireless mic, or changing its settings such as Gain Assist.
-- Setting the time zone or daylight saving. The unit sets its own clock over the internet.
-- Changing the unit's language.
-- Playing back, trimming or fading a recording on the unit.
+- Setting the time zone or daylight saving. The desk sets its own clock over the internet.
+- Changing the desk's language.
+- Playing back, trimming or fading a recording on the desk.
 - Recording straight onto a pad.
 
 Worth knowing:
 
 - Recordings can't be copied off over the USB cable yet. Take the card or drive out and plug it into your computer.
 - A backup doesn't hold your Bluetooth pairings, wifi networks or wireless mic pairing, so after a factory reset you'll need to set those up again.
-- After a reset or a restore, the unit can sometimes stop responding. Unplugging the USB cable and plugging it back in usually brings it back; if it doesn't, switch the unit off and on again. Nothing is lost. Troubleshooting has the details.
+- After a reset or a restore, the desk can sometimes stop responding. Unplugging the USB cable and plugging it back in usually brings it back; if it doesn't, switch the desk off and on again. Nothing is lost. Troubleshooting has the details.
 
 AccessCaster is not endorsed by, associated with, or supported by RODE. It is an independent project, and RODE have had no hand in it. I have taken every precaution I can to make sure the code is safe and that nothing it does to the desk cannot be undone, but it talks directly to your hardware, so you use it at your own risk.
 
@@ -56,17 +56,17 @@ The AccessCaster window is simple. On the left is a tree of nine categories, fro
 - F6 moves between the tree and the page.
 - Alt and 1 to 9 jump to a category.
 - Ctrl and Tab, or Ctrl, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
-- F5 refreshes the category, fetching its current settings from the unit.
+- F5 refreshes the category, fetching its current settings from the desk.
 - F12 checks for any updates for AccessCaster.
 - NVDA and End, Insert and Page Down in JAWS, or Narrator and backslash reads the status bar, which tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
 
 Closing the window leaves AccessCaster running in the notification area, so your keyboard shortcuts and the announcer keep working, and opening the app again brings the same window back. If you would rather closing the window quit the app, turn off Keep running in the system tray on the App settings General page.
 
-To reach the tray icon, press Windows and B, arrow to AccessCaster, then press Enter or the Applications key. Its menu has Open AccessCaster; Announcer, ticked while spoken announcements are on; Diagnostic log, the app's record of what it sent to the unit; Check for updates; and Quit. If the unit is part-way through something, such as a restore or copying a pad's sound, AccessCaster tells you and waits rather than quitting, so the unit is not left half written.
+To reach the tray icon, press Windows and B, arrow to AccessCaster, then press Enter or the Applications key. Its menu has Open AccessCaster; Announcer, ticked while spoken announcements are on; Diagnostic log, the app's record of what it sent to the desk; Check for updates; and Quit. If the desk is part-way through something, such as a restore or copying a pad's sound, AccessCaster tells you and waits rather than quitting, so the desk is not left half written.
 
 # Getting around your RODECaster
 
-Where everything is on the unit, found by touch, and what each control does.
+Where everything is on the desk, found by touch, and what each control does.
 
 ## Where everything is on a RODECaster Pro 2
 
@@ -88,7 +88,7 @@ Six of them across the lower half, left to right, faders 1 to 6. Each has a squa
 Eight pads down the right-hand side, in two columns of four. They are numbered down the columns, not across the rows: the top left pad is 1, with 2, 3 and 4 below it, and the top right pad is 5, with 6, 7 and 8 below that. Directly underneath them, two buttons: previous bank on the left, next bank on the right.
 
 * The back panel
-Left to right as you sit in front of the desk, so the far left end is microphone input 1 and the far right end is the power. In order: the four combo XLR inputs, 1 to 4; the two monitor outputs, which are stacked one above the other, left on top and right below; the four headphone jacks, a block of two rows of two, 1 and 2 along the top and 3 and 4 directly beneath them; then USB 2 and USB 1; then the ethernet socket, with the microSD card slot in the same recess directly above it; then a security lock slot; and last the power inlet, a USB-C mounted vertically rather than flat, with the round power button at the very end. Worth knowing, because this app talks to the unit over one cable and not the other: USB 1 is the nearer of the two to the power end.
+Left to right as you sit in front of the desk, so the far left end is microphone input 1 and the far right end is the power. In order: the four combo XLR inputs, 1 to 4; the two monitor outputs, which are stacked one above the other, left on top and right below; the four headphone jacks, a block of two rows of two, 1 and 2 along the top and 3 and 4 directly beneath them; then USB 2 and USB 1; then the ethernet socket, with the microSD card slot in the same recess directly above it; then a security lock slot; and last the power inlet, a USB-C mounted vertically rather than flat, with the round power button at the very end. Worth knowing, because this app talks to the desk over one cable and not the other: USB 1 is the nearer of the two to the power end.
 
 * What is not on the desk
 Faders 7, 8 and 9 have no physical fader: they are USB 1, USB 1 Chat and USB 2, and they exist on the touchscreen and in this app only.
@@ -121,7 +121,7 @@ Left to right as you sit in front of the desk, so the far left end is microphone
 * What is not on the desk
 The Duo has nine faders and only four you can put a finger on, so faders 5 to 9 live on the touchscreen and in this app only. By default the four physical ones carry Mic 1, Mic 2, Bluetooth and the SMART pads; of the five you cannot reach, four carry the headset input, USB 1, Chat and USB 2, and the ninth ships empty for you to put something on.
 
-## What the controls on the unit do
+## What the controls on the desk do
 
 * Channel buttons
 The square button above each fader hands the encoder to that channel: the encoder then sets the channel's gain on a mic, or its level on anything else. Press the same button again to hand the encoder back.
@@ -140,10 +140,10 @@ Each headphone output's own volume.
 
 # Channels and Processing (Alt+1)
 
-Everything for one channel at a time: its mute and solo, its input settings, and the unit's processing. There is a page for every input channel on your unit. The SMART pads mix is the odd one out: it has a mute and a solo but no processing, because the unit applies none to the pads.
+Everything for one channel at a time: its mute and solo, its input settings, and the desk's processing. There is a page for every input channel on your desk. The SMART pads mix is the odd one out: it has a mute and a solo but no processing, because the desk applies none to the pads.
 
 * Mute or Listen
-Mute silences a channel everywhere, including the recording and anything you stream. The one exception is an output where you have set this channel's level by hand in a custom mix, and the reply names it. Listen (solo) puts just that channel in your headphones and leaves everything else alone, so it is the safe way to check a mic mid-show. The unit gives no clue that a solo is still on, and the app's announcements go quiet while one is, which is why Clear every solo sits beside it.
+Mute silences a channel everywhere, including the recording and anything you stream. The one exception is an output where you have set this channel's level by hand in a custom mix, and the reply names it. Listen (solo) puts just that channel in your headphones and leaves everything else alone, so it is the safe way to check a mic mid-show. The desk gives no clue that a solo is still on, and the app's announcements go quiet while one is, which is why Clear every solo sits beside it.
 
 * Mute the wireless mic
 For a RODE wireless mic paired to the channel. It mutes the transmitter rather than the channel, so a guest who walks off still wearing one is not an open mic in the room.
@@ -158,13 +158,13 @@ Gain is normally set by watching a meter while you talk. Press this, talk normal
 Speaks the level for half a minute, then the loudest it got. It is as useful on a phone over Bluetooth or a computer over USB as on a mic, since those arrive at a level nobody chose. The fader has to be up a little for it to hear anything, but where it sits does not change the reading.
 
 * Mic type
-Tells the unit which mic is plugged in, so it can set its preamp up to suit. Applying one also loads that mic's own default gain, so expect the gain to move.
+Tells the desk which mic is plugged in, so it can set its preamp up to suit. Applying one also loads that mic's own default gain, so expect the gain to move.
 
 * Presets
 Mic channels only. Apply a ready-made voicing or save your own. The list shows which preset the channel is on, or says it has been changed since.
 
 * Processing
-The unit's studio chain: equaliser, compressor (evens out loud and quiet), noise gate (cuts noise between words), de-esser (tames harsh s sounds), high-pass filter (removes rumble), tone shaping and pan. With Advanced processing off, Tone shaping sets the other modules for you, so their values move on their own; switch it on to set each module yourself. Pan does nothing while processing is off.
+The desk's studio chain: equaliser, compressor (evens out loud and quiet), noise gate (cuts noise between words), de-esser (tames harsh s sounds), high-pass filter (removes rumble), tone shaping and pan. With Advanced processing off, Tone shaping sets the other modules for you, so their values move on their own; switch it on to set each module yourself. Pan does nothing while processing is off.
 
 * Effects
 Mic channels only: echo and reverb, each with its own switch and settings.
@@ -189,7 +189,7 @@ Puts every output back to normal. If muting a channel no longer silences it in y
 Choose the channel on each fader, physical or virtual, mic faders included. Picking a channel that is already on another fader swaps the two, and each channel's processing moves with it. Stereo linked inputs joins a pair of mics into one stereo channel on one fader; unlinking puts the second mic back.
 
 * Levels
-The levels with no physical fader: the virtual faders, with their mute and solo, and the monitor speakers. On the unit itself, the virtual faders are turned with the encoder, the dial on the desk. If the encoder stops changing them, a channel button has taken it over; press that button again to give it back.
+The levels with no physical fader: the virtual faders, with their mute and solo, and the monitor speakers. On the desk itself, the virtual faders are turned with the encoder, the dial on the desk. If the encoder stops changing them, a channel button has taken it over; press that button again to give it back.
 
 * Output mutes and auto-mute
 These silence an output, not a channel, so your mixes, the recording and your streams carry on. The Bluetooth output is what a phone hears from you; the Bluetooth channel, on Channels, is what you hear from the phone. Auto-mute silences the speakers, or the Bluetooth send, while a mic is live, so the mic does not pick them up and howl. Leave both on if you use speakers or take calls.
@@ -201,7 +201,7 @@ How loud each source is in one output, without changing the others or the record
 The amp type for each headphone output. High sensitivity is for quiet headphones and can be loud. On a Pro 2, only headphones 1 and 2 can be set.
 
 * USB audio
-On the Master Mix page. What this computer receives is either one mixed pair, or every channel separately so a program can record them apart; Send the separate tracks raw leaves the unit's processing off those, for processing later. What this computer sends is either one stereo input, or Expanded: four separate inputs, Game, Music, A and B, each on a fader of its own. Changing either drops the unit's audio for a few seconds, your screen reader included if it speaks through the unit.
+On the Master Mix page. What this computer receives is either one mixed pair, or every channel separately so a program can record them apart; Send the separate tracks raw leaves the desk's processing off those, for processing later. What this computer sends is either one stereo input, or Expanded: four separate inputs, Game, Music, A and B, each on a fader of its own. Changing either drops the desk's audio for a few seconds, your screen reader included if it speaks through the desk.
 
 * Using Expanded
 Put music, a call, a game and your screen reader on separate faders, so you can duck the music under a guest, or keep your screen reader out of a caller's ears and out of the recording. It needs RODE's Virtual Devices driver, which the page can download and install for you after checking it is signed by RODE. While that driver is installed, the RODECaster ASIO driver stops working. Each input only appears in Windows while it is on a fader, so assign them on Fader assignment first, then choose one for each program in Windows Settings, System, Sound, Volume mixer. Going back to Standard takes them off their faders.
@@ -211,41 +211,41 @@ Also on Master Mix, and it affects everyone. The Compellor evens out and glues t
 
 # SMART pads (Alt+3)
 
-Setting up the pads in every bank: what each pad does and how it behaves, your own voice effects, and jobs on the whole set of pads. To play pads from the keyboard, see the pad shortcuts on App settings, Keyboard shortcuts: the number row plays the pads of the bank the unit is on.
+Setting up the pads in every bank: what each pad does and how it behaves, your own voice effects, and jobs on the whole set of pads. To play pads from the keyboard, see the pad shortcuts on App settings, Keyboard shortcuts: the number row plays the pads of the bank the desk is on.
 
 * Pads
 Every pad in a list, saying where it is and what it does. Edit this pad's settings changes how it behaves; Change what this pad does gives it a new job.
 
 * Change what this pad does
-A sound of your own, a voice effect, a mixer action or a MIDI trigger, the same types the unit's own screen offers, or Empty to clear the pad. Nothing changes until you press Apply.
+A sound of your own, a voice effect, a mixer action or a MIDI trigger, the same types the desk's own screen offers, or Empty to clear the pad. Nothing changes until you press Apply.
 
 * How a sound pad plays
 Toggle: press to play, press again to stop. Hold: plays only while you hold the pad, so a tap gives a blip. One Shot: every press plays it from the start and it cannot be stopped, so Loop is not available with it.
 
 * Trim and fade
-Four points as a percentage of the sound: where it starts, where the fade in ends, where the fade out begins, and where it stops. They are percentages because the unit does not report how long a sound is. Put a fade point on the start or the stop for no fade at that end.
+Four points as a percentage of the sound: where it starts, where the fade in ends, where the fade out begins, and where it stops. They are percentages because the desk does not report how long a sound is. Put a fade point on the start or the stop for no fade at that end.
 
 * Mixer actions
 Censor beeps over everything. Trash Talk cuts your audio to callers while you still hear them. Fade In and Fade Out ramp the whole mix. Back Channel is off-air talkback with the people you choose. Ducking lowers everyone but the host. A latching pad stays on until you press it again; a momentary one only while you hold it.
 
 * MIDI trigger pads
-Send a MIDI message to another app or controller. By default a pad sends a Control Change on its own number, counting from 0, on channel 1. Switch on the custom mapping to change it; switching it off puts the default back and forgets what you typed, as the unit itself does.
+Send a MIDI message to another app or controller. By default a pad sends a Control Change on its own number, counting from 0, on channel 1. Switch on the custom mapping to change it; switching it off puts the default back and forgets what you typed, as the desk itself does.
 
 * Voice effects
 Build your own effect from reverb, echo and more, and save it to the list of voice effects you can put on a pad. Live preview plays it on your mic as you build, and only while it is switched on. Deleting an effect does not change a pad that already uses it.
 
 * Pad maintenance
-Clear all pads empties every pad except the built-in System pads. Restore the pads from a backup puts them back from a backup on this computer, sounds included. Restore the factory voice effects, Censor and Ducking rebuilds those eight pads, but not RODE's factory sounds, which only a backup or a factory reset can bring back. Tidy up unused pad audio deletes sound files no pad plays any more. Export this pad's sound copies it to Documents, AccessCaster, Pad exports, for when the unit holds the only copy. Anything that copies sounds to the unit takes about fifteen seconds a pad.
+Clear all pads empties every pad except the built-in System pads. Restore the pads from a backup puts them back from a backup on this computer, sounds included. Restore the factory voice effects, Censor and Ducking rebuilds those eight pads, but not RODE's factory sounds, which only a backup or a factory reset can bring back. Tidy up unused pad audio deletes sound files no pad plays any more. Export this pad's sound copies it to Documents, AccessCaster, Pad exports, for when the desk holds the only copy. Anything that copies sounds to the desk takes about fifteen seconds a pad.
 
 # Recording (Alt+4)
 
-The unit's own recorder, which writes to a memory card, or to a USB drive in the unit's second USB port. Recording started or stopped on the unit itself shows here too. The unit's internal storage holds the pad sounds and cannot take a recording.
+The desk's own recorder, which writes to a memory card, or to a USB drive in the desk's second USB port. Recording started or stopped on the desk itself shows here too. The desk's internal storage holds the pad sounds and cannot take a recording.
 
 * Start and stop
-Start recording becomes Stop recording once a recording is running, and Pause becomes Resume while one is paused. They change the same way when you press the record button on the unit itself. The Now box below them says what the recorder is doing and how long it has been going. Drop a marker puts a marker at that moment, which your editing software shows so you can find it again.
+Start recording becomes Stop recording once a recording is running, and Pause becomes Resume while one is paused. They change the same way when you press the record button on the desk itself. The Now box below them says what the recorder is doing and how long it has been going. Drop a marker puts a marker at that moment, which your editing software shows so you can find it again.
 
-* The record button on the unit
-On a Pro 2, the circular REC button to the left of the touchscreen. A Duo has no physical record button: its REC button is at the top left of the touchscreen, so on a Duo this page or a keyboard shortcut is the way to record without the screen. Either way, a press starts a recording. While recording, a short press pauses and pressing and holding stops, and a press resumes a paused recording. Set What the record button does when pressed to Press to stop, on Device, Unit settings, and the two swap: a short press stops and pressing and holding pauses.
+* The record button on the desk
+On a Pro 2, the circular REC button to the left of the touchscreen. A Duo has no physical record button: its REC button is at the top left of the touchscreen, so on a Duo this page or a keyboard shortcut is the way to record without the screen. Either way, a press starts a recording. While recording, a short press pauses and pressing and holding stops, and a press resumes a paused recording. Set What the record button does when pressed to Press to stop, on Device, Desk settings, and the two swap: a short press stops and pressing and holding pauses.
 
 * Tracks
 Decide this before you record, because it cannot be fixed afterwards. Mixed track only is one stereo file. The separate-track choices add one file per channel alongside that same mix, taking about seven times the space. Pre-fader ignores your faders, so a guest who was too quiet can be brought up later; post-fader keeps your fader moves. This is what goes on the card or drive; what this computer receives over USB is set on Routing, Master Mix.
@@ -254,23 +254,23 @@ Decide this before you record, because it cannot be fixed afterwards. Mixed trac
 WAV or MP3, for the mixed file only. WAV is full quality and about eighteen times the size; MP3 is fine for speech. Separate tracks are always WAV, so MP3 with separate tracks gives you a small mix to listen to and full-quality tracks to edit.
 
 * Record the separate tracks raw
-The separate tracks without the unit's processing, so you can do that work yourself later. The mixed file keeps its processing either way.
+The separate tracks without the desk's processing, so you can do that work yourself later. The mixed file keeps its processing either way.
 
 * Silence other announcements while recording
-Your mics can pick up spoken announcements wherever they play, so this pauses them during a take. Turn it off if they go to headphones the mics cannot hear. Your screen reader is separate: if it speaks through the unit, it goes into the recording.
+Your mics can pick up spoken announcements wherever they play, so this pauses them during a take. Turn it off if they go to headphones the mics cannot hear. Your screen reader is separate: if it speaks through the desk, it goes into the recording.
 
 * Recordings
-What is on the card or drive, newest first, with the date and length. You can delete one, which cannot be undone. To copy recordings off, take the card or drive out and plug it into a computer, since the unit does not make them available over USB.
+What is on the card or drive, newest first, with the date and length. You can delete one, which cannot be undone. To copy recordings off, take the card or drive out and plug it into a computer, since the desk does not make them available over USB.
 
 * Card and drive
 Eject a card or drive before pulling it out, so nothing is lost mid-write; Reconnect puts it back in use without unplugging it. Erase deletes everything on it.
 
 # CallMe (Alt+5)
 
-CallMe lets people call your RODECaster directly, and lets you call them. Anyone with a RODECaster of their own can call your unit's code, and anyone else can call from a web browser by opening your guest link, with nothing to install. Calls go over the unit's own wifi or network cable, not this computer, and they are announced wherever you are, so you do not need to be on this page when one comes in.
+CallMe lets people call your RODECaster directly, and lets you call them. Anyone with a RODECaster of their own can call your desk's code, and anyone else can call from a web browser by opening your guest link, with nothing to install. Calls go over the desk's own wifi or network cable, not this computer, and they are announced wherever you are, so you do not need to be on this page when one comes in.
 
 * Not ready for calls
-A call cannot connect while the unit is offline or CallMe 1 is on no fader, and neither the unit nor the guest is told why. Until both are fixed, the page shows only what is wrong, with the fix beside it.
+A call cannot connect while the desk is offline or CallMe 1 is on no fader, and neither the desk nor the guest is told why. Until both are fixed, the page shows only what is wrong, with the fix beside it.
 
 * Current call
 Who is calling, who you are calling, or who you are talking to, then Answer, Decline or Hang up, and Extend the call. Decline always turns a ringing call away first, so a second caller is declined rather than the guest you are with being cut off. From any program, Ctrl, Alt and Shift with C answers and with D declines or hangs up. During a call, its length and its quality are listed below.
@@ -279,10 +279,10 @@ Who is calling, who you are calling, or who you are talking to, then Answer, Dec
 On RODE's free and standard plans a call ends after an hour unless it is extended. Five minutes before, you are told, and Extend the call, or the answer shortcut, gives it another hour. Extend calls automatically, on the Plan page, does it for you.
 
 * Incoming calls
-Accept incoming calls gives the unit a code, which another RODECaster dials, and a guest link for everyone else. Switching it off and on again gets a new code, so a link you have already shared stops working. Ring for incoming calls plays a ringtone through your announcement output until the call is answered.
+Accept incoming calls gives the desk a code, which another RODECaster dials, and a guest link for everyone else. Switching it off and on again gets a new code, so a link you have already shared stops working. Ring for incoming calls plays a ringtone through your announcement output until the call is answered.
 
 * Make a call
-Type the code from the other unit's CallMe screen, or paste a guest link they have sent, and press Call. Save a contact with a name and a code, and calls to and from that unit are announced by name; each contact can go on a keyboard shortcut too. If a contact's code stops working, its owner has switched incoming calls off and on, so ask them for the new one.
+Type the code from the other desk's CallMe screen, or paste a guest link they have sent, and press Call. Save a contact with a name and a code, and calls to and from that desk are announced by name; each contact can go on a keyboard shortcut too. If a contact's code stops working, its owner has switched incoming calls off and on, so ask them for the new one.
 
 * Plan
 Your CallMe plan, the minutes left and when they reset. The free plan, CallMe Lite, takes one guest at a time.
@@ -292,60 +292,60 @@ Your CallMe plan, the minutes left and when they reset. The free plan, CallMe Li
 Save the whole desk and put it back later: before a big change, before handing the desk to someone else, or to move between set-ups for different shows. Two pages: Backups, and Factory settings.
 
 * What a backup holds
-Channels and processing, routing and the fader layout, the unit's own settings, and the SMART pads with their sounds. Two things are left out on purpose: which channels are muted, since putting a mute back could silence somebody at the worst moment, and passwords, so wifi is never stored. Your keyboard shortcuts and other AccessCaster settings are not in it either; save those on App settings, General.
+Channels and processing, routing and the fader layout, the desk's own settings, and the SMART pads with their sounds. Two things are left out on purpose: which channels are muted, since putting a mute back could silence somebody at the worst moment, and passwords, so wifi is never stored. Your keyboard shortcuts and other AccessCaster settings are not in it either; save those on App settings, General.
 
 * Where it lives
-Each backup is kept in two places when it can be: the unit's own copy on its card or drive, and this computer's copy of the settings and pads, which survives the card being pulled or erased. One name covers both. Without a card or drive in the unit, the backup is made on this computer only.
+Each backup is kept in two places when it can be: the desk's own copy on its card or drive, and this computer's copy of the settings and pads, which survives the card being pulled or erased. One name covers both. Without a card or drive in the desk, the backup is made on this computer only.
 
-* Back up the unit now
+* Back up the desk now
 Name it and press Back up now. It takes seconds, plus about a second for each pad. Using a name again replaces that backup.
 
 * Restore selected backup
-Puts the desk back from this computer's copy, which takes a minute or two, longer with many pads. It moves the monitor speaker level, so turn your speakers down first. A backup marked "made on the unit" was taken on the touchscreen or in RODE's app, so it has no copy here and is restored the unit's own way instead, which can occasionally lock the unit up: the dialog tells you before you start.
+Puts the desk back from this computer's copy, which takes a minute or two, longer with many pads. It moves the monitor speaker level, so turn your speakers down first. A backup marked "made on the desk" was taken on the touchscreen or in RODE's app, so it has no copy here and is restored the desk's own way instead, which can occasionally lock the desk up: the dialog tells you before you start.
 
 * Rename and delete
-Renaming only changes the name on this computer, so a backup made on the unit cannot be renamed. Deleting removes both copies and cannot be undone.
+Renaming only changes the name on this computer, so a backup made on the desk cannot be renamed. Deleting removes both copies and cannot be undone.
 
 * The as-found backup
-The first time AccessCaster meets a unit, it offers to back it up exactly as it was, before the app changes anything. It is the only record of how your desk arrived, so deleting it asks twice.
+The first time AccessCaster meets a desk, it offers to back it up exactly as it was, before the app changes anything. It is the only record of how your desk arrived, so deleting it asks twice.
 
 * Factory settings
-Puts every setting and every SMART pad back as the unit left the factory, including RODE's factory pad sounds. Your wifi, the language and your recordings are kept. The unit is backed up first unless you untick that, and that backup is your only way back. Unlike the unit's own reset, this skips the setup wizard that only works by touchscreen.
+Puts every setting and every SMART pad back as the desk left the factory, including RODE's factory pad sounds. Your wifi, the language and your recordings are kept. The desk is backed up first unless you untick that, and that backup is your only way back. Unlike the desk's own reset, this skips the setup wizard that only works by touchscreen.
 
 # Device (Alt+7)
 
-The unit itself: how it is right now, its hardware and firmware, the settings it otherwise keeps on its touchscreen, and its wireless connections. Settings for AccessCaster itself are on App settings.
+The desk itself: how it is right now, its hardware and firmware, the settings it otherwise keeps on its touchscreen, and its wireless connections. Settings for AccessCaster itself are on App settings.
 
 * Current state
 The whole desk in one summary: what is muted or soloed, every fader level, anything unusual about the routing, and the pad bank. Look here first when something sounds wrong. The status bar carries the parts that need your attention, wherever you are in the window.
 
 * Hardware
-Whether a card or drive is in and how much recording time is left, the recorder, the firmware, and whether a network cable is in. Check for a firmware update asks RODE whether there is a newer version, and Install firmware installs it: the unit downloads it itself, installs it and restarts, which takes about five minutes. The unit's audio stops while it restarts, so a screen reader speaking through it goes quiet until it is back. RODE offers no way back to an older version. Last is a technical section for troubleshooting.
+Whether a card or drive is in and how much recording time is left, the recorder, the firmware, and whether a network cable is in. Check for a firmware update asks RODE whether there is a newer version, and Install firmware installs it: the desk downloads it itself, installs it and restarts, which takes about five minutes. The desk's audio stops while it restarts, so a screen reader speaking through it goes quiet until it is back. RODE offers no way back to an older version. Last is a technical section for troubleshooting.
 
-* Unit settings
-The settings the unit otherwise offers only on its touchscreen: brightness, the meter style, haptics, the clock, what the record button does, and more. Two worth knowing about. Listen mode: pre-fader hears a soloed channel at its own level whatever its fader is doing, so you can check a mic that is faded down; after-fader hears it as the fader has it. The lockouts can lock the unit's physical buttons, or silence every headphone or line output, and this app can always switch them back off. Enable MIDI control lets a MIDI app or controller handle mutes, faders, listen and recording.
+* Desk settings
+The settings the desk otherwise offers only on its touchscreen: brightness, the meter style, haptics, the clock, what the record button does, and more. Two worth knowing about. Listen mode: pre-fader hears a soloed channel at its own level whatever its fader is doing, so you can check a mic that is faded down; after-fader hears it as the fader has it. The lockouts can lock the desk's physical buttons, or silence every headphone or line output, and this app can always switch them back off. Enable MIDI control lets a MIDI app or controller handle mutes, faders, listen and recording.
 
 * Wireless connections
-Switch the unit's wifi on, scan for networks and join one. The unit lists ten networks at most, never hidden ones, and joining can take up to 45 seconds. To pair a phone, switch on Let other devices find this unit, then pair from the phone's own Bluetooth settings; the unit stops being discoverable after a few minutes. The wireless mics the unit can see are listed with their battery levels.
+Switch the desk's wifi on, scan for networks and join one. The desk lists ten networks at most, never hidden ones, and joining can take up to 45 seconds. To pair a phone, switch on Let other devices find this desk, then pair from the phone's own Bluetooth settings; the desk stops being discoverable after a few minutes. The wireless mics the desk can see are listed with their battery levels.
 
 # App settings (Alt+8)
 
-Everything about AccessCaster itself rather than the unit: what it says, its keyboard shortcuts, how it starts and closes, and its own updates. None of it is in a backup of the unit. Four pages: Announcements, Keyboard shortcuts, General and Updates.
+Everything about AccessCaster itself rather than the desk: what it says, its keyboard shortcuts, how it starts and closes, and its own updates. None of it is in a backup of the desk. Four pages: Announcements, Keyboard shortcuts, General and Updates.
 
 * Announcements
-Speaks what you do on the unit, so you know what happened without the touchscreen: mutes and solos with the channel's name, bank changes, channel buttons and the encoder, including changes made on the unit itself. Announce fader and monitor levels adds each level as you move it, by name. Play a tone for mute is quicker than speech but does not say which channel. Recording starting, pausing and stopping can be spoken, played as tones (one, two or three beeps) or left silent.
+Speaks what you do on the desk, so you know what happened without the touchscreen: mutes and solos with the channel's name, bank changes, channel buttons and the encoder, including changes made on the desk itself. Announce fader and monitor levels adds each level as you move it, by name. Play a tone for mute is quicker than speech but does not say which channel. Recording starting, pausing and stopping can be spoken, played as tones (one, two or three beeps) or left silent.
 
 * Voice, output and volume
 Announcements have their own voice, output and volume, separate from your screen reader. The output matters: left on the RODECaster, announcements can end up in your recording and go quiet when you solo a channel, so your computer's own speakers or headphones are usually better. Refresh voices and outputs reads both lists again after you plug something in.
 
 * Warn when the main mix clips
-Says Main mix clipping when the unit's main mix reaches full scale. It listens to the unit as a Windows audio device, so it does not work over Remote Desktop.
+Says Main mix clipping when the desk's main mix reaches full scale. It listens to the desk as a Windows audio device, so it does not work over Remote Desktop.
 
 * Keyboard shortcuts
 Shortcuts that work in any program, even with this window closed, all held on the same keys, Ctrl, Alt and Shift to begin with. Add a shortcut offers over 100 commands, so anything you can do on a page can go on a key. A new install starts with seven: announcements on and off (A), mute every mic and open them again (M), start or stop a recording (R), hear the desk's state (S), bring this window to the front (O), answer a CallMe call (C), and decline or hang up (D). Each shortcut says what it did, unless you tell it not to. The mic key only reopens mics it muted itself, so it never opens a mic you had shut.
 
 * Playing pads from the keyboard
-Use the SMART pad keys adds a set along the number row: 1 to 8 play the pads of the bank the unit is on (1 to 6 on a Duo), dash and equals step down and up through the banks that have pads on them, and P says what is playing and how long is left. These keys stay silent, because the pad itself is the feedback. You can also put one particular pad on a key of its own, which plays that pad whatever bank the unit is on. Playing a sound pad switches the unit's MIDI control on, because that is the only way to make the unit play a sound.
+Use the SMART pad keys adds a set along the number row: 1 to 8 play the pads of the bank the desk is on (1 to 6 on a Duo), dash and equals step down and up through the banks that have pads on them, and P says what is playing and how long is left. These keys stay silent, because the pad itself is the feedback. You can also put one particular pad on a key of its own, which plays that pad whatever bank the desk is on. Playing a sound pad switches the desk's MIDI control on, because that is the only way to make the desk play a sound.
 
 * General
 Start AccessCaster when you sign in to Windows starts it in the tray, so your shortcuts work from the moment you sign in. Keep running in the system tray when the window is closed is on to begin with; switch it off and closing the window quits the app. Save this app's settings to a file keeps your shortcuts, announcement choices and CallMe contacts in one small file, to restore later or copy to another computer.
@@ -355,21 +355,21 @@ AccessCaster looks for a newer version of itself once a day, or as often as you 
 
 # Troubleshooting
 
-Common problems and what to do about each. The faults in the unit itself were measured on real hardware, and none of them loses your settings, pads or recordings.
+Common problems and what to do about each. The faults in the desk itself were measured on real hardware, and none of them loses your settings, pads or recordings.
 
 ## My desk has stopped responding
 
-Every control stops working and the app says it cannot find the unit, or that it is half connected. The unit has dropped off the USB connection. This is a fault in the unit, and it can sometimes happen just after a factory reset or a restore. Audio can carry on regardless, so silence is not the sign to wait for.
+Every control stops working and the app says it cannot find the desk, or that it is half connected. The desk has dropped off the USB connection. This is a fault in the desk, and it can sometimes happen just after a factory reset or a restore. Audio can carry on regardless, so silence is not the sign to wait for.
 
-Unplug the USB cable in the socket nearest the power inlet, wait a few seconds, and plug it back in. That is the socket this app uses; the other one carries audio only. Do not skip the wait, because putting it straight back in is what fails most often. If the unit does not come back, try again: it can take more than one go.
+Unplug the USB cable in the socket nearest the power inlet, wait a few seconds, and plug it back in. That is the socket this app uses; the other one carries audio only. Do not skip the wait, because putting it straight back in is what fails most often. If the desk does not come back, try again: it can take more than one go.
 
-If it still will not appear, use RODE's own procedure. Disconnect the power, press and hold the red button on the back for sixty seconds, then reconnect the power supply on its own, with no other cables, and press the red button firmly to switch the unit on. Add the rest of your cables once it has started up.
+If it still will not appear, use RODE's own procedure. Disconnect the power, press and hold the red button on the back for sixty seconds, then reconnect the power supply on its own, with no other cables, and press the red button firmly to switch the desk on. Add the rest of your cables once it has started up.
 
-About one factory reset in five ends this way, even with nothing else running, so it is not this app holding the connection open. Restoring a backup the unit's own way does the same, five times in thirty-one tries, which is why Restore uses this computer's copy instead: that did not fail once in nine. A reset or restore that ends like this has almost certainly gone through, and the Backups page shows it once the unit is back.
+About one factory reset in five ends this way, even with nothing else running, so it is not this app holding the connection open. Restoring a backup the desk's own way does the same, five times in thirty-one tries, which is why Restore uses this computer's copy instead: that did not fail once in nine. A reset or restore that ends like this has almost certainly gone through, and the Backups page shows it once the desk is back.
 
 ## My screen reader has gone silent
 
-If your screen reader speaks through the RODECaster, anything that stops the unit's audio silences it too. The unit dropping off USB is one cause; see My desk has stopped responding. Installing firmware stops the audio until the unit has restarted, about five minutes. Changing the USB audio settings on Routing, Master Mix drops it for a few seconds.
+If your screen reader speaks through the RODECaster, anything that stops the desk's audio silences it too. The desk dropping off USB is one cause; see My desk has stopped responding. Installing firmware stops the audio until the desk has restarted, about five minutes. Changing the USB audio settings on Routing, Master Mix drops it for a few seconds.
 
 ## I can't hear a channel
 
@@ -378,25 +378,25 @@ Look at Device, Current state first: it says what is muted or soloed, and where 
 - A solo on any other channel puts only that channel in your headphones. Clear every solo on Channels puts things back.
 - If muting a channel no longer silences it in your headphones, a headphone output has been left on Custom. Reset all output mixes on Routing fixes it.
 - A condenser mic needs 48V phantom power to work at all.
-- If a mic went silent after the unit was restored or reset by something other than this app, change its gain by one step and back. This app does that for you after its own resets and restores.
+- If a mic went silent after the desk was restored or reset by something other than this app, change its gain by one step and back. This app does that for you after its own resets and restores.
 
 ## The announcements have gone quiet
 
-A channel is soloed. Announcements pause while a solo is on, and the unit gives no other clue that one is. Clear every solo on Channels brings them back.
+A channel is soloed. Announcements pause while a solo is on, and the desk gives no other clue that one is. Clear every solo on Channels brings them back.
 
-## The unit refused to restore a backup
+## The desk refused to restore a backup
 
-Now and then the unit refuses a restore without saying why, and from then on it refuses every restore, of any backup, until it is restarted. Switch the unit off and on again with a firm press of the red button on the back, then try again. It only happens when a backup is restored the unit's own way, which is the case for a backup made on the unit or in RODE's app.
+Now and then the desk refuses a restore without saying why, and from then on it refuses every restore, of any backup, until it is restarted. Switch the desk off and on again with a firm press of the red button on the back, then try again. It only happens when a backup is restored the desk's own way, which is the case for a backup made on the desk or in RODE's app.
 
 ## My voice effect pads do nothing
 
-When the unit is reset by its own touchscreen, RODE's app or another tool, the six factory voice effect pads come back with the right names but no effects behind them: a press is accepted and the pad shows as on, but your voice is unchanged. The SMART pads page tells you when it finds them.
+When the desk is reset by its own touchscreen, RODE's app or another tool, the six factory voice effect pads come back with the right names but no effects behind them: a press is accepted and the pad shows as on, but your voice is unchanged. The SMART pads page tells you when it finds them.
 
 Choose Restore the factory voice effects, Censor and Ducking on SMART pads, Pad maintenance. It rebuilds those eight pads in positions 9 to 16, so move anything of your own off those positions first. It takes two or three minutes. Factory settings on the Backups page rebuilds them as part of the reset, so a reset from this app does not leave them like this.
 
 ## A caller can't get through
 
-A call cannot connect while the unit is offline or CallMe 1 is on no fader, and neither you nor the caller is told why. The CallMe page shows what is wrong, with the fix beside it. If a code you have saved stops working, its owner has switched incoming calls off and on, which gives the unit a new code.
+A call cannot connect while the desk is offline or CallMe 1 is on no fader, and neither you nor the caller is told why. The CallMe page shows what is wrong, with the fix beside it. If a code you have saved stops working, its owner has switched incoming calls off and on, which gives the desk a new code.
 
 ## A Virtual Devices input is missing from Windows
 
@@ -408,9 +408,9 @@ A channel button has taken the encoder over. Press that button again to give it 
 
 ## Using RODE's app at the same time
 
-It is best not to. The unit does not tell this app when a fader is moved in RODE's app, so a change made here afterwards could reach the wrong channel. When RODE's app opens, this app says so, and again the next time you come back to this window. While RODE's app is open, this app checks the faders before every change, which makes each change about half a second slower. Quit RODE's app when you have finished with it.
+We advise using only one app at a time to make changes to your desk. Neither app is told about changes the other makes, so either one can end up showing settings that are out of date.
 
-The same is true of any other program that controls the unit: after moving faders in one, press F5 here before changing anything.
+AccessCaster notices when RODE's app is open. While it is, AccessCaster reads all of the desk's settings each time you bring it to the front, and once more when RODE's app closes, so it catches anything you changed in RODE's app.
 
 # Support this project
 

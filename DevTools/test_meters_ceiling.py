@@ -85,8 +85,8 @@ check("a boosted input is called out", "adding 7.7 dB" in boost, True)
 # which dragging a percentage slider cannot.
 check("and it names the fix, which is the Windows level and not the desk's gain",
       "Set it to no change" in boost, True)
-check("and it still sends you to the unit for the gain itself",
-      "on the unit itself" in boost, True)
+check("and it still sends you to the desk for the gain itself",
+      "on the desk itself" in boost, True)
 check("a heavily attenuated input is called out too",
       "taking 12.0 dB off" in meters.level_note(-12.0), True)
 clip_boosted = meters.describe(1.0, 1.0, NAME, ceiling=1.0, volume_db=7.67)

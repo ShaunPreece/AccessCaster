@@ -159,7 +159,7 @@ def _snapshot(blob: bytes, props: dict | None = None) -> dict:
     for n in redacted:
         props[n] = [None] * len(props[n])
     return {
-        "note": ("Every property the unit reported, for reference and for future restores. "
+        "note": ("Every property the desk reported, for reference and for future restores. "
                  "AccessCaster restores from the named settings above, never from here, so a "
                  "property we have not decoded can never be blind-written onto a desk."),
         "properties": props,
@@ -201,7 +201,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     existing = load(safe)
     if existing.get("ok") and is_baseline(existing["prof"]) and not baseline:
         return {"ok": False, "message":
-                f"{safe} is the as-found baseline of this unit, the only record of how it was "
+                f"{safe} is the as-found baseline of this desk, the only record of how it was "
                 f"before this app changed anything, so it cannot be replaced by an ordinary save. "
                 f"Choose another name."}
     # ONE walk of the dump, shared by the unit settings below and by the full snapshot. Read the
@@ -317,8 +317,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     except OSError as exc:
         return {"ok": False, "message": f"Could not save the profile: {exc}"}
     snap = profile[SNAPSHOT_KEY]
-    msg = (f"Saved profile {safe} with the unit's full current settings, and a record of all "
-           f"{snap['property_count']} settings the unit reports.")
+    msg = (f"Saved profile {safe} with the desk's full current settings, and a record of all "
+           f"{snap['property_count']} settings the desk reports.")
     if pads is not None:
         msg += f" Included {count(len(pads), 'SMART pad')}."
     return {"ok": True, "name": safe, "message": msg}
@@ -438,7 +438,7 @@ def delete(name: str, force: bool = False) -> dict:
         got = load(safe)
         if got.get("ok") and is_baseline(got["prof"]):
             return {"ok": False, "baseline": True, "name": safe, "message":
-                    f"{safe} is the as-found baseline: how this unit was set up before "
+                    f"{safe} is the as-found baseline: how this desk was set up before "
                     f"AccessCaster changed anything. It cannot be captured again, and a factory "
                     f"reset gives factory settings, not these. Confirm to delete it anyway."}
     folder = os.path.join(PROFILES_DIR, safe)
@@ -451,7 +451,7 @@ def delete(name: str, force: bool = False) -> dict:
     except OSError as exc:
         return {"ok": False, "message": f"Could not delete the profile: {exc}"}
     return {"ok": True, "message": f"Deleted the profile {safe} from this computer. "
-                                   f"The unit's settings were not changed."}
+                                   f"The desk's settings were not changed."}
 
 
 # ---- apply (device WRITES; THE CALLER MUST HOLD THE HID LOCK) -------------------------------
@@ -686,7 +686,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
         # separately would take two re-enumerations and let the second undo the first.
         if (r.get("usb_multitrack") is not None
                 and int(r["usb_multitrack"]) in rcp_transfer.MULTITRACK_MODES):
-            step("Setting what the unit sends this computer. Its audio devices will drop out for "
+            step("Setting what the desk sends this computer. Its audio devices will drop out for "
                  "a couple of seconds.")
             w("USB multitrack", lambda v=recorder.join_usb_multitrack(
                 r["usb_multitrack"], r.get("usb_expanded")): rcp_transfer.set_usb_multitrack_mode(v))
@@ -733,7 +733,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     # than written on a guessed selector. Gated on the device's "unit_settings" cap.
     unit = prof.get(UNIT_KEY) or {}
     if unit and "unit_settings" in devices.get_active_device().caps:
-        step("Restoring the unit's own settings.")
+        step("Restoring the desk's own settings.")
         for prop, v in sorted(unit.items()):
             if prop not in rcp_transfer.UNIT_SETTING_SEL or not isinstance(v, (int, float)):
                 continue
@@ -742,7 +742,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
             w(prop, lambda prop=prop, v=v: rcp_transfer.set_unit_setting(prop, v))
     elif unit:
         failed += 1
-        errs.append("unit settings (display, buttons, haptics, record button, listen mode): "
+        errs.append("desk settings (display, buttons, haptics, record button, listen mode): "
                     "read-only on this device, not restored")
 
     return {"applied": applied, "failed": failed, "errs": errs}

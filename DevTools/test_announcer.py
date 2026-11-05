@@ -1064,7 +1064,7 @@ print("\nONE FORMATTER, TWO WORD ORDERS, AND THEY MUST STAY OPPOSITE")
 # to a single order would break one of them, so assert both from the shared function itself.
 check("a level that MOVED leads with the number, because the name gets cut off mid-turn",
       announcer._level_words("Mic 1", 0.30, name_first=False), "30 percent, Mic 1")
-check("and drops the unit during a run",
+check("and drops the desk during a run",
       announcer._level_words("Mic 1", 0.30, name_first=False, say_percent=False), "30, Mic 1")
 check("a SELECTION leads with the name, because that is the question the press asks",
       announcer._level_words("Chat", 0.97, name_first=True), "Chat 97 percent")

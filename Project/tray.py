@@ -55,6 +55,7 @@ import win32api
 import win32con
 import win32gui
 import win32process
+from native import dialogs
 from native.dialogs import TextDialog
 from native.frame import MainFrame
 from paths import resource_path
@@ -138,6 +139,7 @@ class TrayApp:
         self._ui_thread = threading.get_ident()
         self._starting = True             # the service is still coming up
         self._quitting = False
+        self._window_gone = False         # quit has closed the window and its dialogs
         self._last_open = float("-inf")
         self._create_window()
         self._add_icon()
@@ -166,8 +168,10 @@ class TrayApp:
     def _brought_up(self) -> None:
         self._starting = False
         if self._quitting:
-            # Quit was chosen while the service came up: finish what `_quit` left.
-            self._finish_quit()
+            # Quit was chosen while the service came up: finish what `_quit` left, once its window
+            # has closed (`_close_window` finishes it otherwise).
+            if self._window_gone:
+                self._finish_quit()
             return
         if self.frame:
             self.frame.start()
@@ -355,11 +359,9 @@ class TrayApp:
         win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
 
     def _rode_app_seen(self) -> None:
-        """RODE's app has opened (`rode_app.on_seen`, on its watcher's thread): the warning spoken in
-        the app's own voice, heard whatever is in front, and the window's dialog at once if the
-        window is the one in front."""
+        """RODE's app has opened (`rode_app.on_seen`, on its watcher's thread): said in the app's
+        own voice, heard whatever is in front."""
         speech.say(rode_app.NOTICE)
-        wx.CallAfter(lambda: self.frame and self.frame.warn_rode_app())
 
     def _on_end_session(self, hwnd, msg, wparam, lparam):
         """Windows is ending the session, or the installer's Restart Manager is closing the app to
@@ -391,7 +393,7 @@ class TrayApp:
 
     def _still_working(self, busy: str) -> None:
         dialog = TextDialog(self.frame, "Still working",
-                            f"{busy} Quit again once it finishes, so the unit is not left half "
+                            f"{busy} Quit again once it finishes, so the desk is not left half "
                             "written.", [(wx.ID_OK, "OK")], default=wx.ID_OK, escape=wx.ID_OK)
         with dialog:
             dialog.ShowModal()
@@ -402,13 +404,23 @@ class TrayApp:
             return
         self._quitting = True
         self._remove_icon()
+        self._close_window(set())
+
+    def _close_window(self, ended: set[int]) -> None:
         # A dialog open in the window runs a loop of its own inside this one, and the process waits
-        # on it: end it before the window goes.
-        for window in wx.GetTopLevelWindows():
-            if isinstance(window, wx.Dialog) and window.IsModal():
-                window.EndModal(wx.ID_CANCEL)
+        # on it. Only the innermost loop can be ended, so the dialogs end newest first, each once
+        # the one inside it has returned. `ended` holds the ids of those already asked to end.
+        modal = dialogs.modal_dialogs()
+        if modal:
+            newest = modal[-1]
+            if id(newest) not in ended:
+                ended.add(id(newest))
+                newest.EndModal(wx.ID_CANCEL)
+            wx.CallLater(50, self._close_window, ended)
+            return
         if self.frame:
             self.frame.Close(force=True)
+        self._window_gone = True
         if not self._starting:
             self._finish_quit()
 

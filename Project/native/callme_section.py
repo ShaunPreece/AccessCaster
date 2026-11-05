@@ -25,7 +25,7 @@ from native.pages import Page, labelled, page_body, read_only, set_text
 
 TITLE = "CallMe"
 UNREAD = "CallMe has not been read yet."
-BUSY = "One moment: the unit is still carrying out your last press."
+BUSY = "One moment: the desk is still carrying out your last press."
 POLL_MS = 1000
 NO_LINK = "There is no guest link while incoming calls are off."
 
@@ -221,7 +221,7 @@ class CallPage(wx.Panel):
         self.ready_sizer.Add(self.put, 0, wx.ALL, 6)
 
         self.now = read_only(parent, sizer, "Now")
-        self.now.SetValue("Reading the unit.")
+        self.now.SetValue("Reading the desk.")
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.answer = _button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
@@ -544,7 +544,7 @@ class PlanPage(wx.Panel):
         self.frame = section.frame
         sizer, parent = page_body(self)
         self.plan = read_only(parent, sizer, "Your plan", height=100)
-        self.plan.SetValue("Reading the unit.")
+        self.plan.SetValue("Reading the desk.")
         self.auto = Switch(self, parent, sizer, "Extend calls automatically",
                            server.action_callme_auto_extend, *section.field("auto_extend"),
                            description="On plans with an hour limit, five minutes before the end.",

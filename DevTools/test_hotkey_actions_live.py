@@ -24,7 +24,7 @@ import speech
 def main():
     do_record = "--record" in sys.argv
 
-    print("--- say what the unit is doing ---")
+    print("--- say what the desk is doing ---")
     print(repr(commands._say_state()))
 
     print("\n--- announcements on/off (twice, so it ends as it started) ---")

@@ -63,13 +63,13 @@ print("\nHALF CONNECTED: the audio interface is there, the control one is not")
 d, found = with_interfaces([FakeIface(3, 0x0026)])
 check("the finder refuses MI_03 rather than handing it out as a control interface", found, None)
 check("this is NOT reported as connected", d["connected"], False)
-check("the message says half connected, not 'no unit found'",
+check("the message says half connected, not 'no desk found'",
       "half connected" in d["message"].lower(), True)
 check("it names the CABLE, since that is the fix",
       "cable" in d["message"].lower(), True)
 check("and says WHICH cable, by where it is rather than by a label nobody can read",
       "nearest the power inlet" in d["message"].lower(), True)
-check("it still names the unit, so it is clearly not a 'device missing' error",
+check("it still names the desk, so it is clearly not a 'device missing' error",
       bool(d.get("device_name")), True)
 check("and the interface it did find is still reported for troubleshooting",
       bool(d.get("control_interface")), True)

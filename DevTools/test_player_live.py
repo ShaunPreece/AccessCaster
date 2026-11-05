@@ -90,7 +90,7 @@ def main() -> int:
         show("LOADED", loaded)
         # A file size the unit filled in ITSELF is the first real signal: it means the path was
         # accepted and the file opened, before a single sample is played.
-        print(f"  the unit "
+        print(f"  the desk "
               f"{'DID' if loaded['playerFileSize'] else 'did NOT'} report a file size back")
 
         print(f"\nPLAY (playerState = {args.state})")
@@ -103,7 +103,7 @@ def main() -> int:
                     if name in live:
                         live[name].add(repr(value))
         moved = any(len(values) > 1 for values in live.values())
-        print(f"\n  progress {'MOVED - the unit is playing' if moved else 'never moved'}")
+        print(f"\n  progress {'MOVED - the desk is playing' if moved else 'never moved'}")
     finally:
         print("\nrestoring...")
         _t.write_at(PLAYER, "playerState", "int", 0)

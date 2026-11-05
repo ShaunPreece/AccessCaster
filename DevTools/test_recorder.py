@@ -95,11 +95,11 @@ vols = [
      "inserted": True, "mounted": True, "can_record": False, "free_bytes": 5_000_000_000,
      "low": False},
 ]
-check("an EMPTY slot is not a destination, even though the unit flags it as eligible",
+check("an EMPTY slot is not a destination, even though the desk flags it as eligible",
       recorder.destination(vols)["spoken"], "USB drive")
 check("the pad volume is never a destination",
       recorder.destination([vols[2]]), None)
-check("nothing in the unit means nowhere to record", recorder.destination([]), None)
+check("nothing in the desk means nowhere to record", recorder.destination([]), None)
 
 print("\nHOW LONG WILL IT FIT (the figure a bar gives a sighted operator)")
 check("no destination, no claim",
@@ -125,7 +125,7 @@ check("an unrelated packet is ignored",
 check("the wrong selector is refused",
       state_of(PUSH_RECORDING[:9] + b"\x0f" + PUSH_RECORDING[10:]), None)
 
-print("\nELAPSED TIME (counted here, because the unit will not: recordTimeMs stays 0)")
+print("\nELAPSED TIME (counted here, because the desk will not: recordTimeMs stays 0)")
 
 
 def pushed(watcher, state):
@@ -169,7 +169,7 @@ w2.note_state(recorder.RECORDING, timed=False)
 check("a repeated read does not reset anything", w2.snapshot()["state"], recorder.RECORDING)
 
 print("\nCOMMANDS")
-check("start and resume are the same command to the unit",
+check("start and resume are the same command to the desk",
       recorder.COMMANDS["start"], recorder.COMMANDS["resume"])
 check("stop is 0", recorder.COMMANDS["stop"], 0)
 check("pause is 1", recorder.COMMANDS["pause"], 1)
@@ -191,7 +191,7 @@ check("taking it out while idle says it is no longer available, and names what l
       "Recording no longer available: the USB drive was removed")
 check("with no name known it still explains itself rather than guessing a medium",
       S(recorder.READY, recorder.NO_DESTINATION),
-      "Recording no longer available: the unit has nowhere to record to")
+      "Recording no longer available: the desk has nowhere to record to")
 # The one case where a plug really does stop a recording. It must NOT be softened into the
 # "no longer available" wording: the operator has just lost the end of a take.
 check("pulling it MID-TAKE is a stop, and says why",
@@ -260,7 +260,7 @@ check("a stop is answered by READY, which is 0",
       sorted(server._await_record(listen, recorder.READY)), ["recordState"])
 check("and a state on the way is not the answer", listen.pushes, [])
 listen = Pushes()
-check("a press the unit ignores hears nothing",
+check("a press the desk ignores hears nothing",
       server._await_record(listen, recorder.RECORDING), {})
 check("and gives up within the margin", listen.timeouts, [server._RECORD_ANSWER_S])
 

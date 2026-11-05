@@ -84,7 +84,7 @@ check_in("a paused take is an alert", "A recording is paused.", summary)
 check_in("so is a mute", "Muted: Mic 2.", summary)
 check_in("a routing note is said as it is", "Chat carries only Mic 1.", summary)
 check_not_in("the levels are left to the report", "percent", summary)
-check("offline is an alert only while guests expect to reach the unit",
+check("offline is an alert only while guests expect to reach the desk",
       [device_section.desk_summary(overview(network={"online": False,
                                                         "callme_hosting": hosting})).count(
           "offline") for hosting in (False, True)], [0, 1])
@@ -108,12 +108,12 @@ check("a nearly full drive says so", hardware[1],
       "USB drive: in use, 10 MB free of 100 MB, 10 percent left. This is nearly full.")
 check("the internal storage comes after the slots", hardware[2],
       "Internal storage: 50 MB free of 100 MB, 50 percent left.")
-check_in("the recorder is a reading", "Recorder: ready. 3 recordings on the unit.", hardware[3])
+check_in("the recorder is a reading", "Recorder: ready. 3 recordings on the desk.", hardware[3])
 check("a firmware update is named after the version",
       device_section.firmware_line("1.7.6", {"available": True, "version": "1.7.7"}),
       "1.7.6. Version 1.7.7 is available.")
 check("no mic slots is not none connected", device_section.mic_lines({}),
-      ["Wireless mics: the unit did not report any, so there is nothing to show."])
+      ["Wireless mics: the desk did not report any, so there is nothing to show."])
 facts = device_section.network_facts({"wifi": {"on": False}, "bluetooth": {"visible": True},
                                       "still_read_only": "A fixed IP cannot be set."})
 check_true("with the radio off no wifi fact is listed",
@@ -161,7 +161,7 @@ check("opening Current state reads the desk: free space is never pushed", reads[
 section.state.Hide()
 followed = {type(fn.__self__._read.__self__).__name__: names
             for names, fn in frame.desk.watched}
-check("Hardware, Unit settings and Wireless connections follow what they show", followed,
+check("Hardware, Desk settings and Wireless connections follow what they show", followed,
       {"HardwarePage": set(server.HARDWARE_PROPS), "UnitPage": set(server.UNIT_SETTING_PROPS),
        "NetworkPage": set(server.NETWORK_PROPS)})
 
@@ -173,7 +173,7 @@ real = server.read_device_state, server.read_device_status
 server.read_device_state = lambda: calls.append("state") or {"ok": True, "firmware": "1.7.7"}
 server.read_device_status = lambda: calls.append("status") or {"connected": True}
 try:
-    check("a followed read reads the unit's state alone", (sorted(hw.fetch(False)), calls),
+    check("a followed read reads the desk's state alone", (sorted(hw.fetch(False)), calls),
           (["ok", "state"], ["state"]))
     check("a full read rescans the USB as well", (sorted(hw.fetch(True)), calls[1:]),
           (["ok", "state", "status"], ["state", "status"]))
@@ -204,8 +204,8 @@ check("an offered update shows its button, named after it",
       (hw.install.IsShown(), hw.install.GetLabel()), (True, "Install firmware 1.7.7"))
 hw._show_install({"available": False})
 check("and it goes once nothing is offered", hw.install.IsShown(), False)
-hw._ask_install({"ok": True, "version": "1.7.7", "refusal": "The unit is recording."})
-check("a refusal is spoken and asks nothing", frame.said[-1], "The unit is recording.")
+hw._ask_install({"ok": True, "version": "1.7.7", "refusal": "The desk is recording."})
+check("a refusal is spoken and asks nothing", frame.said[-1], "The desk is recording.")
 with FirmwareDialog(frame.window, "1.7.7", "1.7.6", "Before firmware update") as ask:
     buttons = [c for c in ask.GetChildren() if isinstance(c, (wx.Button, wx.CheckBox))]
     check("the question lands on Cancel", buttons[0].GetId(), wx.ID_CANCEL)
@@ -226,12 +226,12 @@ unit.shown({"ok": True, "settings": settings, "midi": True, "writable": True,
             "device_name": "RODECaster Pro II"})
 check("a dim time off the list is listed as it is",
       dim.control.GetString(dim.control.GetSelection()), "Currently 45")
-check("a switch shows the unit's value", unit.controls["outputMonFixed"].box.GetValue(), True)
+check("a switch shows the desk's value", unit.controls["outputMonFixed"].box.GetValue(), True)
 check("a brightness lands on its slider", unit.controls["screenBrightness"].slider.GetValue(), 180)
 check("and is read as a fraction and a percentage",
       unit.controls["screenBrightness"]._value_words(), "180 of 255, about 71 percent")
 check("MIDI rides on the same read", unit.midi.box.GetValue(), True)
-check_in("a setting the unit did not report says so", "did not report",
+check_in("a setting the desk did not report says so", "did not report",
          unit.controls["metering"].acc.description)
 check("a writable desk hides the note", unit.note.IsShown(), False)
 check("and refuses nothing", unit._guard(), None)
@@ -261,7 +261,7 @@ check("and the status says it is off", net.wifi_status.GetValue(), device_sectio
 check("a one-line reading is reached by Tab", net.wifi_status.AcceptsFocusFromKeyboard(), True)
 net.shown(network(True))
 check("joined, the status names the network and address", net.wifi_status.GetValue(),
-      "Connected to Home. The unit's address is 10.0.0.2.")
+      "Connected to Home. The desk's address is 10.0.0.2.")
 check("and Disconnect is offered, named after it, with no scan",
       (net.disconnect.IsShown(), net.disconnect.GetLabel(), net.scan.IsShown()),
       (True, "Disconnect from Home", False))

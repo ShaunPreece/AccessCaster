@@ -130,7 +130,7 @@ follow._timer.Stop()
 with open(_bootstrap.docs_path("PROPERTY_LIST_PRO2.md"), encoding="utf-8") as f:
     published = set(re.findall(r"`(\w+)`", f.read()))
 for label, names in (("Hardware", server.HARDWARE_PROPS),
-                     ("Unit settings", server.UNIT_SETTING_PROPS),
+                     ("Desk settings", server.UNIT_SETTING_PROPS),
                      ("Wireless connections", server.NETWORK_PROPS),
                      ("Backups", server.SHOW_STATE_PROPS),
                      ("SMART pads", soundpad.PAD_GRID_PROPS)):

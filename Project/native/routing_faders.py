@@ -40,7 +40,7 @@ class FadersPage(scrolled.ScrolledPanel):
         change.Bind(wx.EVT_BUTTON, self._on_change)
         sizer.Add(change, 0, wx.ALL, 6)
         reset = wx.Button(parent, label="Reset faders to default")
-        a11y.describe(reset, "The unit's default channel on each fader.")
+        a11y.describe(reset, "The desk's default channel on each fader.")
         reset.Bind(wx.EVT_BUTTON, self._on_reset)
         sizer.Add(reset, 0, wx.ALL, 6)
 

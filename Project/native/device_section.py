@@ -21,21 +21,21 @@ from native.pages import FollowDesk, Page, group, page_body, read_only, set_text
 from native.wifi_dialogs import JoinDialog, NetworksDialog
 
 TITLE = "Device"
-UNREAD = "Not read from the unit yet."
-UNIT_UNREAD = "The unit's settings have not been read yet."
+UNREAD = "Not read from the desk yet."
+UNIT_UNREAD = "The desk's settings have not been read yet."
 NETWORK_UNREAD = "The wireless connections have not been read yet."
 NETWORK_READ_ONLY = ("Changing the network settings is not enabled on this device yet. You can "
                      "still read what it has.")
-UNIT_SETTINGS_OFF = ("Changing the unit's settings is not enabled on this device yet. You can "
+UNIT_SETTINGS_OFF = ("Changing the desk's settings is not enabled on this device yet. You can "
                      "still read what it has.")
-NOT_REPORTED = (" The unit did not report this setting, so the control shows a default rather "
+NOT_REPORTED = (" The desk did not report this setting, so the control shows a default rather "
                 "than its real value.")
 WIFI_OFF = "WiFi is off. Turn it on to join a network."
 # Desk state events that can change the status bar's summary, and how long after the last of a
 # burst it is read again.
 SUMMARY_EVENTS = {"read", "changed", "mix", "faders", "recorder"}
 SUMMARY_AFTER_MS = 1500
-NOT_SCANNED = ("Nothing found. The unit only fills this in after a scan, so this usually means no "
+NOT_SCANNED = ("Nothing found. The desk only fills this in after a scan, so this usually means no "
                "scan has been run rather than nothing being in range.")
 
 
@@ -71,7 +71,7 @@ def wifi_status(wifi):
     if not wifi.get("on"):
         return WIFI_OFF
     if wifi.get("ip"):
-        return f"Connected to {ssid or 'a network'}. The unit's address is {wifi['ip']}."
+        return f"Connected to {ssid or 'a network'}. The desk's address is {wifi['ip']}."
     if ssid:
         refused = " It refused the password." if (wifi.get("incorrect_psk")
                                                   or wifi.get("wrong_password")) else ""
@@ -88,18 +88,18 @@ def overview_lines(d):
     means all is well. Fader levels are the exception to the exception, since a level has no
     normal value to infer from silence."""
     if not d.get("ok"):
-        return [d.get("message") or "Could not read the unit."]
-    lines = [f"{d.get('device_name') or 'The unit'} connected."]
+        return [d.get("message") or "Could not read the desk."]
+    lines = [f"{d.get('device_name') or 'The desk'} connected."]
     # A latched pad first: a voice effect makes no noise of its own, so the only symptom is
     # sounding wrong.
     for pad in d.get("pads_engaged") or []:
         lines.append(f"Pad {pad['grid']}, {pad['name']}, is switched on and processing a live "
-                     "channel. Press that pad on the unit to switch it off, or clear it from the "
+                     "channel. Press that pad on the desk to switch it off, or clear it from the "
                      "SMART pads page.")
     if d.get("recording"):
         lines.append("A recording is PAUSED. The Recording section carries on or stops it."
                      if d["recording"].get("state") == 1 else
-                     "The unit is RECORDING. The Recording section pauses or stops it.")
+                     "The desk is RECORDING. The Recording section pauses or stops it.")
     for volume in d.get("storage_low") or []:
         lines.append(f"{volume['label']} is nearly full: {volume['free_pct']} percent left, "
                      f"about {volume['free_mb']} MB.")
@@ -147,13 +147,13 @@ def desk_summary(d):
               for p in d.get("pads_engaged") or []]
     if d.get("recording"):
         alerts.append("a recording is paused" if d["recording"].get("state") == 1
-                      else "the unit is recording")
+                      else "the desk is recording")
     alerts += [f"{v['label']} is nearly full, {v['free_pct']} percent left"
                for v in d.get("storage_low") or []]
     # Offline is a problem only when guests expect to reach the unit.
     net = d.get("network") or {}
     if net.get("online") is False and net.get("callme_hosting"):
-        alerts.append("the unit is offline, so CallMe guests cannot reach it")
+        alerts.append("the desk is offline, so CallMe guests cannot reach it")
     update = d.get("firmware_update") or {}
     if update.get("available"):
         alerts.append((f"firmware {update['version']}" if update.get("version")
@@ -201,7 +201,7 @@ def firmware_line(firmware, update):
 def hardware_lines(d):
     """Storage and the recorder from `server.read_device_state`, as sentences."""
     if not d.get("ok"):
-        return [d.get("message") or "Could not read the unit."]
+        return [d.get("message") or "Could not read the desk."]
     volumes = (d.get("storage") or {}).get("volumes") or []
     cards = [v for v in volumes if not (v.get("label") or "").startswith("Internal")]
     internal = next((v for v in volumes if (v.get("label") or "").startswith("Internal")), None)
@@ -210,14 +210,14 @@ def hardware_lines(d):
         return (f"{v['free_mb']} MB free of {v['capacity_mb']} MB"
                 + ("" if v.get("free_pct") is None else f", {v['free_pct']} percent left")
                 + (". This is nearly full" if v.get("low") else ""))
-    lines = [] if cards else ["Storage: the unit reported no card slot or drive."]
+    lines = [] if cards else ["Storage: the desk reported no card slot or drive."]
     lines += [f"{v['label']}: in use, {space(v)}." if v.get("inserted")
               else f"{v['label']}: nothing in it." for v in cards]
     if internal:
         lines.append(f"{internal['label']}: {space(internal)}.")
     rec = d.get("recorder") or {}
     lines.append(f"Recorder: {(rec.get('state_label') or 'unknown').lower()}. "
-                 f"{rec.get('total_recordings') or 0} recordings on the unit. Start and stop it "
+                 f"{rec.get('total_recordings') or 0} recordings on the desk. Start and stop it "
                  "in the Recording section.")
     return lines
 
@@ -237,7 +237,7 @@ def mic_lines(mics):
     same as none connected."""
     mics = mics or {}
     if not mics.get("present"):
-        return ["Wireless mics: the unit did not report any, so there is nothing to show."]
+        return ["Wireless mics: the desk did not report any, so there is nothing to show."]
     if not mics.get("any_connected"):
         return ["Wireless mics: none connected."]
     lines = []
@@ -307,7 +307,7 @@ class DeviceSection:
         self.views = [self.state, self.hardware, self.unit, self.network]
         self.pages = [Page("state", "Current state", self.state),
                       Page("hardware", "Hardware", self.hardware),
-                      Page("unit", "Unit settings", self.unit),
+                      Page("unit", "Desk settings", self.unit),
                       Page("network", "Wireless connections", self.network)]
         self._summary_timer = None
         frame.desk.subscribe(self._desk_event)
@@ -399,7 +399,7 @@ class StatePage(_Reader, wx.Panel):
     def shown(self, reply):
         set_text(self.report, "\n".join(overview_lines(reply)))
         summary = (desk_summary(reply) if reply.get("ok")
-                   else reply.get("message") or "Could not read the unit.")
+                   else reply.get("message") or "Could not read the desk.")
         self.section.frame.set_status(summary)
         return summary
 
@@ -494,7 +494,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
     def _ask_install(self, ready):
         if not ready.get("ok") or ready.get("refusal"):
             self.frame.say(ready.get("refusal") or ready.get("message")
-                           or "The unit could not be read.")
+                           or "The desk could not be read.")
             return
         version = ready["version"]
         dialog = FirmwareDialog(self, version, ready.get("firmware"), server.FIRMWARE_BACKUP_NAME)
@@ -504,8 +504,8 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
                 return
             backup_first = dialog.wants_backup()
         reply = follow_job(self, f"Installing firmware {version}",
-                           "Backing the unit up, then updating it." if backup_first
-                           else f"Updating the unit to firmware {version}.",
+                           "Backing the desk up, then updating it." if backup_first
+                           else f"Updating the desk to firmware {version}.",
                            lambda: server.action_firmware_install(backup_first),
                            lambda _started: server.firmware_job_status)
         report(self, ("Firmware updated", "Firmware not updated"), reply)
@@ -528,7 +528,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self.controls = {}           # prop: its control
         sizer, parent = page_body(self)
         self._sizer = sizer
-        self.note = read_only(parent, sizer, "Unit settings status", height=60)
+        self.note = read_only(parent, sizer, "Desk settings status", height=60)
         self.note.SetValue(UNIT_UNREAD)
         for spec in server.UNIT_SETTINGS:
             self.controls[spec["prop"]] = self._build(parent, sizer, spec)
@@ -587,8 +587,8 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
     def shown(self, reply):
         if not reply.get("ok"):
             if self.data is None:
-                set_text(self.note, reply.get("message") or "Could not read the unit's settings.")
-            return reply.get("message") or "Could not read the unit's settings."
+                set_text(self.note, reply.get("message") or "Could not read the desk's settings.")
+            return reply.get("message") or "Could not read the desk's settings."
         self.data = reply
         self.values = {s["prop"]: s.get("value") for s in reply.get("settings") or []}
         self.values["midi"] = reply.get("midi")
@@ -597,13 +597,13 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self.midi.show()
         note = "" if reply.get("writable") else (
             f"These settings can be read but not changed on the "
-            f"{reply.get('device_name') or 'connected unit'}: changing them has only ever been "
+            f"{reply.get('device_name') or 'connected desk'}: changing them has only ever been "
             "confirmed on a RODECaster Pro 2, so AccessCaster leaves them alone rather than risk "
             "changing the wrong one.")
         set_text(self.note, note)
         self._sizer.Show(self.note.GetContainingSizer(), bool(note))
         self.Layout()
-        return "Unit settings read."
+        return "Desk settings read."
 
     def _show(self, spec):
         prop = spec["prop"]
@@ -635,7 +635,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
 
         self.wifi = Switch(self, parent, sizer, "WiFi on", server.action_set_wifi,
                            *self.field("wifi", "on"),
-                           description="Turn the unit's wifi on or off, and join a network.",
+                           description="Turn the desk's wifi on or off, and join a network.",
                            guard=self._guard, accepted=self._wifi_switched,
                            working=lambda on: ("Turning the wifi on and waiting for it to "
                                                "connect. Please wait." if on else
@@ -647,19 +647,19 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self.scan = _button(parent, sizer, "Scan for networks", self._on_scan)
 
         box_sizer, box = group(parent, sizer, "Bluetooth")
-        self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this unit",
+        self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this desk",
                                 server.action_set_bt_visible,
                                 *self.field("bluetooth", "visible"),
                                 description="Switch this on, then pair from the phone's own "
-                                            "Bluetooth screen. The unit stops being discoverable "
+                                            "Bluetooth screen. The desk stops being discoverable "
                                             "on its own after a few minutes.",
                                 guard=self._guard)
 
         self.mics = read_only(parent, sizer, "Wireless microphones", height=60)
-        a11y.describe(self.mics, "RODE wireless transmitters the unit can see, and how much "
+        a11y.describe(self.mics, "RODE wireless transmitters the desk can see, and how much "
                                  "battery each has left. Pairing one is done on the transmitter "
-                                 "and the unit.")
-        self.facts = read_only(parent, sizer, "What the unit reports", height=180, scroll=True)
+                                 "and the desk.")
+        self.facts = read_only(parent, sizer, "What the desk reports", height=180, scroll=True)
         for box_ in (self.mics, self.facts):
             box_.SetValue(UNREAD)
         self._show_radio()
@@ -769,7 +769,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
             return
         ssid = ((self.data or {}).get("wifi") or {}).get("ssid") or "the network"
         if not confirm(self, f"Disconnect from {ssid}?",
-                       f"The unit leaves {ssid} and forgets it, password included, so joining it "
+                       f"The desk leaves {ssid} and forgets it, password included, so joining it "
                        f"again needs the password.", "Disconnect"):
             return
         job = JobDialog(self, "Disconnecting", f"Disconnecting from {ssid}.",

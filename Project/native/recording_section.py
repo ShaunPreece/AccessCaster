@@ -24,16 +24,16 @@ from native.pages import Page, labelled, page_body, set_items
 
 TITLE = "Recording"
 UNREAD = "The recorder has not been read yet."
-BUSY = "One moment: the unit is still carrying out your last press."
-NOWHERE = ("The unit has nowhere to record to. Put a memory card in, or a USB drive in the second "
+BUSY = "One moment: the desk is still carrying out your last press."
+NOWHERE = ("The desk has nowhere to record to. Put a memory card in, or a USB drive in the second "
            "USB port.")
-USB_POINTER = ("This is what the unit writes to its card or drive. What it sends this computer "
+USB_POINTER = ("This is what the desk writes to its card or drive. What it sends this computer "
                "over USB is a separate setting, on Routing, under Master Mix.")
 MUTE_HINT = ("If off, announcements may be heard in the recording, depending on where you have "
              "them routed.")
 LIST_HINT = "Newest first. To copy them off, take the card or drive to a computer."
 STORAGE_HINT = "Eject before pulling a card or drive out. Erase deletes everything on it."
-NO_STORAGE_WRITE = "AccessCaster cannot eject or erase storage on this unit."
+NO_STORAGE_WRITE = "AccessCaster cannot eject or erase storage on this desk."
 RUNNING = (recorder.RECORDING, recorder.PAUSED)
 CLOCK_MS = 1000
 START, STOP, PAUSE, RESUME = "Start recording", "Stop recording", "Pause", "Resume"
@@ -203,7 +203,7 @@ class RecorderPage(wx.Panel):
         sizer.Add(row, 0, wx.ALL, 6)
         # Below the buttons, so one Tab after a press reaches what the unit is doing.
         self.now = labelled(parent, sizer, "Now", lambda p: wx.TextCtrl(
-            p, value="Reading the unit.", size=(460, 60),
+            p, value="Reading the desk.", size=(460, 60),
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
 
         self.multitrack = Choice(
@@ -350,7 +350,7 @@ class RecordingsPage(wx.Panel):
         self.takes = []              # the recordings as listed; empty when the list holds a note
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Recording", lambda p: wx.ListBox(
-            p, choices=["Reading the unit."], size=(460, 220)))
+            p, choices=["Reading the desk."], size=(460, 220)))
         a11y.describe(self.list, LIST_HINT)
         self.delete = wx.Button(parent, label="Delete selected recording")
         a11y.describe(self.delete, "Deletes it from the card or drive. This cannot be undone; you "
@@ -366,9 +366,9 @@ class RecordingsPage(wx.Panel):
         if self.takes:
             labels = [recording_label(take) for take in self.takes]
         elif data.get("state") == recorder.NO_DESTINATION:
-            labels = ["Nothing to list: there is no card or drive in the unit."]
+            labels = ["Nothing to list: there is no card or drive in the desk."]
         else:
-            labels = ["No recordings on the unit."]
+            labels = ["No recordings on the desk."]
         set_items(self.list, labels)
         uids = [take["uid"] for take in self.takes]
         self.list.SetSelection(uids.index(uid) if uid in uids else 0)
@@ -381,14 +381,14 @@ class RecordingsPage(wx.Panel):
         data = self.section.data
         take = self._chosen()
         refusal = (UNREAD if data is None else
-                   "There are no recordings on the unit." if take is None else
+                   "There are no recordings on the desk." if take is None else
                    None if data.get("can_delete") else
                    data.get("delete_note") or "Deleting is not available.")
         if refusal:
             self.frame.say(refusal)
             return
         if not confirm(self, f"Delete {recording_label(take)}?",
-                       "This removes the recording from the unit's card or drive. It cannot be "
+                       "This removes the recording from the desk's card or drive. It cannot be "
                        "undone, and AccessCaster has no copy of it.", "Delete"):
             return
         self.section.command(self.delete, server.action_delete_recording, take["uid"],
@@ -407,7 +407,7 @@ class StoragePage(wx.Panel):
         self.shown = []              # the volumes as listed
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Card or drive", lambda p: wx.ListBox(
-            p, choices=["Reading the unit."], size=(460, 80)))
+            p, choices=["Reading the desk."], size=(460, 80)))
         a11y.describe(self.list, STORAGE_HINT)
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.eject = self._button(parent, row, "Eject", self._on_eject)
@@ -428,7 +428,7 @@ class StoragePage(wx.Panel):
         index = chosen["index"] if chosen else None
         self.shown = volumes(self.section.data)
         set_items(self.list, [volume_label(v) for v in self.shown]
-                  or ["The unit reports no card slot or drive."])
+                  or ["The desk reports no card slot or drive."])
         indices = [v["index"] for v in self.shown]
         if index in indices:
             self.list.SetSelection(indices.index(index))
@@ -449,7 +449,7 @@ class StoragePage(wx.Panel):
         if data.get("storage_writable") is False:
             return NO_STORAGE_WRITE
         if volume is None:
-            return "The unit reports no card slot or drive."
+            return "The desk reports no card slot or drive."
         return None
 
     def _on_eject(self, _event):

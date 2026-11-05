@@ -170,7 +170,7 @@ hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop
 check("the reply says hung up, the watcher does not", said, [])
 hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
 hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Idle","reason":"Local drop"}')
-check("a hang-up on the unit is said in plain words", said[-1],
+check("a hang-up on the desk is said in plain words", said[-1],
       "Call with Shaun ended: you hung up.")
 
 print("the call area")
@@ -210,7 +210,7 @@ hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 check("five minutes' warning is spoken", said,
       ["Call with Shaun ends in five minutes unless you extend it."])
 hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Active","reason":""}')
-check("an extension on the unit is spoken", said[-1], "Call with Shaun extended.")
+check("an extension on the desk is spoken", said[-1], "Call with Shaun extended.")
 hear(w, DESK_SLOTS[0], "sipSlotCallState", '{"state":"Expiring","reason":""}')
 ext = []
 for r in callme.build_extend(SLOTS[0]):
@@ -252,7 +252,7 @@ w, said = watcher()
 hear(w, DESK_CTL, "sipIncomingCallDetails", DETAILS)
 hear(w, DESK_CTL, "sipIncomingCallAccept", [('{"id":5,"sip_slot":-1}', "str"), (True, "bool")])
 hear(w, DESK_CTL, "sipIncomingCallDetails", CLEARED)
-check("declined on the unit", said[1:], ["Declined the call from Shaun on the unit."])
+check("declined on the desk", said[1:], ["Declined the call from Shaun on the desk."])
 
 print("the audio never opening")
 w, said = watcher()
@@ -346,7 +346,7 @@ check("not knowing whether it is on a fader is not taken as on one",
       callme.readiness(True, None)[1]["ok"], False)
 check("offline outranks hosting in the status line",
       callme.status_sentence(dict(READY, online=False, slots=[], incoming=None)).endswith(
-          "The unit is offline, so no call can connect."), True)
+          "The desk is offline, so no call can connect."), True)
 
 print()
 sys.exit(_testkit.finish())

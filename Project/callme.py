@@ -346,7 +346,7 @@ def read_all(blob: bytes) -> tuple:
             slots.append(_slot_view(len(slots) + 1, props))
             slot_at.append(n.path())
     if p is None:
-        return {"ok": False, "message": "This unit does not publish CallMe."}, None, []
+        return {"ok": False, "message": "This desk does not publish CallMe."}, None, []
     return _state(p, slots), ctl, slot_at
 
 
@@ -464,9 +464,9 @@ def status_sentence(d: dict) -> str:
     """The spoken summary: what is happening, and whether calls can come in."""
     parts = [call_now(d)]
     if d.get("online") is False:
-        parts.append("The unit is offline, so no call can connect.")
+        parts.append("The desk is offline, so no call can connect.")
     elif d.get("hosting"):
-        parts.append(f"Your unit's code is {spell(d.get('code') or '')}."
+        parts.append(f"Your desk's code is {spell(d.get('code') or '')}."
                      if d.get("code") else "Guests can call in.")
     else:
         parts.append("Incoming calls are off.")
@@ -487,13 +487,13 @@ def readiness(online, on_fader) -> list:
     CallMe's own state does not follow the faders, so it never carries that fact."""
     out = []
     out.append({"key": "online", "ok": online is True,
-                "text": "The unit is online." if online else
-                        ("The unit is offline, so no call can connect either way. Join it to wifi "
+                "text": "The desk is online." if online else
+                        ("The desk is offline, so no call can connect either way. Join it to wifi "
                          "or plug in a network cable." if online is False else
-                         "Whether the unit is online is not known yet.")})
+                         "Whether the desk is online is not known yet.")})
     out.append({"key": "fader", "ok": on_fader is True,
                 "text": "CallMe 1 is on a fader." if on_fader else
-                        "CallMe 1 is on no fader, so a guest's call never reaches the unit. "
+                        "CallMe 1 is on no fader, so a guest's call never reaches the desk. "
                         "Put it on a fader."})
     return out
 
@@ -726,7 +726,7 @@ class Watcher:
                 ringing = self._ringing or {}
                 who = ringing.get("name") if ringing.get("id") == call_id else "the guest"
                 if accept.get("sip_slot", -1) < 0:
-                    say.append(f"Declined the call from {who} on the unit.")
+                    say.append(f"Declined the call from {who} on the desk.")
 
     def _slot(self, i, name, value, was, say) -> None:
         if name == "sipSlotCallAddress":

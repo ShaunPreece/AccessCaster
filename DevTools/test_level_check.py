@@ -109,7 +109,7 @@ check_in("it gives the peak as a level, spoken", "peaked at minus 9 dB", msg)
 check_in("and a verdict, because a number alone is half an answer", "good", msg)
 hot = server._level_check_summary(FakeWatcher(0.95))
 check_in("a hot channel is told which knob to turn", "gain", hot)
-check_in("and that it is the UNIT's knob, not Windows'", "on the unit", hot)
+check_in("and that it is the UNIT's knob, not Windows'", "on the desk", hot)
 silent = server._level_check_summary(FakeWatcher(0.0))
 check_in("silence is reported as silence rather than as a level", "nothing", silent)
 muted = server._level_check_summary(FakeWatcher(0.0, muted=True))
@@ -214,7 +214,7 @@ streams = {"streams": [
     {"id": "out", "name": "Speakers (RODECaster Pro II Main Stereo)", "flow": "playback"},
     {"id": "chat", "name": "Microphone (RODECaster Pro II Chat)", "flow": "recording"},
     {"id": "main", "name": "Microphone (RODECaster Pro II Main Stereo)", "flow": "recording"}]}
-check("it watches the main recording stream, never what this computer plays to the unit",
+check("it watches the main recording stream, never what this computer plays to the desk",
       server._main_mix_stream(streams)["id"], "main")
 check("with no main stream, the first recording stream",
       server._main_mix_stream({"streams": streams["streams"][:2]})["id"], "chat")
@@ -251,7 +251,7 @@ with patched((server.settings_file, {"update": lambda **kw: saved.update(kw)}),
     on = server.action_set_clip_warning(True)
     off = server.action_set_clip_warning(False)
 check("the switch is saved", saved, {"clip_warning": False})
-check_in("on with no audio says when it will start", "once the unit's audio is available",
+check_in("on with no audio says when it will start", "once the desk's audio is available",
          on["message"])
 check("off says so", off["message"], "Clipping will not be announced.")
 server._clip_wake.clear()

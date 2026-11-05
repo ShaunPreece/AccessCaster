@@ -74,11 +74,11 @@ def read_back(slot: int, name: str, size: int) -> str | None:
             return None
         on_device = os.path.join(root, "pads", str(slot), name)
         if os.path.isfile(on_device):
-            check("the file is on the unit", os.path.getsize(on_device), size)
+            check("the file is on the desk", os.path.getsize(on_device), size)
             return md5(on_device)
         folder = os.path.join(root, "pads", str(slot))
         listing = os.listdir(folder) if os.path.isdir(folder) else []
-        print(f"  no such file on the unit. pads/{slot}/ holds: {listing}")
+        print(f"  no such file on the desk. pads/{slot}/ holds: {listing}")
         return None
 
 
@@ -99,7 +99,7 @@ def main() -> int:
     source = next(((p["grid"], p["file"]) for p in live["pads"]
                    if p["present"] and p["type"] == 1 and p.get("file")), None)
     if source is None:
-        print("No sound pad on the unit to borrow a file from.")
+        print("No sound pad on the desk to borrow a file from.")
         return 1
 
     print(f"free slot: grid {slot}   borrowing the audio from pad {source[0]} ({source[1]})")
@@ -124,7 +124,7 @@ def main() -> int:
             print(f"  create took {took:.2f}s")
 
             # THE POINT: leave transfer mode completely, come back, and read what the DESK has.
-            print("\nleaving transfer mode, remounting, and reading the file back off the unit")
+            print("\nleaving transfer mode, remounting, and reading the file back off the desk")
             time.sleep(1.0)
             got = read_back(slot, os.path.basename(src_local), size)
             check("and it is byte-for-byte the source", got, want)

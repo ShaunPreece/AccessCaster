@@ -68,7 +68,7 @@ def main() -> int:
     # on slot 1 while the card slot reads empty. The names live in recorder.VOLUME_NAMES, keyed on the slot INDEX rather than on
     # the position in the list: the unit adds a fourth volume while it is recording, and a
     # position-keyed lookup renames every slot mid-take.
-    print("\nNAMING: slot 0 is the card slot, slot 1 the USB port, slot 2 the unit's pad storage")
+    print("\nNAMING: slot 0 is the card slot, slot 1 the USB port, slot 2 the desk's pad storage")
     named = low_for([state(64 * GB, 1 * GB), state(0, 0, inserted=False),
                      state(5 * GB, 100 * 1024 * 1024)])
     check("the first is the memory card slot", [v["label"] for v in named][0], "Memory card slot")

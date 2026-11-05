@@ -59,7 +59,7 @@ STATE_SPOKEN = {
     READY: "Recording stopped",
     PAUSED: "Recording paused",
     RECORDING: "Recording started",
-    NO_DESTINATION: "Recording stopped: the unit has nowhere to record to",
+    NO_DESTINATION: "Recording stopped: the desk has nowhere to record to",
 }
 
 
@@ -124,7 +124,7 @@ def spoken_change(was, now, medium: str = "") -> str:
             return f"Recording stopped: {gone}" if gone else STATE_SPOKEN[NO_DESTINATION]
 
         return ("Recording no longer available: " +
-                (gone or "the unit has nowhere to record to"))
+                (gone or "the desk has nowhere to record to"))
     return ""
 
 # MULTITRACK, named for what it DOES rather than for the unit's own word for it.
@@ -236,7 +236,7 @@ USB_EXPANDED_HINT = ("Expanded adds Game, Music, A and B, each on its own fader.
 # it moves is in virtual_devices.park_output). On the Confirm button that applies the write.
 USB_DROP_HINT = "Audio drops for a couple of seconds, screen reader included."
 USB_EXPANDED_DROP_HINT = ("Audio drops for a couple of seconds, screen reader included, and plays "
-                          "from this computer's speakers until the unit is back.")
+                          "from this computer's speakers until the desk is back.")
 # Said in the reply to turning Expanded on, when it is needed. The Windows step that is still the
 # user's, because a program's output is a choice this app knows nothing about; pointing Windows'
 # default at System (RODECaster) the app does itself (virtual_devices.py).
@@ -250,7 +250,7 @@ USB_EXPANDED_NEXT = ("Send a program to one of the four in Windows' App volume a
 # final mix output including all processing." So BOTH halves of that go in the hint: it is
 # multitrack-only, and the mixed track always keeps its processing.
 BYPASS_HINT = ("Separate tracks only, and it changes what is IN them rather than how many you get "
-               "or what format they are. The mixed track always keeps the unit's processing, so "
+               "or what format they are. The mixed track always keeps the desk's processing, so "
                "this is for when you would rather do the compression and EQ yourself afterwards.")
 BYPASS_NEEDS_MULTITRACK = ("This does nothing while only the mixed track is being made. Choose "
                            "pre-fader or post-fader above first.")

@@ -109,7 +109,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         label = dict(out["modes"]).get(mode)
         if mode is None:
             self.mode_acc.description = (self.matrix.get("reason")
-                                         or "The unit's current mix could not be read.")
+                                         or "The desk's current mix could not be read.")
         elif mode == MIX_MINUS:
             self.mode_acc.description = f"{label}: every source except this output's own."
         elif mode == CUSTOM:
@@ -269,7 +269,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         if exists and not confirm(
                 self, f"Replace the mix preset {name}?",
                 "A saved preset of that name already exists. Saving replaces it with "
-                + (f"the {out['label']} mix" if one_output else "the unit's mixes")
+                + (f"the {out['label']} mix" if one_output else "the desk's mixes")
                 + " as it is now.", "Replace preset"):
             self.frame.say("Cancelled. The saved preset was not changed.")
             return
