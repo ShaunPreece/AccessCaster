@@ -23,7 +23,7 @@ What you can do from the app:
 
 And extra features AccessCaster has added:
 
-- Spoken announcements for every button, bank, encoder turn and fader move on the desk.
+- Spoken announcements for every button, bank, encoder turn and fader move on the desk, and for changes made on the touchscreen or in RODE's app.
 - Keyboard shortcuts that work in any program, from over 100 commands.
 - Playing SMART pads from the keyboard.
 - Level meters in words, telling you when something clips or goes silent.
@@ -333,7 +333,7 @@ Switch the desk's wifi on, scan for networks and join one. The desk lists ten ne
 Everything about AccessCaster itself rather than the desk: what it says, its keyboard shortcuts, how it starts and closes, and its own updates. None of it is in a backup of the desk. Four pages: Announcements, Keyboard shortcuts, General and Updates.
 
 * Announcements
-Speaks what you do on the desk, so you know what happened without the touchscreen: mutes and solos with the channel's name, bank changes, channel buttons and the encoder, including changes made on the desk itself. Announce fader and monitor levels adds each level as you move it, by name. Play a tone for mute is quicker than speech but does not say which channel. Recording starting, pausing and stopping can be spoken, played as tones (one, two or three beeps) or left silent.
+Speaks what happens on the desk, so you know without the touchscreen: mutes and solos with the channel's name, bank changes, channel buttons and the encoder, and anything changed on the touchscreen, such as a processing switch, a mix or which channel is on a fader. A change that moves many settings at once, like a preset, is counted rather than read out. Announce fader and monitor levels adds each level as you move it, by name. Play a tone for mute is quicker than speech but does not say which channel. Recording starting, pausing and stopping can be spoken, played as tones (one, two or three beeps) or left silent.
 
 * Voice, output and volume
 Announcements have their own voice, output and volume, separate from your screen reader. The output matters: left on the RODECaster, announcements can end up in your recording and go quiet when you solo a channel, so your computer's own speakers or headphones are usually better. Refresh voices and outputs reads both lists again after you plug something in.
@@ -410,7 +410,7 @@ A channel button has taken the encoder over. Press that button again to give it 
 
 We advise using only one app at a time to make changes to your desk. Neither app is told about changes the other makes, so either one can end up showing settings that are out of date.
 
-AccessCaster notices when RODE's app is open. While it is, AccessCaster reads all of the desk's settings each time you bring it to the front, and once more when RODE's app closes, so it catches anything you changed in RODE's app.
+AccessCaster notices when RODE's app is open. While it is, AccessCaster reads all of the desk's settings each time you bring it to the front, and once more when RODE's app closes, so it catches anything you changed there. With announcements on, it then tells you what changed in one sentence, such as "Mic 1 compressor off. Headphone 4 set to Custom."
 
 # Support this project
 
