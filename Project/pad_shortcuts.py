@@ -7,8 +7,8 @@ keeps it honest from the desk's pushes (`follow_desk`) and from every pad edit (
 remembers what it switched on or is holding down, because the desk does not echo our own writes.
 The bank the desk is on is the desk model's (`desk_model.bank`).
 
-It never imports the server. The one thing it needs from it is the device lock, which the server
-installs as `lock` at import.
+It never imports the server. The device lock is `desk_access.hid_lock`, as everywhere else in the
+app.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import contextlib
 import threading
 import time
 
+import desk_access
 import desk_live
 import desk_model
 import devices
@@ -26,10 +27,6 @@ import rcp_transfer
 import soundpad
 import speech
 import wording
-
-# The server's device lock. Every desk access here goes through it, as everywhere else in the app.
-lock = threading.Lock()
-
 
 def _said(message: str, ok: bool = True) -> dict:
     """A shortcut's result, in the shape every action returns. One whose `ok` is False is spoken
@@ -106,7 +103,7 @@ def refresh_pads() -> dict:
     voice-FX pads have lost their effect object - so the press that follows needs no read of its
     own. The desk model adopts the same dump, which is where the bank comes from."""
     global _pad_map, _pads_at, _fx_missing, mixer_positions
-    with lock:
+    with desk_access.hid_lock:
         blob = rcp_read.read_model_stable()
     modes = soundpad.pad_play_modes(blob)
     placed = list(soundpad.pad_positions(blob))
@@ -235,13 +232,13 @@ class _DeskBusy(Exception):
 
 @contextlib.contextmanager
 def _desk():
-    if not lock.acquire(timeout=_DESK_WAIT_S):
+    if not desk_access.hid_lock.acquire(timeout=_DESK_WAIT_S):
         raise _DeskBusy("The desk is busy with another job, such as a restore, so nothing was "
                         "pressed. Try again when it has finished.")
     try:
         yield
     finally:
-        lock.release()
+        desk_access.hid_lock.release()
 
 
 def _arm_midi() -> None:
@@ -321,13 +318,13 @@ def _pad_verify(pad_idx: int, want_on: bool) -> None:
     """After a press, re-read and confirm the RIGHT pad reacted. Runs on its own thread."""
     try:
         fresh = refresh_pads()
-        with lock:
+        with desk_access.hid_lock:
             latched = {pi for _pos, pi, _nm in soundpad.latched_pads()}
         if want_on and pad_idx not in latched and latched:
             wrong = sorted(latched)[0]
             entry = fresh.get(wrong)
             if entry:
-                with lock:
+                with desk_access.hid_lock:
                     soundpad.unlatch_pad(entry[0])
                 speech.say(f"That fired the wrong pad, {entry[1]}, and it has been switched off "
                          f"again. The pad list was out of date and has been read again.")
@@ -617,7 +614,7 @@ def _playing_from_model() -> dict:
     Returns {stream position: sentence}, keyed the same way as the tracked state so the caller can
     merge the two rather than say the same pad twice."""
     try:
-        with lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
         pads = soundpad.pad_nodes(blob)
     except Exception:

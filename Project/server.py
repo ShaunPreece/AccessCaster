@@ -27,6 +27,7 @@ import callme  # RODE's remote guests: hosting, answering, call state
 import change_words  # a change on the desk in words
 import channels
 import devices  # per-device model (matrix labels, caps) keyed by product id
+import desk_access  # the lock, the desk as it is now, the capability gate, the long job
 import desk_firmware  # installing a firmware update through the desk's own updater
 import desk_live  # the one listener: everything the desk pushes, to every subscriber
 import desk_model  # the desk as last seen, kept current by the listener and our own writes
@@ -34,6 +35,7 @@ import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\.
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import model_tree
+import network  # wifi and Bluetooth, and the wireless mics
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
 import profiles  # settings backup/restore (save+restore live here, not in server)
 import rcp_hid
@@ -69,12 +71,6 @@ from paths import (  # frozen-build-safe asset/data locations
 )
 
 
-# One lock around ALL device access. The window, the shortcuts and the watchers call in from
-# their own threads and the unit must never be opened twice at once; this also serialises the
-# slow transfer-mode pad write against status reads.
-_hid_lock = threading.Lock()
-pad_shortcuts.lock = _hid_lock
-
 _preview_grid = None               # grid of the live-preview scratch pad, if one is engaged
 
 
@@ -99,28 +95,6 @@ LEVEL_MAX_DB = 12
 _PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c in g["controls"]}
 _PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
 
-def _wireless_mics(blob) -> dict:
-    """RODE wireless transmitters (Series IV etc.) as the unit reports them, for Wireless
-    connections.
-
-    PRESENT and CONNECTED are different facts and the page needs both. An empty slot list means the
-    dump carried no txConnected at all, which is not the same as "no mic is on" and must not be
-    read out as if it were. Nothing has ever been paired here, so this is structure-only until it is.
-    """
-    def col(name, kind=None):
-        return rcp_read.values(blob, name, kind)
-
-    conn = col("txConnected")
-    batt = col("txBatteryLevel", "int")
-    rssi = col("txRssi", "int")
-    tx = [{"index": i, "connected": bool(c),
-           "battery_pct": batt[i] if i < len(batt) else None,
-           "rssi": rssi[i] if i < len(rssi) else None}
-          for i, c in enumerate(conn)]
-    return {"transmitters": tx,
-            "present": bool(tx),
-            "any_connected": any(t["connected"] for t in tx)}
-
 
 FIRMWARE_UPDATE_PROPS = ("appUpdateAvailable", "osUpdateAvailable", "updateVersion",
                          "updateNoInternet")      # what `_firmware_update` reads
@@ -141,7 +115,7 @@ def read_device_state() -> dict:
         return rcp_read.values(blob, prop, kind)
 
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk's live state: {exc}"}
@@ -208,7 +182,7 @@ def read_firmware_install() -> dict:
     """Whether the unit's waiting firmware update can be installed now: `version`, and `refusal`
     as a sentence when it cannot."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk: {exc}"}
@@ -248,7 +222,7 @@ def action_firmware_install(backup_first: bool = True) -> dict:
                         "message": "The backup did not finish, so the update was not started and "
                                    "nothing on the desk has changed. "
                                    + (backed.get("message") or "")}
-        res = desk_firmware.install(desk_firmware.Desk(_hid_lock), job.step, target)
+        res = desk_firmware.install(desk_firmware.Desk(desk_access.hid_lock), job.step, target)
         if res.get("ok") and backup_first:
             res["message"] += (f" Your settings were backed up first as {FIRMWARE_BACKUP_NAME}, "
                                "on the Backups page.")
@@ -265,7 +239,7 @@ def action_check_firmware() -> dict:
     """Ask the desk to check RODE's server for a firmware update, and say what it found."""
     listener = desk_live.PushListener()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
             found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
             if not found:
@@ -275,7 +249,7 @@ def action_check_firmware() -> dict:
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
         listener.wait_for("updateChecking", _UPDATE_CHECK_WAIT_S, match=lambda v: v is False)
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not check for a firmware update: {exc}"}
@@ -386,7 +360,7 @@ def _recorder_refusal(name: str, task: str = "") -> str:
 
 
 def _recorder_gate(task: str = ""):
-    return _cap_gate("recorder", lambda name: _recorder_refusal(name, task))
+    return desk_access.cap_gate("recorder", lambda name: _recorder_refusal(name, task))
 
 
 def recorder_watcher():
@@ -432,7 +406,7 @@ def read_recorder() -> dict:
     """The Recording page, read from the unit. The desk model adopts the dump, so a push the
     listener missed is put right here, and the Watcher's count catches up with it untimed."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the recorder: {exc}"}
@@ -551,10 +525,10 @@ def action_record(command: str) -> dict:
     listener = desk_live.PushListener()
     try:
         listener.start()            # before the write: the desk answers within 30 ms
-        with _hid_lock:
+        with desk_access.hid_lock:
             recorder.send_command(recorder.COMMANDS[cmd])
         heard = _await_record(listener, wanted)
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not {cmd} the recording: {exc}"}
@@ -621,7 +595,7 @@ def action_drop_marker() -> dict:
                             "Nothing is being recorded while it is paused, so there is nowhere to "
                             "put a marker.")}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             recorder.drop_marker()
     except Exception as exc:
         return {"ok": False, "message": f"Could not drop a marker: {exc}"}
@@ -672,7 +646,7 @@ def action_delete_recording(uid: int) -> dict:
                 "message": "Stop the recording first. Nothing is deleted while the recorder is "
                            "running."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             before = recorder.read_recordings(rcp_read.read_model_stable(fresh=True))
             target = next((r for r in before if r.get("uid") == int(uid)), None)
             if target is None:
@@ -703,7 +677,7 @@ _ERASE_WAIT_S = 90.0        # a 117 GB drive took about 20 s
 
 
 def _storage_gate():
-    return _cap_gate("storage_write", lambda name:
+    return desk_access.cap_gate("storage_write", lambda name:
                      f"AccessCaster can show the {name}'s storage but not eject or erase it: that "
                      f"has only been confirmed on a RODECaster Pro 2.")
 
@@ -735,7 +709,7 @@ def action_storage_eject(index: int, on: bool = True) -> dict:
         return gate
     on = bool(on)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             vol, path, blob = _storage_target(index)
             if vol is None:
                 return {"ok": False, "message": path}
@@ -778,7 +752,7 @@ def action_storage_erase(index: int) -> dict:
         return gate
     listener = desk_live.PushListener()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             vol, path, blob = _storage_target(index)
             if vol is None:
                 return {"ok": False, "message": path}
@@ -790,7 +764,7 @@ def action_storage_erase(index: int) -> dict:
             rcp_transfer.send_record(
                 rcp_transfer.build_path_prop_bool("storageVolumeErase", True, path))
         listener.wait_for("storageVolumeErase", _ERASE_WAIT_S, match=lambda v: v is False)
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         return {"ok": False, "message": f"Could not erase the {recorder.volume_spoken(index)}: "
@@ -834,18 +808,18 @@ def callme_watcher():
 
 
 def _callme_gate():
-    return _cap_gate("callme", lambda name:
+    return desk_access.cap_gate("callme", lambda name:
                      f"AccessCaster can show CallMe on the {name} but not answer calls or change "
                      f"hosting: that has only been confirmed on a RODECaster Pro 2.")
 
 
 def _callme_dump() -> bytes:
-    with _hid_lock:
+    with desk_access.hid_lock:
         return rcp_read.read_model()
 
 
 def _desk_network(blob: bytes) -> dict:
-    """How the unit reaches the internet, read BY BLOCK (see read_network_status for why). A wifi
+    """How the unit reaches the internet, read BY BLOCK (see network.read_status for why). A wifi
     address means joined; the radio being on does not."""
     def net(name):
         return rcp_read.block_value(blob, "NETWORK", name)
@@ -953,7 +927,7 @@ def action_callme_hosting(on: bool) -> dict:
             return {"ok": False, "message": "This desk does not publish CallMe."}
         if d.get("hosting_locked"):
             return {"ok": False, "message": "Incoming calls cannot be switched while a call is up."}
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.send_record(callme.build_hosting(on, path))
             # The code comes from RODE's service over the network, about a second after the switch.
             deadline = time.monotonic() + (6.0 if on else 2.0)
@@ -986,7 +960,7 @@ def _callme1_on_fader():
     cannot be read. CallMe's own state does not follow the faders, and the desk does not push a
     layout change this app makes, so only a read of the layout itself is current."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             return callme.CALLME1_SOURCE in _read_fader_vector()
     except Exception:
         return None
@@ -1019,7 +993,7 @@ def _callme_respond(answer: bool) -> dict:
         if answer:
             w.quiet_connect(slot, True)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.send_record(callme.build_answer(call["id"], slot, path))
     except Exception as exc:
         if w is not None and answer:
@@ -1086,7 +1060,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
     who = target.get("peer") or "the guest"
     w.quiet_end(i, True)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for rec in callme.build_hangup(path):
                 rcp_transfer.send_record(rec)
                 time.sleep(0.15)
@@ -1141,7 +1115,7 @@ def action_callme_dial(code: str) -> dict:
     # A failure inside the wait is said by this reply, so the Watcher is kept from saying it too.
     w.quiet_end(i, True)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for rec in callme.build_dial(code, i, path):
                 rcp_transfer.send_record(rec)
                 time.sleep(0.15)
@@ -1262,7 +1236,7 @@ def action_callme_extend(auto: bool = False) -> dict:
     who = target.get("peer") or "the guest"
     w.quiet_connect(i, True)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for rec in callme.build_extend(path):
                 rcp_transfer.send_record(rec)
                 time.sleep(0.15)
@@ -1400,7 +1374,7 @@ def read_unit_settings() -> dict:
     (the stray-append hazard) off an unproven desk."""
     dev = devices.get_active_device()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk's settings: {exc}"}
@@ -1429,7 +1403,7 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     spec = UNIT_SETTING_BY_PROP.get(prop)
     if spec is None:
         return {"ok": False, "message": f"Unknown desk setting: {prop}."}
-    gate = _cap_gate("unit_settings", lambda name:
+    gate = desk_access.cap_gate("unit_settings", lambda name:
                      f"These settings can be read but not changed on the {name}: changing them "
                      f"has only been confirmed on a RODECaster Pro 2.")
     if gate is not None:
@@ -1455,7 +1429,7 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     guard_mute = prop == "outputMonFixed"
     extra = ""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             mute_before = (rcp_read.values(rcp_read.read_model_stable(fresh=True),
                                            "outputMonMute") or [None])[0] if guard_mute else None
             rcp_transfer.set_unit_setting(prop, v)
@@ -1579,14 +1553,14 @@ def device_overview(fresh: bool = True) -> dict:
     and is present on every cross-point in that source's row, physical faders included, so we read
     it from the row's first cell.
 
-    `fresh` False builds it from the desk model where that can be trusted (`_desk_now`): for the
-    re-build after each push. Everything here is pushed when it changes, physical fader moves
-    included (as `mixLevelWithAnchor`), except a card's or drive's free space, which only a read
-    brings up to date."""
+    `fresh` False builds it from the desk model where that can be trusted
+    (`desk_access.desk_now`): for the re-build after each push. Everything here is pushed when it
+    changes, physical fader moves included (as `mixLevelWithAnchor`), except a card's or drive's
+    free space, which only a read brings up to date."""
     dev = devices.get_active_device()
     try:
-        with _hid_lock:
-            blob = rcp_read.read_model_stable() if fresh else _desk_now()
+        with desk_access.hid_lock:
+            blob = rcp_read.read_model_stable() if fresh else desk_access.desk_now()
     except Exception as exc:
         return {"ok": False, "device_name": dev.name,
                 "message": f"Could not read the desk: {exc}"}
@@ -1682,7 +1656,7 @@ def read_device_status() -> dict:
 
     Read-only. Never changes device state. See the comment at the command for why it is only `I`.
     """
-    with _hid_lock:
+    with desk_access.hid_lock:
         # A status read is the one place a person asks "is it plugged in?", so it scans the bus
         # rather than trusting the remembered list, and the finder below then reuses that scan.
         found = rcp_hid.refresh_interfaces()
@@ -1762,482 +1736,6 @@ def read_device_status() -> dict:
             }
 
 
-# What Device > Wireless connections shows from `read_network_status`, for following the desk. The
-# wifi scan results are left out: the desk never pushes them (see the scan, below).
-NETWORK_PROPS = frozenset(
-    ["wifi", "wifiSSID", "wifiIpAddress", "wifiIncorrectPSK", "wifiPSK", "btConnectedAddress",
-     "btVisible", "txConnected", "txBatteryLevel", "txRssi"]
-    + [f"btPairedNumber{n}" for n in range(1, 6)] + [f"btScan{n}" for n in range(1, 11)])
-
-
-def read_network_status() -> dict:
-    """Live-read wifi, Bluetooth and firmware from the device model. Read-only.
-
-    These all live in the property model (rcp_read), so one model dump answers
-    everything. Never changes device state.
-    """
-    try:
-        with _hid_lock:
-            blob = rcp_read.read_model()
-    except Exception as exc:
-        return {"ok": False,
-                "message": f"Could not read network info from the device: {exc}"}
-
-    def first(name):
-        return rcp_read.first(blob, name)
-
-    def net(name):
-        """A NETWORK-block value, by block rather than by "first in the stream".
-
-        `first()` cannot be used for a name that might occur in more than one block: False is a
-        meaningful value, so it has no way to tell a real answer from the wrong block's. A stray
-        can be appended to any block by one malformed write (a stray `btVisible` in SYSTEM reads
-        False while the radio is discoverable), so a name is only unambiguous with its block.
-        """
-        return rcp_read.block_value(blob, "NETWORK", name)
-
-    def slots(prefix, count, start=1):
-        """The non-blank entries of a numbered slot array (btScan1..10, wifiScan1..10)."""
-        out = []
-        for n in range(start, start + count):
-            v = first(f"{prefix}{n}")
-            if v:
-                out.append(str(v))
-        return out
-
-    ssid = first("wifiSSID")
-    ip = first("wifiIpAddress")
-    gateway = first("wifiGateway")
-    dhcp = first("wifiDHCP")
-    incorrect = first("wifiIncorrectPSK")
-    bt_addr = first("btConnectedAddress")
-    midi = first("systemMidiControl")
-    bt_visible = net("btVisible")
-    bt_paired = slots("btPairedNumber", 5)
-    fw = _firmware_version(blob)
-    wired = first("wiredConnected")
-    return {
-        "ok": True,
-        "firmware": fw,
-        "midi": bool(midi) if midi is not None else None,
-        "wifi": {
-            # The RADIO, which is not the same fact as "connected": it can be on and not yet
-            # joined to anything. Read BY BLOCK, like everything else here that has a duplicate.
-            "on": bool(net("wifi")),
-            "ssid": ssid or "",
-            "ip": ip or "",
-            "gateway": gateway or "",
-            "dhcp": bool(dhcp) if dhcp is not None else None,
-            "connected": bool(ip),               # has an IP => joined a network
-            "incorrect_psk": bool(incorrect) if incorrect is not None else None,
-            # Whatever the unit's last scan found, by the app, the touchscreen or the radio coming
-            # up unjoined. Empty means "nothing scanned for yet" as often as "nothing in range".
-            "scan": wifi_scan_slots(blob),
-            # Never returned, and this is deliberate rather than an oversight: firmware before
-            # 1.7.6 publishes wifiPSK, and putting a password into a reply, the window and a log
-            # line is not a thing to do casually. Whether the network HAS a password is
-            # enough. On 1.7.6 it reads empty, so this is False there whatever is stored.
-            "has_password": bool(first("wifiPSK")),
-        },
-        "bluetooth": {
-            "connected_address": bt_addr or "",
-            "connected": bool(bt_addr),
-            "visible": bool(bt_visible) if bt_visible is not None else None,
-            "paired": bt_paired,
-            "scan": slots("btScan", 10),
-        },
-        # The third radio on the Wireless connections tab. Same helper as the Hardware state read,
-        # so the two readings cannot drift apart.
-        "wireless_mics": _wireless_mics(blob),
-        # Returned here as well as on the Hardware tab, where the page shows it: it comes free
-        # with this dump, and callers other than that tab may want it.
-        "wired_connected": bool(wired) if wired is not None else None,
-        # WHAT CAN BE CHANGED HERE. Three things on this block are proven and writable; everything
-        # else on this page is read-only, and the page says WHICH is which rather than leaving a
-        # user to find out by pressing things.
-        "writable": "network_write" in devices.get_active_device().caps,
-        # Bluetooth scanning is stated as what the app offers, never what the desk can do: it
-        # behaves differently on the two desks. The fixed IP IS a fact about the desk: `ipAddress`
-        # takes no write (PROJECT_GUIDE part 2).
-        "still_read_only": (
-            "Scanning for Bluetooth devices is not available here. Make the desk discoverable "
-            "above and pair from the phone instead. Pairing from here is still being worked on. "
-            "A fixed IP address cannot be set: the desk reports its address but takes no other."),
-        "message": "Read network and firmware from the device.",
-    }
-
-
-# ----------------------------------------------------------------------------
-# NETWORK WRITES. Joining wifi and making the unit discoverable, with no touchscreen.
-#
-# THE NETWORK BLOCK: `btVisible` written there reads back in the NETWORK block (not the
-# SYSTEM duplicate), leaves no stray, and makes the unit discoverable. `wifiSSID` and `wifiPSK`
-# write as strings, and with the radio on the unit holds a DHCP address about 15 seconds later.
-# The RODE app's Network screen being read-only says nothing about what the bus can write.
-#
-# WHAT IS DELIBERATELY NOT OFFERED, and it is not caution:
-#   * **Bluetooth scanning.** `btDoScan` is not built. Its SYSTEM occurrence is a STRAY, so any
-#     "the write lands but nothing happens" reading taken there is a write into a stray. Making the
-#     unit discoverable and pairing FROM the phone is the route offered. Wifi scanning works only
-#     while unjoined: see action_scan_wifi.
-#   * **Pairing, connecting and unpairing.** `btDoPair` / `btDoConnect` / `btDoDisconnect` /
-#     `btDoUnPair` are addressable, but they are ACTIONS taking an address we have never seen the
-#     format of, and nothing is paired here to test against. Making the unit DISCOVERABLE and
-#     pairing from the phone is the route that is proven and needs no address at all.
-#   * **Static IP and DNS.** Derived but untried, and a bad write drops the unit off the network,
-#     which is exactly the state that then needs the touchscreen to fix.
-
-
-# ---------------------------------------------------------------------------
-
-
-def _wifi_state(blob) -> dict:
-    """Just enough of the wifi state to report a join honestly, read BY BLOCK.
-
-    Never returns the password. `wifiPSK` is readable on older firmware, and "there is a password
-    stored" is the most that should ever leave this process - not in a JSON payload, not in the
-    page, not in a log."""
-    def net(name):
-        return rcp_read.block_value(blob, "NETWORK", name)
-    return {"on": bool(net("wifi")), "ssid": net("wifiSSID") or "",
-            "ip": net("wifiIpAddress") or "", "has_password": bool(net("wifiPSK")),
-            "wrong_password": bool(net("wifiIncorrectPSK"))}
-
-
-def action_set_wifi(on: bool) -> dict:
-    """Turn the wifi radio on or off. `wifi` is an ordinary bool on NETWORK."""
-    gate = _network_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with _hid_lock:
-            rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", bool(on))
-            time.sleep(1.0)
-            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the wifi radio: {exc}"}
-    if bool(on) != state["on"]:
-        return {"ok": False, "wifi": state,
-                "message": "The desk did not take that: the wifi radio is still "
-                           + ("on" if state["on"] else "off") + "."}
-    if not on:
-        return {"ok": True, "wifi": state, "message": "Wifi is off."}
-    if not state["ssid"]:
-        return {"ok": True, "wifi": state, "message": "Wifi is on, but no network is set up yet. Scan for "
-                                                       "networks, or type one in, to join."}
-    # The radio is on at once, but the network takes several seconds more, and "on" without
-    # "connected" leaves the user checking back by hand. So the reply waits for the address.
-    if not state["ip"]:
-        state = _wait_for_wifi_address() or state
-    if state.get("ip"):
-        return {"ok": True, "wifi": state, "message": f"Wifi connected to {state['ssid']}."}
-    if state.get("wrong_password"):
-        return {"ok": True, "wifi": state,
-                "message": f"Wifi is on, but {state['ssid']} refused the stored password."}
-    return {"ok": True, "wifi": state,
-            "message": f"Wifi is on, but has not connected to {state['ssid']} yet. It may be out "
-                       f"of range, or still connecting."}
-
-
-def _wait_for_wifi_address():
-    """Poll until the unit has a wifi address or reports a wrong password, for up to
-    WIFI_JOIN_TIMEOUT_S. Polls rather than sleeping the whole timeout so a quick join answers
-    quickly. Returns the last state read, or None if no read succeeded."""
-    deadline = time.monotonic() + WIFI_JOIN_TIMEOUT_S
-    state = None
-    while time.monotonic() < deadline:
-        time.sleep(2.5)
-        try:
-            with _hid_lock:
-                state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-        except Exception as exc:
-            diagnostics.event("wifi.read_failed", "still waiting for an address", error=str(exc))
-            continue
-        if state.get("wrong_password") or state.get("ip"):
-            break
-    return state
-
-
-def action_join_wifi(ssid: str, password: str) -> dict:
-    """Join a wifi network: SSID, then password, then the radio on, then wait for an address.
-
-    THE ORDER IS LOAD-BEARING. Bringing the radio up before it knows where to go invites an
-    association failure that then has to be told apart from a wrong password.
-
-    THE PASSWORD IS HANDLED AS A SECRET THROUGHOUT: it is used once, never stored by us, never
-    logged, never echoed back, and never put in a profile. The unit keeps it (it is readable there,
-    which is exactly why this code refuses to repeat it).
-
-    The answer is the unit's own IP address or `wifiIncorrectPSK`, not "the write was sent". A blind
-    operator has no other way to find out whether it worked."""
-    gate = _network_write_gate()
-    if gate is not None:
-        return gate
-    ssid = (ssid or "").strip()
-    if not ssid:
-        return {"ok": False, "message": "Give the name of the network to join."}
-    if not ssid.isascii():
-        return {"ok": False,
-                "message": "The desk only takes plain ASCII in a network name, so this one cannot "
-                           "be sent from here."}
-    if password and not password.isascii():
-        return {"ok": False,
-                "message": "The desk only takes plain ASCII in a password, so this one cannot be "
-                           "sent from here."}
-    try:
-        if not password:
-            # The unit's last scan says which networks need one. Without it the join can only
-            # fail, and writing the name would lose the password the unit has stored (see the
-            # scan comment below), so nothing is sent.
-            with _hid_lock:
-                blob = rcp_read.read_model_stable(fresh=True)
-            scanned = next((e for e in map(parse_scan_slot, wifi_scan_slots(blob))
-                            if e.get("ssid") == ssid), None)
-            if scanned and not scanned["open"]:
-                return {"ok": False, "needs_password": True,
-                        "message": f"{ssid} needs a password. Type it in the Password box, then "
-                                   f"join again."}
-        with _hid_lock:
-            net = rcp_transfer.NETWORK
-            rcp_transfer.write_at(net, "wifiSSID", "str", ssid)
-            time.sleep(0.4)
-            if password:
-                rcp_transfer.write_at(net, "wifiPSK", "str", password)
-                time.sleep(0.4)
-            rcp_transfer.write_at(net, "wifi", "bool", True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not send the network details: {exc}"}
-    finally:
-        del password           # not kept a moment longer than the write needs it
-
-    # Wait for an ADDRESS, which is the only honest evidence of a join.
-    state = _wait_for_wifi_address() or {}
-    if state.get("wrong_password"):
-        return {"ok": False, "wifi": state,
-                "message": f"{ssid} refused the password. The name and password are still stored "
-                           f"on the desk, so try again with the password corrected."}
-    if state.get("ip"):
-        return {"ok": True, "wifi": state,
-                "message": f"Joined {ssid}. The desk's address is {state['ip']}."}
-    return {"ok": False, "wifi": state,
-            "message": f"The desk took the details for {ssid} but has no address yet. It did not "
-                       f"say the password was wrong, so it may still be connecting, or the network "
-                       f"may be out of range. Check again in a moment."}
-
-
-# How long to wait for an address before answering. The measured join took about 15 seconds, so
-# this is roughly three times it: long enough not to report a failure that is really a slow DHCP
-# server, short enough that a page is not left hanging with nothing to say.
-WIFI_JOIN_TIMEOUT_S = 45.0
-
-
-def action_set_bt_visible(on: bool) -> dict:
-    """Make the unit discoverable, or stop.
-
-    THE DUPLICATE MATTERS HERE. `btVisible` exists in SYSTEM as well as NETWORK, and only the
-    NETWORK copy drives the radio - writing the SYSTEM one flips a stored value and leaves the unit
-    invisible, with nothing in the read-back to say so. So the write goes to NETWORK and the read-back
-    is taken BY BLOCK, never by "first occurrence in the stream"."""
-    gate = _network_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with _hid_lock:
-            rcp_transfer.write_at(rcp_transfer.NETWORK, "btVisible", "bool", bool(on))
-            time.sleep(1.0)
-            blob = rcp_read.read_model_stable(fresh=True)
-        now = bool(rcp_read.block_value(blob, "NETWORK", "btVisible"))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change Bluetooth discoverability: {exc}"}
-    if now != bool(on):
-        return {"ok": False, "visible": now,
-                "message": "The desk did not take that: it is still "
-                           + ("discoverable" if now else "not discoverable") + "."}
-    if on:
-        return {"ok": True, "visible": True,
-                "message": "The desk is now discoverable. On your phone or computer, look for "
-                           "RODECaster in its Bluetooth list and pair from there. It stops being "
-                           "discoverable on its own after a while, so do it now."}
-    return {"ok": True, "visible": False,
-            "message": "The desk is no longer discoverable. Anything already paired still works."}
-
-
-# ----------------------------------------------------------------------------
-# SCANNING FOR WIFI NETWORKS, AND DISCONNECTING.
-#
-# THE UNIT SCANS ON ITS OWN EACH TIME ITS RADIO COMES UP WITH NO NETWORK TO JOIN, and only then.
-# The results clear about 3 s after the radio comes on and fill about 12 s after it, in
-# `wifiScan1..10` and the WIFISCANRESULT blocks alike, each `<SSID>----<security>`. Nothing is
-# pushed, so they appear only in a later model dump. While joined it never scans: `wifiScan` (True,
-# or False then True) is stored, never cleared, and no result arrives (Pro II, firmware 1.7.6). So a
-# scan here is the radio off and on with the unit unjoined, and is refused while joined.
-#
-# THERE IS NO DISCONNECT OR FORGET PROPERTY. Clearing `wifiSSID` and cycling the radio leaves the
-# unit on, unjoined and scanning. Writing `wifiSSID` also loses the stored password: setting the
-# old name back does not rejoin.
-WIFI_SCAN_SLOTS = 10
-WIFI_RADIO_OFF_S = 2.0          # off long enough for the unit to drop the link and the old results
-WIFI_SCAN_TIMEOUT_S = 25.0      # results arrive about 12 s after the radio comes on
-WIFI_SCAN_POLL_S = 2.0
-WIFI_SCAN_SETTLE_S = 5.0        # a second network has arrived 3 s after the first
-
-
-def parse_scan_slot(raw: str) -> dict:
-    """One scan result: `<SSID>----<security>`.
-
-    An SSID may legitimately contain a hyphen, so the split is on the four-hyphen separator from the
-    RIGHT and only once. Anything that does not carry a separator is treated as a bare SSID rather
-    than discarded, because a network we cannot classify is still one you may want to join."""
-    text = str(raw or "").strip()
-    if not text:
-        return {}
-    ssid, sep, security = text.rpartition("----")
-    if not sep:
-        return {"ssid": text, "security": "", "open": False, "spoken": text}
-    ssid, security = ssid.strip(), security.strip()
-    # "the security type is blank or reads as none" is the only claim made here. The exact strings
-    # this firmware uses beyond that have not been catalogued, so they are passed through as read.
-    is_open = security.lower() in ("", "none", "open", "0")
-    return {"ssid": ssid, "security": security, "open": is_open,
-            "spoken": f"{ssid}, open network" if is_open
-                      else f"{ssid}, needs a password" + (f", {security}" if security else "")}
-
-
-def wifi_scan_slots(blob) -> list:
-    """The raw results of the unit's last wifi scan, blanks dropped: the numbered slots, or the
-    WIFISCANRESULT blocks (one unnumbered `wifiScanResultSSID` each) if those are empty."""
-    numbered = [rcp_read.block_value(blob, "NETWORK", f"wifiScan{n}")
-                for n in range(1, WIFI_SCAN_SLOTS + 1)]
-    found = [str(v) for v in numbered if v]
-    return found or [str(v) for v in rcp_read.block_values(blob, "WIFISCANRESULT",
-                                                           "wifiScanResultSSID") if v]
-
-
-def _cycle_wifi_radio():
-    with _hid_lock:
-        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", False)
-    time.sleep(WIFI_RADIO_OFF_S)
-    with _hid_lock:
-        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", True)
-
-
-def _wait_for_scan() -> list:
-    """The results of the scan a radio cycle starts. Old results can outlast the radio going off,
-    so only a list read after the slots have cleared counts, and it is taken once it has held for
-    WIFI_SCAN_SETTLE_S, because networks arrive a few seconds apart."""
-    deadline = time.monotonic() + WIFI_SCAN_TIMEOUT_S
-    cleared, last, since, found = False, None, 0.0, []
-    while time.monotonic() < deadline:
-        time.sleep(WIFI_SCAN_POLL_S)
-        with _hid_lock:
-            found = wifi_scan_slots(rcp_read.read_model_stable(fresh=True))
-        if not found:
-            cleared = True
-        if found != last:
-            last, since = found, time.monotonic()
-        elif cleared and found and time.monotonic() - since >= WIFI_SCAN_SETTLE_S:
-            return found
-    return found if cleared else []
-
-
-def action_scan_wifi() -> dict:
-    """Scan for wifi networks and return what the unit found: the radio off and on, then the
-    results read back (see the comment above)."""
-    gate = _network_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with _hid_lock:
-            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-        # The scan uses the wifi radio, so with it off there is nothing to scan with; a wired
-        # connection does not change that.
-        if not state["on"]:
-            return {"ok": False, "message": "The wifi is off. Turn it on to scan for networks."}
-        if state["ip"]:
-            return {"ok": False,
-                    "message": (f"The desk only looks for networks while it is not connected to "
-                                f"one, and it is connected to {state['ssid']}. Disconnect from it "
-                                f"first, or type the name of the network you want.")}
-        _cycle_wifi_radio()
-        raw = _wait_for_scan()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not scan for networks: {exc}"}
-
-    found, seen = [], set()
-    for entry in map(parse_scan_slot, raw):
-        # The unit can report the same SSID twice (two bands, or two access points on one network),
-        # and a picker listing a name twice is unusable by ear.
-        if entry.get("ssid") and entry["ssid"] not in seen:
-            seen.add(entry["ssid"])
-            found.append(entry)
-    if not found:
-        return {"ok": True, "networks": [],
-                "message": "The scan finished but found no networks in range."}
-    current = state["ssid"]
-    for entry in found:
-        entry["current"] = bool(current and entry["ssid"] == current)
-    return {"ok": True, "networks": found, "current": current,
-            "message": (f"Found {wording.count(len(found), 'network')}. "
-                        f"The desk lists ten at most, so a network in range can still be missing "
-                        f"from this list.")}
-
-
-def action_disconnect_wifi() -> dict:
-    """Leave the wifi network and forget it: `wifiSSID` cleared, then the radio off and on if it
-    was on, so the unit stays on wifi with nothing to join (see the comment above)."""
-    gate = _network_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with _hid_lock:
-            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-        ssid = state["ssid"]
-        if not ssid and not state["ip"]:
-            return {"ok": True, "wifi": state, "message": "The desk is not set up for any network."}
-        with _hid_lock:
-            rcp_transfer.write_at(rcp_transfer.NETWORK, "wifiSSID", "str", "")
-        if state["on"]:
-            _cycle_wifi_radio()
-        time.sleep(WIFI_RADIO_OFF_S)
-        with _hid_lock:
-            state = _wifi_state(rcp_read.read_model_stable(fresh=True))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not disconnect from the network: {exc}"}
-    if state["ssid"] or state["ip"]:
-        return {"ok": False, "wifi": state,
-                "message": f"The desk did not let go of {ssid or 'its network'}."}
-    return {"ok": True, "wifi": state,
-            "message": (f"Disconnected from {ssid or 'the network'}, and the desk has forgotten "
-                        f"it, so joining it again needs its password.")}
-
-
-def _cap_gate(cap: str, refusal) -> dict | None:
-    """None if the CONNECTED device has `cap`, else a refusal dict carrying `refusal(device name)`.
-
-    THE ONE SHAPE EVERY RISKY WRITE FAMILY IS GATED BY. The rule behind all of them: a selector
-    proven on a RODECaster Pro II has NOT been proven on a Duo, and a wrong selector does not simply
-    fail - it can append a stray property that only a factory reset clears, which has happened on
-    hardware here. So a device without the cap REFUSES BY NAME and says why, rather than writing
-    blind and hoping.
-
-    Each gate below keeps its own sentence, because what the user can and cannot do differs per
-    family and a generic "not supported" would be useless to them.
-    """
-    dev = devices.get_active_device()
-    if cap in dev.caps:
-        return None
-    return {"ok": False, "message": refusal(dev.name)}
-
-
-def _network_write_gate():
-    """The NETWORK block. Proven on both the Pro II and the Duo, so this gate refuses no desk
-    we know; it stays for the next one. See _cap_gate."""
-    return _cap_gate("network_write", lambda name:
-                     f"AccessCaster can read the network settings on the {name} but not change "
-                     f"them: changing them has only ever been confirmed on a RODECaster Pro 2, so "
-                     f"it refuses rather than risk the wrong setting.")
-
-
 def soundpad_model() -> dict:
     """Live pad grid: what is on each pad now, plus the effect-object pool health (which gates
     clear / assign-effect for safety) and the voice-effect choices.
@@ -2245,7 +1743,7 @@ def soundpad_model() -> dict:
     Reads the device model (~1.5s) under the HID lock. On a read failure it returns the static
     layout with an error note so the section still renders."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             # max_banks / pads_per_bank default to the ACTIVE DEVICE geometry (Pro II 8/bank,
             # Duo 6/bank) - do NOT force the Pro II numbers here. read_pads_live also returns a
             # read_only flag (True on a device without the pad_write cap).
@@ -2263,11 +1761,11 @@ def soundpad_model() -> dict:
 
 # ----------------------------------------------------------------------------
 # Control actions. Each returns {"ok": bool, "message": str}. All device access
-# goes through _hid_lock so the unit is only ever opened by one request at once.
+# goes through desk_access.hid_lock so the unit is only ever opened by one request at once.
 # ----------------------------------------------------------------------------
 
 def action_set_midi(on: bool) -> dict:
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_midi_control(on)
     return {"ok": True, "message": f"MIDI control turned {'on' if on else 'off'}."}
 
@@ -2278,7 +1776,7 @@ class _AnnouncerHooks(announcer.Hooks):
     """The device lock, the shortcut layer's mixer pads, and what a reconnect means for the USB
     mode and RODE's virtual devices. Each looks the server's state up when called."""
 
-    lock = _hid_lock
+    lock = desk_access.hid_lock
 
 
     def mixer_positions(self):
@@ -2317,7 +1815,7 @@ def action_set_gain(channel: int, db: int) -> dict:
     if db < GAIN_MIN_DB or db > GAIN_MAX_DB:
         return {"ok": False, "message": f"Gain must be between {GAIN_MIN_DB} and "
                                         f"{GAIN_MAX_DB} dB."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_mic_gain(channel, db)
     announcer.mark_self_gain(channel, True)     # the desk echoes this; the UI already reports it
     return {"ok": True, "message": f"Mic {channel} gain set to {db} dB."}
@@ -2326,7 +1824,7 @@ def action_set_gain(channel: int, db: int) -> dict:
 def action_set_phantom(channel: int, on: bool) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_phantom(channel, on)
     return {"ok": True,
             "message": f"Mic {channel} 48V phantom power turned {'on' if on else 'off'}."}
@@ -2335,7 +1833,7 @@ def action_set_phantom(channel: int, on: bool) -> dict:
 def action_set_polarity(channel: int, on: bool) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_polarity(channel, on)
     return {"ok": True,
             "message": f"Mic {channel} polarity {'inverted' if on else 'normal'}."}
@@ -2382,9 +1880,9 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     if channel not in MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     # ALL THREE READS INSIDE THE LOCK, like every other read that has to line up with a write of
-    # ours: the readers do not take _hid_lock themselves, the caller does. The first is adopted by
-    # the desk model, which is where the gain before the change comes from.
-    with _hid_lock:
+    # ours: the readers do not take the HID lock themselves, the caller does. The first is adopted
+    # by the desk model, which is where the gain before the change comes from.
+    with desk_access.hid_lock:
         proc_before = _mic_processing_snapshot(channel)
         was = channels.mic_gain_known(channel)
         channels.set_mic_type(channel, type_value)
@@ -2423,7 +1921,7 @@ def action_get_channels(percent: bool = True) -> dict:
     or with `percent` False the desk's own 0..1 floats, which `_preset_now` can compare again
     after a pushed change (a whole percent is as coarse as its tolerance)."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             # ONE DUMP FOR BOTH. The wireless-mic slots ride the same read as the channels so the
             # "Mute the wireless mic" switches can be made unavailable when the unit reports no
             # transmitter, without a second trip to the desk for a fact we already have in hand.
@@ -2441,7 +1939,7 @@ def read_window_state() -> dict:
     state (`levels`, `_window_levels`) and the Master Mix page's (`master`, `_window_master`),
     from ONE model dump."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk: {exc}"}
@@ -2484,7 +1982,7 @@ def _channels_reply(blob: bytes, percent: bool) -> dict:
                            for p, v in c["params"].items()}
     return {
         "ok": True, "channels": chans, "groups": PROCESSING_CONTROLS,
-        "wireless_mics": _wireless_mics(blob),
+        "wireless_mics": network.wireless_mics(blob),
         "modules": PROCESSING_MODULES, "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]),
         "presets": preset_list(),
         "pan_links": _pan_links(),
@@ -2503,21 +2001,10 @@ def action_set_channel_level(name: str, db: int) -> dict:
         return action_set_gain(channels.mic_channel_number(ch), db)
     if db < LEVEL_MIN_DB or db > LEVEL_MAX_DB:
         return {"ok": False, "message": f"Level must be between {LEVEL_MIN_DB} and {LEVEL_MAX_DB} dB."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_channel_level(name, db)
     announcer.mark_self_gain(name, False)       # line strips push inputDigitalGain back at us
     return {"ok": True, "message": f"{ch['label']} level set to {db} dB."}
-
-
-def _desk_now() -> bytes:
-    """The desk as a model dump: the desk model's picture while it is trusted and RODE's app, whose
-    changes are not pushed, is closed; otherwise a read, which the model adopts. CALLER HOLDS THE
-    HID LOCK."""
-    if desk_model.trusted() and not rode_app.is_open():
-        snap = desk_model.snapshot()
-        if snap:
-            return snap
-    return rcp_read.read_model_stable(fresh=True)
 
 
 _rode_read_busy = threading.Lock()
@@ -2555,17 +2042,17 @@ def read_for_rode_app() -> None:
 def _read_unheard() -> None:
     """One read, compared with the desk model. Skipped while a job has the desk, while the desk is
     gone, and while another such read runs."""
-    if not desk_live.connected() or desk_work_in_progress() is not None:
+    if not desk_live.connected() or desk_access.work_in_progress() is not None:
         return
     if not _rode_read_busy.acquire(blocking=False):
         return
     try:
-        if not _hid_lock.acquire(timeout=_RODE_READ_WAIT_S):
+        if not desk_access.hid_lock.acquire(timeout=_RODE_READ_WAIT_S):
             return
         try:
             rcp_read.read_model(fresh=True)
         finally:
-            _hid_lock.release()
+            desk_access.hid_lock.release()
     except Exception as exc:
         diagnostics.event("rode_app.read_failed", str(exc))
     finally:
@@ -2581,7 +2068,7 @@ def _mute_reach_message(who: str, sources) -> str:
     output instead of claiming silence everywhere. A cached dump is enough: muting moves no link
     and no level. If the grid cannot be read, the reply says so rather than guessing either way."""
     try:
-        blob = _desk_now()
+        blob = desk_access.desk_now()
         lv = rcp_read.read_matrix_levels(blob)
         ex = rcp_read.read_matrix_state(blob)
     except Exception:
@@ -2619,7 +2106,7 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_mute(name, on)
             strip = channels.channel_strip_index(name)
     except Exception as exc:
@@ -2627,7 +2114,7 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     announcer.mark_self_mute(strip)
     if not on:
         return {"ok": True, "message": f"{ch['label']} unmuted."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         msg = _mute_reach_message(ch["label"], [int(ch["source_code"])])
     return {"ok": True, "message": msg}
 
@@ -2637,8 +2124,8 @@ def encoder_hold_mute(strip: int) -> None:
     and speak it as the desk's own hold is spoken."""
     if _strip_toggle_gate("Muting") is not None:
         return
-    with _hid_lock:
-        mutes = rcp_read.values(_desk_now(), channels.MUTE_PROP)
+    with desk_access.hid_lock:
+        mutes = rcp_read.values(desk_access.desk_now(), channels.MUTE_PROP)
         if not 0 <= strip < len(mutes) or not isinstance(mutes[strip], bool):
             return
         on = not mutes[strip]
@@ -2658,7 +2145,7 @@ def _strip_toggle_gate(what: str):
 
     The Channels page's by-name mute reaches the same gate through channels._require_processing;
     this is the by-fader route's half, so the two cannot drift apart."""
-    return _cap_gate("processing", lambda name:
+    return desk_access.cap_gate("processing", lambda name:
                      f"{what} a channel is not enabled on the {name} yet, so this is read-only "
                      f"here. You can still see which channels are muted or soloed.")
 
@@ -2682,7 +2169,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
     if not 0 <= int(fader) < spec.count:
         return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             vec = _read_fader_vector(spec=spec)
             code = vec[int(fader)] if int(fader) < len(vec) else None
             if _is_empty_fader(code):
@@ -2699,7 +2186,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
         return {"ok": True, "muted": False, "message": f"{who} unmuted."}
     # A stereo-linked pair is its own fader code but two matrix sources, its two mics.
     sources = list(spec.pair_map.get(code, (code,)))
-    with _hid_lock:
+    with desk_access.hid_lock:
         msg = _mute_reach_message(who, sources)
     return {"ok": True, "muted": True, "message": msg}
 
@@ -2721,7 +2208,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
     if not 0 <= int(fader) < spec.count:
         return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             vec = _read_fader_vector(spec=spec)
             code = vec[int(fader)] if int(fader) < len(vec) else None
             if _is_empty_fader(code):
@@ -2754,7 +2241,7 @@ def action_set_channel_solo(name: str, on: bool) -> dict:
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_solo(name, on)
             strip = channels.channel_strip_index(name)
     except Exception as exc:
@@ -2788,7 +2275,7 @@ def action_set_channel_wireless_mute(name: str, on: bool) -> dict:
         return {"ok": False, "message": f"{ch['label']} is not a mic channel, so no wireless mic "
                                         f"can be paired to it."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_wireless_mute(name, on)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the wireless mic mute: {exc}"}
@@ -2805,7 +2292,7 @@ def action_clear_solos() -> dict:
     channel caused it - and the reply says plainly when there was nothing to clear, rather than
     reporting a cheerful success for a no-op."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             cleared = channels.clear_all_solos()
     except Exception as exc:
         return {"ok": False, "message": f"Could not clear the solos: {exc}"}
@@ -2821,7 +2308,7 @@ def _solo_live() -> dict:
     """{strip: bool} for every strip the desk reports, or {} if it cannot be read. Never raises:
     this only ever decorates a message, and a message is not worth failing a write over."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             return {i: bool(v) for i, v in enumerate(channels.read_solos())}
     except Exception:
         return {}
@@ -2942,7 +2429,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
     iso = None
     try:
         _autogain_set(phase="preparing", message="Getting ready. Do not talk yet.")
-        with _hid_lock:
+        with desk_access.hid_lock:
             gain_before, proc_on = _read_gain_and_processing(mic)
         if gain_before is None:
             _autogain_set(phase="failed", done=True,
@@ -2953,7 +2440,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         # PROCESSING OFF. The meter reads the unit's output, which is AFTER the compressor and
         # limiter, so with processing on we would be measuring the safety net and not the gain.
         if proc_on:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 channels.set_processing_enabled(mic, False)
             restore_processing = True
 
@@ -2967,7 +2454,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         check = None
         # The lock is taken first. `as` binds only once __enter__ succeeds, and a failed __enter__
         # restores for itself.
-        with _hid_lock, _ChatIsolation(mic - 1) as iso:
+        with desk_access.hid_lock, _ChatIsolation(mic - 1) as iso:
             result = _autogain_take("Talk at the tone.",
                                     "listening", seconds, endpoint["id"], iso)
             decision = autogain.verdict(result) if result is not None else None
@@ -3007,7 +2494,7 @@ def _autogain_run(name: str, mic: int, seconds: float) -> None:
         # sign of why. The isolation's own exit has already tried once, so this is the retry, and
         # if it still cannot be put back it says so LOUDLY in the result.
         if iso is not None and not iso.restored:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 if not iso.restore():
                     _autogain_warn(CHAT_NOT_RESTORED)
         if restore_processing and not _autogain_restore_processing(mic):
@@ -3185,7 +2672,7 @@ def _autogain_restore_processing(mic: int) -> bool:
     """
     for attempt in range(3):
         try:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 channels.set_processing_enabled(mic, True)
                 time.sleep(0.4)
                 _gain, on = _read_gain_and_processing(mic)
@@ -3232,7 +2719,7 @@ def _autogain_words(name: str, before: int, after: int, result: dict, win: str,
 def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
     """Begin an auto-gain run on one mic channel."""
     global _autogain
-    gate = _cap_gate("input_mic_write",
+    gate = desk_access.cap_gate("input_mic_write",
                      lambda dev_name: f"Mic gain cannot be set on the {dev_name} from here.")
     if gate is not None:
         return gate
@@ -3275,7 +2762,7 @@ def action_autogain_undo() -> dict:
     if mic is None or before is None:
         return {"ok": False, "message": "There is no gain change to undo."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_mic_gain(mic, int(before))
         announcer.mark_self_gain(mic, True)
     except Exception as exc:
@@ -3290,7 +2777,7 @@ def action_set_processing_enabled(name: str, on: bool) -> dict:
     ch = _ui_chan(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_processing_enabled(name, on)
     return {"ok": True,
             "message": f"{ch['label']} processing turned {'on' if on else 'off'}."}
@@ -3308,7 +2795,7 @@ def action_set_channel_advanced(name: str, on: bool) -> dict:
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_advanced(name, on)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the processing mode: {exc}"}
@@ -3325,7 +2812,7 @@ def action_set_channel_module(name: str, module: str, on: bool) -> dict:
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_processing_module(name, module, on)
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
@@ -3341,7 +2828,7 @@ def action_set_channel_effect(name: str, effect: str, on: bool) -> dict:
     if ch is None or ch["kind"] != "mic":
         return {"ok": False, "message": "Echo and reverb are available on mic channels only."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_effect(channels.mic_channel_number(ch), effect, on)
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
@@ -3356,7 +2843,7 @@ def action_set_channel_effect_param(name: str, param: str, value01: float) -> di
         return {"ok": False, "message": "Echo and reverb are available on mic channels only."}
     try:
         v = max(0.0, min(1.0, float(value01)))
-        with _hid_lock:
+        with desk_access.hid_lock:
             channels.set_channel_effect_param(channels.mic_channel_number(ch), param, v)
     except (ValueError, TypeError) as exc:
         return {"ok": False, "message": str(exc)}
@@ -3374,7 +2861,7 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
         v = max(0.0, min(1.0, float(value01)))
     except (TypeError, ValueError):
         return {"ok": False, "message": "Value must be a number from 0 to 1."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         channels.set_channel_processing(name, prop, v)
     ctrl = _PROCESSING_CONTROL_BY_PROP[prop]
     pct = round(v * 100)
@@ -3469,7 +2956,7 @@ def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> 
     off = max(-100, min(100, int(offset)))
     legs = shift_pan_legs(link["base"], off)
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for prop, pct in zip(_PAN_LEGS, legs):
                 channels.set_channel_processing(name, prop, pct / 100)
     except Exception as exc:
@@ -3697,7 +3184,7 @@ def action_apply_mic_preset(channel: int, name: str) -> dict:
     # Read the modules FIRST so we can say what actually changed: nothing on screen otherwise shows
     # a module moving.
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             before = _read_channel_modules(channel)
             channels.apply_processing_preset(channel, props)
             after = _read_channel_modules(channel)
@@ -3731,7 +3218,7 @@ def action_save_mic_preset(channel: int, name: str) -> dict:
     if name in _load_factory_presets():
         return {"ok": False, "message": f"{name} is a built-in preset name; choose another."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             props = _read_channel_preset_props(channel)
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the current settings: {exc}"}
@@ -3904,7 +3391,7 @@ def _fader_write_gate():
     """Fader-assignment WRITES. Reads and labels are always device-aware and safe; writes gate
     because a device whose fader write model is only partly known (the Duo: empty strips encoded
     as -1, no confirmed default vector) must refuse rather than write a guessed layout."""
-    return _cap_gate("fader_write", lambda name:
+    return desk_access.cap_gate("fader_write", lambda name:
                      f"Changing the fader layout is not enabled on the {name} yet, so the faders "
                      f"are read-only here. You can still see the current layout.")
 
@@ -4080,7 +3567,7 @@ def _stereo_link_gate():
     """Stereo-link WRITES. Two conditions, not one: the device must claim the cap AND carry a proven
     pair table, so a future device that gets the cap by copy-paste still refuses until its codes are
     captured rather than writing a Pro II code at a desk that means something else by it."""
-    gate = _cap_gate("stereo_link", lambda name:
+    gate = desk_access.cap_gate("stereo_link", lambda name:
                      f"Linking two inputs into a stereo pair is not enabled on the {name} yet, so "
                      f"this is read-only here.")
     if gate is not None:
@@ -4142,7 +3629,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
         return wording.join_and(_channel_name(c, spec) for c in codes)
 
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model()
             vec = _read_fader_vector(blob, spec)
             target = list(vec)
@@ -4300,7 +3787,7 @@ def action_set_fader(fader_index: int, code: int) -> dict:
         return {"ok": False, "message": f"Channel code {code} is not assignable."}
     chain_note = ""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model()
             vec = _read_fader_vector(blob, spec)
             old = vec[fader_index]
@@ -4368,7 +3855,7 @@ def action_set_fader(fader_index: int, code: int) -> dict:
 # matter. Both are confirmed writes; see RODECASTER_PROTOCOL.txt 6.1.
 def _level_write_gate():
     """Fader and monitor LEVEL writes. The one gate with a second condition beyond the cap: the
-    device must also have a virtual fader, so it cannot use _cap_gate alone."""
+    device must also have a virtual fader, so it cannot use desk_access.cap_gate alone."""
     dev = devices.get_active_device()
     if "level_write" not in dev.caps or not dev.fader.level_faders:
         return {"ok": False,
@@ -4381,7 +3868,7 @@ def _level_write_gate():
 def fader_levels_live() -> dict:
     """Read the levels we can set: each writable (virtual) fader, plus the monitor speaker."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
         return _fader_levels(blob)
     except Exception as exc:
@@ -4496,7 +3983,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
     # the model to name it would cost a second and a half per step.
     vec = channels.last_known_strip_vector()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             if vec is None:
                 vec = _read_fader_vector(spec=spec)
             rcp_transfer.set_fader_level(int(fader), round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
@@ -4521,7 +4008,7 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
         return gate
     pct = max(0, min(100, int(percent)))
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.set_monitor_level(pct / 100.0)
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the monitor level: {exc}"}
@@ -4540,7 +4027,7 @@ ENCODER_HOME = "Encoder on the virtual faders and monitor."
 def action_reset_encoder() -> dict:
     """Put the encoder back on the virtual faders and the monitor, whatever it was bound to."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for strip in (0, -1):
                 announcer.mark_self_write("channel_selected")
                 rcp_transfer.write_at(rcp_transfer.SYSTEM, "systemChannelSelected", "int", strip)
@@ -4755,7 +4242,7 @@ def _chan_check_stop(speak: bool = True, run_id: int | None = None) -> str:
     trouble = ""
     if iso is not None:
         try:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 if not iso.restore():
                     trouble = CHAT_NOT_RESTORED + " "
         except Exception as exc:
@@ -4818,7 +4305,7 @@ def action_channel_level_check(name: str = "") -> dict:
     win = _chat_endpoint_to_unity(endpoint["id"])
 
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             iso = _ChatIsolation(src["index"])
             iso.__enter__()
     except Exception as exc:
@@ -4887,7 +4374,7 @@ def action_set_output_mute(which: str, on: bool) -> dict:
         return gate
     announcer.mark_self_write(("output_mute", prop))
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.set_unit_setting(prop, bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the {label.lower()} mute: {exc}"}
@@ -4906,7 +4393,7 @@ def action_set_bt_output_level(percent: int) -> dict:
         return gate
     pct = max(0, min(100, int(percent)))
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.set_unit_setting("outputBTLevel", pct / 100.0)
     except Exception as exc:
         return {"ok": False, "message": f"Could not set the Bluetooth output level: {exc}"}
@@ -4946,7 +4433,7 @@ def action_reset_faders() -> dict:
                             f"guessed layout.")}
     chain_note = ""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             # One dump serves both jobs: the layout we are about to replace, and the per-strip
             # chains as they stand BEFORE the write, which is what tells us whose chain is whose.
             blob = rcp_read.read_model()
@@ -5023,7 +4510,7 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
         return {"ok": False, "message": "That source is not adjustable here."}
     try:
         v = max(0.0, min(1.0, float(level01)))
-        with _hid_lock:
+        with desk_access.hid_lock:
             # Ensure Custom mode + the source unlinked. Both writes are idempotent (no-ops if
             # already so), so we send them unconditionally rather than pay a ~1.5s model read
             # to check first - that read was the cause of the per-slider lag.
@@ -5051,7 +4538,7 @@ def action_reset_monitor_output(output_index: int) -> dict:
     if output_index not in mon_out:
         return {"ok": False, "message": "That output is not adjustable here."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             for si, _ in _monitor_sources():
                 rcp_transfer.set_cross_point_linked(output_index, si, True)
                 time.sleep(0.05)
@@ -5128,7 +4615,7 @@ def action_set_multitrack(mode: int) -> dict:
         return gate
     if mode not in rcp_transfer.MULTITRACK_MODES:
         return {"ok": False, "message": f"Multitrack mode {mode} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_multitrack_mode(mode)
     # Answered in the same words the control offers (recorder.MULTITRACK_LABEL), not in the unit's
     # own "Pre-Fader" / "Post-Fader", which never say whether you are getting multitrack at all.
@@ -5147,7 +4634,7 @@ def action_set_recording_format(value: int) -> dict:
         return gate
     if value not in recorder.RECORDING_FORMAT_LABEL:
         return {"ok": False, "message": f"Recording format {value} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_recording_format(value)
     # NOT lowercased, unlike the multitrack reply: these labels open with an initialism, and
     # "written as mp3, smaller files" reads as a typo and is spoken as a word by some voices.
@@ -5169,7 +4656,7 @@ def action_set_usb_multitrack(mode: int) -> dict:
         return gate
     if mode not in recorder.USB_MULTITRACK_LABEL:
         return {"ok": False, "message": f"USB multitrack mode {mode} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         # READ FIRST so the input half is carried through. The desk holds both in one property, so
         # writing the mode alone would take a desk out of Expanded without being asked to.
         old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
@@ -5193,7 +4680,7 @@ def _clear_extended_faders() -> list:
     extended = {code for code, _label in spec.expanded_sources}
     if not extended or _fader_write_gate() is not None:
         return []
-    with _hid_lock:
+    with desk_access.hid_lock:
         blob = rcp_read.read_model()
         old = _read_fader_vector(blob, spec)
         dead = [i for i, code in enumerate(old) if code in extended]
@@ -5242,7 +4729,7 @@ def action_set_usb_expanded(on: bool) -> dict:
     if on is None:
         return {"ok": False, "message": "Expanded needs on or off."}
     cleared = [] if on else _clear_extended_faders()
-    with _hid_lock:
+    with desk_access.hid_lock:
         old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
         mode, _ = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
@@ -5263,7 +4750,7 @@ def seed_usb_expanded() -> None:
     leaves the flag unpublished, and the next routing read or announcer seed fills it in."""
     try:
         if not channels.usb_expanded_known():
-            with _hid_lock:
+            with desk_access.hid_lock:
                 rcp_read.read_model_stable(fresh=True)
         # A desk found in Standard with the Expanded four still on faders: tidy it now.
         if channels.usb_expanded_known() and not channels.usb_expanded():
@@ -5471,7 +4958,7 @@ def _desk_usb_mode():
     """`outputMultiMode` as the desk holds it now, or None when it cannot be read. Takes the HID
     lock."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             return rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
     except Exception as exc:
         diagnostics.event("device.read_failed", "USB mode", error=str(exc))
@@ -5514,7 +5001,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
         """Re-enumerate the desk on purpose: the output mode off and back, Expanded kept, with the
         default parked for the arrival. The lock is held across the hold, so a person's own write
         waits and lands after this one."""
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(0, True))
             time.sleep(_VIRTUAL_DEVICES_RETRY_HOLD_S)
             _write_usb_mode_parked(value, recorder.join_usb_multitrack(0, True))
@@ -5647,7 +5134,7 @@ def action_set_processing_bypass(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_recording_processing_bypass(on)
     return {"ok": True, "message": _bypass_sentence("Recordings on the card or drive", on)}
 
@@ -5657,7 +5144,7 @@ def action_set_usb_bypass(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_usb_multitrack_bypass(on)
     return {"ok": True, "message": _bypass_sentence("The tracks sent to this computer", on)}
 
@@ -5694,7 +5181,7 @@ _AUTO_MUTE = {
 def read_auto_mute(which: str) -> bool:
     """Whether one of the two auto-mutes is on, from a model read. Raises on an unknown target or
     a failed read."""
-    with _hid_lock:
+    with desk_access.hid_lock:
         blob = rcp_read.read_model()
     return bool(rcp_read.block_value(blob, "OUTPUT", _AUTO_MUTE[which]["prop"]))
 
@@ -5717,7 +5204,7 @@ def action_set_auto_mute(which: str, on: bool) -> dict:
     if spec is None:
         return {"ok": False, "message": f"Unknown auto-mute target {which}."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             getattr(rcp_transfer, spec["writer"])(bool(on))
             time.sleep(_AUTO_MUTE_SETTLE_S)
             now = rcp_read.block_value(rcp_read.read_model_stable(fresh=True),
@@ -5763,7 +5250,7 @@ def action_set_headphone_type(value: int, output: int = 0) -> dict:
     index, out_label = spec.outputs[output]
     if value not in spec.value_codes:
         return {"ok": False, "message": "That headphone type is not a valid value for this device."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_headphone_type(value, index)
     return {"ok": True, "message": f"{out_label} type set to {spec.value_label[value]}."}
 
@@ -5773,7 +5260,7 @@ def action_set_master_compellor(on: bool) -> dict:
     gate = _output_write_gate()
     if gate is not None:
         return gate
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_master_compellor(on)
     return {"ok": True, "message": f"Master Compellor turned {'on' if on else 'off'}."}
 
@@ -5786,7 +5273,7 @@ def action_set_compellor_param(param: str, value01: float) -> dict:
     if param not in rcp_transfer.MASTER_COMPELLOR_PARAM:
         return {"ok": False, "message": f"Unknown Compellor parameter {param!r}."}
     v = max(0.0, min(1.0, float(value01)))
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_master_compellor_param(param, v)
     return {"ok": True, "message": f"Master Compellor {param} set to {round(v * 100)} percent."}
 
@@ -5797,7 +5284,7 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
     if gate is not None:
         return gate
     seconds = None if ms is None else max(0.0, min(2.0, float(ms) / 1000.0))
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_output_delay(on, seconds)
     if not on:
         return {"ok": True, "message": "Output delay turned off." if seconds is None else
@@ -5833,7 +5320,7 @@ def _matrix_source(idx: int):
 def _matrix_write_gate():
     """Cross-point writes. Both the Pro II and the Duo have this cap today; a device whose
     cross-point selector is not verified keeps its matrix read-only rather than writing blind."""
-    return _cap_gate("matrix_write", lambda name:
+    return desk_access.cap_gate("matrix_write", lambda name:
                      f"Changing output mixes is not enabled on the {name} yet, so the routing "
                      f"matrix is read-only here.")
 
@@ -5842,7 +5329,7 @@ def _output_write_gate():
     """Master/global output writes: multitrack, monitor and BT auto-mute, headphone type, master
     Compellor, output delay: named properties on the OUTPUT, HEADPHONE and MASTERCHANNEL
     blocks."""
-    return _cap_gate("output_write", lambda name:
+    return desk_access.cap_gate("output_write", lambda name:
                      f"Changing the master output settings is not enabled on the {name} yet, so "
                      f"these controls are read-only here.")
 
@@ -5891,7 +5378,7 @@ def action_set_output_mode(output_index: int, mode: int) -> dict:
         return {"ok": False, "message": f"Output {output_index} is not valid."}
     if mode not in OUTPUT_MODE_LABEL:
         return {"ok": False, "message": f"Mode {mode} is not valid."}
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_transfer.set_output_routing(output_index, mode)
     return {"ok": True, "message": f"{out['label']} output set to {OUTPUT_MODE_LABEL[mode]}."}
 
@@ -5903,7 +5390,7 @@ def action_set_cross_point(output_index: int, source_index: int, excluded: bool)
     if gate is not None:
         return gate
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             rcp_transfer.set_cross_point_excluded(output_index, source_index, excluded)
     except ValueError as exc:
         return {"ok": False, "message": str(exc)}
@@ -5931,7 +5418,7 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
     if gate is not None:
         return gate
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             # Our own writes come back on the push stream as mixLevelWithAnchor on the SOURCE, which
             # the announcer speaks as a fader move - a full-desk scheme would otherwise narrate a
             # hundred of them over the top of the page's own reply. Marked per write because the
@@ -6022,7 +5509,7 @@ def action_save_routing_scheme(name: str, output: str = "") -> dict:
         return {"ok": False, "message": "A mix preset name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the output mixes: {exc}"}
@@ -6099,136 +5586,19 @@ def rename_profile(name: str, new_name: str) -> dict:
     return {"ok": False, "message": busy} if busy else profiles.rename(name, new_name)
 
 
-class _BackgroundJob:
-    """One long job running off the request thread: its progress, and its result.
-
-    ONE SHAPE FOR EVERY LONG JOB (the profile save and restore, the desk's own show commands, the
-    pad restore, the driver install), so there is one lock, one state dict and one finish block.
-
-    WHY BACKGROUND AT ALL. These take from a few seconds to well over a minute (a pad backup copies
-    every sound file off the unit over transfer mode). A window that can poll for progress speaks
-    each step; one long silent call just hangs, which for a screen-reader user is
-    indistinguishable from a crash.
-
-    `start` claims the job, refusing plainly if one is already running, and runs `work(job)` on a
-    daemon thread. `work` reports with `job.step` (a message) or `job.tick` (a message AND a count),
-    and RETURNS its result dict. This class writes the finish, including turning an exception into
-    an honest failure message rather than a dialog that never closes.
-    """
-
-    def __init__(self, busy: str, failed: str, rewrites_desk: bool = False):
-        self._lock = threading.Lock()
-        # A job that rewrites the desk holds the announcer's desk-change speech for its run
-        # (announcer.hold_desk_speech): every write it makes would otherwise be read out.
-        self._rewrites_desk = rewrites_desk
-        self._busy = busy        # "A profile save is already running."
-        self._failed = failed    # "Could not save the profile"
-        self._state = {"running": False, "step": 0, "total": 0, "label": "",
-                       "done": False, "ok": None, "message": ""}
-        self._n = 0
-        self._phrase = None
-
-    def status(self) -> dict:
-        """The whole state, copied, for the window's progress dialog to poll."""
-        with self._lock:
-            return dict(self._state)
-
-    def busy(self) -> bool:
-        with self._lock:
-            return self._state["running"]
-
-    def step(self, message: str) -> None:
-        """Say what is happening now WITHOUT advancing the count. For a phase that reports its own
-        sections rather than a countable list of items (the settings half of a restore)."""
-        diagnostics.event("job.step", message)
-        with self._lock:
-            self._state["message"] = message
-
-    def tick(self, message: str) -> None:
-        """Advance the step count and say what is happening now."""
-        diagnostics.event("job.step", message)
-        with self._lock:
-            self._n += 1
-            self._state["step"] = self._n
-            self._state["label"] = message
-            self._state["message"] = (self._phrase(message, self._n, self._state["total"])
-                                      if self._phrase else message)
-
-    def start(self, work, message: str, total: int = 0, phrase=None,
-              started: str | None = None, failed: str | None = None) -> dict:
-        """Claim the job and run it. `message` is what the dialog says until the first report;
-        `phrase(msg, n, total)` words a counted step ("Pad 3 (3 of 16)."); `started` overrides the
-        sentence handed straight back to the caller; `failed` overrides the wording of a crash for
-        a job that shares this state with another (the pad backup on a baseline is not "could not
-        save the profile")."""
-        with self._lock:
-            if self._state["running"]:
-                return {"ok": False, "message": self._busy}
-            self._n = 0
-            self._phrase = phrase
-            self._state.update({"running": True, "step": 0, "total": total, "label": "",
-                                "done": False, "ok": None, "message": message})
-        crashed = failed or self._failed
-        label = (started or message).rstrip(".")
-
-        def _worker():
-            # EVERY JOB IS BRACKETED IN THE DIAGNOSTIC LOG, because the fault this log was built
-            # for happens AFTER a job reports success: the interesting question is what the app did
-            # in the minute following the end line, and that can only be asked once the end line
-            # has a timestamp of its own.
-            at = time.monotonic()
-            diagnostics.event("job.start", label)
-            if self._rewrites_desk:
-                announcer.hold_desk_speech()
-            try:
-                res = work(self) or {}
-            except Exception as exc:
-                res = {"ok": False, "message": f"{crashed}: {exc}"}
-            finally:
-                if self._rewrites_desk:
-                    announcer.release_desk_speech()
-            diagnostics.event("job.end", label, ok=bool(res.get("ok")),
-                              took=f"{time.monotonic() - at:.2f}s",
-                              said=res.get("message") or "Done.")
-            with self._lock:
-                self._state.update({"running": False, "done": True,
-                                    "ok": bool(res.get("ok")),
-                                    "message": res.get("message") or "Done."})
-            # A CUE AT THE END OF EVERY JOB, rising for finished and falling for failed. Every step
-            # a job reports is spoken the same way, so the closing sentence arrives sounding
-            # exactly like the twenty before it and "Backup complete" is heard as one more pad
-            # name. A tone is not a sentence and cannot be mistaken for one, and it lands BEFORE
-            # the words, so the outcome is known first.
-            # ONE PLACE, because this class already owns the finish block for every long job: the
-            # backup, the restore, the reset and the pad jobs all get it without knowing it exists.
-            # NOT GATED ON THE ANNOUNCER. The announcer speaks for the DESK's own controls and can
-            # reasonably be off; this answers a button the user just pressed in this app and is
-            # waiting on.
-            try:
-                speech.tone("done" if res.get("ok") else "failed")
-            except Exception:
-                pass                    # a missing cue must never fail the job that just succeeded
-
-        # NAMED, so the diagnostic log's thread column says which job a line came from rather than
-        # "Thread-7". Every other line in a job's window is written from this thread.
-        threading.Thread(target=_worker, daemon=True, name=f"job:{label[:14]}").start()
-        reply = {"ok": True, "started": True, "message": started or message}
-        if total:
-            reply["total"] = total
-        return reply
-
-
 # A settings-only profile save is quick, but include_pads copies every pad's sound file off the unit
 # over transfer mode and takes a minute or more, so it runs as a job and the window polls
 # `profile_save_status`.
-_profile_job = _BackgroundJob("A profile save is already running.", "Could not save the profile")
+_profile_job = desk_access.BackgroundJob("A profile save is already running.",
+                                         "Could not save the profile", "A backup is running.")
 
 
 # RODE'S DRIVER, FETCHED ON REQUEST. Its own job state rather than a shared one: it is the only
 # job in the app that touches the network instead of the desk, so it can run while a desk job is
 # going and must not be refused by one.
-_driver_job = _BackgroundJob("The driver install is already running.",
-                             "The driver could not be installed")
+_driver_job = desk_access.BackgroundJob("The driver install is already running.",
+                                        "The driver could not be installed",
+                                        "The driver install is running.")
 
 
 def driver_install_status() -> dict:
@@ -6293,7 +5663,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
     also back up the SMART pad grid (metadata + copy each sound file off the unit) in the same
     locked session. The device reads stay here because the lock lives here."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             # PHASES, NOT ITEMS. Everything spoken during a job goes to one dialog's notifier, so
             # each line cuts off the one before it; with a line per pad you hear the first two words of
             # each and nothing else, and the closing line sounds like one more pad. Three lines for
@@ -6344,7 +5714,7 @@ def _removable_volume_ready() -> bool:
     Backups page, the Recording section and this could disagree. Deliberately NOT fresh: the short-lived cache is what keeps this cheap
     enough to ask on a page load."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model()
         return bool(recorder.destination(recorder.read_volumes(blob)))
     except Exception:
@@ -6537,7 +5907,7 @@ def action_baseline_add_pads() -> dict:
     safe = existing["name"]
 
     def _work(job):
-        with _hid_lock:
+        with desk_access.hid_lock:
             backup = soundpad.backup_pads(profiles.pads_dir(safe), progress=job.tick)
         return profiles.attach_pads(safe, backup["pads"])
 
@@ -6550,8 +5920,9 @@ def action_baseline_add_pads() -> dict:
 # Profile restore runs in a background thread (the settings, then an optional pad rebuild at about
 # PAD_RESTORE_SECONDS a pad), so the page is not blocked and can poll progress for live-region
 # announcements.
-_restore_job = _BackgroundJob("A profile restore is already running.",
-                              "Could not restore the profile", rewrites_desk=True)
+_restore_job = desk_access.BackgroundJob("A profile restore is already running.",
+                                         "Could not restore the profile", "A restore is running.",
+                                         rewrites_desk=True)
 
 
 def profile_restore_status() -> dict:
@@ -6629,7 +6000,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         spec = _active_faders()
         carry_levels = not (prof.get("routing") or {}).get("fader_levels")
         vec_before = levels_before = None
-        with _hid_lock:
+        with desk_access.hid_lock:
             if carry_levels and _level_write_gate() is None:
                 try:
                     blob0 = rcp_read.read_model()
@@ -6650,14 +6021,14 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         pad_shortcuts.pads_stale()
         # Output mix matrix + monitor-mix levels (v2 profiles only).
         job.step("Settings done. Restoring output routing...")
-        with _hid_lock:
+        with desk_access.hid_lock:
             mx_res = _apply_matrix(prof.get("routing") or {})
         pad_res = None
         pad_tidy = None
         pad_extra = None
         if pad_list:
             job.step("Restoring SMART pads...")
-            with _hid_lock:
+            with desk_access.hid_lock:
                 # ONE TRANSFER SESSION FOR THE WHOLE PAD RESTORE. Without it each create enters
                 # transfer mode, remounts the volume and leaves again for itself: sixteen cycles for
                 # sixteen pads, every one dropping the desk's audio, popping a Windows device sound,
@@ -6680,7 +6051,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         healed = None
         if clean:
             job.step("Checking the voice effects survived the reset...")
-            with _hid_lock:
+            with desk_access.hid_lock:
                 healed = soundpad.heal_fx_pool(progress=job.step)
 
         msg = profiles.restore_result(safe, res)["message"]
@@ -6711,11 +6082,14 @@ def restore_profile(name: str, clean: bool = False) -> dict:
 # by nature (you cannot import while a reset runs) and because every one of them needs a progress
 # dialog: an import and a reset take seconds, and a blind operator staring at a page that has not
 # changed cannot tell "working" from "died".
-_show_job = _BackgroundJob("A show command is already running.", "The show command failed",
-                           rewrites_desk=True)
+_show_job = desk_access.BackgroundJob("A show command is already running.",
+                                      "The show command failed",
+                                      "A backup, restore or reset is running on the desk.",
+                                      rewrites_desk=True)
 # A firmware update (read_firmware_install, action_firmware_install).
-_firmware_job = _BackgroundJob("A firmware update is already running.",
-                               "The firmware update failed")
+_firmware_job = desk_access.BackgroundJob("A firmware update is already running.",
+                                          "The firmware update failed",
+                                          "A firmware update is running.")
 # The backup an update takes first, replaced by the next update's.
 FIRMWARE_BACKUP_NAME = "Before firmware update"
 
@@ -6727,7 +6101,7 @@ def _shows_write_gate():
     BOTH KNOWN DESKS HOLD THIS CAP, so nothing refuses here today. The gate stays because the
     hazard is a property of the ADDRESS and not of any one desk, and the next unknown desk gets the
     same treatment. `DevTools/test_shows_sim.py` proves it with a synthetic capless device."""
-    return _cap_gate("shows", lambda name:
+    return desk_access.cap_gate("shows", lambda name:
                      f"AccessCaster can list the shows on the {name} but not export, restore or "
                      f"reset them: doing that has only ever been confirmed on a RODECaster Pro 2, "
                      f"and the same control carries the factory reset, so it refuses rather than "
@@ -6753,7 +6127,7 @@ def read_backup_storage() -> dict:
     write to (`recorder.destination`, the same answer the Recording section gives). Known up front
     so the factory reset's "back the unit up first" is not offered where it cannot work."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model()
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk's storage: {exc}"}
@@ -6786,7 +6160,7 @@ def _locked_dump():
     Passed to shows.wait_for so a forty-second wait does not hold the lock through its sleeps. See
     the note on shows.wait_for: holding it across the wait blocked the announcer and read as a
     frozen app."""
-    with _hid_lock:
+    with desk_access.hid_lock:
         return rcp_read.read_model_stable(fresh=True)
 
 
@@ -6823,7 +6197,7 @@ def _export_and_wait(step, label: str) -> dict:
     bus, so not sending one that cannot succeed removes the risk from every case that was never going
     to work anyway.
     """
-    with _hid_lock:
+    with desk_access.hid_lock:
         before, blob = _read_shows_now()
         dest = recorder.destination(recorder.read_volumes(blob))
         if not dest:
@@ -6875,7 +6249,7 @@ def _reset_and_wait(step) -> dict:
     """
     listener = desk_live.PushListener()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             before_uuid = shows.read_current(rcp_read.read_model_stable(fresh=True)).get("uuid")
             step("Resetting the desk to factory settings and pads...")
             listener.start()        # before the write: the push burst starts 20 ms after it
@@ -6904,7 +6278,7 @@ def _reset_and_wait(step) -> dict:
     if not after:
         step("Checking the desk...")
         try:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 got = shows.read_current(rcp_read.read_model_stable(fresh=True)).get("uuid")
             answered = bool(got)
             after = got if (got and got != before_uuid) else None
@@ -6987,7 +6361,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
         return {"ok": False, "message": "Choose which backup to restore."}
 
     def work(step):
-        with _hid_lock:
+        with desk_access.hid_lock:
             current, blob = _read_shows_now()
             match = shows.find_by_snapshot(current, snapshot)
             if match is None:
@@ -7083,7 +6457,7 @@ def wake_channels() -> dict:
     have a cheap real-value write. Whether the fault can hit a non-mic channel is UNKNOWN: nothing
     was plugged into the others when it was reproduced, so it could not be heard either way.
     """
-    gate = _cap_gate("input_mic_write",
+    gate = desk_access.cap_gate("input_mic_write",
                      lambda name: f"Cannot wake the channels on a {name}.")
     if gate is not None:
         return gate
@@ -7092,7 +6466,7 @@ def wake_channels() -> dict:
     # an import, exactly the two moments the cache is guaranteed stale. Sourcing it from the cache
     # would write the gain the app last displayed over the one the restore just put back.
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
     except Exception as exc:
         diagnostics.event("wake.read_failed", str(exc))
@@ -7109,7 +6483,7 @@ def wake_channels() -> dict:
             # A step DOWN unless that would fall off the bottom, so the nudge is always a real
             # change. Putting the original back immediately means the user never hears the step.
             other = now - 1 if now > GAIN_MIN_DB else now + 1
-            with _hid_lock:
+            with desk_access.hid_lock:
                 channels.set_mic_gain(ch, other)
                 channels.set_mic_gain(ch, now)
             announcer.mark_self_gain(ch, True)
@@ -7192,7 +6566,7 @@ def backup_restore_plan(name: str) -> dict:
     paired = prof.get(profiles.SHOW_KEY) or None
     blob = None
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             blob = rcp_read.read_model()
     except Exception:
         blob = None
@@ -7232,7 +6606,7 @@ def read_backups() -> dict:
     on_drive, storage, note = [], False, ""
     if "shows" in dev.caps:
         try:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 blob = rcp_read.read_model()
             on_drive = shows.read_shows(blob)
             storage = bool(recorder.destination(recorder.read_volumes(blob)))
@@ -7308,7 +6682,7 @@ def action_delete_backup(name: str, force: bool = False) -> dict:
     paired = (loaded["prof"].get(profiles.SHOW_KEY) or {}).get("snapshot")
     if paired is not None and "shows" in devices.get_active_device().caps:
         try:
-            with _hid_lock:
+            with desk_access.hid_lock:
                 blob = rcp_read.read_model()
             still_there = shows.find_by_snapshot(shows.read_shows(blob), paired)
         except Exception:
@@ -7476,7 +6850,7 @@ def action_show_reset(backup_first: bool = True) -> dict:
         # and says "factory SMART pads" while it does so - see soundpad.heal_fx_pool for the
         # mechanism and the captures that prove it.
         step("Rebuilding the factory voice effects...")
-        with _hid_lock:
+        with desk_access.hid_lock:
             healed = soundpad.heal_fx_pool(progress=step)
         pad_shortcuts.pads_stale()   # the pad grid was rewritten, so the shortcut layer's is stale
         msg = ("The desk is back to factory settings and factory SMART pads. Your wifi, language "
@@ -7514,7 +6888,7 @@ def _show_delete_work(snapshot: int, step) -> dict:
     RUNS INSIDE A SHOW JOB THAT THE CALLER OWNS, which is the whole reason it is not just the body
     of the function above: the unified delete has to remove the unit's copy AND this computer's in
     ONE job, so the user gets one progress dialog and one result for one backup."""
-    with _hid_lock:
+    with desk_access.hid_lock:
         current, blob = _read_shows_now()
         match = shows.find_by_snapshot(current, snapshot)
         if match is None:
@@ -7579,7 +6953,7 @@ def _pad_write(grid: int, failed: str, work, invalid: str | None = None,
     # re-read: this is the wrong moment to spend a model dump, and the next press reads it anyway.
     pad_shortcuts.pads_stale()
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             return work()
     except ValueError as exc:
         if plain_value_error:
@@ -7626,7 +7000,7 @@ def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True)
         fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="accesscaster_")
         with os.fdopen(fd, "wb") as f:
             f.write(raw)
-        with _hid_lock:
+        with desk_access.hid_lock:
             # dest_filename = the real upload name so the device stores it as the factory does
             # (pads/<n>/RealName.ext), not a generic sound.wav. name = the on-screen pad label.
             return soundpad.create_sound(pad_n, tmp_path, name=name, replay=replay,
@@ -7774,7 +7148,7 @@ def action_clear_all_pads() -> dict:
     """Clear every user pad (sound/FX/mixer/MIDI/quick-dial), leaving the System pads untouched.
     Destructive - the window confirms with a dialog before calling this."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             res = soundpad.clear_all_pads()
             # allow_empty: with every pad cleared, NO pad points at any file, so all of it is
             # genuinely unused. This is the only caller that may say so - see tidy_unused_pad_audio.
@@ -7790,8 +7164,9 @@ def action_clear_all_pads() -> dict:
 # Pad-defaults restore runs in a background thread (it takes ~a minute) so the page is not blocked
 # and can poll progress for live-region announcements. This state is the single source the status
 # endpoint reports.
-_pad_restore_job = _BackgroundJob("A pad restore is already running.",
-                                  "The pad restore failed", rewrites_desk=True)
+_pad_restore_job = desk_access.BackgroundJob("A pad restore is already running.",
+                                             "The pad restore failed", "A pad restore is running.",
+                                             rewrites_desk=True)
 
 
 def pad_restore_status() -> dict:
@@ -7806,7 +7181,7 @@ def action_restore_factory_fx() -> dict:
     and so is everything past pad 16. Reuses the pad-restore progress channel, so the page shows the
     same progress dialog it already knows."""
     def _work(job):
-        with _hid_lock:
+        with desk_access.hid_lock:
             return soundpad.restore_factory_fx_pads(live=True, progress=job.tick)
 
     return _pad_restore_job.start(
@@ -7853,7 +7228,7 @@ def action_restore_backup_pads(name: str) -> dict:
         return {"ok": False, "message": "A profile restore is running. Try again when it finishes."}
 
     def _work(job):
-        with _hid_lock:
+        with desk_access.hid_lock:
             # One transfer session for every pad, as the full restore does.
             with rcp_transfer.transfer_session():
                 pad_res = soundpad.restore_pads(pad_list, profiles.pads_dir(safe),
@@ -7992,7 +7367,7 @@ def action_tidy_pad_audio() -> dict:
     nothing and writes no files, which is why it raises no drive toast - so it cannot tidy up after
     itself without giving that up) and audio left by older builds."""
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             return soundpad.tidy_unused_pad_audio()
     except Exception as exc:
         return {"ok": False, "message": f"Could not tidy up the pad audio: {exc}"}
@@ -8053,7 +7428,7 @@ def action_preview_start(stack: dict, colour: int, mic: int) -> dict:
     mic. Returns the grid used, or no_pad:True if every pad is full."""
     global _preview_grid
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             res = soundpad.preview_start(stack or {}, colour=colour, mic=mic)
         if res.get("ok"):
             _preview_grid = res.get("grid")
@@ -8108,7 +7483,7 @@ class _PreviewWriter:
             if not edits:
                 continue
             try:
-                with _hid_lock:
+                with desk_access.hid_lock:
                     soundpad.preview_write(edits, more=lambda: self._take(self.IDLE_S))
             except Exception as exc:
                 diagnostics.event("preview.write_failed", str(exc))
@@ -8136,7 +7511,7 @@ def action_preview_stop(grid: int) -> dict:
     global _preview_grid
     _preview_writer.forget(int(grid))
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             res = soundpad.preview_stop(grid)
         _preview_grid = None
         return res
@@ -8150,31 +7525,14 @@ def cleanup_preview_on_exit() -> None:
     if _preview_grid is None:
         return
     try:
-        with _hid_lock:
+        with desk_access.hid_lock:
             soundpad.preview_stop(_preview_grid)
     except Exception:
         pass
 
 
-def desk_work_in_progress() -> str | None:
-    """What is part-way through, as a sentence, or None. Quitting in the middle of one of these can
-    leave the desk half written: a pad's sound cut off mid-copy leaves an entry only a factory
-    reset clears."""
-    for job, running in ((_firmware_job, "A firmware update is running."),
-                         (_restore_job, "A restore is running."),
-                         (_pad_restore_job, "A pad restore is running."),
-                         (_show_job, "A backup, restore or reset is running on the desk."),
-                         (_profile_job, "A backup is running."),
-                         (_driver_job, "The driver install is running.")):
-        if job.busy():
-            return running
-    if rcp_transfer.transfer_active():
-        return "SMART pad sounds are being copied."
-    return None
-
-
 def read_desk_once() -> None:
     """The first read of the desk, adopted by the desk model, so every page and listener starts
     from the desk as it is. Raises when the desk cannot be read."""
-    with _hid_lock:
+    with desk_access.hid_lock:
         rcp_read.read_model_stable()

@@ -439,7 +439,7 @@ check("no reset was sent", "reset" in DESK.calls, False)
 print("one job at a time")
 reset_desk()
 # A REAL job is held open rather than the state flag being poked, so this exercises the actual
-# claim in _BackgroundJob.start. All the show commands share one job state because they are
+# claim in BackgroundJob.start. All the show commands share one job state because they are
 # mutually exclusive on the desk.
 _held = threading.Event()
 server._show_job.start(lambda job: (_held.wait(10), {"ok": True, "message": "held"})[1],

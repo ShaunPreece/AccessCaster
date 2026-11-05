@@ -10,11 +10,12 @@ so the wait is estimated from the sentence's length.
 
 The installer closes this app as Windows does at shutdown, which nothing can refuse, so an update
 neither starts nor hands over while the desk is part-way through a change
-(`server.desk_work_in_progress`).
+(`desk_access.work_in_progress`).
 """
 import wx
 
 import app_updates
+import desk_access
 import server
 from native.calls import call
 from native.dialogs import JobDialog, _paragraphs, report
@@ -97,7 +98,7 @@ class _Follower:
 
     def begin(self, dialog):
         self.dialog = dialog
-        busy = server.desk_work_in_progress()
+        busy = desk_access.work_in_progress()
         if busy:
             dialog.finish({"ok": False, "message": f"{busy} Install the update once it finishes."})
             return
@@ -119,7 +120,7 @@ class _Follower:
         if self.stage == app_updates.CHECKING:
             self.dialog.say(job["message"])
         elif self.stage == app_updates.READY:
-            busy = server.desk_work_in_progress()
+            busy = desk_access.work_in_progress()
             if busy:
                 # Cancelling keeps the verified installer, so the next attempt skips the download.
                 call(self.dialog, app_updates.cancel)

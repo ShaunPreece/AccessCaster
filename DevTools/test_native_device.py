@@ -14,6 +14,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
+import network
 import server
 import wx
 from _testkit import check, check_in, check_not_in, check_true
@@ -163,7 +164,7 @@ followed = {type(fn.__self__._read.__self__).__name__: names
             for names, fn in frame.desk.watched}
 check("Hardware, Desk settings and Wireless connections follow what they show", followed,
       {"HardwarePage": set(server.HARDWARE_PROPS), "UnitPage": set(server.UNIT_SETTING_PROPS),
-       "NetworkPage": set(server.NETWORK_PROPS)})
+       "NetworkPage": set(network.PROPS)})
 
 # ---- a read the desk's pushes ask for leaves the USB facts alone --------------------------------
 frame = FakeFrame()
@@ -244,7 +245,7 @@ check_in("and the note names it", "RODECaster Duo", unit.note.GetValue())
 net = section.network
 
 
-def network(on, ssid="Home"):
+def network_reply(on, ssid="Home"):
     return {"ok": True, "writable": True,
             "wifi": {"on": on, "ssid": ssid, "connected": on and bool(ssid),
                      "ip": "10.0.0.2" if on and ssid else "",
@@ -254,22 +255,22 @@ def network(on, ssid="Home"):
 
 
 check("before a read the wifi switch refuses", net._guard(), device_section.NETWORK_UNREAD)
-net.shown(network(False))
+net.shown(network_reply(False))
 check("with the radio off there is neither button", (net.scan.IsShown(), net.disconnect.IsShown()),
       (False, False))
 check("and the status says it is off", net.wifi_status.GetValue(), device_section.WIFI_OFF)
 check("a one-line reading is reached by Tab", net.wifi_status.AcceptsFocusFromKeyboard(), True)
-net.shown(network(True))
+net.shown(network_reply(True))
 check("joined, the status names the network and address", net.wifi_status.GetValue(),
       "Connected to Home. The desk's address is 10.0.0.2.")
 check("and Disconnect is offered, named after it, with no scan",
       (net.disconnect.IsShown(), net.disconnect.GetLabel(), net.scan.IsShown()),
       (True, "Disconnect from Home", False))
-net.shown(network(True, ssid=""))
+net.shown(network_reply(True, ssid=""))
 check("with no network set up, Scan replaces Disconnect",
       (net.scan.IsShown(), net.disconnect.IsShown()), (True, False))
 check("and the status says so", net.wifi_status.GetValue(), "Not connected to a wifi network.")
-stuck = network(True)
+stuck = network_reply(True)
 stuck["wifi"].update(ip="", incorrect_psk=True)
 net.shown(stuck)
 check("a name with no address is not called connected", net.wifi_status.GetValue(),
@@ -296,7 +297,7 @@ with wifi_dialogs.NetworksDialog(frame.window, [secured], "Found 1 network.") as
     check("choosing from the list gives its scan entry", pick.choice, secured)
 with wifi_dialogs.NetworksDialog(frame.window, [], "Found no networks.") as pick:
     check("with nothing found there is no list", pick.list, None)
-ro = network(True)
+ro = network_reply(True)
 ro["writable"] = False
 net.shown(ro)
 check("a read-only desk refuses the network writes", net._guard(),

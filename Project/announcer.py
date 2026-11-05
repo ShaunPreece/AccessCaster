@@ -37,7 +37,7 @@ class Hooks:
     """What the announcer needs from the app around it. The server installs its own at import; these
     defaults do nothing, so the decoder also runs alone in the offline tests and DevTools."""
 
-    lock = threading.Lock()   # the server's device lock, taken for a seeding dump
+    lock = threading.Lock()   # the device lock, for a seeding dump; the server's is hid_lock
 
     def mixer_positions(self) -> frozenset:
         """The pad positions that hold mixer pads."""

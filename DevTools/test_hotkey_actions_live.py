@@ -17,6 +17,7 @@ import time
 
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
 import commands
+import desk_access
 import server
 import speech
 
@@ -65,7 +66,7 @@ def main():
 def _mic_mutes() -> dict:
     import channels
     import rcp_read
-    with server._hid_lock:
+    with desk_access.hid_lock:
         blob = rcp_read.read_model_stable()
     mutes = [v for v, _k in rcp_read.find_all(blob, "channelOutputMute")]
     out = {}

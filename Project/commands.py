@@ -27,9 +27,11 @@ from __future__ import annotations
 import announcer
 import app_window
 import channels
+import desk_access
 import desk_model
 import devices
 import diagnostics
+import network
 import pad_shortcuts
 import rcp_read
 import recorder
@@ -205,7 +207,7 @@ def _cough_key() -> dict:
         return _said(f"{wording.count(len(opened), 'mic')} open again.")
     try:
         if not desk_model.trusted():
-            with server._hid_lock:
+            with desk_access.hid_lock:
                 rcp_read.read_model_stable(fresh=True)
         muted_now = desk_model.mutes()
         # A mic on no fader has no mute to press, so it is left out rather than refused.
@@ -528,13 +530,13 @@ def _run_unit(arg: str) -> dict:
     if arg == "midi":
         now = bool(server.read_unit_settings().get("midi"))
         return server.action_set_midi(not now)
-    net = server.read_network_status()
+    net = network.read_status()
     if arg == "wifi":
         now = bool((net.get("wifi") or {}).get("on"))
-        return server.action_set_wifi(not now)
+        return network.action_set_wifi(not now)
     if arg == "bt":
         now = bool((net.get("bluetooth") or {}).get("visible"))
-        return server.action_set_bt_visible(not now)
+        return network.action_set_bt_visible(not now)
     return _fail(f"Unknown desk command {arg}.")
 
 

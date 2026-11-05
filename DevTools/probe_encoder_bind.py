@@ -28,6 +28,7 @@ import time
 
 import _bootstrap  # noqa: F401
 import _desk
+import desk_access
 import model_tree
 import rcp_read
 import rcp_transfer as t
@@ -94,7 +95,7 @@ def double_press() -> None:
 
 def main() -> int:
     server = _desk.service()
-    with server._hid_lock:
+    with desk_access.hid_lock:
         start, state = read()
         bank = state["selectedBank"]
         print(f"start: {state}")

@@ -250,8 +250,8 @@ baseline" was never silent.
 
 A Windows system-tray app (`Project/tray.py`) that runs the service (`server.py`) and a native
 window (`native/`) in one process; the window calls the service's functions directly, and nothing
-listens on the network. Everything that touches USB is behind one lock, because HID is a single
-resource and the window, the announcer, the clip warning and the shortcut thread all want it.
+listens on the network. Everything that touches USB is behind one lock (`desk_access.hid_lock`),
+because HID is a single resource and the window, the announcer, the clip warning and the shortcut thread all want it.
 
 The layers, bottom up:
 
@@ -264,8 +264,10 @@ The layers, bottom up:
 - `desk_live.py` is the one listener, the app's only long-lived handle, and `desk_model.py` the one
   picture of the desk: every dump any reader takes, every push the listener hears and every write
   the app sends lands there, so a fact about the desk is held once and read from there.
+- `desk_access.py` is the shared core the features reach the desk through: the lock, the desk as
+  it is now, the capability gate and the long job. It imports none of the modules that use it.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
-  `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the
+  `recorder.py`, `shows.py`, `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the
   desk's button presses spoken) over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
@@ -631,11 +633,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   no result arrives. Unjoined, the results clear about 3 s after the radio comes on and fill about
   12 s after it, in `wifiScan1..10` and the WIFISCANRESULT blocks alike (one unnumbered
   `wifiScanResultSSID` per block), before `wifiScan` is written; whether `wifiScan` does anything
-  is unproven. So `action_scan_wifi` cycles the radio and refuses while joined.
+  is unproven. So `network.action_scan_wifi` cycles the radio and refuses while joined.
 - **THERE IS NO WIFI DISCONNECT OR FORGET PROPERTY** (the whole 1.7.6 property list has
-  `btDoDisconnect` only). `action_disconnect_wifi` writes `wifiSSID` = "" (accepted, reads back
+  `btDoDisconnect` only). `network.action_disconnect_wifi` writes `wifiSSID` = "" (accepted, reads back
   empty) and cycles the radio. Any `wifiSSID` write loses the stored password: writing the old name
-  back did not rejoin in a minute. So `action_join_wifi` sends nothing when the password is empty
+  back did not rejoin in a minute. So `network.action_join_wifi` sends nothing when the password is empty
   and the last scan lists that network as needing one.
 - **USB multitrack mode 1 IS pre-fader and mode 2 IS post-fader. MEASURED 29th August 2026**, no
   longer inferred from the recorder's twin field: with the fader down, mode 1's per-channel stream
@@ -1565,7 +1567,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   once when it comes back to the front (`server.read_for_rode_app`). While RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
   and the user is warned once per run of it. `channels.follow_desk` also untrusts the model on a
   derived chain value pushed from elsewhere, ignoring our own writes' echoes for `CHAIN_ECHO_S`.
-  A read for a reply follows the same rule through `server._desk_now` (the mute's reach check, the
+  A read for a reply follows the same rule through `desk_access.desk_now` (the mute's reach check, the
   encoder hold, the status bar's re-build after a push): a fresh dump per mute made a three-mic
   cough key take 1.5 s, and the status bar's dump after each change held up the next press.
   Current state still reads the desk when opened: a card's free space is never pushed.
@@ -1844,9 +1846,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   November 2026: 5.1 s with the speech output open, 0.6 s closed). The speech output stays open
   for `wave_player.CLOSE_AFTER_S` after a phrase, so `service.stop` closes it (`speech.stop`). A new
   thread that holds an audio device must be closed there too.
-- **QUIT REFUSES WHILE THE DESK IS PART-WAY THROUGH A CHANGE** (`server.desk_work_in_progress`:
-  any `_BackgroundJob`, or `rcp_transfer.transfer_active`). A pad sound cut off mid-copy leaves an
-  entry only a factory reset clears. A new long job must be added to that list. A session end
+- **QUIT REFUSES WHILE THE DESK IS PART-WAY THROUGH A CHANGE** (`desk_access.work_in_progress`:
+  any `BackgroundJob`, each of which registers itself, or `rcp_transfer.transfer_active`). A pad
+  sound cut off mid-copy leaves an entry only a factory reset clears. A session end
   (Windows shutting down, or the installer's Restart Manager) is NOT refused: it goes straight to
   `_quit`, because a refusal there cannot hold anything open. So an app update checks instead,
   before it downloads and again before it hands over (`update_dialogs._Follower`).
@@ -1992,7 +1994,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A PAGE THAT READS THE DESK FOR ITSELF FOLLOWS IT WITH `pages.FollowDesk`**: the pads, the
   backups, and Device's Hardware, Desk settings and Wireless connections. Each names the properties
   it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `HARDWARE_PROPS`,
-  `UNIT_SETTING_PROPS`, `NETWORK_PROPS`), watched through the desk state's one follower
+  `UNIT_SETTING_PROPS`, `network.PROPS`), watched through the desk state's one follower
   (`DeskState.watch`), and re-reads once their pushes stop for `AFTER_MS`, never while a modal
   dialog is open. A RE-READ, NOT THE MODEL, because which of these the desk pushes for a
   touchscreen change is unmeasured. Keep out of the lists what changes while the desk is merely in
@@ -2106,7 +2108,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   suppressed phrase is still logged, marked: "it said nothing" and "it was never asked to" are
   different faults. Hotkey replies and the clip warning are handed `speech.say` itself; a second
   "speak if announcing" wrapper would only skip that log line.
-- **A JOB THAT REWRITES THE DESK HOLDS THE ANNOUNCER'S DESK-CHANGE SPEECH** (`_BackgroundJob`'s
+- **A JOB THAT REWRITES THE DESK HOLDS THE ANNOUNCER'S DESK-CHANGE SPEECH** (`BackgroundJob`'s
   `rewrites_desk`: the profile restore, the show commands, the pad restore). The announcer drops
   every desk change until 1.5 s after the last job ends, and says nothing of its own about the
   job: the window that started it speaks its progress through the screen reader, and a sentence in
@@ -2641,8 +2643,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   that is not a dump and hands back no blob at all when none ever arrived, so an import that lost
   the desk says so and tells the user to replug it.
 - **THE TEST FAKES MUST OPEN WITH THE ROOT NODE'S NAME** (`Rodecaster\0`), as a real dump does, or
-  they are indistinguishable from a dead desk and every check over them is ignored. Both
-  `test_shows.fake_blob` and `test_shows_sim.encode` do.
+  they are indistinguishable from a dead desk and every check over them is ignored.
+  `fake_model.encode`, which the offline fakes are built with, does.
 
 ## wake_channels reads the gain from the DESK
 
@@ -2839,7 +2841,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Global keyboard shortcuts
 
-- **A PAD SHORTCUT WRITES TO THE DESK UNDER `_hid_lock`, THROUGH `pad_shortcuts._desk`**, which gives
+- **A PAD SHORTCUT WRITES TO THE DESK UNDER `desk_access.hid_lock`, THROUGH `pad_shortcuts._desk`**, which gives
   up after `_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
   restore has the desk in transfer mode lands inside the transfer.
   **A SOUND PAD PLAYS THROUGH A RESTORE, BY DESIGN.** Once MIDI is armed and the bank is cached, a
@@ -2981,7 +2983,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   voice effect switched on from software is knowable only from `pad_shortcuts._pads_on`.
 - **A PAD SHORTCUT MUST NOT REFRESH THE PAD MAP ON EVERY PRESS, and doing so is what made pad
   firing flaky** (Shaun, 2nd September 2026: "sound pad playback and stopping is flakey"). A
-  refresh is a FULL MODEL DUMP, 1.5 to 3 seconds holding `_hid_lock`, so a row of number keys at
+  refresh is a FULL MODEL DUMP, 1.5 to 3 seconds holding the HID lock, so a row of number keys at
   performance speed queued one per press - and `HotkeyManager._fire` DROPS a re-press while the
   last one is still running, so presses went missing rather than merely arriving late. It is a TTL
   now (`pad_shortcuts._PAD_CACHE_S`) plus an explicit `pads_stale()` from `_pad_write` and from a
@@ -3052,20 +3054,18 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 Four shapes in `server.py` each existed as many hand-written copies until 30th August 2026. Use the
 shared one; a new copy is how they drifted apart the first time.
 
-- **A LONG JOB IS A `_BackgroundJob`.** `_profile_job`, `_restore_job`, `_show_job`,
-  `_pad_restore_job`. `start(work, message=..., ...)` claims it (refusing plainly if one is already
+- **A LONG JOB IS A `desk_access.BackgroundJob`.** `start(work, message=..., ...)` claims it (refusing plainly if one is already
   running) and runs `work(job)` on a daemon thread; `work` REPORTS with `job.step` (message only)
   or `job.tick` (message and count) and RETURNS its result dict. The class writes the finish and
   turns a crash into a sentence, so a failure can never leave a progress dialog that never closes.
-  There were four copies of the state machine and SIX of the finish block. The page only reads
-  `message`, `done` and `ok`.
+  The page only reads `message`, `done` and `ok`.
 - **A LIVE PAD EDIT IS A `_pad_write`**: range-check the grid, take the HID lock, call, turn a crash
   into a sentence. `invalid=` is a refusal for a value the helper cannot check itself and is
   checked AFTER the range and BEFORE the lock (the pad number is the more basic complaint, and
   nothing should take the device lock to find out a value was wrong). `plain_value_error=True`
   surfaces a ValueError's own text, because soundpad raises those with a finished user-facing
   sentence and wrapping it buries the part that says what to do.
-- **A RISKY WRITE FAMILY IS GATED BY `_cap_gate`**, which holds the shared reasoning: a selector
+- **A RISKY WRITE FAMILY IS GATED BY `desk_access.cap_gate`**, which holds the shared reasoning: a selector
   proven on a Pro II is NOT proven on a Duo, and a wrong one can append a stray only a factory reset
   clears (it happened, 26th August 2026). Each gate keeps its OWN refusal sentence, because what the
   user can and cannot do differs per family. **`_level_write_gate` is deliberately not on it**: it
@@ -3080,9 +3080,8 @@ shared one; a new copy is how they drifted apart the first time.
   everything the announcer needs from the app (the device lock, the mixer pads, what a reconnect
   means), and the server installs `_AnnouncerHooks`, whose methods look the state up when called,
   so a test that patches `pad_shortcuts.mixer_positions` still reaches the decoder. The pad
-  shortcuts need only the device lock, which the server installs as `pad_shortcuts.lock` straight
-  after creating `_hid_lock`; a module that took its own lock would let a pad press write in the
-  middle of a restore. Call them as `speech.say(...)`
+  shortcuts need only the device lock, `desk_access.hid_lock`; a module that took its own lock
+  would let a pad press write in the middle of a restore. Call them as `speech.say(...)`
   and read `announcer.live_state`, never `from speech import say`: the tests patch the module
   attribute, and a name imported into another module keeps the original.
 - **THE SERVER IMPORTS NOTHING ABOVE IT.** `commands`, `shortcuts`, `app_settings_actions` and

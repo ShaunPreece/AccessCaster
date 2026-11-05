@@ -46,6 +46,7 @@ import announcer
 import app_updates
 import app_window
 import autostart
+import desk_access
 import diagnostics
 import instance
 import rode_app
@@ -380,10 +381,10 @@ class TrayApp:
             self.frame.reread("settings")
 
     def _request_quit(self) -> None:
-        """Quit, unless the desk is part-way through being changed (`server.desk_work_in_progress`):
+        """Quit, unless the desk is part-way through being changed (`desk_access.work_in_progress`):
         the window then says what is running, and the app stays. Windows ending the session quits
         regardless, through `_quit`."""
-        busy = server.desk_work_in_progress()
+        busy = desk_access.work_in_progress()
         if busy is None:
             self._quit()
             return

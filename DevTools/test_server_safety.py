@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import announcer
+import desk_access
 import desk_model
 import pad_shortcuts
 import server
@@ -67,7 +68,7 @@ print("\nFADER LEVEL")
 reads = []
 with as_device(server.devices.PRO2), patched(
         (server.rcp_read, {"read_model":
-                           lambda *a, **k: reads.append(server._hid_lock.locked()) or b""}),
+                           lambda *a, **k: reads.append(desk_access.hid_lock.locked()) or b""}),
         (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
         (announcer, {"mark_self_level": lambda *a: None})):
     _testkit.hold_desk([0, 1, 2, 3, 4, 5, 6, 7, 8])

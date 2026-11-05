@@ -27,6 +27,7 @@ from ctypes import wintypes
 import _bootstrap  # noqa: F401
 import comtypes
 import comtypes.client
+import desk_access
 import meters
 import rcp_read
 import recorder
@@ -182,7 +183,7 @@ def main() -> None:
     # Every cycle ends in post-fader multitrack, so the mode found here is put back at the end.
     # The arrivals counted only happen in Expanded, so a desk found in Standard is switched to
     # Expanded first and back afterwards.
-    with server._hid_lock:
+    with desk_access.hid_lock:
         blob = rcp_read.read_model(fresh=True)
     mode_before, expanded_before = recorder.split_usb_multitrack(
         rcp_read.first(blob, "outputMultiMode", "int"))

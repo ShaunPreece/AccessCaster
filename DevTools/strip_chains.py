@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import channels
+import desk_access
 import rcp_read
 
 OUT_DIR = Path(__file__).resolve().parent / "captures" / "strip_chains"
@@ -75,7 +76,7 @@ def restore(name: str, write: bool) -> int:
     if not write:
         print("dry run: add --write to send it")
         return 0
-    with server._hid_lock:
+    with desk_access.hid_lock:
         for strip, _ops in pending:
             channels.write_chain(strip, saved["chains"][strip], live[strip])
     left = _pending(saved["chains"], _live()[1])

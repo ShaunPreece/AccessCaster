@@ -11,6 +11,7 @@ state changes, and read from the desk whenever Current state is opened.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import network
 import server
 from native import a11y
 from native.calls import call
@@ -313,7 +314,7 @@ class DeviceSection:
         frame.desk.subscribe(self._desk_event)
         for view, names in ((self.hardware, server.HARDWARE_PROPS),
                             (self.unit, server.UNIT_SETTING_PROPS),
-                            (self.network, server.NETWORK_PROPS)):
+                            (self.network, network.PROPS)):
             FollowDesk(frame, names, view.follow)
 
     def _desk_event(self, event, _detail):
@@ -630,10 +631,10 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self._init_reader()
         self.section = section
         self.frame = section.frame
-        self.data = None             # the last good `server.read_network_status`
+        self.data = None             # the last good `network.read_status`
         sizer, parent = page_body(self)
 
-        self.wifi = Switch(self, parent, sizer, "WiFi on", server.action_set_wifi,
+        self.wifi = Switch(self, parent, sizer, "WiFi on", network.action_set_wifi,
                            *self.field("wifi", "on"),
                            description="Turn the desk's wifi on or off, and join a network.",
                            guard=self._guard, accepted=self._wifi_switched,
@@ -648,7 +649,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
 
         box_sizer, box = group(parent, sizer, "Bluetooth")
         self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this desk",
-                                server.action_set_bt_visible,
+                                network.action_set_bt_visible,
                                 *self.field("bluetooth", "visible"),
                                 description="Switch this on, then pair from the phone's own "
                                             "Bluetooth screen. The desk stops being discoverable "
@@ -680,7 +681,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         return None if self.data.get("writable") else NETWORK_READ_ONLY
 
     def fetch(self, _full):
-        return server.read_network_status()
+        return network.read_status()
 
     def shown(self, reply):
         if not reply.get("ok"):
@@ -727,7 +728,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
             return
         job = JobDialog(self, "Scanning for networks",
                         "Scanning for networks. This takes about twenty seconds.",
-                        lambda dialog: call(dialog, server.action_scan_wifi, done=dialog.finish),
+                        lambda dialog: call(dialog, network.action_scan_wifi, done=dialog.finish),
                         stop=None, closable=False)
         with job:
             reply = job.run()
@@ -773,7 +774,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
                        f"again needs the password.", "Disconnect"):
             return
         job = JobDialog(self, "Disconnecting", f"Disconnecting from {ssid}.",
-                        lambda dialog: call(dialog, server.action_disconnect_wifi,
+                        lambda dialog: call(dialog, network.action_disconnect_wifi,
                                             done=dialog.finish),
                         stop=None, closable=False)
         with job:
@@ -799,7 +800,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
     def _join(self, ssid, password, network, scan):
         job = JobDialog(self, f"Joining {ssid}",
                         f"Joining {ssid}. This can take up to 45 seconds.",
-                        lambda dialog: call(dialog, server.action_join_wifi, ssid, password,
+                        lambda dialog: call(dialog, network.action_join_wifi, ssid, password,
                                             done=dialog.finish),
                         stop=None, closable=False)
         with job:

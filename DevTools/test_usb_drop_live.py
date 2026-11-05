@@ -65,6 +65,7 @@ import threading
 import time
 
 import _bootstrap
+import desk_access
 import hid
 import rcp_hid
 import rcp_read
@@ -85,7 +86,7 @@ def uuid_direct() -> str | None:
 
 def uuid_via_app() -> str | None:
     """Read under the app's own lock, so the `app` layer never opens a competing handle of ours."""
-    with server._hid_lock:
+    with desk_access.hid_lock:
         return shows.read_current(rcp_read.read_model_stable(fresh=True)).get("uuid")
 
 

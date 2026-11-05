@@ -21,6 +21,7 @@ import channels
 import desk_live
 import desk_model
 import devices
+import network
 import recorder
 import rcp_transfer
 import server
@@ -131,7 +132,7 @@ with open(_bootstrap.docs_path("PROPERTY_LIST_PRO2.md"), encoding="utf-8") as f:
     published = set(re.findall(r"`(\w+)`", f.read()))
 for label, names in (("Hardware", server.HARDWARE_PROPS),
                      ("Desk settings", server.UNIT_SETTING_PROPS),
-                     ("Wireless connections", server.NETWORK_PROPS),
+                     ("Wireless connections", network.PROPS),
                      ("Backups", server.SHOW_STATE_PROPS),
                      ("SMART pads", soundpad.PAD_GRID_PROPS)):
     check(f"{label} follows only published properties", sorted(set(names) - published), [])
