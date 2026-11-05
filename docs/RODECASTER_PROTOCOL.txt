@@ -935,7 +935,7 @@ way to clear it.
 6.4 THE UNIT'S OWN SETTINGS (display, haptics, REC button, listen) - 2026-08-26
 --------------------------------------------------------------------------------
 The nine selectors captured in 11.1, plus activeButtonsBrightness on the DERIVED GUI
-selector, are now written by the app: server.UNIT_SETTINGS is the spec (labels, value
+selector, are now written by the app: desk_labels.UNIT_SETTINGS is the spec (labels, value
 domains, help text), rcp_transfer.UNIT_SETTING_SEL is the address table, and a profile
 saves and restores all ten. Every one was write/read-back/restore verified against the
 live Pro II on 2026-08-26 (over our own HTTP service),

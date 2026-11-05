@@ -2429,7 +2429,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the stream because RECORDINGS are oldest first; copying that into `shows.read_shows` put the
   oldest at the top labelled "the newest". Sort on the snapshot index, never on stream order.
 - **THE ADDRESS TABLE IS THE SINGLE SOURCE OF WHICH UNIT SETTINGS EXIST.** `rcp_transfer.
-  UNIT_SETTING_SEL` says what can be written; `server.UNIT_SETTINGS` says how one is presented. That
+  UNIT_SETTING_SEL` says what can be written; `desk_labels.UNIT_SETTINGS` says how one is presented. That
   split is deliberate (the address table is shared with the Duo and must not carry UI copy), but
   MEMBERSHIP is not: every entry in the address table either appears on the Device page or is named
   in `server.UNIT_SETTINGS_NOT_ON_PAGE` with a reason. `server.unit_settings_off_page()` must return
@@ -2810,7 +2810,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   channel button holding the encoder, a hold of three seconds mutes nothing (Pro II,
   3rd November 2026), so `encoder_hold` does that one itself: it toggles the selected strip's mute
   and speaks it with `announcer.announce_mute`. No echo of that write reaches the announcer, so it
-  cannot rely on one (Pro II, 3rd November 2026). The announcer speaks both mutes (`_OUTPUT_MUTES` for the monitor), counts
+  cannot rely on one (Pro II, 3rd November 2026). The announcer speaks both mutes (`change_words.OUTPUT_MUTES` for the monitor), counts
   either one during a press as a hold, and seats its ring position from it (`_ring_place`): a hold
   moves no level, so without that a hold straight after a restart leaves the next press saying only
   "Select".
@@ -3071,6 +3071,31 @@ shared one; a new copy is how they drifted apart the first time.
   middle of a restore. Call them as `speech.say(...)`
   and read `announcer.live_state`, never `from speech import say`: the tests patch the module
   attribute, and a name imported into another module keeps the original.
+- **A CHANGE MADE ELSEWHERE IS SPOKEN AS ONE SENTENCE PER BURST** (`announcer._note_change`,
+  `change_words.summarise`). Speech keeps only the newest phrase waiting, so a phrase per push
+  leaves a preset's thirty parameters, or a batch revealed on return from RODE's app, heard as its
+  last one.
+- **A CHANGE IS A VALUE DIFFERENT FROM `push.was`, never a push alone.** The desk re-pushes values
+  it already had, and this app's own writes reach the desk model before the desk echoes them, so
+  the echo arrives with `was` equal to the value and is not spoken over the window's own reply.
+- **AN UNLINKED CROSS-POINT IS A SEND, NOT ITS FADER.** `mixLevelWithAnchor` with level and anchor
+  equal follows the fader; unequal, it is that source's level in that one output. Read as a fader,
+  a send of Mic 3 to Headphone 4 is announced as Mic 3's own level.
+- **A FADER'S SOURCE CHANGING PUSHES THE LEVELS OF THE NEW LAYOUT**, which read as movements ("100
+  percent, Bluetooth", "0 percent, Bluetooth"). For `_LAYOUT_QUIET_S` after `channelInputSource`
+  they are recorded as said. A move from the touchscreen is unmeasured: if the desk pushes the
+  levels before the source, or no source at all as it does for RODE's app, they are still spoken.
+- **WHILE RODE'S APP IS OPEN, CHANGES ARE GATHERED, NOT SPOKEN** (`announcer.gather_changes`,
+  released by `speak_gathered` after the read on return and spoken as RODE's app closes). Moving a
+  channel to another fader there pushes the levels and sends it rewrites but NOT the
+  `channelInputSource` itself (Pro II, firmware 1.7.7), so spoken live they are stray lines with
+  no move to explain them.
+- **A CHANNEL THAT MOVED FADER CARRIES ITS STRIP AND ITS SENDS** (`change_words._without_what_moved`):
+  with a move in the burst, the processing, effects, mute and solo of the strips involved and the
+  levels and sends of the sources moved are not news. Unfiltered, a swap reads as "USB 2: 21
+  processing settings changed".
+- **WHAT A SETTING IS CALLED LIVES IN `desk_labels` ONLY**: the window's controls, the server's
+  replies and the announcer's words all read it, so a label is never copied into one of them.
 
 --------------------------------------------------------------------------------
 ## Tooling

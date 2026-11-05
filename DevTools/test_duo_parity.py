@@ -21,6 +21,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import announcer
+import change_words
 import channels
 import devices
 import rcp_read
@@ -70,8 +71,8 @@ with as_device(devices.DUO):
 
 print("\nSPOKEN NAMES USE THE DUO'S OWN SOURCES (code 2 = Headset, NOT Mic 3)")
 with as_device(devices.DUO):
-    check("source label 2", announcer._source_label(2), "Headset")
-    check("no Mic 3 to name", announcer._source_label(3), "Source 3")
+    check("source label 2", change_words.source_name(2), "Headset")
+    check("no Mic 3 to name", change_words.source_name(3), "Source 3")
     hold_desk(list(DUO_VEC))
     said, _ = run([state_packet("channelOutputMute", 4, True)])
     check("mute on the Headset strip", said, ["Headset muted"])
@@ -82,7 +83,7 @@ with as_device(devices.DUO):
     said, _ = run([state_packet("channelOutputMute", 9, True)])
     check("the spare slot 9 still names its source", said, ["USB 2 muted"])
 with as_device(devices.PRO2):
-    check("Pro II still says Mic 3 for the same code", announcer._source_label(2), "Mic 3")
+    check("Pro II still says Mic 3 for the same code", change_words.source_name(2), "Mic 3")
 
 print("\nCHANNEL-BUTTON SELECTION SPEAKS THE RIGHT THING ON THE DUO")
 # systemChannelSelected on selector 0x0f. What the encoder then moves depends on the strip: a mic
@@ -121,18 +122,18 @@ print("\nGAIN NAMES COME FROM THE ADDRESS THE CHANGE WAS PUSHED AT")
 # the low byte up in a per-device selector table instead is what leaves a gain turned ON THE DESK
 # matching nothing and never spoken at all, because the Duo's table holds the dead MIX selectors.
 with as_device(devices.DUO):
-    check("Duo Mic 2 gain at INPUTSOURCE[1]", announcer._gain_label(rcp_read.push_key([0x26F]), True), "Mic 2 gain")
+    check("Duo Mic 2 gain at INPUTSOURCE[1]", change_words.gain_name(rcp_read.push_key([0x26F]), True), "Mic 2 gain")
     check("Duo Headset level at INPUTSOURCE[2]",
-          announcer._gain_label(rcp_read.push_key([0x270]), False), "Headset input level")
-    check("the DEAD MIX address names nothing", announcer._gain_label(rcp_read.push_key([0x149]), True), None)
+          change_words.gain_name(rcp_read.push_key([0x270]), False), "Headset input level")
+    check("the DEAD MIX address names nothing", change_words.gain_name(rcp_read.push_key([0x149]), True), None)
     check("a source this desk does not have names nothing (Pro II Mic 4)",
-          announcer._gain_label(rcp_read.push_key([0x271]), True), None)
+          change_words.gain_name(rcp_read.push_key([0x271]), True), None)
     check("a mic address asked as a line names nothing",
-          announcer._gain_label(rcp_read.push_key([0x26F]), False), None)
-    check("an unparseable address names nothing", announcer._gain_label(None, True), None)
+          change_words.gain_name(rcp_read.push_key([0x26F]), False), None)
+    check("an unparseable address names nothing", change_words.gain_name(None, True), None)
 with as_device(devices.PRO2):
-    check("Pro II Mic 1 gain at INPUTSOURCE[0]", announcer._gain_label(rcp_read.push_key([0x26E]), True), "Mic 1 gain")
-    check("Pro II Mic 4 gain at INPUTSOURCE[3]", announcer._gain_label(rcp_read.push_key([0x271]), True), "Mic 4 gain")
+    check("Pro II Mic 1 gain at INPUTSOURCE[0]", change_words.gain_name(rcp_read.push_key([0x26E]), True), "Mic 1 gain")
+    check("Pro II Mic 4 gain at INPUTSOURCE[3]", change_words.gain_name(rcp_read.push_key([0x271]), True), "Mic 4 gain")
 
 print("\nTHE PUSHED ADDRESS IS READ IN FULL, NOT JUST ITS LOW BYTE")
 # 0x026E needs two bytes. Reading only the low one calls it selector 0x6E, which is an ordinary

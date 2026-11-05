@@ -9,6 +9,7 @@ import wx
 import wx.lib.scrolledpanel as scrolled
 
 import server
+from desk_labels import EFFECT_PARAMS, pan_words
 from native import a11y
 from native.calls import call
 from native.channel_jobs import AutoGain
@@ -28,29 +29,8 @@ PARAM_TABS = {
     "Pan": ("tone", "Tone and pan"),
 }
 
-# Echo and reverb parameters in the order shown, with the words after the effect's name.
-EFFECT_PARAMS = {
-    "echo": [("echoMix", "level"), ("echoLowCut", "low cut"), ("echoHighCut", "high cut"),
-             ("echoDelay", "delay"), ("echoDecay", "decay")],
-    "reverb": [("reverbMix", "level"), ("reverbModel", "size"), ("reverbLowCut", "low cut"),
-               ("reverbHighCut", "high cut")],
-}
-
-
 def percent_words(value):
     return f"{value} percent"
-
-
-def pan_words(value):
-    """A pan position, 0 to 100 with 50 the centre, in words: a bare percentage gives no
-    direction."""
-    if value == 50:
-        return "centre"
-    if value <= 0:
-        return "hard left"
-    if value >= 100:
-        return "hard right"
-    return f"{(50 - value) * 2} percent left" if value < 50 else f"{(value - 50) * 2} percent right"
 
 
 def pan_note(rec):

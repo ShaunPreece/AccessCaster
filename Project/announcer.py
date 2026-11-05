@@ -19,6 +19,7 @@ from __future__ import annotations
 import threading
 import time
 
+import change_words
 import channels
 import desk_live
 import desk_model
@@ -71,9 +72,6 @@ _RECONNECT_SPEAK_AFTER_S = 1.0
 # strictly read-only. The press edge (`mutePressed` / `soloPressed`) is addressed at the physical
 # BUTTON, which names no channel, so it is only the fallback when no state follows.
 _STATE_PROPS = {"channelOutputMute": "mute", "channelCueEnable": "solo"}
-# A whole output's mute, addressed at the OUTPUT block rather than a strip. The monitor's is what an
-# encoder hold on the monitor level toggles.
-_OUTPUT_MUTES = {"outputMonMute": "Monitor speakers", "outputBTMute": "Bluetooth output"}
 # HOW LONG A MIXER PAD OWNS THE MUTE AND CUE LINES. One press of a Back Channel pad moves four of
 # these at once (both members' mute and cue), and each edge of a momentary pad brings its own burst,
 # so speaking them turns a two-second talkback push into eight announcements describing a state the
@@ -249,42 +247,6 @@ _ENC_DEAD_S = 0.45     # a turn with no level change within this was a turn agai
 _ENC_DEAD_GAP_S = 4.0  # and do not repeat that message more often than this
 
 
-def _source_label(source_code: int) -> str:
-    """A speakable name for a matrix SOURCE code, e.g. 'Mic 1'. Never touches the device.
-
-    `labels_for`, NOT `code_label`: a fader can HOLD a stereo-linked pair (codes 4, 5, 6) even
-    though a pair is never something you assign, and code_label covers only the assignable set, so
-    a linked Mic 1 + 2 would be announced as "Source 4"."""
-    try:
-        lbl = devices.get_active_device().fader.labels_for(channels.usb_expanded()).get(source_code)
-        if lbl:
-            return lbl
-        for s in devices.get_active_device().matrix.sources_for(True):
-            if s.get("index") == source_code:
-                return s.get("label") or f"source {source_code}"
-    except Exception:
-        pass
-    return f"Source {source_code}"
-
-
-def channel_label(strip_idx: int) -> str:
-    """A speakable name for a strip index, e.g. 'Mic 2', from the desk model's fader layout, however
-    old: the last layout seen beats 'Channel N', which is said when no layout has been seen or it
-    does not name that slot."""
-    try:
-        vec = desk_model.strip_vector()
-        if vec and 0 <= strip_idx < len(vec):
-            # labels_for, so a linked pair is named rather than spoken as a bare code, and the
-            # Expanded four are named rather than announced as "Source 12".
-            label = devices.get_active_device().fader.labels_for(
-                channels.usb_expanded()).get(vec[strip_idx])
-            if label:
-                return label
-    except Exception:
-        pass
-    return f"Channel {strip_idx + 1}"
-
-
 def handle_report(b: bytes, st: dict) -> None:
     """`handle_push` for one raw report-04 frame, for a tool reading a handle of its own: the push is
     applied to the desk model first, as the listener does. A slice of a model dump decodes as
@@ -301,6 +263,11 @@ def handle_push(push, st: dict) -> None:
     global _mixer_quiet_until
     path, name, val, kind, node = push[:5]
     was = push.was
+    if push.revealed:
+        # Found by a read while RODE's app is open: no gesture behind it, and the whole batch
+        # arrives at once, so all of it is worded together.
+        _note_change(st, push)
+        return
     # Typed views of the value, so a branch that wants an int never acts on a string or a bool.
     ival = val if kind == "int" else None
     bval = val if kind == "bool" else None
@@ -320,17 +287,29 @@ def handle_push(push, st: dict) -> None:
                 _mixer_quiet_until = time.monotonic() + _MIXER_QUIET_S
         return
     if name == "mixLevelWithAnchor":
-        # A fader is moving. One phrase per gesture, not per push: hold the latest value and let
-        # flush_pending speak it once the pushes stop. The cross-point's MIX node gives the source,
-        # and the matrix row IS the source code.
+        # A LINKED cross-point follows its fader, so a fader is moving: one phrase per gesture,
+        # not per push, held until flush_pending speaks it once the pushes stop. The MIX node gives
+        # the source, and the matrix row IS the source code. An UNLINKED one is a send level of
+        # its own, worded with the other changes.
         cell = rcp_transfer.cross_point_of(node)
-        if not levels_on or kind != "str" or "|" not in val or cell is None:
+        level = rcp_read.decode_level_cell(val)
+        if cell is None or level["level"] is None:
             return
-        try:
-            lvl = float(val.split("|", 1)[0])
-        except ValueError:
+        if not level["linked"] or _gathering:
+            _note_change(st, push)
             return
-        _note_level(st, "fader", cell[1], lvl)
+        if not levels_on:
+            return
+        if time.monotonic() - st.get("layout_at", 0.0) < _LAYOUT_QUIET_S:
+            # The source has just moved fader, and its level is the new fader's: not a movement.
+            st.setdefault("said", {})[("fader", cell[1])] = level["level"]
+            st.get("levels", {}).pop(("fader", cell[1]), None)
+            return
+        _note_level(st, "fader", cell[1], level["level"])
+        return
+    if name == "channelInputSource":
+        st["layout_at"] = time.monotonic()
+        _note_change(st, push)
         return
     if name == "encoderSignal":
         # Raw rotation, a COMPOSITE whose first member is the signed step (+1 clockwise, -1 anti).
@@ -358,12 +337,12 @@ def handle_push(push, st: dict) -> None:
         if not levels_on or ival is None:
             return
         st["enc_turn_at"] = None              # the turn DID do something: it moved a gain
-        who = _gain_label(node, name == "inputMicrophoneGain")
+        who = change_words.gain_name(node, name == "inputMicrophoneGain")
         if who and st.get("gain_said") != (who, ival):
             # Record it either way, so a suppressed echo is not spoken by a later duplicate push.
             st["gain_said"] = (who, ival)
             if not is_self_echo(("gain", who)):
-                # Number first, as for any level that moved (see _level_words).
+                # Number first, as for any level that moved (see change_words.level_words).
                 _say(f"{ival} d B, {who}")
         return
     if name == "faderLevel":
@@ -380,7 +359,7 @@ def handle_push(push, st: dict) -> None:
             _ring_place(st, "monitor", 0)
             _note_level(st, "monitor", 0, fval)
         return
-    if name in _OUTPUT_MUTES:
+    if name in change_words.OUTPUT_MUTES:
         if bval is None or bval == was:
             return
         if st.get("enc_down_at"):
@@ -390,7 +369,7 @@ def handle_push(push, st: dict) -> None:
         if is_self_echo(("output_mute", name)):
             return
         if not (mute_tones and _tone("muted" if bval else "unmuted")):
-            _say(f"{_OUTPUT_MUTES[name]} {'muted' if bval else 'unmuted'}")
+            _say(f"{change_words.OUTPUT_MUTES[name]} {'muted' if bval else 'unmuted'}")
         return
     # THE HEADPHONE KNOBS. They are physical pots with NO TACTILE INDICATOR, so there is no way to
     # know where one is set by touch, which is exactly the case software has to answer. The desk
@@ -409,7 +388,7 @@ def handle_push(push, st: dict) -> None:
             return
         on, what = bval, _STATE_PROPS[name]
         st["pending"] = None            # the state supersedes the press edge
-        who = channel_label(strip)
+        who = change_words.strip_name(strip)
         # Our own write, echoed back: the UI announced it already (see mark_self_write). Before
         # the press-and-hold inference, because a software mute is not a gesture on the desk. Solo
         # is marked too (mark_self_solo), though this desk pushes nothing back for a software solo,
@@ -484,6 +463,59 @@ def handle_push(push, st: dict) -> None:
             st["enc_pos"] = (pos + 1) % len(_encoder_ring())
             _say(_ring_phrase(st, st["enc_pos"]))
         return
+    _note_change(st, push)
+
+
+# A burst of changes is spoken this long after its last push, as one sentence.
+_CHANGES_SETTLE_S = 0.4
+# How long after a fader's source changes the levels its cross-points push are the new layout's,
+# not a movement.
+_LAYOUT_QUIET_S = 1.0
+# Changes that are levels, which the levels switch silences.
+_LEVEL_TARGETS = frozenset({"level", "send", "outputMonLevel", "potLevel"})
+
+
+# WHILE RODE'S APP IS OPEN, changes are gathered rather than spoken (`gather_changes`), and said
+# together when the window reads the desk on coming back to the front or as RODE's app closes
+# (`speak_gathered`). Most of what RODE's app changes is never pushed and is only found by that
+# read; what it does push, such as the levels and sends it rewrites while moving a channel to
+# another fader, would otherwise be heard on its own, out of context, while the user is in RODE's app.
+_gathering = False
+_release_until = 0.0
+# Long enough for the read's revealed changes to be queued and settle.
+_RELEASE_S = 2.0
+
+
+def gather_changes(on: bool) -> None:
+    global _gathering
+    _gathering = bool(on)
+
+
+def speak_gathered() -> None:
+    """Say what has been gathered, with whatever the read just made has revealed."""
+    global _release_until
+    _release_until = time.monotonic() + _RELEASE_S
+
+
+def _note_change(st: dict, push) -> None:
+    """Hold a change made elsewhere to be spoken with the rest of its burst (`flush_pending`). A
+    revealed change with no words is counted, and logged by name so the words can follow."""
+    if push.name in change_words.NOT_NEWS:
+        return
+    change = change_words.describe(push.name, push.value, push.kind, push.key, push.was)
+    if change is None:
+        if push.revealed and push.was is not None and push.was != push.value:
+            st["unworded"] = st.get("unworded", 0) + 1
+            diagnostics.event("announcer.unworded", push.name, key=push.key)
+        else:
+            return
+    elif change.target[0] in _LEVEL_TARGETS and not levels_on:
+        return
+    else:
+        changes = st.setdefault("changes", {})
+        changes.pop(change.target, None)
+        changes[change.target] = change
+    st["changes_at"] = time.monotonic()
 
 
 def seed(st: dict) -> None:
@@ -536,7 +568,7 @@ def _selected_phrase(strip_idx: int) -> str:
     SAY WHAT THE CHANNEL HAS, NEVER WHAT IT LACKS. A bus such as the SMART pads has no gain but
     still rides a fader, so it gets "Fader level only", which is true whether that fader is
     physical or virtual. Only a strip with NOTHING on it gets "nothing to adjust"."""
-    who = channel_label(strip_idx)
+    who = change_words.strip_name(strip_idx)
     dev = devices.get_active_device()
     vec = desk_model.strip_vector() or []
     code = vec[strip_idx] if 0 <= strip_idx < len(vec) else None
@@ -556,31 +588,6 @@ def _selected_phrase(strip_idx: int) -> str:
     return f"{who} selected. Nothing here for the encoder to adjust"
 
 
-def _gain_label(node, is_mic: bool):
-    """Name the channel whose GAIN just moved, from the NODE the change was pushed at.
-
-    Mic strips carry 'gain'; line strips carry 'level', which is what the app and the desk call them,
-    so the spoken phrase matches the control the operator knows.
-
-    Matched against DeviceModel.input_key: the announcer and the writer read the same rule, so they
-    cannot drift. A per-device selector table would miss every gain turned on a Duo's own controls."""
-    dev = devices.get_active_device()
-    entry = dev.channel_for_input_key(node)
-    if entry is None:
-        return None
-    if is_mic:
-        if entry.get("kind") != "mic":
-            return None
-        return f"Mic {channels.mic_channel_number(entry)} gain"
-    if entry.get("kind") != "line":
-        return None
-    # RESOLVED from the wide set above, NAMED from the current mode: the entry that an address
-    # matches is fixed, what it is called is not.
-    label = (dev.fader.labels_for(channels.usb_expanded()).get(entry.get("source_code"))
-             or entry.get("label") or entry.get("name"))
-    return f"{label} input level"
-
-
 def _at_limit(st: dict, delta: int) -> bool:
     """Would a turn in this direction do nothing because we are already at the end of the range?
 
@@ -595,29 +602,6 @@ def _at_limit(st: dict, delta: int) -> bool:
     return (delta < 0 and lvl <= 0.001) or (delta > 0 and lvl >= 0.999)
 
 
-def _level_words(name: str, level: float, *, name_first: bool, say_percent: bool = True) -> str:
-    """THE one place a level is turned into words. Both announcements below come through here.
-
-    WHY THE WORD ORDER IS A PARAMETER AND NOT A CONSTANT. The two callers want opposite orders and
-    both are right, which is the whole reason this is one function with a flag rather than two
-    functions that drifted apart:
-
-      * A LEVEL MOVED -> number first. Speaking the name first is what makes a turn feel laggy:
-        "USB 2 (Main Stereo)" takes about a second, and each new update cuts off the phrase before
-        it, so the number never arrives until the movement stops. Number-first means the
-        changing fact lands even when the next update cuts the phrase mid-word, and the name
-        completes on the first pause.
-      * SOMETHING WAS SELECTED -> name first. Nothing has moved yet; the question the press asks is
-        "what have I got", so the answer has to lead.
-
-    `say_percent` is dropped only during a RUN of updates, where the unit is obvious and the extra
-    syllables just eat into the name."""
-    pct = _pct(level)
-    if name_first:
-        return f"{name} {pct} percent" if say_percent else f"{name} {pct}"
-    return f"{pct} percent, {name}" if say_percent else f"{pct}, {name}"
-
-
 def _moved_phrase(kind: str, source: int, level: float, short: bool = False) -> str:
     """A level that just MOVED. `source` is a SOURCE CODE, never a fader index.
 
@@ -627,8 +611,8 @@ def _moved_phrase(kind: str, source: int, level: float, short: bool = False) -> 
     speak of a "fader" kind; check which space you are in before calling either."""
     name = ("Monitor" if kind == "monitor"
             else f"Headphone {source + 1}" if kind == "headphone"
-            else _source_label(source))
-    return _level_words(name, level, name_first=False, say_percent=not short)
+            else change_words.source_name(source))
+    return change_words.level_words(name, level, name_first=False, say_percent=not short)
 
 
 def _fader_label(fader_idx: int) -> str:
@@ -636,7 +620,7 @@ def _fader_label(fader_idx: int) -> str:
     ring announces "Chat" rather than "fader 8", and follows the layout if a source is moved."""
     vec = desk_model.strip_vector()
     if vec and 0 <= fader_idx < len(vec) and vec[fader_idx] is not None and vec[fader_idx] >= 0:
-        return _source_label(vec[fader_idx])
+        return change_words.source_name(vec[fader_idx])
     return f"Fader {fader_idx + 1}"
 
 
@@ -663,7 +647,7 @@ def _ring_phrase(st: dict, pos: int) -> str:
     lvl = _ring_level(kind, idx)
     if lvl is None:
         return name
-    return _level_words(name, lvl, name_first=True)
+    return change_words.level_words(name, lvl, name_first=True)
 
 
 def _ring_place(st: dict, kind: str, idx: int) -> None:
@@ -739,6 +723,18 @@ def flush_pending(st: dict) -> None:
                 _say(_selected_phrase(sel)
                          + ". Press its channel button again for the fader and monitor levels")
 
+    changes = st.get("changes")
+    if ((changes or st.get("unworded"))
+            and (time.monotonic() - st.get("changes_at", 0.0)) > _CHANGES_SETTLE_S
+            and (not _gathering or time.monotonic() < _release_until)):
+        text = change_words.summarise(list(changes.values()) if changes else [],
+                                      st.get("unworded", 0))
+        if changes:
+            changes.clear()
+        st["unworded"] = 0
+        if text:
+            _say(text)
+
     levels = st.get("levels")
     if levels and (time.monotonic() - st.get("levels_at", 0.0)) > _SETTLE_S:
         said = st.setdefault("said", {})
@@ -795,7 +791,7 @@ def mark_self_gain(key, is_mic: bool) -> None:
     """Mark a gain/level write of ours under the SAME label the push side builds for it.
 
     The two sides name a gain differently - the writer has a mic number or a channel name, the push
-    has an ADDRESS - so we resolve ours to that same address and let _gain_label do the naming,
+    has an ADDRESS - so we resolve ours to that same address and let change_words.gain_name do the naming,
     rather than keeping two naming schemes in step. `key` is the mic number (mic strips) or the
     channel name (line strips)."""
     try:
@@ -809,7 +805,7 @@ def mark_self_gain(key, is_mic: bool) -> None:
         entry = next((c for c in (dev.ui_channels or ()) if matches(c)), None)
         if entry is None:
             return
-        who = _gain_label(dev.input_key(entry), is_mic)
+        who = change_words.gain_name(dev.input_key(entry), is_mic)
         if who:
             mark_self_write(("gain", who))
     except Exception:
@@ -841,7 +837,7 @@ def announce_mute(strip_idx: int, on: bool) -> None:
     if live_state is None:
         return
     if not (mute_tones and _tone("muted" if on else "unmuted")):
-        _say(f"{channel_label(strip_idx)} {'muted' if on else 'unmuted'}")
+        _say(f"{change_words.strip_name(strip_idx)} {'muted' if on else 'unmuted'}")
 
 
 def mark_self_solo(strip_idx: int) -> None:
@@ -892,14 +888,6 @@ GREETING_ON = "Announcements on."
 GREETING_STARTED = "AccessCaster started."
 
 
-# Every push `handle_push` acts on.
-_HEARD = (frozenset({"selectedBank", "padActive", "mixLevelWithAnchor", "encoderSignal",
-                     "systemChannelSelected", "inputMicrophoneGain", "inputDigitalGain",
-                     "encoderColour", "faderLevel", "outputMonLevel", "potLevel", "mutePressed",
-                     "soloPressed", "encoderPressed"})
-          | set(_STATE_PROPS) | set(_OUTPUT_MUTES))
-
-
 def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
     global live_state
     if gen is None:
@@ -919,7 +907,8 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
     announced_on = False
     seed(st)
     live_state = st
-    sub = desk_live.subscribe("announcer", _HEARD)
+    # Every push: anything changed elsewhere is worded (`_note_change`).
+    sub = desk_live.subscribe("announcer")
     try:
         while current():
             event = sub.get(_TICK_S)

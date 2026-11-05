@@ -16,6 +16,7 @@ import time
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import announcer
+import change_words
 import channels
 import desk_live
 import desk_model
@@ -183,11 +184,13 @@ check("speaks again once the tail has passed", said, ["USB 1 (Main Stereo) unmut
 print("\nA FADER SOURCE CHANGE ON THE STREAM MOVES THE NAME")
 desk(LAYOUT)
 # channelInputSource is pushed on the same CHANNEL[strip] node; value = the new source code. The
-# announcer does not hear it: the listener puts it in the desk model, which a fader source change
-# untrusts (`desk_model.STRUCTURAL`), so the next write reads the layout again.
-check("the announcer does not listen for it", "channelInputSource" in announcer._HEARD, False)
+# listener puts it in the desk model, which a fader source change untrusts
+# (`desk_model.STRUCTURAL`), so the next write reads the layout again.
 moved = desk_live.decode(push(addr(rcp_transfer.channel_key(1)), "channelInputSource", v_int(10)))
-desk_model.apply_push(moved.path, moved.name, moved.value, moved.kind)
+was = desk_model.apply_push(moved.path, moved.name, moved.value, moved.kind)
+check("the move is worded with the fader and its new source",
+      change_words.describe(moved.name, moved.value, moved.kind, moved.key, was).words,
+      "Fader 2 is now Bluetooth")
 check("naming layout updated", channels.last_known_strip_vector()[1], 10)
 check("the model is untrusted, so writes re-read", desk_model.trusted(), False)
 said, _ = run([state_packet("channelOutputMute", 1, True)], cold_cache=False)
@@ -776,7 +779,7 @@ announcer.live_state = fresh_st()
 try:
     with patched((announcer, {"mute_tones": False})):
         announcer.announce_mute(0, True)
-    check("a hold's mute is spoken", SPOKEN, [f"{announcer.channel_label(0)} muted"])
+    check("a hold's mute is spoken", SPOKEN, [f"{change_words.strip_name(0)} muted"])
 finally:
     announcer.live_state = None
 SPOKEN.clear()
@@ -1060,16 +1063,16 @@ with patched((rcp_transfer, {"send_record": sent}), (announcer, {"live_state": N
                    speech.action_set_announce_output("Realtek(R)").get("ok"))
 
 print("\nONE FORMATTER, TWO WORD ORDERS, AND THEY MUST STAY OPPOSITE")
-# Both announcements come through announcer._level_words. The orders are opposite ON PURPOSE and drifting
+# Both announcements come through change_words.level_words. The orders are opposite ON PURPOSE and drifting
 # to a single order would break one of them, so assert both from the shared function itself.
 check("a level that MOVED leads with the number, because the name gets cut off mid-turn",
-      announcer._level_words("Mic 1", 0.30, name_first=False), "30 percent, Mic 1")
+      change_words.level_words("Mic 1", 0.30, name_first=False), "30 percent, Mic 1")
 check("and drops the desk during a run",
-      announcer._level_words("Mic 1", 0.30, name_first=False, say_percent=False), "30, Mic 1")
+      change_words.level_words("Mic 1", 0.30, name_first=False, say_percent=False), "30, Mic 1")
 check("a SELECTION leads with the name, because that is the question the press asks",
-      announcer._level_words("Chat", 0.97, name_first=True), "Chat 97 percent")
+      change_words.level_words("Chat", 0.97, name_first=True), "Chat 97 percent")
 check("percent is clamped and rounded once, in one place",
-      [announcer._level_words("X", v, name_first=False) for v in (-0.5, 0.006, 1.4)],
+      [change_words.level_words("X", v, name_first=False) for v in (-0.5, 0.006, 1.4)],
       ["0 percent, X", "1 percent, X", "100 percent, X"])
 
 print("\nTHE TWO INDEX SPACES ARE REAL: A SOURCE ON NO FADER STILL GETS ANNOUNCED")
@@ -1091,19 +1094,19 @@ print("\nA STEREO-LINKED PAIR IS NAMED, NOT SPOKEN AS A BARE CODE")
 # away from reading a bare number aloud ("0 percent, Source 4" for a linked Mic 1 + 2). Names come
 # from FaderSpec.all_labels, and there is no `code_label` helper to reach for the narrow map again.
 check("a pair code has a spoken name at all",
-      [announcer._source_label(c) for c in (4, 5, 6)],
+      [change_words.source_name(c) for c in (4, 5, 6)],
       ["Mic 1 + 2", "Mic 2 + 3", "Mic 3 + 4"])
 check("and no assignable source lost its name",
-      [announcer._source_label(c) for c in (0, 7, 11)],
+      [change_words.source_name(c) for c in (0, 7, 11)],
       ["Mic 1", "USB 1 (Main Stereo)", "SMART pads"])
 # The whole way through: a cross-point push for a linked pair, spoken.
 desk([4, -1, 2, 3, 10, 7, 8, 9, 11])
 said, _ = run([xpoint_packet(4, 0, 0.0)], cold_cache=False)
 check("a level push for a linked pair says the pair, not 'Source 4'", said,
       ["0 percent, Mic 1 + 2"])
-check("and the strip it sits on is named the same way", announcer.channel_label(0), "Mic 1 + 2")
+check("and the strip it sits on is named the same way", change_words.strip_name(0), "Mic 1 + 2")
 check("the vacated fader beside it is not claimed by anything",
-      announcer.channel_label(1), "Channel 2")
+      change_words.strip_name(1), "Channel 2")
 
 print("\nA CROSS-POINT SELECTOR PAST 255 IS STILL DECODED")
 # The cross-point is MIX[13*source + output], whose path leaves byte range at source 14, so
@@ -1153,6 +1156,98 @@ with patched((server.rcp_read, {"read_model_stable": _seed_read})):
     seed_reads.clear()
     server._seed_usb_expanded()
 check("a second seed reads nothing, because the mode is already known", len(seed_reads), 0)
+
+
+print("\nA CHANGE MADE ELSEWHERE IS WORDED, AND A BURST IS ONE SENTENCE")
+desk(LAYOUT)
+announcer._hold_until = 0.0
+STRIP0 = rcp_transfer.channel_key(0)
+HP4_MIC3 = rcp_transfer.cross_point_key(3, 2)
+
+
+def settle(st):
+    """What the burst held in `st` comes to once it has settled."""
+    SPOKEN.clear()
+    st["changes_at"] = 0.0
+    announcer.flush_pending(st)
+    return list(SPOKEN)
+
+
+def revealed(key, name, value, kind, was):
+    """A change a read found while RODE's app was open."""
+    return desk_live.Push(tuple(addr(key)), name, value, kind, key, was, revealed=True)
+
+
+desk_model.apply_push(addr(STRIP0), "compressorOn", True, "bool")
+said, st = run([push(addr(STRIP0), "compressorOn", v_bool(False))], cold_cache=False)
+check("a switch on the touchscreen waits for its burst to settle", said, [])
+check("then it is said, named by channel", settle(st), ["Mic 1 compressor off."])
+said, st = run([push(addr(STRIP0), "compressorOn", v_bool(False))], cold_cache=False)
+check("the desk pushing a value it already had is not news", settle(st), [])
+
+params = ("compressorThreshold", "compressorRatio", "eqLowGain", "eqMidGain", "hpfFrequency")
+for p in params:
+    desk_model.apply_push(addr(STRIP0), p, 0.5, "float")
+said, st = run([push(addr(STRIP0), p, v_float(0.25)) for p in params], cold_cache=False)
+check("a preset's many parameters are counted, not read out", settle(st),
+      ["Mic 1: 5 processing settings changed."])
+
+desk_model.apply_push(addr(HP4_MIC3), "mixLevelWithAnchor", "0|0.8", "str")
+said, st = run([push(addr(HP4_MIC3), "mixLevelWithAnchor", v_str("0.52|0.8"))], cold_cache=False)
+check("an unlinked send is not taken for the fader's level", said, [])
+check("it is the send, in its output", settle(st), ["52 percent, Mic 3 in Headphone 4."])
+said, st = run([push(addr(HP4_MIC3), "mixLevelWithAnchor", v_str("0.52|0.6"))], cold_cache=False)
+check("the fader moving under an unlinked send says nothing of the send", settle(st), [])
+
+st = {"pending": None, "at": 0.0}
+for change in (revealed(STRIP0, "compressorOn", True, "bool", False),
+               revealed(rcp_transfer.output_key(3), "outputMixMinus", 2, "int", 0),
+               revealed(HP4_MIC3, "mixLevelWithAnchor", "0.52|0.8", "str", "0|0.8"),
+               revealed(rcp_transfer.SYSTEM, "somethingUnworded", 3, "int", 2)):
+    announcer.handle_push(change, st)
+check("what RODE's app changed is said together, the unworded counted", settle(st),
+      ["Mic 1 compressor on. Headphone 4 set to Custom. 52 percent, Mic 3 in Headphone 4. "
+       "1 other setting changed."])
+
+print("\nWHILE RODE'S APP IS OPEN, CHANGES WAIT FOR THE READ ON RETURN")
+desk(LAYOUT)
+announcer.gather_changes(True)
+desk_model.apply_push(addr(STRIP0), "compressorOn", True, "bool")
+said, st = run([push(addr(STRIP0), "compressorOn", v_bool(False)),
+                push(addr(rcp_transfer.cross_point_key(0, 11)), "mixLevelWithAnchor",
+                     v_str("1|1"))], cold_cache=False)
+check("a pushed level is not spoken on its own", said, [])
+check("nor is anything else, however long it settles", settle(st), [])
+announcer.speak_gathered()
+announcer.handle_push(revealed(rcp_transfer.output_key(3), "outputMixMinus", 2, "int", 0), st)
+check("the read on return says the lot", settle(st),
+      ["Mic 1 compressor off. 100 percent, SMART pads. Headphone 4 set to Custom."])
+announcer.gather_changes(False)
+announcer._release_until = 0.0
+
+print("\nA CHANNEL MOVING FADER BRINGS ITS CHAIN AND ITS SENDS, WHICH ARE NOT NEWS")
+st = {"pending": None, "at": 0.0}
+for change in (revealed(rcp_transfer.channel_key(4), "channelInputSource", 9, "int", 10),
+               revealed(rcp_transfer.channel_key(8), "channelInputSource", 10, "int", 9),
+               *[revealed(rcp_transfer.channel_key(4), p, 0.25, "float", 0.5) for p in params],
+               revealed(rcp_transfer.channel_key(4), "channelCurrentFxPreset", 1, "int", -1),
+               revealed(rcp_transfer.cross_point_key(8, 10), "mixLevelWithAnchor", "1|0.3", "str",
+                        "0|0.3"),
+               revealed(STRIP0, "compressorOn", False, "bool", True)):
+    announcer.handle_push(change, st)
+check("the move and what else changed, nothing it carried", settle(st),
+      ["Fader 5 is now USB 2 (Secondary). Fader 9 is now Bluetooth. Mic 1 compressor off."])
+
+print("\nA FADER SWAP IS SAID AS THE LAYOUT, NOT AS THE LEVELS IT BRINGS")
+desk(LAYOUT)
+swap = [push(addr(rcp_transfer.channel_key(4)), "channelInputSource", v_int(11)),
+        push(addr(rcp_transfer.channel_key(5)), "channelInputSource", v_int(10)),
+        push(addr(rcp_transfer.cross_point_key(0, 11)), "mixLevelWithAnchor", v_str("1|1")),
+        push(addr(rcp_transfer.cross_point_key(0, 10)), "mixLevelWithAnchor", v_str("0|0"))]
+said, st = run(swap, {"pending": None, "at": 0.0, "said": {}}, cold_cache=False)
+check("no level line for either source", said, [])
+check("the two faders, each with what is on it now", settle(st),
+      ["Fader 5 is now SMART pads. Fader 6 is now Bluetooth."])
 
 
 print()

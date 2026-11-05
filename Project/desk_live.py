@@ -54,7 +54,8 @@ class Push(NamedTuple):
     """One property the desk pushed, or this app wrote (`ours`). `key` is the node it is addressed
     at, named by the desk's own layout (`rcp_read.push_key`), or None when no layout is known or
     the node is not a fixed one. `was` is the desk model's value before it, None when it held none,
-    which is how a subscriber tells a change from the desk re-pushing a value it already had."""
+    which is how a subscriber tells a change from the desk re-pushing a value it already had.
+    `revealed` marks a change the desk never pushed, found by a read (`desk_model.reveal`)."""
     path: tuple
     name: str
     value: object
@@ -62,6 +63,7 @@ class Push(NamedTuple):
     key: Optional[tuple]
     was: object = None
     ours: bool = False
+    revealed: bool = False
 
 
 class Connected(NamedTuple):
@@ -201,7 +203,7 @@ def _revealed(changes) -> None:
     """`desk_model.revealed_watcher`: what a dump showed the desk changed without pushing, handed
     to the subscriptions as the pushes it never sent."""
     for path, name, value, kind, was in changes:
-        _fan_out(Push(path, name, value, kind, rcp_read.push_key(path), was))
+        _fan_out(Push(path, name, value, kind, rcp_read.push_key(path), was, revealed=True))
 
 
 desk_model.revealed_watcher = _revealed

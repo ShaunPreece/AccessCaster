@@ -23,11 +23,18 @@ class Switch:
     `working(on)`, if given, returns a sentence spoken as the write goes out, for one that takes
     seconds."""
 
+    # THE STATE FIRST. The screen reader says "checked" from the checkbox's own state change, and
+    # a reply that returns sooner than this is queued ahead of it, so the consequence is heard
+    # before the state it follows from. A setting kept in this app's own file returns at once; a
+    # desk write takes long enough not to need the wait.
+    REPLY_AFTER_S = 0.3
+
     def __init__(self, page, parent, sizer, label, send, current, remember, description="",
                  guard=None, accepted=None, working=None):
         self.page = page
         self._working = working
         self._accepted = accepted
+        self._pressed_at = 0.0
         self.box = wx.CheckBox(parent, label=label)
         self.acc = a11y.describe(self.box, description)
         self._send = send
@@ -51,16 +58,25 @@ class Switch:
             return
         if self._working:
             self.page.frame.say(self._working(on))
+        self._pressed_at = time.monotonic()
         call(self.page, self._send, on, done=lambda reply: self._returned(on, reply))
 
     def _returned(self, on, reply):
-        self.page.frame.reply(self.box, reply)
+        wait_ms = int((self.REPLY_AFTER_S - (time.monotonic() - self._pressed_at)) * 1000)
+        if wait_ms > 0:
+            wx.CallLater(wait_ms, self._speak, reply)
+        else:
+            self._speak(reply)
         if reply.get("ok"):
             self._remember(on)
             if self._accepted:
                 self._accepted(reply)
         else:
             self.show()
+
+    def _speak(self, reply):
+        if self.box:                 # the page may have gone in the wait
+            self.page.frame.reply(self.box, reply)
 
 
 class Slider:
