@@ -14,15 +14,15 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
+import channel_actions
 
 WATCH = ("Mic1", "USB2")
 RETRY_S = 1.0       # after a failed read, so an absent desk is not asked as fast as it refuses
-server = None
 
 
 def sample() -> tuple[dict | None, str]:
     """({channel: (muted, cue)} for the watched channels, "") or (None, why the read failed)."""
-    d = server.action_get_channels()
+    d = channel_actions.action_get_channels()
     if not d.get("ok"):
         return None, d.get("message") or "no reply"
     return {c["name"]: (bool(c.get("muted")), bool(c.get("solo")))
@@ -30,8 +30,7 @@ def sample() -> tuple[dict | None, str]:
 
 
 def main():
-    global server
-    server = _desk.service()
+    _desk.service()
     secs = float(sys.argv[1]) if len(sys.argv) > 1 else 30.0
     start = time.monotonic()
     while time.monotonic() - start < secs:

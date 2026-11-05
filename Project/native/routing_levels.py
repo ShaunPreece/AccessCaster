@@ -8,8 +8,8 @@ import wx.lib.scrolledpanel as scrolled
 
 import faders
 import master_outputs
+import mute_solo
 import output_mixes
-import server
 from native import a11y
 from native.calls import call
 from native.controls import Slider, Switch, set_choices
@@ -102,10 +102,10 @@ class LevelsPage(scrolled.ScrolledPanel):
             lambda: self._fader_value("percent"), lambda _value: None,
             words=percent)
         self.fader_mute = Switch(
-            self, parent, sizer, "Mute", self._fader_send(server.action_set_fader_mute),
+            self, parent, sizer, "Mute", self._fader_send(mute_solo.action_set_fader_mute),
             lambda: self._fader_value("muted"), lambda _on: None)
         self.fader_solo = Switch(
-            self, parent, sizer, "Solo", self._fader_send(server.action_set_fader_solo),
+            self, parent, sizer, "Solo", self._fader_send(mute_solo.action_set_fader_solo),
             lambda: self._fader_value("soloed"), lambda _on: None)
         clear = wx.Button(parent, label="Clear all solos")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
@@ -148,7 +148,7 @@ class LevelsPage(scrolled.ScrolledPanel):
 
     def _on_clear_solos(self, event):
         source = event.GetEventObject()
-        call(self, server.action_clear_solos, done=lambda reply: self.frame.reply(source, reply))
+        call(self, mute_solo.action_clear_solos, done=lambda reply: self.frame.reply(source, reply))
 
     # ---- the monitor speakers and the Bluetooth output -------------------------------------
 

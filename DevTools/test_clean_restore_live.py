@@ -30,7 +30,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _desk
+import channel_actions
 import faders
+import mute_solo
 import rcp_read
 from _desk import wait_for_job
 from analyse_clean_restore import compare, show, snap
@@ -77,7 +79,7 @@ def live_state(blob: bytes) -> dict:
     """Every mute and solo, the state a restore never writes. A channel the page reports neither
     for (one on no fader) is left out: the app has no route to it either."""
     chans = [(c["name"], c.get("muted"), c.get("solo"))
-             for c in server.action_get_channels().get("channels") or []]
+             for c in channel_actions.action_get_channels().get("channels") or []]
     return {
         "mute": {n: m for n, m, _s in chans if m is not None},
         "solo": {n: s for n, _m, s in chans if s is not None},
@@ -87,9 +89,9 @@ def live_state(blob: bytes) -> dict:
 
 def put_live_state_back(state: dict) -> None:
     for name, on in state["mute"].items():
-        server.action_set_channel_mute(name, bool(on))
+        mute_solo.action_set_channel_mute(name, bool(on))
     for name, on in state["solo"].items():
-        server.action_set_channel_solo(name, bool(on))
+        mute_solo.action_set_channel_solo(name, bool(on))
     for which, on in state["output"].items():
         if on is not None:
             faders.action_set_output_mute(which, bool(on))

@@ -1,7 +1,8 @@
 """Every channel and channel-processing operation, read and write: inputs (gain, phantom,
 polarity, mic type, line Level), the per-strip chain (processing, effects, mute, solo, wireless
-mute), and the reads behind the Channels page. The web layer and the CLI call into this one
-module, the way soundpad.py owns all pad logic.
+mute), and the reads behind the Channels page. The app side, the actions the window calls with
+their wording, is channel_actions.py and mute_solo.py; this module owns the desk side, the way
+soundpad.py owns all pad logic.
 
 LAYERING (mirrors soundpad.py over pad_records.py):
   rcp_transfer.py  - report-3 byte builders (build_*), the send layer, and the non-per-channel
@@ -157,7 +158,7 @@ def set_mic_type(channel: int, type_value: int) -> int:
 
     THIS ALSO MOVES THE GAIN. The desk gives each voicing its own default preamp gain and applies it
     on selection, so a caller that has just set a gain has to write this FIRST or lose it (see
-    profiles.apply, and server.action_set_mic_type which reads the gain back and says so).
+    profiles.apply, and channel_actions.action_set_mic_type which reads the gain back and says so).
     Measured on Mic 3:
 
         Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
@@ -705,6 +706,12 @@ def active_ui_channels() -> tuple:
 def ui_channel_map() -> dict:
     """{name: ui-channel entry} for the connected device, e.g. {"Mic1": {...}, "Headset": {...}}."""
     return {c["name"]: c for c in active_ui_channels()}
+
+
+def ui_channel(name: str) -> dict | None:
+    """A channel by name on the CONNECTED device, resolved per call: the Duo's names ("Headset",
+    "USB1") differ from the Pro II's, so a map built at import would reject them."""
+    return ui_channel_map().get(name)
 
 
 def mic_channel_number(ch: dict) -> int:

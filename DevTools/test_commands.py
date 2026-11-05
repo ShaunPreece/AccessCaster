@@ -1,4 +1,4 @@
-"""Unit tests for the shortcut COMMAND dispatch (commands.py). NO DEVICE: `server` is a stub.
+"""Unit tests for the shortcut COMMAND dispatch (commands.py). NO DEVICE: the channel actions are stubs.
 
 What it pins down: a toggle shortcut writes the OPPOSITE of the channel's real current state. The
 mute toggle may answer from the announcer's push-fed cache; solo, processing and phantom have no
@@ -25,18 +25,20 @@ devices.force_device(devices.PRO2)
 _testkit.hold_desk(list(devices.PRO2_FADERS.default_vector))
 
 
-# A stub server: Mic 1 is muted, soloed, processed and on phantom, and the announcer's cache knows
-# only its mute.
+# Stub channel actions: Mic 1 is muted, soloed, processed and on phantom, and the announcer's cache
+# knows only its mute.
 writes = []
-stub = types.ModuleType("server")
+stub = types.ModuleType("channel_actions")
+mutes = types.ModuleType("mute_solo")
 announcer.live_state = {"muted": {channels.channel_strip_index("Mic1"): True}}
 stub.action_get_channels = lambda: {"channels": [
     {"name": "Mic1", "muted": True, "solo": True, "processing_on": True, "phantom": True}]}
-stub.action_set_channel_mute = lambda name, on: writes.append(("mute", on)) or {}
-stub.action_set_channel_solo = lambda name, on: writes.append(("solo", on)) or {}
+mutes.action_set_channel_mute = lambda name, on: writes.append(("mute", on)) or {}
+mutes.action_set_channel_solo = lambda name, on: writes.append(("solo", on)) or {}
 stub.action_set_processing_enabled = lambda name, on: writes.append(("proc", on)) or {}
 stub.action_set_phantom = lambda mic, on: writes.append(("phantom", on)) or {}
-commands.server = stub
+commands.channel_actions = stub
+commands.mute_solo = mutes
 
 print("CHANNEL TOGGLES write the opposite of the real state")
 for cmd in ("mute", "solo", "proc", "phantom"):

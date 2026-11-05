@@ -16,10 +16,10 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import commands
 import devices
+import mute_solo
 import rcp_read
 import rcp_transfer
 import rode_app
-import server
 from _testkit import as_device, check, check_not_in, hold, hold_desk, patched
 
 # The Pro II's factory layout with CallMe on fader 4, so Mic 4 (source 3) is on no fader.
@@ -37,7 +37,7 @@ def press(muted: dict) -> tuple[str, list]:
 
     for strip, on in muted.items():
         hold(rcp_transfer.channel_key(strip), "channelOutputMute", on, "bool")
-    with patched((server, {"action_set_channel_mute": set_mute})):
+    with patched((mute_solo, {"action_set_channel_mute": set_mute})):
         said = commands._cough_key()["message"]
     return said, writes
 
@@ -65,7 +65,7 @@ def main() -> int:
         reads = []
         with patched((rcp_read, {"read_model_stable": lambda fresh=False: reads.append(fresh)}),
                      (rode_app, {"is_open": lambda: False})):
-            said = server._mute_reach_message("Mic 2", [1])
+            said = mute_solo._mute_reach_message("Mic 2", [1])
         check("a trusted model answers it", reads, [])
         check("and the reply is a real one", said.startswith("Mic 2 muted"), True)
         check_not_in("not the could-not-check one", "Could not check", said)

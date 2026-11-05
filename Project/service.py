@@ -22,10 +22,12 @@ import encoder_hold
 import encoder_home
 import faders
 import firmware
+import mute_solo
 import pad_actions
 import pad_shortcuts
 import recording
 import rode_app
+import rode_follow
 import server
 import shortcuts
 import speech
@@ -50,7 +52,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     desk_live.start()
     channels.follow_desk()
     pad_shortcuts.follow_desk()
-    rode_app.on_look = server.follow_rode_app
+    rode_app.on_look = rode_follow.follow
     firmware.backup = server.backup_unit
     rode_app.start()
     if announce and announcer.starts_on():
@@ -72,7 +74,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     recording.watcher()
     # A hold on the encoder while a channel button holds it mutes that channel, as the desk's own
     # hold does for the encoder's ring target.
-    encoder_hold.Watcher(server.encoder_hold_mute).start()
+    encoder_hold.Watcher(mute_solo.encoder_hold_mute).start()
     # A turn that moves nothing, with no channel selected, puts the encoder back on the virtual
     # faders and monitor.
     encoder_home.Watcher(faders.action_reset_encoder).start()

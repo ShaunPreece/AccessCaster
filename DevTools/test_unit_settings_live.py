@@ -32,7 +32,9 @@ import time
 import _bootstrap  # noqa: F401  (the test data dir, like every other test)
 import _desk
 import _testkit
+import channel_actions
 import device_page
+import mute_solo
 import profiles
 from _desk import count_changes, wait_for_job
 from _testkit import check
@@ -101,7 +103,7 @@ def set_unit(prop, value):
 
 
 def channel_state(name):
-    d = server.action_get_channels()
+    d = channel_actions.action_get_channels()
     for c in d.get("channels") or []:
         if c["name"] == name:
             return c
@@ -109,7 +111,7 @@ def channel_state(name):
 
 
 def set_mute(name, on):
-    return server.action_set_channel_mute(name, on)
+    return mute_solo.action_set_channel_mute(name, on)
 
 
 def main() -> int:

@@ -17,7 +17,7 @@ import channels
 import desk_model
 import rcp_read
 import rode_app
-import server
+import rode_follow
 from _testkit import check, check_true, hold_desk, patched
 
 LAYOUT = [0, 7, 2, 3, 10, 11, 1, 16, 9, 9]
@@ -47,15 +47,15 @@ rode_app.note(False)
 
 print("\nCOMPARING READS, AND THE READ AS IT CLOSES")
 reads_done = []
-with patched((server, {"_read_unheard": lambda: reads_done.append(desk_model._reveal)})):
-    server.follow_rode_app(True)
-    server.follow_rode_app(True)
+with patched((rode_follow, {"_read_unheard": lambda: reads_done.append(desk_model._reveal)})):
+    rode_follow.follow(True)
+    rode_follow.follow(True)
     check("while it is open, reads are compared and nothing is read on a timer",
           (desk_model._reveal, reads_done), (True, []))
-    server.follow_rode_app(False)
+    rode_follow.follow(False)
     check("as it closes, one read, still compared, then comparing stops",
           (reads_done, desk_model._reveal), ([True], False))
-    server.follow_rode_app(False)
+    rode_follow.follow(False)
     check("and nothing more while it stays closed", reads_done, [True])
 
 print("\nADDRESSING A WRITE")

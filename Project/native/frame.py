@@ -20,7 +20,7 @@ import wx
 import app_settings_actions
 import device_page
 import rode_app
-import server
+import rode_follow
 from native import announce
 from native.app_settings_section import AppSettingsSection
 from native.backups_section import BackupsSection
@@ -170,8 +170,8 @@ class MainFrame(Speaker, wx.Frame):
             return
         if rode_app.is_open():
             # Back from RODE's app, most likely: what it changed, which the desk never pushes, is
-            # read now (`server.read_for_rode_app`).
-            call(self, server.read_for_rode_app)
+            # read now (`rode_follow.read_now`).
+            call(self, rode_follow.read_now)
 
     def check_updates(self):
         for section in self.sections:

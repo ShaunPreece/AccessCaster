@@ -8,9 +8,10 @@ re-read replaces the record.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import channel_actions
 import mic_presets
+import mute_solo
 import pan_link
-import server
 from desk_labels import EFFECT_PARAMS, pan_words
 from native import a11y
 from native.calls import call
@@ -19,7 +20,7 @@ from native.controls import Slider, Switch, set_choices
 from native.dialogs import DeletePresetDialog
 from native.pages import group, labelled
 
-# Which tab each of the server's parameter groups (server.PROCESSING_CONTROLS) goes on, so the
+# Which tab each parameter group (desk_labels.PROCESSING_CONTROLS) goes on, so the
 # strip stays one row. A group not listed here gets a tab of its own.
 PARAM_TABS = {
     "Equaliser": ("eq", "Equaliser"),
@@ -135,10 +136,10 @@ class SettingsTab(Tab):
 
         self.mute = self.add(Switch(
             page, self, self.sizer, f"Mute {label}",
-            lambda on: server.action_set_channel_mute(name, on), *field("muted")))
+            lambda on: mute_solo.action_set_channel_mute(name, on), *field("muted")))
         self.solo = self.add(Switch(
             page, self, self.sizer, f"Listen (solo) {label}",
-            lambda on: server.action_set_channel_solo(name, on), *field("solo")))
+            lambda on: mute_solo.action_set_channel_solo(name, on), *field("solo")))
         clear = wx.Button(self, label="Clear every solo")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
         self.sizer.Add(clear, 0, wx.ALL, 6)
@@ -147,7 +148,7 @@ class SettingsTab(Tab):
         if is_mic:
             self.wireless = self.add(Switch(
                 page, self, self.sizer, f"Mute the wireless mic on {label}",
-                lambda on: server.action_set_channel_wireless_mute(name, on),
+                lambda on: mute_solo.action_set_channel_wireless_mute(name, on),
                 *field("wireless_muted"),
                 guard=lambda: "No wireless mics detected." if self._no_wireless() else None))
 
@@ -156,7 +157,7 @@ class SettingsTab(Tab):
             lo, hi = ((data["gain_min_db"], data["gain_max_db"]) if is_mic
                       else (data["level_min_db"], data["level_max_db"]))
             self.add(Slider(page, self, self.sizer, "Level", lo, hi,
-                            lambda db: server.action_set_channel_level(name, db),
+                            lambda db: channel_actions.action_set_channel_level(name, db),
                             *field("level_db"), words=lambda db: f"{db} decibels"))
         # Auto gain sets a mic's preamp gain, which nothing else has. The level check works on
         # every channel but Chat: it listens on the Chat output, which leaves the caller out.
@@ -171,9 +172,9 @@ class SettingsTab(Tab):
         if is_mic:
             number = page.number
             self.add(Switch(page, self, self.sizer, "48V phantom power",
-                            lambda on: server.action_set_phantom(number, on), *field("phantom")))
+                            lambda on: channel_actions.action_set_phantom(number, on), *field("phantom")))
             self.add(Switch(page, self, self.sizer, "Invert polarity (phase)",
-                            lambda on: server.action_set_polarity(number, on), *field("polarity")))
+                            lambda on: channel_actions.action_set_polarity(number, on), *field("polarity")))
             self._mic_types = [(value, text) for value, text in data.get("mic_types") or []]
             if self._mic_types:
                 self.mic_type = labelled(self, self.sizer, "Mic type", lambda p: wx.Choice(p))
@@ -211,7 +212,7 @@ class SettingsTab(Tab):
 
     def _on_clear_solos(self, event):
         source = event.GetEventObject()
-        call(self, server.action_clear_solos, done=lambda reply: self.reply(source, reply))
+        call(self, mute_solo.action_clear_solos, done=lambda reply: self.reply(source, reply))
 
     def _fill_mic_types(self, current):
         choices = list(self._mic_types)
@@ -233,7 +234,7 @@ class SettingsTab(Tab):
             self.page.frame.say(f"{self.page.rec['label']} is already set to "
                                 f"{self.mic_type.GetString(index)}.")
             return
-        call(self, server.action_set_mic_type, self.page.number, value,
+        call(self, channel_actions.action_set_mic_type, self.page.number, value,
              done=lambda reply: self._mic_type_done(source, reply))
 
     def _mic_type_done(self, source, reply):
@@ -349,18 +350,18 @@ class ProcessingTab(Tab):
         page = self.page
         name = page.name
         self.add(Switch(page, self, self.sizer, "Processing on",
-                        lambda on: server.action_set_processing_enabled(name, on),
+                        lambda on: channel_actions.action_set_processing_enabled(name, on),
                         *page.field("processing_on")))
         if page.rec.get("advanced") is not None:
             self.add(Switch(
                 page, self, self.sizer, "Advanced processing (use the modules below)",
-                lambda on: server.action_set_channel_advanced(name, on), *page.field("advanced"),
+                lambda on: channel_actions.action_set_channel_advanced(name, on), *page.field("advanced"),
                 description="Off, Tone shaping sets the modules for you. Your settings are kept "
                             "either way."))
         for module in page.section.data.get("modules") or []:
             self.add(Switch(
                 page, self, self.sizer, module["label"],
-                lambda on, key=module["key"]: server.action_set_channel_module(name, key, on),
+                lambda on, key=module["key"]: channel_actions.action_set_channel_module(name, key, on),
                 *page.field("modules", module["prop"])))
 
 
@@ -392,7 +393,7 @@ class ParamTab(Tab):
                     continue
                 slider = self.add(Slider(
                     page, parent, sizer, ctrl["label"], 0, 100,
-                    lambda pct, prop=ctrl["prop"]: server.action_set_channel_param(
+                    lambda pct, prop=ctrl["prop"]: channel_actions.action_set_channel_param(
                         name, prop, pct / 100),
                     *page.field("params", ctrl["prop"], scale=100),
                     words=pan_words if ctrl.get("pan") else percent_words, unread=50))
@@ -425,7 +426,7 @@ class StereoPan:
                            self._linked, lambda _on: None, accepted=self._links_changed)
         self.leg_sliders = [Slider(
             page, parent, sizer, ctrl["label"], 0, 100,
-            lambda pct, prop=ctrl["prop"]: server.action_set_channel_param(name, prop, pct / 100),
+            lambda pct, prop=ctrl["prop"]: channel_actions.action_set_channel_param(name, prop, pct / 100),
             *page.field("params", ctrl["prop"], scale=100), words=pan_words, unread=50)
             for ctrl in legs]
         self.linked = Slider(page, parent, sizer, "Pan", -100, 100,
@@ -494,12 +495,12 @@ class EffectsTab(Tab):
             title = effect.capitalize()
             sizer, parent = group(self, self.sizer, title)
             self.add(Switch(page, parent, sizer, title,
-                            lambda on, fx=effect: server.action_set_channel_effect(name, fx, on),
+                            lambda on, fx=effect: channel_actions.action_set_channel_effect(name, fx, on),
                             *page.field("effects", effect)))
             for param, words in params:
                 self.add(Slider(
                     page, parent, sizer, f"{title} {words}", 0, 100,
-                    lambda pct, p=param: server.action_set_channel_effect_param(
+                    lambda pct, p=param: channel_actions.action_set_channel_effect_param(
                         name, p, pct / 100),
                     *page.field("effects", effect + "_params", param, scale=100),
                     words=percent_words, unread=50, quiet=True))

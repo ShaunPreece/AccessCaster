@@ -54,6 +54,7 @@ import argparse
 import time
 
 import _bootstrap  # puts Project/ on the path; import FIRST
+import channel_actions
 import diagnostics
 import _desk
 import faders
@@ -72,19 +73,19 @@ NOOP_S = 8.0            # a job quicker than this did essentially nothing, whate
 # same N knobs and two runs at the same delta are comparable.
 
 def _mic_gains() -> list:
-    got = server.action_get_channels()
+    got = channel_actions.action_get_channels()
     out = []
     for c in got.get("channels") or []:
         if c.get("kind") == "mic" and isinstance(c.get("level_db"), int):
             n = int(c["name"].replace("Mic", ""))
             out.append((f"gain {c['name']}",
                         lambda name=c["name"]: _one_channel(name, "level_db"),
-                        lambda v, n=n: server.action_set_gain(n, v)))
+                        lambda v, n=n: channel_actions.action_set_gain(n, v)))
     return out
 
 
 def _one_channel(name: str, key):
-    for c in server.action_get_channels().get("channels") or []:
+    for c in channel_actions.action_get_channels().get("channels") or []:
         if c.get("name") == name:
             return c.get(key)
     return None

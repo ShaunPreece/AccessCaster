@@ -1,6 +1,6 @@
 """The native window's desk state (Project/native/desk_state.py), offline: a view over the desk model.
 
-A change in the desk model, rebuilt through `server.window_state` as a read is, lands on the right
+A change in the desk model, rebuilt through `window_state.from_dump` as a read is, lands on the right
 channel's record (the same record, updated in place), output mix, levels or master values, and only
 a real change notifies; a structural change asks for a full read, and a recording state is passed
 straight on. A page that reads the desk for itself hears the properties it watches, and
@@ -27,6 +27,7 @@ import recorder
 import rcp_transfer
 import server
 import soundpad
+import window_state
 import wx
 from _testkit import addr, as_device, check, check_true, hold, hold_desk
 from native import desk_state, pages
@@ -57,7 +58,7 @@ with as_device(devices.PRO2):
     store = desk_state.DeskState(owner)
     store.subscribe(lambda event, detail: events.append((event, detail)))
     # A full read, of the desk the model holds.
-    store._read_done(desk_state._named(server.window_state(desk_model.snapshot())))
+    store._read_done(desk_state._named(window_state.from_dump(desk_model.snapshot())))
     check("a full read notifies", events[-1][0], "read")
     mic = store._records["Mic1"]
     usb = store._records["USB1"]
@@ -92,7 +93,7 @@ with as_device(devices.PRO2):
 
     # A page that reads the desk for itself watches what it shows, through the same follower.
     watcher = desk_state.DeskState(owner)
-    watcher._read_done(desk_state._named(server.window_state(desk_model.snapshot())))
+    watcher._read_done(desk_state._named(window_state.from_dump(desk_model.snapshot())))
     heard = []
     watcher.watch({"screenBrightness", channels.MUTE_PROP}, lambda: heard.append(True))
     store = watcher

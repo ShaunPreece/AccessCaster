@@ -43,15 +43,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import announcer
+import channel_actions
 import channels
 import faders
+import mute_solo
 import rcp_hid
 import rcp_read
 import rcp_transfer
 import speech
 from _desk import push_handle, service
 
-server = service()
+service()
 
 FADER = 8          # 0-based fader index: the USB 2 virtual fader (no physical fader to fight)
 MUTE_CHAN = "Mic3"  # nothing is plugged into Mic 3, and the standing rule keeps Mic 1 unwritten
@@ -127,7 +129,7 @@ def main() -> int:
     if rcp_hid.find_control_interface() is None:
         print("no device")
         return 1
-    chans = {c["name"]: c for c in server.action_get_channels()["channels"]}
+    chans = {c["name"]: c for c in channel_actions.action_get_channels()["channels"]}
     mute_was = bool(chans[MUTE_CHAN]["muted"])
     strip = channels.channel_strip_index(MUTE_CHAN)
     # The channels list carries mute but not gain (gain is a mixer read), so take it from the desk.
@@ -157,7 +159,7 @@ def main() -> int:
             # SILENT: see the module docstring - the desk answers a software mute with mixMute
             # matrix records only.
             phase(dev, st, "MUTE    MARKED",
-                  lambda: server.action_set_channel_mute(MUTE_CHAN, not mute_was), False,
+                  lambda: mute_solo.action_set_channel_mute(MUTE_CHAN, not mute_was), False,
                   failures, notes)
             phase(dev, st, "MUTE    UNMARKED",
                   raw(lambda: channels.set_channel_mute(MUTE_CHAN, mute_was)), None,
@@ -170,17 +172,17 @@ def main() -> int:
             g_a = base + 6 if base <= 30 else base - 6
             g_b = base + 12 if base <= 24 else base - 12
             phase(dev, st, "GAIN    MARKED",
-                  lambda: server.action_set_gain(GAIN_CHAN, g_a), False, failures, notes)
+                  lambda: channel_actions.action_set_gain(GAIN_CHAN, g_a), False, failures, notes)
             phase(dev, st, "GAIN    UNMARKED",
                   raw(lambda: channels.set_mic_gain(GAIN_CHAN, g_b)), None, failures, notes)
     finally:
         faders.action_set_fader_level(FADER, original)
-        server.action_set_channel_mute(MUTE_CHAN, mute_was)
+        mute_solo.action_set_channel_mute(MUTE_CHAN, mute_was)
         if isinstance(gain_was, int):
-            server.action_set_gain(GAIN_CHAN, gain_was)
+            channel_actions.action_set_gain(GAIN_CHAN, gain_was)
         back = faders.fader_levels_live()
         now = next((f["percent"] for f in back["faders"] if f["index"] == FADER), None)
-        chans2 = {c["name"]: c for c in server.action_get_channels()["channels"]}
+        chans2 = {c["name"]: c for c in channel_actions.action_get_channels()["channels"]}
         mute_now = bool(chans2[MUTE_CHAN]["muted"])
         gain_now = channels.read_mixer()["mics"][GAIN_CHAN]["gain_db"]
         for what, before, after in (("fader level", original, now),

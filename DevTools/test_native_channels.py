@@ -12,7 +12,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
 import channels
-import server
+import desk_labels
 import wx
 from _testkit import check, check_true
 from native import channels_section
@@ -64,7 +64,7 @@ def record(name, kind):
             "effects": {"echo": False, "reverb": False, "echo_params": {}, "reverb_params": {}}}
 
 
-data = {"ok": True, "groups": server.PROCESSING_CONTROLS, "modules": server.PROCESSING_MODULES,
+data = {"ok": True, "groups": desk_labels.PROCESSING_CONTROLS, "modules": desk_labels.PROCESSING_MODULES,
         "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]), "presets": [],
         "pan_links": {}, "wireless_mics": {}, "gain_min_db": channels.GAIN_MIN_DB,
         "gain_max_db": channels.GAIN_MAX_DB, "level_min_db": channels.LEVEL_MIN_DB,

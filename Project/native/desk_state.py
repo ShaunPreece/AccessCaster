@@ -1,5 +1,5 @@
 """The window's picture of the desk, its channels, its output mixes, its levels and its master mix:
-a view over the desk model (`desk_model`), built by `server.window_state`, the same code a read of
+a view over the desk model (`desk_model`), built by `window_state.from_dump`, the same code a read of
 the desk builds it with.
 
 It follows the desk listener (`desk_live`) while the window exists, this app's own writes included.
@@ -23,7 +23,7 @@ import desk_live
 import desk_model
 import devices
 import rcp_transfer
-import server
+import window_state
 from native.calls import call
 
 STRUCTURAL = desk_model.STRUCTURAL
@@ -51,12 +51,12 @@ _SHOWN = (STRUCTURAL
 
 
 class DeskState:
-    """`channels` is the window's channels (server.window_state: the channels with the desk's own
+    """`channels` is the window's channels (window_state.from_dump: the channels with the desk's own
     0..1 params), one record per channel. `matrix` is the output mixes (rcp_read.read_matrix_state:
     `modes` and `excluded`, keyed by output and source index, `ok` False with a `reason` when the
     grid could not be read), with the layout as `matrix["model"]` (output_mixes.matrix_model). `faders`
     is the fader layout (`model`, `layout`, `labels`, `stereo`), `levels` the Levels page's state
-    (server._window_levels) and `master` the Master Mix page's (master_outputs.window_master).
+    (window_state._levels) and `master` the Master Mix page's (master_outputs.window_master).
 
     A subscriber is called as `fn("read", reply)` after every full read, successful or not, and
     after a rebuild that changed which channels exist; `fn("changed", names)` with the names of the
@@ -222,7 +222,7 @@ class DeskState:
 
 def _read():
     """A full read on a worker thread."""
-    return _named(server.read_window_state())
+    return _named(window_state.read())
 
 
 def _from_model():
@@ -230,7 +230,7 @@ def _from_model():
     blob = desk_model.snapshot()
     if not blob:
         return {"ok": False}
-    return _named(server.window_state(blob))
+    return _named(window_state.from_dump(blob))
 
 
 def _named(reply):

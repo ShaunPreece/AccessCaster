@@ -22,11 +22,12 @@ import desk_live
 import desk_model
 import devices
 import layout_fixture
+import mute_solo
 import pad_shortcuts
 import rcp_hid
 import rcp_read
 import rcp_transfer
-import server
+import server  # noqa: F401  (installs the announcer's hooks: the mixer pads' quiet)
 import settings_file
 import speech
 import usb_audio
@@ -909,7 +910,7 @@ with patched((rcp_transfer, {"send_record": sent}), (announcer, {"live_state": N
         st = fresh_st()
         announcer.live_state = st
         SPOKEN.clear()
-        res = server.action_set_channel_mute("Mic2", True)
+        res = mute_solo.action_set_channel_mute("Mic2", True)
         check_true("the write reports ok", res.get("ok"))
         check_true("and says it silences every mix, not just what you hear",
                    "every mix" in res.get("message", ""))
@@ -917,26 +918,26 @@ with patched((rcp_transfer, {"send_record": sent}), (announcer, {"live_state": N
         check("but the desk model holds it, keyed by STRIP", desk_model.mutes()[6], True)
         check("so an encoder press quotes the mute, not a stale 90 percent",
               announcer._ring_phrase(st, 0), "Mic 2, muted")
-        server.action_set_channel_mute("Mic2", False)
+        mute_solo.action_set_channel_mute("Mic2", False)
         check("unmuting clears it again", desk_model.mutes()[6], False)
         check("and the ring goes back to the level", announcer._ring_phrase(st, 0), "Mic 2 90 percent")
         announcer.live_state = None
         check_true("a mute with the announcer OFF works the same",
-                   server.action_set_channel_mute("Mic2", True).get("ok"))
+                   mute_solo.action_set_channel_mute("Mic2", True).get("ok"))
 
         # A mute does not reach a cross-point unlinked at a manual level, so the reply must name that
         # output instead of claiming silence everywhere. Monitor (index 4) in Custom, Mic 2 hand-set.
         MIX_MODES[4] = 2
         MIX_LEVELS[4][1] = {"level": 0.5, "linked": False}
-        msg = server.action_set_channel_mute("Mic2", True).get("message", "")
+        msg = mute_solo.action_set_channel_mute("Mic2", True).get("message", "")
         check_true("a hand-set level is named as still hearing the muted channel",
                    "Monitor" in msg and "still hears" in msg and "every mix" not in msg)
         MIX_LEVELS[4][1] = {"level": 0.0, "linked": False}
         check_true("but a hand-set level of zero is silent anyway",
-                   "every mix" in server.action_set_channel_mute("Mic2", True).get("message", ""))
+                   "every mix" in mute_solo.action_set_channel_mute("Mic2", True).get("message", ""))
         rcp_read.read_matrix_levels = lambda blob=None: {"ok": False}
         check_true("an unreadable grid says so rather than claiming either way",
-                   "Could not check" in server.action_set_channel_mute("Mic2", True).get("message", ""))
+                   "Could not check" in mute_solo.action_set_channel_mute("Mic2", True).get("message", ""))
 
     # ---- ECHO SUPPRESSION: our own writes are not read back at us ----
     # The checks above only prove the WRITE itself is silent. The desk then PUSHES the change back,

@@ -713,7 +713,7 @@ def read_output_modes(blob: bytes) -> list:
 def master_processing(blob: bytes) -> dict:
     """The master bus's own processing, as the SEVEN keys the window and a profile both use.
 
-    ONE SOURCE for the Master Mix page (server.read_window_state) and a backup (profiles.save), so a
+    ONE SOURCE for the Master Mix page (window_state.read) and a backup (profiles.save), so a
     property cannot be one the window changes and a profile cannot put back. The key names are the
     format the window and the profile JSON both read, so both callers splat this straight in.
     """

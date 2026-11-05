@@ -266,8 +266,9 @@ The layers, bottom up:
   the app sends lands there, so a fact about the desk is held once and read from there.
 - `desk_access.py` is the shared core the features reach the desk through: the lock, the desk as
   it is now, the capability gate and the long job. It imports none of the modules that use it.
-- Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
-  `recorder.py`, `recording.py` (the Recording page's app side, over `recorder.py`),
+- Feature modules on top: `channels.py` with its app side, `channel_actions.py` (the Channels
+  page) and `mute_solo.py` (the mute and solo, by channel and by fader), `soundpad.py`,
+  `profiles.py`, `routing_schemes.py`, `recorder.py`, `recording.py` (the Recording page's app side, over `recorder.py`),
   `firmware.py` (the check and the install, over `desk_firmware.py`), `callme_actions.py` (CallMe's
   app side, over `callme.py`), `device_page.py` (the Device page and the desk's status),
   `pad_actions.py` (the SMART pads' app side, over `soundpad.py`), `output_mixes.py` (the output
@@ -277,8 +278,10 @@ The layers, bottom up:
   over `virtual_devices.py`), `master_outputs.py` (the auto-mutes, headphone types, master
   Compellor and output delay), `clip_warning.py`, `autogain_actions.py` (auto gain's app side,
   over `autogain.py`) and `level_check.py`, both listening through `chat_isolation.py`, `shows.py`,
-  `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
-  over `speech.py` (everything the app says) and `settings_file.py`.
+  `network.py`, `meters.py`, `hotkeys.py`, `rode_follow.py` (what RODE's app changes, which the
+  desk never pushes), and `announcer.py` (the desk's button presses spoken) over `speech.py`
+  (everything the app says) and `settings_file.py`. `window_state.py` builds the window's full
+  read from one dump, each page's part from the module that owns it.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
@@ -1042,7 +1045,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
   (Depth, Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, all three EQ
   gains, both Aphex), and every one was still on the Dynamic value after the type went back. A DUO
-  mic moves the gain only. NOT undone by `server.action_set_mic_type` on purpose - the voicing's own
+  mic moves the gain only. NOT undone by `channel_actions.action_set_mic_type` on purpose - the voicing's own
   chain is what the user asked for by naming their mic - but it is COUNTED and ANNOUNCED, and the
   client re-reads the panel, because the alternative is a screen reader reading 13 stale numbers.
 - **A VOICING TAKES A SECOND OR TWO TO APPLY, AND A CHAIN WRITE LANDING INSIDE THAT WINDOW IS LOST.**
@@ -1058,7 +1061,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   voicing threw the saved gain away). Measured Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27,
   Procaster 50, NT1 30, NT1-A 31, RE20 51, SM7B 55; Line-in and Instrument leave it alone.
   `DevTools/test_mic_type_gain_live.py` re-measures, `test_restore_mic_order_live.py` proves the
-  restore end to end, and `test_profiles.py` asserts the order offline. **`server.action_set_mic_type`
+  restore end to end, and `test_profiles.py` asserts the order offline. **`channel_actions.action_set_mic_type`
   reads the gain back, updates the Level slider and says the new number** - the UI must never leave a
   gain on screen that the desk has moved by up to 30 dB.
 - **A RESTORE ONTO THE STATE IT WAS SAVED FROM PROVES ALMOST NOTHING.** Every write is a no-op there,
@@ -1574,7 +1577,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   APP IS OPEN:** every reader is sent every dump's frames, and one read every 3 s kept RODE's app
   on "Synchronizing device" for good (measured). Instead, while it is open, `desk_model.reveal`
   compares every read with the picture and hands on what changed as pushes, and the window reads
-  once when it comes back to the front (`server.read_for_rode_app`). While RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
+  once when it comes back to the front (`rode_follow.read_now`). While RODE's app is running (`rode_app.is_open`) every layout-addressed write reads the desk,
   and the user is warned once per run of it. `channels.follow_desk` also untrusts the model on a
   derived chain value pushed from elsewhere, ignoring our own writes' echoes for `CHAIN_ECHO_S`.
   A read for a reply follows the same rule through `desk_access.desk_now` (the mute's reach check, the
@@ -1588,7 +1591,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   only be in the way. A background process cannot take the focus from the app in front, so the
   app's own voice is the one channel heard whatever is in front; a tray notification
   (`tray._notify`) has never been seen to arrive on this Windows 11 PC. **The desk is read once
-  more as RODE's app closes** (`server.follow_rode_app`), still compared: a change made there
+  more as RODE's app closes** (`rode_follow.follow`), still compared: a change made there
   just before it quit is otherwise never seen, since the window reads on return only while RODE's
   app is open.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
@@ -1915,7 +1918,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   rather than rebuilding them, so a re-read never moves the focus.
 - **THE WINDOW'S DESK STATE IS A VIEW OVER THE DESK MODEL, BUILT BY THE CODE A READ USES.** A change
   the window shows, pushed or ours, rebuilds it from `desk_model.snapshot` through
-  `server.window_state`, so there is ONE decoder for a read and a push. Do not put a push's value on
+  `window_state.from_dump`, so there is ONE decoder for a read and a push. Do not put a push's value on
   a record by hand again, and do not patch the desk state from a write's reply: our write reaches
   the model as it is sent. The rebuild updates records IN PLACE, because a channel page keeps the
   record it was built from. A channel page still `remember`s its own writes, because a channel on

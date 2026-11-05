@@ -73,8 +73,8 @@ import announcer  # noqa: E402
 import devices  # noqa: E402
 import rcp_read  # noqa: E402
 import rcp_transfer  # noqa: E402
+import mute_solo  # noqa: E402
 import rode_app  # noqa: E402
-import server  # noqa: E402
 from _testkit import as_device, hold_desk, patched  # noqa: E402
 from _testkit import hold as hold_value  # noqa: E402
 
@@ -87,11 +87,11 @@ with as_device(devices.PRO2), patched(*fakes):
     hold_desk([0, 1, 2, 3, 10, 11, 7, 8, 9])
     hold_value(rcp_transfer.channel_key(2), "channelOutputMute", True, "bool")
     with patched((rode_app, {"is_open": lambda: False})):
-        server.encoder_hold_mute(2)
+        mute_solo.encoder_hold_mute(2)
     check("a muted channel is unmuted", [on for _key, on in writes], [False])
     check("without reading the desk", reads, [])
     with patched((rode_app, {"is_open": lambda: True})):
-        server.encoder_hold_mute(2)
+        mute_solo.encoder_hold_mute(2)
     check("while RODE's app is open the desk is read first", reads, [True])
 
 sys.exit(_testkit.finish())

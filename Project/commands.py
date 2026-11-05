@@ -27,6 +27,7 @@ from __future__ import annotations
 import announcer
 import app_window
 import callme_actions
+import channel_actions
 import channels
 import desk_access
 import desk_model
@@ -36,13 +37,13 @@ import diagnostics
 import faders
 import master_outputs
 import mic_presets
+import mute_solo
 import network
 import output_mixes
 import pad_shortcuts
 import rcp_read
 import recorder
 import recording
-import server
 import soundpad
 import speech
 import wording
@@ -111,7 +112,7 @@ def _fail(message: str) -> dict:
 
 
 def run(command_id: str) -> dict:
-    """Carry out a command. Returns {ok, message} as every server action does, `message` being the
+    """Carry out a command. Returns {ok, message} as every action does, `message` being the
     sentence to speak. Never raises for an unknown id."""
     # The namespace is up to the FIRST DOT; everything after it belongs to that namespace's own
     # parser. Colons separate a command from what it acts on ("chan.mute:Mic1"), so splitting on a
@@ -207,7 +208,7 @@ def _cough_key() -> dict:
         names, _muted_mics = _muted_mics, []
         opened = []
         for name in names:
-            res = server.action_set_channel_mute(name, False)
+            res = mute_solo.action_set_channel_mute(name, False)
             if not res.get("ok"):
                 return _fail(res.get("message", "The mics could not be opened."))
             opened.append(name)
@@ -227,7 +228,7 @@ def _cough_key() -> dict:
         return _said("Every mic is already muted.")
     done = []
     for name in open_mics:
-        res = server.action_set_channel_mute(name, True)
+        res = mute_solo.action_set_channel_mute(name, True)
         if not res.get("ok"):
             _muted_mics = done          # keep what DID land, so the undo is still exact
             return _fail(res.get("message", "The mics could not be muted."))
@@ -319,7 +320,7 @@ def _muted_now(name: str) -> bool:
 
 def _channel_read(name: str) -> dict:
     """One channel's state from a fresh read: mute, solo, processing and phantom."""
-    res = server.action_get_channels()
+    res = channel_actions.action_get_channels()
     for c in res.get("channels", []):
         if c.get("name") == name:
             return {"muted": bool(c.get("muted")), "solo": bool(c.get("solo")),
@@ -331,24 +332,24 @@ def _channel_read(name: str) -> dict:
 def _run_chan(arg: str) -> dict:
     what, _, name = arg.partition(":")
     if what == "solos.clear":
-        return server.action_clear_solos()
+        return mute_solo.action_clear_solos()
     ch = channels.ui_channel_map().get(name)
     if ch is None:
         return _fail(f"This desk has no channel called {name}.")
     if what == "mute":
-        return server.action_set_channel_mute(name, not _muted_now(name))
+        return mute_solo.action_set_channel_mute(name, not _muted_now(name))
     # Solo, processing and phantom have no push-fed cache, so each reads the channel first. About a
     # second and a half, and worth it: a shortcut that guesses the current state and writes the
     # opposite is a shortcut that does the wrong thing every other press.
     full = _channel_read(name)
     if what == "solo":
-        return server.action_set_channel_solo(name, not full.get("solo", False))
+        return mute_solo.action_set_channel_solo(name, not full.get("solo", False))
     if what == "proc":
-        return server.action_set_processing_enabled(
+        return channel_actions.action_set_processing_enabled(
             name, not full.get("processing_on", False))
     if what == "phantom":
         mic = channels.mic_channel_number(ch)
-        return server.action_set_phantom(mic, not full.get("phantom", False))
+        return channel_actions.action_set_phantom(mic, not full.get("phantom", False))
     return _fail(f"Unknown channel command {what}.")
 
 
