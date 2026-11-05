@@ -18,7 +18,9 @@ import desk_model
 import diagnostics
 import encoder_hold
 import encoder_home
+import firmware
 import pad_shortcuts
+import recording
 import rode_app
 import server
 import shortcuts
@@ -44,6 +46,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     channels.follow_desk()
     pad_shortcuts.follow_desk()
     rode_app.on_look = server.follow_rode_app
+    firmware.backup = server.backup_unit
     rode_app.start()
     if announce and announcer.starts_on():
         # App settings can still turn it off.
@@ -61,7 +64,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
         shortcuts.start()
     # The recording state follower: it is what makes the Recording page free to poll, and it is
     # how a press of the unit's own REC button is noticed. Started on first use, so this starts it.
-    server.recorder_watcher()
+    recording.watcher()
     # A hold on the encoder while a channel button holds it mutes that channel, as the desk's own
     # hold does for the encoder's ring target.
     encoder_hold.Watcher(server.encoder_hold_mute).start()

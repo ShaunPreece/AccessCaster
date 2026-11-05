@@ -232,7 +232,7 @@ check_in("with multitrack off, it says nothing happens yet",
          "does nothing", recorder.BYPASS_NEEDS_MULTITRACK)
 
 print("\nA TRANSPORT PRESS WAITS FOR THE DESK'S ANSWER, NOT A FIXED TIME")
-import server  # noqa: E402
+import recording  # noqa: E402
 
 
 class Pushes:
@@ -252,16 +252,16 @@ class Pushes:
 
 
 start = time.monotonic()
-heard = server._await_record(Pushes(("recordState", recorder.RECORDING)), recorder.RECORDING)
+heard = recording._await_record(Pushes(("recordState", recorder.RECORDING)), recorder.RECORDING)
 check("a start ends at the pushed state", sorted(heard), ["recordState"])
 check("without waiting out the margin", time.monotonic() - start < 0.5, True)
 listen = Pushes(("recordState", recorder.PAUSED), ("recordState", recorder.READY))
 check("a stop is answered by READY, which is 0",
-      sorted(server._await_record(listen, recorder.READY)), ["recordState"])
+      sorted(recording._await_record(listen, recorder.READY)), ["recordState"])
 check("and a state on the way is not the answer", listen.pushes, [])
 listen = Pushes()
 check("a press the desk ignores hears nothing",
-      server._await_record(listen, recorder.RECORDING), {})
-check("and gives up within the margin", listen.timeouts, [server._RECORD_ANSWER_S])
+      recording._await_record(listen, recorder.RECORDING), {})
+check("and gives up within the margin", listen.timeouts, [recording._RECORD_ANSWER_S])
 
 sys.exit(_testkit.finish())

@@ -30,7 +30,7 @@ import _bootstrap  # noqa: F401
 import _testkit
 import announcer
 import recorder
-import server
+import recording
 import settings_file
 import speech
 from _testkit import check
@@ -77,7 +77,7 @@ def mark_ours():
 
 print("\nA RECORDING STARTED ON THE UNIT (nothing marked as ours)")
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("announcements are switched off", speech.enabled.is_set(), False)
 check("and the app remembers that IT did it", announcer.suspended_for_record, True)
 check("the notice is spoken BEFORE the silence, in one phrase", len(SAID), 1)
@@ -88,7 +88,7 @@ check("the announcer thread is told to leave QUIETLY, so its sign-off is not rec
 
 print("\nAND STOPPED AGAIN")
 SAID.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("announcements are back on", speech.enabled.is_set(), True)
 check("the claim is released", announcer.suspended_for_record, False)
 check("one phrase, saying both things", len(SAID), 1)
@@ -98,58 +98,58 @@ check("the announcer is restarted QUIETLY, so its greeting cannot silence that p
 
 print("\nA USER WHO HAD ANNOUNCEMENTS OFF KEEPS THEM OFF")
 reset(announcing=False)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("nothing is spoken", SAID, [])
 check("no claim is made on the switch", announcer.suspended_for_record, False)
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("and they are STILL off after the recording", speech.enabled.is_set(), False)
 check("still nothing spoken", SAID, [])
 
 print("\nSTARTED FROM THE APP: the notice is NOT spoken (the reply carries it, silently)")
 reset(announcing=True)
 mark_ours()
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("announcements are still switched off", speech.enabled.is_set(), False)
 check("but nothing was said out loud, so nothing lands in the take", SAID, [])
 
 print("\nA PAUSE ON THE UNIT GIVES ANNOUNCEMENTS BACK UNTIL IT RESUMES")
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+recording._state_changed(recorder.RECORDING, recorder.PAUSED)
 check("pausing brings announcements back", speech.enabled.is_set(), True)
 check("and says it paused", SAID, ["Recording paused."])
 SAID.clear()
-server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
+recording._state_changed(recorder.PAUSED, recorder.RECORDING)
 check("resuming switches them off again", speech.enabled.is_set(), False)
 check("saying only that it is recording again, not the off notice a second time",
       SAID, ["Recording again."])
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("and the stop still gives them back", speech.enabled.is_set(), True)
 
 print("\nA PAUSE WITH ANNOUNCEMENTS OFF SAYS NOTHING AND LEAVES THEM OFF")
 reset(announcing=False)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+recording._state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.RECORDING, recorder.PAUSED)
 check("still off while paused", speech.enabled.is_set(), False)
 check("nothing spoken", SAID, [])
 
 print("\nA PAUSE FROM THE APP: announcements come back, the reply carries the word")
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
 mark_ours()
-server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
+recording._state_changed(recorder.RECORDING, recorder.PAUSED)
 check("back on", speech.enabled.is_set(), True)
 check("nothing spoken by the watcher", SAID, [])
 
 print("\nTHE USER TURNS THEM BACK ON MID-TAKE")
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("off, as before", speech.enabled.is_set(), False)
 announcer.action_set_announce(True)              # a deliberate toggle by the user
 check("their choice releases our claim", announcer.suspended_for_record, False)
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("so stopping does not switch them off again", speech.enabled.is_set(), True)
 
 print("\nTHE OPTION OFF: a user with a separate headphone output keeps their announcements")
@@ -161,18 +161,18 @@ check("it defaults to ON, because most people do not want speech in the take",
       announcer.record_mutes_announcer(), True)
 _settings["record_mute_announcer"] = False
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("announcements keep playing through the take", speech.enabled.is_set(), True)
 check("no claim is made on the switch", announcer.suspended_for_record, False)
 check("and the spoken notice does NOT promise silence that is not coming",
       len(SAID) == 1 and "Announcements off" not in SAID[0], True)
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("they are still on afterwards", speech.enabled.is_set(), True)
 
 print("\nTURNING THE OPTION OFF MID-TAKE GIVES THEM BACK STRAIGHT AWAY")
 _settings["record_mute_announcer"] = True
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("off while recording", speech.enabled.is_set(), False)
 announcer.action_set_record_mute_announcer(False)
 check("switching the option off restores them without waiting for the stop",
@@ -181,21 +181,21 @@ _settings["record_mute_announcer"] = True
 
 print("\nNO DESTINATION IS A STOP TOO")
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
-server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+recording._state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("the drive being pulled mid-take still gives announcements back",
       speech.enabled.is_set(), True)
 
 print("\nPLUGGING THE DRIVE IN AND OUT, WORDED FROM THE SERVER")
 # recorder.spoken_change owns the words; this pins the WIRING round it - the medium name coming
 # from the last full page read, and the full stop the phrase does not carry itself.
-server._note_recorder_context({"destination": {"spoken": "USB drive", "low": False},
+recording._note_context({"destination": {"spoken": "USB drive", "low": False},
                                "room": {"words": "3 hours"}})
 reset(announcing=True)
-server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
+recording._state_changed(recorder.NO_DESTINATION, recorder.READY)
 check("putting it IN does not say a recording stopped", SAID, ["Recording now available."])
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.NO_DESTINATION)
+recording._state_changed(recorder.READY, recorder.NO_DESTINATION)
 check("taking it out while idle names the drive that left",
       SAID, ["Recording no longer available: the USB drive was removed."])
 check("and it did not touch announcements, having never suspended them",
@@ -203,17 +203,17 @@ check("and it did not touch announcements, having never suspended them",
 # Mid-take: the phrase must arrive WITH the news that announcements are back, in one phrase,
 # because the speech pump coalesces and a second call would silence the first.
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+recording._state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("a mid-take pull says the recording stopped, why, and that announcements are back",
       SAID, ["Recording stopped: the USB drive was removed. Announcements are back on."])
 # The startup case: the first state the app ever sees is not a change, so nothing is said. This is
 # the whole reason `was` is checked for None rather than defaulted.
 reset(announcing=True)
-server._recorder_state_changed(None, recorder.READY)
+recording._state_changed(None, recorder.READY)
 check("the first state we ever see is announced as nothing at all", SAID, [])
-server._note_recorder_context({})
+recording._note_context({})
 
 print("\nRECORD TONES INSTEAD OF SPEECH")
 # Each tone with whether announcements were on as it was queued: a start's must be queued before
@@ -222,54 +222,54 @@ TONES = []
 _tone, speech.tone = speech.tone, lambda name: TONES.append((name, speech.enabled.is_set())) or True
 announcer.record_feedback = "tone"
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("a start plays the start tone, before the silence", TONES, [("record_start", True)])
 check("and says nothing", SAID, [])
 check("and announcements still go quiet for the take", speech.enabled.is_set(), False)
 TONES.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.PAUSED)
+recording._state_changed(recorder.PAUSED, recorder.RECORDING)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("pause, resume and stop each play their own",
       TONES, [("record_pause", True), ("record_start", True), ("record_stop", True)])
 check("with nothing spoken", SAID, [])
 reset(announcing=True)
 TONES.clear()
 mark_ours()
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("a press from this app plays one too", TONES, [("record_start", True)])
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 TONES.clear()
 SAID.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+recording._state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("a take ended by a pulled drive has no tone", TONES, [])
 check("and is spoken, saying why", SAID[0].startswith("Recording stopped"), True)
 reset(announcing=True)
-server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
+recording._state_changed(recorder.NO_DESTINATION, recorder.READY)
 check("a drive going in has no tone either", TONES, [])
 
 print("\nSAY NOTHING: the transport is silent, storage is still spoken")
 announcer.record_feedback = "silent"
 reset(announcing=True)
 TONES.clear()
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 check("a start makes no sound", (TONES, SAID), ([], []))
 check("and announcements still go quiet for the take", speech.enabled.is_set(), False)
-server._recorder_state_changed(recorder.RECORDING, recorder.PAUSED)
-server._recorder_state_changed(recorder.PAUSED, recorder.RECORDING)
-server._recorder_state_changed(recorder.RECORDING, recorder.READY)
+recording._state_changed(recorder.RECORDING, recorder.PAUSED)
+recording._state_changed(recorder.PAUSED, recorder.RECORDING)
+recording._state_changed(recorder.RECORDING, recorder.READY)
 check("nor do pause, resume and stop", (TONES, SAID), ([], []))
 check("and announcements are back after it", speech.enabled.is_set(), True)
 reset(announcing=True)
-server._recorder_state_changed(recorder.READY, recorder.RECORDING)
+recording._state_changed(recorder.READY, recorder.RECORDING)
 SAID.clear()
-server._recorder_state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
+recording._state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("a take ended by a pulled drive is still spoken",
       bool(SAID) and SAID[0].startswith("Recording stopped"), True)
 reset(announcing=True)
 SAID.clear()
-server._recorder_state_changed(recorder.NO_DESTINATION, recorder.READY)
+recording._state_changed(recorder.NO_DESTINATION, recorder.READY)
 check("and so is a drive going in", bool(SAID), True)
 announcer.record_feedback = "speak"
 speech.tone = _tone

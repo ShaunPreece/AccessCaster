@@ -1,7 +1,7 @@
 """Recording: the unit's recorder (what to record, and start, pause and stop), the recordings on its
 card or drive, and the card and drive themselves.
 
-The recorder is not in the desk state. The section reads it (`server.read_recorder`, one model
+The recorder is not in the desk state. The section reads it (`recording.read`, one model
 dump) after the desk state's first read, on F5, after a job that rewrites the desk, and when the
 desk pushes a recording state the page is not showing (the desk state's "recorder" event): the
 unit's own REC button, and a card or drive going in or out. A command's reply carries the same
@@ -9,13 +9,13 @@ payload, so a press is shown from its reply without another dump; its buttons fo
 press causes, which arrives first.
 
 A change made on the unit is not spoken here: the announcer speaks it, and switches itself off for
-the take (`server._recorder_state_changed`).
+the take (`recording._state_changed`).
 """
 import wx
 
 import announcer
 import recorder
-import server
+import recording
 from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch
@@ -63,7 +63,7 @@ def _with_sentence(action, *args):
     """A transport command, then the state sentence from the recorder's listener (no device read),
     which the command has just brought up to date."""
     reply = action(*args)
-    reply["sentence"] = server.read_recorder_live().get("message") or ""
+    reply["sentence"] = recording.read_live().get("message") or ""
     return reply
 
 
@@ -73,8 +73,8 @@ class RecordingSection:
 
     def __init__(self, frame):
         self.frame = frame
-        self.data = None             # the last recorder payload (server._recorder_payload)
-        self.sentence = ""           # what the unit is doing, as the server words it
+        self.data = None             # the last recorder payload (recording._payload)
+        self.sentence = ""           # what the unit is doing, as `recording` words it
         self.busy = False            # a command from this window has not returned
         self._pushed = None          # the last state pushed while busy
         self._label = None           # the pressed button's label at the press
@@ -116,7 +116,7 @@ class RecordingSection:
             self._again = bool(self._again) or announce
             return
         self._reading = True
-        call(self.frame, server.read_recorder, done=lambda reply: self._read_done(reply, announce))
+        call(self.frame, recording.read, done=lambda reply: self._read_done(reply, announce))
 
     def _read_done(self, reply, announce):
         self._reading = False
@@ -208,15 +208,15 @@ class RecorderPage(wx.Panel):
 
         self.multitrack = Choice(
             self, parent, sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
-            server.action_set_multitrack, *self.field("multitrack"),
+            recording.action_set_multitrack, *self.field("multitrack"),
             description=f"{recorder.MULTITRACK_HINT} {USB_POINTER}", guard=self._unread,
             accepted=lambda _reply: self._show_bypass())
         self.format = Choice(
             self, parent, sizer, "Save recordings as",
-            sorted(recorder.RECORDING_FORMAT_LABEL.items()), server.action_set_recording_format,
+            sorted(recorder.RECORDING_FORMAT_LABEL.items()), recording.action_set_recording_format,
             *self.field("format"), description=recorder.RECORDING_FORMAT_HINT, guard=self._unread)
         self.bypass = Switch(self, parent, sizer, "Record the separate tracks raw",
-                             server.action_set_processing_bypass,
+                             recording.action_set_processing_bypass,
                              *self.field("processing_bypass"), guard=self._bypass_refused)
         self.mute = Switch(self, parent, sizer, "Silence other announcements while recording",
                            announcer.action_set_record_mute_announcer, lambda: self._mute,
@@ -295,7 +295,7 @@ class RecorderPage(wx.Panel):
         event.Skip()
 
     def _tick(self):
-        call(self, server.read_recorder_live, done=self._ticked)
+        call(self, recording.read_live, done=self._ticked)
 
     def _ticked(self, reply):
         # A take stopped between the tick and its reply is left to the section's own read.
@@ -316,7 +316,7 @@ class RecorderPage(wx.Panel):
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(event.GetEventObject(), server.action_record,
+        self.section.command(event.GetEventObject(), recording.action_record,
                              "stop" if state in RUNNING else "start")
 
     def _on_pause(self, event):
@@ -327,16 +327,16 @@ class RecorderPage(wx.Panel):
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(event.GetEventObject(), server.action_record,
+        self.section.command(event.GetEventObject(), recording.action_record,
                              "resume" if state == recorder.PAUSED else "pause")
 
     def _on_marker(self, event):
-        # The server refuses a marker with nothing recording, from its listener's state.
+        # `recording` refuses a marker with nothing recording, from its listener's state.
         refusal = self._unread()
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(event.GetEventObject(), server.action_drop_marker)
+        self.section.command(event.GetEventObject(), recording.action_drop_marker)
 
 
 class RecordingsPage(wx.Panel):
@@ -391,7 +391,7 @@ class RecordingsPage(wx.Panel):
                        "This removes the recording from the desk's card or drive. It cannot be "
                        "undone, and AccessCaster has no copy of it.", "Delete"):
             return
-        self.section.command(self.delete, server.action_delete_recording, take["uid"],
+        self.section.command(self.delete, recording.action_delete_recording, take["uid"],
                              working="Deleting, please wait.", reread=True)
 
 
@@ -464,7 +464,7 @@ class StoragePage(wx.Panel):
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(self.eject, server.action_storage_eject, volume["index"], True,
+        self.section.command(self.eject, recording.action_storage_eject, volume["index"], True,
                              working="Ejecting, please wait.", reread=True)
 
     def _on_reconnect(self, _event):
@@ -475,7 +475,7 @@ class StoragePage(wx.Panel):
         if refusal:
             self.frame.say(refusal)
             return
-        self.section.command(self.reconnect, server.action_storage_eject, volume["index"], False,
+        self.section.command(self.reconnect, recording.action_storage_eject, volume["index"], False,
                              working="Reconnecting, please wait.", reread=True)
 
     def _on_erase(self, _event):
@@ -498,7 +498,7 @@ class StoragePage(wx.Panel):
                        "undone, and AccessCaster has no copy.", "Erase"):
             return
         job = JobDialog(self, "Erasing", f"Erasing the {spoken}. This can take a minute or more.",
-                        lambda dialog: call(dialog, server.action_storage_erase, volume["index"],
+                        lambda dialog: call(dialog, recording.action_storage_erase, volume["index"],
                                             done=dialog.finish),
                         stop=None, closable=False)
         with job:

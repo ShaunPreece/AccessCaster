@@ -1,4 +1,5 @@
-"""INSTALLING A FIRMWARE UPDATE: the desk's own updater, driven through its SYSTEM node.
+"""THE DESK'S FIRMWARE: its version, the update it offers, and installing that update through the
+desk's own updater, driven through its SYSTEM node.
 
 The desk does the work, exactly as from its touchscreen: it downloads RODE's image over its own
 network connection and installs it. Nothing is flashed from this computer. The sequence, from the
@@ -32,6 +33,7 @@ from __future__ import annotations
 import time
 
 import desk_live
+import desk_model
 import diagnostics
 import model_tree
 import rcp_hid
@@ -44,6 +46,8 @@ PROPS = ("systemFirmwareVersion", "appUpdateAvailable", "osUpdateAvailable", "up
          "downloadInitiateRequested", "downloadCancelRequested", "updateDownloadProgress",
          "updateDownloaded", "updateInitiateRequested", "updateInstalledProgress",
          "updateComplete", "updateRebootRequested", "updateResetAfterFWURequested")
+# What says an update is offered, or why the desk could not look: what `update` reads.
+UPDATE_PROPS = ("appUpdateAvailable", "osUpdateAvailable", "updateVersion", "updateNoInternet")
 # Requests written False before an update starts, so each True is a change the engine acts on.
 REQUESTS = ("downloadInitiateRequested", "downloadCancelRequested", "updateInitiateRequested")
 # The identity a desk takes while it is being flashed over USB. It answers nothing.
@@ -74,6 +78,23 @@ def read(blob: bytes) -> dict:
             if name in PROPS and (name not in out or out[name][1] in (None, "")):
                 out[name] = (node.path(), value)
     return out
+
+
+def version(blob: bytes):
+    """The desk's firmware version, or None: from `blob`, else the desk model's, for a dump that
+    ended before `systemFirmwareVersion`, which sits near its tail."""
+    return rcp_read.first(blob, "systemFirmwareVersion") or desk_model.firmware()
+
+
+def update(blob: bytes) -> dict:
+    """The update the desk offers: `available`, `version`, and `no_internet` when its last check
+    could not reach RODE's server."""
+    def sys_val(name):
+        return rcp_read.block_value(blob, "SYSTEM", name)
+    available = bool(sys_val("appUpdateAvailable")) or bool(sys_val("osUpdateAvailable"))
+    offered_version = sys_val("updateVersion") or ""
+    return {"available": available, "version": offered_version if available else "",
+            "no_internet": bool(sys_val("updateNoInternet"))}
 
 
 def values(state: dict) -> dict:

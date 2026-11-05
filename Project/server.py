@@ -28,13 +28,12 @@ import change_words  # a change on the desk in words
 import channels
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import desk_access  # the lock, the desk as it is now, the capability gate, the long job
-import desk_firmware  # installing a firmware update through the desk's own updater
+import desk_firmware  # the desk's firmware version and the update it offers
 import desk_live  # the one listener: everything the desk pushes, to every subscriber
 import desk_model  # the desk as last seen, kept current by the listener and our own writes
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
-import model_tree
 import network  # wifi and Bluetooth, and the wireless mics
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
 import profiles  # settings backup/restore (save+restore live here, not in server)
@@ -96,13 +95,11 @@ _PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c i
 _PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
 
 
-FIRMWARE_UPDATE_PROPS = ("appUpdateAvailable", "osUpdateAvailable", "updateVersion",
-                         "updateNoInternet")      # what `_firmware_update` reads
 # What Device > Hardware shows from `read_device_state`, for following the desk. Storage is
 # followed through recordState, which the desk pushes when a card or drive goes in or out: its
 # `storageVolumeState` is left out because a recording ticks its free space down throughout.
 HARDWARE_PROPS = frozenset(("recordState", "recordingTotalCount", "systemFirmwareVersion",
-                            "wiredConnected") + FIRMWARE_UPDATE_PROPS)
+                            "wiredConnected") + desk_firmware.UPDATE_PROPS)
 
 
 def read_device_state() -> dict:
@@ -134,648 +131,11 @@ def read_device_state() -> dict:
     # ---- firmware and the wired network. Neither is a connection you can make or change, so they
     # sit with the other facts the unit reports about itself rather than on a tab of wireless
     # controls.
-    out["firmware"] = _firmware_version(blob)
-    out["firmware_update"] = _firmware_update(blob)
+    out["firmware"] = desk_firmware.version(blob)
+    out["firmware_update"] = desk_firmware.update(blob)
     wired = next((v for v in val("wiredConnected") if v is not None), None)
     out["wired_connected"] = bool(wired) if wired is not None else None
     return out
-
-
-# ----------------------------------------------------------------------------
-# FIRMWARE UPDATES: telling the user one exists. Installing one is desk_firmware.py, through
-# action_firmware_install.
-#
-# All on the SYSTEM node. `updateCheckRequested` is the touchscreen's Check for Update: the desk
-# raises `updateChecking` and clears both within about a second. An available update sets
-# `osUpdateAvailable` (a full image) or `appUpdateAvailable` (the application alone), and
-# `updateVersion` names it.
-_UPDATE_CHECK_WAIT_S = 20.0
-_UPDATE_HOW = "Install it with Install firmware, under Device, Hardware."
-
-
-def _firmware_version(blob: bytes):
-    """The desk's firmware version, or None: from `blob`, else the desk model's, for a dump that
-    ended before `systemFirmwareVersion`, which sits near its tail."""
-    return rcp_read.first(blob, "systemFirmwareVersion") or desk_model.firmware()
-
-
-def _firmware_update(blob: bytes) -> dict:
-    def sys_val(name):
-        return rcp_read.block_value(blob, "SYSTEM", name)
-    available = bool(sys_val("appUpdateAvailable")) or bool(sys_val("osUpdateAvailable"))
-    version = sys_val("updateVersion") or ""
-    return {"available": available, "version": version if available else "",
-            "no_internet": bool(sys_val("updateNoInternet"))}
-
-
-def _firmware_update_sentence(upd: dict) -> str:
-    if upd.get("available"):
-        what = f"Firmware {upd['version']}" if upd.get("version") else "A firmware update"
-        return f"{what} is available. {_UPDATE_HOW}"
-    if upd.get("no_internet"):
-        return ("The desk could not reach RODE's update server. It needs wifi or a network cable "
-                "to check.")
-    return ""
-
-
-def read_firmware_install() -> dict:
-    """Whether the unit's waiting firmware update can be installed now: `version`, and `refusal`
-    as a sentence when it cannot."""
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the desk: {exc}"}
-    state = desk_firmware.read(blob)
-    recording = recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED)
-    try:
-        in_call = any(slot.get("state") not in (None, "Idle")
-                      for slot in callme.read(blob).get("slots") or [])
-    except Exception:
-        in_call = False
-    refusal = desk_firmware.refusal(state, _desk_network(blob)["online"], recording, in_call)
-    for job, busy in ((_profile_job, "A backup is running."),
-                      (_restore_job, "A restore is running."),
-                      (_show_job, "A show command is running.")):
-        if not refusal and job.busy():
-            refusal = busy + " Try again when it finishes."
-    return {"ok": True, "version": desk_firmware.offered(state),
-            "firmware": _firmware_version(blob) or "", "refusal": refusal}
-
-
-def action_firmware_install(backup_first: bool = True) -> dict:
-    """Install the firmware update the unit offers: a backup first, unless declined, then the
-    unit's own download, install and restart (desk_firmware.install). Refuses before anything is
-    written if the update cannot run now."""
-    ready = read_firmware_install()
-    if not ready.get("ok"):
-        return ready
-    if ready["refusal"]:
-        return {"ok": False, "message": ready["refusal"]}
-    target = ready["version"]
-
-    def work(job):
-        if backup_first:
-            backed = _backup_unit(job, FIRMWARE_BACKUP_NAME)
-            if not backed.get("ok"):
-                return {"ok": False,
-                        "message": "The backup did not finish, so the update was not started and "
-                                   "nothing on the desk has changed. "
-                                   + (backed.get("message") or "")}
-        res = desk_firmware.install(desk_firmware.Desk(desk_access.hid_lock), job.step, target)
-        if res.get("ok") and backup_first:
-            res["message"] += (f" Your settings were backed up first as {FIRMWARE_BACKUP_NAME}, "
-                               "on the Backups page.")
-        return res
-    return _firmware_job.start(work, message=f"Updating the desk to firmware {target}.",
-                               started=f"Updating the desk to firmware {target}.")
-
-
-def firmware_job_status() -> dict:
-    return _firmware_job.status()
-
-
-def action_check_firmware() -> dict:
-    """Ask the desk to check RODE's server for a firmware update, and say what it found."""
-    listener = desk_live.PushListener()
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
-            found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
-            if not found:
-                return {"ok": False, "message": "This desk does not offer a firmware check."}
-            path = found[0][0].path()
-            listener.start()        # before the write: the desk answers within a second
-            rcp_transfer.send_record(
-                rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
-        listener.wait_for("updateChecking", _UPDATE_CHECK_WAIT_S, match=lambda v: v is False)
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not check for a firmware update: {exc}"}
-    finally:
-        listener.stop()
-    upd = _firmware_update(blob)
-    fw = _firmware_version(blob) or "unknown"
-    msg = (_firmware_update_sentence(upd)
-           or f"Your desk is up to date. Firmware {fw} is the latest.")
-    return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
-
-
-# ----------------------------------------------------------------------------
-# THE RECORDER. Start, pause and stop from software, and say what the unit is doing.
-#
-# The protocol side is in recorder.py; this is the app side of it. TWO THINGS SHAPE THIS CODE:
-#
-#   * **The state comes from a PUSH, not a poll.** recorder.Watcher follows the desk listener and
-#     hears `recordState` change within ~30 ms, from our writes AND from the unit's own REC
-#     button. So `read_recorder_live` costs nothing and can be polled while the page is shown,
-#     while `read_recorder` (the full page: volumes and the recordings list) does a ~1.5 s dump.
-#   * **A write is never trusted.** `requestRecordState` is a request the firmware consumes and
-#     resets, so the only honest confirmation is reading `recordState` back, which is what
-#     action_record does before it tells anyone the recording started.
-
-_recorder_watch = None
-
-
-def _recorder_state_changed(was, now) -> None:
-    """Speak a recording state change, and SWITCH ANNOUNCEMENTS OFF FOR THE TAKE. On the Watcher's
-    thread, so this runs whether the recording was started from here or from the unit's own button.
-
-    ANNOUNCEMENTS ARE SUSPENDED WHILE RECORDING because there is no other way to keep them out of
-    the recording. Sending the speech to the computer's own speakers instead of the desk is NOT a
-    fix: it moves the announcements off the USB return and they are picked up by the microphones
-    anyway. Anything audible in the room reaches the mics, so silence is the only fix that works.
-
-    THE NOTICE IS SPOKEN BEFORE THE SILENCE, and only when the recording was started ON THE UNIT.
-    Started from this app, the reply carries the same words to the window instead, spoken by the
-    screen reader rather than by this app, and therefore cannot land in the take. Started on the unit there is
-    no reply to carry it, so one short phrase at the top of the recording is the price of the
-    operator knowing what just happened.
-
-    A PAUSE GIVES ANNOUNCEMENTS BACK until the take resumes. Nothing reaches the take while it is
-    paused, and without speech a paused desk sounds exactly like a recording one. A resume from the
-    UNIT says "Recording again" as it suspends them, which lands at the start of the resumed section
-    for the same reason "Recording started" does; a resume from this app says "Resuming" first and
-    waits for it to finish (action_record).
-
-    WHAT IS SAID COMES FROM THE TRANSITION, NOT FROM `now` ALONE (recorder.spoken_change), which is
-    what tells a drive being plugged in apart from a recording stopping. The SUSPENSION decisions
-    are keyed on the new state alone: a take is over once the desk leaves RECORDING and PAUSED,
-    whatever the reason it left."""
-    ours = announcer.is_self_echo(("record",))
-    # The last destination we knew about, which on a REMOVAL is the thing that just left. Best
-    # effort by design: it is empty until a full page read has happened, and spoken_change falls
-    # back to naming no medium at all rather than guessing one.
-    medium = _recorder_context.get("where") or ""
-    phrase = recorder.spoken_change(was, now, medium)
-    # A tone replaces the phrase, and plays for this app's own presses too: a shortcut's spoken
-    # reply to a start is lost to the silence the take begins with. It is queued before that
-    # silence, and the speech thread plays what is already queued.
-    cue = recorder.record_cue(was, now)
-    if cue and announcer.record_feedback == "silent":
-        # A transport change, chosen to make no sound. Announcements are still suspended for the
-        # take and given back after it, below.
-        phrase = ""
-    if announcer.record_feedback != "tone":
-        cue = None
-    if now == recorder.RECORDING:
-        # Only a NEW take explains the silence: after a pause it is already known.
-        going_quiet = (speech.enabled.is_set() and announcer.record_mutes_announcer()
-                       and was != recorder.PAUSED)
-        if cue:
-            speech.tone(cue)
-        elif speech.enabled.is_set() and not ours and phrase:
-            # One phrase, not two: the speech pump coalesces, so a second would silence the first.
-            speech.say(f"{phrase}."
-                     + (" Announcements off until you stop." if going_quiet else ""))
-        announcer.suspend_for_record()
-        return
-    if now == recorder.PAUSED:
-        # Restored only if the take suspended them, so the resume suspends them again the same way.
-        announcer.restore_after_record()
-        if cue:
-            speech.tone(cue)
-        elif speech.enabled.is_set() and not ours and phrase:
-            speech.say(f"{phrase}.")
-        return
-    if now in (recorder.READY, recorder.NO_DESTINATION):
-        # Unconditional, and before the speech: a take that ended because the drive was pulled must
-        # give announcements back just the same as one that was stopped. It is a no-op when we did
-        # not switch them off in the first place, so an idle plug costs nothing here.
-        came_back = announcer.restore_after_record()
-        if cue:
-            speech.tone(cue)
-        elif not ours and speech.enabled.is_set() and phrase:
-            speech.say(phrase + (". Announcements are back on." if came_back else "."))
-        return
-    if speech.enabled.is_set() and not ours and phrase:
-        speech.say(phrase)
-
-
-def _recorder_refusal(name: str, task: str = "") -> str:
-    so = f", so it cannot {task}" if task else ""
-    return (f"AccessCaster can read the recorder on the {name} but not drive it{so}: that has "
-            f"only been confirmed on a RODECaster Pro 2.")
-
-
-def _recorder_gate(task: str = ""):
-    return desk_access.cap_gate("recorder", lambda name: _recorder_refusal(name, task))
-
-
-def recorder_watcher():
-    """The running Watcher, started on first use. Returns None if it could not be started, and the
-    callers then fall back to reading the state out of a model dump."""
-    global _recorder_watch
-    if _recorder_watch is None:
-        try:
-            w = recorder.Watcher(on_change=_recorder_state_changed)
-            w.start()
-            _recorder_watch = w
-        except Exception as exc:
-            diagnostics.event("recorder.watcher_failed", "the recorder listener did not start",
-                              error=str(exc))
-            return None
-    return _recorder_watch
-
-
-def _recorder_payload(blob: bytes) -> dict:
-    """The Recording section from one dump: the read and every transport command's reply."""
-    dev = devices.get_active_device()
-    out = recorder.describe(blob)
-    # Multitrack lives here rather than on Routing: it decides what a recording CONTAINS. The write
-    # is `action_set_multitrack`.
-    mt = rcp_read.values(blob, "recordingMultitrackMode", "int")
-    out["multitrack"] = mt[0] if mt else None
-    # Normalised, because the desk stores out-of-range values (see recorder.RECORDING_FORMAT_LABEL):
-    # anything non-zero IS an MP3, so the control shows MP3 rather than nothing for a stray 3.
-    fmt = rcp_read.values(blob, "recordingCompressionQuality", "int")
-    out["format"] = None if not fmt or fmt[0] is None else (0 if fmt[0] == 0 else 1)
-    pb = rcp_read.values(blob, "recordingProcessingBypass", "bool")
-    out["processing_bypass"] = bool(pb[0]) if pb else None
-    # Known BEFORE the control is drawn, so a button that cannot work is disabled with the reason
-    # attached rather than failing when it is pressed.
-    out["can_delete"] = "recorder" in dev.caps
-    out["delete_note"] = ("" if out["can_delete"] else
-                          _recorder_refusal(dev.name, "delete a recording"))
-    out["storage_writable"] = "storage_write" in dev.caps
-    return out
-
-
-def read_recorder() -> dict:
-    """The Recording page, read from the unit. The desk model adopts the dump, so a push the
-    listener missed is put right here, and the Watcher's count catches up with it untimed."""
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the recorder: {exc}"}
-    out = _recorder_payload(blob)
-    w = recorder_watcher()
-    if w is not None and out.get("state") is not None:
-        out["live"] = w.snapshot()
-    _note_recorder_context(out)
-    out["ok"] = True
-    out["message"] = _recorder_sentence(out)
-    return out
-
-
-# WHERE A RECORDING WOULD GO and HOW LONG THERE IS ROOM FOR, from the last full read.
-#
-# Kept so the CHEAP read can answer in full sentences too. `read_recorder_live` costs no device
-# read at all (it is answered from the push listener), and without this it could only say the bare
-# state - so "Recording status" would give you less than arriving on the page did.
-_recorder_context = {"where": "", "room": "", "low": None}
-
-
-def _note_recorder_context(payload: dict) -> None:
-    dest = payload.get("destination")
-    _recorder_context["where"] = dest["spoken"] if dest else ""
-    _recorder_context["room"] = (payload.get("room") or {}).get("words") or ""
-    _recorder_context["low"] = dest if (dest and dest.get("low")) else None
-
-
-def _recorder_sentence(state, elapsed: str = "") -> str:
-    """What the unit is doing, said in the order it matters while you are working.
-
-    THE ORDER IS THE WHOLE DESIGN OF THIS SENTENCE: while a recording is running the only things
-    worth hearing are WHETHER it is running and HOW LONG it has been going, with the time left at
-    the END. Where it is recording to is not repeated - you
-    were told that when you pressed record - and the storage detail is not here at all; that lives
-    on the Device page, where you go to look at it deliberately.
-
-    `state` may be the state code or the whole payload dict, so the page read and the cheap live
-    read produce identical wording rather than two versions that drift."""
-    if isinstance(state, dict):
-        elapsed = elapsed or ((state.get("live") or {}).get("elapsed") or "")
-        state = state.get("state")
-    where = f" to the {_recorder_context['where']}" if _recorder_context["where"] else ""
-    # ROOM LEFT IN TIME, not megabytes: whether a two-hour show fits is the actual question, and
-    # nobody can answer it from a free-space figure and a bitrate while a recording is running.
-    room = _recorder_context["room"]
-    room_left = f" {room} left." if room else ""
-    if state == recorder.RECORDING:
-        so_far = f" {elapsed} so far." if elapsed else (
-            " It started before AccessCaster was watching, so there is no time to give.")
-        return f"Recording.{so_far}{room_left}"
-    if state == recorder.PAUSED:
-        so_far = f" {elapsed} recorded." if elapsed else ""
-        return f"Paused.{so_far}{room_left}"
-    if state == recorder.READY:
-        low = _recorder_context["low"]
-        if low:
-            room_left += (f" Careful: only {low['free_pct']} percent of the drive is free, "
-                          f"about {low['free_mb']} megabytes.")
-        return f"Ready to record{where}.{room_left}"
-    if state == recorder.NO_DESTINATION:
-        return ("The desk has nowhere to record to. Put a memory card in, or a USB drive in the "
-                "second USB port, and this will say Ready.")
-    return "The desk did not report a recording state."
-
-
-def read_recorder_live() -> dict:
-    """The cheap one: what the unit is doing right now, with NO device read at all.
-
-    Answered entirely from the Watcher's last push, so the page can poll it while it is open
-    without costing a 1.5 s dump or fighting anything else for the HID lock."""
-    w = recorder_watcher()
-    if w is None:
-        return {"ok": False, "message": "The recording state listener is not running."}
-    snap = w.snapshot()
-    snap["ok"] = True
-    # The same sentence the page read produces, built from the listener's state plus the
-    # destination and room noted at the last full read. One wording, two endpoints.
-    snap["message"] = _recorder_sentence(snap.get("state"), snap.get("elapsed") or "")
-    return snap
-
-
-def action_record(command: str) -> dict:
-    """Start, pause, resume or stop, then READ THE STATE BACK before saying what happened.
-
-    The read-back is the whole point. `requestRecordState` is consumed and reset by the firmware,
-    so a write that lands on a unit with no destination looks exactly like one that started a
-    recording. Reporting "recording" to someone who cannot see the unit, when it is not recording,
-    is the single worst thing this page could do."""
-    cmd = (command or "").strip().lower()
-    if cmd not in recorder.COMMANDS:
-        return {"ok": False, "message": f"Unknown recording command: {command}."}
-    gate = _recorder_gate()
-    if gate is not None:
-        return gate
-
-    w = recorder_watcher()
-    before = w.snapshot().get("state") if w else None
-    if cmd == "pause" and before == recorder.PAUSED:
-        return {"ok": True, "message": "It is already paused. Resume carries on with it."}
-    if cmd in ("start", "resume") and before == recorder.RECORDING:
-        return {"ok": True, "message": "It is already recording."}
-    if cmd == "stop" and before in (recorder.READY, recorder.NO_DESTINATION):
-        return {"ok": True, "message": "Nothing is recording."}
-    if cmd == "resume" and before == recorder.PAUSED and announcer.record_feedback == "speak":
-        # Announcements are back on during a pause (_recorder_state_changed), and this is the one
-        # resume where the notice can be finished before the take carries on. With record tones,
-        # the start tone marks the resume instead, and with nothing chosen nothing is said.
-        speech.say_and_wait("Resuming")
-
-    # Mark it BEFORE the write: the unit pushes the new state back in about 30 ms, which can beat
-    # this function's own reply to the page.
-    announcer.mark_self_write(("record",))
-    wanted = {"start": recorder.RECORDING, "resume": recorder.RECORDING,
-              "pause": recorder.PAUSED, "stop": recorder.READY}[cmd]
-    listener = desk_live.PushListener()
-    try:
-        listener.start()            # before the write: the desk answers within 30 ms
-        with desk_access.hid_lock:
-            recorder.send_command(recorder.COMMANDS[cmd])
-        heard = _await_record(listener, wanted)
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not {cmd} the recording: {exc}"}
-    finally:
-        listener.stop()
-    diagnostics.event("record.answered", cmd, **heard)
-
-    state = recorder.read_state(blob)
-    if w is not None:
-        w.note_state(state, timed=(cmd in ("start", "resume")))
-    # Idempotent, and belt and braces: the Watcher has almost certainly done this already off the
-    # unit's push, but a missed push must not leave announcements talking into a take, or leave
-    # them off after one.
-    announcer_back = False
-    if state == recorder.RECORDING:
-        announcer.suspend_for_record()
-    elif state in (recorder.PAUSED, recorder.READY, recorder.NO_DESTINATION):
-        announcer_back = announcer.restore_after_record()
-    info = _recorder_payload(blob)
-    _note_recorder_context(info)
-    if state == wanted:
-        msg = {"start": "Recording.", "resume": "Recording again.",
-               "pause": "Paused.", "stop": "Stopped."}[cmd]
-        dest = info.get("destination")
-        if cmd == "start" and dest:
-            msg = f"Recording to the {dest['spoken']}."
-        if cmd == "stop":
-            newest = (info.get("recordings") or [None])[0]
-            if newest:
-                msg = f"Stopped. Saved {newest['name']}, {newest['duration']}."
-        # SAID IN THE REPLY, not spoken: this is the one path where the notice can reach the
-        # operator without making a sound, and therefore without landing in the recording.
-        if cmd == "start" and announcer.suspended_for_record:
-            msg += " Announcements are off until you stop."
-        elif cmd == "stop" and announcer_back:
-            msg += " Announcements are back on."
-        return {"ok": True, "state": state, "recorder": info, "message": msg}
-    # It did not do what was asked. Say what it IS doing, and why that is usually the answer.
-    return {"ok": False, "state": state, "recorder": info,
-            "message": f"That did not take. The desk says: {_recorder_sentence(info)}"}
-
-
-def action_drop_marker() -> dict:
-    """Put a marker at the current point of the recording.
-
-    THE REPLY IS DELIBERATELY NOT "DONE". Nothing over USB confirms a marker: the desk consumes the
-    write and pushes the field back cleared, and no readable property changes, so the app can only
-    honestly say it was sent and where it believes it landed. The proof lives in the file, as a
-    standard WAV cue point - which is how this was confirmed at all (two markers at exactly 4.0 s
-    and 8.0 s in a take read off the drive on a PC, against a marker-free take with no cue chunk).
-
-    Refused when nothing is running, because a marker has no meaning without a position. The
-    ELAPSED TIME is what makes the reply useful: "marker at 2 minutes 5 seconds" is something you
-    can find again in an editor, where "marker sent" is not."""
-    gate = _recorder_gate("drop a marker")
-    if gate is not None:
-        return gate
-    w = recorder_watcher()
-    state = w.snapshot().get("state") if w else None
-    if state != recorder.RECORDING:
-        return {"ok": False,
-                "message": ("Markers can only be dropped while something is recording."
-                            if state != recorder.PAUSED else
-                            "Nothing is being recorded while it is paused, so there is nowhere to "
-                            "put a marker.")}
-    try:
-        with desk_access.hid_lock:
-            recorder.drop_marker()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not drop a marker: {exc}"}
-    where = (w.snapshot().get("elapsed") if w else "") or ""
-    return {"ok": True,
-            "message": (f"Marker dropped at {where}." if where else "Marker dropped.")
-                       + " It will show up in the recording as a marker your editor can find."}
-
-
-# The unit takes a moment to act on a delete request. Measured at well under a second, so this is
-# a comfortable margin, and the read-back that follows is what actually decides the answer.
-_RECORD_SETTLE_S = 1.2
-# The most a transport press waits for the desk's answer. Only a press the unit ignores waits it
-# out, so it is set well clear of the slowest stop measured (1.06 s): a later answer would be
-# reported as a press that did not take.
-_RECORD_ANSWER_S = 3.0
-
-
-def _await_record(listener, wanted: int) -> dict:
-    """Wait, at most `_RECORD_ANSWER_S`, for the desk to push `recordState` at `wanted`, and return
-    how long it took, for the log. Measured: a start answers in about 40 ms, a stop in 0.5 to 1.1 s,
-    and a stopped take is already in the recordings list by then (no other push marks it).
-
-    A request the unit ignores (nowhere to record to) pushes nothing, so the full margin passes and
-    the read-back reports what the unit is doing instead."""
-    started = time.monotonic()
-    if listener.wait_for("recordState", _RECORD_ANSWER_S, match=lambda v: v == wanted) is None:
-        return {}
-    return {"recordState": round(time.monotonic() - started, 3)}
-
-
-def action_delete_recording(uid: int) -> dict:
-    """Delete one recording from the unit's card or drive, by UID.
-
-    THE READ-BACK IS THE ANSWER, not the write. `requestDeleteUID` self-clears whether or not it did
-    anything (the same pattern as the record command and the marker), so this re-reads the
-    recordings list and reports what it finds: gone, or still there. It never says "deleted"
-    because a write was sent.
-
-    Refuses while a recording is running: deleting a take from under the recorder is the one version
-    of this that could cost somebody real material rather than a test file."""
-    gate = _recorder_gate("delete a recording")
-    if gate is not None:
-        return gate
-    w = recorder_watcher()
-    if (w.snapshot().get("state") if w else None) in (recorder.RECORDING, recorder.PAUSED):
-        return {"ok": False,
-                "message": "Stop the recording first. Nothing is deleted while the recorder is "
-                           "running."}
-    try:
-        with desk_access.hid_lock:
-            before = recorder.read_recordings(rcp_read.read_model_stable(fresh=True))
-            target = next((r for r in before if r.get("uid") == int(uid)), None)
-            if target is None:
-                return {"ok": False, "message": f"There is no recording with id {uid} on the desk."}
-            recorder.delete_recording(int(uid))
-            time.sleep(_RECORD_SETTLE_S)
-            blob = rcp_read.read_model_stable(fresh=True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not delete the recording: {exc}"}
-    info = _recorder_payload(blob)
-    still = any(r.get("uid") == int(uid) for r in (info.get("recordings") or []))
-    if still:
-        return {"ok": False, "recorder": info,
-                "message": (f"{target['name']} is still on the desk. The request was sent and the "
-                            f"desk did not act on it.")}
-    return {"ok": True, "recorder": info,
-            "message": (f"Deleted {target['name']}, {target['duration']}. "
-                        f"{wording.count(len(info.get('recordings') or []), 'recording')} left "
-                        f"on the desk.")}
-
-
-# ----------------------------------------------------------------------------
-# EJECTING AND ERASING THE CARD OR DRIVE. Per-volume switches on the STORAGEVOLUME nodes, found
-# by walking the tree; section 7.2a of the protocol spec. The third volume is the unit's INTERNAL
-# storage, which holds the pad sounds, so only a volume the desk marks as a recording destination
-# may be touched, and the guard is checked against the live dump on every call.
-_ERASE_WAIT_S = 90.0        # a 117 GB drive took about 20 s
-
-
-def _storage_gate():
-    return desk_access.cap_gate("storage_write", lambda name:
-                     f"AccessCaster can show the {name}'s storage but not eject or erase it: that "
-                     f"has only been confirmed on a RODECaster Pro 2.")
-
-
-def _storage_target(index: int):
-    """(volume, node path, blob) for a card or drive this may act on, or (None, refusal, None)."""
-    blob = rcp_read.read_model_stable(fresh=True)
-    vols = recorder.read_volumes(blob)
-    vol = next((v for v in vols if v["index"] == int(index)), None)
-    if vol is None or not vol.get("can_record"):
-        return None, "That is not a card slot or drive this can change.", None
-    nodes = [n for n in model_tree.walk(model_tree.parse(blob)[0]) if n.name == "STORAGEVOLUME"]
-    if int(index) >= len(nodes):
-        return None, "The desk does not publish that slot.", None
-    return vol, nodes[int(index)].path(), blob
-
-
-def _storage_reply(blob: bytes, ok: bool, message: str) -> dict:
-    return {"ok": ok, "recorder": _recorder_payload(blob), "message": message}
-
-
-def action_storage_eject(index: int, on: bool = True) -> dict:
-    """Eject the card or drive (`on`), or reconnect one ejected from here (`on=False`).
-
-    An ejected volume reads as empty, so it can be pulled out safely, and clearing the flag mounts
-    it again with no replug. Refused while recording: the take is on that volume."""
-    gate = _storage_gate()
-    if gate is not None:
-        return gate
-    on = bool(on)
-    try:
-        with desk_access.hid_lock:
-            vol, path, blob = _storage_target(index)
-            if vol is None:
-                return {"ok": False, "message": path}
-            if on and recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
-                return {"ok": False, "message": f"The {vol['spoken']} is being recorded to. Stop "
-                                                f"the recording first."}
-            if on and not vol["inserted"]:
-                return {"ok": False, "message": f"Nothing is in the {vol['spoken']}."}
-            rcp_transfer.send_record(
-                rcp_transfer.build_path_prop_bool("storageVolumeEject", on, path))
-            time.sleep(1.5 if on else 3.0)
-            blob = rcp_read.read_model_stable(fresh=True)
-        now = next((v for v in recorder.read_volumes(blob) if v["index"] == vol["index"]), None)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the {recorder.volume_spoken(index)}: "
-                                        f"{exc}"}
-    if now is None:
-        return _storage_reply(blob, False, f"The desk no longer reports the {vol['spoken']}. If it "
-                                           f"has been unplugged, plug it in again to use it.")
-    if on:
-        if now["mounted"]:
-            return _storage_reply(blob, False, f"The {vol['spoken']} is still in use: the desk "
-                                               f"did not eject it.")
-        return _storage_reply(blob, True, f"The {vol['spoken']} is ejected. You can unplug it "
-                                          f"now, or reconnect it here to use it again.")
-    if not now["mounted"]:
-        return _storage_reply(blob, False, f"The {vol['spoken']} did not come back. If it has "
-                                           f"been unplugged, plug it in again.")
-    return _storage_reply(blob, True, f"The {vol['spoken']} is back, with {now['free_mb']} MB "
-                                      f"free.")
-
-
-def action_storage_erase(index: int) -> dict:
-    """Erase (format) the card or drive. Everything on it is deleted; the page asks first.
-
-    The desk clears `storageVolumeErase` itself when the format is done, which is the
-    confirmation; the free space then reads the whole capacity."""
-    gate = _storage_gate()
-    if gate is not None:
-        return gate
-    listener = desk_live.PushListener()
-    try:
-        with desk_access.hid_lock:
-            vol, path, blob = _storage_target(index)
-            if vol is None:
-                return {"ok": False, "message": path}
-            if recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
-                return {"ok": False, "message": "A recording is running. Stop it before erasing."}
-            if not (vol["inserted"] and vol["mounted"]):
-                return {"ok": False, "message": f"Nothing usable is in the {vol['spoken']}."}
-            listener.start()
-            rcp_transfer.send_record(
-                rcp_transfer.build_path_prop_bool("storageVolumeErase", True, path))
-        listener.wait_for("storageVolumeErase", _ERASE_WAIT_S, match=lambda v: v is False)
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable(fresh=True)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not erase the {recorder.volume_spoken(index)}: "
-                                        f"{exc}"}
-    finally:
-        listener.stop()
-    now = next((v for v in recorder.read_volumes(blob) if v["index"] == vol["index"]), None)
-    if not now or now["free_mb"] < now["capacity_mb"] - 64:
-        return _storage_reply(blob, False, f"The erase was sent, but the {vol['spoken']} does not "
-                                           f"read as empty yet.")
-    return _storage_reply(blob, True, f"Erased the {vol['spoken']}. {now['free_mb']} MB free.")
 
 
 # ----------------------------------------------------------------------------
@@ -816,17 +176,6 @@ def _callme_gate():
 def _callme_dump() -> bytes:
     with desk_access.hid_lock:
         return rcp_read.read_model()
-
-
-def _desk_network(blob: bytes) -> dict:
-    """How the unit reaches the internet, read BY BLOCK (see network.read_status for why). A wifi
-    address means joined; the radio being on does not."""
-    def net(name):
-        return rcp_read.block_value(blob, "NETWORK", name)
-    wired = next((v for v in rcp_read.values(blob, "wiredConnected") if v is not None), None)
-    ip = net("wifiIpAddress") or ""
-    return {"wifi_on": bool(net("wifi")), "wifi_ssid": net("wifiSSID") or "", "wifi_ip": ip,
-            "wired": bool(wired), "online": bool(ip) or bool(wired)}
 
 
 def _callme_payload(d: dict) -> dict:
@@ -1623,11 +972,11 @@ def device_overview(fresh: bool = True) -> dict:
             # A latched voice-FX pad sits on a live mic, makes no sound of its own and simply makes
             # you sound wrong, with nothing on screen to say why.
             "pads_engaged": _pads_engaged(blob),
-            "firmware_update": _firmware_update(blob),
+            "firmware_update": desk_firmware.update(blob),
             # Always reported, unlike the exceptions above: whether the unit is online decides
             # whether CallMe and the firmware check can work at all. `callme_hosting` lets the
             # spoken summary call an offline unit a problem only when guests expect to reach it.
-            "network": dict(_desk_network(blob),
+            "network": dict(network.connection(blob),
                             callme_hosting=bool(rcp_read.first(blob, "sipCallHostingEnabled"))),
             "faders": faders,
             "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,
@@ -4609,40 +3958,6 @@ def read_usb_driver() -> dict:
             "switching": _virtual_devices_following.locked()}
 
 
-def action_set_multitrack(mode: int) -> dict:
-    gate = _output_write_gate()
-    if gate is not None:
-        return gate
-    if mode not in rcp_transfer.MULTITRACK_MODES:
-        return {"ok": False, "message": f"Multitrack mode {mode} is not valid."}
-    with desk_access.hid_lock:
-        rcp_transfer.set_multitrack_mode(mode)
-    # Answered in the same words the control offers (recorder.MULTITRACK_LABEL), not in the unit's
-    # own "Pre-Fader" / "Post-Fader", which never say whether you are getting multitrack at all.
-    return {"ok": True,
-            "message": f"Recording set to {recorder.MULTITRACK_LABEL[mode].lower()}."}
-
-
-def action_set_recording_format(value: int) -> dict:
-    """WAV or MP3 for the unit's own recordings. Refuses anything else, deliberately.
-
-    The desk would ACCEPT a 2 or a 99 and store it, so the validation here is the only thing that
-    keeps it on a value its own touchscreen can represent (see rcp_transfer.set_recording_format).
-    """
-    gate = _output_write_gate()
-    if gate is not None:
-        return gate
-    if value not in recorder.RECORDING_FORMAT_LABEL:
-        return {"ok": False, "message": f"Recording format {value} is not valid."}
-    with desk_access.hid_lock:
-        rcp_transfer.set_recording_format(value)
-    # NOT lowercased, unlike the multitrack reply: these labels open with an initialism, and
-    # "written as mp3, smaller files" reads as a typo and is spoken as a word by some voices.
-    return {"ok": True,
-            "message": f"Recordings will be saved as "
-                       f"{recorder.RECORDING_FORMAT_LABEL[value]}."}
-
-
 def action_set_usb_multitrack(mode: int) -> dict:
     """What the desk sends this computer over USB: the mix pair, or every channel.
 
@@ -5117,28 +4432,6 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
             if parking is not None else "")
 
 
-def _bypass_sentence(where: str, on: bool) -> str:
-    """Said as what you GET, not as the state of a flag: "bypass is on" needs translating in your
-    head every time, and both of these are read aloud."""
-    return (f"{where}: separate tracks will now be "
-            f"{'raw, with no processing' if on else 'processed as you hear them'}. "
-            f"The mixed track is unchanged.")
-
-
-def action_set_processing_bypass(on: bool) -> dict:
-    """The RECORDER's raw switch: what the unit writes to its card or drive.
-
-    Two actions rather than one with a `which`, because the two destinations live on different
-    pages and each endpoint belongs to the page that calls it. They share the sentence, not the
-    route."""
-    gate = _output_write_gate()
-    if gate is not None:
-        return gate
-    with desk_access.hid_lock:
-        rcp_transfer.set_recording_processing_bypass(on)
-    return {"ok": True, "message": _bypass_sentence("Recordings on the card or drive", on)}
-
-
 def action_set_usb_bypass(on: bool) -> dict:
     """The USB stream's raw switch: what this computer receives. Routing > USB audio."""
     gate = _output_write_gate()
@@ -5146,7 +4439,7 @@ def action_set_usb_bypass(on: bool) -> dict:
         return gate
     with desk_access.hid_lock:
         rcp_transfer.set_usb_multitrack_bypass(on)
-    return {"ok": True, "message": _bypass_sentence("The tracks sent to this computer", on)}
+    return {"ok": True, "message": recorder.bypass_sentence("The tracks sent to this computer", on)}
 
 
 # The two auto-mutes, by name: the writer, the property to read back, and what to call it.
@@ -5326,9 +4619,9 @@ def _matrix_write_gate():
 
 
 def _output_write_gate():
-    """Master/global output writes: multitrack, monitor and BT auto-mute, headphone type, master
-    Compellor, output delay: named properties on the OUTPUT, HEADPHONE and MASTERCHANNEL
-    blocks."""
+    """Master/global output writes: USB multitrack and its raw switch, monitor and BT auto-mute,
+    headphone type, master Compellor, output delay: named properties on the OUTPUT, HEADPHONE and
+    MASTERCHANNEL blocks. The recorder's options share the capability (`recording._options_gate`)."""
     return desk_access.cap_gate("output_write", lambda name:
                      f"Changing the master output settings is not enabled on the {name} yet, so "
                      f"these controls are read-only here.")
@@ -5679,7 +4972,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
                 pad_backup = None
     except Exception as exc:
         return {"ok": False, "message": f"Could not read settings from the device: {exc}"}
-    firmware = _firmware_version(blob)
+    firmware = desk_firmware.version(blob)
     dev = devices.get_active_device()
     # capture_length, not count: a profile must capture the WHOLE channelInputSource vector,
     # including any slot the desk does not expose as a fader (both known desks have a 10th, measured),
@@ -5740,11 +5033,11 @@ def action_backup_now(name: str) -> dict:
         return {"ok": False, "message": "Backup name must be 1 to 40 letters, digits, "
                                         "spaces, dashes or underscores."}
 
-    return _profile_job.start(lambda job: _backup_unit(job, safe),
+    return _profile_job.start(lambda job: backup_unit(job, safe),
                               message="Backing up, please wait.", started="Backing up.")
 
 
-def _backup_unit(job, safe: str) -> dict:
+def backup_unit(job, safe: str) -> dict:
     """The body of a backup, run inside `job`: the unit's own copy when there is a drive, then the
     settings and pads on this computer. See `action_backup_now`."""
     show = None
@@ -6086,12 +5379,6 @@ _show_job = desk_access.BackgroundJob("A show command is already running.",
                                       "The show command failed",
                                       "A backup, restore or reset is running on the desk.",
                                       rewrites_desk=True)
-# A firmware update (read_firmware_install, action_firmware_install).
-_firmware_job = desk_access.BackgroundJob("A firmware update is already running.",
-                                          "The firmware update failed",
-                                          "A firmware update is running.")
-# The backup an update takes first, replaced by the next update's.
-FIRMWARE_BACKUP_NAME = "Before firmware update"
 
 
 def _shows_write_gate():

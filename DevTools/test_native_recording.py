@@ -3,7 +3,7 @@ the card and drive are listed with what each is, a choice survives a read, Recor
 by the state and each transport press is refused where it cannot act, the Now line counts a take
 only while the page is shown, a pushed state reads the
 recorder only when it is news, the raw switch waits for separate tracks, and a delete, eject,
-reconnect and erase each call the server with the right target and read again. Nothing is shown
+reconnect and erase each call their action with the right target and read again. Nothing is shown
 and nothing touches a desk.
 
 Run: python DevTools/test_native_recording.py
@@ -17,7 +17,7 @@ import _a11y
 import _testkit
 import announcer
 import recorder
-import server
+import recording
 import wx
 from _testkit import check, check_in, check_true, patched
 from native import recording_section
@@ -153,8 +153,8 @@ def labels():
 
 START, STOP = recording_section.START, recording_section.STOP
 PAUSE, RESUME = recording_section.PAUSE, recording_section.RESUME
-live = {"read_recorder_live": lambda: {"ok": True, "message": "Recording. 1 minute so far."}}
-with patched(sync, (server, {"action_record": fake_record, **live})):
+live = {"read_live": lambda: {"ok": True, "message": "Recording. 1 minute so far."}}
+with patched(sync, (recording, {"action_record": fake_record, **live})):
     section.show(payload(state=recorder.READY), "")
     check("a ready desk offers Start recording and Pause", labels(), (START, PAUSE))
     said = len(frame.said)
@@ -199,9 +199,9 @@ section.show(payload(state=recorder.PAUSED), "")
 check("and a pause on the desk offers Resume", labels(), (STOP, RESUME))
 
 # ---- the Now line's clock --------------------------------------------------------------------
-ticking = {"read_recorder_live": lambda: {"ok": True, "state": recorder.RECORDING,
+ticking = {"read_live": lambda: {"ok": True, "state": recorder.RECORDING,
                                           "message": "Recording. 2 minutes so far."}}
-with patched(sync, (server, ticking)):
+with patched(sync, (recording, ticking)):
     section.show(payload(state=recorder.RECORDING), "Recording. 1 minute so far.")
     check("a hidden page runs no clock", rec._clock.IsRunning(), False)
     rec.Show()
@@ -254,7 +254,7 @@ def pushed_then_replied(command):
 seen = []
 section.show(payload(state=recorder.READY), "")
 said = len(frame.said)
-with patched(sync, (server, {"action_record": pushed_then_replied, **live})):
+with patched(sync, (recording, {"action_record": pushed_then_replied, **live})):
     rec._on_transport(press(rec.transport))
 check("the buttons follow the push before the reply", seen, [(STOP, PAUSE)])
 check("and the reply after it is still not spoken", frame.said[said:], [])
@@ -266,7 +266,7 @@ questions = []
 confirm = (recording_section, {"confirm": lambda _p, title, _t, _a: questions.append(title) or True})
 section.show(payload(takes=[take(5, "REC0005"), take(4, "REC0004")]), "")
 takes.list.SetSelection(1)
-with patched(sync, confirm, (server, {"action_delete_recording": lambda uid: calls.append(
+with patched(sync, confirm, (recording, {"action_delete_recording": lambda uid: calls.append(
         ("delete", uid)) or {"ok": True, "recorder": payload(takes=[take(5, "REC0005")]),
                              "message": "Deleted."}})):
     reads.clear()
@@ -281,7 +281,7 @@ takes._on_delete(None)
 check("a desk that cannot delete says why", frame.said[-1], "Not here.")
 
 section.show(payload(), "")
-with patched(sync, (server, {"action_storage_eject": lambda index, on: calls.append(
+with patched(sync, (recording, {"action_storage_eject": lambda index, on: calls.append(
         ("eject", index, on)) or {"ok": True, "message": "Ejected."}})):
     storage._on_eject(None)
     check("Eject ejects the chosen volume", calls[-1], ("eject", 1, True))
@@ -330,7 +330,7 @@ reads.clear()
 with patched(sync, confirm, (recording_section, {
         "JobDialog": FakeJob, "report": lambda _p, titles, reply: reports.append(
             titles[0] if reply.get("ok") else titles[1])}),
-        (server, {"action_storage_erase": lambda index: calls.append(("erase", index))
+        (recording, {"action_storage_erase": lambda index: calls.append(("erase", index))
                   or {"ok": True, "recorder": payload(), "message": "Erased."}})):
     storage._on_erase(None)
 check("Erase is asked about by name", questions[-1], "Erase the usb drive?")

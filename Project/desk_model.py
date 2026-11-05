@@ -362,7 +362,7 @@ def firmware() -> Optional[str]:
 def online() -> Optional[bool]:
     """Whether the unit reaches the internet, by wifi or cable, or None before the picture holds
     the NETWORK block. A wifi address means joined; the radio being on does not. The address is
-    read on its block, as `server._desk_network` reads a dump: a stray of the same name can sit in
+    read on its block, as `network.connection` reads a dump: a stray of the same name can sit in
     another."""
     book = _layout
     if book is None or not book.has(rcp_transfer.NETWORK):

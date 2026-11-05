@@ -267,8 +267,10 @@ The layers, bottom up:
 - `desk_access.py` is the shared core the features reach the desk through: the lock, the desk as
   it is now, the capability gate and the long job. It imports none of the modules that use it.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
-  `recorder.py`, `shows.py`, `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the
-  desk's button presses spoken) over `speech.py` (everything the app says) and `settings_file.py`.
+  `recorder.py`, `recording.py` (the Recording page's app side, over `recorder.py`),
+  `firmware.py` (the check and the install, over `desk_firmware.py`), `shows.py`,
+  `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
+  over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
@@ -725,7 +727,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   reciting both, and Expanded going away is the consequential one: the operator's Game, Music, A
   and B inputs go dead and every RODECaster device on the computer is renamed.
 - **THE THIRD STORAGEVOLUME IS THE INTERNAL PAD STORAGE, AND ERASE MUST NEVER REACH IT.** Eject and
-  erase are per-volume switches; `_storage_target` takes the volume from `recorder.read_volumes` on
+  erase are per-volume switches; `recording._storage_target` takes the volume from `recorder.read_volumes` on
   the live dump and refuses anything not marked `can_record`, which the internal one never is. Do
   not address the nodes by a fixed index instead.
 - **LEAVING EXPANDED OVER USB DOES NOT UNASSIGN THE FOUR; THE TOUCHSCREEN DOES IT ITSELF.** The
@@ -1617,7 +1619,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   reaches the take then and a silent pause sounds exactly like recording. A resume from the app
   speaks "Resuming" and waits for it to finish (`speech.say_and_wait`) before it sends the command; a
   resume from the unit's button is already recording by the time we hear it.
-- **A RECORD TONE IS QUEUED IN `_recorder_state_changed` BEFORE `suspend_for_record`, AND PLAYS FOR
+- **A RECORD TONE IS QUEUED IN `recording._state_changed` BEFORE `suspend_for_record`, AND PLAYS FOR
   THE APP'S OWN PRESSES TOO** (`announcer.record_feedback` "tone", `recorder.record_cue`). The speech thread
   plays what is already queued after announcements go off, but `speech._submit` drops anything
   submitted after: queued after the suspend, or left to `action_record`'s reply, which returns after
@@ -2035,7 +2037,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   command. The transport buttons follow that held push at once (the button label is the
   confirmation), so the pressed label is taken at the press, not at the reply.
 - **A TRANSPORT PRESS WAITS FOR THE DESK'S `recordState` PUSH, NOT A FIXED TIME**
-  (`server._await_record`, with the HID lock released while it waits). A start answers in about
+  (`recording._await_record`, with the HID lock released while it waits). A start answers in about
   40 ms, a stop in 0.5 to 1.1 s; `_RECORD_ANSWER_S` (3 s) is only waited out by a press the unit
   ignores. Cut it near 1 s and a slow stop is reported as a press that did not take. A stop pushes
   no `lastRecordingID` under this listener, and the new take is in the list by the time the state

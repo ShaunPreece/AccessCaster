@@ -11,6 +11,7 @@ state changes, and read from the desk whenever Current state is opened.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import firmware
 import network
 import server
 from native import a11y
@@ -466,7 +467,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
     def _on_check(self, _event):
         job = JobDialog(self, "Checking for a firmware update",
                         "Checking with RODE. This takes up to twenty seconds.",
-                        lambda dialog: call(dialog, server.action_check_firmware,
+                        lambda dialog: call(dialog, firmware.action_check,
                                             done=dialog.finish),
                         stop=None, closable=False)
         with job:
@@ -490,7 +491,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
             self.FitInside()
 
     def _on_install(self, _event):
-        call(self, server.read_firmware_install, done=self._ask_install)
+        call(self, firmware.read_install, done=self._ask_install)
 
     def _ask_install(self, ready):
         if not ready.get("ok") or ready.get("refusal"):
@@ -498,7 +499,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
                            or "The desk could not be read.")
             return
         version = ready["version"]
-        dialog = FirmwareDialog(self, version, ready.get("firmware"), server.FIRMWARE_BACKUP_NAME)
+        dialog = FirmwareDialog(self, version, ready.get("firmware"), firmware.BACKUP_NAME)
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 self.install.SetFocus()
@@ -507,8 +508,8 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
         reply = follow_job(self, f"Installing firmware {version}",
                            "Backing the desk up, then updating it." if backup_first
                            else f"Updating the desk to firmware {version}.",
-                           lambda: server.action_firmware_install(backup_first),
-                           lambda _started: server.firmware_job_status)
+                           lambda: firmware.action_install(backup_first),
+                           lambda _started: firmware.job_status)
         report(self, ("Firmware updated", "Firmware not updated"), reply)
         self.check.SetFocus()
         self.frame.desk_rewritten()

@@ -46,6 +46,17 @@ def wireless_mics(blob) -> dict:
             "any_connected": any(t["connected"] for t in tx)}
 
 
+def connection(blob: bytes) -> dict:
+    """How the unit reaches the internet, read BY BLOCK (see read_status for why). A wifi
+    address means joined; the radio being on does not."""
+    def net(name):
+        return rcp_read.block_value(blob, "NETWORK", name)
+    wired = next((v for v in rcp_read.values(blob, "wiredConnected") if v is not None), None)
+    ip = net("wifiIpAddress") or ""
+    return {"wifi_on": bool(net("wifi")), "wifi_ssid": net("wifiSSID") or "", "wifi_ip": ip,
+            "wired": bool(wired), "online": bool(ip) or bool(wired)}
+
+
 def read_status() -> dict:
     """Live-read wifi, Bluetooth and the wireless mics from the device model. Read-only.
 

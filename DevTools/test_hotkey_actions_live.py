@@ -18,7 +18,7 @@ import time
 import _bootstrap  # noqa: F401  - puts Project/ on sys.path
 import commands
 import desk_access
-import server
+import recording
 import speech
 
 
@@ -52,7 +52,7 @@ def main():
 
     if do_record:
         print("\n--- start and stop a recording ---")
-        server.recorder_watcher()
+        recording.watcher()
         time.sleep(2.0)                       # let the watcher hear the current state
         print(repr(commands.run("rec.toggle")))
         time.sleep(4.0)

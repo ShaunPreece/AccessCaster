@@ -162,7 +162,7 @@ levels_on = bool(settings_file.load().get("announcer_levels", True))
 # choose otherwise, and the tones only make sense to someone who has been told what they mean.
 mute_tones = bool(settings_file.load().get("announcer_mute_tones", False))
 # WHAT RECORDING STARTING, PAUSING AND STOPPING SOUNDS LIKE, from the unit or from here
-# (server._recorder_state_changed): spoken, a tone in its place, or nothing. Never both: speech after
+# (recording._state_changed): spoken, a tone in its place, or nothing. Never both: speech after
 # the tone repeats it and lands in the take. A card or drive going in or out is spoken whichever is
 # chosen. Spoken by default, like the mutes.
 RECORD_FEEDBACK = {"speak": "Speak it", "tone": "Play a tone", "silent": "Say nothing"}
@@ -961,7 +961,7 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
 
 
 # Set while the RECORDER is switching announcements off or back on, so the announcer thread leaves
-# and returns without a greeting of its own (`server._recorder_state_changed` says why that
+# and returns without a greeting of its own (`recording._state_changed` says why that
 # matters).
 _quiet_stop = threading.Event()
 _quiet_start = threading.Event()

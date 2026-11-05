@@ -255,6 +255,15 @@ BYPASS_HINT = ("Separate tracks only, and it changes what is IN them rather than
 BYPASS_NEEDS_MULTITRACK = ("This does nothing while only the mixed track is being made. Choose "
                            "pre-fader or post-fader above first.")
 
+
+def bypass_sentence(where: str, on: bool) -> str:
+    """Said as what you GET, not as the state of a flag: "bypass is on" needs translating in your
+    head every time, and both of these are read aloud."""
+    return (f"{where}: separate tracks will now be "
+            f"{'raw, with no processing' if on else 'processed as you hear them'}. "
+            f"The mixed track is unchanged.")
+
+
 # The command values, named so a caller never passes a bare number.
 CMD_STOP = 0
 CMD_PAUSE = 1
@@ -468,7 +477,7 @@ def describe(blob: bytes) -> dict:
 # what actually happened - which is the only honest way round, since the request field self-clears.
 
 def send_command(value: int) -> None:
-    """Write `requestRecordState`. Nothing is verified here: see server.action_record, which reads
+    """Write `requestRecordState`. Nothing is verified here: see recording.action_record, which reads
     the state back rather than trusting the write."""
     rcp_transfer.write_at(rcp_transfer.RECORDER, "requestRecordState", "int", int(value))
 
@@ -495,7 +504,7 @@ def drop_marker() -> None:
 # `recordingContent` each lose one occurrence and no other property moves. Two more facts:
 #   - THE REMAINING RECORDINGS ARE NOT RENUMBERED, so a UID is a stable handle and a list held by a
 #     page does not shift under it.
-#   - THE FIELD SELF-CLEARS, so the write never confirms itself. `server.action_delete_recording`
+#   - THE FIELD SELF-CLEARS, so the write never confirms itself. `recording.action_delete_recording`
 #     re-reads the recordings list and reports what it finds.
 #
 # SHOWCONTROL also carries a `requestDeleteUID` on the Pro II here: an inert stray left by an
@@ -508,7 +517,7 @@ def build_delete_request(uid: int) -> bytes:
 
 def delete_recording(uid: int) -> None:
     """Send the delete request. VERIFIES NOTHING - the field self-clears either way, so the caller
-    must re-read the recordings list and check the UID has gone (server.action_delete_recording)."""
+    must re-read the recordings list and check the UID has gone (recording.action_delete_recording)."""
     rcp_transfer.send_record(build_delete_request(uid))
 
 

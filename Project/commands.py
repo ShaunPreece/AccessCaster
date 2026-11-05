@@ -35,6 +35,7 @@ import network
 import pad_shortcuts
 import rcp_read
 import recorder
+import recording
 import server
 import soundpad
 import speech
@@ -421,15 +422,15 @@ def _run_rec(arg: str) -> dict:
         # One key both starts and stops: a PAUSED take is stopped rather than restarted. The live
         # state is the watcher's last push, so this costs no device read, and action_record reads
         # the state back before it reports, so what is spoken is what the unit is really doing.
-        state = server.read_recorder_live().get("state")
+        state = recording.read_live().get("state")
         going = state in (recorder.RECORDING, recorder.PAUSED)
-        return server.action_record("stop" if going else "start")
+        return recording.action_record("stop" if going else "start")
     if arg == "marker":
-        return server.action_drop_marker()
+        return recording.action_drop_marker()
     if arg == "pause":
-        live = server.read_recorder_live()
+        live = recording.read_live()
         paused = live.get("state") == recorder.PAUSED
-        return server.action_record("resume" if paused else "pause")
+        return recording.action_record("resume" if paused else "pause")
     return _fail(f"Unknown recording command {arg}.")
 
 
