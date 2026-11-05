@@ -34,7 +34,8 @@ def service(start: bool = False, announce: bool = False):
                          "then run this again.")
     import server
     if start:
-        server.start_service(announce=announce, shortcuts=False, greeting="")
+        import service
+        service.start(announce=announce, register_shortcuts=False, greeting="")
     return server
 
 

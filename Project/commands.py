@@ -20,15 +20,12 @@ A COMMAND ID IS THE STABLE HANDLE, and it is what a shortcut stores: "chan.mute:
 "pad.fire:14", "scheme.apply:My Show". It survives the catalogue being rebuilt, a pad being renamed
 and the app being restarted. Where an id names something that has since gone (a deleted scheme, a
 cleared pad), `run` says so in a sentence rather than failing silently.
-
-WHY IT IMPORTS `server` INSIDE THE FUNCTIONS. server.py imports this module, so a top-level import
-back would be circular. Every dispatch happens long after both modules are loaded, so a local import
-is free and keeps the arrow pointing one way.
 """
 
 from __future__ import annotations
 
 import announcer
+import app_window
 import channels
 import desk_model
 import devices
@@ -36,6 +33,7 @@ import diagnostics
 import pad_shortcuts
 import rcp_read
 import recorder
+import server
 import soundpad
 import speech
 import wording
@@ -192,7 +190,6 @@ def _cough_key() -> dict:
 
     With nothing latched and every mic already muted it says so and writes nothing, rather than
     treating "all muted" as an invitation to open them."""
-    import server
     global _muted_mics
     mics = [c for c in channels.active_ui_channels() if c.get("kind") == "mic"]
     if not mics:
@@ -237,7 +234,6 @@ def _say_state() -> dict:
     a second and a half is a key you press again. By exception like the page's own report - what is
     muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
     is itself the answer and takes one sentence to hear."""
-    import server
     speech.say("Reading the desk.")   # silent whenever the announcer is
     ov = server.device_overview()
     if not ov.get("ok"):
@@ -273,10 +269,9 @@ def _say_state() -> dict:
 def _open_window() -> dict:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
-    import app_window
     # SILENT ON SUCCESS: Windows announces the raised window and its focused control, so speaking
     # here would talk over the screen reader in a second voice. A real activation is
-    # `server.raise_window`'s problem and is documented there.
+    # `app_window.raise_window`'s problem and is documented there.
     if app_window.show is None:
         return _said("")
     if app_window.show():
@@ -315,7 +310,6 @@ def _muted_now(name: str) -> bool:
 
 def _channel_read(name: str) -> dict:
     """One channel's state from a fresh read: mute, solo, processing and phantom."""
-    import server
     res = server.action_get_channels()
     for c in res.get("channels", []):
         if c.get("name") == name:
@@ -326,7 +320,6 @@ def _channel_read(name: str) -> dict:
 
 
 def _run_chan(arg: str) -> dict:
-    import server
     what, _, name = arg.partition(":")
     if what == "solos.clear":
         return server.action_clear_solos()
@@ -375,7 +368,6 @@ def _known_level(kind: str, idx: int):
 
 
 def _run_level(arg: str) -> dict:
-    import server
     parts = arg.split(".")
     what = parts[0]
     direction = parts[1] if len(parts) > 1 else ""
@@ -423,7 +415,6 @@ def _recording_commands() -> list:
 
 
 def _run_rec(arg: str) -> dict:
-    import server
     if arg == "toggle":
         # One key both starts and stops: a PAUSED take is stopped rather than restarted. The live
         # state is the watcher's last push, so this costs no device read, and action_record reads
@@ -459,13 +450,11 @@ def _callme_commands() -> list:
 def _callme_contact_commands() -> list:
     # BOUND BY NAME, NOT BY CODE: a code is what gets edited when its owner's changes, and the
     # shortcut has to survive that edit.
-    import server
     return [_cmd(f"callme.contact:{c['name']}", "CallMe", f"Call {c['name']}")
             for c in server._callme_contacts()]
 
 
 def _run_callme(arg: str) -> dict:
-    import server
     if arg.startswith("contact:"):
         name = arg.partition(":")[2]
         c = next((c for c in server._callme_contacts() if c["name"].lower() == name.lower()), None)
@@ -504,7 +493,6 @@ def _output_commands() -> list:
 
 
 def _run_out(arg: str) -> dict:
-    import server
     what, _, which = arg.partition(":")
     if what == "mute":
         # The two output mutes are UNIT SETTINGS (that is the write path action_set_output_mute
@@ -537,7 +525,6 @@ def _unit_commands() -> list:
 
 
 def _run_unit(arg: str) -> dict:
-    import server
     if arg == "midi":
         now = bool(server.read_unit_settings().get("midi"))
         return server.action_set_midi(not now)
@@ -556,7 +543,6 @@ def _run_unit(arg: str) -> dict:
 # ---------------------------------------------------------------------------------------------
 
 def _scheme_commands() -> list:
-    import server
     out = []
     try:
         schemes = server.read_routing_schemes()
@@ -578,7 +564,6 @@ def _scheme_commands() -> list:
 
 
 def _run_scheme(arg: str) -> dict:
-    import server
     kind, _, name = arg.partition(":")
     return server.action_apply_routing_scheme(name, builtin=(kind == "builtin"))
 
@@ -649,7 +634,6 @@ def _run_pad(arg: str) -> dict:
 # ---------------------------------------------------------------------------------------------
 
 def _preset_commands() -> list:
-    import server
     out = []
     try:
         presets = server.preset_list()
@@ -665,7 +649,6 @@ def _preset_commands() -> list:
 
 
 def _run_preset(arg: str) -> dict:
-    import server
     _what, _, rest = arg.partition(":")
     name, _, preset = rest.partition(":")
     ch = channels.ui_channel_map().get(name)

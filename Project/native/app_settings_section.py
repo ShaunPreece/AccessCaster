@@ -11,6 +11,7 @@ import wx
 import wx.lib.scrolledpanel as scrolled
 
 import announcer
+import app_settings_actions
 import app_updates
 import server
 import speech
@@ -84,7 +85,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        self.data = None             # the last `server.read_announce`
+        self.data = None             # the last `app_settings_actions.read_announce`
         sizer, parent = page_body(self)
         self.switches = [Switch(self, parent, sizer, label, send, *self.field(key),
                                 description=description, guard=self._unread)
@@ -152,7 +153,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
             self.show(reply)
             if announce:
                 self.frame.say("Announcement settings read.")
-        call(self, server.read_announce, done=done)
+        call(self, app_settings_actions.read_announce, done=done)
 
     def show(self, data):
         self.data = data
@@ -183,16 +184,16 @@ class GeneralPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        self.data = None             # the last `server.read_general`
+        self.data = None             # the last `app_settings_actions.read_general`
         sizer, parent = page_body(self)
         self.autostart = Switch(self, parent, sizer,
                                 "Start AccessCaster when you sign in to Windows",
-                                server.action_set_autostart,
+                                app_settings_actions.action_set_autostart,
                                 lambda: (self.data or {}).get("enabled"), lambda _on: None,
                                 guard=self._autostart_refused, accepted=lambda _r: self.read())
         self.keep_in_tray = Switch(
             self, parent, sizer, "Keep running in the system tray when the window is closed",
-            server.action_set_keep_in_tray, lambda: (self.data or {}).get("keep_in_tray"),
+            app_settings_actions.action_set_keep_in_tray, lambda: (self.data or {}).get("keep_in_tray"),
             self._remember_tray,
             description="Your keyboard shortcuts and spoken announcements only work while "
                         "AccessCaster is running. Off, closing the window quits it.",
@@ -237,15 +238,15 @@ class GeneralPage(wx.Panel):
             self.keep_in_tray.show()
             if announce:
                 self.frame.say("General settings read.")
-        call(self, server.read_general, done=done)
+        call(self, app_settings_actions.read_general, done=done)
 
     def _on_export(self, _event):
-        call(self, server.action_export_app_settings,
+        call(self, app_settings_actions.action_export,
              done=lambda reply: self._report(("Settings saved", "Settings not saved"), reply,
                                              self.export))
 
     def _on_folder(self, _event):
-        call(self, server.action_open_app_settings_folder,
+        call(self, app_settings_actions.action_open_export_folder,
              done=lambda reply: self.frame.reply(self.folder, reply))
 
     def _report(self, titles, reply, source):
@@ -254,7 +255,7 @@ class GeneralPage(wx.Panel):
 
     def _on_restore(self, _event):
         with wx.FileDialog(self, "Restore from a saved settings file",
-                           defaultDir=server.app_settings_dir(),
+                           defaultDir=app_settings_actions.export_dir(),
                            wildcard="AccessCaster settings (*.json)|*.json",
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as chooser:
             if chooser.ShowModal() != wx.ID_OK:
@@ -283,7 +284,7 @@ def _import_file(path):
     except (OSError, ValueError):
         return {"ok": False, "message": "That file is not readable as settings. Choose the file "
                                         "AccessCaster saved."}
-    return server.action_import_app_settings(payload)
+    return app_settings_actions.action_import(payload)
 
 
 class UpdatesPage(wx.Panel):

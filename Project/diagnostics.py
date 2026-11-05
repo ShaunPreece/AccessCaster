@@ -30,7 +30,7 @@ THREE PROPERTIES IT HAS TO HAVE, and each one is a decision rather than a defaul
   * IT CANNOT BREAK THE APP. Every entry point swallows its own exceptions. A log that can take
     down the thing it is logging is worse than no log.
 
-IT IS OFF UNTIL `start()` IS CALLED, which `server.start_service` does - the one place every
+IT IS OFF UNTIL `start()` IS CALLED, which `service.start` does: the one place every
 entry point funnels through, and only the holder of the single-instance lock gets there. So the
 offline test suites import this module and write nothing, and only the process that owns the desk
 writes to the file. That is also what keeps it a SINGLE-WRITER file.
@@ -402,7 +402,7 @@ def _flusher() -> None:
 def start(context: str, **fields) -> str | None:
     """Begin logging. Returns the log path, or None if logging is off or could not be opened.
 
-    Called once, from `server._bring_up_server`: the single place every entry point goes through,
+    Called once, from `service.start`: the single place every entry point goes through,
     and the only process that should be writing this file. Set ACCESSCASTER_NO_DIAG_LOG to refuse.
     """
     global _fh, _size, _active, _start_time

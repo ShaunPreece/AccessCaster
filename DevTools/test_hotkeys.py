@@ -148,17 +148,17 @@ def main():
 
     # With announcements off, a failure is the "failed" cue; during a take, nothing.
     import announcer  # noqa: PLC0415
-    import server  # noqa: PLC0415
+    import shortcuts  # noqa: PLC0415
     import speech  # noqa: PLC0415
     cues = []
     was_on = speech.enabled.is_set()
     speech.enabled.clear()
     with _testkit.patched((speech, {"tone": lambda name, despite_off=False: cues.append(
             (name, despite_off)) or True})):
-        server._shortcut_failed("the desk said no")
+        shortcuts._failed("the desk said no")
         check_true("announcements off plays the failed cue", cues == [("failed", True)], str(cues))
         with _testkit.patched((announcer, {"suspended_for_record": True})):
-            server._shortcut_failed("the desk said no")
+            shortcuts._failed("the desk said no")
         check_true("and a take keeps it silent", cues == [("failed", True)], str(cues))
     if was_on:
         speech.enabled.set()

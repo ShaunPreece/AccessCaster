@@ -168,7 +168,7 @@ def _later(seconds, fn, *args) -> None:
 
 def start() -> None:
     """Report what the last update did, then keep the automatic check running. Called once, from
-    `server.start_service`."""
+    `service.start`."""
     global _started
     if _started:
         return

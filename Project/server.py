@@ -7,8 +7,8 @@ unit's real state: one command makes the desk stream its whole property model, w
 parses.
 
 The window (`native/`) calls the read_* and action_* functions here directly, on worker threads.
-`start_service` brings up what runs whether or not the window is open (the announcer, the global
-shortcuts and the watchers), and `stop_service` lets it all go. `tray.py` is the entry point.
+Each section that runs something in the background has a `start_*` (and `stop_*` where it holds
+something), which `service.py` calls; `tray.py` is the entry point.
 """
 
 from __future__ import annotations
@@ -22,23 +22,16 @@ import time
 import webbrowser
 
 import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
-import app_settings  # this app's own settings file: export and import, no file access
-import app_updates  # keeping AccessCaster itself up to date: check, decide, download, install
 import autogain  # sets a mic's gain by measuring it
-import autostart  # the HKCU Run entry, shared with installer.iss
 import callme  # RODE's remote guests: hosting, answering, call state
 import change_words  # a change on the desk in words
 import channels
-import commands  # the catalogue of what a shortcut can do, from the spec tables
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import desk_firmware  # installing a firmware update through the desk's own updater
 import desk_live  # the one listener: everything the desk pushes, to every subscriber
 import desk_model  # the desk as last seen, kept current by the listener and our own writes
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
-import encoder_home  # a lost encoder is put back on the virtual faders and monitor
-import encoder_hold  # an encoder hold mutes the channel a channel button selected
-import hotkeys  # system-wide keyboard shortcuts: the Win32 half (keys, no meaning)
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import model_tree
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
@@ -73,9 +66,6 @@ from paths import (  # frozen-build-safe asset/data locations
     resource_path,
     safe_name,
     write_json,
-)
-from version import (
-    __version__ as APP_VERSION,  # single source of truth (Project/version.py)
 )
 
 
@@ -399,7 +389,7 @@ def _recorder_gate(task: str = ""):
     return _cap_gate("recorder", lambda name: _recorder_refusal(name, task))
 
 
-def _recorder_watcher():
+def recorder_watcher():
     """The running Watcher, started on first use. Returns None if it could not be started, and the
     callers then fall back to reading the state out of a model dump."""
     global _recorder_watch
@@ -447,7 +437,7 @@ def read_recorder() -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the recorder: {exc}"}
     out = _recorder_payload(blob)
-    w = _recorder_watcher()
+    w = recorder_watcher()
     if w is not None and out.get("state") is not None:
         out["live"] = w.snapshot()
     _note_recorder_context(out)
@@ -514,7 +504,7 @@ def read_recorder_live() -> dict:
 
     Answered entirely from the Watcher's last push, so the page can poll it while it is open
     without costing a 1.5 s dump or fighting anything else for the HID lock."""
-    w = _recorder_watcher()
+    w = recorder_watcher()
     if w is None:
         return {"ok": False, "message": "The recording state listener is not running."}
     snap = w.snapshot()
@@ -539,7 +529,7 @@ def action_record(command: str) -> dict:
     if gate is not None:
         return gate
 
-    w = _recorder_watcher()
+    w = recorder_watcher()
     before = w.snapshot().get("state") if w else None
     if cmd == "pause" and before == recorder.PAUSED:
         return {"ok": True, "message": "It is already paused. Resume carries on with it."}
@@ -622,7 +612,7 @@ def action_drop_marker() -> dict:
     gate = _recorder_gate("drop a marker")
     if gate is not None:
         return gate
-    w = _recorder_watcher()
+    w = recorder_watcher()
     state = w.snapshot().get("state") if w else None
     if state != recorder.RECORDING:
         return {"ok": False,
@@ -676,7 +666,7 @@ def action_delete_recording(uid: int) -> dict:
     gate = _recorder_gate("delete a recording")
     if gate is not None:
         return gate
-    w = _recorder_watcher()
+    w = recorder_watcher()
     if (w.snapshot().get("state") if w else None) in (recorder.RECORDING, recorder.PAUSED):
         return {"ok": False,
                 "message": "Stop the recording first. Nothing is deleted while the recorder is "
@@ -827,7 +817,7 @@ _callme_watch = None
 _CALLME_ANSWER_WAIT_S = 4.0
 
 
-def _callme_watcher():
+def callme_watcher():
     """The running Watcher, started on first use, or None if it could not be started."""
     global _callme_watch
     if _callme_watch is None:
@@ -869,7 +859,7 @@ def _callme_payload(d: dict) -> dict:
     """The page's reply: the state, plus the sentences the page shows, all worded here."""
     d = dict(d)
     d["online"] = desk_model.online()
-    w = _callme_watcher()
+    w = callme_watcher()
     if w is not None and "missed" not in d:
         d["missed"] = w.missed()        # a dump has no memory of a missed call; the Watcher does
     for s in d.get("slots", []):
@@ -933,7 +923,7 @@ def read_callme() -> dict:
 def read_callme_live() -> dict:
     """The cheap one, from the Watcher alone: no device read. `version` changes whenever anything
     the page shows has changed, so the page redraws only then."""
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
         return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
@@ -943,7 +933,7 @@ def read_callme_live() -> dict:
 def _callme_state_now():
     """(state, control path) from the Watcher once the model holds CallMe, else from a fresh dump.
     A hotkey answer should not wait a second and a half for a dump the model makes unnecessary."""
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is not None and w.control_path() is not None:
         return snap, w.control_path()
@@ -1023,7 +1013,7 @@ def _callme_respond(answer: bool) -> dict:
             return {"ok": False, "message": callme.sentence(
                 f"{call['name']} is calling, but every call this plan allows is already in use.")}
         slot = free[0]
-    w = _callme_watcher()
+    w = callme_watcher()
     if w is not None:
         w.note_handled(call["id"])
         if answer:
@@ -1077,7 +1067,7 @@ def action_callme_hangup(slot: int = 0) -> dict:
     gate = _callme_gate()
     if gate is not None:
         return gate
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
         return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
@@ -1142,7 +1132,7 @@ def action_callme_dial(code: str) -> dict:
     slot = free[0]
     i = slot["slot"] - 1
     who = callme.peer_name(callme.RODE_PREFIX + code)
-    w = _callme_watcher()
+    w = callme_watcher()
     if w is None:
         # The listener is what tells a call that rang from one that failed, so without it a dial
         # would go out with nothing to follow it.
@@ -1229,7 +1219,7 @@ def _callme_ring(call_id, sentence: str) -> None:
     start = time.monotonic()
 
     def still_ringing() -> bool:
-        w = _callme_watcher()
+        w = callme_watcher()
         snap = w.snapshot() if w is not None else None
         ringing = (snap or {}).get("incoming") or {}
         return (ringing.get("id") == call_id and time.monotonic() - start < _CALLME_RING_MAX_S
@@ -1257,7 +1247,7 @@ def action_callme_extend(auto: bool = False) -> dict:
     gate = _callme_gate()
     if gate is not None:
         return gate
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = w.snapshot() if w is not None else None
     if snap is None:
         return {"ok": False, "message": "The CallMe listener has not read the desk yet."}
@@ -1291,7 +1281,7 @@ def action_callme_end() -> dict:
     """Decline the call that is ringing, or else hang up the one that is up. A ringing call comes
     first, so a second call arriving mid-conversation is turned away rather than the guest you are
     talking to being cut off."""
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = (w.snapshot() if w is not None else None) or {}
     if snap.get("incoming"):
         return action_callme_decline()
@@ -1303,7 +1293,7 @@ def action_callme_end() -> dict:
 def action_callme_answer() -> dict:
     """Answer the ringing call; with nothing ringing, extend a call that is about to end. A ringing
     call comes first, because its two minutes run out sooner than an expiring call's five."""
-    w = _callme_watcher()
+    w = callme_watcher()
     snap = (w.snapshot() if w is not None else None) or {}
     if not snap.get("incoming") and any(s.get("state") == "Expiring"
                                         for s in snap.get("slots", [])):
@@ -2539,7 +2529,7 @@ _RODE_READ_WAIT_S = 1.0
 _rode_was_open = False
 
 
-def _follow_rode_app(open_now: bool) -> None:
+def follow_rode_app(open_now: bool) -> None:
     """`rode_app.on_look`: while RODE's app is open, compare each dump with the desk model, so what
     it changed, which the desk never pushes, reaches whatever follows the desk
     (`desk_model.reveal`). NOTHING IS READ ON A TIMER: every reader is sent every dump's frames,
@@ -2642,7 +2632,7 @@ def action_set_channel_mute(name: str, on: bool) -> dict:
     return {"ok": True, "message": msg}
 
 
-def _encoder_hold_mute(strip: int) -> None:
+def encoder_hold_mute(strip: int) -> None:
     """`encoder_hold`'s write: toggle the mute of the channel a channel button has given the encoder,
     and speak it as the desk's own hold is spoken."""
     if _strip_toggle_gate("Muting") is not None:
@@ -4583,7 +4573,7 @@ _clip_wake = threading.Event()
 _clip_supervisor = None
 
 
-def _clip_warning_on() -> bool:
+def clip_warning_on() -> bool:
     return bool(settings_file.load().get("clip_warning", False))
 
 
@@ -4628,7 +4618,7 @@ def _clip_supervise() -> None:
     while True:
         with _clip_lock:
             running = bool(_clip_watcher and _clip_watcher.running)
-        if _clip_warning_on():
+        if clip_warning_on():
             if not running:
                 why = _clip_start()
                 if why and why != said:
@@ -5266,7 +5256,7 @@ def action_set_usb_expanded(on: bool) -> dict:
                         + _virtual_devices_follow(value, arrived) + next_step)}
 
 
-def _seed_usb_expanded() -> None:
+def seed_usb_expanded() -> None:
     """Publish the desk's USB mode once at startup, so no page has to be opened first.
 
     Takes the HID lock like any other read and never raises: a desk that is not there yet simply
@@ -5316,6 +5306,32 @@ def _virtual_devices_repair() -> None:
         diagnostics.event("virtual_devices.repair_failed", f"{exc}")
     finally:
         _virtual_devices_busy.release()
+
+
+def start_virtual_devices() -> None:
+    """Make Windows agree with RODE's driver now, and keep it agreeing.
+
+    The first pass applies a mode change made while this app was not running. It waits so the
+    announcer's greeting comes first, and is silent unless something changes. The pass after a
+    mode write acts on a single sample, so a bind that lands a moment later leaves Windows holding
+    endpoints this app switched off itself: Windows announces every endpoint change, and the
+    watcher listens and repairs."""
+    global _virtual_devices_watch
+    threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None, False)),
+                     daemon=True, name="virtual-devices-start").start()
+    _virtual_devices_watch = threading.Thread(
+        target=virtual_devices.watch_endpoints,
+        args=(_virtual_devices_repair, _virtual_devices_watch_stop),
+        daemon=True, name="virtual-devices-watch")
+    _virtual_devices_watch.start()
+
+
+def stop_virtual_devices() -> None:
+    """Unregister the endpoint watcher's callback, rather than leave Windows' audio service holding
+    a pointer into a process that is going away."""
+    _virtual_devices_watch_stop.set()
+    if _virtual_devices_watch is not None:
+        _virtual_devices_watch.join(timeout=2.0)
 
 
 # Set while the follow-up is re-enumerating the desk on purpose, so the announcer's reconnect
@@ -7857,7 +7873,7 @@ def action_restore_backup_pads(name: str) -> dict:
                                   failed="Could not restore the pads")
 
 
-def _documents_folder(name: str) -> str:
+def documents_folder(name: str) -> str:
     """Documents\\AccessCaster\\<name>, created if need be: where the app's exports go.
 
     Documents rather than the app's own data folder (%LOCALAPPDATA%): an export you cannot find is
@@ -7869,7 +7885,7 @@ def _documents_folder(name: str) -> str:
     return base
 
 
-def _open_folder_reply(folder: str, what: str) -> dict:
+def open_folder_reply(folder: str, what: str) -> dict:
     """Open `folder` in Explorer and say so. `what` names it in a failure: "The folder"."""
     try:
         _open_folder_focused(folder)
@@ -7880,7 +7896,7 @@ def _open_folder_reply(folder: str, what: str) -> dict:
 
 def pad_export_dir() -> str:
     """Where an exported pad sound goes."""
-    return _documents_folder("Pad exports")
+    return documents_folder("Pad exports")
 
 
 def action_export_pad(pad: int) -> dict:
@@ -7967,7 +7983,7 @@ def _open_folder_focused(folder: str) -> None:
 
 def action_open_pad_exports() -> dict:
     """Open the exports folder in Explorer, so the file can actually be used once it is copied."""
-    return _open_folder_reply(pad_export_dir(), "The exports folder")
+    return open_folder_reply(pad_export_dir(), "The exports folder")
 
 
 def action_tidy_pad_audio() -> dict:
@@ -8128,7 +8144,7 @@ def action_preview_stop(grid: int) -> dict:
         return {"ok": False, "message": f"Could not stop live preview: {exc}"}
 
 
-def _cleanup_preview_on_exit() -> None:
+def cleanup_preview_on_exit() -> None:
     """If the server stops (watchdog/quit/Ctrl-C) while a live preview is engaged, clear the
     scratch pad so no effect is left on the mic. Best effort; failures are ignored."""
     if _preview_grid is None:
@@ -8138,563 +8154,6 @@ def _cleanup_preview_on_exit() -> None:
             soundpad.preview_stop(_preview_grid)
     except Exception:
         pass
-
-
-# ----------------------------------------------------------------------------
-# GLOBAL KEYBOARD SHORTCUTS. The Windows plumbing is hotkeys.py, what a shortcut can do is
-# commands.py, and the pad shortcuts are pad_shortcuts.py. What follows is the manager that joins
-# them, the shipped defaults, and the Keyboard shortcuts page's state.
-# ----------------------------------------------------------------------------
-
-# WHICH PAD TYPES A SHORTCUT MAY BE POINTED AT lives in `commands.PAD_TYPES`: sound, voice FX and
-# mixer.
-
-# WHAT A FRESH INSTALL GETS. (command, modifiers, key, speak). Only laid down when nothing has been
-# saved, so deleting them stays deleted.
-#
-# THE NUMBER ROW IS THE PAD SCHEME, and it is one row you can find by touch: 1 to N play the pads of
-# the current bank, and Dash and Equals - which sit at the END of that same row - step the bank down
-# and up. Deliberately NO NUMPAD KEYS, which rules out the otherwise obvious numpad pair for bank
-# down/up; brackets lose to Dash and Equals because they are not on the number row.
-#
-# N IS PER-DEVICE. Eight on a Pro II, six on a Duo, taken from the device table and never
-# hard-coded, so a Duo owner is not given two keys that can only ever say "there is no pad 7".
-def _pad_hotkey_scheme() -> list:
-    """The pad half, on its own, because it can also be added to a list that already exists
-    (`action_add_pad_shortcuts`) rather than only shipped to a fresh install."""
-    per_bank = devices.get_active_device().pad.pads_per_bank
-    rows = ([("pad.playing", hotkeys.DEFAULT_MODS, "P"),
-             ("pad.bank:down", hotkeys.DEFAULT_MODS, hotkeys.KEY_DASH),
-             ("pad.bank:up", hotkeys.DEFAULT_MODS, hotkeys.KEY_EQUALS)]
-            + [(f"pad.slot:{n}", hotkeys.DEFAULT_MODS, str(n)) for n in range(1, per_bank + 1)])
-    # Which of these speak is `commands.speaks_by_default`, so the shipped set and a hand-added
-    # shortcut agree. The pad keys arrive silent: the pad IS the feedback.
-    return [(cid, mods, key, commands.speaks_by_default(cid)) for cid, mods, key in rows]
-
-
-def _hotkey_defaults() -> list:
-    return [
-        ("app.announcer", hotkeys.DEFAULT_MODS, "A", True),
-        ("app.mics", hotkeys.DEFAULT_MODS, "M", True),
-        ("rec.toggle", hotkeys.DEFAULT_MODS, "R", True),
-        ("app.state", hotkeys.DEFAULT_MODS, "S", True),
-        ("app.window", hotkeys.DEFAULT_MODS, "O", True),
-        ("callme.answer", hotkeys.DEFAULT_MODS, "C", True),
-        ("callme.end", hotkeys.DEFAULT_MODS, "D", True),
-    ] + _pad_hotkey_scheme()
-
-
-_hotkeys = None
-
-
-def hotkey_manager():
-    """The one manager, built on first use and given the saved shortcuts. Built lazily so importing
-    server.py (our DevTools scripts all do) never registers a system-wide hotkey by surprise: only
-    _bring_up_server asks for it, and only when the app is really running.
-
-    The manager holds keys and knows nothing about the desk; `commands` holds what a shortcut can
-    DO. The two meet here, and only here."""
-    global _hotkeys
-    if _hotkeys is None:
-        # Replies go through speech.say, which enforces the announcer switch: a recording's
-        # suspension silences the very keys you reach for mid-take, and a shortcut that FAILS is
-        # silent too. Turning announcements back ON still speaks, because announcer.action_set_announce(True)
-        # has run by the time the reply is handed over.
-        mgr = hotkeys.HotkeyManager(speak=speech.say,
-                                    runner=commands.run,
-                                    labeller=_hotkey_label,
-                                    fail=_shortcut_failed)
-        mgr.load(settings_file.load().get("hotkeys") or {},
-                 defaults=_hotkey_defaults())
-        _hotkeys = mgr
-    return _hotkeys
-
-
-# The catalogue is generated from live spec tables, and generating it can touch the desk (pads,
-# presets), so labels are CACHED: `state()` asks for one per shortcut and the page reads state
-# often. Cleared whenever the catalogue is re-read.
-_hotkey_labels = {}
-
-
-def _shortcut_failed(message: str) -> None:
-    """A shortcut that failed: spoken, or with announcements off, which silence every phrase so no
-    words reach the mix, the "failed" cue, so a press that did nothing never passes for one that
-    worked. Silent while a take holds announcements off (`suspended_for_record`): nothing the app
-    plays may land in the recording."""
-    if speech.enabled.is_set():
-        speech.say(message)
-    elif announcer.suspended_for_record or not speech.tone("failed", despite_off=True):
-        diagnostics.event("say", message[:90] + "  [suppressed: announcements off]")
-
-
-def _hotkey_label(command_id: str) -> str:
-    """The label a stored command id shows. A miss fills the cache from ONE catalogue, so a list of
-    uncached shortcuts costs one build rather than one each.
-
-    A shortcut bound to something that no longer exists (a deleted mix scheme, a cleared pad) keeps
-    its place in the list and SAYS so, rather than vanishing and leaving a key mysteriously taken."""
-    label = _hotkey_labels.get(command_id)
-    if label is None:
-        try:
-            for c in commands.catalogue(include_device=True):
-                _hotkey_labels[c["id"]] = c["label"]
-            label = _hotkey_labels.get(command_id, f"{command_id} (not available now)")
-        except Exception as exc:
-            diagnostics.event("hotkeys.labels_unread", "shortcut labels could not be built",
-                              error=str(exc))
-            label = command_id
-        _hotkey_labels[command_id] = label
-    return label
-
-
-def read_announce() -> dict:
-    """Every announcement setting, and the voices and outputs this computer offers."""
-    lists = speech.sapi_lists()
-    return {"ok": True, "on": speech.enabled.is_set(), "levels": announcer.levels_on,
-            "mute_tones": announcer.mute_tones, "record_feedback": announcer.record_feedback,
-            "remember": announcer.remember,
-            "volume": speech.volume,
-            "voice": speech.chosen_voice, "output": speech.chosen_output,
-            "voices": lists["voices"], "outputs": lists["outputs"],
-            "clip_warning": _clip_warning_on(),
-            "running": bool(announcer._thread and announcer._thread.is_alive())}
-
-
-def hotkey_state() -> dict:
-    return _hotkey_page_state(hotkey_manager())
-
-
-def _pad_set_commands() -> set:
-    return {cid for cid, _mods, _key, _speak in _pad_hotkey_scheme()}
-
-
-def _hotkey_page_state(mgr) -> dict:
-    """The manager's state plus `pad_set`: "all", "some" or "none" of the pad scheme is bound,
-    which is what the "Use the SMART pad keys" switch shows (ticked, mixed or clear)."""
-    state = mgr.state()
-    want = _pad_set_commands()
-    have = want & {row["command"] for row in state["shortcuts"]}
-    state["pad_set"] = "all" if have == want else ("some" if have else "none")
-    # What "Restore default shortcuts" would leave, for its confirmation to say.
-    state["default_count"] = len(_hotkey_defaults()) - len(want)
-    state["default_pad_count"] = len(want)
-    return state
-
-
-def hotkey_commands() -> dict:
-    """The whole catalogue of bindable commands, grouped by category for the Add dialog.
-
-    THIS ONE READS THE DESK (pads and presets), which is why it is not part of `hotkey_state`: the
-    shortcut list has to answer at once and with the unit unplugged, and only the Add dialog needs
-    the catalogue. A read that fails still returns the device-free half rather than nothing."""
-    try:
-        items = commands.catalogue(include_device=True)
-        complete = True
-    except Exception:
-        items = commands.catalogue(include_device=False)
-        complete = False
-    _hotkey_labels.clear()
-    for c in items:
-        _hotkey_labels[c["id"]] = c["label"]
-    groups = []
-    for cat in commands.CATEGORIES:
-        rows = [c for c in items if c["category"] == cat]
-        if rows:
-            groups.append({"category": cat, "commands": rows})
-    msg = f"{len(items)} things can be put on a shortcut."
-    if not complete:
-        msg += " The desk could not be read, so pads and presets are not listed."
-    return {"ok": True, "groups": groups, "count": len(items), "complete": complete,
-            "message": msg}
-
-
-def app_settings_dir() -> str:
-    """Where an app-settings export goes. The point of this one is to survive a reinstall."""
-    return _documents_folder("App settings")
-
-
-def _app_settings_available() -> dict:
-    """What this computer actually HAS, for the machine-specific keys - see app_settings.merge_import.
-
-    Best-effort: if a list cannot be read, the key is left out entirely, which merge_import treats
-    as "cannot check, so apply it" rather than as "not available". Refusing to restore a setting
-    because we failed to enumerate would be the wrong way round."""
-    out = {}
-    try:
-        lists = speech.sapi_lists()
-        # Only offer a list we actually got. Over Remote Desktop, SAPI enumeration fails with
-        # 0x80045039 and both come back empty, and an empty list must NOT be read as "this
-        # computer has no voices, so refuse the setting" - it means we could not tell.
-        if lists.get("voices"):
-            out["announcer_voice"] = list(lists["voices"])
-        if lists.get("outputs"):
-            out["announcer_output"] = list(lists["outputs"])
-    except Exception:
-        pass
-    try:
-        found = meters.desk_streams()
-        if found.get("streams"):
-            out["meter_stream"] = [s["name"] for s in found["streams"] if s.get("name")]
-    except Exception:
-        pass
-    return out
-
-
-def action_export_app_settings() -> dict:
-    """Write this app's own settings to a file: shortcuts, announcements, level warnings.
-
-    NOT the desk - that is a profile. This is the half no profile has ever carried, so before it
-    existed a reinstall lost every keyboard shortcut with no way back."""
-    payload = app_settings.build_export(settings_file.load())
-    # Writing an empty file would be a cheerful success for a no-op, and the user would carry it to
-    # the new machine believing their shortcuts were in it.
-    if app_settings.is_empty(payload):
-        return {"ok": False,
-                "message": "There is nothing to save yet: no keyboard shortcuts are set up and no "
-                           "announcement or level-warning preference has been changed from its "
-                           "default."}
-    # A filename somebody will hear rather than see, so the date is spoken, not numeric.
-    name = f"AccessCaster settings {wording.spoken_date(datetime.date.today())}.json"
-    path = os.path.join(app_settings_dir(), name)
-    try:
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-    except OSError as exc:
-        return {"ok": False, "message": f"Could not write the settings file: {exc}"}
-    return {"ok": True, "path": path, "folder": app_settings_dir(),
-            "message": (f"Saved {app_settings.describe_export(payload)} to {name}, in your "
-                        f"Documents folder under AccessCaster, App settings. It holds none of "
-                        f"the desk's settings.")}
-
-
-def action_import_app_settings(payload) -> dict:
-    """Restore this app's own settings from an export. MERGES, never replaces (see merge_import).
-
-    The shortcuts are re-registered here rather than at the next restart, because a shortcut that
-    only works tomorrow reads exactly like one that does not work."""
-    why = app_settings.validate(payload)
-    if why:
-        return {"ok": False, "message": why}
-    changes, report = app_settings.merge_import(payload, settings_file.load(),
-                                                _app_settings_available())
-    if not changes:
-        return {"ok": False, "message": app_settings.describe_import(report)}
-    settings_file.update(**changes)
-    if "callme_contacts" in changes:
-        callme.set_contacts(changes["callme_contacts"])
-
-    notes = []
-    if "hotkeys" in changes:
-        # Re-register NOW. mgr.load validates and registers each combination, and saveable() is
-        # written back so anything the manager refused (a key another program already owns) does
-        # not sit in the file pretending to work.
-        try:
-            mgr = hotkey_manager()
-            mgr.load(changes["hotkeys"], defaults=_hotkey_defaults())
-            settings_file.update(hotkeys=mgr.saveable())
-        except Exception as exc:
-            notes.append(f" The shortcuts were saved but could not all be registered: {exc}")
-    # Speech and the announcer hold their settings in module state, so a restored preference has to
-    # be pushed into them or it would not take effect until a restart.
-    speech.apply_settings(changes)
-    announcer.apply_settings(changes)
-    return {"ok": True, "report": report,
-            "message": app_settings.describe_import(report) + "".join(notes)}
-
-
-def read_general() -> dict:
-    """The General settings: whether AccessCaster starts when this user signs in (see autostart.py
-    for why that is the installer's own registry value rather than one of ours), and
-    `keep_in_tray`."""
-    return {"ok": True, **autostart.state(), "keep_in_tray": keep_in_tray()}
-
-
-def keep_in_tray() -> bool:
-    """Whether closing the window leaves the app running in the tray, the default, rather than
-    quitting it."""
-    return settings_file.load().get("keep_in_tray", True) is not False
-
-
-def action_set_keep_in_tray(on: bool) -> dict:
-    if on is None:
-        return {"ok": False, "message": "Say whether to keep running in the tray or not."}
-    settings_file.update(keep_in_tray=bool(on))
-    return {"ok": True, "keep_in_tray": bool(on),
-            "message": ("Closing the window will leave AccessCaster running in the tray." if on
-                        else "Closing the window will quit AccessCaster.")}
-
-
-def action_set_autostart(on: bool) -> dict:
-    """Turn "start when you sign in" on or off, for THIS user only."""
-    if on is None:
-        return {"ok": False, "message": "Say whether to start at sign-in or not."}
-    res = autostart.set_enabled(bool(on))
-    return {**res, "ok": bool(res.get("ok"))}
-
-
-def action_open_app_settings_folder() -> dict:
-    """Open the folder the export went to, so the file can actually be copied somewhere safe."""
-    return _open_folder_reply(app_settings_dir(), "The folder")
-
-
-def action_set_hotkey(id: str, key: str, enabled: bool, speak: bool = True) -> dict:
-    """Change one shortcut, and persist it only if it was accepted. The manager validates and
-    registers first, so the settings file can never hold a binding that does not work."""
-    mgr = hotkey_manager()
-    res = mgr.set_binding(str(id or ""), str(key or ""), bool(enabled), bool(speak))
-    if res.get("ok"):
-        settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def action_set_hotkey_mods(mods) -> dict:
-    """Change the keys held for EVERY shortcut."""
-    mgr = hotkey_manager()
-    res = mgr.set_mods(list(mods or []))
-    if res.get("ok"):
-        settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def action_add_hotkey(command: str, key: str = "") -> dict:
-    """Add a shortcut for a catalogue command, on `key` or else the first free key, already
-    working."""
-    mgr = hotkey_manager()
-    res = mgr.add(str(command or ""), speak=commands.speaks_by_default(command),
-                  key=str(key or ""))
-    if res.get("ok"):
-        settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def action_add_pad_shortcuts() -> dict:
-    """Put the whole pad scheme onto this machine's shortcut list, on request.
-
-    THE ONE THING A SHIPPED DEFAULT CANNOT DO. Defaults land only on a machine that has saved
-    nothing, so anybody who had already chosen their keys before the pad scheme existed would never
-    see it. This is the "Use the SMART pad keys" switch ticked, so it stays an explicit choice
-    rather than a start-up surprise, and it can be ticked again after switching desks - a Duo has six
-    pads in a bank where a Pro II has eight, and the missing two are added without disturbing
-    anything."""
-    mgr = hotkey_manager()
-    res = mgr.add_scheme(_pad_hotkey_scheme())
-    settings_file.update(hotkeys=mgr.saveable())
-    added, had, clashed = res["added"], res["already_there"], res["clashed"]
-    bits = []
-    if added:
-        bits.append(f"Added {wording.count(len(added), 'pad shortcut')}.")
-    if had:
-        bits.append(f"{len(had)} {wording.plural(len(had), 'was', 'were')} already there.")
-    for command, key, taken_by in clashed:
-        bits.append(f"{hotkeys.combo_text(mgr.state()['mods'], key)} is already used for "
-                    f"{_hotkey_label(taken_by)}, so {_hotkey_label(command)} was not added.")
-    if not bits:
-        bits.append("Every pad shortcut was already there.")
-    return {"ok": True, "message": " ".join(bits), "state": _hotkey_page_state(mgr)}
-
-
-def action_restore_hotkey_defaults() -> dict:
-    """Replace every shortcut with what a fresh install has, keys to hold included. The page asks
-    first: anything added or changed is lost."""
-    mgr = hotkey_manager()
-    res = mgr.reset(_hotkey_defaults())
-    settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def action_set_pad_shortcuts(on: bool) -> dict:
-    """The "Use the SMART pad keys" switch: on adds whatever of the pad scheme is missing, off
-    deletes every shortcut for a pad-scheme command, on whatever key it had been moved to."""
-    if on:
-        return action_add_pad_shortcuts()
-    mgr = hotkey_manager()
-    want = _pad_set_commands()
-    gone = [row for row in mgr.state()["shortcuts"] if row["command"] in want]
-    for row in gone:
-        mgr.remove(row["id"])
-    settings_file.update(hotkeys=mgr.saveable())
-    msg = (f"Removed {wording.count(len(gone), 'pad shortcut')}." if gone
-           else "There were no pad shortcuts to remove.")
-    return {"ok": True, "message": msg, "state": _hotkey_page_state(mgr)}
-
-
-def action_delete_hotkey(id: str) -> dict:
-    mgr = hotkey_manager()
-    res = mgr.remove(str(id or ""))
-    if res.get("ok"):
-        settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def action_set_hotkeys_enabled(on: bool) -> dict:
-    """The master switch. Off unregisters every combination, so nothing is held from other
-    programs: the point of an off switch is that it really lets go."""
-    mgr = hotkey_manager()
-    res = mgr.set_enabled(bool(on))
-    settings_file.update(hotkeys=mgr.saveable())
-    res["state"] = _hotkey_page_state(mgr)
-    return res
-
-
-def raise_window(hwnd: int) -> bool:
-    """Restore `hwnd` if minimised and bring it to the foreground, from any thread. Returns whether
-    Windows made it the foreground window. Logs the outcome as `window.raise`."""
-    if os.name != "nt":
-        return False
-    import ctypes
-    from ctypes import wintypes
-    user32 = ctypes.windll.user32
-    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-    user32.IsIconic.argtypes = [wintypes.HWND]
-    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-    user32.SetForegroundWindow.restype = wintypes.BOOL
-    # Declared: an undeclared restype is a C int, which TRUNCATES a 64-bit HWND and would make the
-    # success check below compare two different halves of the same window.
-    user32.GetForegroundWindow.argtypes = []
-    user32.GetForegroundWindow.restype = wintypes.HWND
-    SW_RESTORE = 9
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-
-    # A PLAIN SetForegroundWindow, AND NOTHING ELSE. Windows grants this process the right to set
-    # the foreground while the hotkey it registered is being handled, so the call is allowed and
-    # produces a NORMAL activation - which is the whole point, because a normal activation is what
-    # tells a screen reader the window came forward.
-    #
-    # DO NOT ADD A WORKAROUND HERE IF IT FAILS. Every one of them - a minimize/restore flip, an
-    # Alt tap, AttachThreadInput - puts the window in front WITHOUT a real activation: measured,
-    # the window became foreground and held it, GetGUIThreadInfo agreed the keyboard focus was
-    # ours, and NVDA went on reading the app the user came from. Alt-Tabbing to the same window
-    # announced it perfectly, which is what proved the window and the screen reader were both
-    # fine. A refusal here means the CALLER has lost the foreground right, and the fix is at that
-    # end - see hotkeys._FOREGROUND_COMMANDS, where dispatching to a worker thread was spending it.
-    user32.SetForegroundWindow(hwnd)
-    # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED: the caller stays silent on a
-    # success, so a refusal reported as success would be silent too.
-    got = user32.GetForegroundWindow()
-    ok = bool(got) and got == hwnd
-    # LOG THE FOCUS WINDOW, NOT JUST THE FOREGROUND ONE. They are different things and only the
-    # second is what a screen reader follows, so "the window came up but my screen reader still
-    # says I am in the other app" has two possible causes that look identical from outside: a
-    # window that is merely in front without holding focus, or a screen reader reporting a stale
-    # object because nothing generated a focus event. This one line separates them.
-    # GetGUIThreadInfo(0) reports the foreground thread's own focus window.
-    try:
-        class _GTI(ctypes.Structure):
-            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
-                        ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
-                        ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
-                        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
-                        ("rcCaret", wintypes.RECT)]
-        gti = _GTI()
-        gti.cbSize = ctypes.sizeof(_GTI)
-        user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(_GTI)]
-        user32.GetGUIThreadInfo(0, ctypes.byref(gti))
-
-        def _title(h):
-            if not h:
-                return "none"
-            n = user32.GetWindowTextLengthW(h)
-            b = ctypes.create_unicode_buffer(n + 1)
-            user32.GetWindowTextW(h, b, n + 1)
-            return (b.value or "")[:40]
-
-        diagnostics.event("window.raise", "app window", activated=ok,
-                          wanted=f"{hwnd}", foreground=f"{got}",
-                          fg_title=_title(got),
-                          active=f"{gti.hwndActive}", active_title=_title(gti.hwndActive),
-                          focus=f"{gti.hwndFocus}", focus_title=_title(gti.hwndFocus))
-    except Exception as exc:
-        diagnostics.event("window.raise", "app window", activated=ok, error=f"{exc}")
-    return ok
-
-
-def start_service(announce=True, shortcuts=True, greeting=announcer.GREETING_STARTED) -> None:
-    """Bring up what runs whether or not the window is open. Returns once the desk has been read
-    once, so the window's first pages show real state.
-
-      - announce:  turn the control announcer on at startup, and the clip warning with it.
-      - greeting:  what the announcer says once the desk is open; empty for nothing.
-      - shortcuts: register the global keyboard shortcuts. A DevTools run passes False: a tooling
-                   run must never take keys away from the whole machine.
-    """
-    # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because every entry point comes through here.
-    diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
-                      shortcuts=shortcuts)
-    # The one listener, and what follows it whatever else is running: the naming layout, and the
-    # pad bank and playback the shortcuts fire by.
-    desk_live.start()
-    channels.follow_desk()
-    pad_shortcuts.follow_desk()
-    rode_app.on_look = _follow_rode_app
-    rode_app.start()
-    if announce and announcer.starts_on():
-        # App settings can still turn it off.
-        announcer.action_set_announce(True, chosen=False, greeting=greeting)
-    if announce:
-        start_clip_warning()
-    # SEED THE EXPANDED FLAG BEFORE ANYTHING ASKS FOR IT. It is a published cache, and unpublished
-    # it answers False: the fader list then omits Game, Music, A and B and the write gate refuses
-    # them, so on a desk that IS in Expanded the four cannot be assigned until something reads the
-    # routing. The announcer seeds it too, but only while announcements are ON. Skipped when
-    # something has already published, so this costs one dump at most.
-    threading.Thread(target=_seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
-    # RODE's virtual devices may have been left switched off in Windows by a mode change made
-    # while this app was not running; apply the driver's current state now. Delayed so the
-    # announcer's greeting comes first, and silent unless something actually changed.
-    threading.Thread(target=lambda: (time.sleep(4), _virtual_devices_follow(None, False)),
-                     daemon=True, name="virtual-devices-start").start()
-    # And keep agreeing with it. The pass above, and the one after every mode write, each act on a
-    # single sample, so a bind that lands a moment later leaves Windows holding endpoints this app
-    # switched off itself. Windows announces every endpoint change; this listens and repairs.
-    global _virtual_devices_watch
-    _virtual_devices_watch = threading.Thread(
-        target=virtual_devices.watch_endpoints,
-        args=(_virtual_devices_repair, _virtual_devices_watch_stop),
-        daemon=True, name="virtual-devices-watch")
-    _virtual_devices_watch.start()
-    if shortcuts:
-        # Failures are reported and never fatal: no shortcut is worth refusing to start the app.
-        try:
-            mgr = hotkey_manager()
-            mgr.start()
-            live = [a["combo"] for a in mgr.state()["shortcuts"]
-                    if a["enabled"] and not a["problem"]]
-            print(f"Keyboard shortcuts registered: {len(live)}.")
-        except Exception as exc:
-            print(f"Keyboard shortcuts unavailable: {exc}")
-    # The recording state follower: it is what makes the Recording page free to poll, and it is
-    # how a press of the unit's own REC button is noticed.
-    _recorder_watcher()
-    # A hold on the encoder while a channel button holds it mutes that channel, as the desk's own
-    # hold does for the encoder's ring target.
-    encoder_hold.Watcher(_encoder_hold_mute).start()
-    # A turn that moves nothing, with no channel selected, puts the encoder back on the virtual
-    # faders and monitor.
-    encoder_home.Watcher(action_reset_encoder).start()
-    # AccessCaster's own update: says what the last one did, then checks now and then. Silent
-    # unless a version is found, and never from a source run.
-    app_updates.start()
-    # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
-    # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
-    _callme_watcher()
-    # THE FIRST READ OF THE DESK, adopted by the desk model, so every page and listener starts
-    # from the desk as it is.
-    try:
-        with _hid_lock:
-            rcp_read.read_model_stable()
-        midi = desk_model.first("systemMidiControl", "bool")
-        print(f"Read the desk (MIDI {'on' if midi else 'off'}, "
-              f"firmware {desk_model.firmware()}).")
-    except Exception as exc:
-        print(f"Startup read skipped: {exc}")
 
 
 def desk_work_in_progress() -> str | None:
@@ -8714,25 +8173,8 @@ def desk_work_in_progress() -> str | None:
     return None
 
 
-def stop_service(reason: str) -> None:
-    """What the app lets go of on the way out. Safe to call more than once.
-
-    The global shortcuts go first: left registered, they keep taking those keys from every other
-    program with nothing left running to act on them. Then any Hold-mode pad a shortcut is holding,
-    which would otherwise keep playing with nothing left to release it, and any live preview still
-    engaged on a mic. The endpoint watcher unregisters its callback rather than leaving Windows'
-    audio service holding a pointer into a process that is going away, the speech output closes,
-    since a device left open holds the process's exit up, and the desk listener closes its handle
-    on its own thread."""
-    diagnostics.event("app.stopping", reason)
-    _virtual_devices_watch_stop.set()
-    if _virtual_devices_watch is not None:
-        _virtual_devices_watch.join(timeout=2.0)
-    if _hotkeys is not None:
-        _hotkeys.stop()
-    pad_shortcuts.release_held()
-    _cleanup_preview_on_exit()
-    speech.stop()
-    rode_app.stop()
-    desk_live.stop()
-    diagnostics.stop(reason)
+def read_desk_once() -> None:
+    """The first read of the desk, adopted by the desk model, so every page and listener starts
+    from the desk as it is. Raises when the desk cannot be read."""
+    with _hid_lock:
+        rcp_read.read_model_stable()

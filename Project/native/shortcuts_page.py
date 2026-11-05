@@ -7,7 +7,7 @@ page shows that.
 """
 import wx
 
-import server
+import shortcuts
 from native import a11y
 from native.calls import call
 from native.dialogs import FormDialog, _paragraphs, confirm
@@ -57,11 +57,11 @@ class ShortcutsPage(wx.Panel):
         self.Hide()
         self.section = section
         self.frame = section.frame
-        self.state = None            # the last `server.hotkey_state`, or a write's `state`
+        self.state = None            # the last `shortcuts.read_state`, or a write's `state`
         self.rows = []               # the shortcuts as listed
         sizer, parent = page_body(self)
         self.enabled = Switch(
-            self, parent, sizer, "Use keyboard shortcuts", server.action_set_hotkeys_enabled,
+            self, parent, sizer, "Use keyboard shortcuts", shortcuts.action_set_enabled,
             lambda: (self.state or {}).get("enabled"), lambda _on: None,
             description="These work anywhere in Windows, whatever program you are in and even "
                         "with this window closed, for as long as AccessCaster is running. Each "
@@ -104,7 +104,7 @@ class ShortcutsPage(wx.Panel):
             if announce:
                 self.frame.say("Shortcuts read." if reply.get("ok")
                                else reply.get("message") or "Could not read the shortcuts.")
-        call(self, server.hotkey_state, done=done)
+        call(self, shortcuts.read_state, done=done)
 
     def show(self, state, keep=None):
         """Put the whole page in `state`, keeping the selection on `keep` (an id) or on the shortcut
@@ -182,7 +182,7 @@ class ShortcutsPage(wx.Panel):
         never sent per shortcut."""
         values = {"key": row["key"], "enabled": row.get("enabled"),
                   "speak": row.get("speak", True), **changes}
-        call(self, server.action_set_hotkey, row["id"], values["key"], values["enabled"],
+        call(self, shortcuts.action_set, row["id"], values["key"], values["enabled"],
              values["speak"], done=lambda reply: self._applied(reply, row["id"]))
 
     def _edit(self):
@@ -211,7 +211,7 @@ class ShortcutsPage(wx.Panel):
         neighbour = others[0]["id"] if others else None
         # A delete that worked says nothing more: it was confirmed, and the focus landing on the
         # next shortcut shows it is gone.
-        call(self, server.action_delete_hotkey, row["id"],
+        call(self, shortcuts.action_delete, row["id"],
              done=lambda reply: self._applied(reply, neighbour, speak=False))
 
     # ---- the buttons ----------------------------------------------------------------------
@@ -222,7 +222,7 @@ class ShortcutsPage(wx.Panel):
             return
         # The catalogue reads the pads and presets on the unit, so it is read on every open.
         self.frame.say("Reading what can be put on a shortcut.")
-        call(self, server.hotkey_commands, done=self._add_with)
+        call(self, shortcuts.read_catalogue, done=self._add_with)
 
     def _add_with(self, catalogue):
         if not catalogue.get("groups"):
@@ -254,7 +254,7 @@ class ShortcutsPage(wx.Panel):
         if not confirm(self, "Restore the default shortcuts?", restore_text(self.state),
                        "Restore"):
             return
-        call(self, server.action_restore_hotkey_defaults,
+        call(self, shortcuts.action_restore_defaults,
              done=lambda reply: self._applied(reply, keep=None))
 
     def _on_pad_set(self, _event):
@@ -268,7 +268,7 @@ class ShortcutsPage(wx.Panel):
         def done(reply):
             self.show(reply.get("state") or self.state)
             self.frame.reply(self.pad_set, reply)
-        call(self, server.action_set_pad_shortcuts, on, done=done)
+        call(self, shortcuts.action_set_pad_shortcuts, on, done=done)
 
 
 class EditDialog(FormDialog):
@@ -298,7 +298,7 @@ class EditDialog(FormDialog):
         if index == wx.NOT_FOUND:
             return "Choose a key first."
         key, on, speak = self.keys[index], not self.off.GetValue(), self.speak.GetValue()
-        return lambda: server.action_set_hotkey(self.row["id"], key, on, speak)
+        return lambda: shortcuts.action_set(self.row["id"], key, on, speak)
 
 
 class ModsDialog(FormDialog):
@@ -317,7 +317,7 @@ class ModsDialog(FormDialog):
 
     def request(self):
         mods = [mod for mod, box in self.boxes if box.GetValue()]
-        return lambda: server.action_set_hotkey_mods(mods)
+        return lambda: shortcuts.action_set_mods(mods)
 
 
 class AddDialog(FormDialog):
@@ -357,4 +357,4 @@ class AddDialog(FormDialog):
         command = self._commands()[index]["id"]
         key_index = self.key.GetSelection()
         key = self.keys[key_index] if key_index != wx.NOT_FOUND else ""
-        return lambda: server.action_add_hotkey(command, key)
+        return lambda: shortcuts.action_add(command, key)

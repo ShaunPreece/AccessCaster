@@ -1146,7 +1146,7 @@ desk_model.dump_finished(desk_model.dump_starting(),
                          layout_fixture.skeleton(layout_fixture.PRO2_177))
 desk_model._reset()
 with patched((server.rcp_read, {"read_model_stable": _seed_read})):
-    server._seed_usb_expanded()
+    server.seed_usb_expanded()
     check_true("the startup seed reads it", channels.usb_expanded_known())
     check("and the desk's real mode is what the app then holds", channels.usb_expanded(), True)
     check("so the four are assignable again",
@@ -1154,7 +1154,7 @@ with patched((server.rcp_read, {"read_model_stable": _seed_read})):
           [12, 13, 14, 15])
     # Idempotent: a second call must not pay for another dump.
     seed_reads.clear()
-    server._seed_usb_expanded()
+    server.seed_usb_expanded()
 check("a second seed reads nothing, because the mode is already known", len(seed_reads), 0)
 
 

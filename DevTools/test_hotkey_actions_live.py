@@ -51,7 +51,7 @@ def main():
 
     if do_record:
         print("\n--- start and stop a recording ---")
-        server._recorder_watcher()
+        server.recorder_watcher()
         time.sleep(2.0)                       # let the watcher hear the current state
         print(repr(commands.run("rec.toggle")))
         time.sleep(4.0)

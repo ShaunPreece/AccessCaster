@@ -87,11 +87,11 @@ with as_device(devices.PRO2), patched(*fakes):
     hold_desk([0, 1, 2, 3, 10, 11, 7, 8, 9])
     hold_value(rcp_transfer.channel_key(2), "channelOutputMute", True, "bool")
     with patched((rode_app, {"is_open": lambda: False})):
-        server._encoder_hold_mute(2)
+        server.encoder_hold_mute(2)
     check("a muted channel is unmuted", [on for _key, on in writes], [False])
     check("without reading the desk", reads, [])
     with patched((rode_app, {"is_open": lambda: True})):
-        server._encoder_hold_mute(2)
+        server.encoder_hold_mute(2)
     check("while RODE's app is open the desk is read first", reads, [True])
 
 sys.exit(_testkit.finish())

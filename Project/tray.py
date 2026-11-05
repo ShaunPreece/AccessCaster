@@ -50,6 +50,7 @@ import diagnostics
 import instance
 import rode_app
 import server
+import service
 import speech
 import win32api
 import win32con
@@ -162,7 +163,7 @@ class TrayApp:
 
     # -- the service ------------------------------------------------------------------------------
     def _bring_up(self, greeting: str) -> None:
-        server.start_service(greeting=greeting)
+        service.start(greeting=greeting)
         wx.CallAfter(self._brought_up)
 
     def _brought_up(self) -> None:
@@ -198,7 +199,7 @@ class TrayApp:
         hwnd = self._show_window()
         if not hwnd:
             return
-        server.raise_window(_to_raise(hwnd))
+        app_window.raise_window(_to_raise(hwnd))
         if not self._starting and app_updates.take_request():
             self.frame.check_updates()
 
@@ -215,7 +216,7 @@ class TrayApp:
                                                _SHOW_TIMEOUT_MS, ctypes.byref(result)):
                 return False
             hwnd = result.value
-        return bool(hwnd) and server.raise_window(_to_raise(hwnd))
+        return bool(hwnd) and app_window.raise_window(_to_raise(hwnd))
 
     # -- hidden window that receives the tray callbacks -------------------------------------------
     def _create_window(self) -> None:
@@ -425,7 +426,7 @@ class TrayApp:
             self._finish_quit()
 
     def _finish_quit(self) -> None:
-        server.stop_service("quit from the tray")
+        service.stop("quit from the tray")
         win32gui.DestroyWindow(self.hwnd)
         # Not `Exit`, which is ignored unless this loop is the active one: Quit can arrive inside a
         # dialog's loop, which ends first.

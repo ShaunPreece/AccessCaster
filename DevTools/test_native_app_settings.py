@@ -16,7 +16,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
-import server
+import shortcuts
 import wx
 from _testkit import check, check_in, check_true, patched
 from native import app_settings_section, help_section, shortcuts_page
@@ -98,7 +98,7 @@ deleted = []
 said_before = len(frame.said)
 sync = (shortcuts_page, {"call": lambda _o, fn, *a, done=None: done(fn(*a)),
                          "confirm": lambda *a: True})
-with patched(sync, (server, {"action_delete_hotkey": lambda id_: (
+with patched(sync, (shortcuts, {"action_delete": lambda id_: (
         deleted.append(id_), {"ok": True, "state": state([r for r in rows if r["id"] != id_])})[1]}),
         (wx, {"CallLater": lambda ms, fn, *a: fn(*a)})):
     page.show(state(rows))
@@ -107,7 +107,7 @@ with patched(sync, (server, {"action_delete_hotkey": lambda id_: (
 check("Delete deletes the shortcut chosen", deleted, ["2"])
 check("and the next one is chosen", page._chosen()["id"], "3")
 check("a delete that worked says nothing more", len(frame.said), said_before)
-with patched(sync, (server, {"action_delete_hotkey": lambda id_: {
+with patched(sync, (shortcuts, {"action_delete": lambda id_: {
         "ok": True, "state": state([r for r in rows if r["id"] != id_])}}),
         (wx, {"CallLater": lambda ms, fn, *a: fn(*a)})):
     page.show(state(rows))

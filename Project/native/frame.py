@@ -12,11 +12,12 @@ Arrowing the tree shows each page and leaves the focus in the tree. Selecting a 
 pages shows its first page.
 
 The window belongs to the tray (`tray.TrayApp`), which runs the service. Closing it hides it, and
-the tray shows it again with `present`; only Quit destroys it. With `server.keep_in_tray` off,
+the tray shows it again with `present`; only Quit destroys it. With `app_settings_actions.keep_in_tray` off,
 closing asks the tray to quit (`quit_app`).
 """
 import wx
 
+import app_settings_actions
 import rode_app
 import server
 from native import announce
@@ -357,7 +358,7 @@ class MainFrame(Speaker, wx.Frame):
 
     def _on_close(self, event):
         if event.CanVeto():
-            if not server.keep_in_tray():
+            if not app_settings_actions.keep_in_tray():
                 # Quit closes the window with force, which comes back here unvetoable.
                 event.Veto()
                 wx.CallAfter(self._quit_app)

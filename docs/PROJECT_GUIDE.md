@@ -265,13 +265,17 @@ The layers, bottom up:
   picture of the desk: every dump any reader takes, every push the listener hears and every write
   the app sends lands there, so a fact about the desk is held once and read from there.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
-  `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, `commands.py`, and `announcer.py` (the
+  `recorder.py`, `shows.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the
   desk's button presses spoken) over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
-- `server.py` is the service over them: the `read_*` and `action_*` functions the window calls,
-  and `start_service`, which brings up the desk listener, the announcer, the shortcuts and the watchers.
+- `server.py` is the service over them: the `read_*` and `action_*` functions the window calls.
+- Above the server, and never imported by it: `commands.py` (what a shortcut can do),
+  `shortcuts.py` (the manager and the Keyboard shortcuts page) and `app_settings_actions.py` (the
+  App settings pages).
+- `service.py` is the composition root: `start` brings up the desk listener, the announcer, the
+  shortcuts and the watchers, joining each to the code that acts on it, and `stop` lets them go.
 - `native/` is the wxPython window. `tray.py` hosts it in the service's own process.
 
 Two rules do most of the work of keeping it honest:
@@ -1495,7 +1499,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   announcer) hears all of them. Mutes held on at the desk read True in `channelOutputMute` in the
   dump taken while they were held, so the app's mute display from the dump is right. `potLevel` was
   never pushed.
-- **ONE LISTENER, ONE HANDLE: `desk_live`.** Started by `start_service` (or by the first
+- **ONE LISTENER, ONE HANDLE: `desk_live`.** Started by `service.start` (or by the first
   subscription), it reads every report-04 frame, decodes each push once and hands it to each
   subscriber that named it. **NOTHING A SUBSCRIBER DOES RUNS ON THE READER**: each has its own
   queue, and a `Follower` its own thread, because encoder hold's mute is a write under the HID lock
@@ -1572,7 +1576,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   only be in the way. A background process cannot take the focus from the app in front, so the
   app's own voice is the one channel heard whatever is in front; a tray notification
   (`tray._notify`) has never been seen to arrive on this Windows 11 PC. **The desk is read once
-  more as RODE's app closes** (`server._follow_rode_app`), still compared: a change made there
+  more as RODE's app closes** (`server.follow_rode_app`), still compared: a change made there
   just before it quit is otherwise never seen, since the window reads on return only while RODE's
   app is open.
 - **A CLEAN PROFILE RESTORE IS A SHOW OPERATION, so anything true of shows is true of it.**
@@ -1838,7 +1842,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   reopening straight away showed the other-account warning.
 - **AN AUDIO OUTPUT LEFT OPEN HOLDS THE PROCESS'S EXIT UP BY ABOUT FIVE SECONDS** (measured 3rd
   November 2026: 5.1 s with the speech output open, 0.6 s closed). The speech output stays open
-  for `wave_player.CLOSE_AFTER_S` after a phrase, so `stop_service` closes it (`speech.stop`). A new
+  for `wave_player.CLOSE_AFTER_S` after a phrase, so `service.stop` closes it (`speech.stop`). A new
   thread that holds an audio device must be closed there too.
 - **QUIT REFUSES WHILE THE DESK IS PART-WAY THROUGH A CHANGE** (`server.desk_work_in_progress`:
   any `_BackgroundJob`, or `rcp_transfer.transfer_active`). A pad sound cut off mid-copy leaves an
@@ -1865,7 +1869,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **THE OPEN SHORTCUT SHOWS THE WINDOW WITH A SENT MESSAGE AND RAISES IT ON THE HOTKEY THREAD**
   (`TrayApp._show_from_any_thread`). The foreground right belongs to the hotkey handler while it
   runs (`hotkeys._FOREGROUND_COMMANDS`); `SendMessageTimeout` keeps it running while the wx thread
-  shows the window, then `server.raise_window` raises it from the handler. A second launch hands
+  shows the window, then `app_window.raise_window` raises it from the handler. A second launch hands
   its own right over with `AllowSetForegroundWindow` before posting `WM_OPEN_WINDOW`.
 - **NOTHING IN `native/` OUTSIDE `native/win/` CALLS A WINDOWS API.** Screen reader speech and
   control descriptions go through `native.announce` and `native.a11y`, which import the platform's
@@ -2677,7 +2681,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   every two-second tick, an event recurring every two seconds or slower never folded: the recorder
   watcher wrote "no control interface" 34 times in the minute a firmware restart took.
   `test_diagnostics.py` pins it.
-- **THE LOG IS STARTED IN EXACTLY ONE PLACE, `server.start_service`,** and that is what keeps it
+- **THE LOG IS STARTED IN EXACTLY ONE PLACE, `service.start`,** and that is what keeps it
   a single-writer file: the tray and every DevTools script that runs the service go through there,
   and only the holder of the single-instance lock gets that far. It is SILENT until then, so the
   offline suites write nothing.
@@ -2865,9 +2869,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   window forward is a Windows action, the screen reader announces it, and the app's own announcer
   is for the DESK.
 
-- **A FRESH INSTALL GETS SIXTEEN SHORTCUTS, NOT FIVE.** `_hotkey_defaults` is the five app ones plus
-  the whole of `_pad_hotkey_scheme` (what is playing, bank up and down, one per pad slot). The pad
-  half is a separate function only because `action_add_pad_shortcuts` can lay it onto a list that
+- **A FRESH INSTALL GETS SIXTEEN SHORTCUTS, NOT FIVE.** `shortcuts.defaults` is the five app ones plus
+  the whole of `shortcuts._pad_scheme` (what is playing, bank up and down, one per pad slot). The pad
+  half is a separate function only because `shortcuts.action_add_pad_shortcuts` can lay it onto a list that
   already exists. The Help guide said "you start with five" for weeks after that changed.
 
 - **A DISCONNECTED WINDOWS SESSION CANNOT FIRE A HOTKEY, AND IT LOOKS EXACTLY LIKE A BUG.** With the
@@ -2906,7 +2910,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   shortcut** (per row, `speak`), and except the announcements shortcut turning announcements OFF,
   which is ALWAYS silent: the reason to press it is that announcements are reaching a recording. **A
   FAILURE is spoken whatever the flag says** - silencing hides a confirmation, not a fault. With
-  announcements off it is the "failed" cue instead (`server._shortcut_failed`, `speech.tone`'s
+  announcements off it is the "failed" cue instead (`shortcuts._failed`, `speech.tone`'s
   `despite_off`), the one sound made then; during a take it stays silent.
 - **THERE ARE TWO WAYS TO FIRE A PAD AND THEY COVER DIFFERENT PAD TYPES. USE MIDI FOR A SOUND PAD
   AND HID FOR THE REST.**
@@ -3035,8 +3039,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   caches padIdx -> position so a press is instant, refreshes in the background once it is stale, and
   CHECKS that the pad that engaged is the one that was asked for. Keep that check: without it a
   stale map silently fires a stranger's voice effect onto a live mic.
-- **`hotkey_manager()` is LAZY.** Importing `server` must never register a system-wide hotkey: every
-  DevTools script imports it. Only `start_service` asks, and never for a DevTools run.
+- **`shortcuts.manager()` is LAZY.** Importing a module must never register a system-wide hotkey.
+  Only `service.start` asks, and never for a DevTools run.
 - **`test_hotkeys.py` PRESSES NO KEYS, AND MUST NOT AGAIN.** It fires shortcuts by posting
   WM_HOTKEY to the pump. Injected presses proved only that Windows delivers a registered key, which
   any real press shows, and a run killed between a press and its release left Ctrl and Shift held
@@ -3081,6 +3085,9 @@ shared one; a new copy is how they drifted apart the first time.
   middle of a restore. Call them as `speech.say(...)`
   and read `announcer.live_state`, never `from speech import say`: the tests patch the module
   attribute, and a name imported into another module keeps the original.
+- **THE SERVER IMPORTS NOTHING ABOVE IT.** `commands`, `shortcuts`, `app_settings_actions` and
+  `service` import the server, and the server imports none of them: that is what lets `commands`
+  import it at the top. A server function that needs one of them belongs in that module.
 - **A CHANGE MADE ELSEWHERE IS SPOKEN AS ONE SENTENCE PER BURST** (`announcer._note_change`,
   `change_words.summarise`). Speech keeps only the newest phrase waiting, so a phrase per push
   leaves a preset's thirty parameters, or a batch revealed on return from RODE's app, heard as its

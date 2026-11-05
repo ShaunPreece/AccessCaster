@@ -196,7 +196,7 @@ def usb_expanded() -> bool:
     False while the model has never seen the mode, which is a safe default only in the sense that it
     offers FEWER sources and the plainer name. It is NOT a harmless one: unknown, the fader dropdown
     omits Game, Music, A and B AND the write gate refuses them, so on a desk that is in Expanded the
-    four cannot be assigned at all. The server reads the desk at start (`_seed_usb_expanded`)
+    four cannot be assigned at all. The server reads the desk at start (`seed_usb_expanded`)
     rather than leaving it to whichever page the user happens to open."""
     return bool(recorder.split_usb_multitrack(desk_model.usb_mode())[1])
 

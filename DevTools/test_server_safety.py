@@ -28,6 +28,7 @@ import announcer
 import desk_model
 import pad_shortcuts
 import server
+import service
 import settings_file
 import speech
 from _testkit import as_device, check, patched
@@ -82,7 +83,7 @@ print("\nSHUTTING DOWN")
 released = []
 with patched((pad_shortcuts.midi_out, {"release_pad": released.append, "close": lambda: None})):
     pad_shortcuts._pads_held.add(2)            # a Hold-mode pad a shortcut is holding: pad 3 of bank 1
-    server.stop_service("test")
+    service.stop("test")
     check("a held pad is released however the app stops", released, [3])
     check("and is no longer held", pad_shortcuts._pads_held, set())
 

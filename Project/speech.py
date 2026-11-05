@@ -402,7 +402,7 @@ def tone(name: str, despite_off: bool = False) -> bool:
     """Play the named cue instead of a phrase. True if it was queued, False if we have no such
     tone, in which case the caller must speak: a cue that silently does nothing is worse than the
     sentence it was replacing. Nothing cuts a cue off. `despite_off` plays it with announcements
-    off, for a shortcut that failed (`server._shortcut_failed`)."""
+    off, for a shortcut that failed (`shortcuts._failed`)."""
     try:
         path = tones.tone_path(name)
     except Exception:

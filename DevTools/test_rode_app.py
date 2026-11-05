@@ -48,14 +48,14 @@ rode_app.note(False)
 print("\nCOMPARING READS, AND THE READ AS IT CLOSES")
 reads_done = []
 with patched((server, {"_read_unheard": lambda: reads_done.append(desk_model._reveal)})):
-    server._follow_rode_app(True)
-    server._follow_rode_app(True)
+    server.follow_rode_app(True)
+    server.follow_rode_app(True)
     check("while it is open, reads are compared and nothing is read on a timer",
           (desk_model._reveal, reads_done), (True, []))
-    server._follow_rode_app(False)
+    server.follow_rode_app(False)
     check("as it closes, one read, still compared, then comparing stops",
           (reads_done, desk_model._reveal), ([True], False))
-    server._follow_rode_app(False)
+    server.follow_rode_app(False)
     check("and nothing more while it stays closed", reads_done, [True])
 
 print("\nADDRESSING A WRITE")

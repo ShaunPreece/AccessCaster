@@ -36,7 +36,7 @@ stub.action_set_channel_mute = lambda name, on: writes.append(("mute", on)) or {
 stub.action_set_channel_solo = lambda name, on: writes.append(("solo", on)) or {}
 stub.action_set_processing_enabled = lambda name, on: writes.append(("proc", on)) or {}
 stub.action_set_phantom = lambda mic, on: writes.append(("phantom", on)) or {}
-sys.modules["server"] = stub
+commands.server = stub
 
 print("CHANNEL TOGGLES write the opposite of the real state")
 for cmd in ("mute", "solo", "proc", "phantom"):
