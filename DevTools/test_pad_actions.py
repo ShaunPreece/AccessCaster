@@ -16,7 +16,9 @@ WHAT IT PINS, and each is a decision that could be silently undone:
     user-facing sentence (a polluted effect pool, an unknown effect); wrapping it in "Could not
     assign the voice effect:" buries the part that says what to do about it;
   * every action still REFUSES an out-of-range pad. That is the guard standing between the browser
-    and a write to a pad position the device does not have.
+    and a write to a pad position the device does not have;
+  * every action that edits the pad grid outside `_pad_write` still marks the shortcut layer's pad
+    map stale, or a shortcut plays the old pad until the map's timer runs out.
 
 Run: python DevTools/test_pad_actions.py
 """
@@ -26,8 +28,9 @@ import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import devices
 import pad_actions
+import pad_shortcuts
 import soundpad
-from _testkit import as_device, check, check_in
+from _testkit import as_device, check, check_in, patched
 
 TOO_HIGH = pad_actions.max_user_pads() + 1
 
@@ -124,6 +127,35 @@ for _dev, _want in ((devices.PRO2, 56), (devices.DUO, 42)):
         check(f"{_dev.name}: _max_user_pads is its PadSpec's", pad_actions.max_user_pads(),
               _dev.pad.max_user_pads)
         check(f"{_dev.name}: which is {_want}", pad_actions.max_user_pads(), _want)
+
+print("\nthe grid edits outside _pad_write mark the shortcut pad map stale")
+
+
+class _Job:
+    def tick(self, _message):
+        pass
+
+
+EDITS = [
+    ("action_add_sound", lambda: pad_actions.action_add_sound(1, "a.wav", b"RIFF")),
+    ("action_clear_all_pads", pad_actions.action_clear_all_pads),
+    ("action_restore_factory_fx", pad_actions.action_restore_factory_fx),
+    ("action_preview_start", lambda: pad_actions.action_preview_start({}, 0, 1)),
+    ("action_preview_stop", lambda: pad_actions.action_preview_stop(1)),
+]
+done = {"ok": False, "message": "stub"}
+for name, call in EDITS:
+    marked = []
+    with patched((pad_shortcuts, {"pads_stale": lambda m=marked: m.append(True)}),
+                 (soundpad, {"create_sound": lambda *_a, **_k: done,
+                             "clear_all_pads": lambda: dict(done),
+                             "tidy_unused_pad_audio": lambda **_k: {},
+                             "restore_factory_fx_pads": lambda **_k: done,
+                             "preview_start": lambda *_a, **_k: done,
+                             "preview_stop": lambda *_a: done}),
+                 (pad_actions.restore_job, {"start": lambda work, **_k: work(_Job())})):
+        call()
+    check(f"{name} marks the pad map stale", bool(marked), True)
 
 print()
 raise SystemExit(_testkit.finish())

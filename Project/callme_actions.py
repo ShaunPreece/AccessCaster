@@ -47,7 +47,7 @@ def watcher():
 def _gate():
     return desk_access.cap_gate("callme", lambda name:
                      f"AccessCaster can show CallMe on the {name} but not answer calls or change "
-                     f"hosting: that has only been confirmed on a RODECaster Pro 2.")
+                     f"hosting.", confirmed=True)
 
 
 def _dump() -> bytes:
@@ -84,7 +84,9 @@ def contacts() -> list:
     return callme.clean_contacts(settings_file.load().get("callme_contacts"))
 
 
-callme.set_contacts(contacts())
+def load_contacts() -> None:
+    """Hand callme the saved contacts, which it names callers by."""
+    callme.set_contacts(contacts())
 
 
 def _contact_rows(saved: list) -> list:
@@ -159,15 +161,17 @@ def action_hosting(on: bool) -> dict:
             return {"ok": False, "message": "Incoming calls cannot be switched while a call is up."}
         with desk_access.hid_lock:
             rcp_transfer.send_record(callme.build_hosting(on, path))
-            # The code comes from RODE's service over the network, about a second after the switch.
-            deadline = time.monotonic() + (6.0 if on else 2.0)
-            while True:
-                time.sleep(1.0)
+        # The code comes from RODE's service over the network, about a second after the switch. The
+        # lock is taken per read, not across the wait, so shortcuts and the announcer carry on.
+        deadline = time.monotonic() + (6.0 if on else 2.0)
+        while True:
+            time.sleep(1.0)
+            with desk_access.hid_lock:
                 blob = rcp_read.read_model_stable(fresh=True)
-                d = callme.read(blob)
-                settled = d.get("hosting") == on and (not on or d.get("code"))
-                if settled or time.monotonic() > deadline:
-                    break
+            d = callme.read(blob)
+            settled = d.get("hosting") == on and (not on or d.get("code"))
+            if settled or time.monotonic() > deadline:
+                break
     except Exception as exc:
         return {"ok": False, "message": f"Could not change hosting: {exc}"}
     out = payload(d)

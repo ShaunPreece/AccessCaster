@@ -90,7 +90,7 @@ check("is silent", got, [])
 print("\nlevels follow the channels when the profile has none of its own")
 CALLS = []
 faders.follow_levels = lambda old, new, before, spec: CALLS.append((list(old), list(new),
-                                                                     list(before)))
+                                                                     list(before))) or ""
 faders.level_write_gate = lambda: None
 profiles.apply = lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}
 output_mixes.apply_matrix = lambda routing: {"ok": True, "applied": 0, "message": ""}

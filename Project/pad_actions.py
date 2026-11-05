@@ -132,6 +132,7 @@ def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True)
 
     name = _pad_name_from_filename(filename)
     tmp_path = None
+    pad_shortcuts.pads_stale()          # as in _pad_write
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="accesscaster_")
         with os.fdopen(fd, "wb") as f:
@@ -279,6 +280,7 @@ def action_clear_pad(grid: int) -> dict:
 def action_clear_all_pads() -> dict:
     """Clear every user pad (sound/FX/mixer/MIDI/quick-dial), leaving the System pads untouched.
     Destructive - the window confirms with a dialog before calling this."""
+    pad_shortcuts.pads_stale()
     try:
         with desk_access.hid_lock:
             res = soundpad.clear_all_pads()
@@ -313,6 +315,7 @@ def action_restore_factory_fx() -> dict:
     and so is everything past pad 16. Reuses the pad-restore progress channel, so the page shows the
     same progress dialog it already knows."""
     def _work(job):
+        pad_shortcuts.pads_stale()
         with desk_access.hid_lock:
             return soundpad.restore_factory_fx_pads(live=True, progress=job.tick)
 
@@ -406,6 +409,7 @@ def action_preview_start(stack: dict, colour: int, mic: int) -> dict:
     """Create a scratch preview pad carrying the in-progress effect and engage it on the live
     mic. Returns the grid used, or no_pad:True if every pad is full."""
     global _preview_grid
+    pad_shortcuts.pads_stale()
     try:
         with desk_access.hid_lock:
             res = soundpad.preview_start(stack or {}, colour=colour, mic=mic)
@@ -489,6 +493,7 @@ def action_preview_stop(grid: int) -> dict:
     """Clear the preview scratch pad, removing the effect from the live mic."""
     global _preview_grid
     _preview_writer.forget(int(grid))
+    pad_shortcuts.pads_stale()
     try:
         with desk_access.hid_lock:
             res = soundpad.preview_stop(grid)

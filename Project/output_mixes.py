@@ -274,8 +274,8 @@ def monitor_mix_model() -> dict:
         note = ("Shows how loud each source is in each headphone output on this device. Changing "
                 "these levels is not enabled here yet, so the sliders are read-only.")
     return {
-        "outputs": [{"index": i, "label": l} for i, l in _monitor_outputs()],
-        "sources": [{"index": i, "label": l} for i, l in _monitor_sources()],
+        "outputs": [{"index": i, "label": label} for i, label in _monitor_outputs()],
+        "sources": [{"index": i, "label": label} for i, label in _monitor_sources()],
         "read_only": read_only,
         "note": note,
     }

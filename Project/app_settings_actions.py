@@ -33,7 +33,7 @@ def read_announce() -> dict:
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
             "clip_warning": clip_warning.clip_warning_on(),
-            "running": bool(announcer._thread and announcer._thread.is_alive())}
+            "running": announcer.running()}
 
 
 def export_dir() -> str:

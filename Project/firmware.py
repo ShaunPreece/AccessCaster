@@ -50,8 +50,9 @@ def read_install() -> dict:
     try:
         in_call = any(slot.get("state") not in (None, "Idle")
                       for slot in callme.read(blob).get("slots") or [])
-    except Exception:
-        in_call = False
+    except Exception as exc:
+        # An update restarts the desk, so a call that cannot be ruled out refuses it.
+        return {"ok": False, "message": f"Could not tell whether a CallMe call is up: {exc}"}
     refusal = desk_firmware.refusal(state, network.connection(blob)["online"], recording, in_call)
     busy = desk_access.work_in_progress()
     if not refusal and busy:

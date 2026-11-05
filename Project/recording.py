@@ -112,12 +112,11 @@ def _state_changed(was, now) -> None:
 
 def _refusal(name: str, task: str = "") -> str:
     so = f", so it cannot {task}" if task else ""
-    return (f"AccessCaster can read the recorder on the {name} but not drive it{so}: that has "
-            f"only been confirmed on a RODECaster Pro 2.")
+    return f"AccessCaster can read the recorder on the {name} but not drive it{so}."
 
 
 def _gate(task: str = ""):
-    return desk_access.cap_gate("recorder", lambda name: _refusal(name, task))
+    return desk_access.cap_gate("recorder", lambda name: _refusal(name, task), confirmed=True)
 
 
 def watcher():
@@ -152,9 +151,9 @@ def _payload(blob: bytes) -> dict:
     out["processing_bypass"] = bool(pb[0]) if pb else None
     # Known BEFORE the control is drawn, so a button that cannot work is disabled with the reason
     # attached rather than failing when it is pressed.
-    out["can_delete"] = "recorder" in dev.caps
-    out["delete_note"] = ("" if out["can_delete"] else
-                          _refusal(dev.name, "delete a recording"))
+    refused = _gate("delete a recording")
+    out["can_delete"] = refused is None
+    out["delete_note"] = (refused or {}).get("message", "")
     out["storage_writable"] = "storage_write" in dev.caps
     return out
 
@@ -434,8 +433,8 @@ _ERASE_WAIT_S = 90.0        # a 117 GB drive took about 20 s
 
 def _storage_gate():
     return desk_access.cap_gate("storage_write", lambda name:
-                     f"AccessCaster can show the {name}'s storage but not eject or erase it: that "
-                     f"has only been confirmed on a RODECaster Pro 2.")
+                     f"AccessCaster can show the {name}'s storage but not eject or erase it.",
+                     confirmed=True)
 
 
 def _storage_target(index: int):

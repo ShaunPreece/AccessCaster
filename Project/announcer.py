@@ -1025,6 +1025,12 @@ def restore_after_record() -> bool:
     return True
 
 
+def running() -> bool:
+    """Whether the announcer's loop is alive."""
+    t = _thread
+    return t is not None and t.is_alive()
+
+
 def action_set_announce(on: bool, chosen: bool = True, greeting: str = GREETING_ON) -> dict:
     """Switch announcements on or off. `chosen` is a person's decision (the page, the tray, the
     shortcut), which is saved when they have asked for it to be remembered; the app switching them

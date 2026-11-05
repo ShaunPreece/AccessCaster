@@ -25,6 +25,7 @@ import autogain_actions
 import chat_isolation
 import clip_warning
 import desk_access
+import diagnostics
 import meters
 import output_mixes
 import speech
@@ -99,11 +100,12 @@ def _stop(speak: bool = True, run_id: int | None = None) -> str:
         w, iso, _watcher, _iso = _watcher, _iso, None, None
     if w is None and iso is None:
         return ""
-    try:
-        if w is not None:
+    if w is not None:
+        try:
             w.stop()
-    except Exception:
-        pass
+        except Exception as exc:
+            # The Chat mix still has to go back, below.
+            diagnostics.event("level_check.stop_failed", str(exc))
     # The stop tone as soon as nothing is listening, not after the restore below: it is the
     # answer to the press, and the restore takes a second or more.
     if w is not None:
@@ -127,6 +129,16 @@ def _stop(speak: bool = True, run_id: int | None = None) -> str:
     if speak and msg:
         speech.say(msg)
     return msg
+
+
+def work_in_progress() -> str | None:
+    """For `desk_access.work_in_progress`: a run has the Chat mix carrying one channel alone."""
+    return "A level check is running." if _state()["running"] else None
+
+
+def stop_check() -> None:
+    """End a running check and put the Chat mix back, saying nothing: the app is closing."""
+    _stop(speak=False)
 
 
 def _source(name: str):

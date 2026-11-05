@@ -492,6 +492,5 @@ def _write_gate():
     we know; it stays for the next one. See desk_access.cap_gate."""
     return desk_access.cap_gate("network_write", lambda name:
                                 f"AccessCaster can read the network settings on the {name} but "
-                                f"not change them: changing them has only ever been confirmed on "
-                                f"a RODECaster Pro 2, so it refuses rather than risk the wrong "
-                                f"setting.")
+                                f"not change them, so it refuses rather than risk the wrong "
+                                f"setting.", confirmed=True)

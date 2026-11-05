@@ -598,11 +598,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         for spec in desk_labels.UNIT_SETTINGS:
             self._show(spec)
         self.midi.show()
-        note = "" if reply.get("writable") else (
-            f"These settings can be read but not changed on the "
-            f"{reply.get('device_name') or 'connected desk'}: changing them has only ever been "
-            "confirmed on a RODECaster Pro 2, so AccessCaster leaves them alone rather than risk "
-            "changing the wrong one.")
+        note = "" if reply.get("writable") else reply.get("read_only_note", "")
         set_text(self.note, note)
         self._sizer.Show(self.note.GetContainingSizer(), bool(note))
         self.Layout()

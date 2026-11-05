@@ -8,7 +8,8 @@ NO DEVICE NEEDED. What this pins is the reasoning, not the plumbing:
     listening to ("Microphone (RODECaster Pro II Chat) clipping" while you check Mic 1 names the
     wrong thing entirely);
   * Chat is refused, with the mechanism said out loud rather than a bare "no";
-  * the check lives ONLY on the channel, with no stream-wide check left behind.
+  * the check lives ONLY on the channel, with no stream-wide check left behind;
+  * one Chat isolation at a time, so a level check and auto gain cannot overlap.
 
 and for the main mix clip warning (App settings, Announcements): it watches the main recording
 stream, never a playback one, says nothing but clipping, and its switch is saved and reported.
@@ -24,10 +25,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import autogain
+import chat_isolation
 import clip_warning
+import desk_access
 import devices
 import level_check
 import meters
+import rcp_transfer
 import settings_file
 import speech
 from _testkit import check, check_in, check_not_in, patched
@@ -158,6 +162,14 @@ check("an isolation with no watcher still counts as a run in progress",
       level_check._state()["running"], True)
 check("and it still names the channel, so a stop press can say what it stopped",
       level_check._state()["channel"], "Mic 4")
+# Quit asks work_in_progress, so a run it cannot see is quit through with the Chat mix isolated.
+desk_access.register_work(level_check.work_in_progress)
+check("the quit warning names a running level check", desk_access.work_in_progress(),
+      "A level check is running.")
+service_src = (ROOT / "Project" / "service.py").read_text(encoding="utf-8")
+check_in("and the app registers it", "register_work(level_check.work_in_progress)", service_src)
+check_in("with auto gain beside it", "register_work(autogain_actions.work_in_progress)",
+         service_src)
 level_check._iso = None
 level_check._label = ""
 check("with nothing to restore, nothing is running", level_check._state()["running"], False)
@@ -211,6 +223,49 @@ check_in("and is called a short sound", "short sound", short["reason"])
 check_not_in("not a missing microphone", "plugged in", short["reason"])
 none = autogain.verdict({"loud_db": -60.0, "max_db": -60.0})
 check_in("nothing at all says to check the microphone", "plugged in", none["reason"])
+
+print("\nONE ISOLATION OWNS THE CHAT MIX AT A TIME")
+# A level check and auto gain both isolate the Chat mix. A second isolation entered while the first
+# is live would snapshot the isolated mix as its "before" and put that back afterwards.
+desk = {"mode": 2, "excl": {}, "fail": False}
+
+
+def fake_snapshot(self):
+    return (desk["mode"], {s: desk["excl"].get(s, False) for s in self.sources},
+            {s: {"level": 1.0} for s in self.sources})
+
+
+def fake_exclude(_output, src, on):
+    if desk["fail"]:
+        raise RuntimeError("the desk did not answer")
+    desk["excl"][src] = on
+
+
+def try_enter(keep):
+    try:
+        return chat_isolation.ChatIsolation(keep).__enter__()
+    except RuntimeError as exc:
+        return str(exc)
+
+
+with patched((chat_isolation.ChatIsolation, {"_snapshot": fake_snapshot}),
+             (rcp_transfer, {"set_cross_point_excluded": fake_exclude,
+                             "set_output_routing": lambda *_a: None}),
+             (chat_isolation.time, {"sleep": lambda *_a: None})):
+    first = try_enter(0)
+    check("a second isolation entered while one is live is refused", try_enter(1),
+          chat_isolation.BUSY)
+    check("the first puts the mix back", first.restore(), True)
+    again = try_enter(1)
+    check("after which the next one may listen", getattr(again, "keep", again), 1)
+    desk["fail"] = True
+    check("a restore the desk does not take fails", again.restore(), False)
+    desk["fail"] = False
+    third = try_enter(2)
+    check("the next isolation puts the failed one back before taking the mix",
+          (again.restored, getattr(third, "keep", third)), (True, 2))
+    third.restore()
+
 print("\nTHE MAIN MIX CLIP WARNING")
 streams = {"streams": [
     {"id": "out", "name": "Speakers (RODECaster Pro II Main Stereo)", "flow": "playback"},

@@ -144,6 +144,12 @@ def _unit_setting_values(blob: bytes) -> dict:
 UNIT_SETTING_PROPS = frozenset([s["prop"] for s in UNIT_SETTINGS] + ["systemMidiControl"])
 
 
+def _unit_settings_gate():
+    return desk_access.cap_gate("unit_settings", lambda name:
+                     f"These settings can be read but not changed on the {name}, so AccessCaster "
+                     f"leaves them alone rather than risk changing the wrong one.", confirmed=True)
+
+
 def read_unit_settings() -> dict:
     """The Device page's "Unit settings" group: one dump, every setting, and whether this desk can
     write them.
@@ -166,9 +172,10 @@ def read_unit_settings() -> dict:
     # restore. Read off the dump we already have, by exact name for the reason in
     # _unit_setting_values.
     midi = (rcp_read.snapshot_properties(blob).get("systemMidiControl") or [None])[0]
+    gate = _unit_settings_gate()
     return {"ok": True, "settings": settings, "device_name": dev.name,
             "midi": bool(midi) if midi is not None else None,
-            "writable": "unit_settings" in dev.caps}
+            "writable": gate is None, "read_only_note": (gate or {}).get("message", "")}
 
 
 def action_set_unit_setting(prop: str, value: int) -> dict:
@@ -181,9 +188,7 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     spec = UNIT_SETTING_BY_PROP.get(prop)
     if spec is None:
         return {"ok": False, "message": f"Unknown desk setting: {prop}."}
-    gate = desk_access.cap_gate("unit_settings", lambda name:
-                     f"These settings can be read but not changed on the {name}: changing them "
-                     f"has only been confirmed on a RODECaster Pro 2.")
+    gate = _unit_settings_gate()
     if gate is not None:
         return gate
     try:
@@ -538,7 +543,6 @@ def hardware_id() -> str:
     would deadlock the app rather than merely be slow. "" is a perfectly good answer here: it only
     means a preference goes untagged until the first status read, which the page does on load."""
     return _id_cache[1]
-
 
 
 def desk_record(key: str) -> dict:

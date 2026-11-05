@@ -6,6 +6,7 @@ level check (`level_check`) both listen through it, on the Chat capture endpoint
 
 from __future__ import annotations
 
+import threading
 import time
 
 import devices
@@ -22,6 +23,15 @@ NOT_RESTORED = ("WARNING: the Chat mix could not be put back. It may still be ca
 # A cross-point quieter than this cannot be measured through: correcting for it would multiply the
 # noise floor up rather than the voice.
 MIN_CROSSPOINT = 0.05
+
+BUSY = ("Another measurement is already listening to one channel on the Chat mix. Wait for it to "
+        "finish, or stop it first.")
+
+# The one isolation that owns the Chat mix, from its __enter__ until a restore that succeeds. A
+# second isolation entered meanwhile would snapshot the isolated mix as its "before", and the first
+# one's restore would then pull the mix out from under the second's measurement.
+_owner_lock = threading.RLock()
+_owner: ChatIsolation | None = None
 
 
 def endpoint_to_unity(endpoint_id: str) -> str:
@@ -74,6 +84,26 @@ class ChatIsolation:
         self.excluded_before = {}
         self.changed = False
         self.restored = False
+        # A restore that failed leaves the mix owned by this isolation, and the next one to enter
+        # retries it before taking the mix.
+        self.abandoned = False
+
+    def _claim(self) -> None:
+        global _owner
+        with _owner_lock:
+            held = _owner
+            if held is not None and held is not self:
+                if not held.abandoned:
+                    raise RuntimeError(BUSY)
+                if not held.restore():
+                    raise RuntimeError(NOT_RESTORED)
+            _owner = self
+
+    def _release(self) -> None:
+        global _owner
+        with _owner_lock:
+            if _owner is self:
+                _owner = None
 
     def _snapshot(self):
         blob = rcp_read.read_model_stable(fresh=True)
@@ -89,15 +119,18 @@ class ChatIsolation:
         return lv["modes"].get(self.chat), got, lv["levels"].get(self.chat, {})
 
     def __enter__(self):
-        self.mode_before, self.excluded_before, levels = self._snapshot()
-        cell = levels.get(self.keep) or {}
-        self.level = float(cell.get("level") or 0.0)
-        if self.level < MIN_CROSSPOINT:
-            raise RuntimeError("that channel is not reaching the Chat mix - its fader is down, or "
-                               "it is excluded there - so nothing could be measured through it")
+        self._claim()
         # A with block does not call __exit__ when __enter__ raises, so a write that fails part way
-        # puts back what the earlier ones changed here, and says so if that fails too.
+        # puts back what the earlier ones changed here, and says so if that fails too. A restore
+        # with nothing changed only gives up the claim.
         try:
+            self.mode_before, self.excluded_before, levels = self._snapshot()
+            cell = levels.get(self.keep) or {}
+            self.level = float(cell.get("level") or 0.0)
+            if self.level < MIN_CROSSPOINT:
+                raise RuntimeError("that channel is not reaching the Chat mix - its fader is down, "
+                                   "or it is excluded there - so nothing could be measured "
+                                   "through it")
             if self.mode_before != 2:
                 self.changed = True
                 rcp_transfer.set_output_routing(self.chat, 2)      # Custom
@@ -128,6 +161,7 @@ class ChatIsolation:
         they would have no way of knowing why. A mix that already carried the one source had
         nothing written to it, so there is nothing to put back."""
         if self.restored or self.mode_before is None or not self.changed:
+            self._release()
             return True
         try:
             for src in self.sources:
@@ -140,7 +174,10 @@ class ChatIsolation:
             mode_now, excl_now, _levels = self._snapshot()
             self.restored = (mode_now == self.mode_before
                              and excl_now == self.excluded_before)
-            return self.restored
         except Exception as exc:
             diagnostics.event("chat.restore_failed", str(exc))
-            return False
+        if self.restored:
+            self._release()
+        else:
+            self.abandoned = True
+        return self.restored

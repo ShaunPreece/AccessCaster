@@ -12,6 +12,7 @@ import channels
 import desk_access
 import desk_firmware
 import devices
+import diagnostics
 import faders
 import master_outputs
 import output_mixes
@@ -222,18 +223,23 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         spec = faders.active_faders()
         carry_levels = not (prof.get("routing") or {}).get("fader_levels")
         vec_before = levels_before = None
+        level_note = ""
         with desk_access.hid_lock:
             if carry_levels and faders.level_write_gate() is None:
                 try:
                     blob0 = rcp_read.read_model()
                     vec_before = faders.read_fader_vector(blob0, spec)
                     levels_before = rcp_read.values(blob0, "faderLevel")
-                except Exception:
+                except Exception as exc:
+                    diagnostics.event("restore.levels_unread", str(exc))
                     vec_before = levels_before = None
+                    level_note = (" The fader levels could not be read first, so they did not "
+                                  "follow their channels. Check the virtual faders' levels.")
             res = profiles.apply(prof, fader_count=faders.active_faders().vector_length,
                                  fader_code_set=faders.active_faders().code_set, progress=job.step)
             if levels_before is not None:
-                faders.follow_levels(vec_before, faders.read_fader_vector(spec=spec), levels_before, spec)
+                level_note = faders.follow_levels(vec_before, faders.read_fader_vector(spec=spec),
+                                                  levels_before, spec)
         # A PROFILE CARRIES `systemMidiControl`, so one taken while MIDI was off has just switched
         # the MIDI port back off and every sound-pad shortcut with it. Forget that we armed it and
         # the next pad press arms it again - which is why arming is per-press-until-done rather than
@@ -276,7 +282,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
             with desk_access.hid_lock:
                 healed = soundpad.heal_fx_pool(progress=job.step)
 
-        msg = profiles.restore_result(safe, res)["message"]
+        msg = profiles.restore_result(safe, res)["message"] + level_note
         if reset_note:
             msg = reset_note + " " + msg
         if mx_res and not mx_res.get("skipped"):

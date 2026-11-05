@@ -275,10 +275,6 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
     with desk_access.hid_lock:
         channels.set_channel_processing(name, prop, v)
     pct = round(v * 100)
-    if ctrl.get("pan"):
-        where = ("centre" if pct == 50 else "hard left" if pct == 0 else "hard right" if pct == 100
-                 else f"{(50 - pct) * 2} percent left" if pct < 50 else f"{(pct - 50) * 2} percent right")
-    else:
-        where = f"{pct} percent"
+    where = pan_link.pan_offset_words((pct - 50) * 2) if ctrl.get("pan") else f"{pct} percent"
     return {"ok": True,
             "message": f"{ch['label']} {PROCESSING_SPOKEN[prop].lower()} set to {where}."}

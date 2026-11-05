@@ -15,14 +15,17 @@ This is the place for any other "two tables that must agree" check. Run:
 """
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import channel_actions
+import channels
 import device_page
+import desk_access
 import desk_labels
 import devices
 import model_tree
 import pad_records
 import profiles
 import rcp_transfer
-from _testkit import check_true
+from _testkit import check, check_true, patched
 
 
 def _raises(fn):
@@ -296,5 +299,20 @@ for dev, _table in ((devices.PRO2, devices.CHANNELS_PRO2), (devices.DUO, devices
     check_true(f"{_n}: a scheme covers every row the grid reads",
                tuple(s["index"] for s in dev.matrix.all_sources)
                == tuple(dev.matrix.all_source_indices))
+
+print("\nA REFUSAL NAMES THE DESKS A FEATURE IS CONFIRMED ON, FROM THEIR CAPS")
+for _cap in ("callme", "storage_write"):
+    _holders = [d.name for d in devices.DEVICES.values() if _cap in d.caps]
+    _said = desk_access.confirmed_on(_cap)
+    check_true(f"{_cap}: every desk holding it is named, and no other",
+               all((d.name in _said) == (d.name in _holders) for d in devices.DEVICES.values()))
+check("a cap no desk holds names nobody", desk_access.confirmed_on("no_such_cap"), "")
+
+PAN_SPOKEN = {0.0: "hard left", 0.5: "centre", 0.6: "20 percent right", 1.0: "hard right"}
+print("\nA PAN IS SPOKEN AS A POSITION, AS THE LINKED PAN SAYS IT")
+with patched((channels, {"set_channel_processing": lambda *_a: None})):
+    for _v, _want in PAN_SPOKEN.items():
+        _msg = channel_actions.action_set_channel_param("Mic1", "channelPan", _v)["message"]
+        check(f"a pan of {_v} is {_want}", _msg.endswith(f" set to {_want}."), True)
 
 raise SystemExit(_testkit.finish())

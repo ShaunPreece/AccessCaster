@@ -287,8 +287,11 @@ def action_delete_backup(name: str, force: bool = False) -> dict:
             with desk_access.hid_lock:
                 blob = rcp_read.read_model()
             still_there = shows.find_by_snapshot(shows.read_shows(blob), paired)
-        except Exception:
-            still_there = None
+        except Exception as exc:
+            # Not knowing whether the show is on the drive is not knowing it is gone: deleting the
+            # profile now would leave the show with nothing to name it by.
+            return {"ok": False, "message": f"Could not read the desk to find this backup's show, "
+                                            f"so nothing was deleted. Try again. ({exc})"}
         if still_there is not None:
             # BOTH HALVES IN ONE JOB, so the page shows one progress dialog and one result. `via`
             # tells it which job state to watch, exactly as the restore does.

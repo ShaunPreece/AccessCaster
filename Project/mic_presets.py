@@ -21,7 +21,7 @@ _USER_PRESET_FILE = data_path("user_presets.json")         # user-saved (writabl
 
 def _load_factory_presets() -> dict:
     try:
-        with open(_FACTORY_PRESET_FILE, "r", encoding="utf-8") as f:
+        with open(_FACTORY_PRESET_FILE, encoding="utf-8") as f:
             return (json.load(f) or {}).get("factory", {})
     except (OSError, ValueError):
         return {}

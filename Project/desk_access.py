@@ -19,6 +19,7 @@ import rcp_read
 import rcp_transfer
 import rode_app
 import speech
+import wording
 
 
 # One lock around ALL device access. The window, the shortcuts and the watchers call in from
@@ -38,13 +39,20 @@ def desk_now() -> bytes:
     return rcp_read.read_model_stable(fresh=True)
 
 
-def cap_gate(cap: str, refusal) -> dict | None:
-    """None if the CONNECTED device has `cap`, else a refusal dict carrying `refusal(device name)`.
+def confirmed_on(cap: str) -> str:
+    """The sentence naming the known desks that hold `cap`, or "" if none does."""
+    names = [f"the {dev.name}" for dev in devices.DEVICES.values() if cap in dev.caps]
+    return f"That has only been confirmed on {wording.join_and(names)}." if names else ""
+
+
+def cap_gate(cap: str, refusal, confirmed: bool = False) -> dict | None:
+    """None if the CONNECTED device has `cap`, else a refusal dict carrying `refusal(device name)`,
+    followed by `confirmed_on(cap)` when `confirmed` is set.
 
     THE ONE SHAPE EVERY RISKY WRITE FAMILY IS GATED BY. The rule behind all of them: a selector
-    proven on a RODECaster Pro II has NOT been proven on a Duo, and a wrong selector does not simply
-    fail - it can append a stray property that only a factory reset clears. So a device without
-    the cap REFUSES BY NAME and says why, rather than writing blind and hoping.
+    proven on one desk has NOT been proven on another, and a wrong selector does not simply fail -
+    it can append a stray property that only a factory reset clears. So a device without the cap
+    REFUSES BY NAME and says why, rather than writing blind and hoping.
 
     Each gate keeps its own sentence, because what the user can and cannot do differs per family
     and a generic "not supported" would be useless to them.
@@ -52,11 +60,23 @@ def cap_gate(cap: str, refusal) -> dict | None:
     dev = devices.get_active_device()
     if cap in dev.caps:
         return None
-    return {"ok": False, "message": refusal(dev.name)}
+    message = refusal(dev.name)
+    if confirmed:
+        message = f"{message} {confirmed_on(cap)}".strip()
+    return {"ok": False, "message": message}
 
 
 # Every BackgroundJob, with the sentence that says it is running, in the order they were made.
 _jobs: list = []
+# The features whose long work is not a BackgroundJob, each as a call returning its sentence or None.
+_checks: list = []
+
+
+def register_work(check) -> None:
+    """Have `work_in_progress` ask `check()` as well: a sentence while that feature is part-way
+    through changing the desk, else None. For work on a thread or timer of its own."""
+    if check not in _checks:
+        _checks.append(check)
 
 
 def work_in_progress() -> str | None:
@@ -66,6 +86,10 @@ def work_in_progress() -> str | None:
     for job in _jobs:
         if job.busy():
             return job.running
+    for check in _checks:
+        busy = check()
+        if busy:
+            return busy
     if rcp_transfer.transfer_active():
         return "SMART pad sounds are being copied."
     return None

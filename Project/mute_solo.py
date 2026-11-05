@@ -111,6 +111,31 @@ def _strip_toggle_gate(what: str):
                      f"here. You can still see which channels are muted or soloed.")
 
 
+def _write_fader_toggle(fader: int, prop: str, on: bool, gate_word: str, noun: str) -> tuple:
+    """The by-fader mute and solo up to the reply: the gate, the range, the refusal for an empty
+    fader, and the write of `prop` on the fader's strip. Returns (refusal, None, None), or
+    (None, the channel code on the fader, the fader spec)."""
+    gate = _strip_toggle_gate(gate_word)
+    if gate is not None:
+        return gate, None, None
+    spec = faders.active_faders()
+    fader = int(fader)
+    if not 0 <= fader < spec.count:
+        return {"ok": False, "message": f"Fader {fader + 1} is not valid."}, None, None
+    try:
+        with desk_access.hid_lock:
+            vec = faders.read_fader_vector(spec=spec)
+            code = vec[fader] if fader < len(vec) else None
+            if faders.is_empty_fader(code):
+                empty = (f"{faders.fader_label(fader, spec)} has no channel on it, so there is "
+                         f"nothing to {noun}. Put a channel on it first.")
+                return {"ok": False, "message": empty}, None, None
+            rcp_transfer.write_at(channels.proc_key_for_strip(fader), prop, "bool", bool(on))
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not change the {noun}: {exc}"}, None, None
+    return None, code, spec
+
+
 def action_set_fader_mute(fader: int, on: bool) -> dict:
     """Mute whatever is on one fader, addressed by FADER rather than by channel name.
 
@@ -123,24 +148,9 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
 
     Named for the fader because that is what the user pressed. The reply names the CHANNEL, because
     a virtual fader is only ever meaningful as whatever is currently sitting on it."""
-    gate = _strip_toggle_gate("Muting")
-    if gate is not None:
-        return gate
-    spec = faders.active_faders()
-    if not 0 <= int(fader) < spec.count:
-        return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
-    try:
-        with desk_access.hid_lock:
-            vec = faders.read_fader_vector(spec=spec)
-            code = vec[int(fader)] if int(fader) < len(vec) else None
-            if faders.is_empty_fader(code):
-                return {"ok": False,
-                        "message": (f"{faders.fader_label(int(fader), spec)} has no channel on it, so "
-                                    f"there is nothing to mute. Put a channel on it first.")}
-            rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.MUTE_PROP,
-                                  "bool", bool(on))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the mute: {exc}"}
+    refusal, code, spec = _write_fader_toggle(fader, channels.MUTE_PROP, on, "Muting", "mute")
+    if refusal is not None:
+        return refusal
     announcer.mark_self_mute(int(fader))
     who = f"{faders.channel_name(code, spec)} on {faders.fader_label(int(fader), spec)}"
     if not on:
@@ -162,24 +172,9 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
     saying why - and a switch that only knew about its own fader would be exactly that trap. The
     reply names everything the headphones now carry, not just this one, and the Levels tab carries
     the same one-press Clear all solos that the Channels page has."""
-    gate = _strip_toggle_gate("Solo")
-    if gate is not None:
-        return gate
-    spec = faders.active_faders()
-    if not 0 <= int(fader) < spec.count:
-        return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
-    try:
-        with desk_access.hid_lock:
-            vec = faders.read_fader_vector(spec=spec)
-            code = vec[int(fader)] if int(fader) < len(vec) else None
-            if faders.is_empty_fader(code):
-                return {"ok": False,
-                        "message": (f"{faders.fader_label(int(fader), spec)} has no channel on it, so "
-                                    f"there is nothing to solo.")}
-            rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.CUE_PROP,
-                                  "bool", bool(on))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the solo: {exc}"}
+    refusal, code, spec = _write_fader_toggle(fader, channels.CUE_PROP, on, "Solo", "solo")
+    if refusal is not None:
+        return refusal
     announcer.mark_self_solo(int(fader))
     who = f"{faders.channel_name(code, spec)} on {faders.fader_label(int(fader), spec)}"
     return {"ok": True, "soloed": bool(on),

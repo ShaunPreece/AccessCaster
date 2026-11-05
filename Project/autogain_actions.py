@@ -35,8 +35,11 @@ VERIFY_S = 10.0
 # needs about 3.5 s.
 LEAD_S = 1.0
 LEAD_PER_WORD_S = 0.25
+# A run's processing and Chat restores can take ten seconds after a cancel.
+EXIT_WAIT_S = 15.0
 _lock = threading.Lock()
 _job = None            # the running or finished job, as a plain dict
+_thread: threading.Thread | None = None
 
 
 def state() -> dict:
@@ -45,9 +48,25 @@ def state() -> dict:
 
 
 def running() -> bool:
-    """True while a run is preparing, listening or deciding: the level check refuses then, since
-    the run owns the Chat isolation and is writing a gain from it."""
-    return state().get("phase") in ("preparing", "listening", "verifying", "working")
+    """True from the start of a run until its restores are done: the level check refuses then,
+    since the run owns the Chat isolation and is writing a gain from it."""
+    with _lock:
+        return bool(_job) and not _job.get("done")
+
+
+def work_in_progress() -> str | None:
+    """For `desk_access.work_in_progress`: a run has the mic's processing off and the Chat mix
+    carrying that mic alone."""
+    return "Auto gain is running." if running() else None
+
+
+def cancel_and_wait() -> None:
+    """Cancel a run and wait for its restores, for the app's exit. The run is a daemon thread, which
+    the process exit kills before its `finally` puts the processing and the Chat mix back."""
+    _set(cancel=True)
+    t = _thread
+    if t is not None:
+        t.join(EXIT_WAIT_S)
 
 
 def _set(**changes) -> None:
@@ -251,7 +270,7 @@ def _words(name: str, before: int, after: int, result: dict, win: str, check=Non
 
 def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
     """Begin an auto-gain run on one mic channel."""
-    global _job
+    global _job, _thread
     gate = desk_access.cap_gate("input_mic_write",
                                 lambda dev_name: f"Mic gain cannot be set on the {dev_name} from "
                                                  f"here.")
@@ -267,7 +286,8 @@ def action_autogain_start(name: str, seconds: float = 0.0) -> dict:
                 "message": "Starting."}
     secs = float(seconds) if seconds and seconds > 0 else SECONDS
     secs = max(5.0, min(120.0, secs))
-    threading.Thread(target=_run, args=(name, mic, secs), daemon=True).start()
+    _thread = threading.Thread(target=_run, args=(name, mic, secs), daemon=True)
+    _thread.start()
     return {"ok": True, "message": "Auto gain started.", "seconds": secs}
 
 

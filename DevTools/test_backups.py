@@ -4,6 +4,7 @@ THE RULES THIS PINS:
   * rename and delete reach the backup by its NAME from `read_backups`, which is what
     `selectedBackupName()` sends, not by its list key, which `profiles.safe_name` refuses;
   * the as-found backup is refused on the first delete and deleted with `force`;
+  * a delete that cannot read the desk deletes nothing, rather than the profile without its show;
   * every key the page posts to a route in a literal `postJSON` body is one that route reads, so a
     key such as `force` cannot be dropped on the way to its action.
 
@@ -29,6 +30,7 @@ import backups
 import devices
 import profile_actions
 import profiles
+import rcp_read
 from _testkit import check, patched
 
 
@@ -72,6 +74,25 @@ try:
     with patched((profiles, {"PROFILES_DIR": tmp}),
                  (devices, {"get_active_device": lambda: SimpleNamespace(caps=set())})):
         rename_and_delete(tmp)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def unreadable_desk():
+    raise OSError("the desk did not answer")
+
+
+print("\nA DELETE THAT CANNOT READ THE DESK DELETES NOTHING")
+tmp = tempfile.mkdtemp(prefix="ac_backups_test_")
+try:
+    with patched((profiles, {"PROFILES_DIR": tmp}),
+                 (devices, {"get_active_device": lambda: SimpleNamespace(caps={"shows"})}),
+                 (rcp_read, {"read_model": unreadable_desk})):
+        write_profile(tmp, "Paired", {"saved_at": "now", profiles.SHOW_KEY: {"snapshot": 4}})
+        res = backups.action_delete_backup("Paired")
+        check("the delete is refused", res.get("ok"), False)
+        check("and the profile is still there",
+              [e["name"] for e in backups.read_backups()["backups"]], ["Paired"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -16,7 +16,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels as c
 import devices
-from _testkit import as_device, check, hold_desk, patched
+from _testkit import as_device, check, check_in, hold_desk, patched
 
 # PIN THE DESK AND ITS FADER LAYOUT. `proc_key` resolves a channel to the strip it is sitting
 # on RIGHT NOW, so without this the order checks below read the attached desk's live layout and
@@ -181,6 +181,21 @@ check("it reports that the chains moved", "followed" in res["message"], True)
 check("USB 1 landed on the strip that held the gated voicing", desk.vec.index(7), GATED_STRIP)
 check("USB 1 is NOT gated: its own chain followed it", gate_on(desk, 7), False)
 check("and Mic 2's voicing followed Mic 2, gate still on", gate_on(desk, 1), True)
+
+print("\nRESET FADERS CARRIES THE LEVEL")
+# A channel landing on a virtual fader takes that strip's level, so one moved from a fader at 20
+# onto one at 100 would jump, and onto one at zero would go silent.
+swapped = list(PRO2_DEFAULT)
+swapped[6], swapped[7] = swapped[7], swapped[6]
+levels = [0] * 6 + [100, 20, 64]
+level_writes = []
+with fake_desk(swapped) as desk, patched(
+        (rcp_read, {"values": lambda _blob, prop: levels if prop == "faderLevel" else []}),
+        (rcp_transfer, {"set_fader_level": lambda i, v: level_writes.append((i, v))})):
+    res = faders.action_reset_faders()
+check("each channel moved between virtual faders keeps its own level",
+      sorted(level_writes), [(6, 20), (7, 100)])
+check_in("and the reply says so", "kept its level of 16 percent", res["message"])
 
 print("\nA RESET THAT CHANGES NOTHING WRITES NO CHAIN")
 with fake_desk(PRO2_DEFAULT) as desk:

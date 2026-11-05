@@ -12,6 +12,7 @@ import threading
 
 import announcer
 import app_updates
+import autogain_actions
 import callme_actions
 import channels
 import clip_warning
@@ -22,6 +23,7 @@ import diagnostics
 import encoder_hold
 import encoder_home
 import faders
+import level_check
 import mute_solo
 import pad_actions
 import pad_shortcuts
@@ -75,6 +77,10 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
                       shortcuts=register_shortcuts)
     install_announcer_hooks()
+    # Auto gain and the level check run on threads of their own, outside desk_access's jobs, and a
+    # quit part-way through either leaves a mic unprocessed and the Chat mix carrying it alone.
+    desk_access.register_work(autogain_actions.work_in_progress)
+    desk_access.register_work(level_check.work_in_progress)
     # The one listener, and what follows it whatever else is running: the naming layout, and the
     # pad bank and playback the shortcuts fire by.
     desk_live.start()
@@ -110,6 +116,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     app_updates.start()
     # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
     # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
+    callme_actions.load_contacts()
     callme_actions.watcher()
     try:
         read_desk_once()
@@ -123,11 +130,15 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
 def stop(reason: str) -> None:
     """What the app lets go of on the way out. Safe to call more than once.
 
-    The endpoint watcher and the global shortcuts go first. Then any Hold-mode pad a shortcut is holding, which would
-    otherwise keep playing with nothing left to release it, and any live preview still engaged on
-    a mic. The speech output closes, since a device left open holds the process's exit up, and the
-    desk listener closes its handle on its own thread."""
+    A running auto gain or level check ends first and puts the desk back, since a quit when
+    Windows ends the session gives no warning. The endpoint watcher and the global shortcuts go
+    next. Then any Hold-mode pad a shortcut is holding, which would otherwise keep playing with
+    nothing left to release it, and any live preview still engaged on a mic. The speech output
+    closes, since a device left open holds the process's exit up, and the desk listener closes its
+    handle on its own thread."""
     diagnostics.event("app.stopping", reason)
+    autogain_actions.cancel_and_wait()
+    level_check.stop_check()
     usb_audio.stop_virtual_devices()
     shortcuts.stop()
     pad_shortcuts.release_held()

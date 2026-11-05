@@ -1862,8 +1862,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   for `wave_player.CLOSE_AFTER_S` after a phrase, so `service.stop` closes it (`speech.stop`). A new
   thread that holds an audio device must be closed there too.
 - **QUIT REFUSES WHILE THE DESK IS PART-WAY THROUGH A CHANGE** (`desk_access.work_in_progress`:
-  any `BackgroundJob`, each of which registers itself, or `rcp_transfer.transfer_active`). A pad
-  sound cut off mid-copy leaves an entry only a factory reset clears. A session end
+  any `BackgroundJob`, each of which registers itself, any check registered with
+  `desk_access.register_work`, or `rcp_transfer.transfer_active`). A pad sound cut off mid-copy
+  leaves an entry only a factory reset clears. **Long work on a thread or timer of its own is
+  invisible to Quit unless it registers**: auto gain and the level check do, in `service.start`,
+  and `service.stop` ends both and waits for their restores, since the process exit kills a daemon
+  thread before its `finally` runs. A session end
   (Windows shutting down, or the installer's Restart Manager) is NOT refused: it goes straight to
   `_quit`, because a refusal there cannot hold anything open. So an app update checks instead,
   before it downloads and again before it hands over (`update_dialogs._Follower`).
@@ -2293,6 +2297,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   with `chat_isolation.NOT_RESTORED`, by auto gain and the level check alike. `changed` is set BEFORE each
   write, not after: a mix that already carried the one source is neither settled nor restored, and a
   write that fails part way must still count as a change.
+- **ONE `ChatIsolation` OWNS THE CHAT MIX AT A TIME** (`chat_isolation._owner`, claimed by `__enter__`,
+  given up by a restore that succeeds). A second one entered meanwhile raises `BUSY`: it would
+  snapshot the isolated mix as its "before" and put that back. One whose restore failed is retried
+  by the next to enter, which refuses with `NOT_RESTORED` if that fails too.
 - **Level meters read Windows audio endpoints, so metering cannot work or be tested over Remote
   Desktop.** Run `query session` first; that is the whole precondition.
 - **Default to a CAPTURE endpoint.** With no stream chosen the meter defaulted to the PLAYBACK
@@ -3081,9 +3089,11 @@ shared one; a new copy is how they drifted apart the first time.
   surfaces a ValueError's own text, because soundpad raises those with a finished user-facing
   sentence and wrapping it buries the part that says what to do.
 - **A RISKY WRITE FAMILY IS GATED BY `desk_access.cap_gate`**, which holds the shared reasoning: a selector
-  proven on a Pro II is NOT proven on a Duo, and a wrong one can append a stray only a factory reset
+  proven on one desk is NOT proven on another, and a wrong one can append a stray only a factory reset
   clears (it happened, 26th August 2026). Each gate keeps its OWN refusal sentence, because what the
-  user can and cannot do differs per family. **`faders.level_write_gate` is deliberately not on it**: it
+  user can and cannot do differs per family. **A gate never names the desks a feature works on in its
+  own words**: `confirmed=True` appends `desk_access.confirmed_on(cap)`, built from `devices.DEVICES`,
+  so the sentence cannot go stale when a desk gains the cap. **`faders.level_write_gate` is deliberately not on it**: it
   has a second condition beyond the cap (the device must carry confirmed faderLevel selectors).
 - **The master Compellor and output delay come from `rcp_read.master_processing`**, shared by the
   Routing page and a profile. They were built twice, so a property added to one and not the other

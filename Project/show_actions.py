@@ -38,9 +38,8 @@ def write_gate():
     same treatment. `DevTools/test_shows_sim.py` proves it with a synthetic capless device."""
     return desk_access.cap_gate("shows", lambda name:
                      f"AccessCaster can list the shows on the {name} but not export, restore or "
-                     f"reset them: doing that has only ever been confirmed on a RODECaster Pro 2, "
-                     f"and the same control carries the factory reset, so it refuses rather than "
-                     f"risk it.")
+                     f"reset them: the same control carries the factory reset, so it refuses "
+                     f"rather than risk it.", confirmed=True)
 
 
 _NO_BACKUP_STORAGE = ("There is no memory card or USB drive in the desk, so there is nowhere to "

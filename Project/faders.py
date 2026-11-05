@@ -664,6 +664,13 @@ def fader_levels(blob: bytes) -> dict:
     # monitor level on the Levels tab, and this is the read that tab already makes.
     outs = rcp_read.snapshot_properties(blob)
     vec = read_fader_vector(blob, spec)
+    def switch(values, idx):
+        # None for an empty fader, so the UI can say why the switch is unavailable rather than
+        # offering a mute for nothing.
+        if idx >= len(vec) or is_empty_fader(vec[idx]) or idx >= len(values):
+            return None
+        return bool(values[idx])
+
     faders = []
     for idx in spec.level_faders:
         val = raw[idx] if idx < len(raw) else None
@@ -673,13 +680,10 @@ def fader_levels(blob: bytes) -> dict:
             "channel": channel_name(vec[idx], spec) if idx < len(vec) else None,
             "percent": (None if val is None
                         else max(0, min(100, round(val * 100 / rcp_transfer.FADER_LEVEL_MAX)))),
-            # None for an empty fader, so the UI can say why the switch is unavailable rather than
-            # offering a mute for nothing.
-            "muted": (None if idx >= len(vec) or is_empty_fader(vec[idx])
-                      else bool(mutes[idx]) if idx < len(mutes) else None),
-            "soloed": (None if idx >= len(vec) or is_empty_fader(vec[idx])
-                       else bool(solos[idx]) if idx < len(solos) else None),
+            "muted": switch(mutes, idx),
+            "soloed": switch(solos, idx),
         })
+
     def one(prop):
         vals = outs.get(prop) or []
         return vals[0] if vals else None
@@ -819,13 +823,6 @@ def action_set_bt_output_level(percent: int) -> dict:
                        f"hears from the desk."}
 
 
-# THERE IS NO "Free the encoder" ACTION, and it must not come back on the reasoning that a channel
-# button taking the encoder can only be undone by a POWER CYCLE. The channel button TOGGLES:
-# measured, systemChannelSelected goes 0 on the press and -1 on a second press of the same button,
-# while two encoder presses in between leave it at 0. The announcer names the holding channel and
-# names that way out, so a systemChannelSelected = -1 write earns nothing.
-
-
 def action_reset_faders() -> dict:
     """Restore the factory-default fader layout in one go (direct set per position, no swap
     logic so it lands exactly on the default). Device-aware: a device whose clean default vector
@@ -833,10 +830,11 @@ def action_reset_faders() -> dict:
     guessed layout. Both shipped desks HAVE a confirmed vector, so neither refuses today; the
     guard is for the next desk added.
 
-    THE CHAIN FOLLOWS THE CHANNEL HERE TOO, exactly as in action_set_fader. Without it, a reset
-    drops USB 1 onto a strip holding a mic voicing with the noise gate on and music beds start
-    gating. Processing is per fader STRIP and a reset moves EVERY channel at once, so it is the
-    single move most likely to hand a channel the wrong chain."""
+    THE CHAIN AND THE LEVEL FOLLOW THE CHANNEL HERE TOO, exactly as in action_set_fader. Without
+    the chain, a reset drops USB 1 onto a strip holding a mic voicing with the noise gate on and
+    music beds start gating; without the level, a channel landing on a virtual fader at zero goes
+    silent. Both are per fader STRIP and a reset moves EVERY channel at once, so it is the single
+    move most likely to hand a channel the wrong one."""
     gate = fader_write_gate()
     if gate is not None:
         return gate
@@ -856,16 +854,20 @@ def action_reset_faders() -> dict:
             blob = rcp_read.read_model()
             old = read_fader_vector(blob, spec)
             chains_before = channels.read_chains(blob) if chain_follow_on() else None
+            levels_before = (rcp_read.values(blob, "faderLevel")
+                             if level_write_gate() is None else None)
             for i, code in enumerate(spec.default_vector):
                 rcp_transfer.set_fader_source(i, code)
             new = read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = follow_chains(old, new, chains_before)
+            if levels_before is not None:
+                chain_note += follow_levels(old, new, levels_before, spec)
     except Exception as exc:
         return {"ok": False, "message": f"Could not reset the faders: {exc}"}
     labels = ", ".join(channel_name(c, spec) for c in spec.default_vector)
     msg = f"Faders reset to the default layout: {labels}."
     if chain_note:
-        msg += " " + chain_note
+        msg += " " + chain_note.strip()
     return {"ok": True, "faders": new, "labels": [channel_name(c, spec) for c in new],
             "stereo": stereo_link_state(new, spec), "message": msg}
