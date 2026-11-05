@@ -26,8 +26,9 @@ import _testkit
 import autogain
 import clip_warning
 import devices
+import level_check
 import meters
-import server
+import settings_file
 import speech
 from _testkit import check, check_in, check_not_in, patched
 
@@ -40,7 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakeWatcher:
-    """Only what _level_check_summary reads. The real one needs an audio endpoint."""
+    """Only what level_check._summary reads. The real one needs an audio endpoint."""
 
     def __init__(self, peak_max, name="Mic 2", volume_db=0.0, ceiling=1.0,
                  muted=False, wake_failed=False, clip_at=0.99):
@@ -57,7 +58,7 @@ print("\nTHE FADER IS DIVIDED OUT (scale), so a check and auto gain cannot disag
 w = meters.Watcher("", lambda *_a: None, scale=0.5, label="Mic 2")
 check("a post-fader cross-point at half level is carried as the scale", w.scale, 0.5)
 check("and the label is what it will be CALLED out loud", w.label, "Mic 2")
-# The floor matters: _ChatIsolation already refuses below 0.05, but a scale of 0 here would divide
+# The floor matters: ChatIsolation already refuses below 0.05, but a scale of 0 here would divide
 # by zero on the first poll and take the whole check down with it.
 check("a zero scale falls back to no correction rather than dividing by zero",
       meters.Watcher("", lambda *_a: None, scale=0).scale, 1.0)
@@ -101,47 +102,47 @@ check("a channel reading 0.25 through a half-level cross-point is 0.5 at the cha
 check("and nothing is ever reported above full scale", one_poll(0.9, 0.5), 1.0)
 
 print("\nTHE SUMMARY NAMES THE CHANNEL, AND ENDS WITH ADVICE")
-msg = server._level_check_summary(FakeWatcher(0.35))
+msg = level_check._summary(FakeWatcher(0.35))
 check_in("it names the channel, not the Windows endpoint", "Mic 2", msg)
 check_not_in("the endpoint's own name is nowhere in it", "RODECaster Pro II Chat", msg)
 # SPOKEN dB, not "-9 dBFS": this sentence goes to a speech engine, and meters.dbfs writes it the
 # way it should be heard ("minus 9 dB"), not the way it would be printed.
 check_in("it gives the peak as a level, spoken", "peaked at minus 9 dB", msg)
 check_in("and a verdict, because a number alone is half an answer", "good", msg)
-hot = server._level_check_summary(FakeWatcher(0.95))
+hot = level_check._summary(FakeWatcher(0.95))
 check_in("a hot channel is told which knob to turn", "gain", hot)
 check_in("and that it is the UNIT's knob, not Windows'", "on the desk", hot)
-silent = server._level_check_summary(FakeWatcher(0.0))
+silent = level_check._summary(FakeWatcher(0.0))
 check_in("silence is reported as silence rather than as a level", "nothing", silent)
-muted = server._level_check_summary(FakeWatcher(0.0, muted=True))
+muted = level_check._summary(FakeWatcher(0.0, muted=True))
 check_in("a Windows mute is NAMED, since it reads exactly like a dead microphone",
          "mute", muted)
 
 print("\nWHICH CHANNELS IT IS OFFERED ON")
-src, why = server._chan_check_source("Mic1")
+src, why = level_check._source("Mic1")
 check("Mic 1 is the first matrix source", (src or {}).get("index"), 0)
 check("and it carries the label the check will speak", (src or {}).get("label"), "Mic 1")
 check("a mic needs no explanation", why, "")
-src, why = server._chan_check_source("USB2")
+src, why = level_check._source("USB2")
 check("a non-mic channel is offered too: nobody chose the level a USB feed arrives at",
       (src or {}).get("label"), "USB 2 (Secondary)")
-src, why = server._chan_check_source("Chat")
+src, why = level_check._source("Chat")
 check("Chat is refused", src, None)
 # THE REASON IS THE MECHANISM, not a rule we chose: the check listens on the Chat OUTPUT, and that
 # output is mix-minus, so the Chat source is deliberately not in it.
 check_in("and the refusal explains WHY, in terms of the mix", "output", why)
 check_in("naming the caller, so it reads as a fact about mix-minus rather than a limitation",
          "caller", why)
-src, why = server._chan_check_source("Nonsense")
+src, why = level_check._source("Nonsense")
 check("an unknown channel is refused", src, None)
 check_in("with the channel name in the message", "Nonsense", why)
 
-print("\nTHE WINDOW AND THE SERVER AGREE ABOUT CHAT")
+print("\nTHE WINDOW AND THE CHECK AGREE ABOUT CHAT")
 tabs_src = (ROOT / "Project" / "native" / "channel_tabs.py").read_text(encoding="utf-8")
 check_in("the window does not even build the button for Chat", 'if name != "Chat"', tabs_src)
 
 print("\nTHE CHECK IS PER CHANNEL ONLY: NO STREAM-WIDE CHECK, NOT EVEN A HIDDEN ONE")
-check("there is no action for one", hasattr(server, "action_meter_check"), False)
+check("there is no action for one", hasattr(level_check, "action_meter_check"), False)
 
 print("\nA RUN WHOSE WATCHER HAS DIED, AND A STALE TIMER")
 # When a run's watcher thread dies mid-run, the next press must stop that run rather than start a
@@ -150,38 +151,38 @@ spoken = []
 meters.cue = lambda *_a, **_k: None            # no beeps in an offline run
 speech.say = lambda text, *a, **k: spoken.append(text)
 
-server._chan_check = None
-server._chan_check_iso = object()             # a run with nothing alive but something to restore
-server._chan_check_label = "Mic 4"
+level_check._watcher = None
+level_check._iso = object()             # a run with nothing alive but something to restore
+level_check._label = "Mic 4"
 check("an isolation with no watcher still counts as a run in progress",
-      server._chan_check_state()["running"], True)
+      level_check._state()["running"], True)
 check("and it still names the channel, so a stop press can say what it stopped",
-      server._chan_check_state()["channel"], "Mic 4")
-server._chan_check_iso = None
-server._chan_check_label = ""
-check("with nothing to restore, nothing is running", server._chan_check_state()["running"], False)
+      level_check._state()["channel"], "Mic 4")
+level_check._iso = None
+level_check._label = ""
+check("with nothing to restore, nothing is running", level_check._state()["running"], False)
 
 # A stale end-timer must be a no-op. Press stop at 8 s, start again at 10 s, and the first run's
 # 30-second timer would otherwise arrive 20 s into the second run and kill it.
-server._chan_check = FakeWatcher(0.3, name="Mic 2")
-server._chan_check_iso = None
-server._chan_check_id = 7
+level_check._watcher = FakeWatcher(0.3, name="Mic 2")
+level_check._iso = None
+level_check._run_id = 7
 check("a timer from an older run stops nothing",
-      server._chan_check_stop(speak=False, run_id=6), "")
+      level_check._stop(speak=False, run_id=6), "")
 check("and the run it did not belong to is still going",
-      server._chan_check_state()["running"], True)
+      level_check._state()["running"], True)
 check("the timer for THIS run does end it",
-      "Mic 2" in server._chan_check_stop(speak=False, run_id=7), True)
+      "Mic 2" in level_check._stop(speak=False, run_id=7), True)
 check("after which there is nothing left in progress",
-      server._chan_check_state()["running"], False)
+      level_check._state()["running"], False)
 
 # A WATCHER THAT BROKE MID-RUN is not a quiet channel, and must not be summarised as one.
 broken = FakeWatcher(0.3, name="Mic 2")
 broken.error = "The meter stopped part-way through: device disconnected"
-server._chan_check = broken
-server._chan_check_iso = None
-server._chan_check_id = 8
-msg = server._chan_check_stop(speak=True)
+level_check._watcher = broken
+level_check._iso = None
+level_check._run_id = 8
+msg = level_check._stop(speak=True)
 check_in("the failure is reported instead of a level", "stopped part-way through", msg)
 check_in("and it says outright that nothing was measured", "no level is being reported", msg)
 check_not_in("no peak is quoted from a run that broke", "peaked at", msg)
@@ -190,16 +191,16 @@ check("and it was SPOKEN, not just returned", spoken[-1], msg)
 print("\nTHE REFUSAL A USER WILL ACTUALLY HIT")
 # A channel whose fader is down does not reach the Chat mix at all, so this refusal is the common
 # path rather than an edge case, and it has to say what to DO instead of describing the mixer.
-server_src = (ROOT / "Project" / "server.py").read_text(encoding="utf-8")
+check_src = (ROOT / "Project" / "level_check.py").read_text(encoding="utf-8")
 check_in("the start path recognises the cross-point refusal",
-         "not reaching the Chat mix", server_src)
+         "not reaching the Chat mix", check_src)
 # The phrase is split across source lines, so match the words that carry the instruction.
-check_in("and answers it with an instruction about the fader", "fader up", server_src)
+check_in("and answers it with an instruction about the fader", "fader up", check_src)
 check_in("naming where the exclusion would be, since that is the other cause",
-         "Routing, Output mixes", server_src)
+         "Routing, Output mixes", check_src)
 
 print("\nTHE CHECK'S STATE")
-st = server._chan_check_state()
+st = level_check._state()
 check("nothing is running to begin with", st["running"], False)
 check("and it says so with no channel named", st["channel"], "")
 
@@ -236,7 +237,7 @@ class FakeClipWatcher:
         self.running = False
 
 
-with patched((server.meters, {"desk_streams": lambda: dict(streams, ok=True, reason=""),
+with patched((meters, {"desk_streams": lambda: dict(streams, ok=True, reason=""),
                               "Watcher": FakeClipWatcher})):
     check("a start opens it", clip_warning._clip_start(), "")
 check("on the main stream", made["endpoint"], "main")
@@ -246,8 +247,8 @@ check("saying nothing about silence or the level, and playing no sound of its ow
 check("and called the main mix out loud", made["label"], "Main mix")
 clip_warning._clip_stop()
 saved = {}
-with patched((server.settings_file, {"update": lambda **kw: saved.update(kw)}),
-             (server.meters, {"desk_streams": lambda: {"ok": False, "streams": [],
+with patched((settings_file, {"update": lambda **kw: saved.update(kw)}),
+             (meters, {"desk_streams": lambda: {"ok": False, "streams": [],
                                                        "reason": "Remote Desktop."}})):
     on = clip_warning.action_set_clip_warning(True)
     off = clip_warning.action_set_clip_warning(False)

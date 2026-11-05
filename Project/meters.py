@@ -733,7 +733,7 @@ class Watcher:
                  clip_sound=True, scale=1.0, label=""):
         self.endpoint_id = endpoint_id
         self._say = say
-        # scale and label serve the per-channel check (server.action_channel_level_check), which
+        # scale and label serve the per-channel check (level_check.action_channel_level_check), which
         # hears one channel through a temporary post-fader Chat mix. scale is that cross-point's
         # level: dividing by it puts every reading, and the clip test, back in channel terms, as
         # auto gain does; a microphone clips in the preamp, ahead of the fader. label is the name

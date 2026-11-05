@@ -1,13 +1,13 @@
-"""The two channel jobs that listen to a microphone: auto gain and the level check. The server does
-the measuring (`server._autogain_run`, `server.action_channel_level_check`); this is their buttons
-and dialogs.
+"""The two channel jobs that listen to a microphone: auto gain and the level check. The measuring
+is `autogain_actions` and `level_check`; this is their buttons and dialogs.
 
 Nothing is spoken while either listens beyond what the user needs to act on: the microphone being
 measured hears whatever the computer plays.
 """
 import wx
 
-import server
+import autogain_actions
+import level_check
 from native import a11y
 from native.calls import call
 from native.dialogs import JobDialog, TextDialog
@@ -40,8 +40,8 @@ class AutoGain:
         question = TextDialog(
             self.page, f"Set {self.label}'s gain automatically?",
             "You will be asked to talk normally, as you would on air, for "
-            f"{int(server._AUTOGAIN_SECONDS)} seconds, then for "
-            f"{int(server._AUTOGAIN_VERIFY_S)} seconds more so it can check its work. Each take "
+            f"{int(autogain_actions.SECONDS)} seconds, then for "
+            f"{int(autogain_actions.VERIFY_S)} seconds more so it can check its work. Each take "
             "starts at a tone.\n\n"
             f"This switches {self.label} processing off while it listens and puts it back "
             "afterwards, sets the Windows recording level to no change, and rewrites the gain. The "
@@ -54,7 +54,7 @@ class AutoGain:
             if question.ShowModal() != wx.ID_OK:
                 return
         job = JobDialog(self.page, "Setting the gain", "Getting ready. Do not talk yet.",
-                        self._begin, server.action_autogain_stop, stop_label="Cancel",
+                        self._begin, autogain_actions.action_autogain_stop, stop_label="Cancel",
                         ticks=False)
         with job:
             st = job.run() or {}
@@ -66,10 +66,10 @@ class AutoGain:
     def _begin(self, job):
         def started(reply):
             if reply.get("ok"):
-                job.poll(server.autogain_status, lambda st: self._status(job, st))
+                job.poll(autogain_actions.status, lambda st: self._status(job, st))
             else:
                 job.finish(reply)
-        call(job, server.action_autogain_start, self.page.name, done=started)
+        call(job, autogain_actions.action_autogain_start, self.page.name, done=started)
 
     def _status(self, job, st):
         phase = st.get("phase")
@@ -109,11 +109,11 @@ class AutoGain:
         def undone(reply):
             self.page.frame.reply(self.source, reply)
             section.refresh(False)
-        call(self.source, server.action_autogain_undo, done=undone)
+        call(self.source, autogain_actions.action_autogain_undo, done=undone)
 
 
 class LevelCheck:
-    """The level check. One run at a time across every channel: the server toggles, so any
+    """The level check. One run at a time across every channel: `level_check` toggles, so any
     channel's button stops a run, and its summary names the channel it measured.
 
     A button's label says whether a run is going, but changes only while that button does not have
@@ -143,7 +143,7 @@ class LevelCheck:
         return button
 
     def _press(self, button, name):
-        call(button, server.action_channel_level_check, name, done=self._returned)
+        call(button, level_check.action_channel_level_check, name, done=self._returned)
 
     def _returned(self, reply):
         self.running = bool(reply.get("running"))
@@ -154,7 +154,7 @@ class LevelCheck:
             # Only a Windows mute or level the check had to clear: the start itself is a tone.
             if reply.get("message"):
                 self.frame.say(reply["message"])
-            # The server ends the run on its own timer and speaks the summary itself.
+            # `level_check` ends the run on its own timer and speaks the summary itself.
             self._ends = wx.CallLater(int(((reply.get("seconds") or 30) + 1) * 1000),
                                       self._ended)
         else:

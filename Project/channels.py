@@ -40,6 +40,13 @@ import rode_app  # RODE's app open: its fader moves are not pushed
 # The Pro II's mic channels, 1-based.
 MIC_CHANNELS = (1, 2, 3, 4)
 
+GAIN_MIN_DB = 0
+GAIN_MAX_DB = 76
+# A line channel's Level (inputDigitalGain). The desk clamps; these are the bounds the UI offers
+# (the desk's default is -12 dB).
+LEVEL_MIN_DB = -60
+LEVEL_MAX_DB = 12
+
 
 def _mic_key(channel: int) -> tuple:
     """The node key of a 1-based mic channel's input values on the CONNECTED device.
@@ -732,6 +739,29 @@ def input_value(blob: bytes, ch: dict, prop: str, dev=None):
     """
     dev = dev or devices.get_active_device()
     return _r.keyed_value(blob, dev.input_key(ch), prop, None)
+
+
+def mic_gain_and_processing(mic: int):
+    """(gain dB, processing on) for one 1-based mic, from one fresh dump. CALLER HOLDS THE HID LOCK.
+
+    The gain is read at the mic's own address (`input_value`). Processing is per STRIP, and the
+    strip is found from the same dump's fader vector rather than assumed to be mic - 1, so a
+    reordered layout reports the right strip's bypass. Processing is None while the mic is on no
+    fader."""
+    blob = _r.read_model_stable(fresh=True)
+    entry = next((c for c in active_ui_channels()
+                  if c.get("kind") == "mic" and mic_channel_number(c) == mic), None)
+    if entry is None:
+        return None, None
+    gain = input_value(blob, entry, "inputMicrophoneGain")
+    bypass = _r.values(blob, "channelBypassProcessing")
+    vec = _r.values(blob, "channelInputSource")
+    try:
+        strip = vec.index(entry.get("source_code"))
+    except ValueError:
+        strip = None
+    on = (not bypass[strip]) if (strip is not None and 0 <= strip < len(bypass)) else None
+    return gain, on
 
 
 def read_mixer() -> dict:

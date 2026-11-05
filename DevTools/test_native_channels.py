@@ -66,9 +66,9 @@ def record(name, kind):
 
 data = {"ok": True, "groups": server.PROCESSING_CONTROLS, "modules": server.PROCESSING_MODULES,
         "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]), "presets": [],
-        "pan_links": {}, "wireless_mics": {}, "gain_min_db": server.GAIN_MIN_DB,
-        "gain_max_db": server.GAIN_MAX_DB, "level_min_db": server.LEVEL_MIN_DB,
-        "level_max_db": server.LEVEL_MAX_DB}
+        "pan_links": {}, "wireless_mics": {}, "gain_min_db": channels.GAIN_MIN_DB,
+        "gain_max_db": channels.GAIN_MAX_DB, "level_min_db": channels.LEVEL_MIN_DB,
+        "level_max_db": channels.LEVEL_MAX_DB}
 mics = [c["name"] for c in channels.active_ui_channels() if c["kind"] == "mic"][:2]
 frame = FakeFrame(data)
 section = channels_section.ChannelsSection(frame)

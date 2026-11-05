@@ -13,10 +13,9 @@ HOW IT MEASURES, and each of these is the answer to a way it would otherwise be 
     limiter. With processing on you are measuring the safety net, not the gain - and an overdriven
     preamp distorts BEFORE the limiter, which then tidies the level so the meter looks healthy while
     the sound is already damaged. The bypass is restored afterwards.
-  * **THE CHANNEL ALONE.** The desk's Main Multitrack USB device carries every channel on its own
-    pair, so the measurement is of that microphone and nothing else - no other mic, no SMART pad, no
-    audio from the computer. Metering a mixed stream instead would set your gain from whatever else
-    happened to be live.
+  * **THE CHANNEL ALONE.** A temporary custom Chat mix carries that microphone and nothing else -
+    no other mic, no SMART pad, no audio from the computer (`chat_isolation.ChatIsolation`).
+    Metering a mixed stream instead would set your gain from whatever else happened to be live.
   * **WINDOWS OUT OF THE WAY.** Windows' own level on the endpoint scales the reading, so it is set
     to unity first and any Windows mute cleared. Otherwise a slider nobody can see decides the gain.
   * **SILENT WHILE MEASURING.** The app says nothing at all during the take. Anything played aloud

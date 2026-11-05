@@ -25,9 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import announcer
+import autogain
+import autogain_actions
+import channels
+import chat_isolation
 import desk_access
 import desk_model
 import faders
+import meters
 import mic_presets
 import output_mixes
 import pad_shortcuts
@@ -107,11 +112,12 @@ def excluded(out, src, on):
 
 
 with patched(
-        (server.rcp_transfer, {"set_output_routing": lambda out, mode: writes.append(("mode", mode)),
-                               "set_cross_point_excluded": excluded}),
-        (server.time, {"sleep": lambda s: None}),
+        (chat_isolation.rcp_transfer,
+         {"set_output_routing": lambda out, mode: writes.append(("mode", mode)),
+          "set_cross_point_excluded": excluded}),
+        (chat_isolation.time, {"sleep": lambda s: None}),
         (output_mixes, {"active_matrix": lambda: _Matrix()})):
-    iso = server._ChatIsolation(0)
+    iso = chat_isolation.ChatIsolation(0)
     before = {0: False, 1: False, 2: False, 3: False}
     iso._snapshot = lambda: (2, dict(before), {0: {"level": 1.0}})
     try:
@@ -143,7 +149,7 @@ class _Isolation:
 
 
 def stopped_silent_take(endpoint_id, seconds, should_stop=None):
-    server._autogain_set(cancel=True)          # Cancel pressed during the take
+    autogain_actions._set(cancel=True)          # Cancel pressed during the take
     return {"seconds": 0.0, "samples": 0, "loud": 0.0, "loud_db": -120.0, "max": 0.0,
             "max_db": -120.0, "muted": False, "ceiling": 1.0}
 
@@ -159,19 +165,19 @@ def autogain_run(takes):
     its end state and every gain written."""
     writes = []
     answers = iter(takes)
-    server._autogain = {"phase": "starting", "channel": "Mic1", "done": False, "cancel": False}
+    autogain_actions._job = {"phase": "starting", "channel": "Mic1", "done": False, "cancel": False}
     with patched(
-            (server, {"_read_gain_and_processing": lambda mic: (30, False),
-                      "_chat_endpoint_to_unity": lambda endpoint_id: {},
-                      "_ChatIsolation": _Isolation, "_AUTOGAIN_LEAD_S": 0.0,
-                      "_AUTOGAIN_LEAD_PER_WORD_S": 0.0,
-                      "_autogain_write_gain": lambda mic, db: writes.append(db)}),
-            (server.autogain, {"chat_endpoint": lambda: {"id": "chat"},
+            (autogain_actions, {"LEAD_S": 0.0, "LEAD_PER_WORD_S": 0.0,
+                                "_write_gain": lambda mic, db: writes.append(db)}),
+            (channels, {"mic_gain_and_processing": lambda mic: (30, False)}),
+            (chat_isolation, {"endpoint_to_unity": lambda endpoint_id: "",
+                              "ChatIsolation": _Isolation}),
+            (autogain, {"chat_endpoint": lambda: {"id": "chat"},
                                "measure_endpoint": lambda *a, **k: next(answers)(*a, **k)}),
-            (server.meters, {"cue": lambda name: None})):
-        server._autogain_run("Mic1", 1, 5.0)
-    state = server._autogain_state()
-    server._autogain = None
+            (meters, {"cue": lambda name: None})):
+        autogain_actions._run("Mic1", 1, 5.0)
+    state = autogain_actions.state()
+    autogain_actions._job = None
     return state, writes
 
 

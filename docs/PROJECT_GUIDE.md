@@ -275,7 +275,8 @@ The layers, bottom up:
   `pan_link.py` (one Pan control for a stereo channel), `faders.py` (the fader layout, stereo
   links and the Levels page's writes), `usb_audio.py` (the USB mode and RODE's virtual devices,
   over `virtual_devices.py`), `master_outputs.py` (the auto-mutes, headphone types, master
-  Compellor and output delay), `clip_warning.py`, `shows.py`,
+  Compellor and output delay), `clip_warning.py`, `autogain_actions.py` (auto gain's app side,
+  over `autogain.py`) and `level_check.py`, both listening through `chat_isolation.py`, `shows.py`,
   `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
   over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
@@ -2282,9 +2283,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A SPOKEN LEVEL IS THE LOUDEST SINCE THE LAST ONE SPOKEN, NEVER `peak_hold`** (`meters.Watcher`).
   The hold falls under 1 dB a second, so it went on reading a voice for half a minute after it
   stopped. Below `meters.QUIET` (-50 dBFS) a check says "quiet" once, then nothing.
-- **`_ChatIsolation.__enter__` PUTS BACK WHAT IT CHANGED WHEN IT FAILS PART WAY**, because a
+- **`chat_isolation.ChatIsolation.__enter__` PUTS BACK WHAT IT CHANGED WHEN IT FAILS PART WAY**, because a
   `with` block does not call `__exit__` when `__enter__` raises. A restore that fails is reported
-  with `CHAT_NOT_RESTORED`, by auto gain and the level check alike. `changed` is set BEFORE each
+  with `chat_isolation.NOT_RESTORED`, by auto gain and the level check alike. `changed` is set BEFORE each
   write, not after: a mix that already carried the one source is neither settled nor restored, and a
   write that fails part way must still count as a change.
 - **Level meters read Windows audio endpoints, so metering cannot work or be tested over Remote
