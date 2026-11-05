@@ -114,9 +114,10 @@ check("all three Q values ARE in the chain, because Q is independent and writabl
 # chain on its old strip and hands USB 1 a mic voicing with the gate on. No device: the layout read,
 # the chain read/write and the fader write are all stubbed.
 # ---------------------------------------------------------------------------------------------
+import faders  # noqa: E402
+import mic_presets  # noqa: E402
 import rcp_read  # noqa: E402
 import rcp_transfer  # noqa: E402
-import server  # noqa: E402
 
 PRO2_DEFAULT = list(devices.PRO2_FADERS.default_vector)   # (0,1,2,3,10,11,7,8,9)
 # A layout in real use: USB 1 (code 7) pulled onto strip 1 so a real fader controls the PC audio,
@@ -144,7 +145,7 @@ class fake_desk:
         self._stack.enter_context(as_device(self.dev))
         self._stack.enter_context(patched(
             (rcp_read, {"read_model": lambda *a, **k: b""}),
-            (server, {"_read_fader_vector": lambda *a, **k: list(self.vec)}),
+            (faders, {"read_fader_vector": lambda *a, **k: list(self.vec)}),
             (c, {"read_chains": lambda *a, **k: [dict(ch) for ch in self.chains],
                  "write_chain": self._write_chain}),
             (rcp_transfer, {"set_fader_source": self._set_fader})))
@@ -171,7 +172,7 @@ def gate_on(desk, code):
 
 print("\nRESET FADERS CARRIES THE CHAIN")
 with fake_desk(IN_USE_VEC) as desk:
-    res = server.action_reset_faders()
+    res = faders.action_reset_faders()
 check("the reset succeeds", res.get("ok"), True)
 check("it wrote the default layout", [code for _i, code in desk.fader_writes], PRO2_DEFAULT)
 check("it reports that the chains moved", "followed" in res["message"], True)
@@ -183,12 +184,12 @@ check("and Mic 2's voicing followed Mic 2, gate still on", gate_on(desk, 1), Tru
 
 print("\nA RESET THAT CHANGES NOTHING WRITES NO CHAIN")
 with fake_desk(PRO2_DEFAULT) as desk:
-    server.action_reset_faders()
+    faders.action_reset_faders()
 check("already on the default, so nothing moves", desk.chain_writes, [])
 
 print("\nTHE DUO CARRIES CHAINS TOO")
 with fake_desk(IN_USE_VEC, dev=devices.DUO) as desk:
-    res_duo = server.action_reset_faders()
+    res_duo = faders.action_reset_faders()
 check("the reset succeeds on a Duo", res_duo.get("ok"), True)
 check("a reset moves the chains on a Duo as it does on a Pro II", bool(desk.chain_writes), True)
 
@@ -202,7 +203,7 @@ print("\nA CHANNEL MOVES ONTO AN EMPTY FADER, AND VACATES THE ONE IT LEFT")
 DUO_FACTORY = [0, 1, 10, 11, 2, 7, 8, 9, -1]
 duo_order = [code for code, _ in devices.DUO.fader.assignable]
 with as_device(devices.DUO):
-    got = server._tidy_fader_target(DUO_FACTORY, 8, 2, duo_order)
+    got = faders._tidy_fader_target(DUO_FACTORY, 8, 2, duo_order)
     check("the Headset really lands on the empty fader", got[8], 2)
     check("and the fader it came from is now the empty one", got[4], -1)
     check("no caller is conjured onto a fader", 16 in got, False)
@@ -210,7 +211,7 @@ with as_device(devices.DUO):
     check("every source still appears exactly once",
           sorted(x for x in got if x >= 0), sorted(x for x in DUO_FACTORY if x >= 0))
     check("an occupied-to-occupied swap still swaps",
-          server._tidy_fader_target(DUO_FACTORY, 6, 7, duo_order),
+          faders._tidy_fader_target(DUO_FACTORY, 6, 7, duo_order),
           [0, 1, 10, 11, 2, 8, 7, 9, -1])
 
 # The Pro II has MORE sources than faders, so it has no empty strip. Pinned anyway, so the
@@ -218,10 +219,10 @@ with as_device(devices.DUO):
 print("\nAND THE PRO II IS UNCHANGED (more sources than faders, so no empty strip)")
 PRO2_FACTORY = [0, 1, 2, 3, 10, 11, 7, 8, 9]
 pro2_order = [code for code, _ in devices.PRO2.fader.assignable]
-check("a swap still swaps", server._tidy_fader_target(PRO2_FACTORY, 0, 8, pro2_order),
+check("a swap still swaps", faders._tidy_fader_target(PRO2_FACTORY, 0, 8, pro2_order),
       [8, 1, 2, 3, 10, 11, 7, 0, 9])
 check("bringing the off-fader source on still displaces one",
-      server._tidy_fader_target(PRO2_FACTORY, 0, 16, pro2_order),
+      faders._tidy_fader_target(PRO2_FACTORY, 0, 16, pro2_order),
       [16, 1, 2, 3, 10, 11, 7, 8, 9])
 
 
@@ -232,7 +233,7 @@ check("bringing the off-fader source on still displaces one",
 # (channelBypassProcessing) deliberately is NOT: that one is the operator's control.
 # ---------------------------------------------------------------------------------------------
 print("\nPRESETS CARRY THEIR MODULE SET")
-factory = server._load_factory_presets()
+factory = mic_presets._load_factory_presets()
 check("all three factory presets are still there", sorted(factory), ["Broadcast", "Neutral", "Podcast Studio"])
 for pname, props in factory.items():
     mods = [k for k in props if k in c.PROCESSING_MODULE_BOOLS]
@@ -240,9 +241,9 @@ for pname, props in factory.items():
     check(f"'{pname}' does NOT carry the master on/off",
           "channelBypassProcessing" in props, False)
 check("saving a preset records the modules too",
-      all(m in server._PRESET_PROPS for m in c.PROCESSING_MODULE_BOOLS), True)
+      all(m in mic_presets._PRESET_PROPS for m in c.PROCESSING_MODULE_BOOLS), True)
 check("saving a preset still does NOT record the master on/off",
-      "channelBypassProcessing" in server._PRESET_PROPS, False)
+      "channelBypassProcessing" in mic_presets._PRESET_PROPS, False)
 
 
 def built_order(props):

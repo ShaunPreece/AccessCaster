@@ -13,7 +13,7 @@ import wx.lib.scrolledpanel as scrolled
 import announcer
 import app_settings_actions
 import app_updates
-import server
+import clip_warning
 import speech
 from native import a11y
 from native.calls import call
@@ -71,7 +71,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
          announcer.action_set_announce_mute_tones,
          "Falling notes mean muted, rising notes mean unmuted. Quicker than speech, but it does "
          "not say which channel."),
-        ("clip_warning", "Warn when the main mix clips", server.action_set_clip_warning,
+        ("clip_warning", "Warn when the main mix clips", clip_warning.action_set_clip_warning,
          "Says Main mix clipping when the desk's main mix reaches full scale. Like every "
          "announcement, it is silent during a recording unless announcements stay on while "
          "recording."),

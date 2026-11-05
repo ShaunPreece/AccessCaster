@@ -37,6 +37,10 @@ import rode_app  # RODE's app open: its fader moves are not pushed
 # ============================================================================
 
 
+# The Pro II's mic channels, 1-based.
+MIC_CHANNELS = (1, 2, 3, 4)
+
+
 def _mic_key(channel: int) -> tuple:
     """The node key of a 1-based mic channel's input values on the CONNECTED device.
 
@@ -369,7 +373,7 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     MODULES ARE PART OF A PRESET. Without them it is a silent no-op: applied to a strip whose
     modules are switched off it writes all 33 parameters, reports the preset name, and sounds
     exactly the same, because nothing in the chain is engaged. A preset carries its module set as
-    DATA (see ProjectAssets/mic_presets.json and server._read_channel_preset_props, which records
+    DATA (see ProjectAssets/mic_presets.json and mic_presets._read_channel_preset_props, which records
     the live states on "save as"),
     rather than this function sweeping every module on, which would be a guess dressed as a preset.
 
@@ -992,7 +996,7 @@ def _take(name: str, device_id: str, code: int) -> dict | None:
 
 def park_chain(device_id: str, code: int, chain: dict) -> None:
     """Keep `code`'s chain while it has no strip. Keyed by DESK as well as channel, so two desks
-    do not hand each other their voicings (same reasoning as _applied_preset_record in server)."""
+    do not hand each other their voicings (same reasoning as device_page.desk_record)."""
     if chain:
         _park(_ORPHAN_FILE, device_id, code, chain)
 

@@ -56,6 +56,7 @@ import time
 import _bootstrap  # puts Project/ on the path; import FIRST
 import diagnostics
 import _desk
+import faders
 from _desk import rode_devices_present, wait_for_job
 
 server = None
@@ -91,17 +92,17 @@ def _one_channel(name: str, key):
 
 def _fader_levels() -> list:
     out = []
-    for f in server.fader_levels_live().get("faders") or []:
+    for f in faders.fader_levels_live().get("faders") or []:
         if isinstance(f.get("percent"), int):
             i = f["index"]
             out.append((f"level fader {i + 1}",
                         lambda i=i: _one_fader(i),
-                        lambda v, i=i: server.action_set_fader_level(i, v)))
+                        lambda v, i=i: faders.action_set_fader_level(i, v)))
     return out
 
 
 def _one_fader(index: int):
-    for f in server.fader_levels_live().get("faders") or []:
+    for f in faders.fader_levels_live().get("faders") or []:
         if f.get("index") == index:
             return f.get("percent")
     return None

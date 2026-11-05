@@ -1,4 +1,4 @@
-"""Offline test of the off-fader CHAIN STORE and `server._follow_chains`. NO DEVICE, no HID writes.
+"""Offline test of the off-fader CHAIN STORE and `faders.follow_chains`. NO DEVICE, no HID writes.
 
 WHY THIS EXISTS. Processing and effects live on a fader STRIP, never on a channel, so a channel with
 no fader has no processing anywhere on the desk. Following only the channels present in BOTH
@@ -32,6 +32,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import channels
 import device_page
+import faders
 import server
 from _testkit import check, check_in
 
@@ -90,8 +91,8 @@ def install(before):
     channels.read_chains = lambda blob=None, strips=None: [STATE.get(i) for i in range(len(before))]
     channels.chain_diff = lambda desired, current: [] if desired == current else ["differs"]
     server.rcp_read.read_model = lambda *a, **k: b""
-    server._active_faders = lambda: FakeSpec()
-    server._channel_name = lambda code, spec=None: f"Ch{code}"
+    faders.active_faders = lambda: FakeSpec()
+    faders.channel_name = lambda code, spec=None: f"Ch{code}"
     device_page.hardware_id = lambda: "DESK-TEST"
 
 
@@ -99,7 +100,7 @@ print()
 print("_follow_chains: a channel that MOVES strip")
 before = [chain(0), chain(1), chain(2)]
 install(before)
-note = server._follow_chains([0, 1, 2], [1, 0, 2], before)
+note = faders.follow_chains([0, 1, 2], [1, 0, 2], before)
 check("both chains travel with their channels", sorted(WRITES)[:2],
       sorted([(0, chain(1)), (1, chain(0))])[:2])
 check_in("and the note says what followed", "followed", note)
@@ -108,7 +109,7 @@ print()
 print("_follow_chains: a channel that LEAVES the layout")
 before = [chain(0), chain(1), chain(2)]
 install(before)
-note = server._follow_chains([0, 1, 2], [0, 7, 2], before)
+note = faders.follow_chains([0, 1, 2], [0, 7, 2], before)
 check("the departing channel's chain is parked", channels._parked_load(channels._ORPHAN_FILE)
       .get("DESK-TEST", {}).get("1"), chain(1))
 check_in("and the user is told it is kept, not lost", "comes back", note)
@@ -119,7 +120,7 @@ print()
 print("_follow_chains: a channel that RETURNS from off-fader")
 before = [chain(0), chain(5), chain(2)]         # strip 1 holds a STRANGER's voicing
 install(before)
-note = server._follow_chains([0, 7, 2], [0, 1, 2], before)
+note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
 check("its own parked chain is written back onto the strip it landed on",
       STATE[1], chain(1))
 check("and it is NOT left on the previous occupant's voicing", STATE[1] == chain(5), False)
@@ -130,7 +131,7 @@ print()
 print("_follow_chains: a channel returns with NOTHING parked")
 before = [chain(0), chain(5), chain(2)]
 install(before)
-note = server._follow_chains([0, 7, 2], [0, 4, 2], before)
+note = faders.follow_chains([0, 7, 2], [0, 4, 2], before)
 check("nothing is written for it (we have no chain to write)",
       [w for w in WRITES if w[0] == 1], [])
 check_in("but the user is TOLD it is on whatever was there", "no stored processing", note)
@@ -142,7 +143,7 @@ install(before)
 channels.park_chain("DESK-TEST", 1, chain(1))
 channels.write_chain = lambda strip_idx, desired, current=None, delay=0.02: (
     WRITES.append((strip_idx, desired)) or {"written": 0, "props": []})   # write silently does nothing
-note = server._follow_chains([0, 7, 2], [0, 1, 2], before)
+note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
 check_in("the failure is reported, not swallowed", "warning", note)
 check("and the chain is parked again rather than dropped",
       channels.take_chain("DESK-TEST", 1), chain(1))
@@ -160,14 +161,14 @@ print("_unlink_mutes: what each mic gets back")
 MIC3, MIC4 = 2, 3
 kept = {"lower": True, "upper": False, "pair": True}
 check("a muted Mic 3 linked with an open Mic 4 unlinks the same way",
-      server._unlink_mutes(kept, True, MIC3, MIC4), {MIC3: True, MIC4: False})
+      faders._unlink_mutes(kept, True, MIC3, MIC4), {MIC3: True, MIC4: False})
 check("a pair opened while linked opens both",
-      server._unlink_mutes(kept, False, MIC3, MIC4), {MIC3: False, MIC4: False})
+      faders._unlink_mutes(kept, False, MIC3, MIC4), {MIC3: False, MIC4: False})
 check("a pair muted while linked mutes both",
-      server._unlink_mutes({"lower": False, "upper": False, "pair": False}, True, MIC3, MIC4),
+      faders._unlink_mutes({"lower": False, "upper": False, "pair": False}, True, MIC3, MIC4),
       {MIC3: True, MIC4: True})
 check("a link made outside the app hands the pair's mute to both",
-      server._unlink_mutes(None, True, MIC3, MIC4), {MIC3: True, MIC4: True})
+      faders._unlink_mutes(None, True, MIC3, MIC4), {MIC3: True, MIC4: True})
 
 print()
 raise SystemExit(_testkit.finish())

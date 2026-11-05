@@ -4,7 +4,7 @@ virtual faders and monitor.
 The desk can leave the encoder bound to nothing. It still reports each turn (`encoderSignal`), but
 no level follows. This listener hears every turn and every level the encoder can move on the one
 listener (`desk_live`), whether or not announcements are on, and a turn that nothing follows within
-`DEAD_S` runs `on_dead`, which the server supplies (`server.action_reset_encoder`).
+`DEAD_S` runs `on_dead`, which `service.start` supplies (`faders.action_reset_encoder`).
 
 Left alone: a turn while a channel button holds the encoder (that channel's gain is its target, and
 the channel button gives it back), and a turn that may be against the end of a range, which

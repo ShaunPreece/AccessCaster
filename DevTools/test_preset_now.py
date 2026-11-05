@@ -1,4 +1,4 @@
-"""Unit tests for WHICH PRESET a strip is on (server._preset_now). NO DEVICE, no HID, no writes.
+"""Unit tests for WHICH PRESET a strip is on (mic_presets.preset_now). NO DEVICE, no HID, no writes.
 
 The device cannot answer this on its own: channelCurrentFxPreset is a name-only marker with three
 factory slots that the unit blanks at the first parameter write, so it can never name a custom
@@ -20,7 +20,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels
 import device_page
-import server
+import mic_presets
 import settings_file
 from _testkit import check
 
@@ -62,64 +62,64 @@ SETTINGS: dict = {}
 settings_file.load = lambda: dict(SETTINGS)
 settings_file.update = lambda **kw: SETTINGS.update(kw)
 device_page.hardware_id = lambda: "DESK-A"
-server._load_factory_presets = lambda: {"Podcast Studio": PRESET}
-server._load_user_presets = lambda: {"Shaun voice": PRESET}
+mic_presets._load_factory_presets = lambda: {"Podcast Studio": PRESET}
+mic_presets._load_user_presets = lambda: {"Shaun voice": PRESET}
 
 
 print("THE UNIT'S OWN MARKER WINS WHEN IT HAS AN ANSWER")
 # A non-negative marker means a factory preset was applied and NOTHING has been written since - the
 # firmware blanks it otherwise. That beats any record of ours, and it is the only thing that knows
 # about a preset applied from the RODE app.
-check("marker 1 is Podcast Studio, unedited", server._preset_now(1, live(preset_index=1)),
+check("marker 1 is Podcast Studio, unedited", mic_presets.preset_now(1, live(preset_index=1)),
       {"name": "Podcast Studio", "edited": False, "source": "device"})
-check("marker 0 is Neutral", server._preset_now(1, live(preset_index=0))["name"], "Neutral")
-check("marker 2 is Broadcast", server._preset_now(1, live(preset_index=2))["name"], "Broadcast")
+check("marker 0 is Neutral", mic_presets.preset_now(1, live(preset_index=0))["name"], "Neutral")
+check("marker 2 is Broadcast", mic_presets.preset_now(1, live(preset_index=2))["name"], "Broadcast")
 SETTINGS["applied_presets"] = {"device": "DESK-A", "channels": {"1": "Shaun voice"}}
-check("and it outranks our own record", server._preset_now(1, live(preset_index=1))["name"],
+check("and it outranks our own record", mic_presets.preset_now(1, live(preset_index=1))["name"],
       "Podcast Studio")
 
 print("\nWITH NO MARKER, OUR RECORD ANSWERS - BUT ONLY AFTER THE VALUES AGREE")
 SETTINGS["applied_presets"] = {"device": "DESK-A", "channels": {"1": "Shaun voice"}}
-check("an untouched chain is the preset", server._preset_now(1, live()),
+check("an untouched chain is the preset", mic_presets.preset_now(1, live()),
       {"name": "Shaun voice", "edited": False, "source": "record"})
 check("a moved PARAMETER makes it edited, not the preset",
-      server._preset_now(1, live(params={"eqMidGain": 0.60}))["edited"], True)
+      mic_presets.preset_now(1, live(params={"eqMidGain": 0.60}))["edited"], True)
 check("a switched MODULE does too (a voicing is which parts are engaged, not just values)",
-      server._preset_now(1, live(modules={"eqOn": False}))["edited"], True)
+      mic_presets.preset_now(1, live(modules={"eqOn": False}))["edited"], True)
 check("so does the processing MODE",
-      server._preset_now(1, live(advanced=False))["edited"], True)
+      mic_presets.preset_now(1, live(advanced=False))["edited"], True)
 # Read-back is never bit-identical, so a hair of movement is the same preset, not an edit.
 check("a read-back wobble inside the tolerance is NOT an edit",
-      server._preset_now(1, live(params={"eqMidGain": 0.25 + (server._PRESET_MATCH_TOL / 2)}))
+      mic_presets.preset_now(1, live(params={"eqMidGain": 0.25 + (mic_presets._PRESET_MATCH_TOL / 2)}))
       ["edited"], False)
-check("but a change just outside it is", server._preset_now(
-    1, live(params={"eqMidGain": 0.25 + (server._PRESET_MATCH_TOL * 2)}))["edited"], True)
+check("but a change just outside it is", mic_presets.preset_now(
+    1, live(params={"eqMidGain": 0.25 + (mic_presets._PRESET_MATCH_TOL * 2)}))["edited"], True)
 check("a value we could not read is treated as a mismatch, never as a match",
-      server._preset_now(1, live(params={"channelPunch": None}))["edited"], True)
+      mic_presets.preset_now(1, live(params={"channelPunch": None}))["edited"], True)
 
 print("\nWHEN NOTHING CAN BE CLAIMED, NOTHING IS")
 SETTINGS["applied_presets"] = {"device": "DESK-A", "channels": {}}
-check("no marker and no record", server._preset_now(1, live()), None)
+check("no marker and no record", mic_presets.preset_now(1, live()), None)
 SETTINGS["applied_presets"] = {"device": "DESK-A", "channels": {"1": "Deleted preset"}}
 check("a record naming a preset that no longer exists is named but not judged",
-      server._preset_now(1, live()), {"name": "Deleted preset", "edited": None, "source": "record"})
+      mic_presets.preset_now(1, live()), {"name": "Deleted preset", "edited": None, "source": "record"})
 
 print("\nANOTHER DESK'S RECORD IS NEVER CLAIMED AS THIS ONE'S")
 SETTINGS["applied_presets"] = {"device": "DESK-B", "channels": {"1": "Shaun voice"}}
-check("a record written against another hardware id is ignored", server._preset_now(1, live()), None)
+check("a record written against another hardware id is ignored", mic_presets.preset_now(1, live()), None)
 SETTINGS["applied_presets"] = {"device": "", "channels": {"1": "Shaun voice"}}
 check("an untagged record still answers (written before we tagged them)",
-      server._preset_now(1, live())["name"], "Shaun voice")
+      mic_presets.preset_now(1, live())["name"], "Shaun voice")
 
 print("\nTHE RECORD IS PER CHANNEL, AND WRITING IT KEEPS THE OTHERS")
 SETTINGS.clear()
-server._note_applied_preset(1, "Podcast Studio")
-server._note_applied_preset(3, "Shaun voice")
+mic_presets._note_applied_preset(1, "Podcast Studio")
+mic_presets._note_applied_preset(3, "Shaun voice")
 check("both channels are remembered",
       SETTINGS["applied_presets"]["channels"], {"1": "Podcast Studio", "3": "Shaun voice"})
 check("tagged with the desk it was written on", SETTINGS["applied_presets"]["device"], "DESK-A")
-check("channel 1 answers for itself", server._preset_now(1, live())["name"], "Podcast Studio")
-check("channel 3 for itself", server._preset_now(3, live())["name"], "Shaun voice")
-check("and a channel with no record still claims nothing", server._preset_now(2, live()), None)
+check("channel 1 answers for itself", mic_presets.preset_now(1, live())["name"], "Podcast Studio")
+check("channel 3 for itself", mic_presets.preset_now(3, live())["name"], "Shaun voice")
+check("and a channel with no record still claims nothing", mic_presets.preset_now(2, live()), None)
 
 sys.exit(_testkit.finish())

@@ -26,9 +26,9 @@ import channels
 import desk_labels
 import device_page
 import devices
+import faders
 import rcp_read
 import rcp_transfer
-import server
 import speech
 from _testkit import as_device, check, check_true, hold_desk, hold_layout, push
 
@@ -156,11 +156,11 @@ for _dev in (devices.PRO2, devices.DUO):
 
 print("\nLEVEL WRITES AND CHAIN-FOLLOW ARE ON FOR BOTH DESKS")
 with as_device(devices.DUO):
-    check("level writes are not gated", server._level_write_gate(), None)
-    check("chain-follow is on", server._chain_follow_on(), True)
+    check("level writes are not gated", faders.level_write_gate(), None)
+    check("chain-follow is on", faders.chain_follow_on(), True)
 with as_device(devices.PRO2):
-    check("Pro II level writes are not gated", server._level_write_gate(), None)
-    check("Pro II chain-follow on", server._chain_follow_on(), True)
+    check("Pro II level writes are not gated", faders.level_write_gate(), None)
+    check("Pro II chain-follow on", faders.chain_follow_on(), True)
 
 print("\nCAPS AND SHAPES THE DUO WORK ALREADY SETTLED (do not regress these)")
 check("Duo fader count", (devices.DUO.fader.count, devices.DUO.fader.physical), (9, 4))
@@ -201,7 +201,7 @@ check("the Duo claims every cap the Pro II does, bar the ones named off",
 # The Duo has ONE legal pair where the Pro II has three, and that is a property of the INPUTS, not
 # of how much has been proven: the Duo's third input is a HEADSET jack, so "2 + 3" and "3 + 4" are
 # not pairs anyone would want. A device claiming the cap with an EMPTY table still refuses
-# (server._stereo_link_gate checks both), which is what protects a future desk from a copy-paste.
+# (faders._stereo_link_gate checks both), which is what protects a future desk from a copy-paste.
 check("Duo has exactly one stereo pair, Mic 1 + 2",
       devices.DUO.fader.stereo_pairs, ((4, 0, 1, "Mic 1 + 2"),))
 check("Pro II still has its three", len(devices.PRO2.fader.stereo_pairs), 3)

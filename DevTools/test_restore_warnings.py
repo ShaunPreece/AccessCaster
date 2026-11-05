@@ -27,6 +27,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import devices
+import faders
 import output_mixes
 import pad_shortcuts
 import rcp_read
@@ -38,7 +39,7 @@ devices.force_device(devices.PRO2)      # or the answer comes from whatever is o
 
 def warnings_for(prof, vec, levels):
     """Run the warning against a desk in a known state."""
-    server._read_fader_vector = lambda blob=None, spec=None: list(vec)
+    faders.read_fader_vector = lambda blob=None, spec=None: list(vec)
     rcp_read.values = lambda blob, name, kind=None: (list(levels) if name == "faderLevel" else [])
     return server._restore_silence_warnings(prof, b"a blob")
 
@@ -86,9 +87,9 @@ check("is silent", got, [])
 
 print("\nlevels follow the channels when the profile has none of its own")
 CALLS = []
-server._follow_levels = lambda old, new, before, spec: CALLS.append((list(old), list(new),
+faders.follow_levels = lambda old, new, before, spec: CALLS.append((list(old), list(new),
                                                                      list(before)))
-server._level_write_gate = lambda: None
+faders.level_write_gate = lambda: None
 server.profiles.apply = lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}
 output_mixes.apply_matrix = lambda routing: {"ok": True, "applied": 0, "message": ""}
 pad_shortcuts.rearm_midi = lambda: None
@@ -96,7 +97,7 @@ pad_shortcuts.pads_stale = lambda: None
 rcp_read.read_model = lambda *a, **k: b"blob"
 
 _seq = [list(NORMAL), list(SWAPPED)]          # before the write, then after it
-server._read_fader_vector = lambda blob=None, spec=None: _seq.pop(0) if _seq else list(SWAPPED)
+faders.read_fader_vector = lambda blob=None, spec=None: _seq.pop(0) if _seq else list(SWAPPED)
 rcp_read.values = lambda blob, name, kind=None: (list(FADER7_DOWN)
                                                  if name == "faderLevel" else [])
 

@@ -27,6 +27,8 @@ import _testkit
 import announcer
 import desk_access
 import desk_model
+import faders
+import mic_presets
 import output_mixes
 import pad_shortcuts
 import server
@@ -53,16 +55,16 @@ with open(settings_file.FILE + ".bad", encoding="utf-8") as f:
 
 
 print("\nSAVED PRESETS")
-server._USER_PRESET_FILE = os.path.join(folder, "presets.json")
-with open(server._USER_PRESET_FILE, "w", encoding="utf-8") as f:
+mic_presets._USER_PRESET_FILE = os.path.join(folder, "presets.json")
+with open(mic_presets._USER_PRESET_FILE, "w", encoding="utf-8") as f:
     f.write('{"Morning": {"eqLowGain": 0.5}, "Ev')
-check("a file that will not parse reads as no presets", server._load_user_presets(), {})
-with open(server._USER_PRESET_FILE + ".bad", encoding="utf-8") as f:
+check("a file that will not parse reads as no presets", mic_presets._load_user_presets(), {})
+with open(mic_presets._USER_PRESET_FILE + ".bad", encoding="utf-8") as f:
     check("and is kept as .bad, so a save cannot overwrite it", f.read(),
           '{"Morning": {"eqLowGain": 0.5}, "Ev')
-with open(server._USER_PRESET_FILE, "w", encoding="utf-8") as f:
+with open(mic_presets._USER_PRESET_FILE, "w", encoding="utf-8") as f:
     f.write("[1, 2]")
-check("a file holding a list reads as no presets", server._load_user_presets(), {})
+check("a file holding a list reads as no presets", mic_presets._load_user_presets(), {})
 
 
 print("\nFADER LEVEL")
@@ -73,11 +75,11 @@ with as_device(server.devices.PRO2), patched(
         (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
         (announcer, {"mark_self_level": lambda *a: None})):
     _testkit.hold_desk([0, 1, 2, 3, 4, 5, 6, 7, 8])
-    res = server.action_set_fader_level(6, 50)
+    res = faders.action_set_fader_level(6, 50)
     check("the level is set", res.get("ok"), True)
     check("with a layout held, the reply names the channel without a read", reads, [])
     desk_model._reset()
-    server.action_set_fader_level(6, 40)
+    faders.action_set_fader_level(6, 40)
     check("with none held, the read is made under the HID lock", reads, [True])
 
 

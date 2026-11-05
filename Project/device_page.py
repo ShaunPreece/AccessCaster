@@ -1,6 +1,7 @@
 """
 AccessCaster - the Device page: the Current state report, Hardware, and Desk settings, with
-MIDI control; and the connected desk's status, whose USB serial files every per-device preference.
+MIDI control; and the connected desk's status, whose USB serial files every per-device preference
+(`desk_record`).
 Wireless connections is network.py, and the firmware is firmware.py.
 """
 
@@ -15,6 +16,7 @@ import rcp_hid
 import rcp_read
 import rcp_transfer
 import recorder
+import settings_file
 import soundpad
 import wording
 from desk_labels import (  # what each setting is called, shared with the announcer
@@ -539,3 +541,23 @@ def hardware_id() -> str:
     means a preference goes untagged until the first status read, which the page does on load."""
     return _id_cache[1]
 
+
+
+def desk_record(key: str) -> dict:
+    """The per-channel record settings.json files under `key`, as {"device": hardware_id,
+    "channels": {...}}: its channels, or {} when another desk wrote it, so two desks never inherit
+    each other's records. A record with no id, or read before the id is known, counts as this
+    desk's."""
+    rec = settings_file.load().get(key)
+    if not isinstance(rec, dict):
+        return {}
+    here = hardware_id()
+    if rec.get("device") and here and rec.get("device") != here:
+        return {}
+    chans = rec.get("channels")
+    return chans if isinstance(chans, dict) else {}
+
+
+def save_desk_record(key: str, chans: dict) -> None:
+    """Write `key`'s per-channel record, filed under this desk (`desk_record`)."""
+    settings_file.update(**{key: {"device": hardware_id(), "channels": chans}})

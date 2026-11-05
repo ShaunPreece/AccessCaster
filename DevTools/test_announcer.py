@@ -721,7 +721,7 @@ announcer.handle_report(chansel_packet(-1), st)
 check("and deselecting says the encoder is back on levels",
       SPOKEN, ["Virtual faders and monitor. Encoder changes their levels"])
 
-# THE APP'S OWN DOUBLE PRESS (server.action_reset_encoder) says one sentence of its own, so the two
+# THE APP'S OWN DOUBLE PRESS (faders.action_reset_encoder) says one sentence of its own, so the two
 # selection pushes it causes are not spoken over it.
 SPOKEN.clear()
 announcer.mark_self_write("channel_selected")

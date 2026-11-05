@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _desk
+import faders
 import rcp_read
 from _desk import wait_for_job
 from analyse_clean_restore import compare, show, snap
@@ -91,7 +92,7 @@ def put_live_state_back(state: dict) -> None:
         server.action_set_channel_solo(name, bool(on))
     for which, on in state["output"].items():
         if on is not None:
-            server.action_set_output_mute(which, bool(on))
+            faders.action_set_output_mute(which, bool(on))
 
 
 def put_desk_back(before_path: Path, state: dict, restored: bool) -> bool:

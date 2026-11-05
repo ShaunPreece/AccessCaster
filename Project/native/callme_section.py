@@ -17,7 +17,7 @@ import wx
 
 import callme
 import callme_actions
-import server
+import faders
 from native import a11y
 from native.calls import call
 from native.controls import Switch
@@ -40,12 +40,12 @@ def contact_label(contact):
     return f"{contact['name']}, code {contact['spoken']}"
 
 
-def problems(data, faders):
+def problems(data, desk_faders):
     """What stops a call working. Whether CallMe 1 is on a fader comes from the window's fader
     layout, the one Fader assignment shows, which follows a change made anywhere."""
     if not data:
         return []
-    on_fader = data.get("callme1_code") in faders["layout"] if faders else None
+    on_fader = data.get("callme1_code") in desk_faders["layout"] if desk_faders else None
     return [r for r in callme.readiness(data.get("online"), on_fader) if not r["ok"]]
 
 
@@ -278,10 +278,10 @@ class CallPage(wx.Panel):
         self.Layout()
 
     def _fill_faders(self):
-        faders = self.section.frame.desk.faders
-        if not faders:
+        desk_faders = self.section.frame.desk.faders
+        if not desk_faders:
             return
-        labels = faders["labels"]
+        labels = desk_faders["labels"]
         names = [f"Fader {i + 1}, currently {label}" for i, label in enumerate(labels)]
         if [self.fader.GetString(i) for i in range(self.fader.GetCount())] != names:
             chosen = self.fader.GetSelection()
@@ -293,12 +293,12 @@ class CallPage(wx.Panel):
         if index == wx.NOT_FOUND:
             self.frame.say("Choose a fader first.")
             return
-        faders = self.section.frame.desk.faders
+        desk_faders = self.section.frame.desk.faders
         code = self.section.data.get("callme1_code") if self.section.data else None
-        if code is None or not faders:
+        if code is None or not desk_faders:
             self.frame.say(UNREAD)
             return
-        gave_up = faders["labels"][index]
+        gave_up = desk_faders["labels"][index]
 
         def done(reply):
             if not reply.get("ok"):
@@ -309,7 +309,7 @@ class CallPage(wx.Panel):
             # Worded here: the server's reply is the Routing page's account of the layout.
             self.frame.say(f"CallMe 1 is on fader {index + 1}.{lost}")
             self.section.read()
-        call(self, server.action_set_fader, index, code, done=done)
+        call(self, faders.action_set_fader, index, code, done=done)
 
     def _on_answer(self, event):
         self.section.act(event.GetEventObject(), callme_actions.action_answer)

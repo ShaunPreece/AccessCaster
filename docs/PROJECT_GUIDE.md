@@ -271,7 +271,9 @@ The layers, bottom up:
   `firmware.py` (the check and the install, over `desk_firmware.py`), `callme_actions.py` (CallMe's
   app side, over `callme.py`), `device_page.py` (the Device page and the desk's status),
   `pad_actions.py` (the SMART pads' app side, over `soundpad.py`), `output_mixes.py` (the output
-  mixes and mix schemes, over `routing_schemes.py`), `shows.py`,
+  mixes and mix schemes, over `routing_schemes.py`), `mic_presets.py` (mic processing presets),
+  `pan_link.py` (one Pan control for a stereo channel), `faders.py` (the fader layout, stereo
+  links and the Levels page's writes), `clip_warning.py`, `shows.py`,
   `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
   over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
@@ -1065,10 +1067,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   Shaun heard as gated bed tails.
 - **PROCESSING BELONGS TO A STRIP, NEVER TO A CHANNEL, so a channel with no fader has no processing
   anywhere on the desk.** Only we can hold it: `channels.park_chain` / `take_chain` keep a vacated
-  chain in `%LOCALAPPDATA%\AccessCaster\off_fader_chains.json`, keyed by desk, and `_follow_chains`
+  chain in `%LOCALAPPDATA%\AccessCaster\off_fader_chains.json`, keyed by desk, and `faders.follow_chains`
   hands it back when the channel returns. Without that, a channel LEAVING loses its voicing to the
   next occupant and a channel RETURNING silently inherits a stranger's. Measured 31st August 2026:
-  Mic 2 came back from off-fader wearing USB 1's chain, gate off and bypass on. **`_follow_chains`
+  Mic 2 came back from off-fader wearing USB 1's chain, gate off and bypass on. **`faders.follow_chains`
   has three cases, not one** (moved / left / returned); adding a fourth kind of layout change means
   checking all three. A file rather than a cache because stereo link evicts the upper mic of a pair
   and the unlink that returns it can be days later.
@@ -1088,7 +1090,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   stops the two pages disagreeing.
 - **PER-STRIP MUTE AND SOLO GATE ON `processing`, NEVER ON THE LEVEL GATE** (`_strip_toggle_gate`).
   They are compact bools on the channel's processing selector, so `processing` is the capability
-  that decides them. Shipped tied to `_level_write_gate` for an hour on 31st August 2026: the Duo's
+  that decides them. Shipped tied to `faders.level_write_gate` for an hour on 31st August 2026: the Duo's
   `faderLevel` selectors are unconfirmed, which says NOTHING about its mute, so the Duo would have
   lost a working control and been told the wrong reason. The same mistake also left the UI hiding a
   control the HTTP endpoint still accepted. **A gate belongs to the capability the write needs, not
@@ -1926,7 +1928,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   always spoken). A reply arriving after the user has moved on cuts off the screen reader reading
   the control they are on now.
 - **THE WINDOW'S RECORDS HOLD THE DESK'S OWN 0..1 PARAMETERS** (`action_get_channels(percent=False)`;
-  the controls scale with `field(..., scale=100)`). `_preset_now` compares within half a percent, so
+  the controls scale with `field(..., scale=100)`). `mic_presets.preset_now` compares within half a percent, so
   a record rounded to whole percents cannot be compared again after a pushed change.
 - **EVERY SERVER CALL GOES THROUGH `native.calls`**, never straight from an event handler: an
   action holds the HID lock for seconds, and on the UI thread that freezes the window. A slider's
@@ -1965,9 +1967,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   levels the check is speaking. The server toggles, so a press is right whatever the label says.
 - **A STEREO PAN'S THREE SLIDERS ARE BUILT ONCE AND THE LINK ONLY SHOWS OR HIDES THEM**
   (`channel_tabs.StereoPan`), so linking leaves the focus on the switch.
-- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST IS `server.linked_pan_offset` ALONE**, which the
-  window asks (`channel_tabs.StereoPan`). It shows centre for legs moved since the link, and the
-  server starts the link again from those legs on the next move; a second copy of the test would
+- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST IS `pan_link.linked_pan_offset` ALONE**, which the
+  window asks (`channel_tabs.StereoPan`). It shows centre for legs moved since the link, and
+  `action_set_linked_pan` starts the link again from those legs on the next move; a second copy of the test would
   let the slider's position and the written legs disagree.
 - **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
   or entering Custom moves the output's cross-points on the desk, which it does not push. Its own
@@ -2068,7 +2070,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   focus. It is read again `SUMMARY_AFTER_MS` after the last desk event in `SUMMARY_EVENTS`; add an
   event there if the summary gains a fact it carries.
 - **THE CLIP WARNING WATCHES A RECORDING ENDPOINT AND SPEAKS ONLY THROUGH `speech.say`**
-  (`server._main_mix_stream`, `_clip_start`). The desk's playback endpoint reads this computer's
+  (`clip_warning._main_mix_stream`, `_clip_start`). The desk's playback endpoint reads this computer's
   own audio, so a watch on it hears the screen reader and its own words. `speech.say` follows the
   announcer, so the warning is silent while a recording suspends it; `meters.clip_alert` plays on
   the default output, usually the desk, and would land in the take, so `clip_sound` stays False.
@@ -2818,7 +2820,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   hold the encoder on a target with `systemChannelSelected` already -1 (it was turning Mic 1's gain,
   Pro II, 4th November 2026), so writing -1 changes nothing. Writing 0 and then -1, a channel button
   pressed twice, put it on the virtual faders and monitor: the next turn moved the monitor level.
-  That is `server.action_reset_encoder`, which `encoder_home` runs on a dead turn with no channel
+  That is `faders.action_reset_encoder`, which `encoder_home` runs on a dead turn with no channel
   selected, whatever announcements are on, and says nothing: the next turn works. It is not a
   shortcut: telling someone a key exists is no better than telling them to press the channel button
   twice. The strip is selected, never turned, so no gain moves.
@@ -3073,7 +3075,7 @@ shared one; a new copy is how they drifted apart the first time.
 - **A RISKY WRITE FAMILY IS GATED BY `desk_access.cap_gate`**, which holds the shared reasoning: a selector
   proven on a Pro II is NOT proven on a Duo, and a wrong one can append a stray only a factory reset
   clears (it happened, 26th August 2026). Each gate keeps its OWN refusal sentence, because what the
-  user can and cannot do differs per family. **`_level_write_gate` is deliberately not on it**: it
+  user can and cannot do differs per family. **`faders.level_write_gate` is deliberately not on it**: it
   has a second condition beyond the cap (the device must carry confirmed faderLevel selectors).
 - **The master Compellor and output delay come from `rcp_read.master_processing`**, shared by the
   Routing page and a profile. They were built twice, so a property added to one and not the other

@@ -5,7 +5,7 @@ the window is announced twice - once by the window's own reply, once by the anno
 echo. announcer.mark_self_write suppresses the second.
 
 Why the test is shaped like this: the marks live in the process that DECODES the stream, so this
-script is that process. The MARKED half calls the app's own action (`server.action_set_fader_level`
+script is that process. The MARKED half calls the app's own action (`faders.action_set_fader_level`
 and friends), which marks its write as the window's does, the fader-index to source-code
 translation included; the UNMARKED half calls the raw writer underneath, which marks nothing. The
 real echo is read off the script's own HID handle. Quit AccessCaster first.
@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import announcer
 import channels
+import faders
 import rcp_hid
 import rcp_read
 import rcp_transfer
@@ -112,7 +113,7 @@ def phase(dev, st, label: str, write, expect_speech, failures: list, notes: list
 
 
 def main() -> int:
-    levels = server.fader_levels_live()
+    levels = faders.fader_levels_live()
     original = next((f["percent"] for f in levels["faders"] if f["index"] == FADER), None)
     if original is None:
         print(f"fader index {FADER} has no level control here; nothing to test")
@@ -144,7 +145,7 @@ def main() -> int:
             # ---- LEVEL: the one path the desk really does echo. This is the regression. ----
             target_a = 60 if original != 60 else 55
             phase(dev, st, "LEVEL   MARKED",
-                  lambda: server.action_set_fader_level(FADER, target_a), False, failures, notes)
+                  lambda: faders.action_set_fader_level(FADER, target_a), False, failures, notes)
             phase(dev, st, "LEVEL   UNMARKED",
                   raw(lambda: rcp_transfer.set_fader_level(
                       FADER, round(original * rcp_transfer.FADER_LEVEL_MAX / 100))),
@@ -173,11 +174,11 @@ def main() -> int:
             phase(dev, st, "GAIN    UNMARKED",
                   raw(lambda: channels.set_mic_gain(GAIN_CHAN, g_b)), None, failures, notes)
     finally:
-        server.action_set_fader_level(FADER, original)
+        faders.action_set_fader_level(FADER, original)
         server.action_set_channel_mute(MUTE_CHAN, mute_was)
         if isinstance(gain_was, int):
             server.action_set_gain(GAIN_CHAN, gain_was)
-        back = server.fader_levels_live()
+        back = faders.fader_levels_live()
         now = next((f["percent"] for f in back["faders"] if f["index"] == FADER), None)
         chans2 = {c["name"]: c for c in server.action_get_channels()["channels"]}
         mute_now = bool(chans2[MUTE_CHAN]["muted"])

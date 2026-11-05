@@ -5,7 +5,7 @@ read follows, since processing and levels move with the channels.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
-import server
+import faders
 from native import a11y
 from native.calls import call
 from native.controls import Switch, set_choices
@@ -50,7 +50,7 @@ class FadersPage(scrolled.ScrolledPanel):
             for pair in pairs:
                 self.links.append(Switch(
                     self, parent, sizer, f"Link {pair['label']}",
-                    send=lambda on, code=pair["code"]: server.action_set_stereo_link(code, on),
+                    send=lambda on, code=pair["code"]: faders.action_set_stereo_link(code, on),
                     current=lambda code=pair["code"]: self._linked(code),
                     remember=lambda _on: None,
                     description=model.get("stereo_note") or "",
@@ -104,7 +104,7 @@ class FadersPage(scrolled.ScrolledPanel):
             self.frame.say(f"{self.model['faders'][index]['label']} already has "
                            f"{self.channel.GetStringSelection()}.")
             return
-        call(self, server.action_set_fader, index, code,
+        call(self, faders.action_set_fader, index, code,
              done=lambda reply: self._done(source, reply))
 
     def _on_reset(self, event):
@@ -113,7 +113,7 @@ class FadersPage(scrolled.ScrolledPanel):
             self.frame.say(READ_ONLY)
             return
         self.frame.say("Resetting faders, please wait.")
-        call(self, server.action_reset_faders, done=lambda reply: self._done(source, reply))
+        call(self, faders.action_reset_faders, done=lambda reply: self._done(source, reply))
 
     def _done(self, source, reply):
         self.frame.reply(source, reply)

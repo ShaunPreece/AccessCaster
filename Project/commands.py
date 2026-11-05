@@ -33,6 +33,8 @@ import desk_model
 import device_page
 import devices
 import diagnostics
+import faders
+import mic_presets
 import network
 import output_mixes
 import pad_shortcuts
@@ -381,12 +383,12 @@ def _run_level(arg: str) -> dict:
     if what == "monitor":
         now = _known_level("monitor", 0)
         if now is None:
-            live = server.fader_levels_live()
+            live = faders.fader_levels_live()
             pct = live.get("monitor_percent")
             now = (pct / 100.0) if isinstance(pct, int) else None
         if now is None:
             return _fail("The monitor level could not be read.")
-        return server.action_set_monitor_speaker_level(
+        return faders.action_set_monitor_speaker_level(
             max(0, min(100, int(round(now * 100)) + step)))
     if what == "fader":
         _dir, _, num = direction.partition(":")
@@ -396,14 +398,14 @@ def _run_level(arg: str) -> dict:
             return _fail(f"{num} is not a fader.")
         now = _known_level("fader", fader - 1)
         if now is None:
-            live = server.fader_levels_live()
+            live = faders.fader_levels_live()
             for f in live.get("faders", []):
                 if f.get("index") == fader - 1 and isinstance(f.get("percent"), int):
                     now = f["percent"] / 100.0
         if now is None:
             return _fail(f"Fader {fader}'s level could not be read.")
         # The command names the fader as the desk does, from 1; the action takes its index.
-        return server.action_set_fader_level(
+        return faders.action_set_fader_level(
             fader - 1, max(0, min(100, int(round(now * 100)) + step)))
     return _fail(f"Unknown level command {arg}.")
 
@@ -508,7 +510,7 @@ def _run_out(arg: str) -> dict:
         for s in device_page.read_unit_settings().get("settings", []):
             if s.get("prop") == prop:
                 now = bool(s.get("value"))
-        return server.action_set_output_mute(which, not now)
+        return faders.action_set_output_mute(which, not now)
     if what == "automute":
         try:
             now = server.read_auto_mute(which)
@@ -642,7 +644,7 @@ def _run_pad(arg: str) -> dict:
 def _preset_commands() -> list:
     out = []
     try:
-        presets = server.preset_list()
+        presets = mic_presets.preset_list()
     except Exception as exc:
         diagnostics.event("hotkeys.catalogue_partial", "presets not listed", error=str(exc))
         return out
@@ -660,7 +662,7 @@ def _run_preset(arg: str) -> dict:
     ch = channels.ui_channel_map().get(name)
     if ch is None or ch.get("kind") != "mic":
         return _fail(f"{name} is not a microphone channel on this desk.")
-    return server.action_apply_mic_preset(channels.mic_channel_number(ch), preset)
+    return mic_presets.action_apply_mic_preset(channels.mic_channel_number(ch), preset)
 
 
 _DISPATCH = {

@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import autogain
+import clip_warning
 import devices
 import meters
 import server
@@ -215,11 +216,11 @@ streams = {"streams": [
     {"id": "chat", "name": "Microphone (RODECaster Pro II Chat)", "flow": "recording"},
     {"id": "main", "name": "Microphone (RODECaster Pro II Main Stereo)", "flow": "recording"}]}
 check("it watches the main recording stream, never what this computer plays to the desk",
-      server._main_mix_stream(streams)["id"], "main")
+      clip_warning._main_mix_stream(streams)["id"], "main")
 check("with no main stream, the first recording stream",
-      server._main_mix_stream({"streams": streams["streams"][:2]})["id"], "chat")
+      clip_warning._main_mix_stream({"streams": streams["streams"][:2]})["id"], "chat")
 check("with no recording stream, nothing",
-      server._main_mix_stream({"streams": streams["streams"][:1]}), None)
+      clip_warning._main_mix_stream({"streams": streams["streams"][:1]}), None)
 made = {}
 
 
@@ -237,23 +238,23 @@ class FakeClipWatcher:
 
 with patched((server.meters, {"desk_streams": lambda: dict(streams, ok=True, reason=""),
                               "Watcher": FakeClipWatcher})):
-    check("a start opens it", server._clip_start(), "")
+    check("a start opens it", clip_warning._clip_start(), "")
 check("on the main stream", made["endpoint"], "main")
 check("saying nothing about silence or the level, and playing no sound of its own",
       (made["warn_silence"], made.get("speak_every", 0.0), made["clip_sound"]),
       (False, 0.0, False))
 check("and called the main mix out loud", made["label"], "Main mix")
-server._clip_stop()
+clip_warning._clip_stop()
 saved = {}
 with patched((server.settings_file, {"update": lambda **kw: saved.update(kw)}),
              (server.meters, {"desk_streams": lambda: {"ok": False, "streams": [],
                                                        "reason": "Remote Desktop."}})):
-    on = server.action_set_clip_warning(True)
-    off = server.action_set_clip_warning(False)
+    on = clip_warning.action_set_clip_warning(True)
+    off = clip_warning.action_set_clip_warning(False)
 check("the switch is saved", saved, {"clip_warning": False})
 check_in("on with no audio says when it will start", "once the desk's audio is available",
          on["message"])
 check("off says so", off["message"], "Clipping will not be announced.")
-server._clip_wake.clear()
+clip_warning._clip_wake.clear()
 print("")
 sys.exit(_testkit.finish())

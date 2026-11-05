@@ -6,6 +6,7 @@ or a fader shows here as it happens.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import faders
 import output_mixes
 import server
 from native import a11y
@@ -26,12 +27,12 @@ NO_CHANNEL = "This fader has no channel on it, so there is nothing to {}."
 # `which` and `auto` name them to the mute and auto-mute writes.
 OUTPUTS = [
     {"title": "Monitor speakers", "key": "monitor", "which": "monitor", "auto": "monitor",
-     "set_level": server.action_set_monitor_speaker_level, "level": "Monitor speaker level",
+     "set_level": faders.action_set_monitor_speaker_level, "level": "Monitor speaker level",
      "level_note": "",
      "mute": "Mute the monitor speakers",
      "mute_note": "Silences the speakers only: headphones, the recording and streams carry on."},
     {"title": "Bluetooth output", "key": "bluetooth_out", "which": "bluetooth", "auto": "bt",
-     "set_level": server.action_set_bt_output_level, "level": "Bluetooth output level",
+     "set_level": faders.action_set_bt_output_level, "level": "Bluetooth output level",
      "level_note": "What a paired phone hears from the desk.",
      "mute": "Mute the Bluetooth output",
      "mute_note": "Silences what a paired phone hears; everything else carries on."},
@@ -96,7 +97,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         # every encoder step, and the screen reader reads a focused list again when it changes.
         self.fader_level = Slider(
             self, parent, sizer, "Level", 0, 100,
-            self._fader_send(server.action_set_fader_level),
+            self._fader_send(faders.action_set_fader_level),
             lambda: self._fader_value("percent"), lambda _value: None,
             words=percent)
         self.fader_mute = Switch(
@@ -158,7 +159,7 @@ class LevelsPage(scrolled.ScrolledPanel):
                                  words=percent))
         level.acc.description = output["level_note"]
         self._add(Switch(self, box, box_sizer, output["mute"],
-                         lambda on: server.action_set_output_mute(output["which"], on),
+                         lambda on: faders.action_set_output_mute(output["which"], on),
                          *self.field(output["key"], "muted"), description=output["mute_note"]))
         label = dict(self.model["auto_mute"]).get(output["auto"])
         if label:

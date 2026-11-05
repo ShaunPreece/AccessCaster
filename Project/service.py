@@ -14,11 +14,13 @@ import announcer
 import app_updates
 import callme_actions
 import channels
+import clip_warning
 import desk_live
 import desk_model
 import diagnostics
 import encoder_hold
 import encoder_home
+import faders
 import firmware
 import pad_actions
 import pad_shortcuts
@@ -54,7 +56,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
         # App settings can still turn it off.
         announcer.action_set_announce(True, chosen=False, greeting=greeting)
     if announce:
-        server.start_clip_warning()
+        clip_warning.start_clip_warning()
     # SEED THE EXPANDED FLAG BEFORE ANYTHING ASKS FOR IT. It is a published cache, and unpublished
     # it answers False: the fader list then omits Game, Music, A and B and the write gate refuses
     # them, so on a desk that IS in Expanded the four cannot be assigned until something reads the
@@ -72,7 +74,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     encoder_hold.Watcher(server.encoder_hold_mute).start()
     # A turn that moves nothing, with no channel selected, puts the encoder back on the virtual
     # faders and monitor.
-    encoder_home.Watcher(server.action_reset_encoder).start()
+    encoder_home.Watcher(faders.action_reset_encoder).start()
     # AccessCaster's own update: says what the last one did, then checks now and then. Silent
     # unless a version is found, and never from a source run.
     app_updates.start()

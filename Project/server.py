@@ -14,7 +14,6 @@ something), which `service.py` calls; `tray.py` is the entry point.
 from __future__ import annotations
 
 import datetime
-import json
 import threading
 import time
 import webbrowser
@@ -23,6 +22,7 @@ import announcer  # speaks the desk's button presses aloud (_AnnouncerHooks)
 import autogain  # sets a mic's gain by measuring it
 import change_words  # a change on the desk in words
 import channels
+import clip_warning  # says when the main mix clips
 import devices  # per-device model (matrix labels, caps) keyed by product id
 import device_page  # the Device page, and the connected desk's USB serial
 import desk_access  # the lock, the desk as it is now, the capability gate, the long job
@@ -31,11 +31,14 @@ import desk_live  # the one listener: everything the desk pushes, to every subsc
 import desk_model  # the desk as last seen, kept current by the listener and our own writes
 import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\...\\logs
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
+import faders  # the fader layout and stereo links, and the Levels page's writes
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
+import mic_presets  # mic processing presets: factory and saved, applying one, which a strip is on
 import network  # wifi and Bluetooth, and the wireless mics
 import output_mixes  # the output mixes: modes, cross-points, monitor levels and mix schemes
 import pad_actions  # the SMART pads: live edits, sounds, voice effects and their preview
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
+import pan_link  # one Pan control for both legs of a stereo channel
 import profiles  # settings backup/restore (save+restore live here, not in server)
 import rcp_hid
 import rcp_read
@@ -55,17 +58,9 @@ from desk_labels import (  # what each setting is called, shared with the announ
     PROCESSING_MODULES,
     PROCESSING_SPOKEN,
 )
-from paths import (  # frozen-build-safe asset/data locations
-    data_path,
-    read_json,
-    resource_path,
-    safe_name,
-    write_json,
-)
+from paths import safe_name
 
 
-# The Pro II's mic channels.
-MIC_CHANNELS = (1, 2, 3, 4)
 GAIN_MIN_DB = 0
 GAIN_MAX_DB = 76
 # Non-mic channel "Level" (inputDigitalGain) range. The device clamps; these are sane UI bounds
@@ -121,7 +116,7 @@ announcer.hooks = _AnnouncerHooks()
 
 
 def action_set_gain(channel: int, db: int) -> dict:
-    if channel not in MIC_CHANNELS:
+    if channel not in channels.MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     if db < GAIN_MIN_DB or db > GAIN_MAX_DB:
         return {"ok": False, "message": f"Gain must be between {GAIN_MIN_DB} and "
@@ -133,7 +128,7 @@ def action_set_gain(channel: int, db: int) -> dict:
 
 
 def action_set_phantom(channel: int, on: bool) -> dict:
-    if channel not in MIC_CHANNELS:
+    if channel not in channels.MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     with desk_access.hid_lock:
         channels.set_phantom(channel, on)
@@ -142,7 +137,7 @@ def action_set_phantom(channel: int, on: bool) -> dict:
 
 
 def action_set_polarity(channel: int, on: bool) -> dict:
-    if channel not in MIC_CHANNELS:
+    if channel not in channels.MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     with desk_access.hid_lock:
         channels.set_polarity(channel, on)
@@ -188,7 +183,7 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     nothing, which leaves a screen-reader user with a panel full of stale numbers and no idea their
     compressor moved. So it is COUNTED and ANNOUNCED, exactly as the gain is, and the client re-reads
     the panel on success."""
-    if channel not in MIC_CHANNELS:
+    if channel not in channels.MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}
     # ALL THREE READS INSIDE THE LOCK, like every other read that has to line up with a write of
     # ours: the readers do not take the HID lock themselves, the caller does. The first is adopted
@@ -229,7 +224,7 @@ def _ui_chan(name):
 
 def action_get_channels(percent: bool = True) -> dict:
     """Read every UI channel's full adaptive state (one model dump). Params are 0-100 percent ints,
-    or with `percent` False the desk's own 0..1 floats, which `_preset_now` can compare again
+    or with `percent` False the desk's own 0..1 floats, which `mic_presets.preset_now` can compare again
     after a pushed change (a whole percent is as coarse as its tolerance)."""
     try:
         with desk_access.hid_lock:
@@ -264,15 +259,56 @@ def window_state(blob: bytes) -> dict:
     if reply.get("ok"):
         reply["matrix"] = rcp_read.read_matrix_state(blob)
         reply["matrix_model"] = output_mixes.matrix_model()
-        spec = _active_faders()
+        spec = faders.active_faders()
         cis = list(rcp_read.values(blob, "channelInputSource"))
         layout = [cis[i] if i < len(cis) else None for i in range(spec.count)]
-        reply["faders"] = {"model": fader_model(), "layout": layout,
-                           "labels": [_channel_name(c, spec) for c in layout],
-                           "stereo": stereo_link_state(cis, spec)}
+        reply["faders"] = {"model": faders.fader_model(), "layout": layout,
+                           "labels": [faders.channel_name(c, spec) for c in layout],
+                           "stereo": faders.stereo_link_state(cis, spec)}
         reply["levels"] = _window_levels(blob)
         reply["master"] = _window_master(blob)
     return reply
+
+
+def _window_levels(blob: bytes) -> dict:
+    """The native Levels page's state from one dump: `faders.fader_levels`, each output's cross-point
+    levels (`mix`, `rcp_read.read_matrix_levels` less its modes, which the window keeps in
+    `matrix`), the two auto-mutes, the headphone types, and the page's layout as `model`."""
+    levels = faders.fader_levels(blob)
+    mix = rcp_read.read_matrix_levels(blob)
+    mix.pop("modes", None)
+    levels.update(
+        mix=mix,
+        auto_mute={which: rcp_read.block_value(blob, "OUTPUT", spec["prop"])
+                   for which, spec in _AUTO_MUTE.items()},
+        headphone_types=_headphone_types(blob),
+        model={"faders": list(faders.active_faders().level_faders),
+               "monitor_mix": output_mixes.monitor_mix_model(),
+               "auto_mute": [[which, spec["label"]] for which, spec in _AUTO_MUTE.items()],
+               "headphones": {
+                   "outputs": [lab for _sel, lab in _active_headphones().outputs],
+                   "values": [[code, lab] for code, lab in _active_headphones().values]}})
+    return levels
+
+
+def _window_master(blob: bytes) -> dict:
+    """The native Master Mix page's state from one dump: the USB audio mode in its two halves, the
+    USB stream's raw switch, the master bus's processing (`rcp_read.master_processing`), and the
+    page's layout as `model`."""
+    usb_mode, usb_expanded = recorder.split_usb_multitrack(
+        rcp_read.first(blob, "outputMultiMode", "int"))
+    return {
+        "usb_multitrack": usb_mode, "usb_expanded": usb_expanded,
+        "usb_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
+        **rcp_read.master_processing(blob),
+        "model": {"usb_modes": sorted(recorder.USB_MULTITRACK_LABEL.items()),
+                  "usb_expanded": sorted(recorder.USB_EXPANDED_LABEL.items()),
+                  "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
+                  "usb_drop_hint": recorder.USB_DROP_HINT,
+                  "usb_expanded_drop_hint": recorder.USB_EXPANDED_DROP_HINT,
+                  "bypass_hint": recorder.BYPASS_HINT,
+                  "bypass_needs_multitrack": recorder.BYPASS_NEEDS_MULTITRACK,
+                  "read_only": _output_write_gate() is not None}}
 
 
 def _channels_reply(blob: bytes, percent: bool) -> dict:
@@ -281,12 +317,12 @@ def _channels_reply(blob: bytes, percent: bool) -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not read channels from the device: {exc}"}
     # Which preset each mic strip is on. BEFORE the percent conversion below, because the comparison
-    # is against the preset's own normalised 0..1 values (see _preset_now).
+    # is against the preset's own normalised 0..1 values (see mic_presets.preset_now).
     for c in chans:
         if c.get("kind") == "mic":
             ui = _ui_chan(c.get("name"))
             if ui is not None:
-                c["preset_now"] = _preset_now(channels.mic_channel_number(ui), c)
+                c["preset_now"] = mic_presets.preset_now(channels.mic_channel_number(ui), c)
     if percent:
         for c in chans:
             c["params"] = {p: (round(v * 100) if v is not None else None)
@@ -295,8 +331,8 @@ def _channels_reply(blob: bytes, percent: bool) -> dict:
         "ok": True, "channels": chans, "groups": PROCESSING_CONTROLS,
         "wireless_mics": network.wireless_mics(blob),
         "modules": PROCESSING_MODULES, "mic_types": sorted([list(kv) for kv in channels.MIC_TYPE.items()]),
-        "presets": preset_list(),
-        "pan_links": _pan_links(),
+        "presets": mic_presets.preset_list(),
+        "pan_links": pan_link.pan_links(),
         "gain_min_db": GAIN_MIN_DB, "gain_max_db": GAIN_MAX_DB,
         "level_min_db": LEVEL_MIN_DB, "level_max_db": LEVEL_MAX_DB,
         "message": "Read all channels from the device.",
@@ -449,7 +485,7 @@ def _strip_toggle_gate(what: str):
     """Per-strip MUTE and SOLO writes, gated on "processing" and NOT on the level gate.
 
     They are compact bools on the channel's own processing selector, so the capability that decides
-    them is the same one that decides every other module toggle. Tying them to _level_write_gate
+    them is the same one that decides every other module toggle. Tying them to faders.level_write_gate
     conflates two unrelated things: the Duo's faderLevel selectors are unconfirmed, which says
     nothing about its mute. It also leaves the UI hiding a control the HTTP endpoint still accepts,
     which is the wrong way round on a device where the write is unproven.
@@ -476,23 +512,23 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
     gate = _strip_toggle_gate("Muting")
     if gate is not None:
         return gate
-    spec = _active_faders()
+    spec = faders.active_faders()
     if not 0 <= int(fader) < spec.count:
         return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
     try:
         with desk_access.hid_lock:
-            vec = _read_fader_vector(spec=spec)
+            vec = faders.read_fader_vector(spec=spec)
             code = vec[int(fader)] if int(fader) < len(vec) else None
-            if _is_empty_fader(code):
+            if faders.is_empty_fader(code):
                 return {"ok": False,
-                        "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
+                        "message": (f"{faders.fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to mute. Put a channel on it first.")}
             rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.MUTE_PROP,
                                   "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the mute: {exc}"}
     announcer.mark_self_mute(int(fader))
-    who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
+    who = f"{faders.channel_name(code, spec)} on {faders.fader_label(int(fader), spec)}"
     if not on:
         return {"ok": True, "muted": False, "message": f"{who} unmuted."}
     # A stereo-linked pair is its own fader code but two matrix sources, its two mics.
@@ -515,23 +551,23 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
     gate = _strip_toggle_gate("Solo")
     if gate is not None:
         return gate
-    spec = _active_faders()
+    spec = faders.active_faders()
     if not 0 <= int(fader) < spec.count:
         return {"ok": False, "message": f"Fader {int(fader) + 1} is not valid."}
     try:
         with desk_access.hid_lock:
-            vec = _read_fader_vector(spec=spec)
+            vec = faders.read_fader_vector(spec=spec)
             code = vec[int(fader)] if int(fader) < len(vec) else None
-            if _is_empty_fader(code):
+            if faders.is_empty_fader(code):
                 return {"ok": False,
-                        "message": (f"{_fader_label(int(fader), spec)} has no channel on it, so "
+                        "message": (f"{faders.fader_label(int(fader), spec)} has no channel on it, so "
                                     f"there is nothing to solo.")}
             rcp_transfer.write_at(channels.proc_key_for_strip(int(fader)), channels.CUE_PROP,
                                   "bool", bool(on))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change the solo: {exc}"}
     announcer.mark_self_solo(int(fader))
-    who = f"{_channel_name(code, spec)} on {_fader_label(int(fader), spec)}"
+    who = f"{faders.channel_name(code, spec)} on {faders.fader_label(int(fader), spec)}"
     return {"ok": True, "soloed": bool(on),
             "message": (f"{who} soloed; the headphones now carry "
                         f"{_solo_summary(int(fader), True)}. The mixes, the recording and anything "
@@ -688,7 +724,7 @@ def _mic_number(name: str):
         n = int(str(name)[3:])
     except ValueError:
         return None
-    return n if n in MIC_CHANNELS else None
+    return n if n in channels.MIC_CHANNELS else None
 
 
 def _read_gain_and_processing(mic: int):
@@ -1185,1257 +1221,6 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
             "message": f"{ch['label']} {PROCESSING_SPOKEN[prop].lower()} set to {where}."}
 
 
-# --- STEREO PAN LINK ---------------------------------------------------------------------------
-# A stereo channel pans with two legs. Linked, one Pan control shifts both from where they were
-# when linked. The desk has no such setting, so the links live in settings.json, filed under the
-# desk like the applied presets: {"device": id, "channels": {name: {"base": [l, r], "offset": n}}},
-# in percent. `base` is kept so that returning the control to centre restores the original width
-# after an end stop has squeezed the legs together.
-_PAN_LINKS_KEY = "pan_links"
-_PAN_LEGS = ("channelPanL", "channelPanR")
-
-
-def _pan_links() -> dict:
-    """{channel name: link} for THIS desk; empty if the record belongs to another one."""
-    rec = settings_file.load().get(_PAN_LINKS_KEY)
-    if not isinstance(rec, dict):
-        return {}
-    here = device_page.hardware_id()
-    if rec.get("device") and here and rec.get("device") != here:
-        return {}
-    chans = rec.get("channels")
-    return chans if isinstance(chans, dict) else {}
-
-
-def _save_pan_links(links: dict) -> None:
-    settings_file.update(**{_PAN_LINKS_KEY: {"device": device_page.hardware_id(), "channels": links}})
-
-
-def shift_pan_legs(base, offset: int) -> list:
-    return [max(0, min(100, int(b) + int(offset))) for b in base]
-
-
-def linked_pan_offset(link: dict, left, right) -> int:
-    """Where the linked control sits for legs now at `left` and `right` (percent): the stored
-    offset, or 0 when the legs have moved since (the desk, a preset, an unlinked write), which
-    links afresh from where they are. `action_set_linked_pan` makes the same call."""
-    expect = shift_pan_legs(link["base"], link["offset"])
-    if abs(expect[0] - left) > 1 or abs(expect[1] - right) > 1:
-        return 0
-    return int(link["offset"])
-
-
-def pan_offset_words(offset: int) -> str:
-    if offset == 0:
-        return "centre"
-    if offset <= -100:
-        return "hard left"
-    if offset >= 100:
-        return "hard right"
-    return f"{-offset} percent left" if offset < 0 else f"{offset} percent right"
-
-
-def action_link_pan(name: str, on: bool, left: float, right: float) -> dict:
-    """Link or unlink a stereo channel's two pan legs. `left` and `right` are where the legs are
-    now, in percent, which becomes the link's centre."""
-    ch = _ui_chan(name)
-    if ch is None:
-        return {"ok": False, "message": f"Unknown channel: {name}."}
-    links = _pan_links()
-    if on:
-        links[name] = {"base": [int(round(left)), int(round(right))], "offset": 0}
-    else:
-        links.pop(name, None)
-    _save_pan_links(links)
-    return {"ok": True, "pan_links": links,
-            "message": f"{ch['label']} pan sides {'linked' if on else 'unlinked'}."}
-
-
-def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> dict:
-    """Move a linked stereo pan: both legs shift by `offset` (-100 to 100) from where they were
-    when linked. `left` and `right` are where the caller shows the legs now, in percent; if they
-    have moved since, the link starts again from them, as `linked_pan_offset` showed it."""
-    ch = _ui_chan(name)
-    if ch is None:
-        return {"ok": False, "message": f"Unknown channel: {name}."}
-    links = _pan_links()
-    link = links.get(name)
-    if link is None:
-        return {"ok": False, "message": f"{ch['label']}'s pan sides are not linked."}
-    if linked_pan_offset(link, left, right) != link["offset"]:
-        link = {"base": [int(round(left)), int(round(right))], "offset": 0}
-    off = max(-100, min(100, int(offset)))
-    legs = shift_pan_legs(link["base"], off)
-    try:
-        with desk_access.hid_lock:
-            for prop, pct in zip(_PAN_LEGS, legs):
-                channels.set_channel_processing(name, prop, pct / 100)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the pan: {exc}"}
-    links[name] = {"base": link["base"], "offset": off}
-    _save_pan_links(links)
-    return {"ok": True, "pan_links": links, "legs": dict(zip(_PAN_LEGS, legs)),
-            "message": f"{ch['label']} pan {pan_offset_words(off)}."}
-
-
-# --- Mic processing PRESETS (whole-chain: the RODE app's factory set + user-saved) -----
-_FACTORY_PRESET_FILE = resource_path("mic_presets.json")   # ships with the app (read-only)
-_USER_PRESET_FILE = data_path("user_presets.json")         # user-saved (writable, %LOCALAPPDATA%)
-
-
-def _load_factory_presets() -> dict:
-    try:
-        with open(_FACTORY_PRESET_FILE, "r", encoding="utf-8") as f:
-            return (json.load(f) or {}).get("factory", {})
-    except (OSError, ValueError):
-        return {}
-
-
-def _load_user_presets() -> dict:
-    return read_json(_USER_PRESET_FILE, {})
-
-
-def _save_user_presets(d: dict) -> None:
-    write_json(_USER_PRESET_FILE, d)
-
-
-# The property set a preset stores = the keys of a factory preset (floats + the index).
-_PRESET_PROPS = ("eqLowGain", "eqMidGain", "eqHighGain", "aphexBBDrive", "aphexAEMix",
-                 "compressorThreshold", "compressorGain", "deesserThreshold",
-                 "noiseGateThreshold", "noiseGateRange", "noiseGateRelease",
-                 "channelDepth", "channelSparkle", "channelPunch",
-                 # The processing MODE belongs to a voicing (see channels.CHAIN_ADVANCED_PROP).
-                 # Without it, a saved advanced voicing applied to a strip in simple mode gets
-                 # regenerated from the VoxLab knobs. Written FIRST by apply_processing_preset;
-                 # the marker below is written LAST.
-                 channels.CHAIN_ADVANCED_PROP,
-                 # The MODULE on/off flags. A voicing is not just parameter values, it is which parts
-                 # of the chain are engaged: without these, applying a preset to a strip with its
-                 # modules off sets every value, changes nothing audible, and reports success.
-                 # channelBypassProcessing is deliberately NOT here: the master on/off is the
-                 # operator's control, not part of the voicing (channels.apply_processing_preset).
-                 *channels.PROCESSING_MODULE_BOOLS,
-                 "channelCurrentFxPreset")
-
-
-def preset_list() -> list:
-    """[{name, custom}] for the UI combo box, factory first then user presets."""
-    out = [{"name": n, "custom": False} for n in _load_factory_presets()]
-    out += [{"name": n, "custom": True} for n in _load_user_presets()]
-    return out
-
-
-# --- WHICH PRESET A STRIP IS ON ----------------------------------------------------------------
-# The device cannot really answer this, so without the record below the Presets tab cannot either:
-# apply Podcast Studio, leave the channel, come back, and nothing says what it is on.
-#
-# `channelCurrentFxPreset` is a NAME-only marker with three factory slots (0/1/2, -1 = none) that
-# the unit blanks the moment any parameter is written. So it cannot name a custom preset at all, and
-# it stops naming a factory one at the first tweak. Reading the device harder does not fix that.
-#
-# Instead we keep our OWN record of what we last applied and then CHECK it against the live values
-# rather than trusting it. A record saying "Podcast Studio" on a chain that no longer matches is
-# reported as edited, not as the preset. That covers custom presets, stays honest through tweaks,
-# and self-corrects when the strip is changed from the RODE app or the desk, because the values
-# simply stop matching. The device marker is still preferred when it HAS an answer (see _preset_now).
-#
-# The record is per-machine and per-device: it carries the hardware id it was written against, and a
-# record from another desk is ignored rather than claimed. On a fresh install there is no record, so
-# the marker is all we have until something is applied - which the UI says plainly.
-_APPLIED_PRESETS_KEY = "applied_presets"
-_PRESET_MATCH_TOL = 0.005     # normalised 0..1 floats: a read-back is never bit-identical
-# The factory marker slots, in channelCurrentFxPreset order, confirmed against the RODE app's own
-# list.
-_FACTORY_MARKER_NAMES = ("Neutral", "Podcast Studio", "Broadcast")
-
-
-def _applied_preset_record() -> dict:
-    """{mic channel as str: preset name} for THIS desk. Empty if the record belongs to another one -
-    two desks would otherwise inherit each other's claims."""
-    rec = settings_file.load().get(_APPLIED_PRESETS_KEY)
-    if not isinstance(rec, dict):
-        return {}
-    here = device_page.hardware_id()
-    if rec.get("device") and here and rec.get("device") != here:
-        return {}
-    chans = rec.get("channels")
-    return chans if isinstance(chans, dict) else {}
-
-
-def _note_applied_preset(channel: int, name: str) -> None:
-    """Remember that we just applied `name` to a mic channel. Best-effort, like every other setting:
-    losing it costs a name in the UI, never a device state."""
-    settings_file.update(**{_APPLIED_PRESETS_KEY: {
-        "device": device_page.hardware_id(),
-        "channels": {**_applied_preset_record(), str(int(channel)): name},
-    }})
-
-
-def _preset_matches(props: dict, ch: dict) -> bool:
-    """Does the live chain still hold every value this preset writes?
-
-    Read straight off the channel dump the UI already asked for, so this costs no device access.
-    Floats compare within _PRESET_MATCH_TOL; the module flags and the processing mode compare
-    exactly, because those are what make a voicing audible. The preset-name marker is skipped: it is
-    a name, not a value, and the unit blanks it as soon as the first parameter lands."""
-    params, modules = (ch.get("params") or {}), (ch.get("modules") or {})
-    for prop, want in props.items():
-        if prop == channels.CHAIN_PRESET_MARKER_PROP:
-            continue
-        if prop == channels.CHAIN_ADVANCED_PROP:
-            got = ch.get("advanced")
-        elif prop in channels.PROCESSING_MODULE_BOOLS:
-            got = modules.get(prop)
-        else:
-            got = params.get(prop)
-            if got is None:
-                return False
-            try:
-                if abs(float(got) - float(want)) > _PRESET_MATCH_TOL:
-                    return False
-            except (TypeError, ValueError):
-                return False
-            continue
-        if got is None or bool(got) != bool(want):
-            return False
-    return True
-
-
-def _preset_now(channel: int, ch: dict):
-    """What this mic strip is on: {name, edited, source}, or None when nothing can be claimed.
-
-    Order of trust, most reliable first:
-      1. The DEVICE marker, when it has an answer. A non-negative marker means a factory preset was
-         applied and nothing has been written since, which beats any record of ours - it is also the
-         only thing that knows about a preset applied from the RODE app.
-      2. OUR record, checked against the live values, which is the only way a custom preset or an
-         edited factory one can be named at all.
-      3. Nothing. The strip is on settings we have no name for, and the UI says exactly that rather
-         than inventing "custom"."""
-    idx = ch.get("preset_index")
-    if isinstance(idx, int) and 0 <= idx < len(_FACTORY_MARKER_NAMES):
-        return {"name": _FACTORY_MARKER_NAMES[idx], "edited": False, "source": "device"}
-    name = _applied_preset_record().get(str(int(channel)))
-    if not name:
-        return None
-    props = {**_load_factory_presets(), **_load_user_presets()}.get(name)
-    if not props:
-        # Applied, then deleted from the preset list: we can still name it, but there is nothing left
-        # to compare against, so we do not claim either way.
-        return {"name": name, "edited": None, "source": "record"}
-    return {"name": name, "edited": not _preset_matches(props, ch), "source": "record"}
-
-
-def _read_channel_preset_props(channel: int) -> dict:
-    """Read the current preset-property values for one mic channel (for 'save as').
-
-    NEVER INDEX THE PROCESSING ARRAYS WITH `channel - 1`: that assumes a mic's chain sits at its own
-    slot, and processing is per fader STRIP. On a reordered layout - a line
-    channel on fader 2 pushing Mic 2 to strip 6 - "save Mic 2's settings as a preset" then silently
-    saves whatever chain sits on strip 1. The strip is resolved the same way every other processing
-    read and write does it (channels._channel_strip, off the live fader vector). The processing MODE
-    is saved too, so applying a saved advanced voicing restores advanced mode rather than landing on
-    a strip that re-derives it from the VoxLab knobs."""
-    blob = rcp_read.read_model_stable()
-    idx = channels._channel_strip(channel)
-    out = {}
-    for p in _PRESET_PROPS:
-        vals = rcp_read.values(blob, p)
-        if idx < len(vals):
-            out[p] = vals[idx]
-    return out
-
-
-# Plain names for the module flags, for the "switched on" sentence. Spelled as the Channels page
-# spells them so the two are not read aloud as if they were different controls.
-_MODULE_LABEL = {"hpfOn": "high-pass filter", "eqOn": "equaliser", "compressorOn": "compressor",
-                 "noiseGateOn": "noise gate", "deesserOn": "de-esser", "aphexOn": "tone shaping",
-                 "channelPanOn": "pan", "eqHighOn": "EQ high band", "eqMidOn": "EQ mid band",
-                 "eqLowOn": "EQ low band"}
-
-
-def _read_channel_modules(channel: int) -> dict:
-    """The module on/off flags for one mic channel's STRIP, plus its master processing state.
-
-    Same strip resolution as every other processing read (channels._channel_strip off the live
-    fader vector), so it is correct on a reordered layout. CALLER HOLDS THE HID LOCK."""
-    blob = rcp_read.read_model(fresh=True)
-    idx = channels._channel_strip(channel)
-    out = {}
-    for p in channels.PROCESSING_MODULE_BOOLS:
-        vals = rcp_read.values(blob, p)
-        out[p] = vals[idx] if idx < len(vals) else None
-    bypass = rcp_read.values(blob, "channelBypassProcessing")
-    out["_processing_on"] = (None if idx >= len(bypass) else not bypass[idx])
-    return out
-
-
-def action_apply_mic_preset(channel: int, name: str) -> dict:
-    if channel not in MIC_CHANNELS:
-        return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    presets = {**_load_factory_presets(), **_load_user_presets()}
-    props = presets.get(name)
-    if not props:
-        return {"ok": False, "message": f"Preset {name} was not found."}
-    # Read the modules FIRST so we can say what actually changed: nothing on screen otherwise shows
-    # a module moving.
-    try:
-        with desk_access.hid_lock:
-            before = _read_channel_modules(channel)
-            channels.apply_processing_preset(channel, props)
-            after = _read_channel_modules(channel)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not apply the preset: {exc}"}
-    # Remember it, so coming back to this channel can still say what it is on. The device marker
-    # cannot do that job for a custom preset, or for a factory one once a slider moves (_preset_now).
-    _note_applied_preset(channel, name)
-    msg = f"Mic {channel} set to the {name} preset."
-    turned_on = [_MODULE_LABEL.get(p, p) for p in channels.PROCESSING_MODULE_BOOLS
-                 if after.get(p) and not before.get(p)]
-    turned_off = [_MODULE_LABEL.get(p, p) for p in channels.PROCESSING_MODULE_BOOLS
-                  if before.get(p) and not after.get(p)]
-    if turned_on:
-        msg += f" Switched on: {wording.join_and(turned_on)}."
-    if turned_off:
-        msg += f" Switched off: {wording.join_and(turned_off)}."
-    # The master on/off is never part of a preset, so say so when it would mask the whole thing.
-    if after.get("_processing_on") is False:
-        msg += (" Note: processing is still off for this channel, so the preset is loaded but not "
-                "heard. Turn processing on to use it.")
-    return {"ok": True, "message": msg}
-
-
-def action_save_mic_preset(channel: int, name: str) -> dict:
-    name = (name or "").strip()
-    if channel not in MIC_CHANNELS:
-        return {"ok": False, "message": f"Mic channel {channel} is not valid."}
-    if not name:
-        return {"ok": False, "message": "Please enter a name for the preset."}
-    if name in _load_factory_presets():
-        return {"ok": False, "message": f"{name} is a built-in preset name; choose another."}
-    try:
-        with desk_access.hid_lock:
-            props = _read_channel_preset_props(channel)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the current settings: {exc}"}
-    if not props:
-        return {"ok": False, "message": "Could not read the current settings to save."}
-    user = _load_user_presets()
-    user[name] = props
-    _save_user_presets(user)
-    # The channel now IS this preset by definition - it was saved from these very values - so the
-    # strip adopts the new name straight away rather than still claiming whatever it was based on.
-    _note_applied_preset(channel, name)
-    return {"ok": True, "message": f"Saved Mic {channel}'s current settings as {name}.",
-            "presets": preset_list()}
-
-
-def action_delete_mic_preset(name: str) -> dict:
-    user = _load_user_presets()
-    if name not in user:
-        return {"ok": False, "message": f"{name} is not a custom preset (built-ins can't be deleted)."}
-    del user[name]
-    _save_user_presets(user)
-    return {"ok": True, "message": f"Deleted the {name} preset.", "presets": preset_list()}
-
-
-# ----------------------------------------------------------------------------
-# Routing / output settings (read-back verifiable).
-# ----------------------------------------------------------------------------
-
-# --- FADER ASSIGNMENT (which channel sits on which fader) ---------------------
-# The fader layout IS the channelInputSource vector (see RODECASTER_PROTOCOL.txt section 6):
-# index 0 = fader 1 ... value = channel code on that fader.
-# We read the layout from the vector and write it with rcp_transfer.set_fader_source
-# (CHANNEL[index]). The per-device SHAPE (vector length, physical/virtual split, assignable channel
-# list + labels, factory-default vector) lives in devices.FaderSpec: the Pro II has 9
-# faders and Mic 1-4; the Duo has a 10-entry vector, code 2 = Headset (not Mic 3), no Mic3/Mic4,
-# and NO confirmed default so its 'reset faders' refuses instead of writing a guessed layout.
-
-
-def _active_faders():
-    """The FaderSpec for the currently-connected device (devices.py)."""
-    return devices.get_active_device().fader
-
-
-def _chain_follow_on() -> bool:
-    """Whether "the chain follows the channel" is enabled for the connected device.
-
-    Gated behind its own cap rather than riding on "fader_write", because the Duo has swap cases the
-    Pro II does not: its default layout contains an EMPTY strip (-1) and a DUPLICATED source (USB 2
-    twice), and index() on a duplicate finds only the first. Until the same read-back test has been
-    run on a Duo, the layout moves there and the chain stays on its strip."""
-    return "chain_follow" in devices.get_active_device().caps
-
-
-def _follow_chains(old_vec, new_vec, chains_before) -> str:
-    """Move each channel's processing/effects chain to the strip it landed on, then VERIFY.
-
-    Called with the HID lock held, immediately after the layout write. `chains_before` is the
-    per-strip chain snapshot taken from the dump BEFORE that write, so for every source that moved we
-    know exactly which chain belongs to it. Only the DIFFERENCES are written (a real swap is about
-    13 writes and a second); a blind full write would be ~110.
-
-    THREE CASES, not one. A channel can move between strips, LEAVE the layout, or RETURN to it. A
-    channel that leaves has its chain parked (channels.park_chain), because the strip it vacated is
-    about to be overwritten by whoever moves in and the desk keeps no per-channel copy. A channel
-    that returns gets that parked chain written onto its new strip, or it silently inherits the
-    previous occupant's voicing. Leaving and returning is not an edge case: it is the ordinary path
-    for stereo link, which evicts the upper mic of a pair and hands it back on unlink.
-
-    Returns a sentence for the user: what moved, or precisely what did not. Never raises - a fader
-    move that succeeded must not be reported as a failure because the chain step had a problem."""
-    try:
-        # Where did each source live, and where does it live now? Sources present in both layouts and
-        # sitting on a DIFFERENT strip are the ones whose chain has to travel.
-        old_at = {code: i for i, code in enumerate(old_vec) if code is not None and code >= 0}
-        new_at = {code: i for i, code in enumerate(new_vec) if code is not None and code >= 0}
-        moves = []
-        for code, i in new_at.items():
-            src = old_at.get(code)
-            if src is not None and src != i and src < len(chains_before) and i < len(chains_before):
-                moves.append((code, src, i))
-        # PARK FIRST, off the pre-write snapshot: once the moves below start writing, the vacated
-        # strip's chain is gone for good.
-        device_id = _layout_store_key()
-        parked = []
-        for code, src in old_at.items():
-            if code not in new_at and src < len(chains_before):
-                channels.park_chain(device_id, code, chains_before[src])
-                parked.append(code)
-        # A channel with no strip before and a strip now: hand back what we parked when it left.
-        returns = []
-        homeless = []
-        for code, dst in new_at.items():
-            if code in old_at or dst >= len(chains_before):
-                continue
-            chain = channels.take_chain(device_id, code)
-            if chain is None:
-                homeless.append(code)      # never saw it leave (moved off-fader by the RODE
-            else:                          # app or the touchscreen, which we cannot see)
-                returns.append((code, dst, chain))
-        if not moves and not returns:
-            return _chain_note(spec=_active_faders(), parked=parked, homeless=homeless)
-        written = 0
-        for _code, src, dst in moves:
-            # `current` is what physically sits on the destination strip right now, i.e. the previous
-            # occupant's chain, so the diff is exactly the handful of values that actually differ.
-            res = channels.write_chain(dst, chains_before[src], chains_before[dst])
-            written += res["written"]
-        for _code, dst, chain in returns:
-            res = channels.write_chain(dst, chain, chains_before[dst])
-            written += res["written"]
-        # Read back and check every moved chain landed. This is the half of the job that makes a
-        # partial write safe to report honestly.
-        after = channels.read_chains(rcp_read.read_model(fresh=True))
-        spec = _active_faders()
-        bad = []
-        for code, src, dst in moves:
-            if dst >= len(after) or channels.chain_diff(channels.fit_chain(chains_before[src], dst),
-                                                        after[dst]):
-                bad.append(_channel_name(code, spec))
-        for code, dst, chain in returns:
-            if dst >= len(after) or channels.chain_diff(channels.fit_chain(chain, dst), after[dst]):
-                bad.append(_channel_name(code, spec))
-                channels.park_chain(device_id, code, chain)   # put it back; it did not land
-        if bad:
-            return (f"WARNING: the processing chain did not fully follow {wording.join_and(bad)} "
-                    f"({written} of the writes landed). Set that channel's processing again, or "
-                    f"restore a profile.")
-        return _chain_note(spec=spec, parked=parked, homeless=homeless,
-                           moved=[c for c, _s, _d in moves],
-                           restored=[c for c, _d, _c in returns])
-    except Exception as exc:
-        return (f"WARNING: the fader layout changed, but moving the processing chain failed ({exc}). "
-                f"Check the affected channels' processing.")
-
-
-def _chain_note(spec, parked=(), homeless=(), moved=(), restored=()) -> str:
-    """The one sentence the user hears about what happened to the processing. Says what was KEPT for
-    an off-fader channel as well as what moved: "off-fader" otherwise reads as "deleted", and the
-    whole point of parking is that it is not."""
-    def names(codes):
-        return wording.join_and(_channel_name(c, spec) for c in codes)
-
-    def own(codes):
-        return "their own" if len(codes) > 1 else "its own"
-
-    out = ""
-    if moved and restored:
-        out = (f"Processing and effects followed {names(moved)}, and {names(restored)} got "
-               f"{own(restored)} processing back.")
-    elif moved:
-        out = f"Processing and effects followed {names(moved)}."
-    elif restored:
-        out = f"{names(restored)} got {own(restored)} processing back."
-    if parked:
-        # Says only what happened to the PROCESSING. action_set_fader already reports the layout
-        # side ("X is now off-fader"), and hearing the same clause twice in one announcement is
-        # worse than terse.
-        many = len(parked) > 1
-        out += (f" The processing for {names(parked)} is kept, and comes back when "
-                f"{'they get faders' if many else 'it gets a fader'} again.")
-    if homeless:
-        many = len(homeless) > 1
-        out += (f" {names(homeless)} had no stored processing, so "
-                f"{'each is' if many else 'it is'} using whatever was already on "
-                f"{'its' if many else 'that'} fader; set {own(homeless)} processing to taste.")
-    return out.strip()
-
-
-def _fader_write_gate():
-    """Fader-assignment WRITES. Reads and labels are always device-aware and safe; writes gate
-    because a device whose fader write model is only partly known (the Duo: empty strips encoded
-    as -1, no confirmed default vector) must refuse rather than write a guessed layout."""
-    return desk_access.cap_gate("fader_write", lambda name:
-                     f"Changing the fader layout is not enabled on the {name} yet, so the faders "
-                     f"are read-only here. You can still see the current layout.")
-
-
-def _is_empty_fader(code) -> bool:
-    """True for an empty/unsourced fader strip. The Duo's vector carries -1 for an empty
-    logical strip; None appears when the read vector is shorter than the fader count."""
-    return code is None or code == -1
-
-
-def _fader_label(i: int, spec=None) -> str:
-    spec = spec or _active_faders()
-    return f"Fader {i + 1}" + ("" if i < spec.physical else " (virtual)")
-
-
-def _channel_name(code, spec=None) -> str:
-    # labels_for, not code_label: a fader can HOLD a stereo-linked pair even though a pair is never
-    # something you assign, and "channel code 4" is no use to anyone reading the layout aloud.
-    spec = spec or _active_faders()
-    if _is_empty_fader(code):
-        return "empty (no channel)"
-    return spec.labels_for(channels.usb_expanded()).get(code, f"channel code {code}")
-
-
-def _follow_levels(old_vec, new_vec, levels_before, spec) -> str:
-    """Move each channel's LEVEL to the fader it landed on, the way _follow_chains moves its chain.
-
-    WHY IT EXISTS. A fader's level belongs to the STRIP, not to the channel sitting on it, so a
-    reassignment silently hands a channel whatever level that strip happens to be at. A backup that
-    moves Main Stereo from fader 8 onto fader 7 lands it on whatever 7 was sitting at, zero in the
-    worst case, while the channel that took fader 8 carries on at 95. Every reading is then clean -
-    unmuted, in the matrix, on a fader, layout exactly as the backup says - because nothing IS
-    wrong. The level has simply not travelled with the channel, and a level is not visible as a
-    fault; it is just silence.
-
-    The app already accepts that a channel's settings should follow the channel: that is the whole
-    reason `_follow_chains` and the off-fader chain store exist. The level is the only one of them
-    that can silence somebody without saying so.
-
-    ONLY BETWEEN FADERS THAT BOTH HAVE A LEVEL CONTROL, i.e. the virtual ones. A physical fader's
-    position is physical: it cannot be read and it cannot be written, so a channel arriving from one
-    brings no level with it and putting a number there would be inventing state. Those cases are the
-    restore warning's job, not this one's.
-
-    Written from the PRE-WRITE snapshot, so a swap works: each channel takes the level it had, not
-    whatever the other one has just been given.
-
-    Never raises. A layout change that succeeded must not be reported as a failure because this
-    step had a problem - the same rule `_follow_chains` follows, and for the same reason.
-    """
-    try:
-        old_at = {code: i for i, code in enumerate(old_vec) if code is not None and code >= 0}
-        new_at = {code: i for i, code in enumerate(new_vec) if code is not None and code >= 0}
-        moved = []
-        for code, dst in new_at.items():
-            src = old_at.get(code)
-            if src is None or src == dst:
-                continue
-            if src not in spec.level_faders or dst not in spec.level_faders:
-                continue
-            was = levels_before[src] if src < len(levels_before) else None
-            now = levels_before[dst] if dst < len(levels_before) else None
-            if not isinstance(was, int) or was == now:
-                continue
-            rcp_transfer.set_fader_level(dst, was)
-            moved.append((code, dst, was))
-        if not moved:
-            return ""
-        pct = [(c, d, round(v * 100 / rcp_transfer.FADER_LEVEL_MAX)) for c, d, v in moved]
-        return " " + " ".join(
-            f"{_channel_name(c, spec)} kept its level of {p} percent on "
-            f"{_fader_label(d, spec)}." for c, d, p in pct)
-    except Exception as exc:
-        return f" The channel moved but its level did not follow it: {exc}"
-
-
-def _read_fader_vector(blob=None, spec=None):
-    """The current channel code on each fader, from channelInputSource (device-length).
-
-    Every layout write re-reads through here straight afterwards. That dump is what makes the desk
-    model trusted again, since our own write of a fader source untrusts it (`desk_model.STRUCTURAL`)."""
-    spec = spec or _active_faders()
-    if blob is None:
-        blob = rcp_read.read_model()
-    cis = rcp_read.values(blob, "channelInputSource")
-    return [cis[i] if i < len(cis) else None for i in range(spec.count)]
-
-
-def _fader_channel_options(spec) -> list:
-    """[code, name] for every channel a fader may take in the USB mode last published. It changes
-    with the mode (Expanded adds Game, Music, A and B and renames USB 1), so the live read carries it
-    as well as the static model."""
-    expanded = channels.usb_expanded()
-    labels = spec.labels_for(expanded)
-    return [[code, labels.get(code, str(code))] for code in spec.code_order_for(expanded)]
-
-
-def fader_model() -> dict:
-    """Static layout the Fader assignment UI renders: the connected device's faders + the
-    channels that can be placed on them (device-aware, see devices.FaderSpec)."""
-    spec = _active_faders()
-    if spec.physical < spec.count:
-        phys_note = (f" Faders 1 to {spec.physical} are the physical faders; the rest are "
-                     f"virtual faders.")
-    else:
-        phys_note = ""
-    return {
-        "faders": [{"index": i, "label": _fader_label(i, spec), "physical": i < spec.physical}
-                   for i in range(spec.count)],
-        # THE DROPDOWN AND THE WRITE GATE MUST OFFER THE SAME SET, or Expanded's four inputs are
-        # either refused after being chosen or missing from the list that can choose them. Both
-        # come off `code_..._for`, so there is one answer to "what may go on a fader".
-        "channels": _fader_channel_options(spec),
-        "read_only": _fader_write_gate() is not None,
-        # The PAIRS are static (which links exist, and what to call them); whether each is currently
-        # linked is live state and arrives with the layout read, not from here.
-        "stereo_pairs": [{"code": code, "label": label,
-                          "lower": _channel_name(lo, spec), "upper": _channel_name(up, spec)}
-                         for code, lo, up, label in spec.stereo_pairs],
-        "stereo_read_only": _stereo_link_gate() is not None,
-        "stereo_note": ("Linking two inputs puts both on one fader, panned hard left and right, so "
-                        "one fader controls the pair. Only inputs next to each other can link. The "
-                        "fader the second input leaves becomes empty, and unlinking gives that input "
-                        "its fader and its processing back."),
-        # NEVER WRITE A FADER ON `change`. A closed select fires on EVERY arrow press, and arrowing
-        # a closed select is how a screen-reader user reads one, so writing on change means simply
-        # browsing the list performs the swap. Each fader applies on Enter.
-        "note": ("Choose which channel sits on each fader." + phys_note + " Putting a channel "
-                 "on a fader that already holds it elsewhere swaps the two. Nothing is sent to the "
-                 "desk until you press Enter."),
-    }
-
-
-def _settle_mutes(new_vec, wanted: dict) -> list:
-    """Write channelOutputMute on the strip each code in `wanted` now sits on, where the desk left
-    it different. Returns the codes this OPENED, so the reply can say a mic is live.
-
-    THE DESK'S MUTES DO NOT FOLLOW THE INPUTS: a strip has kept its own mute through a link, so the
-    pair inherited the lower mic's, and has also been seen clearing it. Neither is relied on; the
-    outcome is read back and settled. A code with no strip (an upper mic left off-fader) is skipped."""
-    mutes = rcp_read.values(rcp_read.read_model(fresh=True), "channelOutputMute")
-    opened = []
-    for code, muted in wanted.items():
-        strip = next((i for i, c in enumerate(new_vec) if c == code), None)
-        if strip is None or strip >= len(mutes) or bool(mutes[strip]) == muted:
-            continue
-        rcp_transfer.write_at(channels.proc_key_for_strip(strip), channels.MUTE_PROP, "bool", muted)
-        if not muted:
-            opened.append(code)
-    return opened
-
-
-def _unlink_mutes(kept, pair_muted: bool, lower: int, upper: int) -> dict:
-    """Each mic's mute after an unlink. `kept` is `channels.take_link_mutes`' record.
-
-    A pair whose mute is unchanged since the link was never muted or opened by anybody, so each mic
-    gets back what it had: a muted Mic 3 linked with an open Mic 4 unlinks the same way. A pair muted
-    or opened while linked was a choice, and both mics keep it. With no record (linked outside the
-    app) the pair's mute is all there is to go on."""
-    if kept and kept.get("pair") == pair_muted:
-        return {lower: bool(kept.get("lower")), upper: bool(kept.get("upper"))}
-    return {lower: pair_muted, upper: pair_muted}
-
-
-def _layout_store_key() -> str:
-    """The desk key for the layout parking stores. Falls back to the model name because
-    `device_page.hardware_id` is "" until the first status read: parking under one key and looking
-    under another would lose the record."""
-    return device_page.hardware_id() or devices.get_active_device().name
-
-
-def _stereo_link_gate():
-    """Stereo-link WRITES. Two conditions, not one: the device must claim the cap AND carry a proven
-    pair table, so a future device that gets the cap by copy-paste still refuses until its codes are
-    captured rather than writing a Pro II code at a desk that means something else by it."""
-    gate = desk_access.cap_gate("stereo_link", lambda name:
-                     f"Linking two inputs into a stereo pair is not enabled on the {name} yet, so "
-                     f"this is read-only here.")
-    if gate is not None:
-        return gate
-    if not _active_faders().stereo_pairs:
-        dev = devices.get_active_device()
-        return {"ok": False,
-                "message": (f"Linking two inputs into a stereo pair is not available on the "
-                            f"{dev.name}: its pair codes have not been confirmed.")}
-    return None
-
-
-def stereo_link_state(vec=None, spec=None) -> list:
-    """Each legal pair and whether it is currently linked, for the UI. Read-only, and it takes the
-    already-read vector when there is one so opening the page costs no extra dump."""
-    spec = spec or _active_faders()
-    vec = vec if vec is not None else _read_fader_vector(spec=spec)
-    out = []
-    for code, lo, up, label in spec.stereo_pairs:
-        out.append({"code": code, "label": label, "linked": code in (vec or []),
-                    "lower": _channel_name(lo, spec), "upper": _channel_name(up, spec)})
-    return out
-
-
-def action_set_stereo_link(pair_code: int, on: bool) -> dict:
-    """Link or unlink one adjacent mic pair (RODECASTER_PROTOCOL 6.5).
-
-    LINKING is two vacates and one write: the pair code goes onto the LOWER mic's fader and the other
-    fader is emptied, because a linked pair occupies one fader rather than two. That is the desk's
-    own shape; the RODE app sends two more records, which are cosmetic: writing the source code
-    alone leaves the desk byte-identical.
-
-    UNLINKING is where we deliberately DIVERGE from the desk. It returns only the lower mic and
-    abandons the upper one off-fader, which on the RODE app leaves you with a mic you cannot hear and
-    no indication why. We put the upper mic back on the fader the link emptied when that fader is
-    still free, so a link followed by an unlink is a true round trip. With its processing restored by
-    the off-fader chain store, the desk ends up where it started. When there is no free fader we say
-    so rather than displacing something the user chose.
-
-    Processing follows both ways through _follow_chains: linking parks BOTH mics' chains (the pair
-    keeps the lower mic's strip voicing, which is what the desk does), and unlinking hands each one
-    back.
-
-    Mutes follow the same way. A pair is muted if EITHER mic was, so a link never opens a mic the
-    user silenced; each mic's own mute is parked (`channels.park_link_mutes`) and `_unlink_mutes`
-    decides what the unlink hands back."""
-    gate = _stereo_link_gate()
-    if gate is not None:
-        return gate
-    spec = _active_faders()
-    pair = spec.pair_map.get(int(pair_code))
-    if pair is None:
-        return {"ok": False, "message": f"{pair_code} is not a stereo pair on this desk."}
-    lower, upper = pair
-    label = spec.pair_label.get(int(pair_code), f"pair {pair_code}")
-    chain_note = mute_note = ""
-
-    def names(codes):
-        return wording.join_and(_channel_name(c, spec) for c in codes)
-
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model()
-            vec = _read_fader_vector(blob, spec)
-            target = list(vec)
-            if on:
-                if int(pair_code) in vec:
-                    return {"ok": True, "faders": vec,
-                            "labels": [_channel_name(c, spec) for c in vec],
-                            "stereo": stereo_link_state(vec, spec),
-                            "message": f"{label} is already linked."}
-                # The pair lands where the LOWER mic sits. If neither mic is on a fader (both were
-                # displaced earlier) the first empty strip will do; with none we refuse rather than
-                # evict a channel the user put there on purpose.
-                seat = next((i for i, c in enumerate(target) if c == lower), None)
-                if seat is None:
-                    seat = next((i for i, c in enumerate(target) if c == upper), None)
-                if seat is None:
-                    seat = next((i for i, c in enumerate(target) if _is_empty_fader(c)), None)
-                if seat is None:
-                    return {"ok": False,
-                            "message": (f"There is no free fader for {label}. Move a channel off a "
-                                        f"fader first, then link.")}
-                for i, c in enumerate(target):
-                    if c in (lower, upper):
-                        target[i] = -1
-                target[seat] = int(pair_code)
-            else:
-                seat = next((i for i, c in enumerate(target) if c == int(pair_code)), None)
-                if seat is None:
-                    return {"ok": True, "faders": vec,
-                            "labels": [_channel_name(c, spec) for c in vec],
-                            "stereo": stereo_link_state(vec, spec),
-                            "message": f"{label} is not linked."}
-                target[seat] = lower
-                spare = next((i for i, c in enumerate(target) if _is_empty_fader(c)), None)
-                if spare is not None:
-                    target[spare] = upper
-            # Mutes are read before the write, since a linked mic has no strip of its own to read
-            # afterwards.
-            mutes = rcp_read.values(blob, "channelOutputMute")
-
-            def muted_now(code):
-                i = next((j for j, c in enumerate(vec) if c == code), None)
-                return bool(mutes[i]) if i is not None and i < len(mutes) else False
-
-            lower_muted, upper_muted, pair_muted = (muted_now(lower), muted_now(upper),
-                                                    muted_now(int(pair_code)))
-            chains_before = channels.read_chains(blob) if _chain_follow_on() else None
-            for i in range(spec.count):
-                if target[i] != vec[i]:
-                    rcp_transfer.set_fader_source(i, target[i])
-            new = _read_fader_vector(spec=spec)
-            if chains_before is not None:
-                chain_note = _follow_chains(vec, new, chains_before)
-            if on:
-                pair_muted = lower_muted or upper_muted
-                _settle_mutes(new, {int(pair_code): pair_muted})
-                channels.park_link_mutes(_layout_store_key(), pair_code, lower_muted,
-                                         upper_muted, pair_muted)
-                if pair_muted:
-                    because = [] if lower_muted and upper_muted else [
-                        lower if lower_muted else upper]
-                    mute_note = (f" {label} is muted, because {names(because)} was." if because
-                                 else f" {label} is muted.")
-            else:
-                wanted = _unlink_mutes(channels.take_link_mutes(_layout_store_key(), pair_code),
-                                       pair_muted, lower, upper)
-                opened = _settle_mutes(new, wanted)
-                muted = [c for c in (lower, upper) if wanted[c] and c in new]
-                if muted:
-                    mute_note += f" {names(muted)} {'is' if len(muted) == 1 else 'are'} muted."
-                if opened:
-                    mute_note += (f" {names(opened)} {'is' if len(opened) == 1 else 'are'} open, "
-                                  f"as before the link.")
-    except Exception as exc:
-        verb = "link" if on else "unlink"
-        return {"ok": False, "message": f"Could not {verb} {label}: {exc}"}
-    if on:
-        msg = (f"{label} linked, on {_fader_label(new.index(int(pair_code)), spec)}. "
-               f"One fader now carries both inputs.")
-    else:
-        msg = f"{label} unlinked."
-        if upper in new:
-            msg += f" {_channel_name(upper, spec)} is back on {_fader_label(new.index(upper), spec)}."
-        else:
-            msg += (f" {_channel_name(upper, spec)} has no free fader to go back to, so it is "
-                    f"off-fader; put it on a fader yourself when you have one spare.")
-    if chain_note:
-        msg += " " + chain_note
-    msg += mute_note
-    return {"ok": True, "faders": new, "labels": [_channel_name(c, spec) for c in new],
-            "stereo": stereo_link_state(new, spec), "message": msg}
-
-
-def _tidy_fader_target(vec, fader_index, code, order):
-    """Return the target fader vector that places `code` on `fader_index` while keeping a
-    VALID layout: no duplicate assignable source, no orphaned channel that is off-fader yet
-    still in the mix. The channel displaced from `fader_index` moves onto wherever `code` used
-    to sit (a true swap, matching a hardware drag). If the prior layout was already messy (code
-    on 2+ faders, or pre-existing duplicates), each leftover duplicate slot is filled with an
-    assignable source currently missing, so the result is always clean. EMPTY strips (Duo -1 /
-    None) are legitimate and left untouched: they are never treated as duplicates nor forced to
-    hold a source (a device can have more strips than assignable sources). `order` is the
-    device's assignable-code display order (the gap-fill order)."""
-    target = list(vec)
-    old = target[fader_index]
-    target[fader_index] = code
-    # The swap: the channel we displaced goes to the first slot that still holds `code`.
-    #
-    # AND WHEN WE DISPLACED NOTHING, THAT SLOT IS VACATED, which is what `old` already is. Do NOT
-    # guard this with `and not _is_empty_fader(old)`: moving a channel onto an EMPTY fader then
-    # leaves it on its old strip as well, and the dedup loop below resolves that duplicate by
-    # overwriting the slot the user just asked for - "put the Headset on fader 9" leaves the Headset
-    # on fader 5 and puts another channel on fader 9. Only a desk with more faders than sources can
-    # reach it, which is why it is invisible on a Pro II.
-    dup_positions = [j for j in range(len(target)) if j != fader_index and target[j] == code]
-    if dup_positions:
-        target[dup_positions[0]] = old
-    # Clean up any remaining duplicates (extra copies, or a pre-existing mess) by handing each
-    # later duplicate an assignable source that is currently absent. Empties are skipped.
-    #
-    # A mic inside a STEREO-LINKED PAIR is not missing, it is on the fader carrying the pair. Without
-    # this, linking 1+2 and then moving any other fader would see Mic 1 and Mic 2 as absent and
-    # gap-fill one of them onto a spare strip, so a mic would be both linked and on its own fader.
-    spec = _active_faders()
-    seen = set()
-    for j in range(len(target)):
-        if _is_empty_fader(target[j]):
-            continue
-        if target[j] in seen:
-            missing = [c for c in order
-                       if c not in target and spec.pair_swallowing(c, target) is None]
-            target[j] = missing[0] if missing else -1
-            if _is_empty_fader(target[j]):
-                continue
-        seen.add(target[j])
-    return target
-
-
-def action_set_fader(fader_index: int, code: int) -> dict:
-    """Put channel `code` on fader `fader_index` (0-based) on the connected device. Always
-    produces a valid layout: the displaced channel swaps onto wherever `code` used to sit, and
-    any duplicate/orphan left by an already-messy layout is tidied (see _tidy_fader_target).
-    Re-reads to report the real result. Device-aware (devices.FaderSpec); refused on a device
-    without the "fader_write" cap (the Duo)."""
-    gate = _fader_write_gate()
-    if gate is not None:
-        return gate
-    spec = _active_faders()
-    if not 0 <= fader_index < spec.count:
-        return {"ok": False, "message": f"Fader {fader_index + 1} is not valid."}
-    # THE OFFERED SET WIDENS IN EXPANDED, where Game, Music, A and B become real inputs. In
-    # Standard they are nameable but not assignable: putting one on a fader there gives somebody a
-    # channel that can never carry audio.
-    if code not in spec.code_set_for(channels.usb_expanded()):
-        return {"ok": False, "message": f"Channel code {code} is not assignable."}
-    chain_note = ""
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model()
-            vec = _read_fader_vector(blob, spec)
-            old = vec[fader_index]
-            if code == old:
-                return {"ok": True, "faders": vec,
-                        "labels": [_channel_name(c, spec) for c in vec],
-                        "message": f"{_fader_label(fader_index, spec)} already carries "
-                                   f"{_channel_name(code, spec)}."}
-            target = _tidy_fader_target(vec, fader_index, code,
-                                        spec.code_order_for(channels.usb_expanded()))
-            # THE CHAIN FOLLOWS THE CHANNEL. Processing and effects are per fader STRIP, so moving a
-            # channel without moving its chain leaves it being processed by whatever voicing sits on
-            # the strip it lands on. The RODE app does the same on its own drag. Snapshot BEFORE the
-            # layout write, off the dump we already have, so a failure can be reported precisely.
-            chains_before = channels.read_chains(blob) if _chain_follow_on() else None
-            # THE LEVEL FOLLOWS THE CHANNEL TOO, and for the same reason the chain does. Snapshot
-            # before the write, off the dump we already have; see _follow_levels for the silence
-            # this prevents. Gated, because a desk with no confirmed faderLevel selectors must not
-            # be written to at all.
-            levels_before = (rcp_read.values(blob, "faderLevel")
-                             if _level_write_gate() is None else None)
-            # Only write the faders that actually change.
-            for i in range(spec.count):
-                if target[i] != vec[i]:
-                    rcp_transfer.set_fader_source(i, target[i])
-            # The layout IS the processing/effects strip map (channels._strip_index), so a stale
-            # cached vector here would address the next processing write to the old strip.
-            new = _read_fader_vector(spec=spec)
-            if chains_before is not None:
-                chain_note = _follow_chains(vec, new, chains_before)
-            if levels_before is not None:
-                chain_note += _follow_levels(vec, new, levels_before, spec)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the fader layout: {exc}"}
-    changed = [i for i in range(spec.count) if i != fader_index and vec[i] != new[i]]
-    # SAY WHAT THE FADER ACTUALLY CARRIES, read back, not what was asked for: whenever the tidy
-    # step overrides the request, reporting `code` would announce the opposite of what it did.
-    landed = new[fader_index] if fader_index < len(new) else None
-    if landed == code:
-        parts = [f"{_fader_label(fader_index, spec)} now carries {_channel_name(code, spec)}."]
-    else:
-        parts = [f"{_fader_label(fader_index, spec)} carries {_channel_name(landed, spec)}, "
-                 f"not {_channel_name(code, spec)}."]
-    moved_to = next((j for j in changed if new[j] == old), None)
-    if moved_to is not None:
-        parts.append(f"{_fader_label(moved_to, spec)} now carries {_channel_name(old, spec)}.")
-    elif not _is_empty_fader(old) and old not in new:
-        # More assignable sources than faders: the displaced channel now sits on no fader.
-        parts.append(f"{_channel_name(old, spec)} is now off-fader; no fader carries it.")
-    if any(j != moved_to for j in changed):
-        parts.append("Tidied the layout so no channel is duplicated or off-fader.")
-    if chain_note:
-        parts.append(chain_note)
-    # `stereo` rides along on every layout write: a swap can seat a channel on top of a linked pair,
-    # so the link switches have to move with the dropdowns or they start claiming a stale state.
-    return {"ok": True, "faders": new, "stereo": stereo_link_state(new, spec),
-            "labels": [_channel_name(c, spec) for c in new], "message": " ".join(parts)}
-
-
-# --- Virtual fader levels + monitor level --------------------------------------------------------
-# The two levels the desk normally keeps to itself: the VIRTUAL faders (7-9 on the Pro II) have no
-# physical fader, and the monitor speaker level has no control in the RODE app either, so without
-# these writes both are reachable only from the desk, by encoder or touchscreen. The encoder is not
-# usable without sight (its target is chosen by touch and it silently unbinds), which is why these
-# matter. Both are confirmed writes; see RODECASTER_PROTOCOL.txt 6.1.
-def _level_write_gate():
-    """Fader and monitor LEVEL writes. The one gate with a second condition beyond the cap: the
-    device must also have a virtual fader, so it cannot use desk_access.cap_gate alone."""
-    dev = devices.get_active_device()
-    if "level_write" not in dev.caps or not dev.fader.level_faders:
-        return {"ok": False,
-                "message": (f"Setting fader and monitor levels is not verified on the {dev.name} "
-                            f"yet, so it is disabled here rather than writing an unconfirmed "
-                            f"selector.")}
-    return None
-
-
-def fader_levels_live() -> dict:
-    """Read the levels we can set: each writable (virtual) fader, plus the monitor speaker."""
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable()
-        return _fader_levels(blob)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the levels: {exc}"}
-
-
-def _fader_levels(blob: bytes) -> dict:
-    """`fader_levels_live`'s reply from a dump already read.
-
-    faderLevel is 0..127 and only the virtual slots carry a value; we present percent, which is what
-    the announcements say too. `channel` names whatever sits on that fader right now."""
-    spec = _active_faders()
-    gate = _level_write_gate()
-    raw = rcp_read.values(blob, "faderLevel")
-    # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
-    # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
-    # the encoder cycles onto the virtual faders (announcer._encoder_ring).
-    mutes = rcp_read.values(blob, "channelOutputMute")
-    solos = rcp_read.values(blob, channels.CUE_PROP)
-    mon = rcp_read.values(blob, "outputMonLevel")
-    # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
-    # They ride on this read rather than on `read_routing_live` because they belong beside the
-    # monitor level on the Levels tab, and this is the read that tab already makes.
-    outs = rcp_read.snapshot_properties(blob)
-    vec = _read_fader_vector(blob, spec)
-    faders = []
-    for idx in spec.level_faders:
-        val = raw[idx] if idx < len(raw) else None
-        faders.append({
-            "index": idx,
-            "label": _fader_label(idx, spec),
-            "channel": _channel_name(vec[idx], spec) if idx < len(vec) else None,
-            "percent": (None if val is None
-                        else max(0, min(100, round(val * 100 / rcp_transfer.FADER_LEVEL_MAX)))),
-            # None for an empty fader, so the UI can say why the switch is unavailable rather than
-            # offering a mute for nothing.
-            "muted": (None if idx >= len(vec) or _is_empty_fader(vec[idx])
-                      else bool(mutes[idx]) if idx < len(mutes) else None),
-            "soloed": (None if idx >= len(vec) or _is_empty_fader(vec[idx])
-                       else bool(solos[idx]) if idx < len(solos) else None),
-        })
-    def one(prop):
-        vals = outs.get(prop) or []
-        return vals[0] if vals else None
-
-    bt_level = one("outputBTLevel")
-    return {"ok": True, "read_only": gate is not None,
-            "message": (gate or {}).get("message", ""),
-            "faders": faders,
-            "monitor": {"percent": (round(mon[0] * 100) if mon else None),
-                        "muted": one("outputMonMute")},
-            # The Bluetooth OUTPUT: what a paired phone hears from the desk. Nothing to do with the
-            # Bluetooth INPUT channel on the Channels page, which is what the phone sends US, and the
-            # labels have to keep saying so or the two are impossible to tell apart by ear.
-            "bluetooth_out": {"percent": (None if bt_level is None else round(bt_level * 100)),
-                              "muted": one("outputBTMute")}}
-
-
-def _window_levels(blob: bytes) -> dict:
-    """The native Levels page's state from one dump: `_fader_levels`, each output's cross-point
-    levels (`mix`, `rcp_read.read_matrix_levels` less its modes, which the window keeps in
-    `matrix`), the two auto-mutes, the headphone types, and the page's layout as `model`."""
-    levels = _fader_levels(blob)
-    mix = rcp_read.read_matrix_levels(blob)
-    mix.pop("modes", None)
-    levels.update(
-        mix=mix,
-        auto_mute={which: rcp_read.block_value(blob, "OUTPUT", spec["prop"])
-                   for which, spec in _AUTO_MUTE.items()},
-        headphone_types=_headphone_types(blob),
-        model={"faders": list(_active_faders().level_faders),
-               "monitor_mix": output_mixes.monitor_mix_model(),
-               "auto_mute": [[which, spec["label"]] for which, spec in _AUTO_MUTE.items()],
-               "headphones": {
-                   "outputs": [lab for _sel, lab in _active_headphones().outputs],
-                   "values": [[code, lab] for code, lab in _active_headphones().values]}})
-    return levels
-
-
-def _window_master(blob: bytes) -> dict:
-    """The native Master Mix page's state from one dump: the USB audio mode in its two halves, the
-    USB stream's raw switch, the master bus's processing (`rcp_read.master_processing`), and the
-    page's layout as `model`."""
-    usb_mode, usb_expanded = recorder.split_usb_multitrack(
-        rcp_read.first(blob, "outputMultiMode", "int"))
-    return {
-        "usb_multitrack": usb_mode, "usb_expanded": usb_expanded,
-        "usb_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
-        **rcp_read.master_processing(blob),
-        "model": {"usb_modes": sorted(recorder.USB_MULTITRACK_LABEL.items()),
-                  "usb_expanded": sorted(recorder.USB_EXPANDED_LABEL.items()),
-                  "usb_expanded_hint": recorder.USB_EXPANDED_HINT,
-                  "usb_drop_hint": recorder.USB_DROP_HINT,
-                  "usb_expanded_drop_hint": recorder.USB_EXPANDED_DROP_HINT,
-                  "bypass_hint": recorder.BYPASS_HINT,
-                  "bypass_needs_multitrack": recorder.BYPASS_NEEDS_MULTITRACK,
-                  "read_only": _output_write_gate() is not None}}
-
-
-def action_set_fader_level(fader: int, percent: int) -> dict:
-    """Set one VIRTUAL fader's level, 0-100 percent (faderLevel, 0-127 on the wire)."""
-    gate = _level_write_gate()
-    if gate is not None:
-        return gate
-    spec = _active_faders()
-    if int(fader) not in spec.level_faders:
-        return {"ok": False,
-                "message": (f"{_fader_label(int(fader), spec)} has no level control here. Only the "
-                            f"virtual faders do: the others are physical faders you move by hand.")}
-    pct = max(0, min(100, int(percent)))
-    # The reply names the fader's channel from the layout already held: a slider step that dumped
-    # the model to name it would cost a second and a half per step.
-    vec = channels.last_known_strip_vector()
-    try:
-        with desk_access.hid_lock:
-            if vec is None:
-                vec = _read_fader_vector(spec=spec)
-            rcp_transfer.set_fader_level(int(fader), round(pct * rcp_transfer.FADER_LEVEL_MAX / 100))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the level: {exc}"}
-    # The desk echoes it, and the echo would otherwise be spoken over the top of the UI's own
-    # announcement.
-    announcer.mark_self_level("fader", int(fader))
-    who = _channel_name(vec[int(fader)] if int(fader) < len(vec) else None, spec)
-    return {"ok": True, "percent": pct,
-            "message": f"{_fader_label(int(fader), spec)} ({who}) set to {pct} percent."}
-
-
-def action_set_monitor_speaker_level(percent: int) -> dict:
-    """Set the monitor SPEAKER level, 0-100 percent (outputMonLevel).
-
-    Named for the speaker deliberately: action_set_monitor_level further down is a different thing
-    entirely, one source's level inside a monitor MIX (a matrix cross-point), and a shared name
-    would silently shadow one with the other."""
-    gate = _level_write_gate()
-    if gate is not None:
-        return gate
-    pct = max(0, min(100, int(percent)))
-    try:
-        with desk_access.hid_lock:
-            rcp_transfer.set_monitor_level(pct / 100.0)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the monitor level: {exc}"}
-    announcer.mark_self_level("monitor", 0)      # same reason as the fader level above
-    return {"ok": True, "percent": pct, "message": f"Monitor speaker level set to {pct} percent."}
-
-
-# A channel button pressed twice puts the encoder on the virtual faders and the monitor. Selecting a
-# strip and then none does the same from software, and overrides a target the touchscreen chose: an
-# encoder that was turning Mic 1's gain with systemChannelSelected already at -1 turned the monitor
-# level afterwards (measured on a Pro II). The strip is selected, never turned, so no gain moves.
-_ENCODER_SELECT_SETTLE_S = 0.8
-ENCODER_HOME = "Encoder on the virtual faders and monitor."
-
-
-def action_reset_encoder() -> dict:
-    """Put the encoder back on the virtual faders and the monitor, whatever it was bound to."""
-    try:
-        with desk_access.hid_lock:
-            for strip in (0, -1):
-                announcer.mark_self_write("channel_selected")
-                rcp_transfer.write_at(rcp_transfer.SYSTEM, "systemChannelSelected", "int", strip)
-                time.sleep(_ENCODER_SELECT_SETTLE_S)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not move the encoder: {exc}"}
-    return {"ok": True, "message": ENCODER_HOME}
-
-
-# ---- LEVEL METERING ----------------------------------------------------------------------------
-
-
-# Where a clip warning fires, as a 0..1 peak: TRUE FULL SCALE. Do not lower it to catch more: this
-# desk's compressor and limiter park peaks just under full scale, so -1 dB is where normal processed
-# speech lives, and a warning there fires on every sentence.
-_CLIP_AT = 1.0
-
-
-# ---- CLIP WARNING ------------------------------------------------------------------------------
-# The window's one background meter: a switch under Announcements that says "Main mix clipping"
-# when the desk's main recording stream reaches full scale. Fixed thresholds, no stream to choose.
-# Its words go through speech.say, so they follow the announcer, recordings included.
-#
-# A SUPERVISOR KEEPS IT RUNNING: the endpoint goes away whenever the desk does (a USB drop, Transfer
-# Mode), the watcher's thread then ends, and the next pass opens it again.
-_CLIP_RETRY_S = 10.0
-_clip_watcher = None
-_clip_lock = threading.Lock()
-_clip_wake = threading.Event()
-_clip_supervisor = None
-
-
-def clip_warning_on() -> bool:
-    return bool(settings_file.load().get("clip_warning", False))
-
-
-def _main_mix_stream(found: dict):
-    """The desk's main recording endpoint, or its first recording endpoint, or None."""
-    inputs = [s for s in found.get("streams") or []
-              if s.get("flow") == meters.FLOW_NAMES[meters.CAPTURE]]
-    main = [s for s in inputs if "main stereo" in s["name"].lower()]
-    return (main or inputs or [None])[0]
-
-
-def _clip_start() -> str:
-    """Open the watcher on the main mix. Returns "" once it runs, else why it could not."""
-    global _clip_watcher
-    found = meters.desk_streams()
-    if not found["ok"]:
-        return found["reason"] or "The desk's audio is not available."
-    stream = _main_mix_stream(found)
-    if stream is None:
-        return "The desk is offering no recording stream."
-    w = meters.Watcher(stream["id"], speech.say, clip_at=_CLIP_AT,
-                       warn_silence=False, clip_sound=False, label="Main mix")
-    if not w.start():
-        return w.error or "The meter could not start."
-    with _clip_lock:
-        _clip_watcher = w
-    return ""
-
-
-def _clip_stop() -> None:
-    global _clip_watcher
-    with _clip_lock:
-        w, _clip_watcher = _clip_watcher, None
-    if w is not None:
-        w.stop()
-
-
-def _clip_supervise() -> None:
-    """Keep the watcher matching the setting, retrying every `_CLIP_RETRY_S` while the desk's
-    audio is away. A failure is logged once until it changes."""
-    said = ""
-    while True:
-        with _clip_lock:
-            running = bool(_clip_watcher and _clip_watcher.running)
-        if clip_warning_on():
-            if not running:
-                why = _clip_start()
-                if why and why != said:
-                    diagnostics.event("meters.clip_watch", "could not start", reason=why)
-                said = why
-        elif running:
-            _clip_stop()
-        _clip_wake.wait(_CLIP_RETRY_S)
-        _clip_wake.clear()
-
-
-def start_clip_warning() -> None:
-    """Start the supervisor. It opens nothing while the setting is off."""
-    global _clip_supervisor
-    if _clip_supervisor is None:
-        _clip_supervisor = threading.Thread(target=_clip_supervise, daemon=True,
-                                            name="clip-warning")
-        _clip_supervisor.start()
-
-
-def action_set_clip_warning(on: bool) -> dict:
-    """Turn the main mix clip warning on or off."""
-    on = bool(on)
-    settings_file.update(clip_warning=on)
-    _clip_wake.set()
-    if not on:
-        return {"ok": True, "clip_warning": False, "message": "Clipping will not be announced."}
-    found = meters.desk_streams()
-    later = "" if found["ok"] else (f" It starts once the desk's audio is available: "
-                                    f"{found['reason']}")
-    return {"ok": True, "clip_warning": True,
-            "message": "The main mix will be announced when it clips." + later}
-
-
 def _level_check_summary(w) -> str:
     """What the run came to: the measurement, then the ADVICE.
 
@@ -2619,7 +1404,7 @@ def action_channel_level_check(name: str = "") -> dict:
         return {"ok": False, "running": False, "message": f"Could not listen to {src['label']} on "
                                                           f"its own: {why}"}
     w = meters.Watcher(endpoint["id"], speech.say,
-                       clip_at=_CLIP_AT, clip_gap=4.0,
+                       clip_at=clip_warning.CLIP_AT, clip_gap=4.0,
                        warn_silence=False,        # a check is not a watch: no went-silent nagging
                        speak_every=_LEVEL_CHECK_SPEAK_S,
                        scale=iso.level, label=src["label"])
@@ -2643,111 +1428,6 @@ def action_channel_level_check(name: str = "") -> dict:
     meters.cue("start")
     return {"ok": True, "running": True, "seconds": _LEVEL_CHECK_S, "channel": src["label"],
             "message": win, "level_note": meters.level_note(w.volume_db)}
-
-
-def action_set_output_mute(which: str, on: bool) -> dict:
-    """Mute or unmute a whole OUTPUT: the monitor speakers, or the Bluetooth send.
-
-    Both selectors are derived from the block rule and confirmed. The
-    accessibility case is the channel mute's, only stronger: killing the speakers is what you reach
-    for when somebody walks in, and the only other way to do it is a control on the unit you have to
-    find by touch.
-
-    The two are one endpoint rather than two because they are the same idea with a different target,
-    and because the message has to draw the SAME distinction in both directions: muting an output
-    changes what somebody HEARS, never what is recorded or streamed."""
-    targets = {
-        "monitor": ("outputMonMute", "Monitor speakers",
-                    "your speakers are silent; headphones, the recording and your streams are not"),
-        "bluetooth": ("outputBTMute", "Bluetooth output",
-                      "a paired phone hears nothing from the desk; everything else is unaffected"),
-    }
-    if which not in targets:
-        return {"ok": False, "message": f"Unknown output: {which}."}
-    prop, label, effect = targets[which]
-    gate = _level_write_gate()
-    if gate is not None:
-        return gate
-    announcer.mark_self_write(("output_mute", prop))
-    try:
-        with desk_access.hid_lock:
-            rcp_transfer.set_unit_setting(prop, bool(on))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the {label.lower()} mute: {exc}"}
-    return {"ok": True, "message": (f"{label} muted: {effect}." if on
-                                    else f"{label} unmuted.")}
-
-
-def action_set_bt_output_level(percent: int) -> dict:
-    """Set the BLUETOOTH OUTPUT level, 0-100 percent (outputBTLevel).
-
-    This is what a paired phone HEARS from the desk. It is not the Bluetooth channel on the Channels
-    page, which is what the phone SENDS us; the two have almost the same name and opposite meanings,
-    so every label and message about this one says "output" out loud."""
-    gate = _level_write_gate()
-    if gate is not None:
-        return gate
-    pct = max(0, min(100, int(percent)))
-    try:
-        with desk_access.hid_lock:
-            rcp_transfer.set_unit_setting("outputBTLevel", pct / 100.0)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the Bluetooth output level: {exc}"}
-    return {"ok": True, "percent": pct,
-            "message": f"Bluetooth output level set to {pct} percent: that is what a paired phone "
-                       f"hears from the desk."}
-
-
-# THERE IS NO "Free the encoder" ACTION, and it must not come back on the reasoning that a channel
-# button taking the encoder can only be undone by a POWER CYCLE. The channel button TOGGLES:
-# measured, systemChannelSelected goes 0 on the press and -1 on a second press of the same button,
-# while two encoder presses in between leave it at 0. The announcer names the holding channel and
-# names that way out, so a systemChannelSelected = -1 write earns nothing.
-
-
-def action_reset_faders() -> dict:
-    """Restore the factory-default fader layout in one go (direct set per position, no swap
-    logic so it lands exactly on the default). Device-aware: a device whose clean default vector
-    is NOT confirmed (devices.FaderSpec.default_vector is None) REFUSES rather than writing a
-    guessed layout. Both shipped desks HAVE a confirmed vector, so neither refuses today; the
-    guard is for the next desk added.
-
-    THE CHAIN FOLLOWS THE CHANNEL HERE TOO, exactly as in action_set_fader. Without it, a reset
-    drops USB 1 onto a strip holding a mic voicing with the noise gate on and music beds start
-    gating. Processing is per fader STRIP and a reset moves EVERY channel at once, so it is the
-    single move most likely to hand a channel the wrong chain."""
-    gate = _fader_write_gate()
-    if gate is not None:
-        return gate
-    spec = _active_faders()
-    if not spec.default_vector:
-        dev = devices.get_active_device()
-        return {"ok": False,
-                "message": (f"Resetting the faders to a default layout is not available on the "
-                            f"{dev.name} yet: its factory-default fader layout has not been "
-                            f"confirmed, so this control stays disabled rather than write a "
-                            f"guessed layout.")}
-    chain_note = ""
-    try:
-        with desk_access.hid_lock:
-            # One dump serves both jobs: the layout we are about to replace, and the per-strip
-            # chains as they stand BEFORE the write, which is what tells us whose chain is whose.
-            blob = rcp_read.read_model()
-            old = _read_fader_vector(blob, spec)
-            chains_before = channels.read_chains(blob) if _chain_follow_on() else None
-            for i, code in enumerate(spec.default_vector):
-                rcp_transfer.set_fader_source(i, code)
-            new = _read_fader_vector(spec=spec)
-            if chains_before is not None:
-                chain_note = _follow_chains(old, new, chains_before)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not reset the faders: {exc}"}
-    labels = ", ".join(_channel_name(c, spec) for c in spec.default_vector)
-    msg = f"Faders reset to the default layout: {labels}."
-    if chain_note:
-        msg += " " + chain_note
-    return {"ok": True, "faders": new, "labels": [_channel_name(c, spec) for c in new],
-            "stereo": stereo_link_state(new, spec), "message": msg}
 
 
 def read_usb_driver() -> dict:
@@ -2794,24 +1474,24 @@ def _clear_extended_faders() -> list:
     THE TOUCHSCREEN DOES THIS AND THE DESK DOES NOT. Leaving Expanded on the unit's screen asks
     "All extended inputs will be unassigned" and empties those faders; the same change written over
     USB leaves them assigned to inputs nothing can feed, so the faders go dead. Each channel's
-    processing is parked by `_follow_chains`, exactly as when a channel is moved off a fader by
+    processing is parked by `faders.follow_chains`, exactly as when a channel is moved off a fader by
     hand. Holds the HID lock. Writes nothing when no fader carries one of the four."""
-    spec = _active_faders()
+    spec = faders.active_faders()
     extended = {code for code, _label in spec.expanded_sources}
-    if not extended or _fader_write_gate() is not None:
+    if not extended or faders.fader_write_gate() is not None:
         return []
     with desk_access.hid_lock:
         blob = rcp_read.read_model()
-        old = _read_fader_vector(blob, spec)
+        old = faders.read_fader_vector(blob, spec)
         dead = [i for i, code in enumerate(old) if code in extended]
         if not dead:
             return []
-        chains_before = channels.read_chains(blob) if _chain_follow_on() else None
+        chains_before = channels.read_chains(blob) if faders.chain_follow_on() else None
         for i in dead:
             rcp_transfer.set_fader_source(i, -1)
-        new = _read_fader_vector(spec=spec)
+        new = faders.read_fader_vector(spec=spec)
         if chains_before is not None:
-            _follow_chains(old, new, chains_before)
+            faders.follow_chains(old, new, chains_before)
     labels = spec.labels_for(True)
     return [labels.get(old[i], f"source {old[i]}") for i in dead]
 
@@ -3558,7 +2238,7 @@ def _do_snapshot(safe: str, include_pads: bool, prog, baseline: bool = False, sh
     # so the saved layout is the real one rather than a truncated view.
     # Capture is deliberately WIDER than write: profiles.apply only writes the first
     # vector_length entries, so the extra slot round-trips into the JSON and is never written back.
-    res = profiles.save(safe, blob, chans, firmware, _active_faders().capture_length,
+    res = profiles.save(safe, blob, chans, firmware, faders.active_faders().capture_length,
                         pads=(pad_backup["pads"] if pad_backup else None),
                         product_id=dev.product_id, device_name=dev.name,
                         headphone_output_count=len(_active_headphones().outputs),
@@ -3869,21 +2549,21 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         # profile DOES carry levels they are authoritative and this must not run: `profiles.apply`
         # writes them after the layout, and overwriting them with the pre-restore values would throw
         # away the very thing the backup recorded.
-        spec = _active_faders()
+        spec = faders.active_faders()
         carry_levels = not (prof.get("routing") or {}).get("fader_levels")
         vec_before = levels_before = None
         with desk_access.hid_lock:
-            if carry_levels and _level_write_gate() is None:
+            if carry_levels and faders.level_write_gate() is None:
                 try:
                     blob0 = rcp_read.read_model()
-                    vec_before = _read_fader_vector(blob0, spec)
+                    vec_before = faders.read_fader_vector(blob0, spec)
                     levels_before = rcp_read.values(blob0, "faderLevel")
                 except Exception:
                     vec_before = levels_before = None
-            res = profiles.apply(prof, fader_count=_active_faders().vector_length,
-                                 fader_code_set=_active_faders().code_set, progress=job.step)
+            res = profiles.apply(prof, fader_count=faders.active_faders().vector_length,
+                                 fader_code_set=faders.active_faders().code_set, progress=job.step)
             if levels_before is not None:
-                _follow_levels(vec_before, _read_fader_vector(spec=spec), levels_before, spec)
+                faders.follow_levels(vec_before, faders.read_fader_vector(spec=spec), levels_before, spec)
         # A PROFILE CARRIES `systemMidiControl`, so one taken while MIDI was off has just switched
         # the MIDI port back off and every sound-pad shortcut with it. Forget that we armed it and
         # the next pad press arms it again - which is why arming is per-press-until-done rather than
@@ -4341,7 +3021,7 @@ def wake_channels() -> dict:
         return {"ok": False, "woken": [],
                 "message": "The desk is not answering, so its mic channels could not be woken."}
     woken = []
-    for ch in MIC_CHANNELS:
+    for ch in channels.MIC_CHANNELS:
         try:
             now = channels.mic_gain(blob, ch)
             if now is None:
@@ -4381,11 +3061,11 @@ def _restore_silence_warnings(prof, blob) -> list:
     """
     out = []
     try:
-        spec = _active_faders()
+        spec = faders.active_faders()
         routing = prof.get("routing") or {}
         want = routing.get("faders")
         want_levels = routing.get("fader_levels")
-        now_vec = _read_fader_vector(blob, spec)
+        now_vec = faders.read_fader_vector(blob, spec)
         now_levels = rcp_read.values(blob, "faderLevel")
 
         def level_of(i, table):
@@ -4397,10 +3077,10 @@ def _restore_silence_warnings(prof, blob) -> list:
                 continue
             after = level_of(i, want_levels) if want_levels else level_of(i, now_levels)
             if after == 0:
-                out.append(f"{_channel_name(code, spec)} will be silent: it ends up on "
-                           f"{_fader_label(i, spec)}, which is at zero.")
+                out.append(f"{faders.channel_name(code, spec)} will be silent: it ends up on "
+                           f"{faders.fader_label(i, spec)}, which is at zero.")
         if want and list(want[:len(now_vec)]) != list(now_vec[:len(want)]):
-            movers = [_channel_name(c, spec) for i, c in enumerate(want)
+            movers = [faders.channel_name(c, spec) for i, c in enumerate(want)
                       if i < len(now_vec) and c != now_vec[i] and c is not None and c >= 0]
             if movers:
                 out.append("It rearranges the faders, moving "

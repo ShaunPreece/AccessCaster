@@ -138,7 +138,7 @@ def build_path_prop_bool(name: str, on: bool, path) -> bytes:
 # The LOWER mic's fader carries the pair; the other fader is vacated with -1. UNLINK IS ASYMMETRIC,
 # and that is the desk's behaviour, not ours: it returns only the lower mic, leaving the upper one
 # off-fader. The upper mic's processing survives that round trip only because channels.park_chain
-# holds it (see server._follow_chains).
+# holds it (see faders.follow_chains).
 
 
 # The single blocks the app writes to, as keys.

@@ -14,9 +14,9 @@ import announcer
 import app_settings
 import autostart  # the HKCU Run entry, shared with installer.iss
 import callme
+import clip_warning
 import folders
 import meters
-import server
 import settings_file
 import shortcuts
 import speech
@@ -32,7 +32,7 @@ def read_announce() -> dict:
             "volume": speech.volume,
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
-            "clip_warning": server.clip_warning_on(),
+            "clip_warning": clip_warning.clip_warning_on(),
             "running": bool(announcer._thread and announcer._thread.is_alive())}
 
 

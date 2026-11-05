@@ -15,7 +15,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
 import callme_actions
-import server
+import faders
 import wx
 from _testkit import check, check_true, patched
 from native import callme_section
@@ -106,7 +106,7 @@ check_true("and not the wifi one", not call_page.wifi.IsShown())
 check("the faders are offered with what is on them", call_page.fader.GetString(2),
       "Fader 3, currently Bluetooth")
 call_page.fader.SetSelection(1)
-with patched(sync, (server, {"action_set_fader": lambda index, code: {
+with patched(sync, (faders, {"action_set_fader": lambda index, code: {
         "ok": True, "labels": ["Mic 1", "CallMe 1", "Bluetooth"], "message": "Done."}})):
     reads.clear()
     call_page._on_put(None)

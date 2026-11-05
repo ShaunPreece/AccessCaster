@@ -62,16 +62,18 @@ check("a run with no window says nothing", commands.run("app.window")["message"]
 
 print("\nA LEVEL SHORTCUT moves the virtual fader it names, from where it is")
 import desk_model  # noqa: E402
+import faders  # noqa: E402
 import rcp_transfer  # noqa: E402
 
 offered = [c["id"] for c in commands._level_commands() if c["id"].startswith("level.fader.up")]
 check("only the virtual faders are offered", offered,
       ["level.fader.up:7", "level.fader.up:8", "level.fader.up:9"])
 levels = []
-stub.action_set_fader_level = lambda index, pct: levels.append((index, pct)) or {}
 _testkit.hold(rcp_transfer.fader_key(6), "faderLevel", 64, "int")
 _testkit.hold(rcp_transfer.fader_key(7), "faderLevel", 0, "int")
-commands.run("level.fader.up:7")
+with _testkit.patched((faders, {"action_set_fader_level":
+                                lambda index, pct: levels.append((index, pct)) or {}})):
+    commands.run("level.fader.up:7")
 expected = round(desk_model.fader_level(6) * 100) + commands.LEVEL_STEP
 check("fader 7 is index 6, stepped from its own level", levels, [(6, expected)])
 

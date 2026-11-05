@@ -8,6 +8,8 @@ re-read replaces the record.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import mic_presets
+import pan_link
 import server
 from desk_labels import EFFECT_PARAMS, pan_words
 from native import a11y
@@ -300,7 +302,7 @@ class PresetsTab(Tab):
             if reply.get("ok"):
                 # The whole chain moved: read it all again, which also shows the preset as on.
                 self.page.section.refresh(False)
-        call(self, server.action_apply_mic_preset, self.page.number, name, done=applied)
+        call(self, mic_presets.action_apply_mic_preset, self.page.number, name, done=applied)
 
     def _on_save(self, event):
         source = event.GetEventObject()
@@ -317,7 +319,7 @@ class PresetsTab(Tab):
                 # The channel is now this preset by definition: it was saved from these values.
                 self.page.rec["preset_now"] = {"name": name, "edited": False, "source": "record"}
                 self.page.section.presets_changed(reply.get("presets"))
-        call(self, server.action_save_mic_preset, self.page.number, name, done=saved)
+        call(self, mic_presets.action_save_mic_preset, self.page.number, name, done=saved)
 
     def _on_delete(self, event):
         source = event.GetEventObject()
@@ -334,7 +336,7 @@ class PresetsTab(Tab):
             self.reply(source, reply)
             if reply.get("ok"):
                 self.page.section.presets_changed(reply.get("presets"))
-        call(self, server.action_delete_mic_preset, name, done=deleted)
+        call(self, mic_presets.action_delete_mic_preset, name, done=deleted)
 
 
 class ProcessingTab(Tab):
@@ -385,7 +387,7 @@ class ParamTab(Tab):
             for ctrl in g["controls"]:
                 if ctrl.get("pan") and bool(ctrl.get("stereo")) != stereo:
                     continue
-                if stereo and ctrl["prop"] in server._PAN_LEGS:
+                if stereo and ctrl["prop"] in pan_link.PAN_LEGS:
                     legs.append(ctrl)
                     continue
                 slider = self.add(Slider(
@@ -409,7 +411,7 @@ class ParamTab(Tab):
 
 class StereoPan:
     """A stereo channel's pan: its two legs, as the desk has them, or with Link on, one Pan
-    control that shifts both from where they were when linked (`server.action_set_linked_pan`).
+    control that shifts both from where they were when linked (`pan_link.action_set_linked_pan`).
     All three sliders are built once and the link shows one kind or the other, so linking never
     moves the focus off the switch."""
 
@@ -419,7 +421,7 @@ class StereoPan:
         name = page.name
         self._legs_now = self._legs()
         self.link = Switch(page, parent, sizer, "Link both sides into one pan control",
-                           lambda on: server.action_link_pan(name, on, *self._legs_now),
+                           lambda on: pan_link.action_link_pan(name, on, *self._legs_now),
                            self._linked, lambda _on: None, accepted=self._links_changed)
         self.leg_sliders = [Slider(
             page, parent, sizer, ctrl["label"], 0, 100,
@@ -427,8 +429,8 @@ class StereoPan:
             *page.field("params", ctrl["prop"], scale=100), words=pan_words, unread=50)
             for ctrl in legs]
         self.linked = Slider(page, parent, sizer, "Pan", -100, 100,
-                             lambda off: server.action_set_linked_pan(name, off, *self._legs_now),
-                             self._offset, lambda _off: None, words=server.pan_offset_words,
+                             lambda off: pan_link.action_set_linked_pan(name, off, *self._legs_now),
+                             self._offset, lambda _off: None, words=pan_link.pan_offset_words,
                              unread=0, accepted=self._moved)
         self._shown_linked = None
 
@@ -440,7 +442,7 @@ class StereoPan:
         """The legs as the record has them, in percent; centre for one not read."""
         params = self.page.rec.get("params") or {}
         return tuple(50 if params.get(prop) is None else round(params[prop] * 100)
-                     for prop in server._PAN_LEGS)
+                     for prop in pan_link.PAN_LEGS)
 
     def _links(self):
         return self.page.section.data.get("pan_links") or {}
@@ -450,7 +452,7 @@ class StereoPan:
 
     def _offset(self):
         link = self._links().get(self.page.name)
-        return None if link is None else server.linked_pan_offset(link, *self._legs())
+        return None if link is None else pan_link.linked_pan_offset(link, *self._legs())
 
     def _links_changed(self, reply):
         self.page.section.data["pan_links"] = reply.get("pan_links") or {}
