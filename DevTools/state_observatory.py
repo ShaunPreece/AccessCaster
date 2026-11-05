@@ -35,7 +35,7 @@ Snapshots are keyed `BLOCK.name`, because a name can sit in two blocks and only 
 would point at the wrong write.
 
 SECRETS: a model dump carries plaintext wifi PSK and SIP credentials, so every value written to
-disk or printed is redacted by SECRET_NAME below. Snapshots land in DevTools/captures/ which is
+disk or printed is redacted by `_redact`. Snapshots land in DevTools/captures/ which is
 gitignored; never move one out of there.
 """
 from __future__ import annotations
@@ -52,12 +52,9 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import model_tree
 import rcp_read
 from _desk import push_handle, pushes, say
+from _redact import redact
 
 OUT_DIR = Path(__file__).resolve().parent / "captures" / "observatory"
-
-# Any property whose NAME matches this never has its value printed or saved.
-SECRET_NAME = re.compile(r"psk|password|paircode|rodecode|authusername|username|ssid|serial",
-                         re.IGNORECASE)
 
 # Properties that move by themselves, so a change in one means nothing. Matched as substrings,
 # because the meter and clock families are large.
@@ -69,11 +66,6 @@ NOISY = ("Meter", "meter", "Progress", "CurrentPosition", "elapsed", "Elapsed",
 def address_hex(path) -> str:
     """The address bytes a record for `path` carries in front of its property name."""
     return model_tree.encode_path(list(path)).hex()
-
-
-def redact(name: str, value):
-    """`value`, or "<redacted>" when `name` (a property name or a `BLOCK.name` key) is secret."""
-    return "<redacted>" if SECRET_NAME.search(name.rpartition(".")[2]) else value
 
 
 def redacted(data: dict[str, list]) -> dict[str, list]:
