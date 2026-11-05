@@ -2441,7 +2441,7 @@ def _pad_audio_source(root: str, grid: int, wanted: str | None):
 # **A FACTORY RESET IS THE ANSWER, and it is the same answer for every user.** The desk keeps its
 # own copies and `showControlNewFromDefault` restores them, files and all
 # (DevTools/test_factory_sfx_live.py checks it). A user with a backup should restore that first,
-# because it needs no reset; see server.action_show_reset, which says both.
+# because it needs no reset; see backups.action_show_reset, which says both.
 #
 # WHAT IS LEFT HERE NEEDS NO FILE AT ALL: the six voice effects are recipes and the two mixer pads
 # are settings, so both can be rebuilt from nothing but the tables below. That is

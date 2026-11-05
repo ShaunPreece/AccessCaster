@@ -3,7 +3,7 @@ the as-found backup), and one for the factory reset. The first-run offer to back
 was found is made from here too.
 
 One list holds every backup, whichever half holds it: a copy on this computer, the unit's own copy
-on its drive, or both under one name (`server.read_backups`). Which half does the work is the
+on its drive, or both under one name (`backups.read_backups`). Which half does the work is the
 server's business; the list only says what a backup can do.
 
 The backups are read once the desk state has first read the desk, on F5, after every job here, and
@@ -14,8 +14,11 @@ import datetime
 
 import wx
 
+import backups
+import baseline
 import device_page
-import server
+import profile_actions
+import show_actions
 import wording
 from native import a11y
 from native.backup_dialogs import BaselineDialog, ResetDialog
@@ -36,24 +39,24 @@ APP_SETTINGS = ("Your keyboard shortcuts and other AccessCaster preferences are 
 
 
 def _read():
-    return {"backups": server.read_backups(), "shows": server.read_backup_storage(),
-            "baseline": server.baseline_status()}
+    return {"backups": backups.read_backups(), "shows": show_actions.read_backup_storage(),
+            "baseline": baseline.baseline_status()}
 
 
 def _baseline_offer():
     """Whether to offer the as-found backup. The offer is filed under the desk's hardware id, which
     only a status read publishes."""
-    status = server.baseline_status()
+    status = baseline.baseline_status()
     if not status.get("connected"):
         device_page.read_status()
-        status = server.baseline_status()
+        status = baseline.baseline_status()
     return status
 
 
 def _restore_question(name):
     """How `name` would be restored and what is in it, for the question before the restore."""
-    plan = server.backup_restore_plan(name)
-    info = server.profile_info(name) if plan.get("ok") and plan.get("via") != "show" else {}
+    plan = backups.backup_restore_plan(name)
+    info = profile_actions.profile_info(name) if plan.get("ok") and plan.get("via") != "show" else {}
     return {"plan": plan, "info": info}
 
 
@@ -168,7 +171,7 @@ class BackupsSection:
         self.pages = [Page("backups", TITLE, self.page), Page("reset", "Factory settings",
                                                               self.reset)]
         frame.desk.subscribe(self._desk_event)
-        FollowDesk(frame, server.SHOW_STATE_PROPS, self.read)
+        FollowDesk(frame, show_actions.SHOW_STATE_PROPS, self.read)
 
     def refresh(self, announce):
         self.read(announce)
@@ -219,14 +222,14 @@ class BackupsSection:
             answer = dialog.ShowModal()
             include_pads = dialog.include_pads.GetValue()
         if answer == wx.ID_NO:
-            call(self.frame, server.action_baseline_skip,
+            call(self.frame, baseline.action_baseline_skip,
                  done=lambda reply: self.frame.say(reply.get("message") or "No backup was taken."))
         elif answer == wx.ID_OK:
             reply = follow_job(self.frame, "Backing up the desk as found",
                                "Saving the desk's settings, then each SMART pad in turn."
                                if include_pads else "Saving the desk's settings.",
-                               lambda: server.action_baseline_save(include_pads),
-                               lambda _started: server.profile_save_status)
+                               lambda: baseline.action_baseline_save(include_pads),
+                               lambda _started: profile_actions.profile_save_status)
             report(self.frame, ("Desk backed up", "Backup failed"), reply)
             self.read()
 
@@ -337,8 +340,8 @@ class BackupsPage(wx.Panel):
         reply = follow_job(self, "Backing up",
                            "Backing the desk up: its own copy if there is a drive in, then the "
                            "settings and each SMART pad on this computer.",
-                           lambda: server.action_backup_now(name),
-                           lambda _started: server.profile_save_status)
+                           lambda: backups.action_backup_now(name),
+                           lambda _started: profile_actions.profile_save_status)
         report(self, ("Backed up", "Backup failed"), reply)
         self.backup.SetFocus()
         self.section.read(prefer=name)
@@ -359,11 +362,11 @@ class BackupsPage(wx.Panel):
             return
         handle = self._handle(backup)
         reply = follow_job(self, "Restoring backup", f"Restoring {backup['name']} to the desk.",
-                           lambda: server.action_restore_backup(handle),
+                           lambda: backups.action_restore_backup(handle),
                            # The two halves report through different jobs, and the start says
                            # which one is running.
-                           lambda started: (server.show_job_status if started.get("via") == "show"
-                                            else server.profile_restore_status))
+                           lambda started: (show_actions.show_job_status if started.get("via") == "show"
+                                            else profile_actions.profile_restore_status))
         report(self, ("Backup restored", "Restore failed"), reply)
         self.restore.SetFocus()
         self.frame.desk_rewritten()
@@ -379,7 +382,7 @@ class BackupsPage(wx.Panel):
         old = backup["name"]
         dialog = NameDialog(self, "Rename backup", f"New name for {old}", old, "Rename",
                             NameDialog.RULE,
-                            submit=lambda new: server.rename_profile(old, new))
+                            submit=lambda new: profile_actions.rename_profile(old, new))
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
@@ -406,7 +409,7 @@ class BackupsPage(wx.Panel):
         self._delete(backup, force=False)
 
     def _delete(self, backup, force):
-        call(self, server.action_delete_backup, self._handle(backup), force,
+        call(self, backups.action_delete_backup, self._handle(backup), force,
              done=lambda reply: self._deleted(backup, reply))
 
     def _deleted(self, backup, reply):
@@ -420,7 +423,7 @@ class BackupsPage(wx.Panel):
             # The unit's copy is deleted by a job on the drive, which then reports the result.
             started = reply
             result = follow_job(self, "Deleting backup", "Deleting the backup.", lambda: started,
-                                lambda _started: server.show_job_status)
+                                lambda _started: show_actions.show_job_status)
             report(self, ("Backup deleted", "Delete failed"), result)
             self.delete.SetFocus()
         else:
@@ -432,8 +435,8 @@ class BackupsPage(wx.Panel):
     def _on_add_pads(self, _event):
         reply = follow_job(self, "Adding SMART pads to the backup",
                            "Copying each pad's sound off the desk in turn.",
-                           server.action_baseline_add_pads,
-                           lambda _started: server.profile_save_status)
+                           baseline.action_baseline_add_pads,
+                           lambda _started: profile_actions.profile_save_status)
         report(self, ("Pads added to the backup", "Could not add the pads"), reply)
         self.about.SetFocus()
         self.section.read()
@@ -490,8 +493,8 @@ class ResetPage(wx.Panel):
         reply = follow_job(self, "Resetting the desk",
                            "Backing the desk up, then resetting it." if backup_first
                            else "Resetting the desk to factory settings.",
-                           lambda: server.action_show_reset(backup_first),
-                           lambda _started: server.show_job_status)
+                           lambda: backups.action_show_reset(backup_first),
+                           lambda _started: show_actions.show_job_status)
         report(self, ("Desk reset", "Reset failed"), reply)
         self.button.SetFocus()
         self.frame.desk_rewritten()

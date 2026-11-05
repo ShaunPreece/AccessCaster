@@ -94,7 +94,7 @@ def double_press() -> None:
 
 
 def main() -> int:
-    server = _desk.service()
+    _desk.service()
     with desk_access.hid_lock:
         start, state = read()
         bank = state["selectedBank"]

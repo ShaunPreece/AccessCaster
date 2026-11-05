@@ -7,7 +7,7 @@ import datetime
 import wx
 
 import pad_actions
-import server
+import profile_actions
 import soundpad
 import wording
 from native import a11y
@@ -162,7 +162,7 @@ class MaintPage(wx.Panel):
 
     def _on_restore_backup(self, _event):
         if not self._refused():
-            call(self, server.pad_backups, done=self._choose_backup)
+            call(self, profile_actions.pad_backups, done=self._choose_backup)
 
     def _choose_backup(self, reply):
         backups = reply.get("backups") or []
@@ -187,7 +187,7 @@ class MaintPage(wx.Panel):
         self._pad_job(self.restore_backup, "Restoring the pads",
                       f"Restoring the SMART pads from {backup['name']}.",
                       ("Pads restored", "Pads not restored"),
-                      server.action_restore_backup_pads, backup["name"])
+                      profile_actions.action_restore_backup_pads, backup["name"])
 
     def _on_restore_fx(self, _event):
         if self._refused() or not confirm(

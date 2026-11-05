@@ -248,8 +248,9 @@ baseline" was never silent.
 
 ## How the app is built
 
-A Windows system-tray app (`Project/tray.py`) that runs the service (`server.py`) and a native
-window (`native/`) in one process; the window calls the service's functions directly, and nothing
+A Windows system-tray app (`Project/tray.py`) that runs the service (the feature modules below,
+brought up by `service.py`) and a native window (`native/`) in one process; the window calls the
+feature modules' functions directly, and nothing
 listens on the network. Everything that touches USB is behind one lock (`desk_access.hid_lock`),
 because HID is a single resource and the window, the announcer, the clip warning and the shortcut thread all want it.
 
@@ -277,7 +278,10 @@ The layers, bottom up:
   links and the Levels page's writes), `usb_audio.py` (the USB mode and RODE's virtual devices,
   over `virtual_devices.py`), `master_outputs.py` (the auto-mutes, headphone types, master
   Compellor and output delay), `clip_warning.py`, `autogain_actions.py` (auto gain's app side,
-  over `autogain.py`) and `level_check.py`, both listening through `chat_isolation.py`, `shows.py`,
+  over `autogain.py`) and `level_check.py`, both listening through `chat_isolation.py`,
+  `show_actions.py` (the desk's own shows, over `shows.py`), `profile_actions.py` (profiles, over
+  `profiles.py`), `baseline.py` (the as-found backup), `backups.py` (the Backups page, over the
+  shows and the profiles),
   `network.py`, `meters.py`, `hotkeys.py`, `rode_follow.py` (what RODE's app changes, which the
   desk never pushes), and `announcer.py` (the desk's button presses spoken) over `speech.py`
   (everything the app says) and `settings_file.py`. `window_state.py` builds the window's full
@@ -285,12 +289,12 @@ The layers, bottom up:
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
   branches, with a capability set that refuses a write BY NAME rather than writing blind when a
   selector has never been observed on that desk.
-- `server.py` is the service over them: the `read_*` and `action_*` functions the window calls.
-- Above the server, and never imported by it: `commands.py` (what a shortcut can do),
+- Above the feature modules, and never imported by them: `commands.py` (what a shortcut can do),
   `shortcuts.py` (the manager and the Keyboard shortcuts page) and `app_settings_actions.py` (the
   App settings pages).
 - `service.py` is the composition root: `start` brings up the desk listener, the announcer, the
   shortcuts and the watchers, joining each to the code that acts on it, and `stop` lets them go.
+  Each feature module imports `desk_access` and its protocol modules, never `service`.
 - `native/` is the wxPython window. `tray.py` hosts it in the service's own process.
 
 Two rules do most of the work of keeping it honest:
@@ -1836,8 +1840,6 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   wrong is the one case the signature exists to catch; calling it a network failure hides it.
 - **The user agent is `AccessCaster/<version>`.** Cloudflare refuses Python's default with a 403,
   which reads as "no release has happened".
-- **Every update route is LOCAL ONLY** (`server.UPDATE_ROUTES`): a phone on the network can read the
-  state but cannot start, steer or stop an install on this PC.
 - **A failed download forgets the held offer AND the last-checked stamp**, so a republished index
   reaches a running app. The downloaded installer is deleted only on the launch after a confirmed
   update; every other path keeps it, because the failure message tells the user to run it by hand.
@@ -2006,7 +2008,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the window, and when the desk pushes a pad change (below).
 - **A PAGE THAT READS THE DESK FOR ITSELF FOLLOWS IT WITH `pages.FollowDesk`**: the pads, the
   backups, and Device's Hardware, Desk settings and Wireless connections. Each names the properties
-  it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `device_page.HARDWARE_PROPS`,
+  it shows (`soundpad.PAD_GRID_PROPS`, `show_actions.SHOW_STATE_PROPS`, `device_page.HARDWARE_PROPS`,
   `UNIT_SETTING_PROPS`, `network.PROPS`), watched through the desk state's one follower
   (`DeskState.watch`), and re-reads once their pushes stop for `AFTER_MS`, never while a modal
   dialog is open. A RE-READ, NOT THE MODEL, because which of these the desk pushes for a
@@ -2175,7 +2177,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A BACKUP IS ABOUT A SECOND A PAD; A RESTORE IS ABOUT FIFTEEN. Never quote one figure for the
   other.** `PAD_BACKUP_SECONDS = 1` (a backup COPIES files off the mounted pad volume with
   `shutil`), `PAD_RESTORE_SECONDS = 15` (a restore pushes each sound back over transfer mode). Both
-  are in server.py and both are published, so copy must read the right one. Quoting the restore
+  are published (`baseline`, `profile_actions`), so copy must read the right one. Quoting the restore
   figure on the backup path calls a full grid "a job of many minutes", wrong by an order of
   magnitude, and makes people skip the pads.
   **THERE IS NO SETTINGS-BACKUP FIGURE AT ALL, and `SETTINGS_RESTORE_SECONDS = 25` is not it.** The
@@ -2399,7 +2401,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   faint underneath" a caller once reported.
   **ONLY A REAL VALUE CHANGE RE-PROGRAMS IT.** Writing the gain back at its CURRENT value did
   nothing at all, which is why the desk's own encoder was the only recovery anyone ever found.
-  `server.wake_channels` nudges each mic gain by one and straight back, and runs after every reset
+  `show_actions.wake_channels` nudges each mic gain by one and straight back, and runs after every reset
   and import. Verified three times out of three (-5, -1, -3 dB, live) against two out of two dead
   without it. **The desk publishes no re-apply, refresh or resync property** - the whole property
   list was searched - so a real change is not a workaround, it is the only lever there is.
@@ -3062,9 +3064,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   down system-wide on the machine in use. `DevTools/press_keys.py` uses `keybd_event`, not
   SendInput, which injects nothing from an RDP session here.
 
-## The server's shared shapes
+## The shared shapes
 
-Four shapes in `server.py` each existed as many hand-written copies until 30th August 2026. Use the
+Four shapes each existed as many hand-written copies until 30th August 2026. Use the
 shared one; a new copy is how they drifted apart the first time.
 
 - **A LONG JOB IS A `desk_access.BackgroundJob`.** `start(work, message=..., ...)` claims it (refusing plainly if one is already
@@ -3089,17 +3091,18 @@ shared one; a new copy is how they drifted apart the first time.
 
 ## The announcer, speech and pad-shortcut modules
 
-- **THE ANNOUNCER, SPEECH AND THE PAD SHORTCUTS NEVER IMPORT THE SERVER.** `announcer.Hooks` is
-  everything the announcer needs from the app (the device lock, the mixer pads, what a reconnect
-  means), and the server installs `_AnnouncerHooks`, whose methods look the state up when called,
+- **THE ANNOUNCER REACHES THE APP ONLY THROUGH ITS HOOKS.** `announcer.Hooks` is everything the
+  announcer needs from the app (the device lock, the mixer pads, what a reconnect means), and
+  `service.start` installs `_AnnouncerHooks`, whose methods look the state up when called,
   so a test that patches `pad_shortcuts.mixer_positions` still reaches the decoder. The pad
   shortcuts need only the device lock, `desk_access.hid_lock`; a module that took its own lock
   would let a pad press write in the middle of a restore. Call them as `speech.say(...)`
   and read `announcer.live_state`, never `from speech import say`: the tests patch the module
   attribute, and a name imported into another module keeps the original.
-- **THE SERVER IMPORTS NOTHING ABOVE IT.** `commands`, `shortcuts`, `app_settings_actions` and
-  `service` import the server, and the server imports none of them: that is what lets `commands`
-  import it at the top. A server function that needs one of them belongs in that module.
+- **A FEATURE MODULE IMPORTS NOTHING ABOVE IT.** `commands`, `shortcuts`, `app_settings_actions`
+  and `service` import the feature modules, and no feature module imports them: that is what lets
+  `commands` import them at the top. A feature function that needs one of them belongs in that
+  module.
 - **A CHANGE MADE ELSEWHERE IS SPOKEN AS ONE SENTENCE PER BURST** (`announcer._note_change`,
   `change_words.summarise`). Speech keeps only the newest phrase waiting, so a phrase per push
   leaves a preset's thirty parameters, or a batch revealed on return from RODE's app, heard as its
@@ -3131,9 +3134,9 @@ shared one; a new copy is how they drifted apart the first time.
 
 - **EVERY NUMBER IN `CodeMap.md` IS GENERATED. Never edit one by hand.**
   `python DevTools/codemap_lines.py` rewrites them; `--check` reports drift and exits 1. It covers
-  the `name` (NNN) references, the file table's line counts and the DevTools file count, and it
-  touches no prose. They were regenerated BY HAND on 29th August 2026 and all 96 were wrong again by
-  the 30th, drifting up to 755 lines, because one day's work moves server.py by hundreds.
+  the file table's line counts and the DevTools file count, and it touches no prose. They were
+  regenerated BY HAND on 29th August 2026 and all 96 were wrong again by the 30th, drifting up to
+  755 lines, because one day's work moves a large file by hundreds.
   A confidently wrong line number is worse than none: you jump, land elsewhere, and grep anyway.
 - **THE RELEASE NOTES ARE GENERATED FROM `version.py` HISTORY, which is a LIST, not prose.**
   `ProjectBuilds/make_release_notes.py` writes `Project/ReleaseNotes.html` before the freeze; the

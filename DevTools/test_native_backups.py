@@ -15,7 +15,9 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
-import server
+import backups
+import profile_actions
+import show_actions
 import wx
 from _testkit import check, check_in, check_true, patched
 from native import backup_dialogs, backups_section, dialogs
@@ -109,7 +111,7 @@ check("before a read the list says so", page.list.GetItems(), ["Reading the back
 check("a desk read starts the first read", True, hasattr(frame.desk, "listener"))
 check("the backups follow the shows and the drive",
       [(names, fn.__self__._read.__self__) for names, fn in frame.desk.watched],
-      [(set(server.SHOW_STATE_PROPS), section)])
+      [(set(show_actions.SHOW_STATE_PROPS), section)])
 
 section.data = data([])
 page.show()
@@ -152,26 +154,26 @@ fakes = (backups_section, {"follow_job": fake_follow,
                            "confirm": lambda _p, title, text, _a: questions.append(text) or True})
 
 page.list.SetSelection(2)
-with patched(fakes, (server, {"action_restore_backup": lambda name: {"ok": True, "via": "profile",
+with patched(fakes, (backups, {"action_restore_backup": lambda name: {"ok": True, "via": "profile",
                                                                      "started": True}})):
     page._ask_restore(page._chosen(), question)
 check("a restore follows the profile restore",
-      jobs[-1], ("Restoring backup", server.profile_restore_status))
+      jobs[-1], ("Restoring backup", profile_actions.profile_restore_status))
 check("and the whole desk is read again", frame.rewritten, 1)
-with patched(fakes, (server, {"action_restore_backup": lambda name: {"ok": True, "via": "show",
+with patched(fakes, (backups, {"action_restore_backup": lambda name: {"ok": True, "via": "show",
                                                                      "started": True}})):
     page._ask_restore(page._chosen(), question)
 check("one through the desk's copy follows the show job",
-      jobs[-1], ("Restoring backup", server.show_job_status))
+      jobs[-1], ("Restoring backup", show_actions.show_job_status))
 
 deletes = []
 answers = iter([{"ok": False, "baseline": True, "message": "This is the as-found backup."},
                 {"ok": True, "message": "Deleted Monday."}])
 page.list.SetSelection(1)
 with patched(fakes, (backups_section, {"call": lambda _o, fn, *a, done=None: done(fn(*a))}),
-             (server, {"action_delete_backup": lambda name, force: deletes.append((name, force))
+             (backups, {"action_delete_backup": lambda name, force: deletes.append((name, force))
                        or next(answers)})):
-    page._deleted(page._chosen(), server.action_delete_backup("Monday", False))
+    page._deleted(page._chosen(), backups.action_delete_backup("Monday", False))
 check("the as-found backup is deleted only on a second, forced yes",
       deletes, [("Monday", False), ("Monday", True)])
 check_in("asked in the server's own words", "This is the as-found backup.", questions[-1])
@@ -182,7 +184,7 @@ page.list.SetSelection(2)
 with patched(fakes):
     page._deleted(page._chosen(), {"ok": True, "started": True, "message": "Deleting."})
 check("a delete that started a job on the drive follows it",
-      jobs[-1], ("Deleting backup", server.show_job_status))
+      jobs[-1], ("Deleting backup", show_actions.show_job_status))
 
 # ---- the factory reset -------------------------------------------------------------------------
 section.data = data([], can_backup=False)

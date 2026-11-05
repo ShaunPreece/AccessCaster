@@ -1,4 +1,4 @@
-"""Restoring only the SMART pads from a backup (server.action_restore_backup_pads, pad_backups),
+"""Restoring only the SMART pads from a backup (profile_actions.action_restore_backup_pads, pad_backups),
 offline: the backup's own pad folder is restored in one transfer session, a pad the backup has
 empty is cleared, nothing but pads is written, and a backup from another model of desk or with no
 pads is refused before anything is sent. The chooser lists only backups holding pads from this
@@ -18,9 +18,9 @@ import devices
 import output_mixes
 import pad_actions
 import pad_shortcuts
+import profile_actions
 import profiles
 import rcp_transfer
-import server
 import soundpad
 from _testkit import as_device, check, check_in, check_true, patched
 
@@ -77,17 +77,17 @@ fakes = (
 )
 
 with as_device(devices.PRO2), patched(*fakes):
-    listed = server.pad_backups()
+    listed = profile_actions.pad_backups()
     check("only backups with pads from this model of desk, newest first",
           [b["name"] for b in listed["backups"]], ["Show night", "Old"])
 
-    reply = server.action_restore_backup_pads("Duo")
+    reply = profile_actions.action_restore_backup_pads("Duo")
     check_true("a backup from another desk is refused before anything is sent",
                not reply["ok"] and "Duo" in reply["message"] and not calls)
-    reply = server.action_restore_backup_pads("Settings only")
+    reply = profile_actions.action_restore_backup_pads("Settings only")
     check_true("a backup with no pads is refused", not reply["ok"] and not calls)
 
-    reply = server.action_restore_backup_pads("Show night")
+    reply = profile_actions.action_restore_backup_pads("Show night")
     check_true("a backup with pads starts", reply["ok"])
     st = wait_for_job()
     check("the pads are restored from the backup's own folder in one session, then the extras "

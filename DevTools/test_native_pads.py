@@ -19,7 +19,7 @@ import _a11y
 import _testkit
 import devices
 import pad_actions
-import server
+import profile_actions
 import soundpad
 import wx
 from _testkit import as_device, check, check_in, check_true, patched
@@ -414,7 +414,7 @@ with as_device(devices.PRO2):
             {"name": "Newest", "pads": 4, "saved_at": None},
             {"name": "Show night", "pads": 16, "saved_at": None}]})
     check("the chosen backup's pads are restored", jobs,
-          [(server.action_restore_backup_pads, "Show night")])
+          [(profile_actions.action_restore_backup_pads, "Show night")])
     check_in("the question says how long it can take", "up to 4 minutes", questions[0])
 
     shown = []

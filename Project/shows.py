@@ -103,7 +103,7 @@ BLOCK_SHOW = "SHOW"
 # refused, a fresh backup of the loaded state included, and restoring a different backup does not
 # clear it; after a power cycle the same import restores. The CODE outlives the power cycle too: it
 # reads 1 until the next import succeeds, which clears it to 0. So a non-zero code read BEFORE an
-# import is not evidence about that import (see server.action_show_import).
+# import is not evidence about that import (see show_actions.action_show_import).
 ERROR_REFUSED = 1
 
 # CODE 8 IS "NOWHERE TO PUT IT", provoked on purpose: an export asked of a Duo with no card and no

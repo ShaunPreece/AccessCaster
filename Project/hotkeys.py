@@ -37,7 +37,7 @@ ACCESSIBILITY RULES, and they are the reason for the validation in `parse_bindin
     confirmation, not an error, because the whole point of silencing is that the thing worked.
 
 This module is deliberately device-agnostic: it knows about keys, modifiers and Windows, and nothing
-about the RODECaster. The actions themselves are registered by server.py.
+about the RODECaster. The actions themselves are registered by shortcuts.py.
 """
 
 from __future__ import annotations

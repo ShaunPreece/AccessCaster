@@ -131,7 +131,7 @@ class PadSpec:
 
 @dataclass(frozen=True)
 class FaderSpec:
-    """Fader-assignment layout for one device (consumed by server.py's fader functions).
+    """Fader-assignment layout for one device (consumed by faders.py).
 
     The fader LAYOUT is the channelInputSource int vector: vector POSITION = fader
     (index 0 = fader 1), VALUE = the channel/source CODE on that fader, written on

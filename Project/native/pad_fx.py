@@ -3,7 +3,7 @@ while building it, and save it to the list a pad's voice effect is chosen from; 
 effects, to delete.
 
 The live preview borrows one empty pad, puts the effect being built on it and engages it, and then
-streams each change to it (`server.action_preview_*`). Nothing else touches the desk: a saved
+streams each change to it (`pad_actions.action_preview_*`). Nothing else touches the desk: a saved
 effect lives in this app until it is put on a pad.
 """
 from collections import namedtuple

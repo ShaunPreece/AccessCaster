@@ -7,9 +7,11 @@ import inspect
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import backups
 import devices
 import fake_model
-import server
+import profile_actions
+import show_actions
 import shows
 from _testkit import check
 
@@ -99,13 +101,13 @@ def params(fn):
 
 # ONE backup takes a NAME, not a handle: the user names it, and the app decides underneath whether
 # that means a show plus a profile or a profile alone.
-check("backup takes a name", params(server.action_backup_now), ["name"])
-check("restore takes a name, then clean", params(server.action_restore_backup), ["name", "clean"])
+check("backup takes a name", params(backups.action_backup_now), ["name"])
+check("restore takes a name, then clean", params(backups.action_restore_backup), ["name", "clean"])
 # Import and delete take a SNAPSHOT INDEX: a uid is a position any export renumbers, and a uuid
 # names the show rather than the file so several backups share one.
-check("import takes snapshot", params(server.action_show_import)[0], "snapshot")
-check("delete takes snapshot", params(server.action_show_delete)[0], "snapshot")
-check("restore takes clean", params(server.restore_profile), ["name", "clean"])
+check("import takes snapshot", params(show_actions.action_show_import)[0], "snapshot")
+check("delete takes snapshot", params(show_actions.action_show_delete)[0], "snapshot")
+check("restore takes clean", params(profile_actions.restore_profile), ["name", "clean"])
 
 print("the write gate")
 check("Pro II may write shows", "shows" in devices.PRO2.caps, True)

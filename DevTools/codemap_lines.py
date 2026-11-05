@@ -3,14 +3,11 @@
     python DevTools/codemap_lines.py            rewrite the file in place
     python DevTools/codemap_lines.py --check    report drift and exit 1, change nothing
 
-CodeMap carries about 100 line references and a line count per file. One day's work moves
-server.py by hundreds of lines, so a hand-kept number is wrong within the day, and a
-wrong line reference sends the reader to the middle of something else. A derived number is
-derived: like the two coverage reports (property_coverage.py, profile_coverage.py), this is
-regenerable, with a --check mode that exits 1 on drift.
+CodeMap carries a line count per file, and a hand-kept number is wrong within the day. A derived
+number is derived: like the two coverage reports (property_coverage.py, profile_coverage.py), this
+is regenerable, with a --check mode that exits 1 on drift.
 
 WHAT IT TOUCHES, and nothing else:
-  * `name` (NNN)          a line reference, in whichever section it sits under (see SECTIONS)
   * | `file.py` | NNNN |  the line count in the file table
   * "## DevTools/ (NN files..." the file count
 The PROSE IS NEVER TOUCHED. Everything CodeMap says about what code MEANS is written by a person
@@ -29,14 +26,6 @@ import _bootstrap
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CODEMAP = pathlib.Path(_bootstrap.docs_path("CodeMap.md"))
 
-# Which source a `name` (NNN) reference resolves against, keyed by the heading it sits under.
-# A section runs until the next heading listed here (or the end of the mapped region).
-SECTIONS = [
-    ("### server.py landmarks", REPO / "Project" / "server.py"),
-    ("## DevTools/", None),                      # nothing below here carries line references
-]
-
-REF = re.compile(r"(`([A-Za-z_$][\w$]*)`\s*\()(\d{2,5})([,)])")
 TABLE_ROW = re.compile(r"^(\|\s*`([A-Za-z_][\w./]*\.(?:py|js|ps1|html|css))`\s*\|\s*)(\d+)(\s*\|)")
 DEVTOOLS_COUNT = re.compile(r"(## DevTools/ \()(\d+)( files)")
 
@@ -47,34 +36,6 @@ def tracked_devtools_files() -> int:
     out = subprocess.run(["git", "ls-files", "DevTools"], cwd=REPO, capture_output=True,
                          text=True, check=True).stdout
     return sum(1 for line in out.splitlines() if line.count("/") == 1)
-
-
-def py_defs(path: pathlib.Path) -> dict:
-    """{name: 1-based line} for every top-level def, class and module constant."""
-    out = {}
-    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        m = re.match(r"(?:def|class)\s+([A-Za-z_]\w*)", line)
-        if not m:
-            m = re.match(r"([A-Za-z_]\w*)\s*[:=]", line)
-        if m and m.group(1) not in out:
-            out[m.group(1)] = i
-    return out
-
-
-def js_defs(path: pathlib.Path) -> dict:
-    """{name: 1-based line} for every top-level function and const/let binding."""
-    out = {}
-    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        m = re.match(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", line)
-        if not m:
-            m = re.match(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", line)
-        if m and m.group(1) not in out:
-            out[m.group(1)] = i
-    return out
-
-
-def defs_for(path: pathlib.Path) -> dict:
-    return js_defs(path) if path.suffix == ".js" else py_defs(path)
 
 
 def line_count(path: pathlib.Path) -> int:
@@ -94,15 +55,8 @@ def rewrite(text: str) -> tuple[str, list]:
     """The corrected CodeMap, plus a list of every number that was wrong."""
     lines = text.splitlines(keepends=True)
     drift = []
-    source = None                        # which file the current section's references belong to
-    cache: dict = {}
 
     for n, line in enumerate(lines):
-        for heading, path in SECTIONS:
-            if line.startswith(heading):
-                source = path
-                break
-
         # --- the file table's line counts ---
         m = TABLE_ROW.match(line)
         if m:
@@ -123,28 +77,6 @@ def rewrite(text: str) -> tuple[str, list]:
                 drift.append(f"line {n + 1}: DevTools says {c.group(2)} files, has {real}")
                 lines[n] = DEVTOOLS_COUNT.sub(lambda mm: mm.group(1) + str(real) + mm.group(3),
                                               line, count=1)
-            continue
-
-        # --- line references ---
-        if source is None:
-            continue
-        if source not in cache:
-            cache[source] = defs_for(source)
-        known = cache[source]
-
-        def fix(mm, _n=n, _known=known, _src=source):
-            name, claimed = mm.group(2), int(mm.group(3))
-            real = _known.get(name)
-            if real is None:
-                # Not a member of this file: a plain "(2026)" or a name that has been renamed or
-                # removed. Left alone and REPORTED, because guessing at it would be worse.
-                drift.append(f"line {_n + 1}: {name} ({claimed}) is not in {_src.name} - check by hand")
-                return mm.group(0)
-            if real != claimed:
-                drift.append(f"line {_n + 1}: {name} said {claimed}, is {real}")
-            return mm.group(1) + str(real) + mm.group(4)
-
-        lines[n] = REF.sub(fix, line)
 
     return "".join(lines), drift
 

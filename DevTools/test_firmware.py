@@ -10,6 +10,7 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path; import FIRST)
 import _testkit
+import backups
 import desk_access
 import desk_firmware
 import fake_model
@@ -57,7 +58,7 @@ print("a failed backup stops the install before anything is written")
 installs = []
 with patched(reading(desk()), (desk_access, {"work_in_progress": lambda: None}),
              (desk_firmware, {"install": lambda *a: installs.append(a) or {"ok": True}}),
-             (firmware, {"backup": lambda job, name: {"ok": False, "message": "No room."}})):
+             (backups, {"backup_unit": lambda job, name: {"ok": False, "message": "No room."}})):
     started = firmware.action_install(backup_first=True)
     deadline = time.monotonic() + 5
     while firmware.job_status().get("running") and time.monotonic() < deadline:

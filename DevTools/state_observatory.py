@@ -3,7 +3,7 @@
 READ ONLY. This script never sends a write record; the only thing it transmits is the same
 full-model dump trigger our normal reads use (`listen` does not even do that). Safe to run with
 the app server up: Windows gives every open HID handle its own input queue, which is why the
-server's announcer can hold a read handle while pad writes go through another (server.py).
+announcer can hold a read handle while pad writes go through another.
 
 Modes
   listen  <seconds> [--label L]   PASSIVE. Log the report-04 stream WITHOUT asking for anything.

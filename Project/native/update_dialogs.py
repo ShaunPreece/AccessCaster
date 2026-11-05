@@ -16,7 +16,6 @@ import wx
 
 import app_updates
 import desk_access
-import server
 from native.calls import call
 from native.dialogs import JobDialog, _paragraphs, report
 

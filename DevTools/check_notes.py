@@ -288,7 +288,7 @@ def check_private_citations() -> None:
 # ---------------------------------------------------------------------------
 # 9. CodeMap's numbers match the source
 # ---------------------------------------------------------------------------
-# codemap_lines.py derives every line reference and count in CodeMap.md. Run here too, because a
+# codemap_lines.py derives every count in CodeMap.md. Run here too, because a
 # separate tool is one more thing to remember, and this is the one run before every finish.
 def check_codemap_lines() -> None:
     import codemap_lines

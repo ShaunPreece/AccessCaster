@@ -35,13 +35,13 @@ import _testkit
 import channel_actions
 import device_page
 import mute_solo
+import profile_actions
 import profiles
 from _desk import count_changes, wait_for_job
 from _testkit import check
 
 CHAN = "Mic2"                    # nothing is connected to Mic 2 on this desk
 PRE, POST = "PRE_UNIT_TEST", "POST_UNIT_TEST"       # temporary profiles, deleted at the end
-server = None
 SETTLE_S = 0.8
 
 # prop -> {current value: the value to write instead}. A write that happens to match the current
@@ -81,10 +81,10 @@ def profile_snapshot(name):
     the file may not exist yet when the reply arrives. The save's own status says when it does, and
     it is what the window polls too.
     """
-    res = server.snapshot_profile(name, include_pads=False)
+    res = profile_actions.snapshot_profile(name, include_pads=False)
     if not res.get("ok"):
         raise SystemExit(f"could not save the {name} profile: {res.get('message')}")
-    st = wait_for_job(server.profile_save_status, 180.0, 0.5)
+    st = wait_for_job(profile_actions.profile_save_status, 180.0, 0.5)
     if not st.get("ok"):
         raise SystemExit(f"the {name} profile did not save: {st.get('message')}")
     path = os.path.join(profiles.PROFILES_DIR, name, "profile.json")
@@ -115,8 +115,7 @@ def set_mute(name, on):
 
 
 def main() -> int:
-    global server
-    server = _desk.service()
+    _desk.service()
     try:
         run()
     finally:

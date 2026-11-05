@@ -33,6 +33,7 @@ import _desk
 import channel_actions
 import faders
 import mute_solo
+import profile_actions
 import rcp_read
 from _desk import wait_for_job
 from analyse_clean_restore import compare, show, snap
@@ -41,7 +42,6 @@ CAP = Path(__file__).resolve().parent / "captures"
 FACTORY_DUMP = CAP / "post-showreset-raw.bin"     # a real factory dump of THIS desk
 PROFILE = "Clean restore retest"
 OUTPUT_MUTES = (("monitor", "outputMonMute"), ("bluetooth", "outputBTMute"))
-server = None
 
 
 def say(text: str) -> None:
@@ -103,12 +103,12 @@ def put_desk_back(before_path: Path, state: dict, restored: bool) -> bool:
     if not restored:
         say("The clean restore did not finish, so I am restoring the profile again, without the "
             "reset.")
-        res = server.restore_profile(PROFILE, False)
+        res = profile_actions.restore_profile(PROFILE, False)
         if not res.get("ok"):
             say(f"That restore would not start. Restore the profile called {PROFILE} by hand.")
             print(f"   restore refused: {res.get('message')}")
             return False
-        st = poll(server.profile_restore_status, "the ordinary restore")
+        st = poll(profile_actions.profile_restore_status, "the ordinary restore")
         print(f"   ordinary restore finished: ok={st.get('ok')} - {st.get('message')}")
     say("Putting the mutes and solos back as they were.")
     put_live_state_back(state)
@@ -131,26 +131,25 @@ def main() -> int:
     if not args.yes:
         print("This FACTORY-RESETS the desk (and puts it back afterwards). Re-run with --yes.")
         return 2
-    global server
-    server = _desk.service()
+    _desk.service()
 
     say("Starting the clean restore retest. I am dumping the desk, then saving a profile of it "
         "with its pads, which takes a few minutes.")
     before_path, before_blob = dump("pre-cleanretest-raw")
     state = live_state(before_blob)
 
-    res = server.snapshot_profile(PROFILE, include_pads=True)
+    res = profile_actions.snapshot_profile(PROFILE, include_pads=True)
     if not res.get("ok"):
         print(f"could not save the profile: {res.get('message')}")
         return 1
-    st = poll(server.profile_save_status, "the profile save")
+    st = poll(profile_actions.profile_save_status, "the profile save")
     print(f"   profile saved: {st.get('message')}")
     if not st.get("ok"):
         return 1
 
     say("Now the clean restore. It backs the desk up, factory resets it, and writes the profile "
         "back on top.")
-    res = server.restore_profile(PROFILE, True)
+    res = profile_actions.restore_profile(PROFILE, True)
     if not res.get("ok"):
         print(f"could not start the restore: {res.get('message')}")
         return 1
@@ -159,7 +158,7 @@ def main() -> int:
     undo_ok = False
     restored = False
     try:
-        st = poll(server.profile_restore_status, "the clean restore")
+        st = poll(profile_actions.profile_restore_status, "the clean restore")
         print(f"   restore finished: ok={st.get('ok')} - {st.get('message')}")
         restored = bool(st.get("ok"))
         if not restored:
@@ -176,7 +175,7 @@ def main() -> int:
         undo_ok = put_desk_back(before_path, state, restored)
         # The profile is the undo, so it is kept whenever the undo did not come back clean.
         if undo_ok and not args.keep_profile:
-            gone = server.delete_profile(PROFILE, True)
+            gone = profile_actions.delete_profile(PROFILE, True)
             print(f"   scratch profile '{PROFILE}' deleted" if gone.get("ok")
                   else f"   COULD NOT DELETE the scratch profile '{PROFILE}': {gone.get('message')}")
 

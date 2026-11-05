@@ -27,11 +27,13 @@ import pad_shortcuts
 import rcp_hid
 import rcp_read
 import rcp_transfer
-import server  # noqa: F401  (installs the announcer's hooks: the mixer pads' quiet)
+import service
 import settings_file
 import speech
 import usb_audio
 from _testkit import addr, check, check_true, patched, push, where
+
+service.install_announcer_hooks()   # the mixer pads' quiet
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
 # would fail on the Duo's different channel set and look like a regression. Offline tests must not

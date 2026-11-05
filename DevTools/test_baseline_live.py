@@ -22,9 +22,10 @@ import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import baseline
 import device_page
+import profile_actions
 import profiles
-import server
 import settings_file
 import wording
 from _desk import wait_for_job
@@ -43,7 +44,7 @@ try:
     device_page.read_status()          # publishes the hardware id, as the page's status read does
     hw = device_page.hardware_id()
     check_true("a desk is connected and identified", hw, hw)
-    s = server.baseline_status()
+    s = baseline.baseline_status()
     check("offered on a store with no baseline", s["offer"], True)
     check("and it suggests a name that says what, when and which desk",
           s["suggested_name"],
@@ -52,14 +53,14 @@ try:
     check_true("which is a legal profile name", profiles.safe_name(s["suggested_name"]))
 
     print("\nDECLINING IS REMEMBERED, SO IT IS ASKED ONCE AND NEVER NAGS")
-    check_true("skip reports ok", server.action_baseline_skip().get("ok"))
-    check("so the offer is gone", server.baseline_status()["offer"], False)
-    check("but the Profiles page can still capture one", server.baseline_status()["baseline"], None)
+    check_true("skip reports ok", baseline.action_baseline_skip().get("ok"))
+    check("so the offer is gone", baseline.baseline_status()["offer"], False)
+    check("but the Profiles page can still capture one", baseline.baseline_status()["baseline"], None)
 
     print("\nCAPTURE (settings only, no pads: this test writes nothing to the desk)")
-    started = server.action_baseline_save(include_pads=False)
+    started = baseline.action_baseline_save(include_pads=False)
     check_true("the capture starts", started.get("ok"), started.get("message"))
-    job = wait_for_job(server.profile_save_status, pause=0.3)
+    job = wait_for_job(profile_actions.profile_save_status, pause=0.3)
     check_true("and finishes ok", job.get("ok"), job.get("message"))
     name = s["suggested_name"]
     check("the profile is on disk under the auto-name", profiles.list_profiles()["profiles"], [name])
@@ -71,7 +72,7 @@ try:
     check("found by name", found["name"], name)
     check("with no pads yet", found["pads"], 0)
     check("and the desk it came from is stamped on it", found["device_name"], s["device_name"])
-    after = server.baseline_status()
+    after = baseline.baseline_status()
     check("so it is not offered again", after["offer"], False)
     check("and the page is told what exists", after["baseline"]["name"], name)
     check_true("a real settings snapshot came back with it",
@@ -88,7 +89,7 @@ try:
                (profiles.load(name)["prof"].get(profiles.SNAPSHOT_KEY) or {}).get("property_count"))
 
     print("\nPROTECTION 2: DELETING IT TAKES A DELIBERATE SECOND STEP")
-    first = server.delete_profile(name)
+    first = profile_actions.delete_profile(name)
     check("the first attempt is refused", first["ok"], False)
     check("and flags itself as the baseline case, so the page can confirm", first.get("baseline"), True)
     check("nothing was deleted", profiles.list_profiles()["profiles"], [name])
@@ -96,7 +97,7 @@ try:
     # every profile. An ordinary one still goes on the first press.
     profiles.save("Ordinary", b"", [], None, 9)
     check_true("an ordinary profile still deletes on the first press, no force needed",
-               server.delete_profile("Ordinary").get("ok"))
+               profile_actions.delete_profile("Ordinary").get("ok"))
 
     print("\nADDING PADS LATER KEEPS THE AS-FOUND SETTINGS")
     # attach_pads is the "add them later" path. Called with a stub list, because copying real pad
@@ -112,14 +113,14 @@ try:
     check_true("and it is still the baseline", profiles.is_baseline(prof))
     check("the page now sees pads in it", profiles.find_baseline()["pads"], 1)
     check("so it stops offering to add them",
-          server.action_baseline_add_pads().get("ok"), False)
+          baseline.action_baseline_add_pads().get("ok"), False)
 
     print("\nFORCED DELETE IS THE WAY OUT")
-    forced = server.delete_profile(name, force=True)
+    forced = profile_actions.delete_profile(name, force=True)
     check_true("it deletes with force", forced.get("ok"), forced.get("message"))
     check("the store is empty again", profiles.list_profiles()["profiles"], [])
     check("and with the record gone, a new capture is offered once more",
-          server.baseline_status()["baseline"], None)
+          baseline.baseline_status()["baseline"], None)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

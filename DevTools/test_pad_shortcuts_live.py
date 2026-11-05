@@ -26,7 +26,6 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import devices
 import pad_shortcuts
-import server  # noqa: F401  (installs the device lock)
 import soundpad
 from _testkit import check, check_in
 

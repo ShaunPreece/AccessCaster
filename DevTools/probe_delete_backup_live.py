@@ -39,16 +39,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import backups
 import profiles
 import rcp_read
 import recorder
-import server
+import show_actions
 from _desk import wait_for_job
 from _testkit import check
 
 
 def names():
-    r = server.read_backups()
+    r = backups.read_backups()
     if not r.get("ok"):
         raise RuntimeError(r.get("message") or "the backups list could not be read")
     return [b["name"] for b in r["backups"]], r
@@ -75,10 +76,10 @@ if args.show is not None:
     target = f"show:{args.show}"
     print(f"1. the SHOW branch: {target}")
     was_free = free_mb()
-    res = server.action_delete_backup(target)
+    res = backups.action_delete_backup(target)
     print(f"   reply: ok={res.get('ok')} {res.get('message','')!r}")
     # A delete that touches the unit is a background job, and the reply only says it STARTED.
-    wait_for_job(server.show_job_status)
+    wait_for_job(show_actions.show_job_status)
     time.sleep(4.0)
     after, raw2 = names()
     snaps = {b.get("snapshot") for b in raw2["backups"]}
@@ -92,7 +93,7 @@ if args.show is not None:
 
 if args.profile:
     print(f"\n2. the BOTH HALVES branch: {args.profile!r}")
-    paired = next((b for b in server.read_backups()["backups"]
+    paired = next((b for b in backups.read_backups()["backups"]
                    if b["name"] == args.profile), None)
     if paired is None:
         _testkit.check_true(f"a backup called {args.profile!r} exists", False)
@@ -100,9 +101,9 @@ if args.profile:
         snap = paired.get("snapshot")
         print(f"   it is paired with snapshot {snap}")
         was_free = free_mb()
-        res = server.action_delete_backup(args.profile)
+        res = backups.action_delete_backup(args.profile)
         print(f"   reply: ok={res.get('ok')} via={res.get('via')!r} {res.get('message','')!r}")
-        wait_for_job(server.show_job_status)
+        wait_for_job(show_actions.show_job_status)
         time.sleep(4.0)
         after, raw3 = names()
         check("the backup is gone from the list", args.profile in after, False)
@@ -122,7 +123,7 @@ check("the as-found baseline is still there",
       any(n.startswith("As found") for n in after), True)
 base = next((n for n in after if n.startswith("As found")), None)
 if base:
-    r = server.action_delete_backup(base)       # NOT forced: this must REFUSE
+    r = backups.action_delete_backup(base)       # NOT forced: this must REFUSE
     check("and deleting it without force is still refused", r.get("ok"), False)
     print(f"   it said: {r.get('message','')!r}")
     check("so it is still listed afterwards", base in names()[0], True)

@@ -25,8 +25,10 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import backups
+import devices
+import profile_actions
 import profiles
-import server
 from _testkit import check, patched
 
 
@@ -45,30 +47,30 @@ def rename_and_delete(folder: str) -> None:
     """Rename and delete through the page's own names, in a profile store at `folder`."""
     write_profile(folder, "Tuesday", {"saved_at": "now"})
     write_profile(folder, "As found", {"saved_at": "now", profiles.BASELINE_KEY: True})
-    entries = {e["name"]: e for e in server.read_backups()["backups"]}
+    entries = {e["name"]: e for e in backups.read_backups()["backups"]}
     check("both profiles are listed", sorted(entries), ["As found", "Tuesday"])
 
-    res = server.rename_profile(page_name(entries["Tuesday"]), "Wednesday")
+    res = profile_actions.rename_profile(page_name(entries["Tuesday"]), "Wednesday")
     check("rename by the page's name succeeds", res.get("ok"), True)
-    entries = {e["name"]: e for e in server.read_backups()["backups"]}
+    entries = {e["name"]: e for e in backups.read_backups()["backups"]}
     check("the renamed profile is listed under its new name", "Wednesday" in entries, True)
 
-    res = server.action_delete_backup(page_name(entries["Wednesday"]))
+    res = backups.action_delete_backup(page_name(entries["Wednesday"]))
     check("delete by the page's name succeeds", res.get("ok"), True)
 
-    res = server.action_delete_backup(page_name(entries["As found"]))
+    res = backups.action_delete_backup(page_name(entries["As found"]))
     check("the as-found backup is refused without force", res.get("ok"), False)
     check("the refusal arms the second press", bool(res.get("baseline")), True)
-    res = server.action_delete_backup(page_name(entries["As found"]), True)
+    res = backups.action_delete_backup(page_name(entries["As found"]), True)
     check("the as-found backup is deleted with force", res.get("ok"), True)
-    check("the store is empty", server.read_backups()["backups"], [])
+    check("the store is empty", backups.read_backups()["backups"], [])
 
 
 print("RENAME AND DELETE TAKE WHAT THE PAGE SENDS")
 tmp = tempfile.mkdtemp(prefix="ac_backups_test_")
 try:
     with patched((profiles, {"PROFILES_DIR": tmp}),
-                 (server.devices, {"get_active_device": lambda: SimpleNamespace(caps=set())})):
+                 (devices, {"get_active_device": lambda: SimpleNamespace(caps=set())})):
         rename_and_delete(tmp)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

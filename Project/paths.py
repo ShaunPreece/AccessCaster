@@ -6,7 +6,7 @@ install folder may not be a good place to WRITE user data. This module draws the
 
   - resource_path(*parts): READ-ONLY assets that ship WITH the app (static/, docs/, the
     factory/seed JSON files). Resolved inside the bundle when frozen, or the source tree when
-    running `python server.py`.
+    running from source.
 
   - data_path(*parts): WRITABLE user data that the app creates and the user owns (saved
     profiles, custom presets, the tray's settings). Always under %LOCALAPPDATA%\\AccessCaster so

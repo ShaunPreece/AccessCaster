@@ -3,7 +3,7 @@
 WHY THIS EXISTS. All the show commands are confirmed on a desk, but the FAULTS cannot be staged on
 one: a desk that takes a command and silently does nothing, a delete that does not delete, an
 error code nobody has seen. Those are the branches that decide whether the app tells the
-truth. This drives the REAL `server.action_*` functions
+truth. This drives the REAL `show_actions` and `backups` functions
 against a fake desk so the logic, the verification and above all the REFUSALS are exercised.
 
 The fake desk models ONE restorable value (a mic gain) as well as the show list, because the app's
@@ -25,8 +25,10 @@ import desk_live
 import devices
 import fake_model
 import profiles as profiles_mod
+import backups
+import profile_actions
 import rcp_read
-import server
+import show_actions
 import shows
 from _desk import wait_for_job
 from _testkit import as_device, check, check_in, patched
@@ -150,7 +152,7 @@ def install():
     shows.POLL_S = 0.01
     shows.COMMAND_TIMEOUT_S = 0.25
     # The factory-pads backup reads the pads and writes the real backup store; here it only says so.
-    server._keep_factory_pads = lambda step: " Kept the factory pads."
+    backups._keep_factory_pads = lambda step: " Kept the factory pads."
 
     # THE LISTENER IS STUBBED OR THIS SUITE IS NOT OFFLINE. `desk_live.PushListener` starts the
     # desk listener, and `find_control_interface` is not faked here - so on a machine
@@ -182,7 +184,7 @@ def run_job(start_result):
         return start_result                      # refused before the job ever started
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
-        st = server.show_job_status()
+        st = show_actions.show_job_status()
         if st.get("done"):
             return st
         time.sleep(0.02)
@@ -200,7 +202,7 @@ install()
 # ---------------------------------------------------------------------------
 # The export every backup runs: Back up the unit now, the reset's backup first, the clean restore.
 def export():
-    return server._export_and_wait(lambda message: None, "Exporting")
+    return show_actions.export_and_wait(lambda message: None, "Exporting")
 
 
 print("export")
@@ -226,14 +228,14 @@ check_in("and it says why", "no memory card or usb drive", res["message"])
 
 reset_desk()
 DESK.storage = False
-res = run_job(server.action_show_reset(backup_first=True))
+res = run_job(backups.action_show_reset(backup_first=True))
 check("a reset WITH a backup refuses too", res["ok"], False)
 check("and does not reset the desk anyway", DESK.calls, [])
 check_in("and offers the unbacked reset as the alternative", "cannot be undone", res["message"])
 
 reset_desk()
 DESK.storage = False
-res = run_job(server.action_show_reset(backup_first=False))
+res = run_job(backups.action_show_reset(backup_first=False))
 check("but an UNBACKED reset still works with no storage", res["ok"], True)
 check("and it really reset", DESK.calls, ["reset"])
 check_in("and keeps a copy of the factory pads", "Kept the factory pads.", res["message"])
@@ -248,7 +250,7 @@ check_in("and says what to check", "drive", res["message"])
 print("import")
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
-res = run_job(server.action_show_import(9))
+res = run_job(show_actions.action_show_import(9))
 check("import reports success", res["ok"], True)
 check("the desk really loaded it", DESK.current_uuid, "show-B")
 check_in("and warns about the monitor level", "monitor", res["message"])
@@ -257,7 +259,7 @@ check("it was addressed by uid, not by snapshot", DESK.calls[-1], ("import", 0))
 
 print("import refusals")
 reset_desk()
-res = run_job(server.action_show_import(999))
+res = run_job(show_actions.action_show_import(999))
 check("an unknown backup is refused", res["ok"], False)
 check_in("and says the list was refreshed", "no longer on the drive", res["message"])
 
@@ -266,14 +268,14 @@ check_in("and says the list was refreshed", "no longer on the drive", res["messa
 # Refusing it in advance makes shows useless for "change something, put it back".
 reset_desk()
 DESK.gain = 99                                    # the desk has drifted since that backup
-res = run_job(server.action_show_import(2))       # snapshot 2 holds the loaded show
+res = run_job(show_actions.action_show_import(2))       # snapshot 2 holds the loaded show
 check("a backup of the loaded show still restores", res["ok"], True)
 check("it really was sent to the desk", DESK.calls[-1], ("import", 0))
 check("and the desk was put back", DESK.gain, 50)
 
 # Nothing to do is NOT a failure, and must not be reported as one.
 reset_desk()
-res = run_job(server.action_show_import(2))       # desk already matches the backup
+res = run_job(show_actions.action_show_import(2))       # desk already matches the backup
 check("a desk that already matches is not an error", res["ok"], True)
 check_in("and says so plainly", "already matched", res["message"])
 
@@ -281,14 +283,14 @@ print("import that the desk rejects")
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 DESK.import_sets_error = shows.ERROR_REFUSED
-res = run_job(server.action_show_import(9))
+res = run_job(show_actions.action_show_import(9))
 check("a rejection is reported as one", res["ok"], False)
 check_in("saying the desk refused it", "refused", res["message"])
 
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 DESK.import_sets_error = 42                       # a code nobody has ever seen
-res = run_job(server.action_show_import(9))
+res = run_job(show_actions.action_show_import(9))
 check("an unknown error code is not given invented wording", res["ok"], False)
 check_in("it says so plainly", "has not seen before", res["message"])
 
@@ -298,7 +300,7 @@ print("a code latched by an earlier refusal")
 reset_desk()
 DESK.last_error = shows.ERROR_REFUSED
 DESK.gain = 99
-res = run_job(server.action_show_import(2))
+res = run_job(show_actions.action_show_import(2))
 check("a restore that works is not failed on an old code", res["ok"], True)
 check("and the desk was put back", DESK.gain, 50)
 check("and the code cleared", DESK.last_error, 0)
@@ -307,7 +309,7 @@ reset_desk()
 DESK.last_error = shows.ERROR_REFUSED
 DESK.import_sets_error = shows.ERROR_REFUSED      # still refusing: nothing moves, the code stands
 DESK.gain = 99
-res = run_job(server.action_show_import(2))
+res = run_job(show_actions.action_show_import(2))
 check("a refusal under an old code is still reported", res["ok"], False)
 check_in("saying the desk refused it", "refused", res["message"])
 check_in("and that restarting it is the remedy", "restarted", res["message"])
@@ -318,7 +320,7 @@ DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 # It TAKES the command and then stops answering, which is the real shape of it: every read after
 # the import returns zero bytes rather than raising.
 DESK.goes_quiet_on_import = True
-res = run_job(server.action_show_import(9))
+res = run_job(show_actions.action_show_import(9))
 check("a desk that stopped answering is NOT reported as a success", res["ok"], False)
 check_in("and it says the desk stopped responding", "stopped responding", res["message"])
 check_in("and it says how to get the desk back", "plug it back in", res["message"])
@@ -327,24 +329,24 @@ print("import that silently does nothing")
 reset_desk()
 DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
 DESK.import_does_nothing = True
-res = run_job(server.action_show_import(9))
+res = run_job(show_actions.action_show_import(9))
 check("a silent no-op is not reported as success", res["ok"], False)
 check_in("and does not claim anything was lost", "check the list", res["message"])
 
 print("delete")
 reset_desk()
-res = run_job(server.action_show_delete(1))
+res = run_job(show_actions.action_show_delete(1))
 check("delete reports success", res["ok"], True)
 check("the backup is gone", [b["snapshot"] for b in DESK.backups], [2])
 check("and the right one went", DESK.calls[-1], ("delete", 1))
 
 reset_desk()
-res = run_job(server.action_show_delete(999))
+res = run_job(show_actions.action_show_delete(999))
 check("deleting something that is not there is refused", res["ok"], False)
 
 reset_desk()
 DESK.delete_does_nothing = True
-res = run_job(server.action_show_delete(1))
+res = run_job(show_actions.action_show_delete(1))
 check("a delete that did not happen is reported as a failure", res["ok"], False)
 check_in("and names the backup", "still on the drive", res["message"])
 
@@ -352,12 +354,12 @@ check_in("and names the backup", "still on the drive", res["message"])
 # a FILE, and since every backup shares one, that rule refuses to delete any of them - which is
 # exactly when a drive fills up.
 reset_desk()
-res = run_job(server.action_show_delete(2))
+res = run_job(show_actions.action_show_delete(2))
 check("a backup of the loaded show can still be deleted", res["ok"], True)
 
 print("the factory reset")
 reset_desk()
-res = run_job(server.action_show_reset(backup_first=True))
+res = run_job(backups.action_show_reset(backup_first=True))
 check("reset reports success", res["ok"], True)
 check("it backed up BEFORE resetting", DESK.calls[0], "export")
 check("then reset", DESK.calls[1], "reset")
@@ -370,7 +372,7 @@ check_in("and it names the undo", "to undo this", res["message"])
 print("THE ONE THAT MATTERS: the backup fails, so the reset must not happen")
 reset_desk()
 DESK.export_does_nothing = True
-res = run_job(server.action_show_reset(backup_first=True))
+res = run_job(backups.action_show_reset(backup_first=True))
 check("the whole thing is refused", res["ok"], False)
 check("THE DESK WAS NOT RESET", DESK.current_uuid, "show-A")
 check("no reset was ever sent", "reset" in DESK.calls, False)
@@ -379,7 +381,7 @@ check_in("and it says nothing was changed", "nothing on the desk has changed", r
 print("reset without a backup, chosen deliberately")
 reset_desk()
 DESK.export_does_nothing = True                  # would fail, but must not be called at all
-res = run_job(server.action_show_reset(backup_first=False))
+res = run_job(backups.action_show_reset(backup_first=False))
 check("it proceeds", res["ok"], True)
 check("no backup was attempted", "export" in DESK.calls, False)
 check("the desk was reset", DESK.current_uuid, "factory-fresh")
@@ -389,7 +391,7 @@ check("and no undo is offered, because there is none", "to undo this" in res["me
 print("a reset that silently does nothing")
 reset_desk()
 DESK.reset_does_nothing = True
-res = run_job(server.action_show_reset(backup_first=False))
+res = run_job(backups.action_show_reset(backup_first=False))
 check("it is not reported as success", res["ok"], False)
 check_in("and it reassures rather than alarms", "nothing has been lost", res["message"])
 # A DESK THAT IS STILL TALKING MUST NOT BE TOLD TO REPLUG ITSELF: a reset that did nothing and a
@@ -414,7 +416,7 @@ def _dies_after_first(*a, **k):
 
 
 rcp_read.read_model_stable = _dies_after_first
-res = run_job(server.action_show_reset(backup_first=False))
+res = run_job(backups.action_show_reset(backup_first=False))
 check("it is not reported as success", res["ok"], False)
 check_in("and it says to replug the cable", "plug it back in", res["message"])
 check_in("and does not claim the reset failed", "almost certainly carried out", res["message"])
@@ -424,14 +426,14 @@ install()                                                     # put the working 
 
 print("the clean restore's reset half")
 reset_desk()
-out = server._clean_restore_reset(lambda msg: None)
+out = show_actions.clean_restore_reset(lambda msg: None)
 check("it backs up then resets", DESK.calls[:2], ["export", "reset"])
 check("and reports ok", out["ok"], True)
 check_in("naming the backup it took", "after backing it up", out["message"])
 
 reset_desk()
 DESK.export_does_nothing = True
-out = server._clean_restore_reset(lambda msg: None)
+out = show_actions.clean_restore_reset(lambda msg: None)
 check("a failed backup stops the clean restore", out["ok"], False)
 check("THE DESK WAS NOT RESET", DESK.current_uuid, "show-A")
 check("no reset was sent", "reset" in DESK.calls, False)
@@ -442,16 +444,16 @@ reset_desk()
 # claim in BackgroundJob.start. All the show commands share one job state because they are
 # mutually exclusive on the desk.
 _held = threading.Event()
-server._show_job.start(lambda job: (_held.wait(10), {"ok": True, "message": "held"})[1],
+show_actions._show_job.start(lambda job: (_held.wait(10), {"ok": True, "message": "held"})[1],
                        message="holding the job open")
-busy = server.action_show_import(1)
+busy = show_actions.action_show_import(1)
 check("a second command is refused while one runs", busy["ok"], False)
 check_in("and says why", "already running", busy["message"])
 _held.set()
 _deadline = time.monotonic() + 10
-while time.monotonic() < _deadline and server._show_job.busy():
+while time.monotonic() < _deadline and show_actions._show_job.busy():
     time.sleep(0.02)
-check("and the held job releases it again", server._show_job.busy(), False)
+check("and the held job releases it again", show_actions._show_job.busy(), False)
 
 print("the write gate")
 # A SYNTHETIC DESK, not the Duo. The gate is about the CAP, not about any particular desk, so it is
@@ -462,11 +464,11 @@ CAPLESS = dataclasses.replace(devices.DUO, name="RODECaster Nocaps",
                               caps=devices.DUO.caps - {"shows"})
 check("the synthetic desk really lacks the cap", "shows" in CAPLESS.caps, False)
 with as_device(CAPLESS):
-    gate = server.action_show_reset()
+    gate = backups.action_show_reset()
     check("a desk without the cap refuses to reset", gate["ok"], False)
     check_in("naming the device", "Nocaps", gate["message"])
     check_in("and saying the reset is why it will not guess", "factory reset", gate["message"])
-    check("it refuses to import", server.action_show_import(1)["ok"], False)
+    check("it refuses to import", show_actions.action_show_import(1)["ok"], False)
     check("nothing was sent to it", DESK.calls, [])
     # A CLEAN restore is refused up front rather than quietly downgraded to a merge: somebody who
     # asked for an exact match must not be told they got one.
@@ -479,27 +481,27 @@ with as_device(CAPLESS):
     with patched((profiles_mod, {"load": lambda name: {
             "ok": True, "safe": "duo-profile",
             "prof": {"product_id": CAPLESS.product_id, "pads": []}}})):
-        clean = server.restore_profile("duo-profile", clean=True)
+        clean = profile_actions.restore_profile("duo-profile", clean=True)
         check("a clean restore without the cap is refused, not downgraded", clean["ok"], False)
         check_in("and it offers the alternative", "restore without the reset", clean["message"])
         check_in("and says what that alternative leaves alone", "does not cover", clean["message"])
-        check("no restore was started", server._restore_job.busy(), False)
+        check("no restore was started", profile_actions.restore_job.busy(), False)
         # The MERGE restore is still allowed on the same device and the same profile: the gate is
         # about the reset, not about restoring.
-        merged = server.restore_profile("duo-profile", clean=False)
+        merged = profile_actions.restore_profile("duo-profile", clean=False)
         check("but a merge restore is still allowed", merged.get("ok"), True)
-        wait_for_job(server._restore_job.status, 20, 0.05)
-        check("and it ran to completion", server._restore_job.busy(), False)
+        wait_for_job(profile_actions.restore_job.status, 20, 0.05)
+        check("and it ran to completion", profile_actions.restore_job.busy(), False)
 
 ANY_PROFILE = (profiles_mod, {"load": lambda name: {"ok": True, "safe": "p", "prof": {"pads": []}}})
 
 print("a CLEAN restore, end to end")
 reset_desk()
 with patched(ANY_PROFILE):
-    started = server.restore_profile("p", clean=True)
+    started = profile_actions.restore_profile("p", clean=True)
     check("it starts", started.get("ok"), True)
-    wait_for_job(server._restore_job.status, 30, 0.05)
-    final = server._restore_job.status()
+    wait_for_job(profile_actions.restore_job.status, 30, 0.05)
+    final = profile_actions.restore_job.status()
     check("it finishes", final["running"], False)
     # ORDER IS THE WHOLE POINT: back up, reset, THEN write the profile. A reset after the writes
     # would erase exactly what the restore had just put back.
@@ -514,9 +516,9 @@ print("a clean restore whose backup fails changes NOTHING")
 reset_desk()
 DESK.export_does_nothing = True
 with patched(ANY_PROFILE):
-    server.restore_profile("p", clean=True)
-    wait_for_job(server._restore_job.status, 30, 0.05)
-    final = server._restore_job.status()
+    profile_actions.restore_profile("p", clean=True)
+    wait_for_job(profile_actions.restore_job.status, 30, 0.05)
+    final = profile_actions.restore_job.status()
     check("the restore is reported as failed", final["ok"], False)
     check("THE DESK WAS NOT RESET", DESK.current_uuid, "show-A")
     check("and no reset was sent", "reset" in DESK.calls, False)
@@ -524,8 +526,8 @@ with patched(ANY_PROFILE):
 
 print("bad handles")
 reset_desk()
-check("import with no handle is refused", server.action_show_import(None)["ok"], False)
-check("delete with no handle is refused", server.action_show_delete("abc")["ok"], False)
+check("import with no handle is refused", show_actions.action_show_import(None)["ok"], False)
+check("delete with no handle is refused", show_actions.action_show_delete("abc")["ok"], False)
 check("nothing was sent", DESK.calls, [])
 
 print("a wait for one push ends on time while other pushes keep arriving")

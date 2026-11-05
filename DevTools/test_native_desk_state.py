@@ -25,7 +25,7 @@ import devices
 import network
 import recorder
 import rcp_transfer
-import server
+import show_actions
 import soundpad
 import window_state
 import wx
@@ -135,7 +135,7 @@ with open(_bootstrap.docs_path("PROPERTY_LIST_PRO2.md"), encoding="utf-8") as f:
 for label, names in (("Hardware", device_page.HARDWARE_PROPS),
                      ("Desk settings", device_page.UNIT_SETTING_PROPS),
                      ("Wireless connections", network.PROPS),
-                     ("Backups", server.SHOW_STATE_PROPS),
+                     ("Backups", show_actions.SHOW_STATE_PROPS),
                      ("SMART pads", soundpad.PAD_GRID_PROPS)):
     check(f"{label} follows only published properties", sorted(set(names) - published), [])
 

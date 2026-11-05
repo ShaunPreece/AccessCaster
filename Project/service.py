@@ -15,24 +15,51 @@ import app_updates
 import callme_actions
 import channels
 import clip_warning
+import desk_access
 import desk_live
 import desk_model
 import diagnostics
 import encoder_hold
 import encoder_home
 import faders
-import firmware
 import mute_solo
 import pad_actions
 import pad_shortcuts
+import rcp_read
 import recording
 import rode_app
 import rode_follow
-import server
 import shortcuts
 import speech
 import usb_audio
 from version import __version__ as APP_VERSION
+
+
+class _AnnouncerHooks(announcer.Hooks):
+    """The app's side of the announcer's interface: the device lock, the shortcut layer's mixer
+    pads, and what a reconnect means for the USB mode and RODE's virtual devices. Each looks its
+    state up when called."""
+
+    lock = desk_access.hid_lock
+
+    def mixer_positions(self):
+        return pad_shortcuts.mixer_positions
+
+    def reconnected(self, was_usb, now_usb):
+        usb_audio.reconnected(was_usb, now_usb)
+
+
+def install_announcer_hooks() -> None:
+    """Join the announcer to the app. `start` does it first; a DevTools test that runs the
+    announcer without the rest of the service calls it alone."""
+    announcer.hooks = _AnnouncerHooks()
+
+
+def read_desk_once() -> None:
+    """The first read of the desk, adopted by the desk model, so every page and listener starts
+    from the desk as it is. Raises when the desk cannot be read."""
+    with desk_access.hid_lock:
+        rcp_read.read_model_stable()
 
 
 def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_STARTED) -> None:
@@ -47,13 +74,13 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because every entry point comes through here.
     diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
                       shortcuts=register_shortcuts)
+    install_announcer_hooks()
     # The one listener, and what follows it whatever else is running: the naming layout, and the
     # pad bank and playback the shortcuts fire by.
     desk_live.start()
     channels.follow_desk()
     pad_shortcuts.follow_desk()
     rode_app.on_look = rode_follow.follow
-    firmware.backup = server.backup_unit
     rode_app.start()
     if announce and announcer.starts_on():
         # App settings can still turn it off.
@@ -85,7 +112,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
     callme_actions.watcher()
     try:
-        server.read_desk_once()
+        read_desk_once()
         midi = desk_model.first("systemMidiControl", "bool")
         print(f"Read the desk (MIDI {'on' if midi else 'off'}, "
               f"firmware {desk_model.firmware()}).")

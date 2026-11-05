@@ -60,7 +60,7 @@ def restore(name: str, write: bool) -> int:
     saved = json.loads(path.read_text(encoding="utf-8"))
     if write:
         from _desk import service
-        server = service()
+        service()
     layout, live = _live()
     if layout != saved["layout"]:
         raise SystemExit(f"the fader layout is {layout}, saved {saved['layout']}: put the faders "

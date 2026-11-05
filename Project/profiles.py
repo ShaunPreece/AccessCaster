@@ -63,7 +63,7 @@ SNAPSHOT_KEY = "device_snapshot"
 
 # ---- the AS-FOUND baseline --------------------------------------------------------------------
 # One profile per desk may be marked as the baseline: the state the unit was in before this app ever
-# wrote to it, captured on first run (server.baseline_status). It is an ordinary profile in every
+# wrote to it, captured on first run (baseline.baseline_status). It is an ordinary profile in every
 # other way - same format, same restore path - but it is the only copy of the desk as it came, and
 # a factory reset gives factory settings, not these, so nothing rebuilds it. It gets two
 # protections that a normal profile does not: an ordinary save can never overwrite that name (a name
@@ -76,7 +76,7 @@ BASELINE_KEY = "baseline"
 # this profile. Present only when there was a card or drive in the unit to export to, since a show
 # can only live on removable storage (the internal volume is the pads partition and cannot hold
 # one). This is what lets ONE Backups list carry both. Restore always reads this file, never the
-# show, because a show import crashes the desk about one time in six (server.action_restore_backup);
+# show, because a show import crashes the desk about one time in six (backups.action_restore_backup);
 # the show stays as a complete copy on the drive. The profile also supplies the NAME, because the
 # unit calls every export after the loaded show and gives no way to rename one, so a shows-only list
 # reads as several identical lines.

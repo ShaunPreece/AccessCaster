@@ -2,7 +2,7 @@
 #
 # PyInstaller spec for AccessCaster (Windows tray app).
 #
-# Entry point is tray.py: it starts the local server, opens the native window (Project/native/), and
+# Entry point is tray.py: it starts the service, opens the native window (Project/native/), and
 # parks the app in the system tray. Built as onedir (a folder with AccessCaster.exe + an _internal/
 # dir), which is faster to start than onefile and lets the bundled assets sit on disk for inspection.
 # console=False so there is no console window (the pythonw equivalent).

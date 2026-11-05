@@ -125,7 +125,7 @@ def mic_gain(blob: bytes, channel: int):
 
     THE PAIR IS THE POINT. Anything that has to put a gain back must take it from the desk rather
     than from the desk model, and reading it at the write's own address is the only way to be
-    certain it is the same value. `server.wake_channels` is the case that forces it: its callers
+    certain it is the same value. `show_actions.wake_channels` is the case that forces it: its callers
     are a reset and an import, the two moments the model is least to be trusted, so sourcing the
     "put it straight back" value from it writes the app's last seen gain over every
     freshly-restored one.

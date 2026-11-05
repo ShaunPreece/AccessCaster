@@ -21,8 +21,10 @@ import _desk
 import announcer
 import rcp_hid
 import rcp_read
-import server  # noqa: F401  (installs the announcer's hooks)
+import service
 import speech
+
+service.install_announcer_hooks()
 
 SAID: list[tuple[float, str]] = []
 _t0 = time.monotonic()

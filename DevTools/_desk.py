@@ -19,7 +19,7 @@ import rcp_hid
 import rcp_read
 
 def service(start: bool = False, announce: bool = False):
-    """The app's service in this process, for a script that drives a real desk: returns `server`.
+    """Claim the desk for a script that drives it, and join the announcer to the app as the app does.
 
     REFUSES WHILE ACCESSCASTER IS RUNNING. The app holds the desk, and two processes writing to it
     at once interleave their transfers; the single-instance lock (`instance.claim`) says which one
@@ -32,22 +32,21 @@ def service(start: bool = False, announce: bool = False):
     if not instance.claim():
         raise SystemExit("AccessCaster is running and holds the desk. Quit it from the tray, "
                          "then run this again.")
-    import server
+    import service
+    service.install_announcer_hooks()
     if start:
-        import service
         service.start(announce=announce, register_shortcuts=False, greeting="")
-    return server
 
 
 def wait_for_job(read_status, timeout: float = 180.0, pause: float = 1.0,
                  on_status=None) -> dict:
-    """Poll `read_status()` until the server's background job stops running; return its last status.
+    """Poll `read_status()` until a background job stops running; return its last status.
 
     FINISHED IS `running` READING FALSE, the key every job status carries. A status without it is
     polled again rather than taken as the end: a wait keyed on a missing key returns at once, while
     the job is still in flight. `on_status` sees every status read. Raises TimeoutError when the job
-    is still running at `timeout`. `read_status` is the server's own status function
-    (`server.show_job_status`).
+    is still running at `timeout`. `read_status` is the job's own status function
+    (`show_actions.show_job_status`).
     """
     deadline = time.monotonic() + timeout
     while True:

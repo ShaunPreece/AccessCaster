@@ -6,6 +6,7 @@ is the app side: the refusals, the backup first, the job and the wording.
 
 from __future__ import annotations
 
+import backups
 import callme
 import desk_access
 import desk_firmware
@@ -20,10 +21,6 @@ _UPDATE_HOW = "Install it with Install firmware, under Device, Hardware."
 
 # The backup an update takes first, replaced by the next update's.
 BACKUP_NAME = "Before firmware update"
-
-# `backup(job, name)` takes the backup, returning a reply. Installed by service.start: the backup
-# is the server's, and the server is never imported here.
-backup = None
 
 _job = desk_access.BackgroundJob("A firmware update is already running.",
                                  "The firmware update failed",
@@ -76,7 +73,7 @@ def action_install(backup_first: bool = True) -> dict:
 
     def work(job):
         if backup_first:
-            backed = backup(job, BACKUP_NAME)
+            backed = backups.backup_unit(job, BACKUP_NAME)
             if not backed.get("ok"):
                 return {"ok": False,
                         "message": "The backup did not finish, so the update was not started and "

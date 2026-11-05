@@ -31,12 +31,14 @@ import channels
 import chat_isolation
 import desk_access
 import desk_model
+import devices
 import faders
 import meters
 import mic_presets
 import output_mixes
 import pad_shortcuts
-import server
+import rcp_read
+import rcp_transfer
 import service
 import settings_file
 import speech
@@ -74,10 +76,10 @@ check("a file holding a list reads as no presets", mic_presets._load_user_preset
 
 print("\nFADER LEVEL")
 reads = []
-with as_device(server.devices.PRO2), patched(
-        (server.rcp_read, {"read_model":
+with as_device(devices.PRO2), patched(
+        (rcp_read, {"read_model":
                            lambda *a, **k: reads.append(desk_access.hid_lock.locked()) or b""}),
-        (server.rcp_transfer, {"set_fader_level": lambda sel, value: None}),
+        (rcp_transfer, {"set_fader_level": lambda sel, value: None}),
         (announcer, {"mark_self_level": lambda *a: None})):
     _testkit.hold_desk([0, 1, 2, 3, 4, 5, 6, 7, 8])
     res = faders.action_set_fader_level(6, 50)
@@ -195,7 +197,7 @@ check("and puts back the gain the first take set",
 
 
 print("\nANNOUNCER LOOPS")
-with patched((server.rcp_transfer, {"find_control_interface": lambda fresh=False: object()}),
+with patched((rcp_transfer, {"find_control_interface": lambda fresh=False: object()}),
              (announcer, {"seed": lambda st: None})):
     try:
         newest = {"pending": None}

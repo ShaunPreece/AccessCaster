@@ -51,7 +51,7 @@ USB by design, yet after a bare reset nothing is missing at t+3s, t+10s or t+20s
 
 EXPENDABLE DESKS ONLY. Every trial is an UNBACKED factory reset: settings and pads go to factory with
 no undo. Right for the Duo test desk, wrong for a desk somebody works on. It also leaves mic channels
-possibly silent, because `server.wake_channels` is not called except in the `app` layer, which runs
+possibly silent, because `show_actions.wake_channels` is not called except in the `app` layer, which runs
 it itself.
 
 Run: python DevTools/test_usb_drop_live.py --expendable-desk [--layers handles2,poll] [--trials N]
@@ -65,10 +65,12 @@ import threading
 import time
 
 import _bootstrap
+import backups
 import desk_access
 import hid
 import rcp_hid
 import rcp_read
+import show_actions
 import shows
 import _desk
 from _desk import rode_devices_present, wait_for_job
@@ -77,7 +79,6 @@ QUIET_SECONDS = 20.0
 POLL_S = 1.5                    # shows.POLL_S, so `poll` polls exactly as the app does
 SAMPLE_AT = (3.0, 10.0, 20.0)
 LAYERS = ("handles1", "handles2", "poll", "export", "exportonly", "app")
-server = None
 
 
 def uuid_direct() -> str | None:
@@ -198,7 +199,7 @@ def fire_via_app() -> str:
     """Drive the app's own reset. backup_first False because a Duo has nowhere to save one, and a
     refused backup would stop the reset before it ever ran (action_show_reset refuses rather than
     reset unbacked, on purpose)."""
-    started = server.action_show_reset(False)
+    started = backups.action_show_reset(False)
     if not started.get("ok", True) and "already running" in str(started.get("message", "")):
         return f"app REFUSED: {started.get('message')}"
     return f"app: {started.get('message') or started}"
@@ -248,7 +249,7 @@ def trial(n: int, baseline: str | None, layers: set, quiet: float) -> tuple[str,
         load.stop()
     if use_app:
         try:
-            st = wait_for_job(server.show_job_status, 90.0)
+            st = wait_for_job(show_actions.show_job_status, 90.0)
             print(f"  app job: {st.get('message') or 'job finished'}")
         except TimeoutError as e:
             print(f"  app job: {e}")
@@ -315,11 +316,9 @@ def main() -> int:
     name = ",".join(sorted(layers)) if layers else "none (command alone)"
     print(f"USB drop test. Layers: {name}. {trials} trials, {quiet:.0f}s window each.")
     print("EVERY TRIAL IS AN UNBACKED FACTORY RESET. Expendable desks only.")
-
-    global server
-    server = _desk.service(start="app" in layers)
+    _desk.service(start="app" in layers)
     if "app" in layers:
-        probe = server.read_backup_storage()
+        probe = show_actions.read_backup_storage()
         if not probe.get("ok"):
             print(f"The app's service could not read the desk: {probe.get('message')}")
             return 2

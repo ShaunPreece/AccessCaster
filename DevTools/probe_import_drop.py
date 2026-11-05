@@ -57,10 +57,11 @@ import _bootstrap  # puts Project/ on the path; import FIRST
 import channel_actions
 import diagnostics
 import _desk
+import backups
 import faders
+import profile_actions
+import show_actions
 from _desk import rode_devices_present, wait_for_job
-
-server = None
 
 SETTLE_S = 6.0          # between trials, so one import is not still landing when the next starts
 STATUS_POLL_S = 2.0
@@ -151,13 +152,13 @@ def run_restore(name: str, via: str) -> dict:
     # THE PROFILE ARM GOES STRAIGHT TO `restore_profile`, NOT to the backup chooser, whose
     # `clean=True` forces the profile only by FACTORY-RESETTING the desk first.
     if via == "profile":
-        started = server.restore_profile(name, False)
-        status = server.profile_restore_status
+        started = profile_actions.restore_profile(name, False)
+        status = profile_actions.profile_restore_status
         started.setdefault("via", "profile")
     else:
-        started = server.action_restore_backup(name)
-        status = (server.show_job_status if started.get("via") == "show"
-                  else server.profile_restore_status)
+        started = backups.action_restore_backup(name)
+        status = (show_actions.show_job_status if started.get("via") == "show"
+                  else profile_actions.profile_restore_status)
     if not started.get("ok"):
         return {"ok": False, "message": started.get("message") or "the restore did not start"}
     at = time.monotonic()
@@ -182,12 +183,11 @@ def main() -> int:
                          "property writes, no show command and no storage gadget")
     ap.add_argument("--list", action="store_true", help="list the backups and the knobs, then exit")
     args = ap.parse_args()
-    global server
-    server = _desk.service(start=True)
+    _desk.service(start=True)
 
     if args.list:
         print("backups:")
-        for b in server.read_backups().get("backups") or []:
+        for b in backups.read_backups().get("backups") or []:
             show = f"   (--via show: show:{b['snapshot']})" if b.get("snapshot") is not None else ""
             print(f"  {b['kind']:<8} {b['name']}{show}")
         print("\nknobs, in the order --delta takes them:")

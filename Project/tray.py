@@ -50,7 +50,6 @@ import desk_access
 import diagnostics
 import instance
 import rode_app
-import server
 import service
 import speech
 import win32api

@@ -33,7 +33,7 @@ import _testkit
 import channels
 import device_page
 import faders
-import server
+import rcp_read
 from _testkit import check, check_in
 
 
@@ -90,7 +90,7 @@ def install(before):
     channels.write_chain = fake_write_chain
     channels.read_chains = lambda blob=None, strips=None: [STATE.get(i) for i in range(len(before))]
     channels.chain_diff = lambda desired, current: [] if desired == current else ["differs"]
-    server.rcp_read.read_model = lambda *a, **k: b""
+    rcp_read.read_model = lambda *a, **k: b""
     faders.active_faders = lambda: FakeSpec()
     faders.channel_name = lambda code, spec=None: f"Ch{code}"
     device_page.hardware_id = lambda: "DESK-TEST"

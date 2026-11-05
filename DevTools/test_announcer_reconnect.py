@@ -34,10 +34,12 @@ import desk_model
 import devices
 import rcp_hid
 import rcp_transfer
-import server  # noqa: F401  (installs the announcer's hooks, whose reconnect is under test)
+import service
 import speech
 import usb_audio
 from _testkit import check, patched
+
+service.install_announcer_hooks()   # whose reconnect is under test
 
 
 class FakeIface:

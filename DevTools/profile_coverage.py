@@ -67,7 +67,7 @@ SAVE_FUNCS = [
     # profiles.save, so its source has to be scanned too or all seven read as UNJUDGED - which
     # would report a refactor as a change to what a profile saves.
     (rcp_read.master_processing, "rcp_read.master_processing"),
-    # server._do_snapshot takes the firmware version a profile records from this reader.
+    # profile_actions.save_desk takes the firmware version a profile records from this reader.
     (channels.read_mixer, "channels.read_mixer"),
 ]
 # PADS ARE DIFFERENT and must be listed by hand. soundpad.read_pads_live reads far MORE than
