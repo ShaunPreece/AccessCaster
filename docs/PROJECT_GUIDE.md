@@ -787,6 +787,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   own reasons too) and at startup. **It never announces the bind or its loss**: RODE's driver
   raises its own Windows notification for both, which a screen reader reads, so the follow-up
   speaks only a miss, missing Faders, a moved default output or an error.
+- **`System (RØDECaster)` HAS A FIXED VOLUME, 0 to 0 dB** (measured 5th November 2026; the desk's
+  Main Stereo has -96 to 0 dB), so Windows' volume keys do nothing while it is the default output.
+  **The app does not take the volume keys to make up for it**: built and tried, it took a key from
+  Windows, changed USB 1's Level on the desk behind the user, and needed a per-side level swap to
+  undo itself. The owner's ruling: overreach, left to the user (the encoder, or another output).
 - **RODE'S OWN APP DOES NOTHING TO MAKE THE BIND HAPPEN, SO THERE IS NOTHING TO CAPTURE FROM IT.**
   Its import table carries only read-only device APIs: `CM_Get_Parent`, `CM_Get_Child`,
   `CM_Get_Sibling`, `CM_Locate_DevNodeA`, `CM_Get_Device_ID_List`, `SetupDiEnumDeviceInterfaces`.

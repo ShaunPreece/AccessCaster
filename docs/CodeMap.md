@@ -249,7 +249,7 @@ after a session that moved code.
 - Lifecycle: `start_service` (8619), `desk_work_in_progress` (8700, what Quit refuses during), `stop_service` (8717). `read_general`, `keep_in_tray` and `action_set_keep_in_tray` are the General page's tray setting.
 
 --------------------------------------------------------------------------------
-## DevTools/ (146 files; the ones worth knowing)
+## DevTools/ (148 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, takes the single-instance lock for a
