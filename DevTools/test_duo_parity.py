@@ -23,6 +23,8 @@ import _testkit
 import announcer
 import change_words
 import channels
+import desk_labels
+import device_page
 import devices
 import rcp_read
 import rcp_transfer
@@ -213,9 +215,9 @@ for dev in (devices.DUO, devices.PRO2):
     with as_device(dev):
         check(f"{dev.name} has the cap", "unit_settings" in dev.caps, True)
         check(f"{dev.name}: an unknown property is still refused",
-              server.action_set_unit_setting("notASetting", 1)["ok"], False)
+              device_page.action_set_unit_setting("notASetting", 1)["ok"], False)
 check_true("every setting the page offers has an address in the table",
-           all(s["prop"] in rcp_transfer.UNIT_SETTING_SEL for s in server.UNIT_SETTINGS))
+           all(s["prop"] in rcp_transfer.UNIT_SETTING_SEL for s in desk_labels.UNIT_SETTINGS))
 
 # A CHANNEL THE DESK DOES NOT CARRY REFUSES, with no fixed fallback strip. Mic 3 from a Pro II
 # profile would otherwise land on Duo strip 2, which holds Bluetooth. Raises before any dump.

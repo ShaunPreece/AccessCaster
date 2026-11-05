@@ -20,6 +20,7 @@ import _testkit
 import channels
 import desk_live
 import desk_model
+import device_page
 import devices
 import network
 import recorder
@@ -130,8 +131,8 @@ follow._timer.Stop()
 # Every property a page follows is one the desk publishes: a misspelt name follows nothing.
 with open(_bootstrap.docs_path("PROPERTY_LIST_PRO2.md"), encoding="utf-8") as f:
     published = set(re.findall(r"`(\w+)`", f.read()))
-for label, names in (("Hardware", server.HARDWARE_PROPS),
-                     ("Desk settings", server.UNIT_SETTING_PROPS),
+for label, names in (("Hardware", device_page.HARDWARE_PROPS),
+                     ("Desk settings", device_page.UNIT_SETTING_PROPS),
                      ("Wireless connections", network.PROPS),
                      ("Backups", server.SHOW_STATE_PROPS),
                      ("SMART pads", soundpad.PAD_GRID_PROPS)):

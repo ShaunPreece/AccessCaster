@@ -22,6 +22,7 @@ import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import device_page
 import profiles
 import server
 import settings_file
@@ -39,8 +40,8 @@ print(f"temporary profile store: {profiles.PROFILES_DIR}\n")
 
 try:
     print("THE OFFER: ONCE PER DESK, AND ONLY WHEN THERE IS A DESK")
-    server.read_device_status()          # publishes the hardware id, as the page's status read does
-    hw = server._device_hardware_id()
+    device_page.read_status()          # publishes the hardware id, as the page's status read does
+    hw = device_page.hardware_id()
     check_true("a desk is connected and identified", hw, hw)
     s = server.baseline_status()
     check("offered on a store with no baseline", s["offer"], True)

@@ -552,7 +552,7 @@ UNIT_SETTING_SEL = {
     "systemDateTimeOnHome": (SYSTEM, "bool"),           # show the clock on the home screen
     # IN THIS TABLE FOR PROFILE SAVE/RESTORE ONLY, and DELIBERATELY NOT ON THE DEVICE PAGE: it is
     # measured display-only, so offering it would be a control that lies. The reason sits next to
-    # the decision, in server.UNIT_SETTINGS_NOT_ON_PAGE.
+    # the decision, in device_page.UNIT_SETTINGS_NOT_ON_PAGE.
     "systemDateTimezone": (SYSTEM, "int"),              # an INDEX into the unit's own list
     # SYSTEM block: the lockouts. Reversible from here by the same write, and each one was
     # set and cleared on hardware, but they are the entries most able to make a working desk feel

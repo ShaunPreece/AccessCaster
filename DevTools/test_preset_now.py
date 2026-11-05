@@ -19,6 +19,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels
+import device_page
 import server
 import settings_file
 from _testkit import check
@@ -60,7 +61,7 @@ def live(**over):
 SETTINGS: dict = {}
 settings_file.load = lambda: dict(SETTINGS)
 settings_file.update = lambda **kw: SETTINGS.update(kw)
-server._device_hardware_id = lambda: "DESK-A"
+device_page.hardware_id = lambda: "DESK-A"
 server._load_factory_presets = lambda: {"Podcast Studio": PRESET}
 server._load_user_presets = lambda: {"Shaun voice": PRESET}
 

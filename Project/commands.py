@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import announcer
 import app_window
+import callme_actions
 import channels
 import desk_access
 import desk_model
+import device_page
 import devices
 import diagnostics
 import network
@@ -238,7 +240,7 @@ def _say_state() -> dict:
     muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
     is itself the answer and takes one sentence to hear."""
     speech.say("Reading the desk.")   # silent whenever the announcer is
-    ov = server.device_overview()
+    ov = device_page.overview()
     if not ov.get("ok"):
         return _fail(ov.get("message", "The desk could not be read."))
     bits = []
@@ -454,31 +456,31 @@ def _callme_contact_commands() -> list:
     # BOUND BY NAME, NOT BY CODE: a code is what gets edited when its owner's changes, and the
     # shortcut has to survive that edit.
     return [_cmd(f"callme.contact:{c['name']}", "CallMe", f"Call {c['name']}")
-            for c in server._callme_contacts()]
+            for c in callme_actions.contacts()]
 
 
 def _run_callme(arg: str) -> dict:
     if arg.startswith("contact:"):
         name = arg.partition(":")[2]
-        c = next((c for c in server._callme_contacts() if c["name"].lower() == name.lower()), None)
+        c = next((c for c in callme_actions.contacts() if c["name"].lower() == name.lower()), None)
         if c is None:
             return _fail(f"There is no contact called {name} any more.")
-        return server.action_callme_dial(c["code"])
+        return callme_actions.action_dial(c["code"])
     if arg == "answer":
-        return server.action_callme_answer()
+        return callme_actions.action_answer()
     if arg == "decline":
-        return server.action_callme_decline()
+        return callme_actions.action_decline()
     if arg == "hangup":
-        return server.action_callme_hangup()
+        return callme_actions.action_hangup()
     if arg == "end":
-        return server.action_callme_end()
+        return callme_actions.action_end()
     if arg == "extend":
-        return server.action_callme_extend()
+        return callme_actions.action_extend()
     if arg == "status":
-        return server.callme_status()
+        return callme_actions.status()
     if arg == "hosting":
-        now, _path = server._callme_state_now()
-        return server.action_callme_hosting(not now.get("hosting"))
+        now, _path = callme_actions.state_now()
+        return callme_actions.action_hosting(not now.get("hosting"))
     return _fail(f"Unknown CallMe command {arg}.")
 
 
@@ -502,7 +504,7 @@ def _run_out(arg: str) -> dict:
         # uses), so their current value comes from the unit-settings read, not the routing one.
         prop = "outputMonMute" if which == "monitor" else "outputBTMute"
         now = False
-        for s in server.read_unit_settings().get("settings", []):
+        for s in device_page.read_unit_settings().get("settings", []):
             if s.get("prop") == prop:
                 now = bool(s.get("value"))
         return server.action_set_output_mute(which, not now)
@@ -529,8 +531,8 @@ def _unit_commands() -> list:
 
 def _run_unit(arg: str) -> dict:
     if arg == "midi":
-        now = bool(server.read_unit_settings().get("midi"))
-        return server.action_set_midi(not now)
+        now = bool(device_page.read_unit_settings().get("midi"))
+        return device_page.action_set_midi(not now)
     net = network.read_status()
     if arg == "wifi":
         now = bool((net.get("wifi") or {}).get("on"))

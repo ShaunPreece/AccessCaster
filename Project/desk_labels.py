@@ -153,7 +153,7 @@ UNIT_SETTINGS = [
      "detail": "0 to 255. Turn it down to darken the desk and keep lit buttons lit."},
     # ---- THE CLOCK (selectors derived and read-back proven). -------------------------------------
     # The timezone and daylight saving are NOT offered: both store a write and leave the clock
-    # alone, because the touchscreen applies them. See server.UNIT_SETTINGS_NOT_ON_PAGE.
+    # alone, because the touchscreen applies them. See device_page.UNIT_SETTINGS_NOT_ON_PAGE.
     {"prop": "systemDateTime24h", "label": "24-hour clock", "kind": "bool",
      "detail": "Otherwise 12-hour with am and pm."},
     {"prop": "systemDateTimeOnHome", "label": "Show the clock on the desk's home screen",

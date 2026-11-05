@@ -142,7 +142,7 @@ def peer_name(address) -> str:
 # ---------------------------------------------------------------------------------------------
 # A code belongs to RODE's service, which issues a new one each time its owner switches hosting
 # off and on. So an entry can go stale and nothing on this side can learn the new code; only its
-# owner can say it. The server owns the stored list and hands it here with set_contacts.
+# owner can say it. callme_actions owns the stored list and hands it here with set_contacts.
 
 _contacts: dict = {}        # code -> name
 

@@ -14,6 +14,7 @@ import datetime
 
 import wx
 
+import device_page
 import server
 import wording
 from native import a11y
@@ -44,7 +45,7 @@ def _baseline_offer():
     only a status read publishes."""
     status = server.baseline_status()
     if not status.get("connected"):
-        server.read_device_status()
+        device_page.read_status()
         status = server.baseline_status()
     return status
 

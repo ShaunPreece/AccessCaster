@@ -248,7 +248,7 @@ def find_control_interface(
     connected, which presents as a freeze. None is the honest answer, and every caller handles it.
 
     Diagnosing WHICH kind of nothing (no desk at all, or a desk on the wrong port) is
-    `server.read_device_status`'s job, because that is a message for a person rather than a value
+    `device_page.read_status`'s job, because that is a message for a person rather than a value
     for a caller.
     """
     candidates = [i for i in _interfaces(fresh) if i.is_control]

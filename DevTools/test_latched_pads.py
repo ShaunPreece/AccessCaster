@@ -22,8 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import device_page
 import pad_shortcuts
-import server
 import soundpad
 from _testkit import check, patched
 
@@ -38,7 +38,7 @@ def with_pads(positions, active_flags):
                          {"padActive": active_flags[i]} if i < len(active_flags) else {})
             for i, (pos, idx, typ, name) in enumerate(positions)]
     with patched((soundpad, {"pad_nodes": lambda blob=None: pads})):
-        return soundpad.latched_pads(b""), server._pads_engaged(b"")
+        return soundpad.latched_pads(b""), device_page._pads_engaged(b"")
 
 
 PADS = [(8, 0, 1, "Music_Bed"), (18, 8, 2, "Voice Disguise"), (23, 14, 2, "Small Robot")]

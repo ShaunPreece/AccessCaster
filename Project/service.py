@@ -12,6 +12,7 @@ import threading
 
 import announcer
 import app_updates
+import callme_actions
 import channels
 import desk_live
 import desk_model
@@ -76,7 +77,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     app_updates.start()
     # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
     # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
-    server.callme_watcher()
+    callme_actions.watcher()
     try:
         server.read_desk_once()
         midi = desk_model.first("systemMidiControl", "bool")

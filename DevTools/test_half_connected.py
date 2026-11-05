@@ -28,8 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import device_page
 import rcp_hid
-import server
 from _testkit import check, patched
 
 
@@ -49,7 +49,7 @@ class FakeIface:
 def with_interfaces(ifaces):
     """Run a body with the HID interface list stubbed. The FINDER is left real on purpose."""
     with patched((rcp_hid, {"enumerate_interfaces": lambda *a, **k: list(ifaces)})):
-        return server.read_device_status(), rcp_hid.find_control_interface()
+        return device_page.read_status(), rcp_hid.find_control_interface()
 
 
 print("\nNOTHING PLUGGED IN AT ALL")

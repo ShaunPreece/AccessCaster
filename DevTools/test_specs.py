@@ -13,16 +13,15 @@ the page or is named in UNIT_SETTINGS_NOT_ON_PAGE with the reason.
 This is the place for any other "two tables that must agree" check. Run:
     python DevTools/test_specs.py
 """
-import re
-
-import _bootstrap  # puts Project/ on the path; import FIRST
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import device_page
+import desk_labels
 import devices
 import model_tree
 import pad_records
 import profiles
 import rcp_transfer
-import server
 from _testkit import check_true
 
 
@@ -38,32 +37,32 @@ def _raises(fn):
 print("desk settings: address table vs the Device page")
 
 # THE CHECK THIS FILE WAS WRITTEN FOR.
-off = server.unit_settings_off_page()
+off = device_page.unit_settings_off_page()
 check_true("every writable desk setting is on the page or deliberately off it",
            not off,
            "these are writable but neither on the Device page nor listed in "
            f"UNIT_SETTINGS_NOT_ON_PAGE, so nobody has decided about them: {off}")
 
-# The reverse direction is asserted at import in server.py, but assert it here too so a failure
+# The reverse direction is asserted at import in device_page.py, but assert it here too so a failure
 # names itself instead of arriving as an ImportError.
-missing_sel = sorted(p for p in server.UNIT_SETTING_BY_PROP
+missing_sel = sorted(p for p in desk_labels.UNIT_SETTING_BY_PROP
                      if p not in rcp_transfer.UNIT_SETTING_SEL)
 check_true("every setting on the page has an address", not missing_sel,
            f"on the page with no way to write them: {missing_sel}")
 
 # An exemption for something that is not writable at all is a leftover, and a leftover reason is
 # worse than none: it implies a decision was made about a setting that no longer exists.
-stale = sorted(p for p in server.UNIT_SETTINGS_NOT_ON_PAGE
+stale = sorted(p for p in device_page.UNIT_SETTINGS_NOT_ON_PAGE
                if p not in rcp_transfer.UNIT_SETTING_SEL)
 check_true("no exemption names a setting that is not writable", not stale,
            f"listed as deliberately off the page but not in the address table: {stale}")
 
 # A setting cannot be both on the page and excluded from it.
-both = sorted(p for p in server.UNIT_SETTINGS_NOT_ON_PAGE if p in server.UNIT_SETTING_BY_PROP)
+both = sorted(p for p in device_page.UNIT_SETTINGS_NOT_ON_PAGE if p in desk_labels.UNIT_SETTING_BY_PROP)
 check_true("nothing is both on the page and excluded from it", not both, f"in both: {both}")
 
 # Every exemption has to say WHY, in a sentence, or it is just a silencer.
-thin = sorted(p for p, why in server.UNIT_SETTINGS_NOT_ON_PAGE.items() if len(why.strip()) < 30)
+thin = sorted(p for p, why in device_page.UNIT_SETTINGS_NOT_ON_PAGE.items() if len(why.strip()) < 30)
 check_true("every exemption gives a real reason", not thin, f"reason too thin to be one: {thin}")
 
 print("\nthe address is a tree path, and there is one builder for it")

@@ -1,11 +1,11 @@
 """CallMe: RODE's remote guests. The call that is up or ringing, making a call and the contacts,
 taking incoming calls, and the plan.
 
-The state is the server's CallMe listener's, which hears every change the unit pushes. The section
-reads the whole of it (`server.read_callme`, one model dump) after the desk state's first read, on
-F5 and after a fix; while one of its pages is shown it asks the listener (`server.read_callme_live`,
-no device read) every `POLL_MS`, and redraws only when its `version` moves. Every sentence comes
-from the server or `callme`.
+The state is the CallMe listener's (`callme_actions.watcher`), which hears every change the unit
+pushes. The section reads the whole of it (`callme_actions.read`, one model dump) after the desk
+state's first read, on F5 and after a fix; while one of its pages is shown it asks the listener
+(`callme_actions.read_live`, no device read) every `POLL_MS`, and redraws only when its `version`
+moves. Every sentence comes from `callme_actions` or `callme`.
 
 Whether CallMe 1 is on a fader is the one fact taken from the window's desk state instead
 (`problems`): the listener does not follow the faders, and the desk state does.
@@ -16,6 +16,7 @@ said here instead, while a CallMe page is shown.
 import wx
 
 import callme
+import callme_actions
 import server
 from native import a11y
 from native.calls import call
@@ -61,7 +62,7 @@ class CallMeSection:
 
     def __init__(self, frame):
         self.frame = frame
-        self.data = None             # the last payload (server._callme_payload)
+        self.data = None             # the last payload (callme_actions.payload)
         self.busy = False            # a press from this section has not returned
         self._seen = None            # the listener's `version` last drawn
         self._ringing = None         # the id of the call last seen ringing
@@ -98,7 +99,7 @@ class CallMeSection:
             self._again = bool(self._again) or announce
             return
         self._reading = True
-        call(self.frame, server.read_callme, done=lambda reply: self._read_done(reply, announce))
+        call(self.frame, callme_actions.read, done=lambda reply: self._read_done(reply, announce))
 
     def _read_done(self, reply, announce):
         self._reading = False
@@ -141,7 +142,7 @@ class CallMeSection:
         if self._polling or self.data is None:
             return
         self._polling = True
-        call(self.frame, server.read_callme_live, done=self._polled)
+        call(self.frame, callme_actions.read_live, done=self._polled)
 
     def _polled(self, reply):
         self._polling = False
@@ -311,13 +312,13 @@ class CallPage(wx.Panel):
         call(self, server.action_set_fader, index, code, done=done)
 
     def _on_answer(self, event):
-        self.section.act(event.GetEventObject(), server.action_callme_answer)
+        self.section.act(event.GetEventObject(), callme_actions.action_answer)
 
     def _on_end(self, event):
-        self.section.act(event.GetEventObject(), server.action_callme_end)
+        self.section.act(event.GetEventObject(), callme_actions.action_end)
 
     def _on_extend(self, event):
-        self.section.act(event.GetEventObject(), server.action_callme_extend)
+        self.section.act(event.GetEventObject(), callme_actions.action_extend)
 
 
 class DialPage(wx.Panel):
@@ -374,14 +375,14 @@ class DialPage(wx.Panel):
         if not self.code.GetValue().strip():
             self.frame.say("Type their CallMe code first.")
             return
-        self.section.act(self.dial, server.action_callme_dial, self.code.GetValue(),
+        self.section.act(self.dial, callme_actions.action_dial, self.code.GetValue(),
                          working="Calling, please wait.")
 
     def _on_call_contact(self, _event):
         if self._none_chosen():
             return
         contact = self._chosen()
-        self.section.act(self.call_contact, server.action_callme_dial, contact["code"],
+        self.section.act(self.call_contact, callme_actions.action_dial, contact["code"],
                          working=f"Calling {contact['name']}, please wait.")
 
     def _on_add(self, _event):
@@ -418,7 +419,7 @@ class DialPage(wx.Panel):
             self.frame.reply(self.delete, reply)
             if reply.get("ok"):
                 self._contacts_changed(reply)
-        call(self, server.action_callme_contact_delete, contact["code"], done=done)
+        call(self, callme_actions.action_contact_delete, contact["code"], done=done)
 
     def _contacts_changed(self, reply, prefer=None):
         if reply.get("contacts") is not None and self.section.data is not None:
@@ -460,7 +461,7 @@ class ContactDialog(wx.Dialog):
         if self._busy:
             return
         self._busy = True
-        call(self, server.action_callme_contact_save, self.name_box.GetValue(),
+        call(self, callme_actions.action_contact_save, self.name_box.GetValue(),
              self.code_box.GetValue(), self._was, done=self._saved)
 
     def _saved(self, reply):
@@ -484,13 +485,13 @@ class IncomingPage(wx.Panel):
         self.frame = section.frame
         sizer, parent = page_body(self)
         self.hosting = Switch(
-            self, parent, sizer, "Accept incoming calls", server.action_callme_hosting,
+            self, parent, sizer, "Accept incoming calls", callme_actions.action_hosting,
             *section.field("hosting"),
             description="Switching it back on gives a new code, and a shared guest link stops "
                         "working.",
             guard=self._hosting_refused, accepted=self._hosted)
         self.ringtone = Switch(self, parent, sizer, "Ring for incoming calls",
-                               server.action_callme_ringtone, *section.field("ringtone"),
+                               callme_actions.action_ringtone, *section.field("ringtone"),
                                guard=section.unread)
         self.code = read_only(parent, sizer, "Your CallMe code", height=None, width=260)
         self.link = read_only(parent, sizer, "Guest link", height=None)
@@ -546,7 +547,7 @@ class PlanPage(wx.Panel):
         self.plan = read_only(parent, sizer, "Your plan", height=100)
         self.plan.SetValue("Reading the desk.")
         self.auto = Switch(self, parent, sizer, "Extend calls automatically",
-                           server.action_callme_auto_extend, *section.field("auto_extend"),
+                           callme_actions.action_auto_extend, *section.field("auto_extend"),
                            description="On plans with an hour limit, five minutes before the end.",
                            guard=section.unread)
 

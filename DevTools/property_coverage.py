@@ -99,15 +99,15 @@ CONTEXT_ROLE = {
     "read_settings": "read", "read_mixer": "read", "read_processing": "read",
     "read_channels": "read", "read_matrix_state": "read", "read_matrix_levels": "read",
     "read_output_modes": "read", "read_pads_live": "read", "pad_positions": "read",
-    "_fields_by_padidx": "read", "first": "read", "read_device_status": "read",
+    "_fields_by_padidx": "read", "first": "read", "read_status": "read",
     "strip_vector": "read",
     # writes
     "PROCESSING_PROPS": "write", "PRESET_EXTRA_FLOAT_PROPS": "write",
     "PRESET_FLOAT_PROPS": "write", "PROCESSING_MODULE_ON": "write", "CHANNEL_PROP": "write",
     "CHANNEL_FX_ON": "write", "PAD_PROP": "write", "MASTER_COMPELLOR_PARAM": "write",
     # The unit's own settings (display/haptics/REC button/listen mode): the address table in
-    # rcp_transfer is the write side; server.UNIT_SETTINGS is the spec that drives both the read and
-    # the write, so it counts as both.
+    # rcp_transfer is the write side; desk_labels.UNIT_SETTINGS is the spec that drives both the
+    # read and the write, so it counts as both.
     "UNIT_SETTING_SEL": "write", "UNIT_SETTINGS": "both",
     # Channel mute: written by channels.set_channel_mute and read by read_channels.
     "MUTE_PROP": "both",

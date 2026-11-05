@@ -18,6 +18,7 @@ closing asks the tray to quit (`quit_app`).
 import wx
 
 import app_settings_actions
+import device_page
 import rode_app
 import server
 from native import announce
@@ -123,7 +124,7 @@ class MainFrame(Speaker, wx.Frame):
         """The service is up: read the device status, then let each section read the desk. The
         device status publishes the desk's hardware id, which every per-desk setting is filed
         under."""
-        call(self, server.read_device_status, done=self._started)
+        call(self, device_page.read_status, done=self._started)
 
     def _started(self, _reply):
         self.desk.start()

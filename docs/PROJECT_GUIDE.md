@@ -268,7 +268,8 @@ The layers, bottom up:
   it is now, the capability gate and the long job. It imports none of the modules that use it.
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
   `recorder.py`, `recording.py` (the Recording page's app side, over `recorder.py`),
-  `firmware.py` (the check and the install, over `desk_firmware.py`), `shows.py`,
+  `firmware.py` (the check and the install, over `desk_firmware.py`), `callme_actions.py` (CallMe's
+  app side, over `callme.py`), `device_page.py` (the Device page and the desk's status), `shows.py`,
   `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
   over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
@@ -956,7 +957,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `U` alone 17.3 s, deterministic; a model dump, the `I` command, a bare HID open and close, SAPI
   speech, SAPI enumeration, a Chromium app window and every `meters.py` call all clean. It looked
   like an Alt-Tab fault because the app's status read sent both on every read.
-  `read_device_status` now sends `I` only, whose answer is the liveness proof, and identity is the
+  `device_page.read_status` now sends `I` only, whose answer is the liveness proof, and identity is the
   USB serial. `rcp_hid.quick_probe` and the DevTools probes still send both; they are tools, not
   app paths, and cost a few seconds of speech when run.
 - **A WINDOWS ENDPOINT RENAME DOES NOT SURVIVE TOGGLING EXPANDED, AND THE OLD NAME LINGERS DEAD.**
@@ -1440,7 +1441,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   slot's `ended` count, and who is ringing and on each slot as heard (see the next rule but one
   under the model).
 - **`online` IS PART OF `Watcher.snapshot`, SO IT MOVES `version`.** The page redraws only when
-  `version` moves, and the network is not a CallMe property: set only in `server._callme_payload`,
+  `version` moves, and the network is not a CallMe property: set only in `callme_actions.payload`,
   the Not ready group's "desk is offline" waited for F5 to appear and to clear.
 - **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
   `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
@@ -1472,12 +1473,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   item: a call out still works. Online comes from the desk model (`desk_model.online`), since the
   page's poll reads no dump. **ON A FADER COMES FROM THE FADER LAYOUT, NEVER FROM CALLME'S OWN STATE**: the page's from
   the window's desk state (`callme_section.problems`), the answer reply's from a read of the layout
-  (`server._callme1_on_fader`). The Watcher hears only `sip*`, and the desk does not push a layout
+  (`callme_actions._callme1_on_fader`). The Watcher hears only `sip*`, and the desk does not push a layout
   change this app makes, so a copy kept with CallMe's state goes stale. A desk can show Wi-Fi on, joined to nothing and scanning empty with its radio stuck; a power
   cycle cleared it.
 - **THE RING AND THE CALLER'S NAME TAKE TURNS, NEVER OVERLAP.** The speech thread plays one item at
   a time and keeps only the newest one waiting, so a name and a ring queued together lose one of
-  them. So `_callme_ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
+  them. So `callme_actions._ring` queues one ring, waits `tones.RING_DURATION_S`, speaks the name with
   `speech.say_and_wait`, and starts again every `_CALLME_RING_CYCLE_S`. It stops when the SAME call id
   is no longer ringing, the ringtone is switched off, or past the desk's 120 s.
 
@@ -1995,14 +1996,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the window, and when the desk pushes a pad change (below).
 - **A PAGE THAT READS THE DESK FOR ITSELF FOLLOWS IT WITH `pages.FollowDesk`**: the pads, the
   backups, and Device's Hardware, Desk settings and Wireless connections. Each names the properties
-  it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `HARDWARE_PROPS`,
+  it shows (`soundpad.PAD_GRID_PROPS`, `server.SHOW_STATE_PROPS`, `device_page.HARDWARE_PROPS`,
   `UNIT_SETTING_PROPS`, `network.PROPS`), watched through the desk state's one follower
   (`DeskState.watch`), and re-reads once their pushes stop for `AFTER_MS`, never while a modal
   dialog is open. A RE-READ, NOT THE MODEL, because which of these the desk pushes for a
   touchscreen change is unmeasured. Keep out of the lists what changes while the desk is merely in
   use, or the page dumps the desk throughout: `padActive` and `padProgress` (a pad playing),
   `storageVolumeState` (a recording's free space; `recordState` covers a card going in or out).
-  The wifi scan results are never pushed. A followed Hardware read skips `read_device_status`,
+  The wifi scan results are never pushed. A followed Hardware read skips `device_page.read_status`,
   which rescans the bus. A name the desk does not publish follows nothing, so
   `test_native_desk_state` checks every list against `PROPERTY_LIST_PRO2.md`.
 - **A PAGE RE-READ WHILE THE USER IS ON IT SETS ONLY WHAT CHANGED** (`pages.set_text`, `set_items`,
@@ -2012,7 +2013,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   (`backups_section`). The pads and the backups are read by their sections, outside the desk state,
   so a desk state refresh alone leaves the Pads pages showing the grid from before.
 - **THE WINDOW READS THE DEVICE STATUS AS THE SERVICE COMES UP** (`MainFrame.start`). Only
-  `read_device_status` publishes the hardware id every per-desk setting is filed under: without it
+  `device_page.read_status` publishes the hardware id every per-desk setting is filed under: without it
   the pan links save against no desk and the as-found backup is never offered.
 - **THE PADS ARE READ AGAIN `REREAD_AFTER_MS` AFTER A SETTINGS DIALOG THAT WROTE, LONGER THAN
   `_Field.DELAY_MS`.** A write still waiting in `LatestWins` when the dialog closes is still sent,
@@ -2042,13 +2043,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   ignores. Cut it near 1 s and a slow stop is reported as a press that did not take. A stop pushes
   no `lastRecordingID` under this listener, and the new take is in the list by the time the state
   arrives.
-- **THE CALLME PAGES ASK THE SERVER'S LISTENER EVERY SECOND WHILE ONE IS SHOWN**
-  (`callme_section.CallMeSection.poll`, `server.read_callme_live`), which reads no desk; a full
+- **THE CALLME PAGES ASK THE LISTENER EVERY SECOND WHILE ONE IS SHOWN**
+  (`callme_section.CallMeSection.poll`, `callme_actions.read_live`), which reads no desk; a full
   read is a dump. A call's state lives in that listener, so the desk state's pushes do not carry
   it. Each redraw puts text on the same controls and only when `version` moves: during a call it
   moves once a second, with the call quality.
-- **THE CALLME END BUTTON IS "DECLINE OR HANG UP", AND THE SERVER CHOOSES AT THE PRESS**
-  (`action_callme_end`): a call that began ringing a moment ago is declined, not the guest already
+- **THE CALLME END BUTTON IS "DECLINE OR HANG UP", AND THE APP CHOOSES AT THE PRESS**
+  (`callme_actions.action_end`): a call that began ringing a moment ago is declined, not the guest already
   on the line.
 - **THE WINDOW'S TRANSPORT IS TWO BUTTONS WHOSE LABELS FOLLOW THE STATE** (Start recording / Stop
   recording, Pause / Resume), from this window's presses and the unit's REC button alike. A focused
@@ -2450,7 +2451,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   UNIT_SETTING_SEL` says what can be written; `desk_labels.UNIT_SETTINGS` says how one is presented. That
   split is deliberate (the address table is shared with the Duo and must not carry UI copy), but
   MEMBERSHIP is not: every entry in the address table either appears on the Device page or is named
-  in `server.UNIT_SETTINGS_NOT_ON_PAGE` with a reason. `server.unit_settings_off_page()` must return
+  in `device_page.UNIT_SETTINGS_NOT_ON_PAGE` with a reason. `device_page.unit_settings_off_page()` must return
   empty, and `DevTools/test_specs.py` asserts it. Four settings drifted for a day without this
   (2026-08-28) and nothing failed except a test that looked broken.
 - **`outputMonAutoMute` WORKS, and ships OFF; the app used to be able to show it ON regardless.**

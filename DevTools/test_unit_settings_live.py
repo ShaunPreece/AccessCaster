@@ -32,6 +32,7 @@ import time
 import _bootstrap  # noqa: F401  (the test data dir, like every other test)
 import _desk
 import _testkit
+import device_page
 import profiles
 from _desk import count_changes, wait_for_job
 from _testkit import check
@@ -58,7 +59,7 @@ SKIP = {"outputMonFixed": "changes what the monitor output sends; not tried unas
 
 
 def unit_values():
-    d = server.read_unit_settings()
+    d = device_page.read_unit_settings()
     if not d.get("ok"):
         raise SystemExit("could not read the desk settings: " + str(d.get("message")))
     return {s["prop"]: s["value"] for s in d["settings"]}, d
@@ -96,7 +97,7 @@ def delete_profile(name):
 
 
 def set_unit(prop, value):
-    return server.action_set_unit_setting(prop, int(value))
+    return device_page.action_set_unit_setting(prop, int(value))
 
 
 def channel_state(name):
@@ -129,7 +130,7 @@ def run() -> None:
     pre_unit, pre_counts, pre_props = profile_snapshot(PRE)
     start, payload = unit_values()
     # COMPARED OVER THE PAGE'S OWN KEYS, not as whole dicts. A profile records everything WRITABLE
-    # and the Device page shows a deliberate subset of it (server.UNIT_SETTINGS_NOT_ON_PAGE says
+    # and the Device page shows a deliberate subset of it (device_page.UNIT_SETTINGS_NOT_ON_PAGE says
     # which is left off and why), so the two are not meant to be equal. What matters is that where
     # they overlap they AGREE: two read paths, one desk. Membership itself is guarded by
     # DevTools/test_specs.py.
@@ -184,7 +185,7 @@ def run() -> None:
         check("the desk reports the new mute state", channel_state(CHAN).get("muted"),
               not was_muted)
         # The Device page's overview lists what is muted, from a different read path.
-        ov = server.device_overview()
+        ov = device_page.overview()
         listed = [m["label"] for m in (ov.get("muted") or [])]
         check("and the Device overview agrees", channel_state(CHAN)["label"] in listed,
               not was_muted)

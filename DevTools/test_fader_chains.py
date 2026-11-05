@@ -31,6 +31,7 @@ import tempfile
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import channels
+import device_page
 import server
 from _testkit import check, check_in
 
@@ -91,7 +92,7 @@ def install(before):
     server.rcp_read.read_model = lambda *a, **k: b""
     server._active_faders = lambda: FakeSpec()
     server._channel_name = lambda code, spec=None: f"Ch{code}"
-    server._device_hardware_id = lambda: "DESK-TEST"
+    device_page.hardware_id = lambda: "DESK-TEST"
 
 
 print()

@@ -11,9 +11,10 @@ state changes, and read from the desk whenever Current state is opened.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import desk_labels
+import device_page
 import firmware
 import network
-import server
 from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch
@@ -86,7 +87,7 @@ def _labels(items):
 
 
 def overview_lines(d):
-    """The Current state report from `server.device_overview`: by exception, so a short report
+    """The Current state report from `device_page.overview`: by exception, so a short report
     means all is well. Fader levels are the exception to the exception, since a level has no
     normal value to infer from silence."""
     if not d.get("ok"):
@@ -201,7 +202,7 @@ def firmware_line(firmware, update):
 
 
 def hardware_lines(d):
-    """Storage and the recorder from `server.read_device_state`, as sentences."""
+    """Storage and the recorder from `device_page.read_hardware`, as sentences."""
     if not d.get("ok"):
         return [d.get("message") or "Could not read the desk."]
     volumes = (d.get("storage") or {}).get("volumes") or []
@@ -313,8 +314,8 @@ class DeviceSection:
                       Page("network", "Wireless connections", self.network)]
         self._summary_timer = None
         frame.desk.subscribe(self._desk_event)
-        for view, names in ((self.hardware, server.HARDWARE_PROPS),
-                            (self.unit, server.UNIT_SETTING_PROPS),
+        for view, names in ((self.hardware, device_page.HARDWARE_PROPS),
+                            (self.unit, device_page.UNIT_SETTING_PROPS),
                             (self.network, network.PROPS)):
             FollowDesk(frame, names, view.follow)
 
@@ -396,7 +397,7 @@ class StatePage(_Reader, wx.Panel):
 
     def fetch(self, full):
         """`full` reads the desk; a re-build after a push uses the desk model (`fresh=False`)."""
-        return server.device_overview(fresh=full)
+        return device_page.overview(fresh=full)
 
     def shown(self, reply):
         set_text(self.report, "\n".join(overview_lines(reply)))
@@ -439,9 +440,9 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
     def fetch(self, full):
         """The unit's state, and with `full` its USB status, which no push changes and whose read
         rescans the bus."""
-        reply = {"ok": True, "state": server.read_device_state()}
+        reply = {"ok": True, "state": device_page.read_hardware()}
         if full:
-            reply["status"] = server.read_device_status()
+            reply["status"] = device_page.read_status()
         return reply
 
     def shown(self, reply):
@@ -517,7 +518,7 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
 
 class UnitPage(_Reader, scrolled.ScrolledPanel):
     """The settings otherwise reached through the unit's touchscreen, built from
-    `server.UNIT_SETTINGS`, then MIDI control, which has a write of its own."""
+    `desk_labels.UNIT_SETTINGS`, then MIDI control, which has a write of its own."""
 
     def __init__(self, section):
         super().__init__(section.frame.host)
@@ -525,16 +526,16 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self._init_reader()
         self.section = section
         self.frame = section.frame
-        self.data = None             # the last good `server.read_unit_settings`
+        self.data = None             # the last good `device_page.read_unit_settings`
         self.values = {}             # prop: value as the unit last reported it
         self.controls = {}           # prop: its control
         sizer, parent = page_body(self)
         self._sizer = sizer
         self.note = read_only(parent, sizer, "Desk settings status", height=60)
         self.note.SetValue(UNIT_UNREAD)
-        for spec in server.UNIT_SETTINGS:
+        for spec in desk_labels.UNIT_SETTINGS:
             self.controls[spec["prop"]] = self._build(parent, sizer, spec)
-        self.midi = Switch(self, parent, sizer, "Enable MIDI control", server.action_set_midi,
+        self.midi = Switch(self, parent, sizer, "Enable MIDI control", device_page.action_set_midi,
                            *self.field("midi"),
                            description="Lets a MIDI app or controller handle mute, faders, "
                                        "listen and record, without RODE Central.",
@@ -561,7 +562,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         prop = spec["prop"]
 
         def send(value):
-            return server.action_set_unit_setting(prop, int(value))
+            return device_page.action_set_unit_setting(prop, int(value))
         if spec["kind"] == "bool":
             current, remember = self.field(prop)
             return Switch(self, parent, sizer, spec["label"], send,
@@ -584,7 +585,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         return slider
 
     def fetch(self, _full):
-        return server.read_unit_settings()
+        return device_page.read_unit_settings()
 
     def shown(self, reply):
         if not reply.get("ok"):
@@ -594,7 +595,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self.data = reply
         self.values = {s["prop"]: s.get("value") for s in reply.get("settings") or []}
         self.values["midi"] = reply.get("midi")
-        for spec in server.UNIT_SETTINGS:
+        for spec in desk_labels.UNIT_SETTINGS:
             self._show(spec)
         self.midi.show()
         note = "" if reply.get("writable") else (

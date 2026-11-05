@@ -2,7 +2,7 @@
 
 Why offline. The judgement itself is the interesting part, and it cannot be exercised on the real
 desk without deliberately filling a card up - which nobody is going to do, and which would still
-only test one threshold. So this feeds `server._storage_low` synthetic `storageVolumeState` strings
+only test one threshold. So this feeds `device_page._storage_low` synthetic `storageVolumeState` strings
 and pins the decisions. Nothing is read from the unit and nothing is written to it.
 
 Why the judgement exists at all. The desk reports capacity and free space as raw byte counts. A
@@ -21,8 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
+import device_page
 import rcp_read
-import server
 from _testkit import check, patched
 
 GB = 1024 * 1024 * 1024
@@ -38,7 +38,7 @@ def low_for(states):
     with patched((rcp_read, {"find_all": lambda blob, name: (
             [(s, "str") for s in states] if name == "storageVolumeState"
             else real(blob, name))})):
-        return server._storage_low(b"")
+        return device_page._storage_low(b"")
 
 
 def state(capacity, free, inserted=True, mounted=True):

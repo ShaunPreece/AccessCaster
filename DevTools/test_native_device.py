@@ -1,6 +1,6 @@
 """The native window's Device section (Project/native/device_section.py), offline: the Current state
 report and the status bar's summary from an overview, kept current from the desk's pushes, the
-hardware and wireless readings in words, the unit settings built from the server's spec (a value
+hardware and wireless readings in words, the unit settings built from their spec (a value
 off the list kept as it is, a read-only desk refused and said), the wifi controls shown only with
 the radio on, a scan filling in the name to join, and F5 reading only the page shown. Nothing is
 shown and nothing touches a desk.
@@ -14,8 +14,9 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
+import device_page
+import desk_labels
 import network
-import server
 import wx
 from _testkit import check, check_in, check_not_in, check_true
 from native import device_section, firmware_dialog, wifi_dialogs
@@ -152,7 +153,7 @@ check("F5 reads only the page shown, and says so", reads[-1], ("NetworkPage", Tr
 check("and nothing else", len(reads), 6)
 section.network.Hide()
 asked = []
-with _testkit.patched((server, {"device_overview": lambda fresh=True: asked.append(fresh) or {}})):
+with _testkit.patched((device_page, {"overview": lambda fresh=True: asked.append(fresh) or {}})):
     type(section.state).fetch(section.state, True)
     type(section.state).fetch(section.state, False)
 check("a read asks the desk, a re-build the desk model", asked, [True, False])
@@ -163,23 +164,23 @@ section.state.Hide()
 followed = {type(fn.__self__._read.__self__).__name__: names
             for names, fn in frame.desk.watched}
 check("Hardware, Desk settings and Wireless connections follow what they show", followed,
-      {"HardwarePage": set(server.HARDWARE_PROPS), "UnitPage": set(server.UNIT_SETTING_PROPS),
+      {"HardwarePage": set(device_page.HARDWARE_PROPS), "UnitPage": set(device_page.UNIT_SETTING_PROPS),
        "NetworkPage": set(network.PROPS)})
 
 # ---- a read the desk's pushes ask for leaves the USB facts alone --------------------------------
 frame = FakeFrame()
 hw = device_section.DeviceSection(frame).hardware
 calls = []
-real = server.read_device_state, server.read_device_status
-server.read_device_state = lambda: calls.append("state") or {"ok": True, "firmware": "1.7.7"}
-server.read_device_status = lambda: calls.append("status") or {"connected": True}
+real = device_page.read_hardware, device_page.read_status
+device_page.read_hardware = lambda: calls.append("state") or {"ok": True, "firmware": "1.7.7"}
+device_page.read_status = lambda: calls.append("status") or {"connected": True}
 try:
     check("a followed read reads the desk's state alone", (sorted(hw.fetch(False)), calls),
           (["ok", "state"], ["state"]))
     check("a full read rescans the USB as well", (sorted(hw.fetch(True)), calls[1:]),
           (["ok", "state", "status"], ["state", "status"]))
 finally:
-    server.read_device_state, server.read_device_status = real
+    device_page.read_hardware, device_page.read_status = real
 hw.connection.SetValue("Connected and responding")
 hw.shown({"ok": True, "state": {"ok": True, "firmware": "1.7.8", "firmware_update": {}}})
 check("and putting it on the page leaves the USB facts as they were",
@@ -220,9 +221,9 @@ section = device_section.DeviceSection(frame)
 unit = section.unit
 dim = unit.controls["screenDimAfterSeconds"]
 check("before a read a setting refuses", unit._guard(), device_section.UNIT_UNREAD)
-values = {s["prop"]: None for s in server.UNIT_SETTINGS}
+values = {s["prop"]: None for s in desk_labels.UNIT_SETTINGS}
 values.update(screenDimAfterSeconds=45, outputMonFixed=1, screenBrightness=180)
-settings = [dict(s, value=values[s["prop"]]) for s in server.UNIT_SETTINGS]
+settings = [dict(s, value=values[s["prop"]]) for s in desk_labels.UNIT_SETTINGS]
 unit.shown({"ok": True, "settings": settings, "midi": True, "writable": True,
             "device_name": "RODECaster Pro II"})
 check("a dim time off the list is listed as it is",

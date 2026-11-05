@@ -1,7 +1,7 @@
 """The native window's CallMe (Project/native/callme_section.py), offline: the call, its details,
-the plan and the code are shown from the server's payload, the Not ready group appears with only
+the plan and the code are shown from callme_actions' payload, the Not ready group appears with only
 the fixes that apply, a poll redraws only when the listener's version moves and says a new ringing
-call only while announcements are off, each press calls the right server action, a contact is
+call only while announcements are off, each press calls the right action, a contact is
 called, saved and deleted by its code, and hosting is refused mid-call. Nothing is shown and
 nothing touches a desk.
 
@@ -14,6 +14,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
+import callme_actions
 import server
 import wx
 from _testkit import check, check_true, patched
@@ -145,9 +146,9 @@ section.show = real_show
 pressed = []
 actions = {name: (lambda name: lambda *a: pressed.append((name,) + a) or {
     "ok": True, "message": name})(name)
-    for name in ("action_callme_answer", "action_callme_end", "action_callme_extend",
-                 "action_callme_dial", "action_callme_contact_delete")}
-with patched(sync, (server, dict(actions, read_callme_live=lambda: payload(version=9)))):
+    for name in ("action_answer", "action_end", "action_extend", "action_dial",
+                 "action_contact_delete")}
+with patched(sync, (callme_actions, dict(actions, read_live=lambda: payload(version=9)))):
     call_page._on_answer(wx.CommandEvent())
     call_page._on_end(wx.CommandEvent())
     call_page._on_extend(wx.CommandEvent())
@@ -158,9 +159,8 @@ with patched(sync, (server, dict(actions, read_callme_live=lambda: payload(versi
     with patched((callme_section, {"confirm": lambda *_a: True})):
         dial._on_delete(None)
 check("each press calls its action", pressed,
-      [("action_callme_answer",), ("action_callme_end",), ("action_callme_extend",),
-       ("action_callme_dial", "ZZZ999"), ("action_callme_dial", "BBB222"),
-       ("action_callme_contact_delete", "BBB222")])
+      [("action_answer",), ("action_end",), ("action_extend",), ("action_dial", "ZZZ999"),
+       ("action_dial", "BBB222"), ("action_contact_delete", "BBB222")])
 check("and the listener is asked straight after", section._seen, 9)
 dial.code.SetValue("")
 dial._on_dial(None)
