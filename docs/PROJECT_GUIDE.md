@@ -1426,6 +1426,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `desk_model.snapshot`); it keeps only what the desk does not: missed calls, call lengths, each
   slot's `ended` count, and who is ringing and on each slot as heard (see the next rule but one
   under the model).
+- **`online` IS PART OF `Watcher.snapshot`, SO IT MOVES `version`.** The page redraws only when
+  `version` moves, and the network is not a CallMe property: set only in `server._callme_payload`,
+  the Not ready group's "desk is offline" waited for F5 to appear and to clear.
 - **A REDIAL DOES NOTHING UNLESS THE PROPERTY IS CLEARED FIRST.** The desk acts on a change to
   `sipOutgoingCallDetails`, so dialling the code it already holds is stored and ignored; the reply
   then times out with no clue why. `callme.build_dial` writes the factory empty string first.
@@ -2297,6 +2300,11 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **`meters.Watcher` must record a mid-loop exception.** It once died silently, so a broken run was
   summarised as a QUIET CHANNEL. A run is in progress if EITHER the watcher or the isolation exists,
   and each run's end-timer carries its run number.
+- **`meters.Meter.peak` ASKS ITS ENDPOINT'S STATE EVERY `PRESENT_CHECK_S` AND RAISES ONCE IT IS
+  GONE.** The endpoint meter does not raise when Windows removes the endpoint (a USB mode change
+  re-enumerates the desk): it reads 0 for as long as it is gone. Without the check a `Watcher` sits
+  on the dead endpoint, and the clip warning's supervisor, which reopens only a watcher that has
+  ended, never reopens it (measured 5th November 2026).
 
 ## Shows, and what the touchscreen alone can do
 

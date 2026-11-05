@@ -296,6 +296,9 @@ def desk_streams() -> dict:
 # How often a running Watcher re-reads the Windows endpoint volume.
 CEILING_REFRESH_S = 2.0
 
+# How often `Meter.peak` asks whether its endpoint is still there.
+PRESENT_CHECK_S = 2.0
+
 # A ceiling at or below this is not believed and becomes 1.0. Clamping it up instead (`max(0.05,
 # c)`) turns a failed volume read into a clip threshold of 0.05, announcing a whisper as clipping;
 # for a warning that interrupts a take, a miss is cheaper than a false alarm.
@@ -395,7 +398,8 @@ class Meter:
     def __init__(self, endpoint_id: str):
         comtypes.CoInitialize()
         self.id = endpoint_id
-        self._meter = self._vol = self._waker = None
+        self._dev = self._meter = self._vol = self._waker = None
+        self._checked = time.monotonic()
         try:
             self._open(endpoint_id)
         except Exception:
@@ -406,6 +410,7 @@ class Meter:
         enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator,
                                             interface=IMMDeviceEnumerator)
         dev = enum.GetDevice(endpoint_id)
+        self._dev = dev
         self.name = _friendly_name(dev)
         self._meter = dev.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None) \
                          .QueryInterface(IAudioMeterInformation)
@@ -443,11 +448,21 @@ class Meter:
         return self.ceiling
 
     def peak(self) -> float:
-        """The current peak, 0 to 1. Raises when the endpoint has gone (the desk unplugged), which
-        a caller must not read as silence."""
+        """The current peak, 0 to 1. Raises when the endpoint has gone (the desk unplugged, or its
+        USB mode changed), which a caller must not read as silence.
+
+        The meter itself does not raise once its endpoint is removed: it goes on returning 0, and
+        reads again if the same endpoint comes back. So the endpoint's state is asked every
+        `PRESENT_CHECK_S`."""
+        now = time.monotonic()
+        if now - self._checked >= PRESENT_CHECK_S:
+            self._checked = now
+            if self._dev.GetState() != STATE_ACTIVE:
+                raise OSError(f"{self.name} is no longer available.")
         return float(self._meter.GetPeakValue())
 
     def close(self):
+        self._dev = None
         self._vol = None
         if self._waker is not None:
             self._waker.close()

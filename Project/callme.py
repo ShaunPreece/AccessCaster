@@ -617,6 +617,8 @@ class Watcher:
             if view is None:
                 return None
             d = json.loads(json.dumps(view[0]))
+            # Part of what `version` covers, so the page's Not ready group follows the network.
+            d["online"] = desk_model.online()
             d["missed"] = self._missed
             for i, s in enumerate(d["slots"]):
                 s["ended"] = self._ended.get(i, 0)

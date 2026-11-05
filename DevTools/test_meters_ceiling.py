@@ -19,6 +19,7 @@ Usage: python DevTools/test_meters_ceiling.py
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -161,5 +162,27 @@ try:
     check("and nothing calls it silent", [s for s in said if "silent" in s], [])
 finally:
     meters.Meter = real_meter
+
+
+class _Removed:
+    """An endpoint Windows has taken away: its meter still answers 0, its state is not active."""
+    def GetPeakValue(self):
+        return 0.0
+
+    def GetState(self):
+        return 0x4          # DEVICE_STATE_NOTPRESENT
+
+
+m = object.__new__(meters.Meter)
+m.name, m._dev, m._meter = "Desk", _Removed(), _Removed()
+m._checked = time.monotonic()
+check("a removed endpoint reads 0 until the next state check", m.peak(), 0.0)
+m._checked -= meters.PRESENT_CHECK_S
+try:
+    m.peak()
+    raised = False
+except OSError:
+    raised = True
+check("then raises, so a Watcher on it ends and can be reopened", raised, True)
 
 sys.exit(_testkit.finish())

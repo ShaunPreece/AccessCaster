@@ -34,9 +34,9 @@ DESK_CTL = [3]
 KIND = {bool: "bool", int: "int", float: "float", str: "str", list: "pair"}
 
 
-def watcher():
+def watcher(extra=()):
     """A Watcher over a fake desk in the desk model, nothing ringing and hosting on code AB12CD,
-    recording what it says."""
+    recording what it says. `extra` are more blocks, after the CallMe ones."""
     desk_model._reset()
     slot = {"sipSlotCallState": "Idle", "sipSlotCallAddress": "", "sipSlotCallUUID": "",
             "sipSlotCallIsHost": False, "sipSlotCallBitrate": 0.0, "sipSlotCallPacketLoss": 0.0}
@@ -45,7 +45,7 @@ def watcher():
            "sipCallHostingToggleEnabled": True, "sipRemainingWebCalltime": 300,
            "sipLicenceMode": 0}
     blob = node("Rodecaster", {}, [node("SIPSLOT", slot) for _ in DESK_SLOTS]
-                + [node("SIPCALLING", ctl)])
+                + [node("SIPCALLING", ctl)] + list(extra))
     desk_model.dump_finished(desk_model.dump_starting(), blob)
     said = []
     return callme.Watcher(on_say=said.append), said
@@ -275,6 +275,14 @@ check("minutes follow the model, though the Watcher does not narrate them",
 v = w.snapshot()["version"]
 hear(w, DESK_SLOTS[1], "sipSlotCallState", '{"state":"Active","reason":""}')
 check("a slot the plan does not have is ignored", (w.snapshot()["version"], said[-1:]), (v, []))
+
+# The desk going offline changes nothing the Watcher hears, but the page's Not ready group shows it.
+w, said = watcher([node("NETWORK", {"wifiIpAddress": "192.168.7.224"})])
+v = w.snapshot()["version"]
+check("online comes with the snapshot", w.snapshot()["online"], True)
+hear(w, [4], "wifiIpAddress", "")
+check("the desk going offline moves the version, so the page redraws",
+      (w.snapshot()["online"], w.snapshot()["version"]), (False, v + 1))
 desk_model._reset()
 unseeded_said = []
 hear(callme.Watcher(on_say=unseeded_said.append), DESK_CTL, "sipIncomingCallDetails", DETAILS)
