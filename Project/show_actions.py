@@ -304,11 +304,10 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
                         "message": "That backup is no longer on the drive. The list has been "
                                    "refreshed."}
             # NO UUID PRE-CHECK. Refusing a backup whose uuid matches the loaded show assumes the
-            # unit would reject it, and THE UNIT DOES NOT: proven twice on hardware, where a backup
-            # sharing the loaded uuid restored Mic 4's gain from 30 to 50 and again from 42 to 50,
-            # with showControlLastError staying 0. Since a uuid only changes on a factory reset,
-            # that refusal blocks the ordinary case this feature exists for - change something, put
-            # it back - and leaves shows usable only straight after a reset. The unit's own refusal
+            # unit would reject it, and THE UNIT DOES NOT: a backup sharing the loaded uuid
+            # restores, with showControlLastError staying 0. Since a uuid only changes on a factory
+            # reset, that refusal blocks the ordinary case this feature exists for - change
+            # something, put it back - and leaves shows usable only straight after a reset. The unit's own refusal
             # (error 1) is reported below; we simply never guess it in advance.
             before = shows.restore_fingerprint(blob)
             err_before = shows.read_last_error(blob)
@@ -375,13 +374,10 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
 def wake_channels() -> dict:
     """Force the audio engine to re-latch every mic channel, after a reset or an import.
 
-    THE FAULT THIS EXISTS FOR, reproduced deliberately on hardware: after a software factory reset
-    followed by a show import, a mic channel can be COMPLETELY SILENT while the control model is
-    byte-identical to its working state.
-    Measured: 472 properties compared, 8 differed, and all 8 were the new backup's own list entry and
-    the drive's free space. Level 1|1, chain matching the working reference exactly, unmuted, gain
-    and phantom correct - and no audio. So NOTHING CAN DETECT THIS BY READING THE DESK, and any fix
-    that displays a value is wasted effort.
+    THE FAULT THIS EXISTS FOR: after a software factory reset followed by a show import, a mic
+    channel can be COMPLETELY SILENT while the control model matches its working state exactly:
+    level, chain, mute, gain and phantom all correct, and no audio. So NOTHING CAN DETECT THIS BY
+    READING THE DESK, and any fix that displays a value is wasted effort.
 
     WHAT WAKES IT IS A REAL VALUE CHANGE, and only that. Writing the gain back at its CURRENT value
     does nothing at all (measured), which is why the desk's own encoder recovers it: an encoder
@@ -389,8 +385,7 @@ def wake_channels() -> dict:
     a step and puts it straight back.
 
     Kept to MIC channels because that is where a dead input is silently catastrophic and where we
-    have a cheap real-value write. Whether the fault can hit a non-mic channel is UNKNOWN: nothing
-    was plugged into the others when it was reproduced, so it could not be heard either way.
+    have a cheap real-value write. Whether the fault can hit a non-mic channel is UNKNOWN.
     """
     gate = desk_access.cap_gate("input_mic_write",
                      lambda name: f"Cannot wake the channels on a {name}.")

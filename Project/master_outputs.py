@@ -26,8 +26,8 @@ def write_gate():
 
 
 # The two auto-mutes, by name: the writer, the property to read back, and what to call it.
-# Both live in the OUTPUT block and neither is duplicated anywhere else in the model (checked on
-# hardware), and the read-back is still taken BY BLOCK rather than by first occurrence: that costs
+# Both live in the OUTPUT block and neither is duplicated anywhere else in the model, and the
+# read-back is still taken BY BLOCK rather than by first occurrence: that costs
 # nothing and is the habit that stops the next duplicate biting.
 # Each entry carries its own two sentences rather than a shared template, because one phrase cannot
 # serve a plural subject and a singular one ("the monitor speakers will not mute on its own"), and
@@ -67,8 +67,7 @@ def action_set_auto_mute(which: str, on: bool) -> dict:
 
     NEVER REPORT SUCCESS FROM THE WRITE RETURNING. The failure mode is a tick box reading ON while
     the desk reads False - here, an auto-mute the operator believes is on, and feedback through the
-    speakers - and nothing in the app notices, because nothing asks. Every other write in this app
-    reads back before it claims anything.
+    speakers - and nothing in the app notices, because nothing asks.
 
     The state is returned as well as reported, so the page can correct its own switch instead of
     showing a setting the desk does not have.

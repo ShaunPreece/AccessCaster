@@ -55,7 +55,7 @@ def _mute_reach_message(who: str, sources) -> str:
 
 
 def action_set_channel_mute(name: str, on: bool) -> dict:
-    """Mute or unmute a channel from software (channelOutputMute, proven writable on hardware).
+    """Mute or unmute a channel from software (channelOutputMute, a confirmed write).
 
     The real accessibility win here is reach: this is the same mute as the button on the unit, so it
     can be pressed from a shortcut instead of by finding the right button by touch.
@@ -225,9 +225,8 @@ def action_set_channel_wireless_mute(name: str, on: bool) -> dict:
     nothing arrives at all, which is the one you want when somebody walks off still wearing it.
 
     THE REPLY SAYS WHAT WAS SENT, NOT WHAT HAPPENED, and that is deliberate. The write is addressed
-    correctly (the property sits on the same CHANNEL node as the mute, measured) but nobody here owns
-    a transmitter, so it has never been heard to work, and a channel with nothing paired has nothing
-    to obey it. Claiming "the mic is muted" would be the app reading its own write back as an
+    correctly (the property sits on the same CHANNEL node as the mute) but is unverified with a
+    paired transmitter, and a channel with nothing paired has nothing to obey it. Claiming "the mic is muted" would be the app reading its own write back as an
     outcome."""
     ch = channels.ui_channel(name)
     if ch is None:

@@ -29,7 +29,7 @@ def wireless_mics(blob) -> dict:
 
     PRESENT and CONNECTED are different facts and the page needs both. An empty slot list means the
     dump carried no txConnected at all, which is not the same as "no mic is on" and must not be
-    read out as if it were. Nothing has ever been paired here, so this is structure-only until it is.
+    read out as if it were. Unverified with a paired transmitter.
     """
     def col(name, kind=None):
         return rcp_read.values(blob, name, kind)
@@ -131,9 +131,9 @@ def read_status() -> dict:
         # The third radio on the Wireless connections tab. The channels reply uses the same
         # helper, so the two readings cannot drift apart.
         "wireless_mics": wireless_mics(blob),
-        # WHAT CAN BE CHANGED HERE. Three things on this block are proven and writable; everything
-        # else on this page is read-only, and the page says WHICH is which rather than leaving a
-        # user to find out by pressing things.
+        # WHAT CAN BE CHANGED HERE: the wifi radio, the network joined and discoverability.
+        # Everything else on this page is read-only, and the page says WHICH is which rather than
+        # leaving a user to find out by pressing things.
         "writable": "network_write" in devices.get_active_device().caps,
         # Bluetooth scanning is stated as what the app offers, never what the desk can do: it
         # behaves differently on the two desks. The fixed IP IS a fact about the desk: `ipAddress`

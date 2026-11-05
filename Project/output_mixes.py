@@ -65,7 +65,7 @@ def matrix_model() -> dict:
     # ONE LINE. Do not explain Main Mix, Mix Minus and Custom here, and do not claim the source list
     # shows the unit's real current mix: that list is hidden on anything but Custom, because outside
     # Custom it shows stored cross-points the engine ignores. What each mix means is said per output,
-    # about the one selected, by `matrix-mix-summary`; the long version lives on Help & About.
+    # about the one selected; the long version lives in Help.
     note = "Each output carries its own mix. Pick an output to see and change it."
     if read_only:
         note = ("This shows each output's live mix on this device. Changing the mix is not "
@@ -297,8 +297,8 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
         v = max(0.0, min(1.0, float(level01)))
         with desk_access.hid_lock:
             # Ensure Custom mode + the source unlinked. Both writes are idempotent (no-ops if
-            # already so), so we send them unconditionally rather than pay a ~1.5s model read
-            # to check first - that read was the cause of the per-slider lag.
+            # already so), so they are sent unconditionally: a ~1.5 s model read to check first
+            # would lag every slider step.
             rcp_transfer.set_output_routing(output_index, 2)       # Custom
             rcp_transfer.set_cross_point_linked(output_index, source_index, False)
             rcp_transfer.set_cross_point_level(output_index, source_index, v)
@@ -366,8 +366,8 @@ def apply_matrix(routing: dict) -> dict:
     just the monitor ones, and an output the connected desk does not have is skipped by name rather
     than written by index.
     """
-    # The saved matrix is Pro II-shaped; a desk that cannot write the matrix (e.g. the Duo, cap off)
-    # must not have Pro II cross-points written to it, so skip the matrix re-apply there.
+    # A desk without the matrix_write cap must not have cross-points written to it, so the matrix
+    # re-apply is skipped there.
     if write_gate() is not None:
         return {"applied": 0, "failed": 0, "skipped": True}
     scheme = routing.get("mix_scheme")

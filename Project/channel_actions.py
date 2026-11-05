@@ -246,8 +246,8 @@ def action_set_channel_effect(name: str, effect: str, on: bool) -> dict:
 
 
 def action_set_channel_effect_param(name: str, param: str, value01: float) -> dict:
-    """Set one channel-effect param (echo*/reverb*) on a mic channel. value01 is 0.0..1.0
-    (decoded: float64 on the strip's EFFECTS_PARAMETERS node, byte-for-byte the RODE app's write)."""
+    """Set one channel-effect param (echo*/reverb*) on a mic channel. value01 is 0.0..1.0, written
+    as a float64 on the strip's EFFECTS_PARAMETERS node."""
     ch = channels.ui_channel(name)
     if ch is None or ch["kind"] != "mic":
         return {"ok": False, "message": "Echo and reverb are available on mic channels only."}

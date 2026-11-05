@@ -43,9 +43,8 @@ def cap_gate(cap: str, refusal) -> dict | None:
 
     THE ONE SHAPE EVERY RISKY WRITE FAMILY IS GATED BY. The rule behind all of them: a selector
     proven on a RODECaster Pro II has NOT been proven on a Duo, and a wrong selector does not simply
-    fail - it can append a stray property that only a factory reset clears, which has happened on
-    hardware here. So a device without the cap REFUSES BY NAME and says why, rather than writing
-    blind and hoping.
+    fail - it can append a stray property that only a factory reset clears. So a device without
+    the cap REFUSES BY NAME and says why, rather than writing blind and hoping.
 
     Each gate keeps its own sentence, because what the user can and cannot do differs per family
     and a generic "not supported" would be useless to them.

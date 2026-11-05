@@ -41,9 +41,7 @@ _BASELINE_ASKED_KEY = "baseline_asked"
 # it takes five seconds, which is the kind of wrong that makes somebody skip the backup.
 #
 # Reading off the mounted pad volume runs at ~20 MB/s (12.14 MB in 0.56 s, and seven smaller files
-# at 12-21 MB/s), so the whole grid moves in about a second. The copy is real rather than a cache
-# trick or an empty file: every WAV was md5'd on the volume and again in the backup folder, and all
-# eight matched byte for byte.
+# at 12-21 MB/s), so the whole grid moves in about a second.
 #
 # SO THE HONEST SHAPE IS THROUGHPUT, NOT A PER-PAD CONSTANT. This grid's biggest pad is 12 MB; a
 # ten-minute bed at 100 MB would take five seconds on its own. One second per pad is right for pads
@@ -68,7 +66,7 @@ def _baseline_name() -> str:
     """The auto-name for a baseline: what it is, when it was taken, and which desk.
 
     Deliberately not "app install": a year from now that says nothing about which unit or when.
-    Kept inside profiles.safe_name's character set (letters, digits, spaces, dashes) and its 40
+    Kept inside paths.safe_name's character set (letters, digits, spaces, dashes) and its 40
     character limit, which is why there are no brackets and the desk is named without the
     "RODECaster" every desk shares: the longest date, "30th September 2026", leaves room for no
     more. The date is spoken rather than numeric because a profile name is heard."""

@@ -71,8 +71,8 @@ def _available() -> dict:
 def action_export() -> dict:
     """Write this app's own settings to a file: shortcuts, announcements, level warnings.
 
-    NOT the desk - that is a profile. This is the half no profile has ever carried, so before it
-    existed a reinstall lost every keyboard shortcut with no way back."""
+    NOT the desk - that is a profile. This is the half no profile carries: without it, a reinstall
+    loses every keyboard shortcut with no way back."""
     payload = app_settings.build_export(settings_file.load())
     # Writing an empty file would be a cheerful success for a no-op, and the user would carry it to
     # the new machine believing their shortcuts were in it.

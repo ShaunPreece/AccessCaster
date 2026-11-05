@@ -148,10 +148,9 @@ def read_unit_settings() -> dict:
     """The Device page's "Unit settings" group: one dump, every setting, and whether this desk can
     write them.
 
-    `writable` is the device's "unit_settings" cap. Every selector was proven on the Pro II and
-    none has ever been seen on a Duo, so the Duo reads them and refuses to write - the same
-    capture-wider-than-write rule the fader levels use, and the refusal that keeps a wrong selector
-    (the stray-append hazard) off an unproven desk."""
+    `writable` is the device's "unit_settings" cap. A desk without it reads them and refuses to
+    write - the same capture-wider-than-write rule the fader levels use, and the refusal that keeps
+    a wrong selector (the stray-append hazard) off an unproven desk."""
     dev = devices.get_active_device()
     try:
         with desk_access.hid_lock:
@@ -163,8 +162,7 @@ def read_unit_settings() -> dict:
     # MIDI LIVES ON THIS TAB, not on one of its own for a single switch, so its value is reported
     # here and the tab still makes exactly ONE call. It is NOT a UNIT_SETTINGS
     # entry and deliberately so: that spec drives the profile's restore set as well as the page, and
-    # MIDI already has its own captured write (rcp_transfer.set_midi_control, byte-verified against
-    # midi_on/midi_off) and its own key in a profile. Adding it there would write it twice on every
+    # MIDI already has its own write (rcp_transfer.set_midi_control) and its own key in a profile. Adding it there would write it twice on every
     # restore. Read off the dump we already have, by exact name for the reason in
     # _unit_setting_values.
     midi = (rcp_read.snapshot_properties(blob).get("systemMidiControl") or [None])[0]

@@ -24,8 +24,7 @@ import wording
 # We read the layout from the vector and write it with rcp_transfer.set_fader_source
 # (CHANNEL[index]). The per-device SHAPE (vector length, physical/virtual split, assignable channel
 # list + labels, factory-default vector) lives in devices.FaderSpec: the Pro II has 9
-# faders and Mic 1-4; the Duo has a 10-entry vector, code 2 = Headset (not Mic 3), no Mic3/Mic4,
-# and NO confirmed default so its 'reset faders' refuses instead of writing a guessed layout.
+# faders and Mic 1-4; the Duo has a 10-entry vector, code 2 = Headset (not Mic 3), no Mic3/Mic4.
 
 
 def active_faders():
@@ -38,8 +37,8 @@ def chain_follow_on() -> bool:
 
     Gated behind its own cap rather than riding on "fader_write", because the Duo has swap cases the
     Pro II does not: its default layout contains an EMPTY strip (-1) and a DUPLICATED source (USB 2
-    twice), and index() on a duplicate finds only the first. Until the same read-back test has been
-    run on a Duo, the layout moves there and the chain stays on its strip."""
+    twice), and index() on a duplicate finds only the first. A desk with the layout write but not
+    this cap moves the layout and leaves the chain on its strip."""
     return "chain_follow" in devices.get_active_device().caps
 
 
@@ -160,8 +159,8 @@ def _chain_note(spec, parked=(), homeless=(), moved=(), restored=()) -> str:
 
 def fader_write_gate():
     """Fader-assignment WRITES. Reads and labels are always device-aware and safe; writes gate
-    because a device whose fader write model is only partly known (the Duo: empty strips encoded
-    as -1, no confirmed default vector) must refuse rather than write a guessed layout."""
+    because a device whose fader write model is only partly known must refuse rather than write a
+    guessed layout."""
     return desk_access.cap_gate("fader_write", lambda name:
                      f"Changing the fader layout is not enabled on the {name} yet, so the faders "
                      f"are read-only here. You can still see the current layout.")
@@ -544,7 +543,7 @@ def action_set_fader(fader_index: int, code: int) -> dict:
     produces a valid layout: the displaced channel swaps onto wherever `code` used to sit, and
     any duplicate/orphan left by an already-messy layout is tidied (see _tidy_fader_target).
     Re-reads to report the real result. Device-aware (devices.FaderSpec); refused on a device
-    without the "fader_write" cap (the Duo)."""
+    without the "fader_write" cap."""
     gate = fader_write_gate()
     if gate is not None:
         return gate
@@ -730,7 +729,7 @@ def action_set_fader_level(fader: int, percent: int) -> dict:
 def action_set_monitor_speaker_level(percent: int) -> dict:
     """Set the monitor SPEAKER level, 0-100 percent (outputMonLevel).
 
-    Named for the speaker deliberately: action_set_monitor_level further down is a different thing
+    Named for the speaker deliberately: output_mixes.action_set_monitor_level is a different thing
     entirely, one source's level inside a monitor MIX (a matrix cross-point), and a shared name
     would silently shadow one with the other."""
     gate = level_write_gate()

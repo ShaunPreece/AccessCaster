@@ -333,9 +333,8 @@ def action_drop_marker() -> dict:
 
     THE REPLY IS DELIBERATELY NOT "DONE". Nothing over USB confirms a marker: the desk consumes the
     write and pushes the field back cleared, and no readable property changes, so the app can only
-    honestly say it was sent and where it believes it landed. The proof lives in the file, as a
-    standard WAV cue point - which is how this was confirmed at all (two markers at exactly 4.0 s
-    and 8.0 s in a take read off the drive on a PC, against a marker-free take with no cue chunk).
+    honestly say it was sent and where it believes it landed. The marker lands in the file, as a
+    standard WAV cue point.
 
     Refused when nothing is running, because a marker has no meaning without a position. The
     ELAPSED TIME is what makes the reply useful: "marker at 2 minutes 5 seconds" is something you
