@@ -11,7 +11,7 @@ from collections import namedtuple
 import wx
 import wx.lib.scrolledpanel as scrolled
 
-import server
+import pad_actions
 from native import a11y
 from pad_records import EFFECT_FLAG
 from native.calls import call
@@ -222,7 +222,7 @@ class FxPage(scrolled.ScrolledPanel):
             grid = self.preview_grid
             if grid is None:
                 return {"ok": True}
-            return server.action_preview_update(grid, control.param, device_value(control, value))
+            return pad_actions.action_preview_update(grid, control.param, device_value(control, value))
         return send
 
     def included(self, box):
@@ -239,7 +239,7 @@ class FxPage(scrolled.ScrolledPanel):
         """Send (param, value) edits to the preview pad in order, stopping at the first refused."""
         def stream():
             for param, value in edits:
-                reply = server.action_preview_update(grid, param, value)
+                reply = pad_actions.action_preview_update(grid, param, value)
                 if not reply.get("ok"):
                     return reply
             return {"ok": True}
@@ -251,7 +251,7 @@ class FxPage(scrolled.ScrolledPanel):
 
     def _on_mic(self, _event):
         if self.preview_grid is not None:
-            call(self, server.action_preview_update, self.preview_grid, "padEffectInput",
+            call(self, pad_actions.action_preview_update, self.preview_grid, "padEffectInput",
                  self._mic() - 1, done=self._streamed)
 
     def _on_preview(self, _event):
@@ -278,7 +278,7 @@ class FxPage(scrolled.ScrolledPanel):
         stack, colour, mic = self.stack(), self._colour(), self._mic()
         job = JobDialog(self, "Starting the live preview",
                         "Finding an empty pad and putting the effect on it.",
-                        lambda dialog: call(dialog, server.action_preview_start, stack, colour,
+                        lambda dialog: call(dialog, pad_actions.action_preview_start, stack, colour,
                                             mic, done=dialog.finish),
                         stop=None, closable=False)
         with job:
@@ -312,7 +312,7 @@ class FxPage(scrolled.ScrolledPanel):
             if announce or not reply.get("ok"):
                 self.frame.say(reply.get("message") or "Live preview stopped.")
             self.section.read()
-        call(self, server.action_preview_stop, grid, done=stopped)
+        call(self, pad_actions.action_preview_stop, grid, done=stopped)
 
     # ---- saving and deleting --------------------------------------------------------------------
 
@@ -344,7 +344,7 @@ class FxPage(scrolled.ScrolledPanel):
             self.name.SetValue("")
             # The borrowed pad goes back once the effect is saved.
             self._stop_preview(announce=False)
-        call(self, server.action_save_fx_preset, name, stack, self._colour(), done=done)
+        call(self, pad_actions.action_save_fx_preset, name, stack, self._colour(), done=done)
 
     def _on_delete(self, _event):
         names = list(self.model.get("custom_fx") or [])
@@ -365,4 +365,4 @@ class FxPage(scrolled.ScrolledPanel):
                 self._show_saved(keep=max(0, index - 1) if index >= len(self.model["custom_fx"])
                                  else index)
                 self.saved.SetFocus()
-        call(self, server.action_delete_fx_preset, name, done=done)
+        call(self, pad_actions.action_delete_fx_preset, name, done=done)

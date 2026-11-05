@@ -18,6 +18,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
 import devices
+import pad_actions
 import server
 import soundpad
 import wx
@@ -176,8 +177,8 @@ with as_device(devices.PRO2):
                controls_named(dialog, "How the pad triggers") is None)
 
     sent = []
-    with patched((server, {"action_set_pad_gain": lambda *a: sent.append(a) or {"ok": True}})):
-        dialog._write(server.action_set_pad_gain, scale=2)(-15)
+    with patched((pad_actions, {"action_set_pad_gain": lambda *a: sent.append(a) or {"ok": True}})):
+        dialog._write(pad_actions.action_set_pad_gain, scale=2)(-15)
     check("a volume write goes in decibels", sent, [(1, -7.5)])
     check_true("a write is remembered for the re-read", dialog.wrote)
     current, remember = dialog.field("envelope", "fade_in", scale=100)
@@ -246,7 +247,7 @@ with as_device(devices.PRO2):
         dialog._on_apply(None)
     check("a MIDI trigger on an empty pad asks nothing and plans the create",
           (dialog.plan.action, dialog.plan.args, dialog.plan.clears),
-          (server.action_create_special_pad, (5, "trigger"), False))
+          (pad_actions.action_create_special_pad, (5, "trigger"), False))
     dialog.kind.SetSelection(3)
     dialog._show_kind()
     dialog.mixer.SetSelection(4)
@@ -264,7 +265,7 @@ with as_device(devices.PRO2):
     check_true("an effect's sliders are hidden until it is included",
                not reverb.sliders["reverbMix"][1].slider.IsShown())
     streamed = []
-    with patched((server, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
+    with patched((pad_actions, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
         reverb.include.SetValue(True)
         fx.included(reverb)
         pitch.include.SetValue(True)
@@ -331,7 +332,7 @@ with as_device(devices.PRO2):
         fx.preview.SetValue(True)
         fx._on_preview(None)
     check("a preview starts with the effect as built, on the chosen mic",
-          started, [(server.action_preview_start, (fx.stack(), 3, 1))])
+          started, [(pad_actions.action_preview_start, (fx.stack(), 3, 1))])
     check("in a wait dialog that stays until it is live", jobs,
           [("Starting the live preview", False)])
     check_true("and once live it says nothing over the switch",
@@ -345,7 +346,7 @@ with as_device(devices.PRO2):
     check_true("a start that fails says why in a dialog and switches back off",
                shown == [("Live preview not started", "No room.")] and not fx.preview.GetValue())
     fx.preview_grid = 5
-    with patched((server, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
+    with patched((pad_actions, {"action_preview_update": lambda *a: streamed.append(a) or {"ok": True}})):
         fx.streamer(reverb.sliders["reverbMix"][0])(80)
     check("while it runs a slider streams to the preview pad", streamed[-1], (5, "reverbMix", 0.8))
     fx.preview_grid, fx._preview_busy = None, False
@@ -359,7 +360,7 @@ with as_device(devices.PRO2):
     exported = []
     with patched((pad_maint, {"call": lambda _o, fn, *a, done=None: exported.append((fn, a))})):
         maint._on_export(None)
-    check("Export copies the chosen pad", exported, [(server.action_export_pad, (1,))])
+    check("Export copies the chosen pad", exported, [(pad_actions.action_export_pad, (1,))])
     maint._exporting = False
     section.show(model_with([empty]))
     check("with no sound pad the list says so", maint.export_choice.GetItems(),

@@ -34,6 +34,7 @@ import device_page
 import devices
 import diagnostics
 import network
+import output_mixes
 import pad_shortcuts
 import rcp_read
 import recorder
@@ -550,7 +551,7 @@ def _run_unit(arg: str) -> dict:
 def _scheme_commands() -> list:
     out = []
     try:
-        schemes = server.read_routing_schemes()
+        schemes = output_mixes.read_routing_schemes()
     except Exception as exc:
         diagnostics.event("hotkeys.catalogue_partial", "mix schemes not listed", error=str(exc))
         return out
@@ -570,7 +571,7 @@ def _scheme_commands() -> list:
 
 def _run_scheme(arg: str) -> dict:
     kind, _, name = arg.partition(":")
-    return server.action_apply_routing_scheme(name, builtin=(kind == "builtin"))
+    return output_mixes.action_apply_routing_scheme(name, builtin=(kind == "builtin"))
 
 
 # ---------------------------------------------------------------------------------------------

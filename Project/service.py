@@ -20,6 +20,7 @@ import diagnostics
 import encoder_hold
 import encoder_home
 import firmware
+import pad_actions
 import pad_shortcuts
 import recording
 import rode_app
@@ -98,7 +99,7 @@ def stop(reason: str) -> None:
     server.stop_virtual_devices()
     shortcuts.stop()
     pad_shortcuts.release_held()
-    server.cleanup_preview_on_exit()
+    pad_actions.cleanup_preview_on_exit()
     speech.stop()
     rode_app.stop()
     desk_live.stop()

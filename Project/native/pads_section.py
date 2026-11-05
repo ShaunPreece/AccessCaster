@@ -3,13 +3,13 @@ or what it does changed, each in a dialog named with the pad (`pad_dialogs`); Vo
 (`pad_fx`); and Pad maintenance (`pad_maint`).
 
 The pads are not part of the window's desk state: they come from a model dump of their own
-(`server.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on F5,
+(`pad_actions.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on F5,
 after a change made here, and once the desk has pushed a change to a pad (`FollowDesk`). Never on
 show, like every page.
 """
 import wx
 
-import server
+import pad_actions
 import soundpad
 from native import a11y
 from native.calls import call
@@ -69,7 +69,7 @@ class PadsSection:
             self._again = bool(self._again) or announce
             return
         self._reading = True
-        call(self.frame, server.soundpad_model, done=lambda model: self._read_done(model, announce))
+        call(self.frame, pad_actions.soundpad_model, done=lambda model: self._read_done(model, announce))
 
     def _read_done(self, model, announce):
         self._reading = False

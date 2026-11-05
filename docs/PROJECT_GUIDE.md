@@ -269,7 +269,9 @@ The layers, bottom up:
 - Feature modules on top: `channels.py`, `soundpad.py`, `profiles.py`, `routing_schemes.py`,
   `recorder.py`, `recording.py` (the Recording page's app side, over `recorder.py`),
   `firmware.py` (the check and the install, over `desk_firmware.py`), `callme_actions.py` (CallMe's
-  app side, over `callme.py`), `device_page.py` (the Device page and the desk's status), `shows.py`,
+  app side, over `callme.py`), `device_page.py` (the Device page and the desk's status),
+  `pad_actions.py` (the SMART pads' app side, over `soundpad.py`), `output_mixes.py` (the output
+  mixes and mix schemes, over `routing_schemes.py`), `shows.py`,
   `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
   over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
@@ -1167,7 +1169,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   is audible locally without its own screen reader going back to it). Mix Minus MODE dropping the
   output's own source is the desk's own doing and is a separate thing.
 - **THERE IS ONE MATRIX CAPTURE AND ONE MATRIX APPLY, and they live in `routing_schemes.py`.** A
-  profile stores the scheme verbatim (`routing.mix_scheme`) and `server._apply_matrix` hands it
+  profile stores the scheme verbatim (`routing.mix_scheme`) and `output_mixes.apply_matrix` hands it
   straight back. Do not grow a second copy in `profiles.py`: the one that used to be there covered
   the monitor outputs only and recorded levels for excluded cells.
 
@@ -1311,7 +1313,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 ## Soundpads
 
 - **A LIVE PREVIEW EDIT IS WRITTEN ONLY TO A PAD STILL NAMED "Preview"** (`soundpad.preview_write`,
-  `name=PREVIEW_NAME`). Edits are queued (`server._PreviewWriter`) and can be written after the
+  `name=PREVIEW_NAME`). Edits are queued (`pad_actions._PreviewWriter`) and can be written after the
   preview has ended; without the check, a late one lands on whatever pad was made since at that
   grid. `action_preview_stop` also drops what is waiting (`forget`). `preview_update` is the one
   caller with `name=None`: an in-place edit of any pad, for tools.
@@ -1974,7 +1976,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `mixLink`, which is pushed, is not the inclusion: it stays True for a source on no fader.
 - **ITS SOURCE SWITCHES ARE HIDDEN ON ANYTHING BUT A CUSTOM MIX.** Outside Custom the desk ignores
   the cross-points it has stored, so the switches would describe a mix the output does not carry.
-- **A MONITOR MIX LEVEL WRITE MAKES ITS OUTPUT CUSTOM** (`server.action_set_monitor_level` writes
+- **A MONITOR MIX LEVEL WRITE MAKES ITS OUTPUT CUSTOM** (`output_mixes.action_set_monitor_level` writes
   the mode first), which the desk does not push back; the write reaches the desk model, which is
   enough. The per-output reset re-reads instead, since what its link requests do to the levels
   comes back from no write of ours.
@@ -2232,7 +2234,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   app's: measured, the foreground two seconds after the call was still AccessCaster. A window you
   were not moved to is indistinguishable from nothing having happened, and that is exactly how it
   was reported. Windows will not let a background process take the foreground unaided, so
-  `server._open_folder_focused` borrows the input state of the window that has it
+  `folders._open_folder_focused` borrows the input state of the window that has it
   (`AttachThreadInput`). Match the window on a title PREFIX: Explorer sets the folder name first and
   appends " - File Explorer" a moment later, so an equality test passes or fails on how fast the
   poll got there. Failing to focus is NOT failing to open, so everything after `startfile` swallows

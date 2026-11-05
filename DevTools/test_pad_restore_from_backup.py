@@ -15,6 +15,8 @@ import time
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import devices
+import output_mixes
+import pad_actions
 import pad_shortcuts
 import profiles
 import rcp_transfer
@@ -40,11 +42,11 @@ def load(name):
 
 def wait_for_job():
     for _ in range(100):
-        st = server.pad_restore_status()
+        st = pad_actions.restore_status()
         if st["done"] and not st["running"]:
             return st
         time.sleep(0.05)
-    return server.pad_restore_status()
+    return pad_actions.restore_status()
 
 
 calls = []
@@ -71,7 +73,7 @@ fakes = (
                 or {"cleared": [2], "failed": []},
                 "tidy_unused_pad_audio": lambda progress=None: calls.append("tidy") or {}}),
     (pad_shortcuts, {"pads_stale": lambda: calls.append("shortcuts stale")}),
-    (server, {"_apply_matrix": lambda *a: calls.append("matrix")}),
+    (output_mixes, {"apply_matrix": lambda *a: calls.append("matrix")}),
 )
 
 with as_device(devices.PRO2), patched(*fakes):

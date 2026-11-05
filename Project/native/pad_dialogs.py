@@ -6,7 +6,7 @@ from collections import namedtuple
 
 import wx
 
-import server
+import pad_actions
 import soundpad
 from native import a11y
 from native.calls import call
@@ -59,7 +59,7 @@ class SettingsDialog(SpeakingDialog):
         self._build_name(sizer)
         self._add(Choice(self, self, sizer, "Colour",
                          [(c["value"], c["label"]) for c in model["colours"]],
-                         self._write(server.action_set_pad_colour), *self.field("colour"),
+                         self._write(pad_actions.action_set_pad_colour), *self.field("colour"),
                          guard=self._guard))
         kind = pad["type"]
         if kind == soundpad.PAD_TYPE_SOUND:
@@ -139,33 +139,33 @@ class SettingsDialog(SpeakingDialog):
             if reply.get("ok"):
                 self.pad["name"] = name
             self.reply(source, reply)
-        call(self, server.action_set_pad_name, self.grid, name, done=done)
+        call(self, pad_actions.action_set_pad_name, self.grid, name, done=done)
 
     # ---- sound pads ---------------------------------------------------------------------------
 
     def _build_sound(self, sizer):
         model = self.model
         self._add(Slider(self, self, sizer, "Volume", -120, 24,
-                         self._write(server.action_set_pad_gain, scale=2),
+                         self._write(pad_actions.action_set_pad_gain, scale=2),
                          *self.field("gain", scale=2),
                          words=lambda units: f"{units / 2:g} dB", unread=-24))
         self._add(Choice(self, self, sizer, "How the pad plays",
                          [(m["value"], m["label"]) for m in model["play_modes"]],
-                         self._write(server.action_set_play_mode), *self.field("play_mode"),
+                         self._write(pad_actions.action_set_play_mode), *self.field("play_mode"),
                          description="Toggle: one press starts the sound and the next stops it. "
                                      "Hold: it plays only while you hold the pad. One Shot: each "
                                      "press replays it from the start, and it cannot loop.",
                          guard=self._guard, accepted=self._play_mode_set))
         self._add(Switch(self, self, sizer, "Restart from the beginning on each press",
-                         self._write(server.action_set_replay), *self.field("replay"),
+                         self._write(pad_actions.action_set_replay), *self.field("replay"),
                          guard=self._guard))
         self.loop = self._add(Switch(self, self, sizer, "Loop: repeat until stopped",
-                                     self._write(server.action_set_pad_loop),
+                                     self._write(pad_actions.action_set_pad_loop),
                                      *self.field("loop"), guard=self._guard))
         box_sizer, box = group(self, sizer, "Trim and fade")
         for f in model["extra_edit"]["envelope"]:
             slider = self._add(Slider(self, box, box_sizer, f["label"], 0, 100,
-                                      self._write(server.action_set_pad_envelope, f["key"]),
+                                      self._write(pad_actions.action_set_pad_envelope, f["key"]),
                                       *self.field("envelope", f["key"], scale=100),
                                       words=lambda units: f"{units} percent"))
             slider.acc.description = f["help"]
@@ -192,22 +192,22 @@ class SettingsDialog(SpeakingDialog):
         pad, model = self.pad, self.model
         self._add(Choice(self, self, sizer, "How the pad triggers",
                          [(t["value"], t["label"]) for t in model["mixer_triggers"]],
-                         self._write(server.action_set_mixer_trigger), *self.field("mixer_trigger"),
+                         self._write(pad_actions.action_set_mixer_trigger), *self.field("mixer_trigger"),
                          guard=self._guard))
         if pad["fade"] is not None:
             box_sizer, box = group(self, sizer, "Fade times")
             for f in model["extra_edit"]["fade"]:
                 slider = self._add(Slider(self, box, box_sizer, f["label"], 0, int(f["max"] * 2),
-                                          self._write(server.action_set_pad_fade, f["key"], scale=2),
+                                          self._write(pad_actions.action_set_pad_fade, f["key"], scale=2),
                                           *self.field("fade", f["key"], scale=2), words=_seconds))
                 slider.acc.description = f["help"]
             self._add(Switch(self, box, box_sizer, "Leave the host's mic out of the fade",
-                             self._write(server.action_set_pad_flag, "fade_exclude_host"),
+                             self._write(pad_actions.action_set_pad_flag, "fade_exclude_host"),
                              *self.field("fade", "exclude_host"), guard=self._guard))
         if pad["censor"] is not None:
             file = (pad["censor"]["file"] or "").split("/")[-1]
             self._add(Switch(self, self, sizer, "Use my own sound instead of the beep",
-                             self._write(server.action_set_pad_flag, "censor_custom"),
+                             self._write(pad_actions.action_set_pad_flag, "censor_custom"),
                              *self.field("censor", "custom"), guard=self._guard,
                              description=(f"The sound on the desk for this pad is {file}." if file
                                           else "No sound of your own is on the desk for this pad, "
@@ -217,7 +217,7 @@ class SettingsDialog(SpeakingDialog):
             box_sizer, box = group(self, sizer, "Who is in the Back Channel")
             for source in model["back_channel_sources"]:
                 self._add(Switch(self, box, box_sizer, source["label"],
-                                 self._write(server.action_set_back_channel, source["prop"]),
+                                 self._write(pad_actions.action_set_back_channel, source["prop"]),
                                  *self.field("back_channel", source["prop"]), guard=self._guard,
                                  description="While the pad is on, Mic 1 and everyone ticked talk "
                                              "privately. With nobody ticked the pad does nothing."))
@@ -228,13 +228,13 @@ class SettingsDialog(SpeakingDialog):
         spec = self.model["trigger_edit"]
         box_sizer, box = group(self, sizer, "What this pad sends")
         self._add(Switch(self, box, box_sizer, "Use a custom mapping instead of the default",
-                         self._write(server.action_set_pad_trigger, "custom"),
+                         self._write(pad_actions.action_set_pad_trigger, "custom"),
                          *self.field("trigger", "custom"), guard=self._guard,
                          accepted=self._custom_set,
                          description="Switching it off forgets your numbers, as the desk itself "
                                      "does."))
         for f in spec["fields"]:
-            send = self._write(server.action_set_pad_trigger, f["key"])
+            send = self._write(pad_actions.action_set_pad_trigger, f["key"])
             if f["choices"]:
                 self._add(Choice(self, box, box_sizer, f["label"],
                                  [(c["value"], c["label"]) for c in spec[f["choices"]]], send,
@@ -308,7 +308,7 @@ def add_sound(grid, path):
             raw = f.read()
     except OSError as exc:
         return {"ok": False, "message": f"Could not read {name}: {exc.strerror}."}
-    return server.action_add_sound(grid, name, raw)
+    return pad_actions.action_add_sound(grid, name, raw)
 
 
 class ChangeDialog(SpeakingDialog):
@@ -417,7 +417,7 @@ class ChangeDialog(SpeakingDialog):
             if not confirm(self, "Clear this pad?",
                            f"This empties {place}, removing {content(pad)}.", "Clear"):
                 return
-            self.plan = Plan(f"Clearing {place}.", server.action_clear_pad, (pad["grid"],), True)
+            self.plan = Plan(f"Clearing {place}.", pad_actions.action_clear_pad, (pad["grid"],), True)
             self.EndModal(wx.ID_OK)
             return
         if key == "sound" and not self.path:
@@ -434,14 +434,14 @@ class ChangeDialog(SpeakingDialog):
                         "seconds.", add_sound, (pad["grid"], self.path), False)
         elif key == "fx":
             effect = self.recipes[self.fx.GetSelection()]
-            plan = Plan(f"Putting {effect} on {place}.", server.action_assign_fx,
+            plan = Plan(f"Putting {effect} on {place}.", pad_actions.action_assign_fx,
                         (pad["grid"], effect), False)
         elif key == "mixer":
             mode, label = self.mixer_modes[self.mixer.GetSelection()]
-            plan = Plan(f"Putting {label} on {place}.", server.action_create_special_pad,
+            plan = Plan(f"Putting {label} on {place}.", pad_actions.action_create_special_pad,
                         (pad["grid"], f"mixer:{mode}"), False)
         else:
-            plan = Plan(f"Putting a MIDI trigger on {place}.", server.action_create_special_pad,
+            plan = Plan(f"Putting a MIDI trigger on {place}.", pad_actions.action_create_special_pad,
                         (pad["grid"], "trigger"), False)
         self.plan = plan
         self.EndModal(wx.ID_OK)

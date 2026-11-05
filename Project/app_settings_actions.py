@@ -14,6 +14,7 @@ import announcer
 import app_settings
 import autostart  # the HKCU Run entry, shared with installer.iss
 import callme
+import folders
 import meters
 import server
 import settings_file
@@ -37,7 +38,7 @@ def read_announce() -> dict:
 
 def export_dir() -> str:
     """Where an app-settings export goes. The point of this one is to survive a reinstall."""
-    return server.documents_folder("App settings")
+    return folders.documents_folder("App settings")
 
 
 def _available() -> dict:
@@ -161,4 +162,4 @@ def action_set_autostart(on: bool) -> dict:
 
 def action_open_export_folder() -> dict:
     """Open the folder the export went to, so the file can actually be copied somewhere safe."""
-    return server.open_folder_reply(export_dir(), "The folder")
+    return folders.open_folder_reply(export_dir(), "The folder")

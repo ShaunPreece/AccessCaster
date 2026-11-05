@@ -27,6 +27,7 @@ import _testkit
 import announcer
 import desk_access
 import desk_model
+import output_mixes
 import pad_shortcuts
 import server
 import service
@@ -107,7 +108,7 @@ with patched(
         (server.rcp_transfer, {"set_output_routing": lambda out, mode: writes.append(("mode", mode)),
                                "set_cross_point_excluded": excluded}),
         (server.time, {"sleep": lambda s: None}),
-        (server, {"_active_matrix": lambda: _Matrix()})):
+        (output_mixes, {"active_matrix": lambda: _Matrix()})):
     iso = server._ChatIsolation(0)
     before = {0: False, 1: False, 2: False, 3: False}
     iso._snapshot = lambda: (2, dict(before), {0: {"level": 1.0}})

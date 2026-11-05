@@ -138,7 +138,7 @@ def test_wav(name: str = "accesscaster-test-tone.wav", seconds: float = 0.5) -> 
     sound if it is ever left on a desk.
 
     Written once into the temp dir and reused. Mono 22.05 kHz 16-bit, which is well inside what the
-    pad player accepts (see server.action_add_sound: every rate and depth tried plays natively).
+    pad player accepts (see pad_actions.action_add_sound: every rate and depth tried plays natively).
     """
     import math
     import struct

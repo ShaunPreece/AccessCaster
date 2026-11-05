@@ -6,6 +6,7 @@ import datetime
 
 import wx
 
+import pad_actions
 import server
 import soundpad
 import wording
@@ -24,7 +25,7 @@ def run_job(owner, title, working, action, *args, reread=True):
     Nothing else can be started meanwhile."""
     def work():
         reply = action(*args)
-        return {"reply": reply, "model": server.soundpad_model() if reread else None}
+        return {"reply": reply, "model": pad_actions.soundpad_model() if reread else None}
 
     job = JobDialog(owner, title, working, lambda dialog: call(dialog, work, done=dialog.finish),
                     stop=None, closable=False)
@@ -144,7 +145,7 @@ class MaintPage(wx.Panel):
             return
         self._finished(self.clear_all, run_job(self, "Clearing all pads",
                                                "Clearing every pad. Please wait.",
-                                               server.action_clear_all_pads),
+                                               pad_actions.action_clear_all_pads),
                        ("Pads cleared", "Pads not cleared"))
 
     def _on_tidy(self, _event):
@@ -156,7 +157,7 @@ class MaintPage(wx.Panel):
             return
         self._finished(self.tidy, run_job(self, "Tidying up pad audio",
                                           "Looking for sound files no pad plays. Please wait.",
-                                          server.action_tidy_pad_audio, reread=False),
+                                          pad_actions.action_tidy_pad_audio, reread=False),
                        ("Pad audio tidied", "Pad audio not tidied"))
 
     def _on_restore_backup(self, _event):
@@ -200,13 +201,13 @@ class MaintPage(wx.Panel):
         self._pad_job(self.restore_fx, "Restoring the factory voice effects",
                       "Starting the restore. It takes two or three minutes.",
                       ("Factory voice effects restored", "Factory voice effects not restored"),
-                      server.action_restore_factory_fx)
+                      pad_actions.action_restore_factory_fx)
 
     def _pad_job(self, source, title, text, titles, action, *args):
         """A job on the pad-restore channel, started by `action(*args)` and followed to the end,
         then the pads read again."""
         reply = follow_job(self, title, text, lambda: action(*args),
-                           lambda _started: server.pad_restore_status)
+                           lambda _started: pad_actions.restore_status)
         self._finished(source, {"reply": reply}, titles)
         self.section.read()
 
@@ -225,9 +226,9 @@ class MaintPage(wx.Panel):
             self._exporting = False
             # Always spoken: the reply names the file, which is the point of the export.
             self.frame.say(_message(reply))
-        call(self, server.action_export_pad, pad["grid"], done=done)
+        call(self, pad_actions.action_export_pad, pad["grid"], done=done)
 
     def _on_open_folder(self, event):
         source = event.GetEventObject()
-        call(self, server.action_open_pad_exports,
+        call(self, pad_actions.action_open_pad_exports,
              done=lambda reply: self.frame.reply(source, reply))

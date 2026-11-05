@@ -193,10 +193,10 @@ RESTORED_BY = {
     "masterDelayOn": "profiles.apply, gated on output_write.",
     "masterDelaySeconds": "profiles.apply (written with masterDelayOn).",
     # --- the routing matrix ---------------------------------------------------------------
-    "outputMixMinus": "server._apply_matrix -> rcp_transfer.set_output_routing, per output.",
-    "mixDisabled": "server._apply_matrix -> rcp_transfer.set_cross_point_excluded (the Custom "
+    "outputMixMinus": "output_mixes.apply_matrix -> rcp_transfer.set_output_routing, per output.",
+    "mixDisabled": "output_mixes.apply_matrix -> rcp_transfer.set_cross_point_excluded (the Custom "
                    "mixes' exclusions).",
-    "mixLevelWithAnchor": "server._apply_matrix, through routing_schemes.apply: EVERY output's "
+    "mixLevelWithAnchor": "output_mixes.apply_matrix, through routing_schemes.apply: EVERY output's "
                           "cross-points, not the monitor ones only. Each "
                           "source is re-included (which re-links it), then any saved manual level "
                           "is written back.",

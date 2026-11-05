@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
-import tempfile
 import threading
 import time
 import webbrowser
@@ -35,6 +33,8 @@ import diagnostics  # the app's own account of what it did, in %LOCALAPPDATA%\\.
 import driver_install  # fetching RODE's Virtual Devices driver, on a button press
 import meters  # level metering, read from Windows' audio endpoints (not over USB)
 import network  # wifi and Bluetooth, and the wireless mics
+import output_mixes  # the output mixes: modes, cross-points, monitor levels and mix schemes
+import pad_actions  # the SMART pads: live edits, sounds, voice effects and their preview
 import pad_shortcuts  # firing pads and stepping the bank from a global hotkey
 import profiles  # settings backup/restore (save+restore live here, not in server)
 import rcp_hid
@@ -42,7 +42,6 @@ import rcp_read
 import rcp_transfer
 import recorder  # the transport: start/pause/stop, storage volumes, recordings
 import rode_app  # whether RODE's own app is running, which the desk does not report
-import routing_schemes  # saved output-mix schemes (the matrix under a name) + the built-ins
 import settings_file  # settings.json, read and merged
 import shows  # the DESK'S own backup: export/import/factory reset (not profiles)
 import soundpad  # single source of truth for ALL pad operations
@@ -51,7 +50,6 @@ import virtual_devices  # RODE's Virtual Device Driver: its state, and switching
 import wording  # plurals, spoken lists and durations
 from desk_labels import (  # what each setting is called, shared with the announcer
     MODULE_TOGGLE_LABEL,
-    OUTPUT_MODE_LABEL,
     OUTPUT_SWITCH_LABEL,
     PROCESSING_CONTROLS,
     PROCESSING_MODULES,
@@ -66,20 +64,8 @@ from paths import (  # frozen-build-safe asset/data locations
 )
 
 
-_preview_grid = None               # grid of the live-preview scratch pad, if one is engaged
-
-
-# Channel / pad layout of the RODECaster Pro II SMART pads.
+# The Pro II's mic channels.
 MIC_CHANNELS = (1, 2, 3, 4)
-# Pad grid geometry is DEVICE-AWARE (devices.PadSpec): the Pro II is 8 pads/bank, the Duo 6.
-# These module constants are the Pro II DEFAULTS, kept only as the floor for the dynamic bank
-# growth (PAD_MIN_BANKS) and the offline fallback in soundpad_model(). The per-device pads/bank,
-# user-bank count and the per-action range limit come from the active device: read_pads_live()
-# resolves the geometry, and _max_user_pads() gives the hard range limit for a pad action.
-# The visible grid is DYNAMIC - it grows with content (every filled bank plus one spare), floor
-# PAD_MIN_BANKS - so a new bank appears as you fill the previous one, like the device itself.
-PAD_MIN_BANKS = 3
-PADS_PER_BANK = 8      # Pro II default (fallback); active device's PadSpec.pads_per_bank wins
 GAIN_MIN_DB = 0
 GAIN_MAX_DB = 76
 # Non-mic channel "Level" (inputDigitalGain) range. The device clamps; these are sane UI bounds
@@ -89,29 +75,6 @@ LEVEL_MAX_DB = 12
 
 _PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c in g["controls"]}
 _PROCESSING_PROP_SET = set(_PROCESSING_CONTROL_BY_PROP)
-
-
-def soundpad_model() -> dict:
-    """Live pad grid: what is on each pad now, plus the effect-object pool health (which gates
-    clear / assign-effect for safety) and the voice-effect choices.
-
-    Reads the device model (~1.5s) under the HID lock. On a read failure it returns the static
-    layout with an error note so the section still renders."""
-    try:
-        with desk_access.hid_lock:
-            # max_banks / pads_per_bank default to the ACTIVE DEVICE geometry (Pro II 8/bank,
-            # Duo 6/bank) - do NOT force the Pro II numbers here. read_pads_live also returns a
-            # read_only flag (True on a device without the pad_write cap).
-            return soundpad.read_pads_live(min_banks=PAD_MIN_BANKS)
-    except Exception as exc:
-        return {
-            "banks": PAD_MIN_BANKS,
-            "pads_per_bank": PADS_PER_BANK,
-            "pads": [],
-            "recipes": list(soundpad.all_recipes().keys()),
-            "custom_fx": list(soundpad.load_user_fx_presets().keys()),
-            "health_message": f"Could not read the pad layout from the device: {exc}",
-        }
 
 
 # ----------------------------------------------------------------------------
@@ -281,8 +244,8 @@ def action_get_channels(percent: bool = True) -> dict:
 
 def read_window_state() -> dict:
     """The native window's full read: every channel, as `action_get_channels(percent=False)`, and
-    the output mixes (`matrix`, `rcp_read.read_matrix_state` keyed by index, with `matrix_model`'s
-    layout as `matrix_model`), the fader layout (`faders`: `fader_model` as `model`, then
+    the output mixes (`matrix`, `rcp_read.read_matrix_state` keyed by index, with
+    `output_mixes.matrix_model`'s layout as `matrix_model`), the fader layout (`faders`: `fader_model` as `model`, then
     `layout`, `labels` and `stereo` as a fader write's reply carries them), the Levels page's
     state (`levels`, `_window_levels`) and the Master Mix page's (`master`, `_window_master`),
     from ONE model dump."""
@@ -300,7 +263,7 @@ def window_state(blob: bytes) -> dict:
     reply = _channels_reply(blob, percent=False)
     if reply.get("ok"):
         reply["matrix"] = rcp_read.read_matrix_state(blob)
-        reply["matrix_model"] = matrix_model()
+        reply["matrix_model"] = output_mixes.matrix_model()
         spec = _active_faders()
         cis = list(rcp_read.values(blob, "channelInputSource"))
         layout = [cis[i] if i < len(cis) else None for i in range(spec.count)]
@@ -424,7 +387,7 @@ def _mute_reach_message(who: str, sources) -> str:
     if not (lv.get("ok") and ex.get("ok")):
         return f"{who} muted. Could not check whether any output still hears it."
     still = []
-    for oi, label in ((o["index"], o["label"]) for o in _active_matrix().outputs):
+    for oi, label in ((o["index"], o["label"]) for o in output_mixes.active_matrix().outputs):
         if lv["modes"].get(oi) != 2:
             continue
         for s in sources:
@@ -925,7 +888,7 @@ class _ChatIsolation:
         self.chat = rcp_transfer.CROSS_POINT_OUTPUT_INDEX["Chat"]
         # `all_sources`: isolating one channel means every OTHER row out, and in Expanded four of
         # them carry the computer's own audio. Leaving those in measures the screen reader.
-        self.sources = [x["index"] for x in _active_matrix().all_sources]
+        self.sources = [x["index"] for x in output_mixes.active_matrix().all_sources]
         self.level = 1.0
         self.mode_before = None
         self.excluded_before = {}
@@ -2273,7 +2236,7 @@ def _window_levels(blob: bytes) -> dict:
                    for which, spec in _AUTO_MUTE.items()},
         headphone_types=_headphone_types(blob),
         model={"faders": list(_active_faders().level_faders),
-               "monitor_mix": monitor_mix_model(),
+               "monitor_mix": output_mixes.monitor_mix_model(),
                "auto_mute": [[which, spec["label"]] for which, spec in _AUTO_MUTE.items()],
                "headphones": {
                    "outputs": [lab for _sel, lab in _active_headphones().outputs],
@@ -2595,7 +2558,7 @@ def _chan_check_stop(speak: bool = True, run_id: int | None = None) -> str:
 
 def _chan_check_source(name: str):
     """The matrix source a channel name refers to, or (None, reason)."""
-    src = next((s for s in _active_matrix().sources_for(True) if s["key"] == name), None)
+    src = next((s for s in output_mixes.active_matrix().sources_for(True) if s["key"] == name), None)
     if src is None:
         return None, f"{name} is not a channel this desk exposes to the mixes."
     # CHAT IS THE ONE CHANNEL THIS CANNOT DO, and the reason is the mechanism rather than a rule:
@@ -2624,7 +2587,7 @@ def action_channel_level_check(name: str = "") -> dict:
     if ag.get("phase") in ("preparing", "listening", "verifying", "working"):
         return {"ok": False, "running": False,
                 "message": "Auto gain is running. Wait for it to finish, or stop it first."}
-    gate = _matrix_write_gate()      # None when writes are allowed; a refusal dict otherwise
+    gate = output_mixes.write_gate()      # None when writes are allowed; a refusal dict otherwise
     if gate is not None:
         return {"ok": False, "running": False, "message": gate["message"]}
 
@@ -2785,148 +2748,6 @@ def action_reset_faders() -> dict:
         msg += " " + chain_note
     return {"ok": True, "faders": new, "labels": [_channel_name(c, spec) for c in new],
             "stereo": stereo_link_state(new, spec), "message": msg}
-
-
-# --- MONITOR MIX: per-output source levels ----------------------------------------------------
-# Set how loud each source is in ONE output (e.g. your headphones), independent of the recording
-# and other outputs. Uses the matrix cross-point level (mixLevelWithAnchor): the output must be in
-# Custom mode, then we unlink the one source and set its absolute level. Reading is reliable (the
-# 13*source+output grid formula), so we prefill and can reset cleanly. Refused during a SIP call.
-# The monitor-mix outputs are the headphone/monitor outputs (matrix indices 0-4); we intersect
-# this with what the CONNECTED device actually exposes (below), so the Duo shows only its Headphone
-# 1/2 and the Pro II shows Headphone 1-4 + Monitor. Source labels + indices come straight from the
-# device matrix (so the Duo's code 2 reads "Headset", not "Mic 3").
-_MONITOR_OUTPUT_INDICES = (0, 1, 2, 3, 4)
-# Spelled exactly as the mode dropdown a few groups up the same page spells them (matrix_model),
-# so the two are not read aloud as if they were different settings.
-
-
-def _monitor_outputs():
-    """(index, label) for each monitor-mix output the connected device exposes, device-labelled."""
-    dev_out = {o["index"]: o["label"] for o in _active_matrix().outputs}
-    return [(i, dev_out[i]) for i in _MONITOR_OUTPUT_INDICES if i in dev_out]
-
-
-def _monitor_sources():
-    """(index, label) for each matrix source on the connected device (device-labelled)."""
-    return [(s["index"], s["label"])
-            for s in _active_matrix().sources_for(channels.usb_expanded())]
-
-
-def monitor_mix_model() -> dict:
-    """Static layout for the Monitor mix UI (the outputs + sources the connected device exposes)."""
-    read_only = _matrix_write_gate() is not None
-    note = ("How loud each source is in the chosen output, without changing the recording or "
-            "other outputs. Moving one makes it a custom mix. Not available during a phone call.")
-    if read_only:
-        note = ("Shows how loud each source is in each headphone output on this device. Changing "
-                "these levels is not enabled here yet, so the sliders are read-only.")
-    return {
-        "outputs": [{"index": i, "label": l} for i, l in _monitor_outputs()],
-        "sources": [{"index": i, "label": l} for i, l in _monitor_sources()],
-        "read_only": read_only,
-        "note": note,
-    }
-
-
-def action_set_monitor_level(output_index: int, source_index: int, level01: float) -> dict:
-    """Set one source's level in one output. Switches the output to Custom mode if needed, unlinks
-    that source, then writes the level. Only affects this output."""
-    gate = _matrix_write_gate()
-    if gate is not None:
-        return gate
-    mon_out = dict(_monitor_outputs())
-    mon_src = dict(_monitor_sources())
-    if output_index not in mon_out:
-        return {"ok": False, "message": "That output is not adjustable here."}
-    if source_index not in mon_src:
-        return {"ok": False, "message": "That source is not adjustable here."}
-    try:
-        v = max(0.0, min(1.0, float(level01)))
-        with desk_access.hid_lock:
-            # Ensure Custom mode + the source unlinked. Both writes are idempotent (no-ops if
-            # already so), so we send them unconditionally rather than pay a ~1.5s model read
-            # to check first - that read was the cause of the per-slider lag.
-            rcp_transfer.set_output_routing(output_index, 2)       # Custom
-            rcp_transfer.set_cross_point_linked(output_index, source_index, False)
-            rcp_transfer.set_cross_point_level(output_index, source_index, v)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the level: {exc}"}
-    # A cross-point write comes back as mixLevelWithAnchor on that SOURCE, which is exactly what the
-    # announcer speaks as a fader move - so without this, every matrix slider is announced twice.
-    # Source index and source code are the same space here (both address the cross-point grid).
-    announcer.mark_self_write(("fader", int(source_index)))
-    return {"ok": True,
-            "message": f"{mon_src[source_index]} in {mon_out[output_index]} "
-                       f"set to {round(v * 100)} percent."}
-
-
-def action_reset_monitor_output(output_index: int) -> dict:
-    """Reset one output to follow the faders: re-link every source (level back to the fader value)
-    and put the output back to Main Mix mode."""
-    gate = _matrix_write_gate()
-    if gate is not None:
-        return gate
-    mon_out = dict(_monitor_outputs())
-    if output_index not in mon_out:
-        return {"ok": False, "message": "That output is not adjustable here."}
-    try:
-        with desk_access.hid_lock:
-            for si, _ in _monitor_sources():
-                rcp_transfer.set_cross_point_linked(output_index, si, True)
-                time.sleep(0.05)
-            rcp_transfer.set_output_routing(output_index, 0)       # Main Mix
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not reset the output: {exc}"}
-    return {"ok": True,
-            "message": f"{mon_out[output_index]} reset to follow the faders."}
-
-
-def action_reset_all_outputs() -> dict:
-    """Reset EVERY output mix on the desk: re-include and re-link every source on every output,
-    then put each output back to its default mode (devices.py, MatrixSpec.outputs default_mode).
-
-    A wider sweep than the per-output "Reset to faders". It exists because a hand-set level silently
-    breaks channel Mute: a mute only reaches cross-points that follow the fader, so an output with
-    that source unlinked keeps carrying it and you still hear a muted mic in your own cans.
-
-    HONESTY: the default modes are a KNOWN-GOOD set taken from a saved profile, NOT a capture of a
-    factory-reset unit (see the provenance comment on PRO2_MATRIX_OUTPUTS). So this is called
-    "defaults", never "factory". Every write is reversible and read-back verifiable, and the UI
-    tells the user to save a profile first.
-
-    THIS IS THE "Everything normal" BUILT-IN MIX SCHEME, applied through the one scheme path
-    (routing_schemes.apply). The button stays because it is where people look for it and it carries
-    its own confirmation, but there is no second copy of the sweep to drift."""
-    b = routing_schemes.builtin(routing_schemes.BUILTIN_NORMAL)
-    if b is None:                       # no matrix outputs on this device model at all
-        return {"ok": False, "message": "This device exposes no output mixes to reset."}
-    return _apply_scheme(b["scheme"], b["name"])
-
-
-def _apply_matrix(routing: dict) -> dict:
-    """Re-apply a profile's output mix matrix. CALLER HOLDS THE HID LOCK. Returns
-    {applied, failed, skipped}. Skips cleanly for one saved while the matrix was unreadable (a
-    phone caller).
-
-    `mix_scheme` is the WHOLE matrix, keyed by name, applied through routing_schemes.apply - the
-    same proven path the Mix schemes page uses. Every output's cross-point levels come back, not
-    just the monitor ones, and an output the connected desk does not have is skipped by name rather
-    than written by index.
-    """
-    # The saved matrix is Pro II-shaped; a desk that cannot write the matrix (e.g. the Duo, cap off)
-    # must not have Pro II cross-points written to it, so skip the matrix re-apply there.
-    if _matrix_write_gate() is not None:
-        return {"applied": 0, "failed": 0, "skipped": True}
-    scheme = routing.get("mix_scheme")
-    if scheme and scheme.get("outputs"):
-        # Same announcer suppression as _apply_scheme: our own cross-point writes come back on the
-        # push stream as mixLevelWithAnchor on the SOURCE, which the announcer would otherwise
-        # narrate as a hundred fader moves over the top of the restore's own progress.
-        res = routing_schemes.apply(
-            scheme, on_source_write=lambda si: announcer.mark_self_write(("fader", int(si))))
-        return {"applied": res["applied"], "failed": res["failed"], "skipped": False}
-    return {"applied": 0, "failed": 0, "skipped": True}
 
 
 def read_usb_driver() -> dict:
@@ -3571,37 +3392,6 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
     return {"ok": True, "message": f"Output delay on, {int(round(seconds * 1000))} milliseconds."}
 
 
-# ----------------------------------------------------------------------------
-# Output mix matrix (the Routing > Custom cross-points), RODECASTER_PROTOCOL.txt section 5. Each
-# output has a mode (OUTPUT_MODE_LABEL); under Custom, each source can be excluded from that
-# output. The per-device source/output LABEL maps live in devices.py (MatrixSpec.sources /
-# .outputs), so the screen adapts to the connected desk; the confirmed-index write guard lives in
-# rcp_transfer.
-# ----------------------------------------------------------------------------
-
-# --- Device-aware matrix helpers: the routing screen shows the CONNECTED desk's real
-# sources/outputs (source code 2 = "Headset" on the Duo, "Mic 3" on the Pro II). Writes are gated
-# on the "matrix_write" cap.
-def _active_matrix():
-    return devices.get_active_device().matrix
-
-
-def _matrix_output(idx: int):
-    return next((o for o in _active_matrix().outputs if o["index"] == idx), None)
-
-
-def _matrix_source(idx: int):
-    return next((s for s in _active_matrix().sources_for(True) if s["index"] == idx), None)
-
-
-def _matrix_write_gate():
-    """Cross-point writes. Both the Pro II and the Duo have this cap today; a device whose
-    cross-point selector is not verified keeps its matrix read-only rather than writing blind."""
-    return desk_access.cap_gate("matrix_write", lambda name:
-                     f"Changing output mixes is not enabled on the {name} yet, so the routing "
-                     f"matrix is read-only here.")
-
-
 def _output_write_gate():
     """Master/global output writes: USB multitrack and its raw switch, monitor and BT auto-mute,
     headphone type, master Compellor, output delay: named properties on the OUTPUT, HEADPHONE and
@@ -3609,201 +3399,6 @@ def _output_write_gate():
     return desk_access.cap_gate("output_write", lambda name:
                      f"Changing the master output settings is not enabled on the {name} yet, so "
                      f"these controls are read-only here.")
-
-
-def _max_user_pads() -> int:
-    """Highest 1-based grid number a pad action may target on the ACTIVE device (Pro II = 56 on
-    a 8/bank x 7-user-bank grid; Duo = 42 on a 6/bank grid). Device-aware so a Duo action cannot
-    address a slot beyond its 48-slot model. Pad WRITES are also gated by soundpad's pad_write cap."""
-    return devices.get_active_device().pad.max_user_pads
-
-
-def matrix_model() -> dict:
-    """Static layout of the output mix matrix for the UI, for the CONNECTED device."""
-    m = _active_matrix()
-    outputs = m.outputs or devices.PRO2.matrix.outputs
-    sources = (m.sources_for(channels.usb_expanded())
-               or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
-    read_only = _matrix_write_gate() is not None
-    # The read-only variant of this note reaches a desk without the cap, instead of the page
-    # promising writes it cannot do.
-    # ONE LINE. Do not explain Main Mix, Mix Minus and Custom here, and do not claim the source list
-    # shows the unit's real current mix: that list is hidden on anything but Custom, because outside
-    # Custom it shows stored cross-points the engine ignores. What each mix means is said per output,
-    # about the one selected, by `matrix-mix-summary`; the long version lives on Help & About.
-    note = "Each output carries its own mix. Pick an output to see and change it."
-    if read_only:
-        note = ("This shows each output's live mix on this device. Changing the mix is not "
-                "enabled here yet, so these controls are read-only.")
-    return {
-        "outputs": [{"key": o["key"], "index": o["index"], "label": o["label"],
-                     "modes": [[0, "Main Mix"]] + ([[1, "Mix Minus"]] if o["mixminus"] else [])
-                              + [[2, "Custom"]]}
-                    for o in outputs],
-        "sources": [{"key": s["key"], "index": s["index"], "label": s["label"]} for s in sources],
-        "read_only": read_only,
-        "note": note,
-    }
-
-
-def action_set_output_mode(output_index: int, mode: int) -> dict:
-    gate = _matrix_write_gate()
-    if gate is not None:
-        return gate
-    out = _matrix_output(output_index)
-    if out is None:
-        return {"ok": False, "message": f"Output {output_index} is not valid."}
-    if mode not in OUTPUT_MODE_LABEL:
-        return {"ok": False, "message": f"Mode {mode} is not valid."}
-    with desk_access.hid_lock:
-        rcp_transfer.set_output_routing(output_index, mode)
-    return {"ok": True, "message": f"{out['label']} output set to {OUTPUT_MODE_LABEL[mode]}."}
-
-
-def action_set_cross_point(output_index: int, source_index: int, excluded: bool) -> dict:
-    """Exclude/include one source in one output's Custom mix. The output should be in
-    Custom mode first (use the mode control)."""
-    gate = _matrix_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with desk_access.hid_lock:
-            rcp_transfer.set_cross_point_excluded(output_index, source_index, excluded)
-    except ValueError as exc:
-        return {"ok": False, "message": str(exc)}
-    out = _matrix_output(output_index)
-    src = _matrix_source(source_index)
-    out_lab = out["label"] if out else "output"
-    src_lab = src["label"] if src else "source"
-    verb = "excluded from" if excluded else "included in"
-    return {"ok": True, "message": f"{src_lab} {verb} the {out_lab} mix."}
-
-
-# ----------------------------------------------------------------------------
-# MIX SCHEMES: the output-mix matrix saved under a name. The format, the capture, the built-ins and
-# the writes all live in routing_schemes.py; these wrappers own the HID lock and the wording.
-#
-# The two Chat presets are BUILT-IN SCHEMES rather than buttons of their own, so there is one apply
-# path, and "Chat back to normal" writes Chat's real normal state (mix minus) rather than a Main Mix
-# that only looks like it.
-# ----------------------------------------------------------------------------
-
-def _apply_scheme(scheme: dict, label: str) -> dict:
-    """Gate, lock, write, and say what happened in one sentence. Shared by every entry point: the
-    dropdown, the built-ins and the "Reset all output mixes" button."""
-    gate = _matrix_write_gate()
-    if gate is not None:
-        return gate
-    try:
-        with desk_access.hid_lock:
-            # Our own writes come back on the push stream as mixLevelWithAnchor on the SOURCE, which
-            # the announcer speaks as a fader move - a full-desk scheme would otherwise narrate a
-            # hundred of them over the top of the page's own reply. Marked per write because the
-            # suppression window is 1.5s and this can run for ten.
-            res = routing_schemes.apply(
-                scheme, on_source_write=lambda si: announcer.mark_self_write(("fader", int(si))))
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not apply the mix preset: {exc}"}
-    outs = res["outputs"]
-    if not outs:
-        return {"ok": False,
-                "message": (f"{label} names no output this device has, so nothing was changed."
-                            + (f" Not on this device: {wording.join_and(res['skipped'])}."
-                               if res["skipped"] else ""))}
-    msg = f"Applied {label} to {wording.count(len(outs), 'output')}"
-    msg += ": " + wording.join_and(outs) + "."
-    if res["skipped"]:
-        msg += (f" Skipped {wording.count(len(res['skipped']), 'part')} this device does not have: "
-                f"{wording.join_and(res['skipped'])}.")
-    if res["failed"]:
-        msg += (f" {wording.count(res['failed'], 'write')} failed, so check the mix before you go "
-                f"on air.")
-    return {"ok": res["ok"], "message": msg, "outputs": outs, "skipped": res["skipped"],
-            "failed": res["failed"]}
-
-
-def read_routing_schemes() -> dict:
-    """What the Mix schemes control offers on this desk: the built-ins, then the saved schemes.
-
-    Each entry carries its own DESCRIPTION so the page can say what a scheme would do before it is
-    applied, without a second round trip. A saved scheme's description is worked out from the file
-    (routing_schemes.describe) rather than stored in it, so it can never describe a desk it no
-    longer matches."""
-    read_only = _matrix_write_gate() is not None
-    # Read once for the whole list: the source count in every description is against the rows the
-    # grid is showing right now, and the mode cannot change mid-loop in any way that matters.
-    expanded = channels.usb_expanded()
-    saved = []
-    for name in routing_schemes.list_names():
-        loaded = routing_schemes.load(name)
-        if not loaded.get("ok"):
-            continue
-        s = loaded["scheme"]
-        saved.append({"name": name,
-                      "description": routing_schemes.describe(s, expanded=expanded),
-                      "scope": routing_schemes.scope_text(s),
-                      "device_name": s.get("device_name"),
-                      "saved_at": s.get("saved_at")})
-    note = ("The output mixes saved under a name: which sources each output carries, and at what "
-            "level. Pick one and choose Apply. Not a profile: it never touches your channels, "
-            "processing or pads.")
-    if read_only:
-        note = ("Changing output mixes is not enabled on this device yet, so mix presets cannot be "
-                "saved or applied here.")
-    return {"ok": True, "read_only": read_only, "note": note,
-            "builtins": [{"id": b["id"], "name": b["name"], "description": b["description"],
-                          "scope": routing_schemes.scope_text(b["scheme"]),
-                          "destructive": b["destructive"]}
-                         for b in routing_schemes.builtins()],
-            "saved": saved}
-
-
-def action_apply_routing_scheme(name: str, builtin: bool = False) -> dict:
-    """Apply a built-in (by id) or a saved scheme (by name). Built-ins are addressed by ID and never
-    by name, so a saved scheme called "Everything normal" cannot shadow the real one."""
-    if builtin:
-        b = routing_schemes.builtin(name)
-        if b is None:
-            return {"ok": False, "message": f"There is no built-in mix preset {name}."}
-        return _apply_scheme(b["scheme"], b["name"])
-    loaded = routing_schemes.load(name)
-    if not loaded.get("ok"):
-        return loaded
-    return _apply_scheme(loaded["scheme"], loaded["safe"])
-
-
-def action_save_routing_scheme(name: str, output: str = "") -> dict:
-    """Save the desk's CURRENT output mixes under a name. One model read under the lock, no writes.
-
-    `output` is an output KEY and makes a ONE-OUTPUT preset, the shape the built-in Chat presets
-    have: applying it later writes that output and leaves every other mix alone. Empty means every
-    output, the default.
-
-    Overwriting an existing scheme is allowed and deliberate (unlike the as-found baseline, a scheme
-    is cheap to re-take), but the page asks first so it is never a surprise."""
-    safe = safe_name(name)
-    if not safe:
-        return {"ok": False, "message": "A mix preset name must be 1 to 40 letters, digits, "
-                                        "spaces, dashes or underscores."}
-    try:
-        with desk_access.hid_lock:
-            blob = rcp_read.read_model_stable()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the output mixes: {exc}"}
-    cap = routing_schemes.capture(safe, blob, only=output)
-    if not cap.get("ok"):
-        return cap
-    res = routing_schemes.save(safe, cap["scheme"])
-    if not res.get("ok"):
-        return res
-    return {"ok": True, "name": safe,
-            "message": (f"Saved the mix preset {safe}. "
-                        f"{routing_schemes.describe(cap['scheme'], expanded=channels.usb_expanded())}")}
-
-
-def action_delete_routing_scheme(name: str) -> dict:
-    """Delete a saved scheme. Pure file work: no device access and no lock."""
-    return routing_schemes.delete(name)
 
 
 # ----------------------------------------------------------------------------
@@ -4299,7 +3894,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
         # Output mix matrix + monitor-mix levels (v2 profiles only).
         job.step("Settings done. Restoring output routing...")
         with desk_access.hid_lock:
-            mx_res = _apply_matrix(prof.get("routing") or {})
+            mx_res = output_mixes.apply_matrix(prof.get("routing") or {})
         pad_res = None
         pad_tidy = None
         pad_extra = None
@@ -5198,271 +4793,6 @@ def _delete_show_then_profile(snapshot: int, name: str):
     return _run_show_job("Deleting the backup", work)
 
 
-def _pad_write(grid: int, failed: str, work, invalid: str | None = None,
-               plain_value_error: bool = False) -> dict:
-    """Range-check a grid pad, take the HID lock, run `work()`, and turn a crash into a sentence.
-
-    THE SHAPE EVERY LIVE PAD EDIT HAS. Only one sentence differs between them: `failed`, the
-    "Could not ..." wording, which is the only part worth reading at a call site.
-
-    `invalid` is a refusal message for a value this function cannot check itself (a play mode, a
-    trigger field), and it is checked AFTER the range and BEFORE the lock: the pad number is the
-    more basic complaint, and nothing should take the device lock to find out a value was wrong.
-
-    `plain_value_error` surfaces a ValueError's own text as the message instead of wrapping it.
-    soundpad raises those with a finished, user-facing sentence in them (a polluted effect pool,
-    an unknown effect name), and wrapping that in "Could not assign the voice effect:" buries the
-    part that says what to do about it.
-    """
-    if grid < 1 or grid > _max_user_pads():
-        return {"ok": False, "message": f"Pad {grid} is out of range."}
-    if invalid:
-        return {"ok": False, "message": invalid}
-    # THE SHORTCUT LAYER'S PAD MAP IS NOW WRONG, whatever this edit turns out to be. It caches the
-    # name, type, play mode and stream POSITION of every pad on a timer, and every one of those can
-    # move here - clearing a pad shifts the positions of the ones after it. Marked stale rather than
-    # re-read: this is the wrong moment to spend a model dump, and the next press reads it anyway.
-    pad_shortcuts.pads_stale()
-    try:
-        with desk_access.hid_lock:
-            return work()
-    except ValueError as exc:
-        if plain_value_error:
-            return {"ok": False, "message": str(exc)}
-        return {"ok": False, "message": f"{failed}: {exc}"}
-    except Exception as exc:
-        return {"ok": False, "message": f"{failed}: {exc}"}
-
-
-def _pad_name_from_filename(filename: str) -> str:
-    """Derive a tidy pad name from an uploaded filename (stem, alnum/space/underscore, capped)."""
-    stem = os.path.splitext(os.path.basename(filename or "Sound"))[0]
-    clean = "".join(c if (c.isalnum() or c in " _-") else " " for c in stem).strip()
-    clean = " ".join(clean.split())            # collapse runs of whitespace
-    return (clean[:24] or "Sound")
-
-
-def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True) -> dict:
-    """Put the uploaded sound on the pad via the PROVEN clear+create path (soundpad.create_sound),
-    NEVER an overwrite-in-place. create_sound clears the slot if occupied, then creates a fresh
-    sound pad writing pads/<grid>/sound.<ext>, and is gated on a clean effect-object pool.
-
-    NO CONVERSION: the unit's pad player accepts WAV at every rate (22k-192k), bit depth
-    (16/24/32-float) and channel count, plus MP3, all played natively. So we write the file
-    AS-IS (no resample / downmix / bit-depth change) and never degrade quality. We only require the
-    file to be WAV or MP3 (the two formats the RODE manual lists) and preserve its extension on
-    the device, because an MP3 written under a .wav name plays as silence (the firmware trusts the
-    extension).
-    """
-    if pad_n < 1 or pad_n > _max_user_pads():
-        return {"ok": False, "message": f"Pad {pad_n} is out of range."}
-    if not raw:
-        return {"ok": False, "message": "The uploaded file was empty."}
-
-    ext = os.path.splitext(filename or "")[1].lower()
-    if ext not in (".wav", ".mp3"):
-        return {"ok": False,
-                "message": "Only WAV or MP3 files can be added to a pad. "
-                           "Please choose a .wav or .mp3 file."}
-
-    name = _pad_name_from_filename(filename)
-    tmp_path = None
-    try:
-        fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="accesscaster_")
-        with os.fdopen(fd, "wb") as f:
-            f.write(raw)
-        with desk_access.hid_lock:
-            # dest_filename = the real upload name so the device stores it as the factory does
-            # (pads/<n>/RealName.ext), not a generic sound.wav. name = the on-screen pad label.
-            return soundpad.create_sound(pad_n, tmp_path, name=name, replay=replay,
-                                         dest_filename=filename)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not add the pad sound: {exc}"}
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-
-def action_set_replay(grid: int, on: bool) -> dict:
-    """Toggle padReplay on an existing sound pad in place (restart-on-re-press vs pause/resume)."""
-    return _pad_write(grid, "Could not change the pad's replay setting",
-                      lambda: soundpad.set_pad_replay(grid, on))
-
-
-def action_set_pad_gain(grid: int, db: float) -> dict:
-    """Set per-pad output volume (padGain, dB) on an existing pad, in place. Read-back verifiable.
-
-    THE NAME MUST STAY DISTINCT from the mic action_set_gain above. Give both the same name and
-    Python keeps the last def, so this pad version silently shadows the mic one and every mic
-    Level/gain write is routed into the pad's."""
-    return _pad_write(grid, "Could not change the pad's volume",
-                      lambda: soundpad.set_pad_property(grid, "padGain", db))
-
-
-def action_set_pad_name(grid: int, name: str) -> dict:
-    """Rename an existing pad in place (padName). Read-back verifiable."""
-    name = (name or "").strip()
-    return _pad_write(grid, "Could not rename the pad",
-                      lambda: soundpad.set_pad_property(grid, "padName", name),
-                      invalid=None if name else "Enter a name for the pad.")
-
-
-def action_set_pad_loop(grid: int, on: bool) -> dict:
-    """Toggle loop (padLoop) on an existing sound pad. Read-back verifiable."""
-    return _pad_write(grid, "Could not change the pad's loop setting",
-                      lambda: soundpad.set_pad_property(grid, "padLoop", on))
-
-
-def action_set_play_mode(grid: int, mode: int) -> dict:
-    """Sound pads: Toggle (0), Hold (1) or One Shot (2). The stored
-    order is NOT the guide's printed "Toggle / One Shot / Hold" order."""
-    return _pad_write(grid, "Could not change how the pad plays",
-                      lambda: soundpad.set_play_mode(grid, mode),
-                      invalid=None if mode in soundpad.PLAY_MODE_LABEL else
-                      "Play mode must be 0 (Toggle), 1 (Hold) or 2 (One Shot).")
-
-
-def action_set_mixer_trigger(grid: int, mode: int) -> dict:
-    """Mixer pads: Momentary (0, only while held) or Latching (1, press on / press again off)."""
-    return _pad_write(grid, "Could not change the pad's trigger mode",
-                      lambda: soundpad.set_mixer_trigger(grid, mode),
-                      invalid=None if mode in (0, 1) else
-                      "Trigger mode must be 0 (Momentary) or 1 (Latching).")
-
-
-def action_set_pad_trigger(grid: int, field: str, value: int) -> dict:
-    """MIDI trigger pads: change ONE field of what the pad sends (type, control, channel, on, off),
-    or turn the custom mapping off again with field="custom", value=0.
-
-    ONE field per request, like every other live pad edit, so each change is read back and spoken on
-    its own. `field` is validated against soundpad.TRIGGER_EDIT (the same spec that builds the
-    window's controls and the write ranges), so an unknown field is REFUSED rather than quietly
-    ignored - a silent no-op on a pad mapping is the worst outcome here, since nothing about the desk
-    would look wrong afterwards."""
-    known = {f["key"]: f for f in soundpad.TRIGGER_EDIT}
-    if field == "custom":
-        def _custom():
-            res = soundpad.set_trigger_mapping(grid, custom=bool(value))
-            # Switching custom OFF is destructive: the desk resets the control number, channel and
-            # values to its own defaults and does not give them back if you switch it on again
-            # (measured). Say so in the message, because a switch reads as reversible.
-            if res.get("ok") and not value:
-                res["message"] = (res.get("message", "") + " The pad is back on its default "
-                                  "mapping, and the numbers you had set are not kept.")
-            return res
-
-        return _pad_write(grid, "Could not change the MIDI mapping", _custom)
-    spec = known.get(field)
-    if not spec:
-        bad = ("Unknown MIDI trigger setting %r. Expected one of: %s."
-               % (field, ", ".join(known)))
-    elif value < spec["min"] or value > spec["max"]:
-        bad = "%s must be between %d and %d." % (spec["label"], spec["min"], spec["max"])
-    else:
-        bad = None
-    return _pad_write(grid, "Could not change the MIDI trigger",
-                      lambda: soundpad.set_trigger_mapping(grid, **{field: value}),
-                      invalid=bad)
-
-
-def action_set_pad_envelope(grid: int, field: str, percent: float) -> dict:
-    """Sound pads: one point of the trim/fade envelope, as a percentage through the sound.
-
-    The four points are start / fade_in / fade_out / stop, and they are POSITIONS along the sound
-    (see soundpad.ENV_FIELD). soundpad validates the field name and the range
-    and reports when the result is a fade that cannot be heard."""
-    return _pad_write(grid, "Could not change the pad's trim and fade",
-                      lambda: soundpad.set_envelope_percent(grid, field, percent))
-
-
-def action_set_pad_fade(grid: int, field: str, seconds: float) -> dict:
-    """Fade mixer pads: how long the fade in or the fade out takes, in seconds."""
-    return _pad_write(grid, "Could not change the fade time",
-                      lambda: soundpad.set_fade_seconds(grid, field, seconds))
-
-
-def action_set_pad_flag(grid: int, name: str, on: bool) -> dict:
-    """The two named per-pad switches: a Fade pad excluding the host, and a Censor pad using your own
-    sound instead of the beep. Named (soundpad.PAD_FLAG) rather than taking a property, so a
-    caller cannot ask for an arbitrary pad write."""
-    return _pad_write(grid, "Could not change that pad setting",
-                      lambda: soundpad.set_pad_flag(grid, name, on))
-
-
-def action_set_back_channel(grid: int, source: str, on: bool) -> dict:
-    """Add or remove one channel from a Back Channel pad's off-air talkback room.
-
-    `source` is the padMixerBackChannel* property name, as handed to the UI in the pads payload
-    (soundpad.back_channel_sources); soundpad validates it against what this desk actually has.
-    A Back Channel pad with no members links nothing and does nothing when pressed, so this is
-    the setting that makes the pad work at all."""
-    return _pad_write(grid, "Could not change the Back Channel members",
-                      lambda: soundpad.set_back_channel_member(grid, source, on))
-
-
-def action_set_pad_colour(grid: int, colour: int) -> dict:
-    """Set a pad's display colour index (padColourIndex 0-11). Read-back verifiable."""
-    return _pad_write(grid, "Could not change the pad's colour",
-                      lambda: soundpad.set_pad_property(grid, "padColourIndex", colour))
-
-
-def action_clear_pad(grid: int) -> dict:
-    """Clear the pad at grid position `grid`. Gated on a clean effect-object pool by soundpad."""
-    return _pad_write(grid, "Could not clear the pad",
-                      lambda: soundpad.clear_grid_pad(grid))
-
-
-def action_clear_all_pads() -> dict:
-    """Clear every user pad (sound/FX/mixer/MIDI/quick-dial), leaving the System pads untouched.
-    Destructive - the window confirms with a dialog before calling this."""
-    try:
-        with desk_access.hid_lock:
-            res = soundpad.clear_all_pads()
-            # allow_empty: with every pad cleared, NO pad points at any file, so all of it is
-            # genuinely unused. This is the only caller that may say so - see tidy_unused_pad_audio.
-            tidy = soundpad.tidy_unused_pad_audio(allow_empty=True)
-        if tidy.get("removed"):
-            res["message"] = ((res.get("message") or "Cleared every user pad.") + " "
-                              + tidy["message"])
-        return res
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not clear all pads: {exc}"}
-
-
-# Pad-defaults restore runs in a background thread (it takes ~a minute) so the page is not blocked
-# and can poll progress for live-region announcements. This state is the single source the status
-# endpoint reports.
-_pad_restore_job = desk_access.BackgroundJob("A pad restore is already running.",
-                                             "The pad restore failed", "A pad restore is running.",
-                                             rewrites_desk=True)
-
-
-def pad_restore_status() -> dict:
-    return _pad_restore_job.status()
-
-
-def action_restore_factory_fx() -> dict:
-    """Put the six factory VOICE EFFECTS back on their original pads.
-
-    DESTRUCTIVE and narrower than it sounds, which is what the confirm dialog has to get across: it
-    clears and recreates those six grid positions only. The eight factory SOUND pads are untouched,
-    and so is everything past pad 16. Reuses the pad-restore progress channel, so the page shows the
-    same progress dialog it already knows."""
-    def _work(job):
-        with desk_access.hid_lock:
-            return soundpad.restore_factory_fx_pads(live=True, progress=job.tick)
-
-    return _pad_restore_job.start(
-        _work, total=len(soundpad.factory_fx_names()),
-        message="Starting the factory voice effect restore.",
-        phrase=lambda msg, _n, _total: f"{msg}.",
-        started="Restoring the factory voice effects.",
-        failed="Could not restore the factory voice effects")
-
-
 def pad_backups() -> dict:
     """The backups on this computer that hold SMART pads saved on this model of desk, newest first,
     for restoring their pads alone. Reads each profile once; the store is a handful of files."""
@@ -5514,292 +4844,9 @@ def action_restore_backup_pads(name: str) -> dict:
                                         f"the desk was changed."
                                         + _pad_restore_words(pad_res, extra, tidy))}
 
-    return _pad_restore_job.start(_work, total=len(pad_list),
+    return pad_actions.restore_job.start(_work, total=len(pad_list),
                                   message=f"Restoring the SMART pads from {safe}.",
                                   failed="Could not restore the pads")
-
-
-def documents_folder(name: str) -> str:
-    """Documents\\AccessCaster\\<name>, created if need be: where the app's exports go.
-
-    Documents rather than the app's own data folder (%LOCALAPPDATA%): an export you cannot find is
-    not an export, and a reinstall wipes the data folder. There is no folder picker: a fixed
-    destination is easier to find again than one chosen each time - the reply says the full path,
-    and Open folder takes you there."""
-    base = os.path.join(os.path.expanduser("~"), "Documents", "AccessCaster", name)
-    os.makedirs(base, exist_ok=True)
-    return base
-
-
-def open_folder_reply(folder: str, what: str) -> dict:
-    """Open `folder` in Explorer and say so. `what` names it in a failure: "The folder"."""
-    try:
-        _open_folder_focused(folder)
-    except Exception as exc:
-        return {"ok": False, "message": f"{what} is {folder}, but it could not be opened: {exc}"}
-    return {"ok": True, "message": f"Opened {folder}."}
-
-
-def pad_export_dir() -> str:
-    """Where an exported pad sound goes."""
-    return documents_folder("Pad exports")
-
-
-def action_export_pad(pad: int) -> dict:
-    """Copy one pad's sound off the unit into the exports folder. Reads the unit; changes nothing."""
-    return _pad_write(pad, f"Could not export pad {pad}",
-                      lambda: soundpad.export_pad_audio(int(pad), pad_export_dir()))
-
-
-def _open_folder_focused(folder: str) -> None:
-    """Open a folder in Explorer AND PUT THE USER IN IT. Raises if it cannot be opened at all.
-
-    `os.startfile` alone opens the window BEHIND the app's: measured, with no window already at
-    that path, the foreground two seconds after the call is still AccessCaster. A window you were not
-    moved to is, to a screen-reader user, indistinguishable from nothing having happened.
-
-    Windows will not let a background process take the foreground on its own, so this borrows the
-    input state of the window that HAS it (AttachThreadInput), which is the documented way. `AllowSetForegroundWindow` is called first because
-    when it does work it is cheaper and needs no window handle.
-
-    FAILING TO FOCUS IS NOT FAILING TO OPEN. The folder is what was asked for; the focus is the
-    courtesy. So everything after `startfile` is best-effort and swallows its own errors - reporting
-    "could not be opened" for a window that opened perfectly well would be worse than the silence
-    this exists to fix.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    u32 = ctypes.windll.user32
-    try:
-        u32.AllowSetForegroundWindow(-1)          # ASFW_ANY, before the window exists
-    except Exception:
-        pass
-    os.startfile(folder)                          # noqa: S606 - app-owned folder, never user input
-
-    want = os.path.basename(os.path.normpath(folder))
-    found = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def _visit(hwnd, _lparam):
-        cls = ctypes.create_unicode_buffer(64)
-        u32.GetClassNameW(hwnd, cls, 64)
-        # Explorer's folder windows only. Anything else with this title is not ours to raise.
-        if cls.value not in ("CabinetWClass", "ExploreWClass"):
-            return True
-        n = u32.GetWindowTextLengthW(hwnd)
-        buf = ctypes.create_unicode_buffer(n + 1)
-        u32.GetWindowTextW(hwnd, buf, n + 1)
-        # PREFIX, NOT EQUALITY. Explorer titles the window with the folder name and then appends
-        # " - File Explorer" a moment later, so which of the two you see depends on how fast the poll
-        # got there.
-        title = buf.value
-        if title == want or title.startswith(want + " - "):
-            found.append(hwnd)
-            return False
-        return True
-
-    # Explorer takes a moment to put the window up; poll rather than guess a sleep.
-    for _ in range(20):
-        found.clear()
-        try:
-            u32.EnumWindows(_visit, 0)
-        except Exception:
-            break
-        if found:
-            break
-        time.sleep(0.1)
-    if not found:
-        return
-    hwnd = found[0]
-    try:
-        fg = u32.GetForegroundWindow()
-        ours = u32.GetWindowThreadProcessId(hwnd, None)
-        theirs = u32.GetWindowThreadProcessId(fg, None)
-        u32.ShowWindow(hwnd, 9)                   # SW_RESTORE, in case it opened minimised
-        if ours != theirs:
-            u32.AttachThreadInput(theirs, ours, True)
-            u32.SetForegroundWindow(hwnd)
-            u32.AttachThreadInput(theirs, ours, False)
-        else:
-            u32.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-
-
-def action_open_pad_exports() -> dict:
-    """Open the exports folder in Explorer, so the file can actually be used once it is copied."""
-    return open_folder_reply(pad_export_dir(), "The exports folder")
-
-
-def action_tidy_pad_audio() -> dict:
-    """Manual sweep of pad audio nothing plays. The destructive pad operations do this for
-    themselves; this covers clearing individual pads (a clear is HID-only by design - it mounts
-    nothing and writes no files, which is why it raises no drive toast - so it cannot tidy up after
-    itself without giving that up) and audio left by older builds."""
-    try:
-        with desk_access.hid_lock:
-            return soundpad.tidy_unused_pad_audio()
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not tidy up the pad audio: {exc}"}
-
-
-def action_assign_fx(grid: int, effect: str) -> dict:
-    """Put a factory voice effect on the pad at grid position `grid`. Gated on a clean pool."""
-    return _pad_write(grid, "Could not assign the voice effect",
-                      lambda: soundpad.assign_fx_to_grid(grid, effect),
-                      plain_value_error=True)
-
-
-def action_create_special_pad(grid: int, type_str: str) -> dict:
-    """Create a Mixer-action pad ("mixer:0".."mixer:4") or a MIDI Trigger pad ("trigger") on `grid`.
-    Both are pool-safe (no region-B writes). Clears the slot first if occupied (soundpad does this)."""
-    def _make():
-        if type_str.startswith("mixer:"):
-            return soundpad.create_mixer(grid, int(type_str.split(":", 1)[1]))
-        if type_str == "trigger":
-            return soundpad.create_trigger(grid)
-        return {"ok": False, "message": f"Unknown pad type {type_str!r}."}
-
-    return _pad_write(grid, "Could not create the pad", _make, plain_value_error=True)
-
-
-def action_save_fx_preset(name: str, stack: dict, colour: int) -> dict:
-    """Save a user-built custom voice effect (no device access; just persists to the user file).
-    soundpad.validate_fx_stack sanitises engines/params and clamps every value to range."""
-    try:
-        saved = soundpad.save_user_fx_preset(name, stack, colour=colour)
-    except ValueError as exc:
-        return {"ok": False, "message": str(exc)}
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not save the effect: {exc}"}
-    return {"ok": True,
-            "message": f"Saved {saved}. It is now in the Assign a voice effect list.",
-            "recipes": list(soundpad.all_recipes().keys()),
-            "custom_fx": list(soundpad.load_user_fx_presets().keys())}
-
-
-def action_delete_fx_preset(name: str) -> dict:
-    """Delete a user-built custom voice effect. Built-in effects cannot be deleted (not in the
-    user file), so this only ever removes the user's own presets."""
-    try:
-        existed = soundpad.delete_user_fx_preset(name)
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not delete the effect: {exc}"}
-    if not existed:
-        return {"ok": False, "message": f"{name} is not one of your custom effects."}
-    return {"ok": True,
-            "message": f"Deleted {name}.",
-            "recipes": list(soundpad.all_recipes().keys()),
-            "custom_fx": list(soundpad.load_user_fx_presets().keys())}
-
-
-def action_preview_start(stack: dict, colour: int, mic: int) -> dict:
-    """Create a scratch preview pad carrying the in-progress effect and engage it on the live
-    mic. Returns the grid used, or no_pad:True if every pad is full."""
-    global _preview_grid
-    try:
-        with desk_access.hid_lock:
-            res = soundpad.preview_start(stack or {}, colour=colour, mic=mic)
-        if res.get("ok"):
-            _preview_grid = res.get("grid")
-        return res
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not start live preview: {exc}"}
-
-
-class _PreviewWriter:
-    """Live-preview edits, written by one thread in as few transfer-mode sessions as it can.
-
-    A session costs about two seconds to open and close (the pad volume mounts and dismounts), and
-    a change is a single record, so each edit is queued, the newest value per setting winning, and
-    the thread writes whatever is waiting in one session, holding it open while more arrive within
-    IDLE_S (soundpad.preview_write). A write that fails is reported by the next submit."""
-
-    IDLE_S = 0.6
-
-    def __init__(self):
-        self._cond = threading.Condition()
-        self._pending = {}       # {(grid, param): (value, kind)}, oldest first
-        self._failure = None
-        self._thread = None
-
-    def submit(self, grid: int, param: str, value, kind: str) -> dict:
-        with self._cond:
-            failure, self._failure = self._failure, None
-            self._pending.pop((grid, param), None)
-            self._pending[(grid, param)] = (value, kind)
-            if self._thread is None or not self._thread.is_alive():
-                self._thread = threading.Thread(target=self._run, name="preview writer",
-                                                daemon=True)
-                self._thread.start()
-            self._cond.notify()
-        return failure or {"ok": True}
-
-    def forget(self, grid: int) -> None:
-        """Drop what is waiting for `grid`, whose preview has ended."""
-        with self._cond:
-            self._pending = {key: v for key, v in self._pending.items() if key[0] != grid}
-
-    def _take(self, wait):
-        with self._cond:
-            if not self._pending:
-                self._cond.wait(wait)
-            edits, self._pending = self._pending, {}
-            return edits
-
-    def _run(self) -> None:
-        while True:
-            edits = self._take(None)
-            if not edits:
-                continue
-            try:
-                with desk_access.hid_lock:
-                    soundpad.preview_write(edits, more=lambda: self._take(self.IDLE_S))
-            except Exception as exc:
-                diagnostics.event("preview.write_failed", str(exc))
-                with self._cond:
-                    self._failure = {"ok": False,
-                                     "message": f"Could not update live preview: {exc}"}
-
-
-_preview_writer = _PreviewWriter()
-
-
-def action_preview_update(grid: int, param: str, value) -> dict:
-    """Queue one control change for the live preview pad (an effect param, on-flag, or mic input).
-    The value is validated and clamped first. Returns at once; a failed write is reported by the
-    next change."""
-    try:
-        p, v, kind = soundpad.sanitise_preview_edit(param, value)
-    except ValueError as exc:
-        return {"ok": False, "message": str(exc)}
-    return _preview_writer.submit(int(grid), p, v, kind)
-
-
-def action_preview_stop(grid: int) -> dict:
-    """Clear the preview scratch pad, removing the effect from the live mic."""
-    global _preview_grid
-    _preview_writer.forget(int(grid))
-    try:
-        with desk_access.hid_lock:
-            res = soundpad.preview_stop(grid)
-        _preview_grid = None
-        return res
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not stop live preview: {exc}"}
-
-
-def cleanup_preview_on_exit() -> None:
-    """If the server stops (watchdog/quit/Ctrl-C) while a live preview is engaged, clear the
-    scratch pad so no effect is left on the mic. Best effort; failures are ignored."""
-    if _preview_grid is None:
-        return
-    try:
-        with desk_access.hid_lock:
-            soundpad.preview_stop(_preview_grid)
-    except Exception:
-        pass
 
 
 def read_desk_once() -> None:

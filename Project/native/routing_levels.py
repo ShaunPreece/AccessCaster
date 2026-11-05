@@ -6,6 +6,7 @@ or a fader shows here as it happens.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import output_mixes
 import server
 from native import a11y
 from native.calls import call
@@ -205,7 +206,7 @@ class LevelsPage(scrolled.ScrolledPanel):
     def _send_mix(self, source, pct):
         """On a worker thread, so the output is the one `_show_mix` last put on the page rather
         than a read of the list."""
-        return server.action_set_monitor_level(self._mix_index, source, pct / 100)
+        return output_mixes.action_set_monitor_level(self._mix_index, source, pct / 100)
 
     def _show_mix(self):
         if not self.mix_sliders:
@@ -245,7 +246,7 @@ class LevelsPage(scrolled.ScrolledPanel):
             self.frame.reply(source, reply)
             # The desk pushes back neither the links nor the mode.
             self.section.desk.refresh()
-        call(self, server.action_reset_monitor_output, out["index"], done=done)
+        call(self, output_mixes.action_reset_monitor_output, out["index"], done=done)
 
     # ---- the headphones --------------------------------------------------------------------
 

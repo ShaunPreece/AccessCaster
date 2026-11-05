@@ -4,7 +4,7 @@ mix, a switch per source. Then the mix presets and the reset of every output.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
-import server
+import output_mixes
 from native import a11y
 from native.calls import call
 from native.controls import Switch, set_choices
@@ -85,7 +85,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
     def _send_cross_point(self, source, on):
         """On a worker thread, so the output is the one `_show_output` last put on the page rather
         than a read of the list."""
-        return server.action_set_cross_point(self._output_index, source, not on)
+        return output_mixes.action_set_cross_point(self._output_index, source, not on)
 
     def _show_output(self):
         """Put the chosen output on every control: its mix, and its sources' names and states."""
@@ -171,7 +171,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
                 self.section.desk.refresh()
             else:
                 self._show_mode()
-        call(self, server.action_set_output_mode, out["index"], mode, done=applied)
+        call(self, output_mixes.action_set_output_mode, out["index"], mode, done=applied)
 
     def _run(self, source, busy_text, fn, *args):
         """A write that takes several seconds (a mix preset, the reset): spoken as it starts and as
@@ -209,7 +209,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         def read(reply):
             if reply.get("ok"):
                 self._fill_schemes(reply, select)
-        call(self, server.read_routing_schemes, done=read)
+        call(self, output_mixes.read_routing_schemes, done=read)
 
     def _fill_schemes(self, data, select):
         chosen = self._scheme()
@@ -253,7 +253,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             self.frame.say("Cancelled. The output mixes were not changed.")
             return
         self._run(source, f"Applying {scheme['label']}, please wait.",
-                  server.action_apply_routing_scheme, scheme["name"], scheme["builtin"])
+                  output_mixes.action_apply_routing_scheme, scheme["name"], scheme["builtin"])
 
     def _on_save_scheme(self, event):
         source = event.GetEventObject()
@@ -278,7 +278,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             self.frame.reply(source, reply)
             if reply.get("ok"):
                 self.read_schemes(select=reply.get("name"))
-        call(self, server.action_save_routing_scheme, name, out["key"] if one_output else "",
+        call(self, output_mixes.action_save_routing_scheme, name, out["key"] if one_output else "",
              done=saved)
 
     def _on_delete_scheme(self, event):
@@ -297,7 +297,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             self.frame.reply(source, reply)
             if reply.get("ok"):
                 self.read_schemes()
-        call(self, server.action_delete_routing_scheme, name, done=deleted)
+        call(self, output_mixes.action_delete_routing_scheme, name, done=deleted)
 
     # ---- reset -----------------------------------------------------------------------------
 
@@ -323,7 +323,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             self.frame.say("Cancelled. The output mixes were not changed.")
             return
         self._run(source, "Resetting every output mix, please wait.",
-                  server.action_reset_all_outputs)
+                  output_mixes.action_reset_all_outputs)
 
 
 def _scheme_text(name, scope):

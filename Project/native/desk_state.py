@@ -54,7 +54,7 @@ class DeskState:
     """`channels` is the window's channels (server.window_state: the channels with the desk's own
     0..1 params), one record per channel. `matrix` is the output mixes (rcp_read.read_matrix_state:
     `modes` and `excluded`, keyed by output and source index, `ok` False with a `reason` when the
-    grid could not be read), with the layout as `matrix["model"]` (server.matrix_model). `faders`
+    grid could not be read), with the layout as `matrix["model"]` (output_mixes.matrix_model). `faders`
     is the fader layout (`model`, `layout`, `labels`, `stereo`), `levels` the Levels page's state
     (server._window_levels) and `master` the Master Mix page's (server._window_master).
 

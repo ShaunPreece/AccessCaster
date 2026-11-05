@@ -1,4 +1,4 @@
-"""The live preview's writes (soundpad.preview_write, server._PreviewWriter), offline: edits made
+"""The live preview's writes (soundpad.preview_write, pad_actions._PreviewWriter), offline: edits made
 close together share one transfer-mode session, the newest value per setting wins, the pad is
 found from one model read, an edit for a pad no longer named Preview is refused before anything is
 sent, and a failed write is reported by the next change. The desk is replaced: nothing is sent.
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import devices
-import server
+import pad_actions
 import soundpad
 from _testkit import as_device, check, check_true, patched
 
@@ -81,8 +81,8 @@ with as_device(devices.PRO2):
             batches_seen.append(dict(edits))
 
     with patched((soundpad, {"preview_write": preview_write}),
-                 (server._PreviewWriter, {"IDLE_S": 0.2})):
-        writer = server._PreviewWriter()
+                 (pad_actions._PreviewWriter, {"IDLE_S": 0.2})):
+        writer = pad_actions._PreviewWriter()
         writer.submit(17, "reverbOn", True, "bool")
         time.sleep(0.1)
         writer.submit(17, "reverbMix", 0.6, "float")
@@ -99,7 +99,7 @@ with as_device(devices.PRO2):
         raise ValueError("The preview pad is no longer there.")
 
     with patched((soundpad, {"preview_write": failing})):
-        writer = server._PreviewWriter()
+        writer = pad_actions._PreviewWriter()
         check("a change is accepted at once", writer.submit(17, "echoMix", 0.5, "float"),
               {"ok": True})
         time.sleep(0.3)
@@ -112,7 +112,7 @@ with as_device(devices.PRO2):
         while writer._failure is None and time.monotonic() < deadline:
             time.sleep(0.01)
 
-    writer = server._PreviewWriter()
+    writer = pad_actions._PreviewWriter()
     writer._pending = {(17, "echoMix"): (0.5, "float"), (5, "robotMix"): (0.2, "float")}
     writer.forget(17)
     check("an ended preview's waiting edits are dropped", list(writer._pending), [(5, "robotMix")])

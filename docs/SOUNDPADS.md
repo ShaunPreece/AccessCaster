@@ -85,7 +85,7 @@ raw via clear+create onto throwaway bank-3 pads, Shaun ear-confirmed each):
   count we tried, plus MP3. The old "force 48k / mono / 16-bit" conversion was needless and degraded
   quality. POLICY (decided 2026-06-17): write the uploaded file AS-IS, no resample/downmix/bit-depth
   change; only require it to be .wav or .mp3 (the two formats the RODE manual lists). wav_tools
-  conversion stays OFF. server.action_add_sound validates the extension and writes raw.
+  conversion stays OFF. pad_actions.action_add_sound validates the extension and writes raw.
 
 ON-DEVICE FILENAME = the REAL name, matching the FACTORY (confirmed by clean-table padFilePath reads):
   factory pads are pads/<n>/Music_Bed.wav, Applause.wav, Crickets.wav, ... (full path
@@ -144,7 +144,7 @@ TRIM AND FADE ENVELOPE (padEnv*, sound pads)  [EAR-PROVEN 2026-08-27]
   A fade point OUTSIDE the played region is accepted and silently does nothing, so the editor warns
   (soundpad.envelope_warning). The UI unit is PERCENT, because the desk never reports a file's
   duration, so seconds could not be shown honestly.
-  Read + write: soundpad.ENV_FIELD / ENV_EDIT / set_envelope_percent, server.action_set_pad_envelope.
+  Read + write: soundpad.ENV_FIELD / ENV_EDIT / set_envelope_percent, pad_actions.action_set_pad_envelope.
 
 FADE + CENSOR MIXER SUB-SETTINGS  [device-proven 2026-08-27]
   padMixerFadeInSeconds / OutSeconds (seconds, no proven ceiling - the app clamps at 60 as a sanity
@@ -153,7 +153,7 @@ FADE + CENSOR MIXER SUB-SETTINGS  [device-proven 2026-08-27]
   created for the test (2.5 / 4.0 / True) and on the factory Censor pad (flag on, then off, clean).
   The censor FILE PATH is read and backed up but never written by us: pointing a pad at audio that
   may not be on the unit is worse than leaving it, and putting the file there is an upload job.
-  soundpad.FADE_FIELD / CENSOR_FIELD / PAD_FLAG, server.action_set_pad_fade and action_set_pad_flag.
+  soundpad.FADE_FIELD / CENSOR_FIELD / PAD_FLAG, pad_actions.action_set_pad_fade and action_set_pad_flag.
 
 MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 2026-08-27]
 
@@ -185,7 +185,7 @@ MIDI TRIGGER (padType 4)  [BUILT + create device-proven + MIDI OUTPUT PROVEN 202
       written back, no control offered.
   READ + WRITE PATH (2026-08-27): soundpad.TRIGGER_FIELD / TRIGGER_EDIT (one spec drives the read,
   the payload, the window's controls, the write validation and the profile), read_pads_live's per-pad
-  "trigger" dict, soundpad.set_trigger_mapping, server.action_set_pad_trigger(pad, field, value), and the
+  "trigger" dict, soundpad.set_trigger_mapping, pad_actions.action_set_pad_trigger(pad, field, value), and the
   MIDI trigger fields in the pad's Settings dialog. All eight padTrigger* properties
   are now in a profile (they were 8 of the 20 listed gaps in the profile-coverage report).
   Live test: DevTools/test_pad_trigger_live.py (create, read the default, write a custom mapping
@@ -277,7 +277,7 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     set_transfer_mode(False). PROVEN realtime (changed Monster's pitch live while talking, no reboot,
     no neighbour disturbed). Best for editing existing pads + realtime preview. The live preview
     batches: soundpad.preview_write writes several flags and params, one padActive per batch, in ONE
-    session, held open while more edits arrive (server._PreviewWriter queues them, newest wins).
+    session, held open while more edits arrive (pad_actions._PreviewWriter queues them, newest wins).
 3.7 EDIT A PAD-LEVEL PROPERTY IN PLACE  [generic, 2026-06-17] soundpad.set_pad_property(grid, name,
     value, kind) - the UI-agnostic editing layer (set_pad_replay and the other setters go through it): resolve the
     pad's 0-based stream position, write ONE SOUNDPADS record (0x9a on a Pro II) in transfer mode, exit. No
