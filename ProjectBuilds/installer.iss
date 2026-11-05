@@ -95,21 +95,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "startup"; Description: "Start {#AppName} automatically when &Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
 
-[InstallDelete]
-; THE SHORTCUTS THE OLD NAME LEFT BEHIND. Earlier builds were named "Access Caster" with a space,
-; and Inno does not remove a previous install's Start Menu group or desktop
-; shortcut when the name changes - it simply writes the new ones beside them. Without this an
-; upgraded machine lists the app TWICE in the Start Menu, both entries launching the same exe.
-;
-; A NO-OP ON A MACHINE THAT NEVER HAD THE OLD NAME: Inno skips a path that is not there, silently
-; and with no cost, which is why this stays in the one installer everybody gets rather than being
-; split into a special build or a separate migration tool. Two installers carrying the same version
-; number and behaving differently would be far worse than five lines nobody's machine reads.
-; The same reasoning covers the legacy Run value and the firewall rules below.
-Type: files; Name: "{autoprograms}\Access Caster\*"
-Type: dirifempty; Name: "{autoprograms}\Access Caster"
-Type: files; Name: "{autodesktop}\Access Caster.lnk"
-
 [Files]
 ; The entire PyInstaller onedir output (AccessCaster.exe + _internal\ with Python and assets).
 ; Relative to this .iss, so it is a sibling now that build_installer.ps1 sends --distpath here.
@@ -138,14 +123,6 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; \
     ValueName: "AccessCaster"; ValueData: """{app}\{#AppExe}"" --startup"; \
     Flags: uninsdeletevalue; Tasks: startup
-; THE PRE-RENAME ENTRY, removed on EVERY install and deliberately not gated on the task. The app
-; was once called "Access Caster" with a space, and the Run value carries that name on any machine
-; installed then. Both entries name the same exe, so a machine upgrading with autostart already
-; ticked would otherwise launch the app twice at sign-in. No Tasks: clause, because it has to go
-; whether or not the user wants autostart this time. Project/autostart.py deletes the same name for the same
-; reason; see LEGACY_VALUE_NAME there.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
-    ValueName: "Access Caster"; Flags: deletevalue
 
 [Run]
 ; Which window ends up in front, the app's page or the release notes, is a race whichever order
@@ -174,10 +151,6 @@ Filename: "{app}\ReleaseNotes.html"; Description: "See the release notes for thi
 
 const
   FW_RULE_NAME = 'AccessCaster';
-  { The rule's name from before the app became one word. A netsh rule is keyed by NAME, so without
-    deleting this one too an upgraded machine keeps an orphaned allow-rule for ever: the
-    uninstaller only ever looks for the new name. }
-  FW_RULE_NAME_LEGACY = 'Access Caster';
   FW_MARK_KEY  = 'Software\AccessCaster';
   FW_MARK_NAME = 'FirewallRuleAdded';
   { Where Inno records its own uninstall entry: the AppId with an _is1 suffix, under HKCU for a
@@ -266,16 +239,14 @@ begin
   Result := RegQueryStringValue(HKA, FW_MARK_KEY, FW_MARK_NAME, Marker) and (Marker = '1');
 end;
 
-{ Both names, the pre-rename one with the current one, in ONE elevated command, so the user
-  answers one permission prompt rather than two. Declining it leaves the rule and the marker, so
-  the next install or the uninstall asks again. }
+{ Declining the permission prompt leaves the rule and the marker, so the next install or the
+  uninstall asks again. }
 procedure RemoveFirewallRule;
 var
   ResultCode: Integer;
 begin
   if ShellExec('runas', 'cmd.exe',
-       '/C netsh advfirewall firewall delete rule name="' + FW_RULE_NAME + '" >nul 2>&1 & ' +
-       'netsh advfirewall firewall delete rule name="' + FW_RULE_NAME_LEGACY + '" >nul 2>&1',
+       '/C netsh advfirewall firewall delete rule name="' + FW_RULE_NAME + '" >nul 2>&1',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     RegDeleteKeyIncludingSubkeys(HKA, FW_MARK_KEY);
 end;

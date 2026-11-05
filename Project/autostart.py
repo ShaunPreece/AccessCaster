@@ -36,13 +36,6 @@ VALUE_NAME = "AccessCaster"
 STARTUP_FLAG = "--startup"
 EXE_NAME = "AccessCaster.exe"
 
-# THE NAME THIS VALUE HAD BEFORE the app's name became one word. Anyone
-# who ticked autostart before then has a Run entry under the old name, pointing at the same exe.
-# Leaving it would start the app TWICE at sign-in, so both this module and installer.iss delete it.
-# Kept as a constant rather than a literal because two places have to agree on it, and it can only
-# be removed once no machine can still be carrying one.
-LEGACY_VALUE_NAME = "Access Caster"
-
 
 def started_at_login(argv=None) -> bool:
     """Was this process launched by the Run entry rather than by a person?"""
@@ -76,23 +69,14 @@ def _open_run_key(write: bool):
 
 
 def read_value() -> str | None:
-    """What the Run entry currently says, or None if there is not one. Never raises.
-
-    FALLS BACK TO THE LEGACY NAME so a machine that has not been upgraded since the rename still
-    reports autostart as ON. Without that the switch would read as off, the user would turn it on,
-    and they would end up with both entries.
-    """
-    for name in (VALUE_NAME, LEGACY_VALUE_NAME):
-        try:
-            import winreg
-            with _open_run_key(False) as key:
-                value, _kind = winreg.QueryValueEx(key, name)
-                return str(value)
-        except OSError:
-            continue
-        except Exception:
-            return None
-    return None
+    """What the Run entry currently says, or None if there is not one. Never raises."""
+    try:
+        import winreg
+        with _open_run_key(False) as key:
+            value, _kind = winreg.QueryValueEx(key, VALUE_NAME)
+            return str(value)
+    except Exception:
+        return None
 
 
 def _delete_value(name: str) -> None:
@@ -154,10 +138,6 @@ def set_enabled(on: bool) -> dict:
                 winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command_for(exe))
         else:
             _delete_value(VALUE_NAME)   # already off; asking for what you have is not a failure
-        # EITHER WAY, the pre-rename entry goes. Switching autostart ON while it survived would
-        # start the app twice at sign-in, and switching OFF while it survived would leave it
-        # starting anyway, with the switch saying it does not.
-        _delete_value(LEGACY_VALUE_NAME)
     except Exception as exc:
         return {"ok": False, "enabled": read_value() is not None,
                 "message": f"Could not change the startup setting: {exc}"}

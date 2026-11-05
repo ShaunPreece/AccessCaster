@@ -2202,16 +2202,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   asserts it. **HKCU, never HKLM**: only one copy runs per PC (`instance.py`), so a machine-wide
   entry starts the app for every account and all but the first are refused (seen with one user at
   the console and another over Remote Desktop).
-  **RENAMING THE APP MEANS MIGRATING FOUR THINGS THAT LIVE ON THE USER'S MACHINE**, learned on 20th
-  September 2026 when "Access Caster" became "AccessCaster": the Run value, the firewall rule an
-  earlier version added (netsh keys a rule by NAME, so the old one is orphaned for ever otherwise),
-  the Start Menu group and the desktop shortcut. All four are handled in `installer.iss`, as
-  `[InstallDelete]` entries, a `deletevalue` and `RemoveFirewallRule`, and they are deliberately NOT
-  gated on the tasks the user ticks. **The one that is not obvious is `UsePreviousGroup=no`**: Inno
-  defaults to reusing the group name the machine remembers, so the first build after the rename
-  wrote correctly-named shortcuts into a folder still called by the old name. `autostart.py` carries
-  `LEGACY_VALUE_NAME` for the same reason - two Run entries naming one exe start the app twice at
-  sign-in.
+  **RENAMING THE APP MEANS MIGRATING WHAT LIVES ON THE USER'S MACHINE UNDER THE OLD NAME**: the Run
+  value (two entries naming one exe start the app twice at sign-in), the Start Menu group and the
+  desktop shortcut (Inno writes the new ones beside the old), each removed by `installer.iss` on
+  every install, NOT gated on the tasks the user ticks, and by `autostart.py` for the Run value. The
+  "Access Caster" to "AccessCaster" migration is retired, both users being past it (5th November
+  2026). **`UsePreviousGroup=no` stays**: Inno otherwise reuses the group name the machine
+  remembers, and a renamed build writes its shortcuts into a folder still called by the old name.
   **The `--startup` flag is the whole difference between a login launch and a manual one** - at login
   `tray.main` opens no window and comes up in the tray with the announcer and shortcuts live.
   **A source run REFUSES to write it** rather than naming python.exe plus a script path, which would
