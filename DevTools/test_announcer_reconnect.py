@@ -31,10 +31,12 @@ import _testkit
 import announcer
 import desk_live
 import desk_model
+import devices
 import rcp_hid
 import rcp_transfer
-import server
+import server  # noqa: F401  (installs the announcer's hooks, whose reconnect is under test)
 import speech
+import usb_audio
 from _testkit import check, patched
 
 
@@ -127,7 +129,8 @@ class Rig:
             # BOTH FOLLOW-UPS OF A RECONNECT ARE STUBBED: the real ones read the desk and move
             # Windows' default audio device, which is the user's screen reader.
             (speech, {"say": self.say}),
-            (server, {"_tidy_after_standard": self.tidy, "_virtual_devices_follow": self.follow}),
+            (usb_audio, {"_tidy_after_standard": self.tidy,
+                         "_virtual_devices_follow": self.follow}),
             (announcer, {"seed": self.seed,
                          "_RECONNECT_SPEAK_AFTER_S": self.speak_after})))
         speech.enabled.set()
@@ -154,7 +157,7 @@ with Rig(speak_after=0.05) as rig:
           rig.opened[-1], EXPANDED)
     check("exactly two opens: it does not thrash", len(rig.opened), 2)
     check("it says it is back, because silence cannot be interpreted",
-          rig.said[-1], f"{server.devices.get_active_device().name} reconnected.")
+          rig.said[-1], f"{devices.get_active_device().name} reconnected.")
     check("it does not greet a second time, which would read as a restart",
           rig.said.count("Announcements on."), 1)
     check("and it re-seeds, since mutes and levels can move while it is deaf",
@@ -214,16 +217,17 @@ rig = Rig(speak_after=0.05)
 rig.seeded_mode = 5
 with rig:
     rig.seeded_mode = 2
-    server._usb_mode_written = (2, time.monotonic())
+    usb_audio._usb_mode_written = (2, time.monotonic())
     said_before = len(rig.said)
     rig.re_enumerate(EXPANDED, gap=0.3)
     time.sleep(0.5)
     check("the reconnect stays quiet", rig.said[said_before:], [])
     check("but still tidies and follows up", (rig.tidied, rig.followed), ([True], [(2, True)]))
     check("and the mark is used up, so a later touchscreen change is said",
-          server._usb_mode_written_by_app(2), False)
-server._usb_mode_written = (2, time.monotonic() - 60)
-check("a write too old to be this reconnect is not ours", server._usb_mode_written_by_app(2), False)
+          usb_audio._usb_mode_written_by_app(2), False)
+usb_audio._usb_mode_written = (2, time.monotonic() - 60)
+check("a write too old to be this reconnect is not ours",
+      usb_audio._usb_mode_written_by_app(2), False)
 
 print("\nTHE SHIPPED CONSTANTS ARE SANE")
 check("a reconnect is only spoken after a real gap",

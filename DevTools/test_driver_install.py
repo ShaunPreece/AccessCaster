@@ -20,7 +20,7 @@ import _bootstrap  # puts Project/ on sys.path
 import _testkit
 import driver_install as di
 import selfupdate.check as update_check
-import server
+import usb_audio
 import virtual_devices
 from _testkit import check, check_true, patched
 
@@ -107,7 +107,7 @@ class _St:
 
 
 with patched((virtual_devices, {"read_status": lambda: _St()})):
-    r = server.action_install_driver()
+    r = usb_audio.action_install_driver()
 check("it refuses rather than downloading again", r.get("ok"), False)
 check("and points at the manual route for a repair",
       "software page" in (r.get("message") or "").lower(), True)

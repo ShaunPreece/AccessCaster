@@ -273,7 +273,9 @@ The layers, bottom up:
   `pad_actions.py` (the SMART pads' app side, over `soundpad.py`), `output_mixes.py` (the output
   mixes and mix schemes, over `routing_schemes.py`), `mic_presets.py` (mic processing presets),
   `pan_link.py` (one Pan control for a stereo channel), `faders.py` (the fader layout, stereo
-  links and the Levels page's writes), `clip_warning.py`, `shows.py`,
+  links and the Levels page's writes), `usb_audio.py` (the USB mode and RODE's virtual devices,
+  over `virtual_devices.py`), `master_outputs.py` (the auto-mutes, headphone types, master
+  Compellor and output delay), `clip_warning.py`, `shows.py`,
   `network.py`, `meters.py`, `hotkeys.py`, and `announcer.py` (the desk's button presses spoken)
   over `speech.py` (everything the app says) and `settings_file.py`.
 - `devices.py` holds one model per product id, so Pro II and Duo differences are data rather than
@@ -783,7 +785,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   and once lost it stays lost, because `System` never appears for the screen reader to move to.
   That feedback is what the "failing runs" were. **The remedy is parking**: before any write that
   brings the desk back as an Expanded device, `virtual_devices.park_output` moves the default to
-  another live playback device, and a guard (`server._park_for_arrival`) puts it back each time
+  another live playback device, and a guard (`usb_audio._park_for_arrival`) puts it back each time
   Windows moves it onto the desk, then moves it on to `System` the moment the service binds.
   **The parking device is never muted**: speech heard briefly on the laptop is fine, and a muted
   default left behind by a crash mid-park is a silent machine. **It is not a fix for every setup**:
@@ -879,7 +881,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   disabled with the desk holding all four channels on faders and the service reporting connected,
   and the log line `reconcile ... not connected ... enabled=0 disabled=3` naming the act. **The
   repair is an event, not a second guess at a delay**: `virtual_devices.watch_endpoints` registers
-  an `IMMNotificationClient` and `server._virtual_devices_repair` reconciles whenever Windows
+  an `IMMNotificationClient` and `usb_audio._virtual_devices_repair` reconciles whenever Windows
   reports an endpoint moving. It runs under `_virtual_devices_busy`, so the deliberate
   re-enumerations of a retry are skipped rather than fought, and it terminates because reconcile is
   idempotent: its own repair wakes it once more and changes nothing.
@@ -1988,7 +1990,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   (`Switch(guard=)`, the Master Mix page's raw tracks switch while no separate tracks are made). A
   disabled Win32 control leaves the tab order, so it would vanish from under the user.
 - **THE MASTER MIX PAGE POLLS RODE'S DRIVER LINE WHILE IT IS SHOWN**, as the CallMe pages poll
-  their listener: neither reads the desk. `server.read_usb_driver` reads Windows and the service's status, never the
+  their listener: neither reads the desk. `usb_audio.read_usb_driver` reads Windows and the service's status, never the
   desk. Its `switching` holds both USB Confirm buttons: a second switch made sooner lands in the
   middle of the first's bind wait.
 - **A LIST OR NUMBER BOX WHOSE VALUE REPLACES NOTHING WRITES AS IT CHANGES, THROUGH `LatestWins`**

@@ -5,7 +5,8 @@ Compellor and the output delay).
 import wx
 import wx.lib.scrolledpanel as scrolled
 
-import server
+import master_outputs
+import usb_audio
 from native import a11y
 from native.calls import call
 from native.controls import Slider, Switch
@@ -106,7 +107,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
 
         self.bypass = self._add(Switch(
             self, parent, sizer, "Send the separate tracks raw",
-            server.action_set_usb_bypass, *self.field("usb_bypass"), guard=self._bypass_refused))
+            usb_audio.action_set_usb_bypass, *self.field("usb_bypass"), guard=self._bypass_refused))
 
     def _bypass_refused(self):
         if self.read_only:
@@ -138,7 +139,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         mode, label = self.model["usb_modes"][index]
         self._apply_usb(event.GetEventObject(), "usb_multitrack", mode,
                         f"This computer already receives {label.lower()}.",
-                        server.action_set_usb_multitrack)
+                        usb_audio.action_set_usb_multitrack)
 
     def _on_apply_sends(self, event):
         index = self.sends.GetSelection()
@@ -148,7 +149,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         on, _label = self.model["usb_expanded"][index]
         self._apply_usb(event.GetEventObject(), "usb_expanded", on,
                         f"Expanded is already {'on' if on else 'off'}.",
-                        server.action_set_usb_expanded)
+                        usb_audio.action_set_usb_expanded)
 
     def _apply_usb(self, source, key, value, already, write):
         refusal = self._usb_refused()
@@ -202,7 +203,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         event.Skip()
 
     def _poll_driver(self):
-        call(self, server.read_usb_driver, done=self._driver_read)
+        call(self, usb_audio.read_usb_driver, done=self._driver_read)
 
     def _driver_read(self, reply):
         if not reply.get("ok"):
@@ -255,8 +256,8 @@ class MasterMixPage(scrolled.ScrolledPanel):
                     job.finish(reply)
                     return
                 job.say(reply.get("message") or "Downloading.")
-                job.poll(server.driver_install_status, lambda st: status(job, st))
-            call(job, server.action_install_driver, done=started)
+                job.poll(usb_audio.driver_install_status, lambda st: status(job, st))
+            call(job, usb_audio.action_install_driver, done=started)
 
         def status(job, st):
             if st.get("done"):
@@ -274,7 +275,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
 
     def _on_driver_page(self, event):
         source = event.GetEventObject()
-        call(self, server.action_open_driver_page,
+        call(self, usb_audio.action_open_driver_page,
              done=lambda reply: self.frame.reply(source, reply))
 
     # ---- master output processing ----------------------------------------------------------
@@ -282,12 +283,13 @@ class MasterMixPage(scrolled.ScrolledPanel):
     def _build_processing(self, parent, sizer):
         """The Compellor and the output delay, on every Main Mix output."""
         self._add(Switch(self, parent, sizer, "Master Compellor",
-                         server.action_set_master_compellor, *self.field("compellor_on"),
+                         master_outputs.action_set_master_compellor, *self.field("compellor_on"),
                          description="Evens out the whole mix, on every Main Mix output.",
                          guard=self._guard))
         for key, label in COMPELLOR:
             self._add(Slider(self, parent, sizer, label, 0, 100,
-                             lambda pct, k=key: server.action_set_compellor_param(k, pct / 100),
+                             lambda pct, k=key:
+                                 master_outputs.action_set_compellor_param(k, pct / 100),
                              *self.field(f"compellor_{key}", scale=100), words=percent))
         self._add(Switch(self, parent, sizer, "Output delay", self._send_delay_on,
                          *self.field("delay_on"),
@@ -303,10 +305,10 @@ class MasterMixPage(scrolled.ScrolledPanel):
     def _send_delay_on(self, on):
         """Turning it on sends the time shown with it, so the reply says what the delay is."""
         ms = self.field("delay_seconds", scale=1000)[0]() if on else None
-        return server.action_set_output_delay(on, ms)
+        return master_outputs.action_set_output_delay(on, ms)
 
     def _send_delay_ms(self, ms):
-        return server.action_set_output_delay(self.master["delay_on"] is True, ms)
+        return master_outputs.action_set_output_delay(self.master["delay_on"] is True, ms)
 
     # ---- showing the desk state ------------------------------------------------------------
 

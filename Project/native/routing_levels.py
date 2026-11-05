@@ -7,6 +7,7 @@ import wx
 import wx.lib.scrolledpanel as scrolled
 
 import faders
+import master_outputs
 import output_mixes
 import server
 from native import a11y
@@ -164,7 +165,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         label = dict(self.model["auto_mute"]).get(output["auto"])
         if label:
             self._add(Switch(self, box, box_sizer, label,
-                             lambda on: server.action_set_auto_mute(output["auto"], on),
+                             lambda on: master_outputs.action_set_auto_mute(output["auto"], on),
                              *self.field("auto_mute", output["auto"]),
                              description=AUTO_MUTE_NOTE))
 
@@ -292,7 +293,7 @@ class LevelsPage(scrolled.ScrolledPanel):
                 self.levels["headphone_types"][position] = value
             else:
                 self._show_headphones()
-        call(self, server.action_set_headphone_type, value, position, done=applied)
+        call(self, master_outputs.action_set_headphone_type, value, position, done=applied)
 
     # ---- showing the desk state ------------------------------------------------------------
 

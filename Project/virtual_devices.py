@@ -144,7 +144,7 @@ def read_status() -> DriverStatus:
 
 # The service binds 1.0 to 1.4 seconds after the desk arrives when the desk's Main output is free,
 # and 0.2 seconds after that output is released when it was not. A wait longer than this only delays
-# the retry (`server._virtual_devices_follow`).
+# the retry (`usb_audio._virtual_devices_follow`).
 CONNECT_WAIT_S = 6.0
 
 

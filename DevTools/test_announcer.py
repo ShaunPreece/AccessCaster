@@ -29,6 +29,7 @@ import rcp_transfer
 import server
 import settings_file
 import speech
+import usb_audio
 from _testkit import addr, check, check_true, patched, push, where
 
 # PIN THE DESK. This suite asserts Pro II strip names and spoken labels, so with a Duo attached it
@@ -1145,8 +1146,8 @@ check("and an unknown mode hides Expanded's four from the fader write gate",
 desk_model.dump_finished(desk_model.dump_starting(),
                          layout_fixture.skeleton(layout_fixture.PRO2_177))
 desk_model._reset()
-with patched((server.rcp_read, {"read_model_stable": _seed_read})):
-    server.seed_usb_expanded()
+with patched((usb_audio.rcp_read, {"read_model_stable": _seed_read})):
+    usb_audio.seed_usb_expanded()
     check_true("the startup seed reads it", channels.usb_expanded_known())
     check("and the desk's real mode is what the app then holds", channels.usb_expanded(), True)
     check("so the four are assignable again",
@@ -1154,7 +1155,7 @@ with patched((server.rcp_read, {"read_model_stable": _seed_read})):
           [12, 13, 14, 15])
     # Idempotent: a second call must not pay for another dump.
     seed_reads.clear()
-    server.seed_usb_expanded()
+    usb_audio.seed_usb_expanded()
 check("a second seed reads nothing, because the mode is already known", len(seed_reads), 0)
 
 

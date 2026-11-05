@@ -33,6 +33,7 @@ import rcp_read
 import recorder
 import virtual_devices as vd
 import _desk
+import usb_audio
 
 EXPANDED_PID = "pid_0094"       # post-fader multitrack AND Expanded: the mode with fader inputs
 HID_INTERFACE_CLASS = "{4D1E55B2-F16F-11CF-88CB-001111000030}"
@@ -100,12 +101,9 @@ def hid_interfaces(match: str = "vid_19f7") -> dict:
     return found
 
 
-server = None
-
-
 def post_mode(mode: int) -> dict:
     """Set the desk's USB output mode. The desk re-enumerates, so the reply can take a while."""
-    return server.action_set_usb_multitrack(mode)
+    return usb_audio.action_set_usb_multitrack(mode)
 
 
 class Sampler(threading.Thread):
@@ -164,9 +162,8 @@ def main() -> None:
                          "default output wherever it already is. Without this run the rate means "
                          "nothing, because a run of failures alone would produce the same drop.")
     args = ap.parse_args()
-    global server
     # The watchers too, as the app runs them: this measures the bind with them in place.
-    server = _desk.service(start=True)
+    _desk.service(start=True)
 
     comtypes.CoInitialize()
     enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
@@ -200,7 +197,7 @@ def main() -> None:
 
     if not expanded_before:
         print("switching USB 1 input to Expanded ...", flush=True)
-        server.action_set_usb_expanded(True)
+        usb_audio.action_set_usb_expanded(True)
         time.sleep(10)
     sampler = Sampler()
     sampler.start()
@@ -222,7 +219,7 @@ def main() -> None:
         sampler.stop.set()
         sampler.join(timeout=3)
         if not expanded_before:
-            res = server.action_set_usb_expanded(False)
+            res = usb_audio.action_set_usb_expanded(False)
             print("USB 1 input restored to Standard" if res.get("ok") else
                   f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
             time.sleep(10)

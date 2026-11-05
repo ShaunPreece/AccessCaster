@@ -29,6 +29,7 @@ import rode_app
 import server
 import shortcuts
 import speech
+import usb_audio
 from version import __version__ as APP_VERSION
 
 
@@ -62,8 +63,8 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     # them, so on a desk that IS in Expanded the four cannot be assigned until something reads the
     # routing. The announcer seeds it too, but only while announcements are ON. Skipped when
     # something has already published, so this costs one dump at most.
-    threading.Thread(target=server.seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
-    server.start_virtual_devices()
+    threading.Thread(target=usb_audio.seed_usb_expanded, daemon=True, name="usb-mode-seed").start()
+    usb_audio.start_virtual_devices()
     if register_shortcuts:
         shortcuts.start()
     # The recording state follower: it is what makes the Recording page free to poll, and it is
@@ -98,7 +99,7 @@ def stop(reason: str) -> None:
     a mic. The speech output closes, since a device left open holds the process's exit up, and the
     desk listener closes its handle on its own thread."""
     diagnostics.event("app.stopping", reason)
-    server.stop_virtual_devices()
+    usb_audio.stop_virtual_devices()
     shortcuts.stop()
     pad_shortcuts.release_held()
     pad_actions.cleanup_preview_on_exit()

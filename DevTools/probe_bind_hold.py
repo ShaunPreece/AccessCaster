@@ -20,12 +20,10 @@ import comtypes.client
 import meters
 import virtual_devices as vd
 import _desk
+import usb_audio
 
 HOLD_S = 10.0
 SETTLE_LIMIT_S = 60.0   # a driver switch takes a few seconds; one still going after this is stuck
-
-
-server = None
 
 
 def post(action, *args) -> None:
@@ -40,7 +38,7 @@ def settle() -> None:
     time.sleep(2)
     deadline = time.monotonic() + SETTLE_LIMIT_S
     while True:
-        st = server.read_usb_driver()
+        st = usb_audio.read_usb_driver()
         if "switching" not in st:
             raise RuntimeError(f"could not read the driver state: {st.get('message')}")
         if not st["switching"]:
@@ -105,14 +103,14 @@ def verdict(first_bind: float | None, held: float | None, released: float | None
 
 
 def trial(n: int, enum) -> None:
-    post(server.action_set_usb_multitrack, 0)
+    post(usb_audio.action_set_usb_multitrack, 0)
     settle()
     time.sleep(3)
     before = set(main_endpoints(enum))
     result = {}
     th = threading.Thread(target=holder, args=(before, result))
     th.start()
-    post(server.action_set_usb_multitrack, 2)
+    post(usb_audio.action_set_usb_multitrack, 2)
     first_bind = None
     t0 = time.monotonic()
     while time.monotonic() - t0 < 25:
@@ -126,16 +124,15 @@ def trial(n: int, enum) -> None:
 
 
 def main() -> int:
-    global server
     # The watchers too: the default-output park and the endpoint repair are the app's own
     # behaviour across an arrival, and this measures the bind with them in place.
-    server = _desk.service(start=True)
+    _desk.service(start=True)
     trials = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     comtypes.CoInitialize()
     enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                         interface=meters.IMMDeviceEnumerator)
     try:
-        post(server.action_set_usb_expanded, True)
+        post(usb_audio.action_set_usb_expanded, True)
         settle()
         for n in range(1, trials + 1):
             trial(n, enum)
@@ -146,8 +143,8 @@ def main() -> int:
 
 def put_back() -> None:
     """Standard, mix only. Each step is tried even when the one before it failed."""
-    for action, arg in ((server.action_set_usb_expanded, False),
-                        (server.action_set_usb_multitrack, 0)):
+    for action, arg in ((usb_audio.action_set_usb_expanded, False),
+                        (usb_audio.action_set_usb_multitrack, 0)):
         try:
             post(action, arg)
             settle()

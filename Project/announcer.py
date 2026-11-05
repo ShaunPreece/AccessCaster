@@ -873,7 +873,7 @@ def usb_mode_change(was, now) -> str:
     now_mode, now_exp = recorder.split_usb_multitrack(now)
     if was_exp != now_exp:
         # Leaving it, the faders are tidied and spoken about separately
-        # (`server._tidy_after_standard`), so this says only what is certain.
+        # (`usb_audio._tidy_after_standard`), so this says only what is certain.
         return "USB input is now Expanded." if now_exp else "The desk has left Expanded USB input."
     # A value outside the six measured ones is still worth SAYING, just not naming: going silent on
     # an unknown would hide exactly the case nobody has seen before.

@@ -34,6 +34,7 @@ import device_page
 import devices
 import diagnostics
 import faders
+import master_outputs
 import mic_presets
 import network
 import output_mixes
@@ -513,10 +514,10 @@ def _run_out(arg: str) -> dict:
         return faders.action_set_output_mute(which, not now)
     if what == "automute":
         try:
-            now = server.read_auto_mute(which)
+            now = master_outputs.read_auto_mute(which)
         except Exception as exc:
             return _fail(f"Could not read the auto-mute: {exc}")
-        return server.action_set_auto_mute(which, not now)
+        return master_outputs.action_set_auto_mute(which, not now)
     return _fail(f"Unknown output command {what}.")
 
 

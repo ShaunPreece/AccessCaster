@@ -56,7 +56,7 @@ class DeskState:
     `modes` and `excluded`, keyed by output and source index, `ok` False with a `reason` when the
     grid could not be read), with the layout as `matrix["model"]` (output_mixes.matrix_model). `faders`
     is the fader layout (`model`, `layout`, `labels`, `stereo`), `levels` the Levels page's state
-    (server._window_levels) and `master` the Master Mix page's (server._window_master).
+    (server._window_levels) and `master` the Master Mix page's (master_outputs.window_master).
 
     A subscriber is called as `fn("read", reply)` after every full read, successful or not, and
     after a rebuild that changed which channels exist; `fn("changed", names)` with the names of the
