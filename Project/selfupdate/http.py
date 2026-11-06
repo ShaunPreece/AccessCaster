@@ -23,6 +23,6 @@ USER_AGENT = f"AccessCaster/{__version__}"
 
 def opened(url, timeout):
     """`urlopen` with AccessCaster's own User-Agent. The caller keeps its own
-    timeout: a small index and a 90 MB installer do not wait the same."""
+    timeout: a small index and a 25 MB installer do not wait the same."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     return urllib.request.urlopen(request, timeout=timeout)
