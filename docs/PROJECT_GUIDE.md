@@ -1667,7 +1667,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   everything after them.** 136675 on a Duo and 143187 on a Pro II, identical on every dump measured.
   It is the first four of the five header bytes `model_tree.parse` skips before `Rodecaster`. This is
   what lets the read end on STRUCTURE. An implausible value falls back to quiet detection rather
-  than trusting it, and `rcp_read._last_read["bounded_by"]` says which happened.
+  than trusting it, and `rcp_read._last_read["bounded_by"]` says which happened. A dump that
+  declared its length and stopped short of it is "silence" too, and the desk model is not given it.
 - **A PUSH IS ONE WHOLE RECORD ALONE IN ITS FRAME: `04 <len32> <record> <zeros to 256>`.** Real ones
   are 20 to 30 bytes, so 220-odd bytes of padding, where a dump frame is 255 dense bytes with at
   most a handful of trailing zeros. `rcp_read._push_record` decides it STRUCTURALLY, via
@@ -1756,7 +1757,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   belong. They are inert now nothing reads them, and the July 2026 "strays" that cost a factory reset
   were the same thing seen without the explanation. It also means a Duo dump's property COUNT grows
   with use, so never read meaning into a count difference without asking how each desk has been used.
-- **ABSENT AND ZERO MEAN OPPOSITE THINGS**, which is why `rcp_read.path_value` takes a `MISSING`
+- **ABSENT AND ZERO MEAN OPPOSITE THINGS**, which is why `rcp_read.keyed_value` takes a `MISSING`
   sentinel rather than defaulting to None.
 - **RODE'S OWN DUO GUIDE UNDERSTATES THE FADERS: it says four physical and THREE virtual, seven in
   total.** The desk on firmware 1.7.3 has NINE (four physical, five virtual), which is what its model
@@ -1770,8 +1771,6 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `rcp_read.parse_push` returns). `0x026E` needs two bytes and `0x6E` alone is an ordinary one-byte selector elsewhere. Taking the
   low byte and looking it up in a per-device table is how a gain turned ON THE DESK went unspoken on
   a Duo: the table held the dead selectors, the lookup missed, and nothing was said at all.
-- **`rcp_read.read_settings` returns RAW STREAM-ORDER arrays and is a diagnostic, not a per-channel
-  read.** Do not index it by mic number. It is what the old broken read was built on.
 - **`source_code` is THE per-channel number.** It addresses the input on both desks, indexes the
   INPUTSOURCE table, names the matrix source, and mic channel number is `source_code + 1`. There
   used to be an `input_slot` beside it holding the identical value in all 16 entries across both
@@ -3196,7 +3195,7 @@ shared one; a new copy is how they drifted apart the first time.
   the dump names neither desk.
 - **THE TREE CAN CONFIRM A SELECTOR WITHOUT A CAPTURE, and that is how a blocked feature gets
   unblocked.** Ask the live dump: does a node exist at that root-child index, is it the block you
-  expect, and does it carry the property you mean to write? `rcp_read.node_at` / `path_value` answer
+  expect, and does it carry the property you mean to write? `rcp_read.keyed_node` / `keyed_value` answer
   all three. That is STRONGER than a capture of one property, because it checks every property you
   would write rather than the one somebody happened to click. It is what turned the Duo's
   `unit_settings` cap on (31st August 2026): all 20 settings across GUI 0x07, OUTPUT 0x0D and SYSTEM

@@ -15,7 +15,6 @@ INPUTSOURCE node (DeviceModel.input_key), keyed by source code. The CHAIN lives 
 the channel currently sits on, keyed by its position in the live fader vector.
 """
 
-import contextlib as _contextlib
 import time as _time
 
 import desk_live  # the one listener, whose chain pushes untrust the fader layout
@@ -282,7 +281,7 @@ def _strip_index(entry) -> int:
     except (ValueError, TypeError):
         raise RuntimeError(
             f"{entry.get('name')!r} is not assigned to a fader strip right now, so its "
-            f"processing/effects cannot be addressed - assign it to a fader first.")
+            f"processing/effects cannot be addressed - assign it to a fader first.") from None
 
 
 def _channel_strip(channel) -> int:
@@ -666,11 +665,11 @@ def set_channel_level(channel_name: str, db: int) -> int:
 # ============================================================================
 # READS - per-channel state for the UI (one model dump covers everything)
 # ----------------------------------------------------------------------------
-# The chain arrays (10 occurrences on both desks) are indexed by STRIP. Input values are read at
+# The chain is read at the strip's own CHANNEL and EFFECTS_PARAMETERS nodes, and input values at
 # the channel's INPUTSOURCE node through input_value, never by position.
 # ============================================================================
 
-# Channel-processing PARAMETERS (all normalised 0..1 floats). Nth occurrence = Nth strip.
+# Channel-processing PARAMETERS (all normalised 0..1 floats).
 PROCESSING_READ_PROPS = (
     "eqLowGain", "eqLowShelf", "eqMidGain", "eqMidBell", "eqHighGain", "eqHighBell",
     "eqLowQ", "eqMidQ", "eqHighQ",      # independent and writable (see PROCESSING_PROPS)
@@ -768,37 +767,6 @@ def mic_gain_and_processing(mic: int):
     return gain, on
 
 
-def read_mixer() -> dict:
-    """Mic-focused live read: gain + phantom + polarity + type per mic, MIDI, fw.
-
-    Device-aware: reads exactly the mics the CONNECTED device exposes (4 on the Pro II, 2 on the
-    Duo), keyed by 1-based mic channel, each mic read from its own ADDRESS - so the Duo shows
-    Mic 1/Mic 2, never mislabels its Headset slot as "Mic 3", and never reports one mic's gain as
-    another's. Gated by the device's "channel_read" cap so a desk whose input layout is not
-    verified refuses rather than guess."""
-    dev = devices.get_active_device()
-    if "channel_read" not in dev.caps:
-        raise RuntimeError(f"Live mixer reads are not verified on the {dev.name}.")
-    blob = _r.read_model()
-    mics = {}
-    for entry in active_ui_channels():
-        if entry.get("kind") != "mic":
-            continue
-        power = input_value(blob, entry, "inputPower", dev)
-        phase = input_value(blob, entry, "inputPhaseFlip", dev)
-        mics[mic_channel_number(entry)] = {
-            "gain_db": input_value(blob, entry, "inputMicrophoneGain", dev),
-            "phantom": None if power is None else (power == 1),
-            "polarity": None if phase is None else (phase is True),
-            "mic_type": input_value(blob, entry, "inputMicrophoneType", dev),
-        }
-    return {
-        "midi": _r.first(blob, "systemMidiControl"),
-        "firmware": _r.first(blob, "systemFirmwareVersion"),
-        "mics": mics,
-    }
-
-
 # ============================================================================
 # THE WHOLE PER-STRIP CHAIN, addressed BY STRIP (for "the chain follows the channel")
 # ----------------------------------------------------------------------------
@@ -866,26 +834,30 @@ def read_chains(blob: bytes | None = None, strips: int | None = None) -> list:
         return []
     if strips is None:
         strips = _r.layout_of(blob).count("CHANNEL")
-
-    def props(key):
-        node = _r.keyed_node(blob, key)
-        return {p: (v, k) for p, v, k in node.props} if node is not None else {}
-
-    def val(found, prop, kind=None):
-        v, k = found.get(prop, (None, None))
-        return v if kind is None or k == kind else None
-
     out = []
     for i in range(strips):
-        proc, fx = props(proc_key_for_strip(i)), props(fx_key_for_strip(i))
+        proc = _node_props(blob, proc_key_for_strip(i))
+        fx = _node_props(blob, fx_key_for_strip(i))
         out.append({
-            "bools": {p: val(proc, p) for p in CHAIN_BOOL_PROPS},
-            "floats": {p: val(proc, p, "float") for p in CHAIN_FLOAT_PROPS},
-            "fx_bools": {p: val(fx, p) for p in CHAIN_FX_BOOL_PROPS},
-            "fx_floats": {p: val(fx, p, "float") for p in CHAIN_FX_FLOAT_PROPS},
-            "marker": val(proc, CHAIN_PRESET_MARKER_PROP, "int"),
+            "bools": {p: _node_val(proc, p) for p in CHAIN_BOOL_PROPS},
+            "floats": {p: _node_val(proc, p, "float") for p in CHAIN_FLOAT_PROPS},
+            "fx_bools": {p: _node_val(fx, p) for p in CHAIN_FX_BOOL_PROPS},
+            "fx_floats": {p: _node_val(fx, p, "float") for p in CHAIN_FX_FLOAT_PROPS},
+            "marker": _node_val(proc, CHAIN_PRESET_MARKER_PROP, "int"),
         })
     return out
+
+
+def _node_props(blob: bytes, key) -> dict:
+    """{name: (value, kind)} for the node `key` names in `blob`, or {} when the dump has none."""
+    node = _r.keyed_node(blob, key)
+    return {p: (v, k) for p, v, k in node.props} if node is not None else {}
+
+
+def _node_val(found: dict, prop: str, kind: str | None = None):
+    """A value from `_node_props`, or None when the node lacks it or holds it as another kind."""
+    v, k = found.get(prop, (None, None))
+    return v if kind is None or k == kind else None
 
 
 def fit_chain(chain: dict, strip_idx: int) -> dict:
@@ -1006,8 +978,10 @@ def _parked_load(name: str) -> dict:
 
 def _parked_save(name: str, store: dict) -> None:
     # Never fail a fader move because the parking file could not be written.
-    with _contextlib.suppress(Exception):
+    try:
         _paths.write_json(_paths.data_path(name), store, indent=None)
+    except Exception as exc:
+        diagnostics.event("chain.park_unwritable", str(exc), file=name)
 
 
 def _park(name: str, device_id: str, code: int, record: dict) -> None:
@@ -1061,63 +1035,45 @@ def read_channels(blob: bytes | None = None) -> list:
     Channels view.
 
     INPUT values (mic gain / power / polarity / type; line inputDigitalGain) are read BY ADDRESS
-    through `input_value`, never by position in a values() list. PROCESSING/EFFECTS arrays ARE
-    positional, and legitimately so: they are per-STRIP and the strip index is resolved from the
-    live fader vector, so the index means something: channelInputSource.index(source_code), and a
-    source with no strip assigned reads its processing as None.
+    through `input_value`. Mute, solo and the chain are per STRIP: the strip is
+    channelInputSource.index(source_code), and its CHANNEL and EFFECTS_PARAMETERS nodes are read by
+    key (`read_chains`). A source with no strip assigned reads all of them as None.
 
     Gated by the device's "channel_read" cap: a device whose per-channel read map is not verified
     refuses here rather than returning Pro II-shaped, mislabelled values."""
     dev = devices.get_active_device()
     if "channel_read" not in dev.caps:
         raise RuntimeError(f"Per-channel reads are not verified on the {dev.name}.")
-    if blob is None:
-        blob = _r.read_model_stable()
+    model = _r.read_model_stable() if blob is None else blob
 
-    def vec(prop, kind=None):
-        return _r.values(blob, prop, kind)
+    chains = read_chains(model)
+    src_vec = _r.values(model, "channelInputSource")
 
-    bypass = vec("channelBypassProcessing")
-    # MUTE is live state rather than a stored setting, but it belongs on the channel panel: it is
-    # the control you reach for most. Indexed by STRIP like the processing arrays.
-    mutes = vec(MUTE_PROP)
-    # SOLO, the same shape and the same indexing as the mute (see set_channel_solo). Live state, not
-    # a stored setting, so it is read every time the panel is filled rather than cached.
-    solos = vec(CUE_PROP)
-    # WIRELESS MIC MUTE, same block and same strip indexing again (see WIRELESS_MUTE_PROP). Read for
-    # every channel and surfaced only on the mics, because that is where a wireless mic can land.
-    wireless = vec(WIRELESS_MUTE_PROP)
-    modules = {m: vec(m) for m in PROCESSING_MODULE_BOOLS}
-    params = {p: vec(p, "float") for p in PROCESSING_READ_PROPS}
-    echo = vec("echoOn")
-    reverb = vec("reverbOn")
-    # The rest of the chain (see CHAIN_ADVANCED_PROP): the processing MODE and the preset-name marker
-    # are per strip and travel with a channel, so profiles and the fader swap need them too.
-    advanced = vec(CHAIN_ADVANCED_PROP)
-    preset_marker = vec(CHAIN_PRESET_MARKER_PROP)
-    fx_params = {p: vec(p, "float") for p in _CHANNEL_FX_PARAM_SET}
-    src_vec = vec("channelInputSource")   # for dynamic proc-index resolution (both desks)
-
-    def at(lst, i):
-        return lst[i] if (i is not None and 0 <= i < len(lst)) else None
-
-    def proc_index(ch):
+    def strip_of(ch):
         try:
             return src_vec.index(ch.get("source_code"))
         except (ValueError, TypeError):
             return None   # source not assigned to any strip
 
     def inp(ch, prop):
-        return input_value(blob, ch, prop, dev)
+        return input_value(model, ch, prop, dev)
 
     out = []
     for ch in dev.ui_channels_for(usb_expanded()):
-        pi = proc_index(ch)
+        pi = strip_of(ch)
+        # MUTE, SOLO and WIRELESS MIC MUTE are live state rather than stored settings, on the same
+        # CHANNEL node as the processing, so they are read every time the panel is filled.
+        node = _node_props(model, proc_key_for_strip(pi)) if pi is not None else {}
         # A BUS HAS NO PROCESSING, and this is where that is decided - see the note on
         # devices.PRO2_UI_CHANNELS. The strip PUBLISHES a whole chain and the desk accepts writes to
         # it, so every value below reads back perfectly; none of it reaches the audio. Reporting it
         # would put an equaliser on the page that does nothing, which is worse than having none.
-        chain = ch["kind"] != "bus"
+        chain = chains[pi] if pi is not None and pi < len(chains) and ch["kind"] != "bus" else None
+
+        def ch_val(group, prop, chain=chain):
+            return chain[group].get(prop) if chain is not None else None
+
+        bypass = ch_val("bools", "channelBypassProcessing")
         rec = {
             "name": ch["name"], "label": ch["label"], "kind": ch["kind"],
             "stereo": ch.get("stereo", False),
@@ -1127,16 +1083,15 @@ def read_channels(blob: bytes | None = None) -> list:
             # this" sends somebody looking for a fault when the answer is "put it on a fader".
             # True of Expanded's four until they are assigned.
             "on_fader": pi is not None,
-            "muted": at(mutes, pi),
-            "solo": at(solos, pi),
-            "processing_on": (None if not chain or at(bypass, pi) is None
-                              else (not at(bypass, pi))),
-            "modules": {m: (at(modules[m], pi) if chain else None)
-                        for m in PROCESSING_MODULE_BOOLS},
-            "params": {p: (at(params[p], pi) if chain else None) for p in PROCESSING_READ_PROPS},
-            # Part of the chain, not decoration: see CHAIN_ADVANCED_PROP.
-            "advanced": at(advanced, pi) if chain else None,
-            "preset_index": at(preset_marker, pi) if chain else None,
+            "muted": _node_val(node, MUTE_PROP),
+            "solo": _node_val(node, CUE_PROP),
+            "processing_on": None if bypass is None else not bypass,
+            "modules": {m: ch_val("bools", m) for m in PROCESSING_MODULE_BOOLS},
+            "params": {p: ch_val("floats", p) for p in PROCESSING_READ_PROPS},
+            # The processing MODE and the preset-name marker are part of the chain: see
+            # CHAIN_ADVANCED_PROP.
+            "advanced": ch_val("bools", CHAIN_ADVANCED_PROP),
+            "preset_index": chain["marker"] if chain is not None else None,
             # Read for the profile's sake (and for anyone deciding what these mean later). The strip
             # colour is the unit's own AARRGGBB string; input_type is None on a slot with no physical
             # input, because -1 there is a placeholder rather than a setting.
@@ -1156,11 +1111,11 @@ def read_channels(blob: bytes | None = None) -> list:
             rec["mic_type"] = inp(ch, "inputMicrophoneType")
             # None, not False, when the desk does not publish it, for the same reason phantom is:
             # "the wireless mic is not muted" and "we do not know" must not sound the same.
-            rec["wireless_muted"] = at(wireless, pi)
+            rec["wireless_muted"] = _node_val(node, WIRELESS_MUTE_PROP)
             rec["effects"] = {
-                "echo": at(echo, pi), "reverb": at(reverb, pi),
-                "echo_params": {p: at(fx_params[p], pi) for p in CHANNEL_FX_PARAMS["echo"]},
-                "reverb_params": {p: at(fx_params[p], pi) for p in CHANNEL_FX_PARAMS["reverb"]},
+                "echo": ch_val("fx_bools", "echoOn"), "reverb": ch_val("fx_bools", "reverbOn"),
+                "echo_params": {p: ch_val("fx_floats", p) for p in CHANNEL_FX_PARAMS["echo"]},
+                "reverb_params": {p: ch_val("fx_floats", p) for p in CHANNEL_FX_PARAMS["reverb"]},
             }
         elif ch["kind"] == "bus":
             # NO LEVEL, AND NO PROCESSING EITHER. A bus (the SMART pads mix) has mute, solo and a

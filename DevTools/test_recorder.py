@@ -167,6 +167,18 @@ check("no start seen, no elapsed claimed", w2.snapshot()["elapsed_seconds"], Non
 check("but the state is still reported", w2.snapshot()["state_label"], "Recording")
 w2.note_state(recorder.RECORDING, timed=False)
 check("a repeated read does not reset anything", w2.snapshot()["state"], recorder.RECORDING)
+pushed(w2, recorder.RECORDING)
+check("a repeated push does not claim the start either", w2.snapshot()["elapsed_seconds"], None)
+
+print("\nA SNAPSHOT BETWEEN THE MODEL TAKING A PUSH AND THE FOLLOWER HANDLING IT")
+desk_model._reset()
+w3 = recorder.Watcher()
+pushed(w3, recorder.READY)
+path = tuple(addr(rcp_transfer.RECORDER))
+was = desk_model.apply_push(path, "recordState", recorder.RECORDING, "int")
+w3.snapshot()
+w3._push(desk_live.Push(path, "recordState", recorder.RECORDING, "int", rcp_transfer.RECORDER, was))
+check("the push still times the take", w3.snapshot()["elapsed_seconds"] is not None, True)
 
 print("\nCOMMANDS")
 check("start and resume are the same command to the desk",

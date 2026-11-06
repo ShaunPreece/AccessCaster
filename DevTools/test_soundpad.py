@@ -68,6 +68,45 @@ check("restore ok", res["ok"], False)
 check("names the setting", res["results"][0]["message"].endswith(
     "colour: Pad 12 is empty; nothing to edit."), True)
 
+FX_PAD = {"grid": 5, "type": soundpad.PAD_TYPE_VOICE_FX, "name": "Radio",
+          "fx_stack": {"reverb": {}}, "colour": 8}
+
+
+def restore_fx(effects_idx):
+    health = dict(CLEAN, clean=False, duplicates=[4], effects_idx=effects_idx)
+    with patched((soundpad, {
+            "safe_assign_fx_recipe": lambda *a, **k: {"ok": False, "health": health},
+            "wait_for_pad_present": lambda idx: True,
+            "set_pad_property": lambda grid, name, value: {"ok": True},
+            "pool_health": lambda blob=None: CLEAN})):
+        return soundpad.restore_pads([dict(FX_PAD)], "unused", verify_first=False)
+
+
+print("a voice-effect pad whose create left it two effect objects is not counted as restored")
+res = restore_fx([4, 4])
+check("restore ok", res["ok"], False)
+check("pad ok", res["results"][0]["ok"], False)
+check("names the effect", "effect: " in res["results"][0]["message"], True)
+
+print("one with its own object, on a pool unclean elsewhere, still counts")
+check("pad ok", restore_fx([4, 2, 2])["results"][0]["ok"], True)
+
+print("replacing a pad whose create fails says the old pad is already gone")
+
+
+def fails():
+    raise RuntimeError("volume did not mount")
+
+
+with patched((soundpad, {"_position_of": lambda idx: (4, soundpad.PAD_TYPE_SOUND, "Applause"),
+                         "clear_slot": lambda pos, ptype: None,
+                         "pool_health": lambda blob=None: CLEAN}),
+             (soundpad.time, {"sleep": lambda s: None})):
+    res = soundpad._replace_slot(5, "sound", fails)
+check("the message says so", res["message"],
+      "Could not create the sound: volume did not mount. Sound Applause was already cleared from "
+      "pad 5, so it is empty.")
+
 print("a pad is named by its place on the desk, as the pad list names it")
 check("first pad of bank 3", soundpad.pad_place(17), "pad 1, bank 3")
 check("last pad of bank 1", soundpad.pad_place(8), "pad 8, bank 1")

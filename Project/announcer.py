@@ -125,6 +125,8 @@ def _say(text: str) -> None:
 def _tone(name: str) -> bool:
     """Play a desk-change cue; False when held, so the caller's spoken fallback is held too."""
     return False if _desk_speech_held() else speech.tone(name)
+
+
 # PRESS AND HOLD ON THE ENCODER TOGGLES THE MUTE OF WHAT THE ENCODER IS ON: a virtual fader's
 # channel (`channelOutputMute`), or the monitor speakers (`outputMonMute`). With a channel button
 # holding the encoder, a hold mutes nothing. Measured: a short press runs about 200 to 475 ms
@@ -155,17 +157,20 @@ _PENDING_S = 0.5
 # value and speak ONE phrase once the movement stops (_SETTLE_S of quiet). Separately switchable
 # from the button announcements: some sessions want mute/solo spoken but not a running commentary on
 # every fader.
-# Persisted, like the volume and the on/off: a bare default means turning levels OFF comes silently
-# back ON at the next launch.
-levels_on = bool(settings_file.load().get("announcer_levels", True))
+# Persisted, like the volume and the on/off (`load_settings`).
+levels_on = True
 # MUTE AS A TONE INSTEAD OF A SENTENCE. Off by default: speech is what everyone gets until they
 # choose otherwise, and the tones only make sense to someone who has been told what they mean.
-mute_tones = bool(settings_file.load().get("announcer_mute_tones", False))
+mute_tones = False
 # WHAT RECORDING STARTING, PAUSING AND STOPPING SOUNDS LIKE, from the unit or from here
 # (recording._state_changed): spoken, a tone in its place, or nothing. Never both: speech after
 # the tone repeats it and lands in the take. A card or drive going in or out is spoken whichever is
 # chosen. Spoken by default, like the mutes.
 RECORD_FEEDBACK = {"speak": "Speak it", "tone": "Play a tone", "silent": "Say nothing"}
+record_feedback = "speak"
+# Whether announcements start the way they were left. OFF BY DEFAULT, so the app opens talking: a
+# start-up in silence is indistinguishable from the app or the desk being broken.
+remember = False
 
 
 def _saved_record_feedback(saved: dict) -> str:
@@ -176,26 +181,30 @@ def _saved_record_feedback(saved: dict) -> str:
     return "tone" if saved.get("announcer_record_tones") else "speak"
 
 
-record_feedback = _saved_record_feedback(settings_file.load())
+def _saved_remember(saved: dict) -> bool:
+    """With no saved answer, a saved `announcer` of False counts as ticked: a settings file that
+    predates this option holds the tray's own on/off, and somebody who switched announcements off
+    there keeps them off."""
+    if "announcer_remember" in saved:
+        return bool(saved["announcer_remember"])
+    return saved.get("announcer") is False
 
 
-def _load_remember() -> bool:
-    """Whether announcements start the way they were left. OFF BY DEFAULT, so the app opens talking:
-    a start-up in silence is indistinguishable from the app or the desk being broken. With no saved
-    answer, a saved `announcer` of False counts as ticked: a settings file that predates this option
-    holds the tray's own on/off, and somebody who switched announcements off there keeps them off."""
-    s = settings_file.load()
-    if "announcer_remember" in s:
-        return bool(s["announcer_remember"])
-    return s.get("announcer") is False
-
-
-remember = _load_remember()
+def load_settings() -> None:
+    """Take the saved announcement choices from the settings file, once, at `service.start`."""
+    global levels_on, mute_tones, record_feedback, remember
+    saved = settings_file.load()
+    levels_on = bool(saved.get("announcer_levels", True))
+    mute_tones = bool(saved.get("announcer_mute_tones", False))
+    record_feedback = _saved_record_feedback(saved)
+    remember = _saved_remember(saved)
 
 
 def starts_on() -> bool:
     """Whether the announcer comes up on at start-up: always, unless it is remembered as off."""
     return not (remember and settings_file.load().get("announcer") is False)
+
+
 _SETTLE_S = 0.12       # a safety net: guarantees the closing value is spoken
 _LEVEL_GAP_S = 0.10    # minimum spacing between spoken level updates while moving
 _RUN_S = 1.5           # within this of the last update on the same target, say just the number
@@ -430,7 +439,6 @@ def handle_push(push, st: dict) -> None:
         # selection alone (see _ENC_HOLD_S), and at the press edge we cannot yet tell which this
         # is. The cost is announcing on release, about 400 ms later on a measured press, which is
         # far cheaper than naming the wrong channel and desyncing the ring.
-        st["enc_at"], st["enc_named"] = time.monotonic(), False
         st["enc_down_at"], st["enc_hold"] = time.monotonic(), False
         return
     if name == "encoderPressed" and bval is False:
@@ -674,8 +682,6 @@ def _note_level(st: dict, kind: str, source: int, level: float) -> None:
     st.setdefault("levels", {})[key] = level
     st["levels_at"] = now
     st["enc_turn_at"] = None        # something moved, so that turn was not against nothing
-    if st.get("enc_at") and not st.get("enc_named"):
-        st["enc_named"] = True
     said = st.setdefault("said", {})
     at = st.setdefault("said_at", {})
     # OUR OWN write, echoed back by the desk (see mark_self_write). The UI has already announced
@@ -804,8 +810,8 @@ def mark_self_gain(key, is_mic: bool) -> None:
         who = change_words.gain_name(dev.input_key(entry), is_mic)
         if who:
             mark_self_write(("gain", who))
-    except Exception:
-        pass
+    except Exception as exc:    # unmarked, the desk's echo is spoken once more; never fail a write
+        diagnostics.event("announcer.self_gain_unmarked", str(exc))
 
 
 def mark_self_level(kind: str, idx: int) -> None:

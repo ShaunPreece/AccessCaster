@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # puts Project/ on sys.path, and finds the notes
 import channels
+import desk_firmware
 import profiles
 import property_coverage as pc
 import rcp_read
@@ -68,7 +69,7 @@ SAVE_FUNCS = [
     # would report a refactor as a change to what a profile saves.
     (rcp_read.master_processing, "rcp_read.master_processing"),
     # profile_actions.save_desk takes the firmware version a profile records from this reader.
-    (channels.read_mixer, "channels.read_mixer"),
+    (desk_firmware.version, "desk_firmware.version"),
 ]
 # PADS ARE DIFFERENT and must be listed by hand. soundpad.read_pads_live reads far MORE than
 # soundpad.backup_pads keeps: the backup builds its own entry dict and quietly drops the rest, so

@@ -76,6 +76,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     # THE ONE PLACE THE DIAGNOSTIC LOG IS STARTED, because every entry point comes through here.
     diagnostics.start("AccessCaster starting", version=APP_VERSION, announcer=announce,
                       shortcuts=register_shortcuts)
+    announcer.load_settings()
     install_announcer_hooks()
     # Auto gain and the level check run on threads of their own, outside desk_access's jobs, and a
     # quit part-way through either leaves a mic unprocessed and the Chat mix carrying it alone.

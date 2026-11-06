@@ -303,4 +303,44 @@ with patched((rcp_hid, {"find_control_interface": lambda *a, **k: FakeIface(),
     others.close()
     desk_live.stop()
 
+print("\nA DUMP THAT STOPS SHORT OF THE LENGTH IT DECLARED")
+
+
+class ShortDump:
+    """A desk that declares a 5000-byte dump, sends two frames of it and goes quiet."""
+
+    def __init__(self):
+        head = (5000).to_bytes(4, "little")
+        self.frames = [b"\x04" + head + b"\x01" * 251, b"\x04" + b"\x01" * 255]
+
+    def set_nonblocking(self, _on):
+        pass
+
+    def write(self, _data):
+        pass
+
+    def read(self, _n, timeout_ms=0):
+        return self.frames.pop(0) if self.frames else b""
+
+
+class Watcher:
+    def __init__(self):
+        self.given = []
+
+    def dump_starting(self):
+        return object()
+
+    def dump_finished(self, _token, blob):
+        self.given.append(blob)
+
+
+watcher = Watcher()
+with patched((rcp_read, {"find_control_interface": lambda *a, **k: object(),
+                         "dump_watcher": watcher}),
+             (rcp_hid, {"open_handle": lambda *a: ShortDump(), "close_handle": lambda *a: None}),
+             (rcp_read.devices, {"unidentified": lambda _iface: False})):
+    rcp_read.read_model_raw(settle_ms=200)
+check("it is logged as the desk falling silent", rcp_read._last_read["bounded_by"], "silence")
+check("and the desk model is not given it", watcher.given, [])
+
 sys.exit(_testkit.finish())

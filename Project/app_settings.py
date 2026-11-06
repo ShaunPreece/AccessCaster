@@ -222,7 +222,7 @@ def describe_import(report: dict) -> str:
     msg = ", ".join(parts) + "."
     for key, value in report.get("unmatched") or ():
         what = {"announcer_voice": "voice", "announcer_output": "announcement output"}.get(key, key)
-        msg += (f" The saved {what}, {value!r}, is not on this computer, so it was left as it is.")
+        msg += (f" The saved {what}, {value}, is not on this computer, so it was left as it is.")
     ignored = len(report.get("ignored") or ())
     if ignored:
         msg += (f" {count(ignored, 'entry', 'entries')} {plural(ignored, 'was', 'were')} not "

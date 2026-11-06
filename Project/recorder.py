@@ -126,6 +126,7 @@ def spoken_change(was, now, medium: str = "") -> str:
                 (gone or "the desk has nowhere to record to"))
     return ""
 
+
 # MULTITRACK, named for what it DOES rather than for the unit's own word for it.
 #
 # `recordingMultitrackMode` really is the RECORDER's setting and not the USB stream's.
@@ -577,7 +578,8 @@ class Watcher:
         if state is None:
             return
         with self._lock:
-            self._advance(state, timed=True)
+            # A push from a state outside a take witnessed the start; a repeat, or a resume, did not.
+            self._advance(state, timed=push.was not in (RECORDING, PAUSED))
         if push.was != state and self._on_change:
             try:
                 self._on_change(push.was, state)
@@ -586,7 +588,13 @@ class Watcher:
 
     def _advance(self, state, timed: bool) -> None:
         """Move the elapsed count on to `state`. Caller holds `_lock`."""
-        if state is None or state == self._timing:
+        if state is None:
+            return
+        if state == self._timing:
+            # The desk model takes a push before this follower does, so a snapshot in between
+            # reaches RECORDING untimed; the push that started the take then times it.
+            if timed and state == RECORDING and not self._timed and not self._banked:
+                self._timed = True
             return
         was, now = self._timing, time.monotonic()
         if was == RECORDING and self._since:

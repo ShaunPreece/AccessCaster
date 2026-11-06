@@ -132,8 +132,7 @@ def main() -> int:
     chans = {c["name"]: c for c in channel_actions.action_get_channels()["channels"]}
     mute_was = bool(chans[MUTE_CHAN]["muted"])
     strip = channels.channel_strip_index(MUTE_CHAN)
-    # The channels list carries mute but not gain (gain is a mixer read), so take it from the desk.
-    gain_was = channels.read_mixer()["mics"][GAIN_CHAN]["gain_db"]
+    gain_was = channels.mic_gain_and_processing(GAIN_CHAN)[0]
     print(f"{MUTE_CHAN} starts {'muted' if mute_was else 'unmuted'} on strip {strip}; "
           f"Mic {GAIN_CHAN} gain starts at {gain_was} dB (both restored at the end)")
 
@@ -184,7 +183,7 @@ def main() -> int:
         now = next((f["percent"] for f in back["faders"] if f["index"] == FADER), None)
         chans2 = {c["name"]: c for c in channel_actions.action_get_channels()["channels"]}
         mute_now = bool(chans2[MUTE_CHAN]["muted"])
-        gain_now = channels.read_mixer()["mics"][GAIN_CHAN]["gain_db"]
+        gain_now = channels.mic_gain_and_processing(GAIN_CHAN)[0]
         for what, before, after in (("fader level", original, now),
                                     (f"{MUTE_CHAN} mute", mute_was, mute_now),
                                     (f"Mic {GAIN_CHAN} gain", gain_was, gain_now)):

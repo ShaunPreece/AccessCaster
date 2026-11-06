@@ -35,7 +35,7 @@ announcer._loop = lambda *_: None
 def fresh(saved: dict):
     STORE.clear()
     STORE.update(saved)
-    announcer.remember = announcer._load_remember()
+    announcer.load_settings()
     announcer.suspended_for_record = False
     speech.enabled.clear()
 

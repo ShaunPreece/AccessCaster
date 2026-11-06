@@ -200,6 +200,23 @@ check("two strips read", len(read), 2)
 check("strip 2's reverb is its own (none), not the pad's", read[1]["fx_floats"].get("reverbMix"), None)
 check("strip 1's reverb is read", read[0]["fx_floats"].get("reverbMix"), 0.25)
 
+# The Channels page reads the same way: a mic on a Duo's tenth strip, whose effects node carries no
+# parameters, reads None for them rather than the pad effect object's.
+duo_strips = [fake_model.node("CHANNEL", {"channelInputSource": 0 if i == 9 else 100 + i,
+                                          "channelOutputMute": i == 9})
+              for i in range(10)]
+duo_fx = [fake_model.node("EFFECTS_PARAMETERS",
+                          {"echoOn": True} if i == 9 else {"echoOn": False, "reverbMix": 0.25})
+          for i in range(10)]
+duo_dump = fake_model.node("Rodecaster", (), duo_strips + duo_fx + [
+    fake_model.node("PADEFFECTS", (), [fake_model.node("EFFECTS_PARAMETERS", {"reverbMix": 0.9})]),
+])
+with as_device(devices.DUO):
+    mic1 = next(c for c in channels.read_channels(duo_dump) if c["name"] == "Mic1")
+check("a mic on a Duo's tenth strip reads its own mute", mic1["muted"], True)
+check("and its own echo", mic1["effects"]["echo"], True)
+check("and no reverb parameter, not the pad's", mic1["effects"]["reverb_params"]["reverbMix"], None)
+
 # ---- 2. A moved block is followed ---------------------------------------------------------------
 # A firmware that inserts one node ahead of CHANNEL moves CHANNEL and everything after it by one,
 # which is the case the lookup exists for. Every record must follow its block.

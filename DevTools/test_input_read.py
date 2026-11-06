@@ -71,15 +71,18 @@ blob = dump(inputsource_table(PRO2, {0: {"inputMicrophoneGain": 44}}), N_KIDS)
 root, _used, _tail = model_tree.parse(blob)
 check("the tree parses", root.name, "Rodecaster")
 check("a node resolves at its address", rr.node_at(blob, [INPUT_TABLE]).name, "INPUTSOURCE")
-check("and carries its property", rr.path_value(blob, [INPUT_TABLE], "inputMicrophoneGain"), 44)
-check("and by its key", rr.keyed_value(blob, ("INPUTSOURCE", 0), "inputMicrophoneGain"), 44)
-check("an address with no node returns the default", rr.path_value(blob, [0x9999], "anything", "d"), "d")
+check("and by its key it carries its property",
+      rr.keyed_value(blob, ("INPUTSOURCE", 0), "inputMicrophoneGain"), 44)
+check("a key with no node returns the default", rr.keyed_value(blob, ("NOSUCH", 0), "anything", "d"),
+      "d")
 
 print("\nMISSING TELLS 'ABSENT' APART FROM A REAL None / 0 / False")
 b = dump({0: ("MIX", {"inputPower": 0, "inputPhaseFlip": False})}, 4)
-check("a real 0 is returned, not treated as absent", rr.path_value(b, [0], "inputPower", rr.MISSING), 0)
-check("a real False likewise", rr.path_value(b, [0], "inputPhaseFlip", rr.MISSING), False)
-check("an absent property gives the sentinel", rr.path_value(b, [0], "inputColour", rr.MISSING), rr.MISSING)
+check("a real 0 is returned, not treated as absent",
+      rr.keyed_value(b, ("MIX", 0), "inputPower", rr.MISSING), 0)
+check("a real False likewise", rr.keyed_value(b, ("MIX", 0), "inputPhaseFlip", rr.MISSING), False)
+check("an absent property gives the sentinel",
+      rr.keyed_value(b, ("MIX", 0), "inputColour", rr.MISSING), rr.MISSING)
 
 print("\nPRO II: the write address IS the table entry, so one lookup answers")
 blob = dump(inputsource_table(PRO2, {

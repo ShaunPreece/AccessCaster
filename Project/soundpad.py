@@ -534,7 +534,6 @@ def _health_message(health: dict) -> str:
             "(clear and recreate that pad). Other pads are unaffected.")
 
 
-
 def _resolve_recipe(name: str) -> str:
     key = _safe_match_recipe(name)
     if key is None:
@@ -813,18 +812,21 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
     try:
         drain(bytearray(), False)               # clear stale backlog
         for r in pre:
-            n += rcp_hid.write_report(dev, r); time.sleep(delay)
+            n += rcp_hid.write_report(dev, r)
+            time.sleep(delay)
         acc = bytearray()
         time.sleep(0.15)
         drain(acc, True)                          # opportunistic: sync may already be buffered
         for r in mid:
-            n += rcp_hid.write_report(dev, r); time.sleep(delay)
+            n += rcp_hid.write_report(dev, r)
+            time.sleep(delay)
         drain(acc, True)                          # the sync typically fires during the commit
         # WAV file write happens HERE, edit handle still bound
         file_copy_fn()
         time.sleep(0.2)
         for r in post:
-            n += rcp_hid.write_report(dev, r); time.sleep(delay)
+            n += rcp_hid.write_report(dev, r)
+            time.sleep(delay)
         drain(acc, True)
         if debug:
             diagnostics.event("pad.create",
@@ -1205,7 +1207,7 @@ TRIGGER_EDIT = [
      "label": "How the pad triggers", "said": "trigger mode", "choices": "modes",
      "help": "Latching means the first press sends the pressed value and the next press sends the "
              "released value. Momentary means the pressed value goes as you press and the released "
-             "value as you let go. Heard on the desk's own MIDI output, not assumed."},
+             "value as you let go."},
     {"key": "type", "prop": "padTriggerType", "kind": "int", "min": 0, "max": 1,
      "label": "MIDI message type", "choices": "types",
      "help": "Control Change sends a CC. Note sends a note, and with Latching the note stays on "
@@ -1624,7 +1626,8 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
                       f"-> sync -> {len(mid)} phase2A -> FILE -> {len(post)} phase2B")
 
     def file_copy():
-        dst_dir = os.path.join(root, "pads", str(folder)); os.makedirs(dst_dir, exist_ok=True)
+        dst_dir = os.path.join(root, "pads", str(folder))
+        os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, on_device)
         last = None
         for attempt in range(6):               # EINVAL can persist for a beat after a fresh mount
@@ -1699,8 +1702,10 @@ def _replace_slot(grid: int, what: str, create, note: str = "") -> dict:
     try:
         result = create()
     except Exception as exc:
-        return {"ok": False, "created": False, "message": f"Could not create the {what}: {exc}",
-                "health": pool_health()}
+        msg = f"Could not create the {what}: {exc}"
+        if cleared:
+            msg = f"{msg.rstrip('.')}. {cleared} was already cleared from pad {grid}, so it is empty."
+        return {"ok": False, "created": False, "message": msg, "health": pool_health()}
     health = pool_health()
     lead = f"Replaced {cleared} on pad {grid}. " if cleared else f"Created {what} on pad {grid}. "
     msg = lead + result + "." + note + " " + _health_message(health)
@@ -1898,7 +1903,8 @@ def safe_assign_fx_recipe(target_idx: int, name: str, recipe: dict, colour: int 
         raise ValueError(_health_message({"clean": False, "detached": [target_idx]}))
     pos, ptype, _name = _position_of(target_idx)
     if pos is not None:
-        clear_slot(pos, ptype); time.sleep(0.8)
+        clear_slot(pos, ptype)
+        time.sleep(0.8)
     remove_orphan_objects(target_idx)
     assign_create_fx_recipe(target_idx, name, recipe, colour=colour, active=active)
     time.sleep(0.6)
@@ -2288,19 +2294,7 @@ def engage_pad(position: int) -> None:
     sends the one flag and nothing else, exactly like `unlatch_pad`.
 
     No transfer mode: a live state toggle, not a record edit."""
-    _require_pad_write()
-    iface = t.find_control_interface()
-    if iface is None:
-        raise RuntimeError("no control interface (close the RODE app)")
-    dev = rcp_hid.open_handle(iface, "pad engage")
-    try:
-        for _ in range(20):
-            if not dev.read(256, timeout_ms=10):
-                break
-        rcp_hid.write_report(dev, build_pad_bool("padActive", True, position))
-        time.sleep(0.3)
-    finally:
-        rcp_hid.close_handle(dev, "pad engage")
+    _set_pad_active(position, True)
 
 
 def unlatch_pad(position: int) -> None:
@@ -2311,20 +2305,25 @@ def unlatch_pad(position: int) -> None:
     exactly where it was, which is what you want when a create left something engaged.
 
     No transfer mode, deliberately: this is a live state toggle, not a record edit."""
+    _set_pad_active(position, False)
+
+
+def _set_pad_active(position: int, on: bool) -> None:
+    """Send one bare `padActive` at `position`, after draining what the desk has queued."""
     _require_pad_write()
     iface = t.find_control_interface()
     if iface is None:
         raise RuntimeError("no control interface (close the RODE app)")
-    dev = rcp_hid.open_handle(iface, "pad unlatch")
+    label = "pad engage" if on else "pad unlatch"
+    dev = rcp_hid.open_handle(iface, label)
     try:
         for _ in range(20):
             if not dev.read(256, timeout_ms=10):
                 break
-        rcp_hid.write_report(dev, build_pad_bool("padActive", False,
-                                                 position))
+        rcp_hid.write_report(dev, build_pad_bool("padActive", on, position))
         time.sleep(0.3)
     finally:
-        rcp_hid.close_handle(dev, "pad unlatch")
+        rcp_hid.close_handle(dev, label)
 
 
 def select_bank(bank: int) -> None:
@@ -2383,7 +2382,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         return {"ok": False, "message": f"{place} is empty, so there is no sound to export."}
     if pad["type"] != PAD_TYPE_SOUND:
         return {"ok": False,
-                "message": (f"{place} is {pad['name']!r}, a {pad['type_label']} pad. Only sound "
+                "message": (f"{place} is {pad['name']}, a {pad['type_label']} pad. Only sound "
                             f"pads have an audio file; a voice effect is a recipe, not a recording.")}
     wanted = pad.get("file")
     os.makedirs(dest_dir, exist_ok=True)
@@ -2951,7 +2950,9 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                 fn = e.get("file")
                 src = os.path.join(src_dir, str(grid), fn) if fn else None
                 if not src or not os.path.isfile(src):
-                    skipped.append(f"pad {grid} (sound file missing)"); ok = False; continue
+                    skipped.append(f"pad {grid} (sound file missing)")
+                    ok = False
+                    continue
                 replay = e.get("replay")
                 created(create_sound(grid, src, name=label or "Sound", colour=e.get("colour") or 5,
                                      replay=bool(replay) if replay is not None else True))
@@ -2962,20 +2963,30 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                     colour = e.get("fx_colour")
                     if colour is None:
                         colour = e.get("colour") if e.get("colour") is not None else 8
-                    safe_assign_fx_recipe(grid - 1, label or key or "Effect", stack,
-                                          colour=int(colour), active=False)
+                    res = safe_assign_fx_recipe(grid - 1, label or key or "Effect", stack,
+                                                colour=int(colour), active=False)
                 elif key:                             # older backup: fall back to the live recipe
-                    assign_fx_to_grid(grid, key)
+                    res = assign_fx_to_grid(grid, key)
                 else:
-                    skipped.append(f"pad {grid} ({label}: unrecognised effect)"); continue
+                    skipped.append(f"pad {grid} ({label}: unrecognised effect)")
+                    continue
+                # An unclean pool elsewhere does not fail this pad; its own object missing or
+                # duplicated does.
+                health = res["health"]
+                if health["effects_idx"].count(grid - 1) != 1:
+                    problems.append("effect: " + (_health_message(health)
+                                                  or "the effect was not created cleanly"))
             elif ptype == PAD_TYPE_MIXER:
                 if e.get("mixer_mode") is None:
-                    skipped.append(f"pad {grid} (mixer mode missing)"); ok = False; continue
+                    skipped.append(f"pad {grid} (mixer mode missing)")
+                    ok = False
+                    continue
                 created(create_mixer(grid, e["mixer_mode"]))
             elif ptype == PAD_TYPE_TRIGGER:
                 created(create_trigger(grid, name=label or None, colour=e.get("colour") or 5))
             else:
-                skipped.append(f"pad {grid} (type {ptype} not restorable)"); continue
+                skipped.append(f"pad {grid} (type {ptype} not restorable)")
+                continue
             if not wait_for_pad_present(grid - 1):
                 raise RuntimeError("the pad did not appear on the desk after it was created")
             # Re-apply the saved cosmetics/behaviour the create path does not already set.
@@ -3096,7 +3107,7 @@ def _cli():
     elif cmd == "clear":
         print(json.dumps(clear_grid_pad(int(sys.argv[2])), indent=2))
     elif cmd == "create":
-        grid = int(sys.argv[2]); wav = sys.argv[3]
+        grid, wav = int(sys.argv[2]), sys.argv[3]
         name = sys.argv[4] if len(sys.argv) > 4 else "Sound"
         colour = int(sys.argv[5]) if len(sys.argv) > 5 else 5
         print(json.dumps(create_sound(grid, wav, name=name, colour=colour, debug=dbg), indent=2))
@@ -3104,7 +3115,7 @@ def _cli():
         print(json.dumps(assign_fx_to_grid(int(sys.argv[2]), sys.argv[3]), indent=2))
     elif cmd == "mixer":
         # mixer <grid> <mode 0-4 or name> [name]
-        grid = int(sys.argv[2]); mode = sys.argv[3]
+        grid, mode = int(sys.argv[2]), sys.argv[3]
         name = sys.argv[4] if len(sys.argv) > 4 else None
         print(json.dumps(create_mixer(grid, mode, name=name, debug=dbg), indent=2))
     elif cmd == "trigger":
@@ -3114,7 +3125,7 @@ def _cli():
         print(json.dumps(create_trigger(grid, name=name, debug=dbg), indent=2))
     elif cmd == "set":
         # set <grid> <property> <value>   (in-place pad-property edit; property from PAD_PROP)
-        grid = int(sys.argv[2]); prop = sys.argv[3]; val = sys.argv[4]
+        grid, prop, val = int(sys.argv[2]), sys.argv[3], sys.argv[4]
         print(json.dumps(set_pad_property(grid, prop, val), indent=2))
     elif cmd == "restore":
         arg = sys.argv[2] if len(sys.argv) > 2 else "list"

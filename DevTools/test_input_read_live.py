@@ -72,11 +72,5 @@ finally:
 print()
 check("every mic is back at its baseline", gains(dev, mics), original)
 
-# read_mixer is the other public reader of these values and must agree with read_channels.
-by_channels = {m["name"]: v for m, v in
-               zip(mics, [c.input_value(rr.read_model(), m, "inputMicrophoneGain", dev) for m in mics])}
-by_mixer = {m["name"]: c.read_mixer()["mics"][c.mic_channel_number(m)]["gain_db"] for m in mics}
-check("read_mixer agrees with the addressed read", by_mixer, by_channels)
-
 print()
 sys.exit(_testkit.finish())

@@ -86,7 +86,7 @@ def read_property_list() -> list[tuple[str, str, int]]:
 # 2. Where our code touches each property
 # ---------------------------------------------------------------------------
 # A line that decodes a value out of a model dump.
-READ_CALL = re.compile(r"find_all|\bvalues\(|\bvec\(|\bfirst\(|read_model|path_value|keyed_value|"
+READ_CALL = re.compile(r"find_all|\bvalues\(|\bvec\(|\bfirst\(|read_model|keyed_value|_node_val|"
                        r"block_value|props\.get")
 # A line that builds or sends a record to the device.
 WRITE_CALL = re.compile(r"build_\w+|write_at|send_record|send_records_paced")
@@ -96,7 +96,7 @@ WRITE_CALL = re.compile(r"build_\w+|write_at|send_record|send_records_paced")
 CONTEXT_ROLE = {
     # reads
     "PROCESSING_READ_PROPS": "read", "PROCESSING_MODULE_BOOLS": "read",
-    "read_settings": "read", "read_mixer": "read", "read_processing": "read",
+    "read_processing": "read",
     "read_channels": "read", "read_matrix_state": "read", "read_matrix_levels": "read",
     "read_output_modes": "read", "read_pads_live": "read", "pad_positions": "read",
     "_fields_by_padidx": "read", "first": "read", "read_status": "read",

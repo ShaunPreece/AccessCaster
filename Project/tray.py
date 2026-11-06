@@ -229,10 +229,10 @@ class TrayApp:
         wc.lpfnWndProc = {
             WM_TRAY: self._on_tray,
             win32con.WM_COMMAND: self._on_command,
-            win32con.WM_CLOSE: lambda h, m, w, l: self._request_quit() or 0,
-            WM_OPEN_WINDOW: lambda h, m, w, l: self.open_window() or 0,
-            WM_SHOW_WINDOW: lambda h, m, w, l: self._show_window(),
-            win32con.WM_QUERYENDSESSION: lambda h, m, w, l: 1,
+            win32con.WM_CLOSE: lambda *_: self._request_quit() or 0,
+            WM_OPEN_WINDOW: lambda *_: self.open_window() or 0,
+            WM_SHOW_WINDOW: lambda *_: self._show_window(),
+            win32con.WM_QUERYENDSESSION: lambda *_: 1,
             win32con.WM_ENDSESSION: self._on_end_session,
             taskbar_created: self._on_taskbar_created,
         }
@@ -277,8 +277,8 @@ class TrayApp:
     def _remove_icon(self) -> None:
         try:
             win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, (self.hwnd, _TRAY_ICON_ID))
-        except Exception:
-            pass
+        except Exception as exc:    # the icon is already gone when Explorer is not running
+            diagnostics.event("tray.icon_remove_failed", str(exc))
 
     # -- tray icon events ------------------------------------------------------------------------
     def _on_tray(self, hwnd, msg, wparam, lparam):

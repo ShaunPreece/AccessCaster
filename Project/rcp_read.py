@@ -250,17 +250,17 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
             deadline = time.monotonic() + QUIET_S  # extend while data keeps flowing
     finally:
         rcp_hid.close_handle(dev, "model dump")
+    complete = need is not None and len(buf) >= need
+    bounded_by = "length" if complete else "silence"
     _last_read.update(bytes=len(buf), frames=frames, pushes_skipped=pushes, declared=declared,
-                      reads=reads, bounded_by="length" if need is not None else "silence",
-                      at=time.time())
+                      reads=reads, bounded_by=bounded_by, at=time.time())
     # A DUMP THAT ENDED ON "silence" IS THE DESK FAILING TO ANSWER, and the size says how far it
     # got before it stopped. This is the app's own reading of the desk's health, taken every time
     # it looks at it, and it is the line that dates a dropout without inferring it from outside.
-    diagnostics.event("model.read", bounded_by="length" if need is not None else "silence",
-                      bytes=len(buf), frames=frames, pushes_skipped=pushes,
-                      took=f"{time.monotonic() - started:.2f}s")
+    diagnostics.event("model.read", bounded_by=bounded_by, bytes=len(buf), frames=frames,
+                      pushes_skipped=pushes, took=f"{time.monotonic() - started:.2f}s")
     blob = bytes(buf)
-    if watcher is not None and need is not None:
+    if watcher is not None and complete:
         try:
             watcher.dump_finished(token, blob)
         except Exception as exc:    # the picture is never worth failing a dump for
@@ -453,7 +453,7 @@ def block_values(blob: bytes, block: str, name: str, kind: str | None = None) ->
 
 
 MISSING = object()
-"""Sentinel for path_value: "this node does not carry that property at all".
+"""Sentinel for keyed_value: "this node does not carry that property at all".
 
 Not None, because None, False, 0 and "" are all REAL values a property can hold, and a caller
 deciding whether to fall back to a default has to be able to tell "absent" from "absent-looking".
@@ -471,28 +471,6 @@ def node_at(blob: bytes, path):
     return _index(blob).by_path.get(tuple(path))
 
 
-def path_value(blob: bytes, path, name: str, default=None):
-    """The value of `name` on the node at `path`, or `default` if the node or property is absent.
-
-    THE ADDRESSED READ, and the counterpart to every build_* writer. Prefer it over `values()` +
-    an index for anything that belongs to one channel, output or pad.
-
-    WHY NOT `values()` AND A POSITION: that is only correct while stream order matches the caller's
-    numbering. On the Pro II it does, because its per-input write selectors ARE the INPUTSOURCE
-    table entries. On a Duo a write into a MIX node at 0x48+source_code CREATES the property there,
-    and one of those ahead of the table shifts every index past it, so one mic's gain is reported
-    as another's. The app never writes there, but RODE's app does, and the property survives until
-    a factory reset, so a positional read stays wrong on a used Duo.
-    """
-    node = node_at(blob, path)
-    if node is None:
-        return default
-    for pname, val, _kind in node.props:
-        if pname == name:
-            return val
-    return default
-
-
 def keyed_node(blob: bytes, key):
     """The node a `model_tree.Layout` key names in THIS dump, or None. Reads by the same key the
     matching write is addressed by, located on the dump being read rather than on a remembered
@@ -504,7 +482,13 @@ def keyed_node(blob: bytes, key):
 
 
 def keyed_value(blob: bytes, key, name: str, default=None):
-    """`path_value` by key: the value of `name` on the node `key` names, or `default`."""
+    """The value of `name` on the node `key` names, or `default` if the node or property is absent.
+
+    THE ADDRESSED READ, and the counterpart to every write. Prefer it over `values()` and an index
+    for anything that belongs to one channel, output or pad: a position is only right while stream
+    order matches the caller's numbering. On a Duo, RODE's app writes into a MIX node at
+    0x48 + source code, which CREATES the property there until a factory reset; one of those ahead
+    of the INPUTSOURCE table shifts every index past it, so one mic's gain reads as another's."""
     node = keyed_node(blob, key)
     if node is None:
         return default
@@ -604,35 +588,6 @@ def snapshot_properties(blob: bytes) -> dict:
     for name, val, _kind in iter_properties(blob):
         out.setdefault(name, []).append(val)
     return out
-
-
-def read_settings() -> dict:
-    """RAW STREAM-ORDER arrays plus MIDI and firmware. A diagnostic, NOT a per-channel read.
-
-    The lists here are every occurrence of each name in dump order. DO NOT index them by channel,
-    mic number or source code: that is only correct when the desk's per-input write addresses happen
-    to be the INPUTSOURCE table entries, which is true on the Pro II and false on the Duo. Use
-    channels.input_value, which addresses the channel's own node. This function is kept for the
-    command-line dump below and for anyone eyeballing the raw shape.
-    """
-    blob = read_model()
-    gains = values(blob, "inputMicrophoneGain")
-    p48 = values(blob, "inputPower")
-    phase = values(blob, "inputPhaseFlip")
-    mtype = values(blob, "inputMicrophoneType")
-    midi = first(blob, "systemMidiControl")
-    # systemFirmwareVersion reads "" in one section and the version in another, which is exactly
-    # what `first` is for (it skips blanks and keeps False/0).
-    fw = first(blob, "systemFirmwareVersion")
-    return {
-        "_bytes": len(blob),
-        "inputMicrophoneGain": gains,
-        "inputPower": p48,
-        "inputPhaseFlip": phase,
-        "inputMicrophoneType": mtype,
-        "systemMidiControl": midi,
-        "systemFirmwareVersion": fw,
-    }
 
 
 # ---- Routing matrix read-back (the output Custom mixes) ---------------------
@@ -808,13 +763,15 @@ if __name__ == "__main__":
     import channels as _ch
     import devices as _dev
 
-    s = read_settings()
-    d = _dev.get_active_device()
-    print(f"device: {d.name}")
-    print(f"stream bytes: {s['_bytes']}")
-    print(f"systemFirmwareVersion : {s['systemFirmwareVersion']}")
-    print(f"systemMidiControl     : {'ON' if s['systemMidiControl'] else 'OFF'} ({s['systemMidiControl']})")
     blob = read_model()
+    d = _dev.get_active_device()
+    # systemFirmwareVersion reads "" in one section and the version in another, which is what
+    # `first` is for: it skips blanks and keeps False and 0.
+    midi = first(blob, "systemMidiControl")
+    print(f"device: {d.name}")
+    print(f"stream bytes: {len(blob)}")
+    print(f"systemFirmwareVersion : {first(blob, 'systemFirmwareVersion')}")
+    print(f"systemMidiControl     : {'ON' if midi else 'OFF'} ({midi})")
     print(f"{'channel':<12} {'gain/level':>10} {'48V':>5} {'polarity':>9} {'type':>5}")
     for entry in d.ui_channels:
         mic = entry.get("kind") == "mic"
