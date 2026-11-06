@@ -136,7 +136,7 @@ after a session that moved code.
 | `web.py` | 22 | **The one way the app reaches the internet**: `opened(url, timeout)`, `urlopen` with `USER_AGENT` (`AccessCaster/<version>`; Cloudflare refuses Python's default). Called only by `driver_install` and `selfupdate`'s `checker` and `downloader`, which `test_driver_install` asserts. |
 
 --------------------------------------------------------------------------------
-## DevTools/ (149 files; the ones worth knowing)
+## DevTools/ (150 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, takes the single-instance lock for a

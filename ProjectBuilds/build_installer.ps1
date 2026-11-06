@@ -71,7 +71,15 @@ $pins = ($ReqFiles | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }
 $current = if (Test-Path $Stamp) { (Get-Content $Stamp -Raw).Trim() } else { "" }
 if (-not (Test-Path $Py) -or $current -ne $pins) {
     Write-Host "==> Creating the build environment ($VenvDir) from the pinned requirements..."
-    Remove-Item $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
+    # A venv with a Python still running from it (DevTools\simulate_desk.py, say) cannot be
+    # deleted, and a new one created over the remains is broken in ways the check cannot see.
+    if (Test-Path $VenvDir) {
+        try { Remove-Item $VenvDir -Recurse -Force -ErrorAction Stop }
+        catch {
+            throw "Could not delete $VenvDir to rebuild it: a program is probably running from " +
+                  "it, such as DevTools\simulate_desk.py. Quit it and build again. ($_)"
+        }
+    }
     # @() because PowerShell unrolls a one-element array returned from a function into a string.
     $base = @(Find-BasePython)
     $baseArgs = @($base | Select-Object -Skip 1)
