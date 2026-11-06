@@ -14,10 +14,9 @@ the profile's own pads/ folder (pads_dir) and records their metadata under "pads
 FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2), holding its pads/ audio
 beside it.
 
-LOCK BOUNDARY: this module never imports the server, so there is no circular import. save() and
-load() are pure (file ops + an already-read model blob). apply() performs the device WRITES and
-assumes THE CALLER HOLDS the HID lock - the server owns that lock and reads the model under it,
-then hands the blob / loaded profile here.
+LOCK BOUNDARY: save() and load() are pure (file ops + an already-read model blob). apply()
+performs the device WRITES and assumes THE CALLER HOLDS the HID lock (`desk_access.hid_lock`):
+`profile_actions` takes it, reads the model under it, and hands the blob or loaded profile here.
 """
 from __future__ import annotations
 
@@ -43,7 +42,7 @@ PROFILE_VERSION = 2
 RESTORE_PACE = 0.02            # seconds between device writes during a restore
 # Mic channel name -> 1-based number. Pro II-shaped (Mic3/Mic4), but SAFE across devices because
 # restore refuses a cross-device restore: a Duo profile only ever carries Mic1/Mic2, and a
-# stray higher channel would fail the device's own mic guard (channels._mic_path) anyway.
+# stray higher channel would fail the device's own mic guard (channels._mic_key) anyway.
 _MIC_NAME_TO_INT = {"Mic1": 1, "Mic2": 2, "Mic3": 3, "Mic4": 4}
 
 # ---- the full-dump snapshot ------------------------------------------------------------------
@@ -96,8 +95,8 @@ UNIT_KEY = "unit"
 # live MUTES that happen to live in the same block, and restoring a mute is the one thing a profile
 # must not do: the whole point of this file is that a restore is safe to run mid-session, and
 # silencing the speakers or the Bluetooth send because that is how they sat when the profile was
-# taken would be a nasty surprise with no visible cause. Exactly the reasoning that keeps
-# channelOutputMute out (see the profile-coverage report); these are its output-side equivalents.
+# taken would be a nasty surprise with no visible cause. The same reasoning keeps
+# channelOutputMute out of a restore; these are its output-side equivalents.
 # They ARE saved, so the full snapshot still records how the desk was found.
 UNIT_NEVER_RESTORE = frozenset({"outputMonMute", "outputBTMute"})
 
@@ -172,7 +171,7 @@ def _snapshot(blob: bytes, props: dict | None = None) -> dict:
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
          product_id=None, device_name=None, headphone_output_count=None, baseline=False, show=None) -> dict:
     """Build the full profile from an ALREADY-READ model `blob` + channel read `chans`, and write
-    it to profiles/<safe>/profile.json. No device access - the server did the read (and, for the
+    it to profiles/<safe>/profile.json. No device access - the caller did the read (and, for the
     optional `pads` backup, the pad read + file copy) under the lock. `pads` is the metadata list
     from soundpad.backup_pads (sound files already copied into profiles/<safe>/pads/); when given it
     is stored under the profile's "pads" key so restore can rebuild the grid.
@@ -228,7 +227,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
                     for v in rcp_read.values(blob, "faderLevel")]
     mon_level = first("outputMonLevel")
     # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
-    # positionally to the outputs the device addresses - the same read read_routing_live does.
+    # positionally to the outputs the device addresses.
     hp_all = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
     headphone_types = [hp_all[i] if i < len(hp_all) else None
                        for i in range(int(headphone_output_count))]
@@ -255,8 +254,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
         "name": safe,
         "saved_at": time.time(),
         # The desk this profile was saved on. restore refuses a cross-device restore when
-        # product_id is present and differs from the connected device. Older profiles have neither
-        # key (all saved on the Pro II historically); those are allowed and rely on per-write guards.
+        # product_id is present and differs from the connected device. A profile without either
+        # key was saved on a Pro II; it is allowed and relies on the per-write guards.
         "product_id": product_id,
         "device_name": device_name,
         "midi": bool(midi) if midi is not None else None,
@@ -493,9 +492,8 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     # every restored chain is written against the OLD layout and then has the layout moved out from
     # under it, so a profile saved with a reordered layout restores its voicings onto the wrong
     # channels.
-    # Gated on the device's "fader_write" cap: the Duo's fader vector carries empty strips
-    # encoded as -1 and its write semantics are unconfirmed. On a device
-    # without the cap we SKIP the fader restore (and tell the user) rather than write it.
+    # Gated on the device's "fader_write" cap: on a device without it the fader restore is
+    # SKIPPED, and the user told, rather than written.
     if "fader_write" in devices.get_active_device().caps:
         step("Restoring the fader layout.")
         for i, code in enumerate(faders):
@@ -531,8 +529,8 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     # A MIC TYPE THAT CHANGES IS LET FINISH BEFORE THAT CHANNEL'S CHAIN IS WRITTEN.
     # A voicing does not just set its default gain: it replaces the strip's whole processing chain,
     # and it takes the desk a second or two to do it (Pro II). A chain write landing
-    # inside that window is thrown away - PROVEN directly, by writing eqLowGain 0.3125 exactly 0.12 s
-    # after a type change and reading back the voicing's 0.59375 instead.
+    # inside that window is thrown away: one sent 0.12 s after a type change reads back as the
+    # voicing's own value.
     # Without the wait an end-to-end restore still keeps its chain today, because the writes between
     # the type and the params take longer than 0.12 s; the wait stops that depending on timing that
     # varies with the voicing pair, the device and whatever gets written in between.
@@ -580,7 +578,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
                 continue
             # THE MIC TYPE GOES FIRST, before the gain, for the same reason the fader layout goes
             # before the processing: CHOOSING A VOICING SETS THAT VOICING'S OWN DEFAULT GAIN.
-            # Measured on Mic 3: Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
+            # The defaults: Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
             # NT1 30, NT1-A 31, RE20 51, SM7B 55. Only Line-in and Instrument leave the gain alone.
             # Write the gain AFTER the type. The other way round, any restore that actually
             # CHANGES the voicing throws the restored gain away and leaves the desk on the new
@@ -602,7 +600,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
                 w(f"{cname} phantom", lambda cnum=cnum, v=ch["phantom"]: channels.set_phantom(cnum, bool(v)))
             if ch.get("polarity") is not None:
                 w(f"{cname} polarity", lambda cnum=cnum, v=ch["polarity"]: channels.set_polarity(cnum, bool(v)))
-            # INSTRUMENT GAIN is restored; INPUT TYPE deliberately is not (profile-coverage report).
+            # INSTRUMENT GAIN is restored; INPUT TYPE deliberately is not.
             # inputType is DERIVED from the mic type just restored above (Line-in -> 2,
             # Instrument -> 1, any mic voicing -> 0), so the path comes back on its
             # own, and writing it as well could only ever produce a state the desk's own UI cannot
@@ -630,7 +628,7 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
                 w(f"{cname} level", lambda cname=cname, v=ch["level_db"]: channels.set_channel_level(cname, int(v)))
 
         # Processing applies to every channel (mic + line).
-        # ORDER MATTERS (hardware-established, see channels.CHAIN_ADVANCED_PROP): the processing
+        # ORDER MATTERS (see channels.CHAIN_ADVANCED_PROP): the processing
         # MODE goes FIRST, because in simple mode the desk derives the chain from the three VoxLab
         # knobs, so restoring an advanced chain onto a strip left in simple mode can be regenerated
         # over the top. The preset-name marker goes LAST, because the device blanks it to -1 as soon
@@ -654,10 +652,9 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
               channels.set_channel_preset_marker(cname, int(v)))
 
     # Master/global output-block writes (multitrack, auto-mutes, headphone type, Compellor, delay)
-    # are gated on the device's "output_write" cap: their selectors are decoded on the Pro II but
-    # NOT yet verified on the Duo, and an unmapped global selector would append a stray. So on a
-    # device without the cap we SKIP them (and tell the user) rather than write blindly. Fader
-    # source writes above are channelInputSource and stay allowed (verified on both desks).
+    # are gated on the device's "output_write" cap, because an unmapped global selector would
+    # append a stray. On a device without the cap they are SKIPPED, and the user told, rather than
+    # written blind.
     _MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_multitrack",
                         "usb_expanded",
                         "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",

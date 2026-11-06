@@ -223,8 +223,8 @@ def tone_path(name: str) -> str:
             return ""
         # Sweep up any earlier shape of this cue, so the folder does not accumulate one file per
         # version for ever. Best effort: a file we cannot delete is clutter, not a fault.
-        # `{name}*.wav`, not `{name}-v*.wav`: the first shape shipped had no version in its name at
-        # all, and a pattern that only matches versioned files leaves it behind for ever.
+        # `{name}*.wav`, not `{name}-v*.wav`, so an unversioned file from the earliest builds goes
+        # too.
         for old_name in glob.glob(os.path.join(folder, f"{name}*.wav")):
             if old_name != path:
                 try:

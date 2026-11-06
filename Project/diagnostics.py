@@ -2,14 +2,14 @@
 
 WHY IT EXISTS. The shipped app is a WINDOWED exe, so every `print` in the codebase goes nowhere and
 the only other way to say what the app is doing is to watch it from OUTSIDE - which measures the
-watching as often as the app. A poll timing out against a server legitimately blocked on the device
-lock, and a port check that does not filter for LISTEN, both read as faults and are not. This writes
-the app's own account to a file instead, so a fault is read rather than inferred.
+watching as often as the app: a poll timing out against a reader legitimately blocked on the device
+lock reads as a fault and is not. This writes the app's own account to a file instead, so a fault
+is read rather than inferred.
 
 WHAT IT RECORDS, and the list is shaped by the fault it is built for (a show import that changed
 something takes the desk down about a minute AFTER the job has finished):
 
-  app.*        the process and the HTTP server coming up and going down, and why
+  app.*        the process coming up and going down, and why
   job.*        every background job: start, each step it reports, its outcome and how long it took
   send         every record written to the desk, DECODED to property = value, not hex
   hid.*        every device handle opened and closed, with what opened it
@@ -316,8 +316,8 @@ def _bind_faulthandler() -> None:
 class _Tee:
     """Everything written to stdout/stderr, into the log as well.
 
-    THE POINT OF IT: the codebase already prints the things worth knowing - the server's address,
-    the shortcut count, the watchdog's stop reason, a startup read that failed - and in the frozen
+    THE POINT OF IT: the codebase already prints the things worth knowing - the shortcut count,
+    the watchdog's stop reason, a startup read that failed - and in the frozen
     windowed build `sys.stdout` is None, so all of it is discarded. Teeing means every existing
     diagnostic starts being recorded without a single call site changing.
     """

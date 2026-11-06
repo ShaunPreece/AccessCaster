@@ -3,12 +3,11 @@ playing.
 
 WHAT IT KEEPS, and why it keeps it: a pad press has to be instant, and knowing where a pad sits and
 what its play mode is come from a model dump of about 1.5 seconds. So this module caches the pad map,
-keeps it honest from the desk's pushes (`follow_desk`) and from every pad edit (`pads_stale`), and
-remembers what it switched on or is holding down, because the desk does not echo our own writes.
-The bank the desk is on is the desk model's (`desk_model.bank`).
+keeps it honest from every pad edit (`pads_stale`) and an age limit, follows what is playing from
+the desk's pushes (`follow_desk`), and remembers what it switched on or is holding down, because the
+desk does not echo our own writes. The bank the desk is on is the desk model's (`desk_model.bank`).
 
-It never imports the server. The device lock is `desk_access.hid_lock`, as everywhere else in the
-app.
+The device lock is `desk_access.hid_lock`, as everywhere else in the app.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ import rcp_transfer
 import soundpad
 import speech
 import wording
+
 
 def _said(message: str, ok: bool = True) -> dict:
     """A shortcut's result, in the shape every action returns. One whose `ok` is False is spoken
@@ -259,9 +259,8 @@ def _arm_midi() -> None:
 # dict update.
 #
 # ADDRESSED BY STREAM POSITION, path [666, position] - the same address our own `padActive` write
-# uses. Measured on a pad chosen so the two candidate readings disagree: Pitch Up is padIdx 12 at
-# position 19 and is pushed at 19, not at 8 + padIdx. On a factory Pro II every user pad happens to
-# sit at 8 + padIdx, so a bank 1 pad proves nothing here.
+# uses, not 8 + padIdx. On a factory Pro II every user pad sits at 8 + padIdx, so the two agree
+# until a pad's record moves in the stream.
 #
 # ONLY SOUND PADS PUBLISH PROGRESS. A voice-FX pad pushes `padActive` and no progress at all
 # (measured), so "how far through" is a sound-pad answer and nothing else.

@@ -29,8 +29,8 @@ NOTICE = "RODE's app is open. AccessCaster catches up with its changes when you 
 # Called on the watcher's thread when RODE's app is first seen in a run of it: the tray speaking
 # `NOTICE`.
 on_seen = None
-# Called on the watcher's thread after every look, with whether RODE's app is open: the server
-# comparing reads with the desk model while it is (`rode_follow.follow`).
+# Called on the watcher's thread after every look, with whether RODE's app is open:
+# `rode_follow.follow`, comparing reads with the desk model while it is.
 on_look = None
 
 _lock = threading.Lock()

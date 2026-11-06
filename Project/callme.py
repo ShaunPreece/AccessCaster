@@ -5,7 +5,7 @@ PROJECT_GUIDE.md part 2. In short: everything lives on the SIPCALLING node and t
 nodes, all root children, addressed from the live tree; an incoming call is PUSHED; answering is one
 composite write. The touchscreen is the only other way to do any of it, which is why this exists.
 
-THE WORDING LIVES HERE, like the recorder's: the server speaks it, the window shows it, and the
+THE WORDING LIVES HERE, like the recorder's: the app speaks it, the window shows it, and the
 window composes none of it.
 """
 
@@ -260,9 +260,9 @@ def build_hangup(path) -> list:
 
     `sipSlotCallDisconnect` is a pair of bools and the desk hangs up when the FIRST one RISES from
     False to True. Writing the value it already holds does nothing, so the first record lowers it
-    (which leaves the call alone) and the second raises it. Measured on a live call: (False, False)
-    then (True, False) ends it as "Local drop"; (True, True) over (True, True) and (False, True)
-    over (True, True) do nothing."""
+    (which leaves the call alone) and the second raises it. (False, False) then (True, False) ends
+    a call as "Local drop"; (True, True) over (True, True) and (False, True) over (True, True) do
+    nothing."""
     def rec(first: bool) -> bytes:
         inner = _block(b"\x02" if first else b"\x03") + _block(b"\x03")
         return rcp_transfer._frame(rcp_transfer.build_address(list(path))
@@ -530,8 +530,8 @@ class Watcher:
     and who is ringing and who is on each slot are remembered as they were heard.
 
     NOT A BRANCH OF THE ANNOUNCER: the announcer only runs while announcements are on, and a call
-    has to be tracked whether or not anyone wants it spoken. Speech goes through `on_say`, which the
-    server points at the announcer's queue, so the announcer switch still decides what is heard.
+    has to be tracked whether or not anyone wants it spoken. Speech goes through `on_say`, which
+    `callme_actions` points at `speech.say`, so the announcements switch still decides what is heard.
 
     `read_model` is called each time the listener has the desk open: the model adopts that read,
     and what the Watcher remembers is seeded from it. Nothing is spoken before the model holds

@@ -8,8 +8,8 @@ desk. A third desk is one more table entry.
 
 This is the DEVICE model, unrelated to profiles.py, which stores user settings snapshots.
 
-This module imports only rcp_hid, so rcp_read / rcp_transfer / channels can import it without a
-cycle.
+This module imports only rcp_hid and diagnostics, so rcp_read / rcp_transfer / channels can import
+it without a cycle.
 """
 from __future__ import annotations
 
@@ -141,7 +141,7 @@ class FaderSpec:
                        what the UI lists and the highest index a channel can be assigned to.
                        NOT necessarily the vector length - see vector_len.
       vector_len     : how many slots we are willing to WRITE, when that is more than the exposed
-                       fader count (Duo: 10 slots for 9 faders, live-tested). None = same as count.
+                       fader count (Duo: 10 slots for 9 faders). None = same as count.
                        Profile RESTORE and the reset default use this length.
       capture_len    : how many slots a profile SAVE records. None = same as vector_len. Split from
                        vector_len: the Pro II's raw vector is 10 long too (slot 9 mirrors
@@ -289,8 +289,8 @@ class HeadphoneTypeSpec:
 
     headphoneType is an int on HEADPHONE[index] (`rcp_transfer.headphone_key`). The INDEX picks
     WHICH headphone output; the VALUE picks the amp profile. Confirmed: HEADPHONE[0] = Headphone 1
-    (the original Pro II reversing) and HEADPHONE[1] = Headphone 2 (captured on the Duo fw-1.7.3
-    output-write pass). Both desks lay the output blocks out identically, so both expose HP1 + HP2.
+    and HEADPHONE[1] = Headphone 2. Both desks lay the output blocks out identically, so both
+    expose HP1 + HP2.
     The write path is gated by the "output_write" cap.
 
       outputs : (HEADPHONE index, label) per addressable headphone output, in UI order.
@@ -446,10 +446,9 @@ CHANNELS_PRO2 = (
     # False, and every parameter on it accepts a write, lands, reads back and restores byte-clean.
     # NONE OF THAT IS PROOF.
     #
-    # SETTLED BY EAR ON BOTH DESKS: the chain does NOTHING to the pads audio. Pan hard over moves
-    # nothing, against a same-listener, same-headphones control where pan on Mic 2 moves the voice
-    # to one ear; maximum HPF, full EQ cuts, a slammed noise gate and zero make-up gain are all
-    # inaudible. **RODE's own guide says so** ("You can add processing to any audio channel except
+    # THE CHAIN DOES NOTHING TO THE PADS AUDIO, on either desk: pan hard over, maximum HPF, full
+    # EQ cuts, a slammed noise gate and zero make-up gain are all inaudible, where pan on a mic
+    # moves it to one ear. **RODE's own guide says so** ("You can add processing to any audio channel except
     # the SMART pads") and so does their app, which offers no processing for it. A write landing
     # at its own address proves an address is live, never that it reaches audio.
     # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
@@ -515,28 +514,23 @@ PRO2_FADERS = FaderSpec(
 # 9 stereo channel audio mixer to be used" (update.rode.com/notes/rcp2). So: 9 faders, 4 physical,
 # 5 virtual - the same 9 as the Pro II, but carried in a 10-slot vector.
 #
-# INDEX 9 IS THE NON-FADER, AND IT IS PROVEN RATHER THAN INFERRED. `PHYSICALINTERFACE` carries four
-# POT nodes and then exactly NINE FADER nodes, at [0,4]..[0,12], for a ten-slot vector - so one slot
-# has no fader behind it. Which one came from writing each fader's level and hearing which audio
-# moved: fader index 5 moved source 7's thirteen cross-points and slot 5 holds source 7, so fader
-# index == vector slot; fader index 8 moved nothing, and slot 8 is the empty strip (-1), which is an
-# ordinary vacant fader rather than an absent one. That leaves slot 9, which also holds a DUPLICATE
-# of USB 2 (already at index 7). So indices 0-8 are the nine faders, matching the Pro II, and the
-# virtual labels and the encoder ring do NOT shift.
+# INDEX 9 IS THE NON-FADER. `PHYSICALINTERFACE` carries four POT nodes and then exactly NINE FADER
+# nodes, at [0,4]..[0,12], for a ten-slot vector - so one slot has no fader behind it. Fader index
+# == vector slot: fader index 5 moves source 7's thirteen cross-points and slot 5 holds source 7,
+# and slot 8 is the empty strip (-1), an ordinary vacant fader rather than an absent one. That
+# leaves slot 9, which also holds a DUPLICATE of USB 2 (already at index 7). So indices 0-8 are the
+# nine faders, matching the Pro II, and the virtual labels and the encoder ring do NOT shift.
 # Indices 0-3 = Mic 1, Mic 2, Bluetooth, SMART pads, which is exactly the four physical faders
 # RODE describes ("after the two main input channels, there are faders for two stereo channels:
 # Bluetooth and the SMART pads").
 #
-# physical=4 IS COUNTED ON HARDWARE, by hand, not read off RODE's wording: the four physical faders
-# drive sources 0, 1, 10 and 11. Worth saying because the wording alone also supports TWO, if the
-# stereo channels are taken not to be faders, and that reading is wrong.
-# default_vector CONFIRMED as (0,1,10,11,2,7,8,9,-1,9): the channelInputSource from the stray-free
-# fw-1.7.3 reference dump taken straight after a factory reset, verified as 10 entries starting at
-# source 0 with no +1 shift (the dump itself is a capture and stays out of the repo), and matched
-# byte-for-byte by an independent live read. So the empty strip (idx8 = -1) and the duplicated USB2
-# (idx9 = 9, also at idx7) are the genuine SHIPPED default on a 10-strip Duo, NOT stray residue,
-# which is what makes it a trustworthy reset target. 'reset faders' is enabled on the Duo (writes -1
-# as a signed int and idx9 via the device-aware set_fader_source bound; both live-tested).
+# physical=4: the four physical faders drive sources 0, 1, 10 and 11. RODE's wording alone also
+# supports TWO, if the stereo channels are taken not to be faders, and that reading is wrong.
+# default_vector CONFIRMED as (0,1,10,11,2,7,8,9,-1,9), the channelInputSource straight after a
+# factory reset on fw 1.7.3. So the empty strip (idx8 = -1) and the duplicated USB2 (idx9 = 9, also
+# at idx7) are the genuine SHIPPED default on a 10-strip Duo, NOT stray residue, which is what
+# makes it a trustworthy reset target. 'reset faders' is enabled on the Duo (writes -1 as a signed
+# int and idx9 via the device-aware set_fader_source bound).
 DUO_FADERS = FaderSpec(
     count=9, physical=4, vector_len=10,
     assignable=_assignable_view(CHANNELS_DUO),
@@ -819,7 +813,7 @@ DUO = DeviceModel(
     # "output_write": RODE app capture, every address byte-identical to the Pro II's.
     # "pad_write": a reversible live create/clear proved the three firmware behaviours a read
     # cannot: clear GCs the bound region-B object, a bare create does not append to the pool, and
-    # handle = pad count. Then the web endpoints end to end.
+    # handle = pad count.
     # "fader_write": set a source on the empty strip, vacate it with -1, write slot 9, and reset to
     # DUO_FADERS.default_vector, each read back byte-clean.
     # "unit_settings": every rcp_transfer.UNIT_SETTING_SEL property resolves to a node of the right
@@ -838,7 +832,7 @@ DUO = DeviceModel(
     # "callme": every write finds its node by property on the live tree; a Pro II to Duo call
     # connects both ways.
     # THE WIFI SCAN is the one network write not proven here: a Duo already joined to a network
-    # fills no slot. action_scan_wifi warns that an empty result may be spurious.
+    # fills no slot, and action_scan_wifi refuses to scan while the desk is joined to one.
     caps=frozenset({"input_mic_write", "processing", "channel_read", "matrix_read",
                     "matrix_write", "output_write", "pad_write", "fader_write",
                     "level_write", "chain_follow", "unit_settings", "stereo_link",

@@ -14,22 +14,17 @@ WHY BOTH STILL EXIST, since the obvious question is why we do not just delete pr
 So: a show is the fast, complete round trip; a profile is the readable, selective one. The Profiles
 page offers both and says which is which.
 
-**ALL FOUR WRITES ARE PROVEN, on a Pro II with the recordings drive in.** Two
-full reset-and-restore cycles were driven from this module alone, with nobody at the touchscreen:
+**ALL FOUR WRITES ARE CONFIRMED, on a Pro II with the recordings drive in:**
 
-  * EXPORT put a new SHOW node on the drive in about a second, at the next snapshot index, stamped
-    with the wall clock, and renumbered every uid beneath it exactly as trap 1 predicts.
-  * DELETE removed a named backup; it was gone from a fresh read and the free space came back.
-  * RESET minted a new show uuid, which is what makes the backup importable again.
-  * IMPORT put the desk back. The second cycle came back with ZERO real differences against a
-    profile snapshot taken moments before the reset - every diff was the new show node's own
-    metadata or the drive's free space - and all 16 SMART pads matched to the leaf value, FX stacks,
-    envelopes and audio files included.
+  * EXPORT puts a new SHOW node on the drive in about a second, at the next snapshot index, stamped
+    with the wall clock, and renumbers every uid beneath it (trap 1).
+  * DELETE removes a named backup and gives its free space back.
+  * RESET mints a new show uuid, which is what makes the backup importable again.
+  * IMPORT puts the desk back: against a profile snapshot taken just before a reset, the only
+    differences are the new show node's own metadata and the drive's free space, and every SMART
+    pad matches to the leaf value, FX stacks, envelopes and audio files included.
 
-BEWARE A PROOF THAT EXPORTS AT THE TOUCHSCREEN and reads the tree afterwards: it proves the traps
-below and nothing at all about our own writes. The loop above is driven entirely from this module.
-
-THE COMMANDS AS RECORDED. All live in SHOWCONTROL and are written at the two-byte address
+THE COMMANDS. All live in SHOWCONTROL and are written at the two-byte address
 `01 01 01 02 8e 02`:
   * `showControlExport` = True         -> a new show file on the recordings drive.
   * `showControlImport` = <uid>        -> load that show. Restores everything, pads included.
@@ -37,7 +32,7 @@ THE COMMANDS AS RECORDED. All live in SHOWCONTROL and are written at the two-byt
     NEW uuid, so an export taken beforehand can be imported straight back as the undo.
   * `showControlDelete` = <uid>        -> remove one show file and give the space back.
 
-FOUR TRAPS, each measured rather than assumed:
+FOUR TRAPS:
 
 1. **`showUID` IS POSITIONAL AND IS REASSIGNED ON EVERY EXPORT.** The newest show is always uid 0
    and everything else shuffles down. So a uid held by a page goes stale the moment anybody exports,
@@ -56,11 +51,10 @@ FOUR TRAPS, each measured rather than assumed:
 
 3. **AN IMPORT DOES *NOT* REFUSE A SHOW WHOSE UUID MATCHES THE LOADED ONE.** A uuid changes only on
    a factory reset, so EVERY backup shares the loaded uuid, and refusing on that basis would make
-   shows useless for the ordinary case: back up, change something, put it back. Measured twice: with
-   the desk deliberately drifted, importing such a backup restored Mic 4's gain (30 to 50, and 42 to
-   50) inside four seconds, with `showControlLastError` staying 0.
+   shows useless for the ordinary case: back up, change something, put it back. Such an import puts
+   a drifted setting back inside four seconds, with `showControlLastError` staying 0.
 
-   `showControlLastError` = 1 IS real (seen twice) but is not a uuid clash. What provokes it is
+   `showControlLastError` = 1 IS real but is not a uuid clash. What provokes it is
    unknown, so the app sends the write and REPORTS the unit's refusal rather than predicting it.
 
    **The consequence for verification is the whole of `restore_fingerprint`.** With the uuid already
@@ -106,11 +100,9 @@ BLOCK_SHOW = "SHOW"
 # import is not evidence about that import (see show_actions.action_show_import).
 ERROR_REFUSED = 1
 
-# CODE 8 IS "NOWHERE TO PUT IT", provoked on purpose: an export asked of a Duo with no card and no
-# drive in it. Within one second `showControlLastError` went 0 -> 8, `showControlExport` cleared to
-# False, no show was created and nothing else in the tree moved, which also proves the SHOWCONTROL
-# address is live on a Duo. Missing storage is what was measured; a full or unwritable volume could
-# plausibly report the same code, so the wording covers that too.
+# CODE 8 IS "NOWHERE TO PUT IT": an export asked of a Duo with no card and no drive in it sets
+# `showControlLastError` to 8 within a second, clears `showControlExport` to False, and creates no
+# show. A full or unwritable volume may report the same code, so the wording covers that too.
 ERROR_NO_STORAGE = 8
 ERROR_TEXT = {
     ERROR_REFUSED: ("The desk refused to restore that backup, and does not say why. Once it has "

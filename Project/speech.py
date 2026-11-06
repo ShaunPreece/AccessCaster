@@ -72,10 +72,10 @@ _lists_lock = threading.Lock()
 def sapi_lists(refresh: bool = False) -> dict:
     """{"voices": [...], "outputs": [...]} of SAPI names, or empty lists if speech is unavailable.
 
-    COM has to be initialised per THREAD, and this runs on whichever HTTP worker thread took the
-    request, so CoInitialize/CoUninitialize wrap the call. A machine with no speech stack at all
-    reports empty lists rather than failing the request: the announcer simply has nothing to choose
-    from, and the rest of the page still works."""
+    COM has to be initialised per THREAD, and this runs on whichever thread asks, so
+    CoInitialize/CoUninitialize wrap the call. A machine with no speech stack at all reports empty
+    lists rather than failing the caller: the announcer simply has nothing to choose from, and the
+    rest of the page still works."""
     with _lists_lock:
         if not refresh and _lists_cache["voices"] is not None:
             return dict(_lists_cache)

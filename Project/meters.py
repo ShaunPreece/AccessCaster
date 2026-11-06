@@ -24,8 +24,9 @@ from ctypes import POINTER, c_float, c_int32, c_uint32, c_void_p, c_wchar_p
 
 import comtypes
 import comtypes.client
-import write_guard
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
+
+import write_guard
 
 CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
 
@@ -309,9 +310,9 @@ def reading_scale(volume_db: float, is_capture: bool) -> tuple:
     """(the Windows level that scales a meter reading, the ceiling it gives): what a true
     full-scale signal reads.
 
-    AN OUTPUT'S METER READS BEFORE WINDOWS' VOLUME, AN INPUT'S AFTER IT. Measured on the desk's Main
-    Stereo pair: a -6 dBFS tone read 0.500 on the output at both -6.3 and -18.3 dB, while the
-    input's reading fell 12 dB with its level. Scaling an output by its volume calls ordinary speech
+    AN OUTPUT'S METER READS BEFORE WINDOWS' VOLUME, AN INPUT'S AFTER IT. On the desk's Main Stereo
+    pair a -6 dBFS tone reads 0.500 on the output at both -6.3 and -18.3 dB, while the input's
+    reading falls 12 dB with its level. Scaling an output by its volume calls ordinary speech
     clipping, so an output is always read at full scale."""
     if not is_capture:
         return 0.0, 1.0

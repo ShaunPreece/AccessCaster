@@ -156,7 +156,7 @@ def enumerate_interfaces() -> list[RodeInterface]:
 
 
 # ---- THE INTERFACE LIST, REMEMBERED ---------------------------------------------------------
-# Which desk is attached is asked several times per request (`devices.get_active_device` alone has
+# Which desk is attached is asked several times per action (`devices.get_active_device` alone has
 # dozens of callers), and every fresh answer is a full `hid.enumerate`, which blocks for tens of
 # seconds on a desk half off the bus. So the last list is kept and reused until something says it
 # is wrong: a handle failing to open on a remembered path, a watcher losing the desk
@@ -240,8 +240,8 @@ def find_control_interface(
 
     MI_09 IS THE ONLY INTERFACE THIS PROTOCOL WORKS OVER, and it is on the desk's USB 1 port alone
     (the one nearest the power inlet). USB 2 presents its own device, PID 0x0026 MI_03, which is a
-    control interface by shape and silent in fact: opened on hardware with both cables in,
-    `get_version` returns '' and `ping` returns False.
+    control interface by shape and silent in fact: on it `get_version` returns '' and `ping`
+    returns False.
 
     SO THERE IS NO FALLBACK TO "the first control interface we found". That fallback hands MI_03 to
     any caller with only USB 2 plugged in, and every read then returns nothing while the app looks
@@ -344,9 +344,9 @@ def wait_for_reenumeration(before: Optional[RodeInterface],
                            timeout_s: float = REENUM_TIMEOUT_S) -> bool:
     """Block until the desk is back on the bus after a write that reconfigures its USB audio.
 
-    WITHOUT THIS, THE WRITES THAT FOLLOW ARE SENT INTO THE GAP AND LOST. A profile restore
-    measured 27 settings failing with "no control interface" in the 1.2 s after it set
-    `outputMultiMode`, and they are reported to the user as though the desk had been unplugged.
+    WITHOUT THIS, THE WRITES THAT FOLLOW ARE SENT INTO THE GAP AND LOST: every write in the second
+    or so after an `outputMultiMode` write fails with "no control interface", and is reported to
+    the user as though the desk had been unplugged.
 
     `before` is the interface as it was BEFORE the write, and watching that exact path die is how
     a real re-enumeration is told from a write the desk ignored: writing a value it already holds
