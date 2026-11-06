@@ -1,7 +1,7 @@
 """End-to-end test of the AS-FOUND BASELINE, against a TEMPORARY profile store.
 
-Reads the real desk (one model dump, read-only, safe alongside the running app) and runs the whole
-first-run flow: offer, capture, mark, protect, add pads afterwards. Nothing is written to the unit,
+Reads the real desk (one model dump, read-only; quit AccessCaster first, as for every live suite)
+and runs the whole first-run flow: offer, capture, mark, protect, add pads afterwards. Nothing is written to the unit,
 and PROFILES_DIR and the settings file are both redirected, so the real profile store and the real
 preferences are untouched - the baseline this creates lives in a temp folder and is deleted at the
 end.

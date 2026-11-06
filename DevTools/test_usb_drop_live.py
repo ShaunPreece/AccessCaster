@@ -127,8 +127,8 @@ class Load:
             self._threads.append(t)
 
     def _read_loop(self, dev) -> None:
-        # A BLOCKING read with a short timeout, which is what both real readers use (200 ms). The
-        # point is that a read is genuinely outstanding when the device goes, not that it spins.
+        # A BLOCKING read with a short timeout, as the app's desk listener makes. The point is that
+        # a read is genuinely outstanding when the device goes, not that it spins.
         #
         # THE HANDLE IS CLOSED HERE, ON THE THREAD THAT READS IT, and that is not tidiness: closing
         # it from `stop()` while this read is in flight SEGFAULTS the interpreter (exit 139).

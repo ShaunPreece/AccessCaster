@@ -1,12 +1,10 @@
-"""Offline checks on the Backups page's rename and delete, and on what the page posts to the server.
+"""Offline checks on the Backups page's rename and delete.
 
 THE RULES THIS PINS:
-  * rename and delete reach the backup by its NAME from `read_backups`, which is what
-    `selectedBackupName()` sends, not by its list key, which `profiles.safe_name` refuses;
+  * rename and delete reach the backup by its NAME from `read_backups`, which is what the page
+    sends, not by its list key, which `profiles.safe_name` refuses;
   * the as-found backup is refused on the first delete and deleted with `force`;
-  * a delete that cannot read the desk deletes nothing, rather than the profile without its show;
-  * every key the page posts to a route in a literal `postJSON` body is one that route reads, so a
-    key such as `force` cannot be dropped on the way to its action.
+  * a delete that cannot read the desk deletes nothing, rather than the profile without its show.
 
 No device: the profile store is a temporary folder and the desk reports no shows.
 
@@ -16,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile

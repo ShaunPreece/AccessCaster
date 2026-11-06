@@ -6,8 +6,8 @@
      exercised only there cannot show the fault.
 
   2. THE ENDPOINT CEILING. Windows' own capture level scales an input's meter. At a capture level
-     of -1.08 dB a signal at TRUE full scale reads 0.883 (measured twice, 8 dB apart, 88.3 percent
-     both times), so a fixed clip threshold of 0.99 is unreachable and the clipping warning, the
+     of -1.08 dB a signal at TRUE full scale reads 0.883 (measured: 88.3 percent of the signal,
+     whatever its level), so a fixed clip threshold of 0.99 is unreachable and the clipping warning, the
      one thing a recording cannot recover from, is never spoken. An OUTPUT's meter reads before
      its volume, so scaling it calls ordinary speech clipping.
 
@@ -75,7 +75,8 @@ check("an absurd ceiling cannot make a whisper clip",
       "CLIPPING" in meters.describe(0.05, 1.0, NAME, ceiling=0.0), False)
 
 print("\nTHE WINDOWS RECORDING LEVEL IS EXPLAINED, AND BLAMED CORRECTLY")
-# Measured on this endpoint: 50% = -1.08 dB, about 55% = unity, 75% = +7.67 dB, 100% = +30 dB. So
+# Windows' recording slider on the desk's input, measured: 50% = -1.08 dB, about 55% = unity,
+# 75% = +7.67 dB, 100% = +30 dB. So
 # the common habit of setting a new device to 75% puts nearly 8 dB of BOOST on a desk that already
 # delivers a levelled stream, and the resulting clipping happens in Windows, not in the desk.
 check("a near-unity level says nothing at all", meters.level_note(-1.08), "")
@@ -117,10 +118,9 @@ check("shared mode, never exclusive (exclusive would steal the mic from every ot
       "AUDCLNT_SHAREMODE_SHARED" in src and meters.AUDCLNT_SHAREMODE_SHARED == 0, True)
 check("Watcher follows the endpoint volume while running",
       "refresh_ceiling()" in src and "CEILING_REFRESH_S" in src, True)
-# A SETTER EXISTS, AND THE RULE BEHIND IT IS UNCHANGED: the app must not move Windows' level behind
-# the user's back, because that changes what EVERY application on the machine records. A control the
-# USER operates is a different thing from the app deciding, so the setter's only caller is that
-# control. What is pinned here is the surrounding safety: the read-back (drivers refuse silently),
+# THE APP NEVER MOVES WINDOWS' LEVEL ON ITS OWN, because that changes what EVERY application on the
+# machine records. A control the USER operates is a different thing from the app deciding, so the
+# setter's only caller is that control. What is pinned here is the surrounding safety: the read-back (drivers refuse silently),
 # the narrowed range (-96 dB is off, not quiet), and that nothing in the METERING path - Meter,
 # Watcher, sample, describe - ever writes.
 check("a setter exists, for the control the user operates",

@@ -186,7 +186,7 @@ recording._state_changed(recorder.RECORDING, recorder.NO_DESTINATION)
 check("the drive being pulled mid-take still gives announcements back",
       speech.enabled.is_set(), True)
 
-print("\nPLUGGING THE DRIVE IN AND OUT, WORDED FROM THE SERVER")
+print("\nPLUGGING THE DRIVE IN AND OUT, NAMED FROM THE LAST PAGE READ")
 # recorder.spoken_change owns the words; this pins the WIRING round it - the medium name coming
 # from the last full page read, and the full stop the phrase does not carry itself.
 recording._note_context({"destination": {"spoken": "USB drive", "low": False},

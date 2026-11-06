@@ -7,10 +7,10 @@ interfaces are in flux at exactly that moment.
 
 This moves the default output to a device that is neither the desk nor the driver, drives the USB
 output mode off and back to make arrivals, and counts how many arrivals produce a bind. Compare
-the rate against the same count with the default left on `System`.
+the rate against a `--control` run, which moves nothing.
 
     python DevTools/probe_bind_default_output.py --cycles 6
-    python DevTools/probe_bind_default_output.py --cycles 6 --keep-default
+    python DevTools/probe_bind_default_output.py --cycles 6 --control
 
 It restores the default output and the USB output mode it found, whatever happens, and every flip
 is a mode the desk already supports. It runs the app's service itself, the watchers included, so

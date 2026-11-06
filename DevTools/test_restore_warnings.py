@@ -84,8 +84,8 @@ check("is silent", got, [])
 # ---------------------------------------------------------------------------------------------
 # THE OTHER HALF OF THE SAME PROBLEM: a restore that REARRANGES the faders and says nothing about
 # the levels. An old profile carries the layout without `fader_levels`, so a channel lands on
-# whatever level that strip was sitting at - which is how Main Stereo went silent. The levels now
-# follow the channels in that case, and must NOT when the profile carries its own.
+# whatever level that strip was sitting at, and one landing on a fader at zero goes silent. So the
+# levels follow the channels in that case, and must NOT when the profile carries its own.
 
 print("\nlevels follow the channels when the profile has none of its own")
 CALLS = []

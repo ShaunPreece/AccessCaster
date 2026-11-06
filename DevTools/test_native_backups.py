@@ -1,8 +1,8 @@
 """The native window's Backups (Project/native/backups_section.py, backup_dialogs.py), offline:
 each backup is listed and described by what it can do, the chosen one survives a read and a
 `prefer` chooses a new one, the as-found line and its Add pads button follow the baseline, the
-restore question carries the plan's warnings and the pad time, each job starts the right server
-call and follows the right status, the as-found backup's delete takes a second yes, and the reset's
+restore question carries the plan's warnings and the pad time, each job starts the right action
+and follows the right status, the as-found backup's delete takes a second yes, and the reset's
 question lands on Cancel and refuses a backup it has nowhere to put. Nothing is shown and nothing
 touches a desk.
 
@@ -176,7 +176,7 @@ with patched(fakes, (backups_section, {"call": lambda _o, fn, *a, done=None: don
     page._deleted(page._chosen(), backups.action_delete_backup("Monday", False))
 check("the as-found backup is deleted only on a second, forced yes",
       deletes, [("Monday", False), ("Monday", True)])
-check_in("asked in the server's own words", "This is the as-found backup.", questions[-1])
+check_in("asked in the action's own words", "This is the as-found backup.", questions[-1])
 check("and its result is spoken", frame.said[-1], "Deleted Monday.")
 check_true("and the backups are read again", reads)
 

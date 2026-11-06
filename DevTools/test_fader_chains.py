@@ -66,7 +66,7 @@ check("the store survives being re-read from disk", (channels.park_chain("DESK-A
 channels.take_chain("DESK-A", 4)
 
 
-# --- _follow_chains, with the device mocked out --------------------------------------------
+# --- follow_chains, with the device mocked out --------------------------------------------
 WRITES = []          # (strip, chain) for every write_chain call, in order
 STATE = {}           # strip -> chain, as the desk would end up
 
@@ -83,7 +83,7 @@ def fake_write_chain(strip_idx, desired, current=None, delay=0.02):
 
 
 def install(before):
-    """Point server at the fakes and seed the desk state from a pre-write snapshot."""
+    """Point the chain and fader calls at the fakes and seed the desk from a pre-write snapshot."""
     WRITES.clear()
     STATE.clear()
     STATE.update({i: c for i, c in enumerate(before)})
@@ -97,7 +97,7 @@ def install(before):
 
 
 print()
-print("_follow_chains: a channel that MOVES strip")
+print("follow_chains: a channel that MOVES strip")
 before = [chain(0), chain(1), chain(2)]
 install(before)
 note = faders.follow_chains([0, 1, 2], [1, 0, 2], before)
@@ -106,7 +106,7 @@ check("both chains travel with their channels", sorted(WRITES)[:2],
 check_in("and the note says what followed", "followed", note)
 
 print()
-print("_follow_chains: a channel that LEAVES the layout")
+print("follow_chains: a channel that LEAVES the layout")
 before = [chain(0), chain(1), chain(2)]
 install(before)
 note = faders.follow_chains([0, 1, 2], [0, 7, 2], before)
@@ -117,7 +117,7 @@ check_in("the note is about PROCESSING, not the layout (reported separately)",
          "the processing for", note)
 
 print()
-print("_follow_chains: a channel that RETURNS from off-fader")
+print("follow_chains: a channel that RETURNS from off-fader")
 before = [chain(0), chain(5), chain(2)]         # strip 1 holds a STRANGER's voicing
 install(before)
 note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
@@ -128,7 +128,7 @@ check("the parked copy is consumed", channels.take_chain("DESK-TEST", 1), None)
 check_in("the note says the channel got its processing back", "got its own processing back", note)
 
 print()
-print("_follow_chains: a channel returns with NOTHING parked")
+print("follow_chains: a channel returns with NOTHING parked")
 before = [chain(0), chain(5), chain(2)]
 install(before)
 note = faders.follow_chains([0, 7, 2], [0, 4, 2], before)
@@ -137,7 +137,7 @@ check("nothing is written for it (we have no chain to write)",
 check_in("but the user is TOLD it is on whatever was there", "no stored processing", note)
 
 print()
-print("_follow_chains: a return that does not land is parked again")
+print("follow_chains: a return that does not land is parked again")
 before = [chain(0), chain(5), chain(2)]
 install(before)
 channels.park_chain("DESK-TEST", 1, chain(1))

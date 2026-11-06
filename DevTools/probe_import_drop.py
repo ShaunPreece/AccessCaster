@@ -53,7 +53,7 @@ Usage, with AccessCaster quit:
 import argparse
 import time
 
-import _bootstrap  # puts Project/ on the path; import FIRST
+import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import channel_actions
 import diagnostics
 import _desk

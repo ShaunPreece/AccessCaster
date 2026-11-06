@@ -458,7 +458,7 @@ def args_of(calls, name):
 
 
 def profile(**routing):
-    """A v2 profile carrying only routing (no channels), so the tests stay on the new keys."""
+    """A version 2 profile carrying routing only, no channels."""
     r = {"faders": [0, 7, 2, 3, 10, 11, 1, 8, 9],
          "fader_levels": FADER_LEVEL_VALUES,
          "monitor_level": 0.03,
@@ -580,8 +580,7 @@ check("a profile with no expanded key restores as Standard",
 
 print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is deliberate")
 # The Duo HAS the output_write cap, so it gets these four. That is the right answer rather than a
-# hole: they all sit on the OUTPUT block 0x0D, which is confirmed on BOTH desks (rcp_transfer's own
-# self-check asserts the Duo's recordingMultitrackMode record byte-for-byte). It does not depend on
+# hole: they all sit on the OUTPUT block, which is confirmed on BOTH desks. It does not depend on
 # the "recorder" cap, because what a recording CONTAINS is an OUTPUT setting and not the transport,
 # which is the point of keeping those two apart.
 with as_device(devices.DUO), recorder() as duo_mt:
