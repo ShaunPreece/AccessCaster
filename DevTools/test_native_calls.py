@@ -1,6 +1,7 @@
-"""The native window's write pacing (Project/native/calls.py LatestWins), offline: taps each send,
-a held arrow key sends its newest value every `max_wait_ms` instead of nothing until it is let go,
-and without `max_wait_ms` (a list) a held key sends once, at the end. Runs a real event loop for a
+"""The native window's desk calls (Project/native/calls.py), offline: a call that raises is a
+refusal and a diagnostic log line, and in the write pacing (LatestWins) taps each send, a held
+arrow key sends its newest value every `max_wait_ms` instead of nothing until it is let go, and
+without `max_wait_ms` (a list) a held key sends once, at the end. Runs a real event loop for a
 second or two; nothing is shown and nothing touches a desk.
 
 Run: python DevTools/test_native_calls.py
@@ -12,6 +13,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
+import diagnostics
 import wx
 from _testkit import check, check_true, patched
 from native import calls
@@ -47,6 +49,22 @@ check_true("a held key sends its newest value as it goes, not only at the end",
 check("a held key with no maximum wait sends once, when it is let go", held(None), [40])
 check("taps further apart than the delay each send", held(None, presses=3, every_ms=250),
       [1, 2, 3])
+
+events, replies = [], []
+
+
+def broken():
+    raise KeyError("backups")
+
+
+with patched((diagnostics, {"event": lambda kind, detail="", **f: events.append((kind, f))})):
+    calls.call(frame, broken, done=lambda reply: (replies.append(reply), app.ExitMainLoop()))
+    wx.CallLater(3000, app.ExitMainLoop)
+    app.MainLoop()
+check("a call that raises is a refusal that does not blame the desk",
+      [r.get("message") for r in replies], ["That did not work: 'backups'"])
+check("and leaves a line in the diagnostic log", [k for k, _f in events], ["window.call_failed"])
+check_true("saying where it was raised", "broken" in (events[0][1].get("at", "") if events else ""))
 
 frame.Destroy()
 _a11y.check_windows("Calls")

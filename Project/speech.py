@@ -36,10 +36,10 @@ enabled = threading.Event()
 # or while USB 1 is muted. Pointing announcements at another device makes them survive both.
 # IT IS THE DEVICE OUR OWN PLAYER OPENS, NOT a Windows setting: it does not move the system default
 # device, and it does not touch the screen reader, which has its own.
-chosen_output = str(settings_file.load().get("announcer_output", "") or "")
+chosen_output = ""
 
 # Which voice speaks them ("" = whatever SAPI's default is).
-chosen_voice = str(settings_file.load().get("announcer_voice", "") or "")
+chosen_voice = ""
 
 # How loud announcements are, 0-100. It scales our own samples, so it changes ONLY our speech:
 # Windows system volume, other apps and the desk's own audio are untouched. It exists because at
@@ -57,7 +57,7 @@ def clamp_volume(value) -> int:
         return _VOLUME_DEFAULT
 
 
-volume = clamp_volume(settings_file.load().get("announcer_volume", _VOLUME_DEFAULT))
+volume = _VOLUME_DEFAULT
 
 
 # WHAT SPEECH IS AVAILABLE. Both lists come from SAPI itself (the engine the speech thread renders
@@ -541,6 +541,13 @@ def action_refresh_speech_devices() -> dict:
     return {"ok": True, "voices": lists["voices"], "outputs": lists["outputs"],
             "message": f"{wording.count(len(lists['voices']), 'voice')} and "
                        f"{wording.count(len(lists['outputs']), 'output')} found."}
+
+
+def load_settings() -> None:
+    """Take the saved voice, output and volume from the settings file, once, at `service.start`."""
+    saved = settings_file.load()
+    apply_settings({key: saved[key] for key in ("announcer_volume", "announcer_voice",
+                                                "announcer_output") if key in saved})
 
 
 def apply_settings(changes: dict) -> None:

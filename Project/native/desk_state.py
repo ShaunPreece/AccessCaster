@@ -31,7 +31,6 @@ REREAD_AFTER_MS = 1500
 # One rebuild for a burst: a fader or a knob pushes a value per step, and a mix preset a
 # cross-point per write.
 REBUILD_AFTER_MS = 30
-MIX_MINUS, CUSTOM = 1, 2      # an output's mix types, as outputMixMinus holds them; 0 is Main Mix
 
 # Every property the window shows: a push or a write of one rebuilds it.
 _SHOWN = (STRUCTURAL

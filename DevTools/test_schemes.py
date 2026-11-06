@@ -10,13 +10,16 @@ Run: python DevTools/test_schemes.py
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import channels
 import devices
 import fake_model
+import output_mixes
 import rcp_transfer
 import routing_schemes
 from _testkit import as_device, check, check_true, patched
@@ -159,6 +162,19 @@ check("the saved scheme is listed", routing_schemes.list_names(), ["show"])
 check("and loads back identical", routing_schemes.load("show")["scheme"] == scheme, True)
 check("a name with a path separator in it is refused", routing_schemes.safe_name("a/b"), None)
 check("as is one with a dot, so no scheme can be named ..", routing_schemes.safe_name(".."), None)
+# A file that parses as JSON but is not a scheme is refused like an unreadable one, so one bad file
+# cannot take the whole Mix preset list down.
+for bad, text in (("list", "[]"), ("flat", '{"outputs": []}')):
+    with open(routing_schemes._path(bad), "w", encoding="utf-8") as f:
+        f.write(text)
+check("JSON that is not a scheme does not load",
+      [routing_schemes.load(n).get("ok") for n in ("list", "flat")], [False, False])
+with as_device(devices.PRO2), patched((channels, {"usb_expanded": lambda: False})):
+    listed = output_mixes.read_routing_schemes()
+check("and the Mix preset list still lists the good one",
+      [s["name"] for s in listed["saved"]], ["show"])
+for bad in ("list", "flat"):
+    os.remove(routing_schemes._path(bad))
 
 
 # --- apply ----------------------------------------------------------------------------------------

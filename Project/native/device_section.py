@@ -20,7 +20,7 @@ from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import JobDialog, confirm, follow_job, report
 from native.firmware_dialog import FirmwareDialog
-from native.pages import FollowDesk, Page, group, page_body, read_only, set_text
+from native.pages import FollowDesk, Page, Reader, add_button, group, page_body, read_only, set_text
 from native.wifi_dialogs import JoinDialog, NetworksDialog
 
 TITLE = "Device"
@@ -192,11 +192,11 @@ def desk_summary(d):
     return " ".join(parts)
 
 
-def firmware_line(firmware, update):
+def firmware_line(version, update):
     update = update or {}
     if not update.get("available"):
-        return firmware or "Unknown"
-    return (f"{firmware or 'Unknown'}. "
+        return version or "Unknown"
+    return (f"{version or 'Unknown'}. "
             + (f"Version {update['version']}" if update.get("version") else "An update")
             + " is available.")
 
@@ -287,12 +287,6 @@ def network_facts(data):
     return lines
 
 
-def _button(parent, sizer, label, handler):
-    button = wx.Button(parent, label=label)
-    button.Bind(wx.EVT_BUTTON, handler)
-    sizer.Add(button, 0, wx.ALL, 6)
-    return button
-
 
 # ---- the section ----------------------------------------------------------------------------
 
@@ -345,34 +339,23 @@ class DeviceSection:
             view.read(announce)
 
 
-class _Reader:
-    """A page's read: one at a time, a second asked for while one runs is made after it.
-    `fetch(full)` runs on a worker thread, `full` False for a read asked for by the desk's pushes
+class _Reader(Reader):
+    """A Device page's read. `fetch(full)` has `full` False for a read the desk's pushes ask for
     (`follow`); `shown(reply)` puts a reply on the page and returns what F5 says."""
 
-    def _init_reader(self):
-        self._reading = False
-        self._again = None           # a read asked for while one runs: (announce, full)
-
     def read(self, announce=False, full=True):
-        if self._reading:
-            said, whole = self._again or (False, False)
-            self._again = (said or announce, whole or full)
-            return
-        self._reading = True
-        call(self, self.fetch, full, done=lambda reply: self._read_done(reply, announce))
+        super().read(announce, full=full)
 
     def follow(self):
         self.read(full=False)
 
-    def _read_done(self, reply, announce):
-        self._reading = False
+    def merge(self, earlier, later):
+        return {"full": earlier["full"] or later["full"]}
+
+    def read_done(self, reply, announce, full):
         said = self.shown(reply)
         if announce:
             self.section.frame.say(said)
-        if self._again is not None:
-            again, self._again = self._again, None
-            self.read(*again)
 
 
 class StatePage(_Reader, wx.Panel):
@@ -423,9 +406,9 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
 
         self.firmware = read_only(parent, sizer, "Firmware", height=None)
         self.wired = read_only(parent, sizer, "Wired network", height=None)
-        self.check = _button(parent, sizer, "Check for a firmware update", self._on_check)
+        self.check = add_button(parent, sizer, "Check for a firmware update", self._on_check)
         # Shown only while the unit offers an update, and named after it.
-        self.install = _button(parent, sizer, "Install firmware", self._on_install)
+        self.install = add_button(parent, sizer, "Install firmware", self._on_install)
         self.install.Hide()
 
         box_sizer, box = group(parent, sizer, "USB interfaces (technical)")
@@ -642,8 +625,8 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self.wifi_status = read_only(parent, sizer, "WiFi status", height=None)
         self.wifi_status.SetValue(WIFI_OFF)
         # One of the two at a time: the unit only scans while it has no network to join.
-        self.disconnect = _button(parent, sizer, "Disconnect", self._on_disconnect)
-        self.scan = _button(parent, sizer, "Scan for networks", self._on_scan)
+        self.disconnect = add_button(parent, sizer, "Disconnect", self._on_disconnect)
+        self.scan = add_button(parent, sizer, "Scan for networks", self._on_scan)
 
         box_sizer, box = group(parent, sizer, "Bluetooth")
         self.bluetooth = Switch(self, box, box_sizer, "Let other devices find this desk",
@@ -744,14 +727,14 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         dialog = NetworksDialog(self, scan.get("networks") or [], scan.get("message") or "")
         with dialog:
             dialog.ShowModal()
-            network = dialog.choice
-        if network is None:
+            chosen = dialog.choice
+        if chosen is None:
             self._focus_wifi()
             return
-        wx.CallAfter(self._ask_join, network, scan)
+        wx.CallAfter(self._ask_join, chosen, scan)
 
-    def _ask_join(self, network, scan=None):
-        dialog = JoinDialog(self, network)
+    def _ask_join(self, chosen, scan=None):
+        dialog = JoinDialog(self, chosen)
         with dialog:
             joining = dialog.ShowModal() == wx.ID_OK
             ssid, password = dialog.ssid, dialog.password
@@ -761,7 +744,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
             else:
                 self._focus_wifi()
             return
-        self._join(ssid, password, network, scan)
+        self._join(ssid, password, chosen, scan)
 
     def _on_disconnect(self, _event):
         if self._refused():
@@ -795,7 +778,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
                 return
         self.wifi.box.SetFocus()
 
-    def _join(self, ssid, password, network, scan):
+    def _join(self, ssid, password, chosen, scan):
         job = JobDialog(self, f"Joining {ssid}",
                         f"Joining {ssid}. This can take up to 45 seconds.",
                         lambda dialog: call(dialog, network.action_join_wifi, ssid, password,
@@ -810,7 +793,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self._show_radio()
         # A refused or missing password is put right in the same dialog, for the same network.
         if reply.get("needs_password") or wifi.get("wrong_password"):
-            wx.CallAfter(self._ask_join, dict(network, ssid=ssid, open=False), scan)
+            wx.CallAfter(self._ask_join, dict(chosen, ssid=ssid, open=False), scan)
             return
         self._focus_wifi()
         # A join that fails still leaves the name stored on the unit, which Disconnect follows.

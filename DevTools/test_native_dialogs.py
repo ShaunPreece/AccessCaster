@@ -132,7 +132,8 @@ dialog = dialogs.DeletePresetDialog(frame, ["Show"])
 check_true("Delete a preset lands on its list", first_focusable(dialog) is dialog.list)
 dialog.Destroy()
 
-dialog = routing_mixes.SavePresetDialog(frame, "Headphones 1")
+dialog = routing_mixes.SavePresetDialog(frame, {"key": "Headphone1", "label": "Headphones 1"},
+                                        [])
 check_true("Save as a preset lands on the name", first_focusable(dialog) is dialog.name_box)
 dialog.Destroy()
 

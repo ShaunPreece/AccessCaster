@@ -39,17 +39,6 @@ FX_BLOCK = PADEFFECTS
 PAD_FILE_PATH_FMT = "/Application/emmc-data/pads/{n}/{name}"
 
 
-def free_handle(pad_record_count: int) -> int:
-    """The edit handle for a create: the first free stream position, which is the current
-    pad-record count (records occupy 0..count-1).
-
-    The handle IS the stream position written to. At exactly `count` the desk emits the
-    padRCVSyncPadType handshake and appends the record; past it (count+1, count+2) the create is
-    silently dropped, with no sync and no commit; below it, the write lands on an existing pad and
-    corrupts it. So the count must be read fresh, and the read must be one that counts every record.
-    """
-    return pad_record_count
-
 
 # The six effect engines and their on-flags; the keys match fx_recipes.json.
 EFFECT_FLAG = {
@@ -170,20 +159,21 @@ def build_phase1(target_idx: int, handle: int) -> list[bytes]:
             for name, kind, value in _PHASE1]
 
 
+def _effect_values(target_idx: int, overrides: dict) -> list:
+    """[(name, kind, value)] of the effects block: the defaults, aimed at `target_idx`, with
+    `overrides` baked in. What a create writes and what its check expects both come from here, so
+    the two cannot disagree."""
+    return [(name, kind, target_idx if name == "effectsIdx" else overrides.get(name, value))
+            for name, kind, value in _EFFECTS]
+
+
 def build_effects(target_idx: int, fx_subhandle: int,
                   param_overrides: dict | None = None) -> list[bytes]:
     """The 20-record EFFECTS_PARAMETERS block. `param_overrides` (name -> value) bakes a recipe's
     tuned params in. The on-flags stay off here; they are turned on in the create's post, the
     order the RODE app uses."""
-    overrides = param_overrides or {}
-    out = []
-    for name, kind, value in _EFFECTS:
-        if name == "effectsIdx":
-            value = target_idx
-        elif name in overrides:
-            value = overrides[name]
-        out.append(write_record(name, kind, value, fx_subhandle, FX_BLOCK))
-    return out
+    return [write_record(name, kind, value, fx_subhandle, FX_BLOCK)
+            for name, kind, value in _effect_values(target_idx, param_overrides or {})]
 
 
 def build_blank(target_idx: int, handle: int, fx_subhandle: int | None = None,
@@ -305,13 +295,7 @@ def expected_effect_object(target_idx: int, recipe: dict) -> dict:
     leaves behind: the effects block in full (defaults with the recipe's params baked in) plus the
     recipe's on-flags. A create writes all twenty, so this is the whole object, not a subset."""
     onflags, overrides = _recipe_parts(recipe)
-    out = {}
-    for name, _kind, value in _EFFECTS:
-        if name == "effectsIdx":
-            value = target_idx
-        elif name in overrides:
-            value = overrides[name]
-        out[name] = value
+    out = {name: value for name, _kind, value in _effect_values(target_idx, overrides)}
     for flag in onflags:
         out[flag] = True
     return out

@@ -704,13 +704,19 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
 # ----------------------------------------------------------------------------------------------
 
 def current_pad_count() -> int:
-    """Number of pad records currently in the device model (= padName occurrences).
-
-    Read FRESH right before a create: the free edit handle is derived from this count, and using
-    a stale/too-low handle makes the create overwrite an existing pad's stream position (this
-    corrupted a system pad on a full table - see pad_records.free_handle).
-    """
+    """Number of pad records currently in the device model (= padName occurrences)."""
     return len(pad_nodes())
+
+
+def free_pad_handle() -> int:
+    """The edit handle for a create: the first free stream position, which is the pad-record
+    count (records occupy 0..count-1), read fresh right before the create.
+
+    The handle IS the stream position written to. At exactly the count the desk emits the
+    padRCVSyncPadType handshake and appends the record; past it the create is silently dropped,
+    with no sync and no commit; below it, the write lands on an existing pad and corrupts it, which
+    is why a stale count is never used."""
+    return current_pad_count()
 
 
 def wait_for_pad_present(target_idx: int, timeout: float = 6.0, poll: float = 0.3) -> bool:
@@ -1609,12 +1615,12 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
       mid  = padType=1, padReplay, envelope, padName, padColourIndex
       -- file written to pads/<folder>/<real name> on the FAT volume here, handle still bound --
       post = remountPadStorage, padFilePath, padName ; then exit transfer mode
-    Records are built by pad_records; the handle is pad_records.free_handle.
+    Records are built by pad_records; the handle is `free_pad_handle`.
 
     The on-device filename uses the REAL name (factory convention pads/<n>/Name.ext), derived
     from `dest_filename` if given else the source basename - see safe_dest_filename.
     """
-    handle = pr.free_handle(current_pad_count())   # FREE slot past the pad records
+    handle = free_pad_handle()
     on_device = safe_dest_filename(src_wav, dest_filename)
     pre, mid, post = pr.build_sound_create(target_idx, folder, name, colour, handle=handle,
                                            replay=replay, filename=on_device)
@@ -1729,7 +1735,7 @@ def assign_create_fx_recipe(target_idx: int, name: str, recipe: dict, colour=8, 
     """Low-level multi-effect VOICE-FX create from a factory/custom recipe ({engine:{param:value}},
     see pad_records.build_fx_create_recipe / fx_recipes.json). Reproduces the exact factory presets.
     `active` True engages it live at once (live preview); False leaves it at rest like the factory."""
-    handle = pr.free_handle(current_pad_count())
+    handle = free_pad_handle()
     fx_sub = free_effect_subhandle(target_idx)
     pre, mid, post = pr.build_fx_create_recipe(target_idx, name, colour, recipe,
                                                handle=handle, fx_subhandle=fx_sub, active=active)
@@ -1794,7 +1800,7 @@ def _bind_existing_fx(target_idx: int, name: str = "ZZheal") -> None:
     (build_blank with no fx_subhandle). Transient helper for orphan GC only - do not leave
     this pad in place as a user pad (its live binding is not reboot-proven)."""
     _require_pad_write()   # backstop: orphan-GC bind is a device write too
-    handle = pr.free_handle(current_pad_count())
+    handle = free_pad_handle()
     pre = pr.build_blank(target_idx, handle)
     mid = [
         pr.write_record("padType", "int", 2, handle, pr.PAD_BLOCK),
@@ -1969,7 +1975,7 @@ def assign_create_mixer(target_idx: int, mode, name="Mixer", colour=None,
         colour = d.get("colour", 8)
     if trigger_mode is None:
         trigger_mode = d.get("trigger_mode", 0)
-    handle = pr.free_handle(current_pad_count())
+    handle = free_pad_handle()
     pre, mid, post = pr.build_mixer_create(target_idx, name, colour, mode,
                                            trigger_mode=trigger_mode, handle=handle)
     diagnostics.event("pad.create",
@@ -2016,7 +2022,7 @@ def assign_create_trigger(target_idx: int, name="Trigger", colour=5, custom=Fals
                           debug=False):
     """Low-level MIDI TRIGGER create (padType=4). No file, no region-B block. Mirrors
     assign_create_mixer. Default mapping = a CC on control=padIdx, channel 1, on 127, off 0."""
-    handle = pr.free_handle(current_pad_count())
+    handle = free_pad_handle()
     pre, mid, post = pr.build_trigger_create(target_idx, name, colour, handle=handle,
                                              custom=custom, trigger_type=trigger_type,
                                              control=control, channel=channel,

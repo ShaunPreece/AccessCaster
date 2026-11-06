@@ -528,7 +528,7 @@ def _settings_payload() -> dict:
     last = datetime.date.fromtimestamp(stamp) if stamp > 0 else None
     return {"days": days,
             "choices": [{"days": d, "label": label}
-                        for d, label in zip(interval.CHOICES, interval.LABELS)],
+                        for d, label in zip(interval.CHOICES, interval.LABELS, strict=True)],
             "hint": phrases.settings_status(interval.describe(days), last,
                                             _setting(_SKIPPED_KEY) or "", datetime.date.today())}
 

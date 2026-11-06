@@ -12,15 +12,13 @@ import wx
 import pad_actions
 import soundpad
 from native import a11y
-from native.calls import call
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import (FollowDesk, MessagePage, Page, labelled, page_body, read_only, select,
-                          set_items, set_text)
+from native.pages import (FollowDesk, MessagePage, Page, Reader, labelled, page_body, read_only,
+                          reply_text, select, set_items, set_text)
 
 TITLE = "SMART pads"
-PADS = "Pads"
 # Every page is built from the first good read; until then each is a sentence saying why it is not
 # there. As (key, title).
 PAGES = [("pads", "Pads"), ("fx", "Voice effects"), ("maint", "Pad maintenance")]
@@ -29,7 +27,7 @@ PAGES = [("pads", "Pads"), ("fx", "Voice effects"), ("maint", "Pad maintenance")
 REREAD_AFTER_MS = 600
 
 
-class PadsSection:
+class PadsSection(Reader):
     title = TITLE
     route = "pads"
 
@@ -39,12 +37,12 @@ class PadsSection:
         self.page = None
         self.fx = None
         self.maint = None
-        self._reading = False
-        self._again = None       # a read asked for while one runs: None, or whether to announce it
+        self._init_reader(owner=frame)
         self.statuses = [MessagePage(frame.host, "Starting AccessCaster.",
                                      button="Read the pads again", on_button=lambda: self.read(True))
                          for _page in PAGES]
-        self.pages = [Page(key, title, status) for (key, title), status in zip(PAGES, self.statuses)]
+        self.pages = [Page(key, title, status)
+                      for (key, title), status in zip(PAGES, self.statuses, strict=True)]
         frame.desk.subscribe(self._desk_event)
         FollowDesk(frame, soundpad.PAD_GRID_PROPS, self.read)
 
@@ -64,19 +62,11 @@ class PadsSection:
         if event == "read" and reply.get("ok") and self.model is None:
             self.read()
 
-    def read(self, announce=False):
-        if self._reading:
-            self._again = bool(self._again) or announce
-            return
-        self._reading = True
-        call(self.frame, pad_actions.soundpad_model, done=lambda model: self._read_done(model, announce))
+    def fetch(self):
+        return pad_actions.soundpad_model()
 
-    def _read_done(self, model, announce):
-        self._reading = False
+    def read_done(self, model, announce):
         self.show(model, announce)
-        if self._again is not None:
-            again, self._again = self._again, None
-            self.read(again)
 
     def show(self, model, announce=False):
         """Put a pad read on the page. A read that failed leaves the last good one in place."""
@@ -95,7 +85,7 @@ class PadsSection:
             if focus is not None and any(status.IsDescendant(focus) for status in self.statuses):
                 self.frame.tree.SetFocus()
             self.pages = [Page(key, title, window) for (key, title), window
-                          in zip(PAGES, (self.page, self.fx, self.maint))]
+                          in zip(PAGES, (self.page, self.fx, self.maint), strict=True)]
             self.frame.pages_changed(self)
         else:
             for window in (self.page, self.fx, self.maint):
@@ -216,7 +206,7 @@ class PadsPage(wx.Panel):
         reply = result["reply"]
         if result.get("model"):
             self.section.show(result["model"])
-        message = reply.get("message") or ("Done." if reply.get("ok") else "That did not work.")
+        message = reply_text(reply)
         pad = self._pad(grid)
         if not reply.get("ok") or plan.clears or pad is None or not pad["present"]:
             self.list.SetFocus()

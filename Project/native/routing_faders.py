@@ -8,7 +8,7 @@ import wx.lib.scrolledpanel as scrolled
 import faders
 from native import a11y
 from native.calls import call
-from native.controls import Switch, set_choices
+from native.controls import AppliedChoice, Switch, set_choices
 from native.pages import labelled, page_body
 
 TITLE = "Fader assignment"
@@ -32,6 +32,7 @@ class FadersPage(scrolled.ScrolledPanel):
         self.fader = labelled(parent, sizer, "Fader", lambda p: wx.Choice(p))
         self.fader.Bind(wx.EVT_CHOICE, lambda _e: self._show_fader())
         self.channel = labelled(parent, sizer, "Channel on this fader", lambda p: wx.Choice(p))
+        self.channel_applied = AppliedChoice(self.channel)
         a11y.describe(self.channel, "Choosing a channel already on another fader swaps the two. "
                                     "Processing moves with the channel.")
         # Confirmed by the button, never by the list: arrowing a closed list fires a change per
@@ -80,7 +81,7 @@ class FadersPage(scrolled.ScrolledPanel):
         for link in self.links:
             link.show()
 
-    def _show_fader(self):
+    def _show_fader(self, force=False):
         """The chosen fader's channel, selected in a list of what it may take. A channel it holds
         that is not offered (a linked pair, or nothing) is added, so the list still shows what is
         there."""
@@ -90,8 +91,8 @@ class FadersPage(scrolled.ScrolledPanel):
         if all(c != code for c, _label in options):
             options.append((code, self.faders["labels"][index]))
         self._codes = [c for c, _label in options]
-        set_choices(self.channel, [label for _c, label in options])
-        self.channel.SetSelection(self._codes.index(code))
+        self.channel_applied.show(self._codes, code, labels=[label for _c, label in options],
+                                  context=index, force=force)
 
     def _on_change(self, event):
         source = event.GetEventObject()
@@ -118,4 +119,4 @@ class FadersPage(scrolled.ScrolledPanel):
     def _done(self, source, reply):
         self.frame.reply(source, reply)
         if not reply.get("ok"):
-            self._show_fader()
+            self._show_fader(force=True)

@@ -15,7 +15,7 @@ import paths
 import speech
 from native import a11y, announce
 from native.calls import call
-from native.pages import Speaker
+from native.pages import Speaker, reply_text
 
 _WRAP_DIP = 440
 
@@ -51,7 +51,7 @@ def modal_dialogs():
     return [w for w in wx.GetTopLevelWindows() if isinstance(w, wx.Dialog) and w.IsModal()]
 
 
-def _paragraphs(dialog, sizer, text):
+def paragraphs(dialog, sizer, text):
     """One static text per paragraph, so a screen reader hears the breaks."""
     items = []
     for para in text.split("\n\n"):
@@ -70,7 +70,7 @@ class TextDialog(wx.Dialog):
     def __init__(self, parent, title, text, buttons, default, escape):
         super().__init__(parent, title=title)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        _paragraphs(self, sizer, text)
+        paragraphs(self, sizer, text)
         row = wx.BoxSizer(wx.HORIZONTAL)
         made = [wx.Button(self, button_id, label) for button_id, label in buttons]
         for button in made:
@@ -85,6 +85,37 @@ class TextDialog(wx.Dialog):
         if chosen is not made[0]:
             chosen.MoveBeforeInTabOrder(made[0])
         self.CentreOnParent()
+
+
+class BackupFirstDialog(SpeakingDialog):
+    """A question before a change there is no undoing: its text, a tick to back the desk up first,
+    then `go_label` and Cancel. Lands on Cancel, so a stray Enter changes nothing."""
+
+    def __init__(self, parent, title, text, tick_label, tick_help, go_label, ticked=True):
+        super().__init__(parent, title)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        paragraphs(self, sizer, text)
+        self.backup_first = wx.CheckBox(self, label=tick_label)
+        self.backup_first.SetValue(ticked)
+        a11y.describe(self.backup_first, tick_help)
+        sizer.Add(self.backup_first, 0, wx.ALL, 12)
+        go = wx.Button(self, wx.ID_OK, label=go_label)
+        cancel = wx.Button(self, wx.ID_CANCEL, label="Cancel")
+        cancel.SetDefault()
+        # The tab order starts on Cancel, so that is where the focus lands.
+        cancel.MoveBeforeInTabOrder(self.backup_first)
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        row.Add(go, 0, wx.ALL, 5)
+        row.Add(cancel, 0, wx.ALL, 5)
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+        sizer.Add(self.sink, 0)
+        self.SetSizerAndFit(sizer)
+        self.Bind(wx.EVT_BUTTON, lambda _e: self.EndModal(wx.ID_OK), id=wx.ID_OK)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.CentreOnParent()
+
+    def wants_backup(self):
+        return self.backup_first.GetValue()
 
 
 class JobDialog(SpeakingDialog):
@@ -118,7 +149,7 @@ class JobDialog(SpeakingDialog):
         self._held = False
         self.result = None
         sizer = wx.BoxSizer(wx.VERTICAL)
-        self.status = _paragraphs(self, sizer, text)[0]
+        self.status = paragraphs(self, sizer, text)[0]
         if closable:
             button = wx.Button(self, wx.ID_CANCEL, stop_label or ("Stop" if stop else "Close"))
             # Bound on the dialog and not skipped, so the cancel id stops the job instead of
@@ -256,11 +287,24 @@ def follow_job(parent, title, text, start, status):
 def report(parent, titles, reply):
     """What a job came to, in a dialog of its own titled (done, failed). Spoken instead, it races
     the screen reader reading the control the focus returns to, and one cuts the other off."""
-    message = reply.get("message") or ("Done." if reply.get("ok") else "That did not work.")
-    dialog = TextDialog(parent, titles[0] if reply.get("ok") else titles[1], message,
+    dialog = TextDialog(parent, titles[0] if reply.get("ok") else titles[1], reply_text(reply),
                         [(wx.ID_OK, "OK")], default=wx.ID_OK, escape=wx.ID_OK)
     with dialog:
         dialog.ShowModal()
+
+
+def ok_cancel(dialog, sizer, ok_label, default=True):
+    """The OK and Cancel row at the foot of `dialog`. Returns the OK button; `default` makes it the
+    one Enter presses."""
+    buttons = wx.StdDialogButtonSizer()
+    ok = wx.Button(dialog, wx.ID_OK, label=ok_label)
+    if default:
+        ok.SetDefault()
+    buttons.AddButton(ok)
+    buttons.AddButton(wx.Button(dialog, wx.ID_CANCEL, label="Cancel"))
+    buttons.Realize()
+    sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+    return ok
 
 
 class NameDialog(wx.Dialog):
@@ -284,13 +328,7 @@ class NameDialog(wx.Dialog):
         self.name_box.SelectAll()
         a11y.describe(self.name_box, description)
         sizer.Add(self.name_box, 0, wx.ALL, 10)
-        buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label=ok_label)
-        ok.SetDefault()
-        buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        ok_cancel(self, sizer, ok_label)
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         self.CentreOnParent()
@@ -326,7 +364,8 @@ class NameDialog(wx.Dialog):
 class FormDialog(wx.Dialog):
     """A dialog of controls, then `ok_label` and Cancel. The subclass adds its controls to `sizer`,
     the control to land on first, then calls `finish_layout`. On OK, `request()` runs on the UI
-    thread and returns a refusal sentence, or a function to run off it whose reply decides: the
+    thread and returns a refusal sentence, None to leave the dialog as it is (the user turned down
+    a question it asked), or a function to run off it whose reply decides: the
     dialog closes on a success, keeping the reply as `reply`, and a refusal is shown in a message
     box of its own titled `refused`, leaving the dialog open as it was."""
 
@@ -339,13 +378,7 @@ class FormDialog(wx.Dialog):
         self.sizer = wx.BoxSizer(wx.VERTICAL)
 
     def finish_layout(self):
-        buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label=self._ok_label)
-        ok.SetDefault()
-        buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        self.sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        ok_cancel(self, self.sizer, self._ok_label)
         self.SetSizerAndFit(self.sizer)
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         self.CentreOnParent()
@@ -357,6 +390,8 @@ class FormDialog(wx.Dialog):
         if self._busy:
             return
         work = self.request()
+        if work is None:
+            return
         if isinstance(work, str):
             self._refuse(work)
             return
@@ -391,12 +426,8 @@ class ListDialog(wx.Dialog):
         self.list.SetSelection(0)
         sizer.Add(self.list, 0, wx.ALL, 10)
         if note:
-            _paragraphs(self, sizer, note)
-        buttons = wx.StdDialogButtonSizer()
-        buttons.AddButton(wx.Button(self, wx.ID_OK, label=ok_label))
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+            paragraphs(self, sizer, note)
+        ok_cancel(self, sizer, ok_label, default=False)
         self.SetSizerAndFit(sizer)
 
     def chosen(self):

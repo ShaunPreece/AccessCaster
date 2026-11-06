@@ -107,7 +107,9 @@ EFFECT_SPOKEN = {prop: f"{effect} {words}"
                  for effect, params in EFFECT_PARAMS.items() for prop, words in params}
 
 # An output's mix type, as outputMixMinus holds it.
-OUTPUT_MODE_LABEL = {0: "Main Mix", 1: "Mix Minus", 2: "Custom"}
+# An output's mix types, as outputMixMinus holds them.
+MAIN_MIX, MIX_MINUS, CUSTOM = 0, 1, 2
+OUTPUT_MODE_LABEL = {MAIN_MIX: "Main Mix", MIX_MINUS: "Mix Minus", CUSTOM: "Custom"}
 
 # Switches on the OUTPUT and MASTER blocks, by property.
 OUTPUT_SWITCH_LABEL = {

@@ -4,7 +4,7 @@ and the first-run offer to back the desk up as it was found.
 import wx
 
 from native import a11y
-from native.dialogs import SpeakingDialog, _paragraphs
+from native.dialogs import BackupFirstDialog, paragraphs
 
 RESET_TEXT = (
     "This puts every setting and every SMART pad back to how the desk left the factory, including "
@@ -22,41 +22,24 @@ RESET_TEXT = (
     "happened and nothing is lost.")
 
 
-class ResetDialog(SpeakingDialog):
-    """The factory reset's question. Lands on Cancel. The backup-first tick is ticked; with nowhere
-    to save a backup (`blocked`, the reason) it is clear, a tick is refused with the reason, and the
-    text says the reset cannot be undone, since that is what the dialog is read for."""
+class ResetDialog(BackupFirstDialog):
+    """The factory reset's question. With nowhere to save a backup (`blocked`, the reason) the tick
+    is clear, a tick is refused with the reason, and the text says the reset cannot be undone,
+    since that is what the dialog is read for."""
 
     def __init__(self, parent, blocked):
-        super().__init__(parent, "Start again from factory settings")
-        self._blocked = blocked
-        sizer = wx.BoxSizer(wx.VERTICAL)
         text = RESET_TEXT
         if blocked:
             text += (f"\n\n{blocked} So this cannot be backed up first, and it cannot be undone. "
                      "Put a memory card or a USB drive in the desk first if you want a way back.")
-        _paragraphs(self, sizer, text)
-        self.backup_first = wx.CheckBox(self, label="Back the desk up first, so this can be undone")
-        self.backup_first.SetValue(not blocked)
-        a11y.describe(self.backup_first, blocked or (
-            "Takes about a second and about 24 megabytes on the recordings drive. Without it there "
-            "is no way back to how the desk is now."))
+        super().__init__(
+            parent, "Start again from factory settings", text,
+            "Back the desk up first, so this can be undone",
+            blocked or ("Takes about a second and about 24 megabytes on the recordings drive. "
+                        "Without it there is no way back to how the desk is now."),
+            "Reset the desk", ticked=not blocked)
+        self._blocked = blocked
         self.backup_first.Bind(wx.EVT_CHECKBOX, self._on_tick)
-        sizer.Add(self.backup_first, 0, wx.ALL, 12)
-        go = wx.Button(self, wx.ID_OK, label="Reset the desk")
-        cancel = wx.Button(self, wx.ID_CANCEL, label="Cancel")
-        cancel.SetDefault()
-        # The tab order starts on Cancel, so that is where the focus lands.
-        cancel.MoveBeforeInTabOrder(self.backup_first)
-        row = wx.BoxSizer(wx.HORIZONTAL)
-        row.Add(go, 0, wx.ALL, 5)
-        row.Add(cancel, 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
-        sizer.Add(self.sink, 0)
-        self.SetSizerAndFit(sizer)
-        self.Bind(wx.EVT_BUTTON, lambda _e: self.EndModal(wx.ID_OK), id=wx.ID_OK)
-        self.SetEscapeId(wx.ID_CANCEL)
-        self.CentreOnParent()
 
     def _on_tick(self, _event):
         if self._blocked and self.backup_first.GetValue():
@@ -64,7 +47,7 @@ class ResetDialog(SpeakingDialog):
             self.say(self._blocked)
 
     def wants_backup(self):
-        return self.backup_first.GetValue() and not self._blocked
+        return super().wants_backup() and not self._blocked
 
 
 class BaselineDialog(wx.Dialog):
@@ -75,7 +58,7 @@ class BaselineDialog(wx.Dialog):
     def __init__(self, parent, status):
         super().__init__(parent, title="Back up this desk as you found it")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        _paragraphs(self, sizer, (
+        paragraphs(self, sizer, (
             f"This looks like the first time AccessCaster has seen this "
             f"{status.get('device_name') or 'desk'}. Before anything is changed, it can save the "
             f"desk's current settings as a backup called {status.get('suggested_name') or ''}, so "

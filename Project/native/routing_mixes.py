@@ -5,11 +5,12 @@ import wx
 import wx.lib.scrolledpanel as scrolled
 
 import output_mixes
+import paths
+from desk_labels import CUSTOM, MIX_MINUS
 from native import a11y
 from native.calls import call
-from native.controls import Switch, set_choices
-from native.desk_state import CUSTOM, MIX_MINUS
-from native.dialogs import DeletePresetDialog, confirm
+from native.controls import AppliedChoice, Switch, set_choices
+from native.dialogs import DeletePresetDialog, FormDialog, NameDialog, confirm
 from native.pages import group, labelled, page_body
 
 TITLE = "Output mixes"
@@ -38,6 +39,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         self.output.Bind(wx.EVT_CHOICE, lambda _e: self._show_output())
 
         self.mode = labelled(parent, sizer, "Mix type for this output", lambda p: wx.Choice(p))
+        self.mode_applied = AppliedChoice(self.mode)
         self.mode_acc = a11y.describe(self.mode)
         # Applied by the button, never by the list: arrowing a closed list fires a change per item,
         # and leaving Custom discards that output's custom mix.
@@ -98,14 +100,14 @@ class OutputMixesPage(scrolled.ScrolledPanel):
             if switch.box.GetLabel() != label:
                 switch.box.SetLabel(label)
         self.sources_box.SetLabel(f"Sources in {out['label']}")
-        set_choices(self.mode, [label for _value, label in out["modes"]])
         self._show_mode()
 
-    def _show_mode(self):
+    def _show_mode(self, force=False):
         out = self.current
         mode = self._mode()
-        values = [value for value, _label in out["modes"]]
-        self.mode.SetSelection(values.index(mode) if mode in values else wx.NOT_FOUND)
+        self.mode_applied.show([value for value, _label in out["modes"]], mode,
+                               labels=[label for _value, label in out["modes"]],
+                               context=out["key"], force=force)
         label = dict(out["modes"]).get(mode)
         if mode is None:
             self.mode_acc.description = (self.matrix.get("reason")
@@ -170,7 +172,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
                 # Leaving or entering Custom moves the output's cross-points too.
                 self.section.desk.refresh()
             else:
-                self._show_mode()
+                self._show_mode(force=True)
         call(self, output_mixes.action_set_output_mode, out["index"], mode, done=applied)
 
     def _run(self, source, busy_text, fn, *args):
@@ -260,26 +262,13 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         if self.read_only:
             self.frame.say(READ_ONLY)
             return
-        out = self.current
-        with SavePresetDialog(self, out["label"]) as dialog:
+        own = [s["name"] for s in self._schemes if not s["builtin"]]
+        with SavePresetDialog(self, self.current, own) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            name, one_output = dialog.name(), dialog.one_output()
-        exists = any(not s["builtin"] and s["name"] == name for s in self._schemes)
-        if exists and not confirm(
-                self, f"Replace the mix preset {name}?",
-                "A saved preset of that name already exists. Saving replaces it with "
-                + (f"the {out['label']} mix" if one_output else "the desk's mixes")
-                + " as it is now.", "Replace preset"):
-            self.frame.say("Cancelled. The saved preset was not changed.")
-            return
-
-        def saved(reply):
-            self.frame.reply(source, reply)
-            if reply.get("ok"):
-                self.read_schemes(select=reply.get("name"))
-        call(self, output_mixes.action_save_routing_scheme, name, out["key"] if one_output else "",
-             done=saved)
+            reply = dialog.reply
+        self.frame.reply(source, reply)
+        self.read_schemes(select=reply.get("name"))
 
     def _on_delete_scheme(self, event):
         source = event.GetEventObject()
@@ -331,49 +320,39 @@ def _scheme_text(name, scope):
     return name if not scope or scope == "every output" else f"{name}, {scope}"
 
 
-class SavePresetDialog(wx.Dialog):
+class SavePresetDialog(FormDialog):
     """A name for the new preset, and whether it holds every output's mix or only `output`'s. One
     output's preset leaves every other output alone when applied, so it is the kind that is safe
-    mid-show."""
+    mid-show. Save runs here, asking first before it replaces one of `existing`, so a name the
+    save refuses leaves the dialog open on it."""
 
-    MAX_NAME = 40
-
-    def __init__(self, parent, output):
-        super().__init__(parent, title="Save the mixes as a preset")
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, 10)
+    def __init__(self, parent, output, existing):
+        super().__init__(parent, "Save the mixes as a preset", "Save", "Preset not saved")
+        self._output = output
+        self._existing = existing
+        self.sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, 10)
         self.name_box = wx.TextCtrl(self, size=(300, -1))
-        self.name_box.SetMaxLength(self.MAX_NAME)
-        a11y.describe(self.name_box, f"Up to {self.MAX_NAME} letters, digits, spaces, dashes or "
-                                     f"underscores.")
-        sizer.Add(self.name_box, 0, wx.ALL, 10)
+        self.name_box.SetMaxLength(NameDialog.MAX_NAME)
+        a11y.describe(self.name_box, NameDialog.RULE)
+        self.sizer.Add(self.name_box, 0, wx.ALL, 10)
         self.scope = wx.RadioBox(self, label="What to save",
-                                 choices=["Every output's mix", f"Only the {output} mix"],
+                                 choices=["Every output's mix", f"Only the {output['label']} mix"],
                                  style=wx.RA_SPECIFY_ROWS)
-        sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
-        buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label="Save")
-        ok.SetDefault()
-        buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        self.SetSizerAndFit(sizer)
-        self.Bind(wx.EVT_BUTTON, self._on_save, id=wx.ID_OK)
-        self.CentreOnParent()
+        self.sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
+        self.finish_layout()
 
-    def _on_save(self, event):
-        if not self.name():
-            # The dialog stays open, so the reason gets a message box of its own and the focus
-            # goes back to the name.
-            wx.MessageBox("Type a name for the preset first.", "No name",
-                          wx.OK | wx.ICON_WARNING, self)
+    def request(self):
+        name = self.name_box.GetValue().strip()
+        if not paths.safe_name(name):
             self.name_box.SetFocus()
-            return
-        event.Skip()
-
-    def name(self):
-        return self.name_box.GetValue().strip()
-
-    def one_output(self):
-        return self.scope.GetSelection() == 1
+            return NameDialog.RULE if name else "Type a name for the preset first."
+        one_output = self.scope.GetSelection() == 1
+        if name in self._existing and not confirm(
+                self, f"Replace the mix preset {name}?",
+                "A saved preset of that name already exists. Saving replaces it with "
+                + (f"the {self._output['label']} mix" if one_output else "the desk's mixes")
+                + " as it is now.", "Replace preset"):
+            self.name_box.SetFocus()
+            return None
+        only = self._output["key"] if one_output else ""
+        return lambda: output_mixes.action_save_routing_scheme(name, only)

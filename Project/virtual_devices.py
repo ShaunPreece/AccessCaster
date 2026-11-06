@@ -320,15 +320,9 @@ class Endpoint:
 def _audio():
     """A COM apartment on this thread and Windows' endpoint enumerator, for one piece of work.
     Every caller here opens its own, because each runs on whatever thread asked."""
-    comtypes.CoInitialize()
-    try:
+    with meters.com_apartment():
         yield comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                            interface=meters.IMMDeviceEnumerator)
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 def _endpoints(enum) -> list:
@@ -472,24 +466,12 @@ def _system_output(eps: list) -> Optional["Endpoint"]:
                  and e.virtual and e.name.startswith("System")), None)
 
 
-def _wait_for_system(enum, timeout_s: float) -> list:
-    """Re-list endpoints until the driver's System output is live, or the time is up. Returns the
-    list."""
+def _wait_for(enum, pick, timeout_s: float, poll_s: float = 0.25) -> list:
+    """Re-list endpoints until `pick(endpoints)` finds one, or the time is up. Returns the list."""
     at = time.monotonic()
     eps = _endpoints(enum)
-    while _system_output(eps) is None and time.monotonic() - at < timeout_s:
-        time.sleep(0.25)
-        eps = _endpoints(enum)
-    return eps
-
-
-def _wait_for_desk_main(enum, timeout_s: float) -> list:
-    """Re-list endpoints until the desk's Main playback output is live, or the time is up.
-    Returns the list."""
-    at = time.monotonic()
-    eps = _endpoints(enum)
-    while _desk_main(eps) is None and time.monotonic() - at < timeout_s:
-        time.sleep(0.25)
+    while pick(eps) is None and time.monotonic() - at < timeout_s:
+        time.sleep(poll_s)
         eps = _endpoints(enum)
     return eps
 
@@ -537,7 +519,7 @@ def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
     if expect_connected and status.connected:
         eps = _wait_for_faders(enum, FADERS_APPEAR_S)
     elif expect_connected is False and parked and move_default:
-        eps = _wait_for_desk_main(enum, DESK_MAIN_APPEARS_S)
+        eps = _wait_for(enum, _desk_main, DESK_MAIN_APPEARS_S)
     else:
         eps = _endpoints(enum)
     if status.running:
@@ -562,7 +544,7 @@ def _reconcile_windows(enum, out: Outcome, expect_connected, move_default: bool,
         if status.connected and _system_output(eps) is None:
             # Bound before its System output exists (an arrival nobody parked for, read straight
             # after the bind), or listed before the flips above took effect.
-            eps = _wait_for_system(enum, FADERS_APPEAR_S)
+            eps = _wait_for(enum, _system_output, FADERS_APPEAR_S)
         out.default_moved_to = _restore_default(enum, policy, eps, status.connected, parked,
                                                 standard=expect_connected is False)
 
@@ -670,16 +652,12 @@ def default_to_system(timeout_s: float) -> str:
     try:
         with _audio() as enum:
             policy = _policy()
-            at = time.monotonic()
-            while time.monotonic() - at < timeout_s:
-                system = next((e for e in _endpoints(enum) if e.virtual and e.flow == "playback"
-                               and e.name.startswith("System") and e.state == "active"), None)
-                if system is not None:
-                    policy.SetDefaultEndpoint(system.id, E_CONSOLE)
-                    policy.SetDefaultEndpoint(system.id, E_MULTIMEDIA)
-                    return system.name
-                time.sleep(0.1)
-            return ""
+            system = _system_output(_wait_for(enum, _system_output, timeout_s, poll_s=0.1))
+            if system is None:
+                return ""
+            policy.SetDefaultEndpoint(system.id, E_CONSOLE)
+            policy.SetDefaultEndpoint(system.id, E_MULTIMEDIA)
+            return system.name
     except Exception as exc:
         diagnostics.event("virtual_devices.default_failed", str(exc))
         return ""
@@ -780,42 +758,38 @@ def watch_endpoints(on_change, stop: threading.Event) -> None:
     endpoints costs one reconcile rather than eleven. Never raises - a repair path that can take the
     app down with it is worse than no repair path."""
     wake = threading.Event()
-    comtypes.CoInitialize()
     enum = client = None
-    try:
-        enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                            interface=meters.IMMDeviceEnumerator)
-        client = _EndpointNotifier(wake)
-        enum.RegisterEndpointNotificationCallback(client)
-        diagnostics.event("virtual_devices.watch", "listening for endpoint changes")
-        _note_default(enum)
-        while not stop.is_set():
-            if not wake.wait(_WATCH_POLL_S):
-                continue
-            # Before the settle, while the endpoint the default left is still the last one seen.
+    with meters.com_apartment():
+        try:
+            enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
+                                                interface=meters.IMMDeviceEnumerator)
+            client = _EndpointNotifier(wake)
+            enum.RegisterEndpointNotificationCallback(client)
+            diagnostics.event("virtual_devices.watch", "listening for endpoint changes")
+            _note_default(enum)
+            while not stop.is_set():
+                if not wake.wait(_WATCH_POLL_S):
+                    continue
+                # Before the settle, while the endpoint the default left is still the last one seen.
+                try:
+                    _note_default(enum)
+                except Exception as exc:    # a missed note costs one default change, not the watch
+                    diagnostics.event("virtual_devices.note_failed", str(exc))
+                # Let the burst finish: each re-arm pushes the settle point out again.
+                while wake.is_set() and not stop.is_set():
+                    wake.clear()
+                    stop.wait(_WATCH_SETTLE_S)
+                if stop.is_set():
+                    break
+                try:
+                    on_change()
+                except Exception as exc:
+                    diagnostics.event("virtual_devices.watch_failed", f"{exc}")
+        except Exception as exc:
+            diagnostics.event("virtual_devices.watch_failed", f"could not listen: {exc}")
+        finally:
             try:
-                _note_default(enum)
+                if enum is not None and client is not None:
+                    enum.UnregisterEndpointNotificationCallback(client)
             except Exception:
                 pass
-            # Let the burst finish: each re-arm pushes the settle point out again.
-            while wake.is_set() and not stop.is_set():
-                wake.clear()
-                stop.wait(_WATCH_SETTLE_S)
-            if stop.is_set():
-                break
-            try:
-                on_change()
-            except Exception as exc:
-                diagnostics.event("virtual_devices.watch_failed", f"{exc}")
-    except Exception as exc:
-        diagnostics.event("virtual_devices.watch_failed", f"could not listen: {exc}")
-    finally:
-        try:
-            if enum is not None and client is not None:
-                enum.UnregisterEndpointNotificationCallback(client)
-        except Exception:
-            pass
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass

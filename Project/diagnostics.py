@@ -46,6 +46,7 @@ import sys
 import threading
 import time
 
+import desk_secrets
 import model_tree  # to decode a sent record into property = value
 from paths import data_path
 
@@ -106,12 +107,6 @@ def _value_text(value, kind: str) -> str:
     return text
 
 
-def _is_secret(name: str) -> bool:
-    """A credential the desk stores: the wifi key (`wifiPSK`) and every `*Password`. The log is meant
-    to be safe to send to somebody, so their values never reach it."""
-    return "PSK" in name or "Password" in name
-
-
 def describe_record(rec: bytes) -> str:
     """One report-3 record as `<property> = <value> at <path>`, or a hex head if it will not parse.
 
@@ -125,7 +120,7 @@ def describe_record(rec: bytes) -> str:
         payload = rec[5:5 + length]
         path, name, value, kind, _end = model_tree.parse_record(payload)
         where = "[" + ", ".join(f"0x{i:02x}" for i in path) + "]"
-        shown = "(hidden)" if _is_secret(name) else _value_text(value, kind)
+        shown = "(hidden)" if desk_secrets.is_secret(name) else _value_text(value, kind)
         return f"{name} = {shown} at {where}"
     except Exception:
         return "undecodable record " + bytes(rec[:16]).hex()

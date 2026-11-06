@@ -49,6 +49,7 @@ _pad_lock = threading.Lock()
 _pads_on = set()             # padIdx of pads THIS app engaged, so a second press releases them
 _pads_held = set()           # padIdx of HOLD-mode sound pads whose MIDI note we are still holding
 
+
 def follow_desk() -> None:
     """Keep what is playing following the desk, whether or not announcements are on."""
     desk_live.Follower("pad shortcuts", {"padProgress", "padActive"}, on_push=note_push).start()
@@ -123,7 +124,7 @@ def refresh_pads() -> dict:
 # that refuses and the read-out that describes it must not disagree about what is wrong or what to
 # do about it.
 _FX_EMPTY = ("{name} has no effect behind it, so it would change nothing. Use Restore the "
-                "factory voice effects on the SMART pads page to rebuild it.")
+             "factory voice effects on the SMART pads page to rebuild it.")
 
 
 def _pad_entry(pad_idx: int):
@@ -282,7 +283,7 @@ def note_pad_progress(position: int, progress: float) -> None:
             # A new sound, or the same pad restarted from the beginning (One Shot), or one we lost
             # track of. Either way the old rate is meaningless, so start again from here.
             _playing[position] = {"first": progress, "first_at": now,
-                                     "last": progress, "last_at": now}
+                                  "last": progress, "last_at": now}
             return
         seen["last"], seen["last_at"] = progress, now
 
@@ -292,7 +293,7 @@ def note_pad_active(position: int, on: bool) -> None:
     with _play_lock:
         if on:
             _playing.setdefault(position, {"first": 0.0, "first_at": time.monotonic(),
-                                              "last": 0.0, "last_at": time.monotonic()})
+                                           "last": 0.0, "last_at": time.monotonic()})
         else:
             _playing.pop(position, None)
 
@@ -313,20 +314,24 @@ def play_snapshot() -> dict:
     return out
 
 
-def _pad_verify(pad_idx: int, want_on: bool) -> None:
-    """After a press, re-read and confirm the RIGHT pad reacted. Runs on its own thread."""
+def _pad_verify(pad_idx: int, position: int, want_on: bool) -> None:
+    """After a press, re-read and confirm the RIGHT pad reacted. Runs on its own thread.
+
+    A press that missed engaged whichever pad the fresh map puts at the stream `position` written,
+    so that pad is the one switched off; any other pad the desk has engaged is left alone."""
     try:
         fresh = refresh_pads()
         with desk_access.hid_lock:
             latched = {pi for _pos, pi, _nm in soundpad.latched_pads()}
-        if want_on and pad_idx not in latched and latched:
-            wrong = sorted(latched)[0]
-            entry = fresh.get(wrong)
-            if entry:
-                with desk_access.hid_lock:
-                    soundpad.unlatch_pad(entry[0])
-                speech.say(f"That fired the wrong pad, {entry[1]}, and it has been switched off "
-                         f"again. The pad list was out of date and has been read again.")
+        if not want_on or pad_idx in latched:
+            return
+        wrong = next((pi for pi, entry in fresh.items() if entry[0] == position), None)
+        if wrong in latched:
+            with desk_access.hid_lock:
+                soundpad.unlatch_pad(position)
+            _pads_on.discard(pad_idx)
+            speech.say(f"That fired the wrong pad, {fresh[wrong][1]}, and it has been switched off "
+                       f"again. The pad list was out of date and has been read again.")
     except Exception as exc:    # a verification that cannot run must not break the press
         diagnostics.event("hotkeys.pad_verify_failed", str(exc))
 
@@ -351,7 +356,7 @@ def fire_pad(pad_idx: int) -> dict:
     entry = _pad_entry(pad_idx)
     if entry is None:
         return _said("That pad is empty now. Choose another on the Keyboard shortcuts tab.",
-                        ok=False)
+                     ok=False)
     position, name, pad_type, play_mode = entry
     if pad_type == soundpad.PAD_TYPE_SOUND:
         return _pad_play(pad_idx, position, name, play_mode)
@@ -437,7 +442,7 @@ def _pad_toggle(pad_idx: int, position: int, name: str) -> dict:
     except Exception as exc:
         _pads_on.discard(pad_idx)
         return _said(f"{name} would not respond: {exc}", ok=False)
-    threading.Thread(target=_pad_verify, args=(pad_idx, on), daemon=True).start()
+    threading.Thread(target=_pad_verify, args=(pad_idx, position, on), daemon=True).start()
     return _said(f"{name} on." if on else f"{name} off.")
 
 
@@ -472,7 +477,7 @@ def fire(target: str) -> dict:
     target = (target or "").strip()
     if not target:
         return _said("No pad is assigned to this shortcut yet. Choose one on the Keyboard "
-                        "shortcuts tab.", ok=False)
+                     "shortcuts tab.", ok=False)
     try:
         pad_idx = int(target)
     except ValueError:
@@ -501,7 +506,7 @@ def slot(target: str) -> dict:
     per_bank = devices.get_active_device().pad.pads_per_bank
     if not 1 <= slot <= per_bank:
         return _said(f"This desk has {per_bank} pads in a bank, so there is no pad {slot}.",
-                        ok=False)
+                     ok=False)
     bank = current_bank()
     if bank is None:
         return _said(_BANK_UNKNOWN, ok=False)

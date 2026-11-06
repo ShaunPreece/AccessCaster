@@ -24,8 +24,8 @@ from native import a11y
 from native.backup_dialogs import BaselineDialog, ResetDialog
 from native.calls import call
 from native.dialogs import NameDialog, confirm, follow_job, report
-from native.pages import (FollowDesk, Page, labelled, modal_open, page_body, select, set_items,
-                          set_text)
+from native.pages import (FollowDesk, Page, Reader, add_button, labelled, modal_open, page_body,
+                          read_only, reply_text, select, set_items, set_text)
 
 TITLE = "Backups"
 RESET_TITLE = "Start again from factory settings"
@@ -86,13 +86,13 @@ def detail(backup):
     return text
 
 
-def storage_line(backups):
+def storage_line(listing):
     """Where a new backup goes: the one part the user can change, by putting a drive in."""
-    if backups.get("note"):
-        return backups["note"]
-    if not backups.get("shows_capable"):
+    if listing.get("note"):
+        return listing["note"]
+    if not listing.get("shows_capable"):
         return "Backups are saved on this computer."
-    if backups.get("storage"):
+    if listing.get("storage"):
         return ("Backups are saved on this computer, and the desk keeps its own copy on its drive "
                 "too.")
     return "There is no card or drive in the desk, so backups are saved on this computer only."
@@ -100,20 +100,20 @@ def storage_line(backups):
 
 def baseline_line(status):
     """The as-found backup: whether there is one and whether its pads were taken."""
-    baseline = (status or {}).get("baseline")
-    if not baseline:
+    found = (status or {}).get("baseline")
+    if not found:
         if status and status.get("connected"):
             return ("No as-found backup of this desk has been taken on this computer, so there is "
                     "no way back if a change goes wrong. Back up the desk now takes one.")
         return "No as-found backup, and no desk connected to take one from."
     when = ""
-    if baseline.get("saved_at"):
+    if found.get("saved_at"):
         when = ", taken " + wording.spoken_datetime(
-            datetime.datetime.fromtimestamp(baseline["saved_at"]))
-    if baseline.get("pads"):
-        return (f"As-found backup: {baseline['name']}{when}, with "
-                f"{wording.count(baseline['pads'], 'SMART pad')}.")
-    return (f"As-found backup: {baseline['name']}{when}, settings only. Its SMART pads were not "
+            datetime.datetime.fromtimestamp(found["saved_at"]))
+    if found.get("pads"):
+        return (f"As-found backup: {found['name']}{when}, with "
+                f"{wording.count(found['pads'], 'SMART pad')}.")
+    return (f"As-found backup: {found['name']}{when}, settings only. Its SMART pads were not "
             "copied, so the pad sounds as they came are not backed up anywhere.")
 
 
@@ -155,7 +155,7 @@ def restore_time(info):
             f"and any other takes about {per_pad} seconds, so allow up to {longest}.")
 
 
-class BackupsSection:
+class BackupsSection(Reader):
     title = TITLE
     route = "profiles"
 
@@ -163,8 +163,7 @@ class BackupsSection:
         self.frame = frame
         self.data = None
         self.last_name = ""          # the name the last backup was given, offered again
-        self._reading = False
-        self._again = None           # a read asked for while one runs: (announce, prefer)
+        self._init_reader(owner=frame)
         self._offered = False
         self.page = BackupsPage(self)
         self.reset = ResetPage(self)
@@ -188,14 +187,12 @@ class BackupsSection:
 
     def read(self, announce=False, prefer=None):
         """Read the backups again; `prefer` is a backup name to choose once they are shown."""
-        if self._reading:
-            self._again = (bool(self._again and self._again[0]) or announce, prefer)
-            return
-        self._reading = True
-        call(self.frame, _read, done=lambda data: self._read_done(data, announce, prefer))
+        super().read(announce, prefer=prefer)
 
-    def _read_done(self, data, announce, prefer):
-        self._reading = False
+    def fetch(self, prefer):
+        return _read()
+
+    def read_done(self, data, announce, prefer):
         if "backups" not in data:
             # A crash in `_read` comes back from `call` as a bare refusal.
             if announce:
@@ -206,9 +203,6 @@ class BackupsSection:
             self.reset.show()
             if announce:
                 self.frame.say("Backups read.")
-        if self._again is not None:
-            again, self._again = self._again, None
-            self.read(*again)
 
     # ---- the as-found backup ---------------------------------------------------------------
 
@@ -257,14 +251,13 @@ class BackupsPage(wx.Panel):
         row = wx.BoxSizer(wx.HORIZONTAL)
         # The chosen backup's detail is on Restore, the press it informs, and not on the list: a
         # description that changes under a focused list is read again over the item landed on.
-        self.restore = self._button(parent, row, "Restore selected backup", self._on_restore)
+        self.restore = add_button(parent, row, "Restore selected backup", self._on_restore)
         self.restore_acc = a11y.describe(self.restore, "")
-        self.rename = self._button(parent, row, "Rename selected backup", self._on_rename)
-        self.delete = self._button(parent, row, "Delete selected backup", self._on_delete)
+        self.rename = add_button(parent, row, "Rename selected backup", self._on_rename)
+        self.delete = add_button(parent, row, "Delete selected backup", self._on_delete)
         sizer.Add(row, 0, wx.ALL, 6)
 
-        self.about = labelled(parent, sizer, "About backups", lambda p: wx.TextCtrl(
-            p, size=(460, 150), style=wx.TE_MULTILINE | wx.TE_READONLY))
+        self.about = read_only(parent, sizer, "About backups", height=150, scroll=True)
         # Hidden while the as-found backup is complete or there is none.
         self.add_pads = wx.Button(parent, label="Add SMART pads to the as-found backup")
         a11y.describe(self.add_pads, "Copies each pad's sound into the as-found backup. Its "
@@ -272,12 +265,6 @@ class BackupsPage(wx.Panel):
         self.add_pads.Bind(wx.EVT_BUTTON, self._on_add_pads)
         self.add_pads.Hide()
         sizer.Add(self.add_pads, 0, wx.ALL, 6)
-
-    def _button(self, parent, row, label, handler):
-        button = wx.Button(parent, label=label)
-        button.Bind(wx.EVT_BUTTON, handler)
-        row.Add(button, 0, wx.RIGHT, 8)
-        return button
 
     @property
     def data(self):
@@ -301,8 +288,8 @@ class BackupsPage(wx.Panel):
         self.backup_acc.description = storage_line(self.data["backups"])
         status = self.data["baseline"]
         set_text(self.about, "\n\n".join([baseline_line(status), HOLDS, APP_SETTINGS]))
-        baseline = status.get("baseline") if status else None
-        wanted = bool(baseline and not baseline.get("pads"))
+        found = status.get("baseline") if status else None
+        wanted = bool(found and not found.get("pads"))
         if self.add_pads.IsShown() != wanted:
             if not wanted and wx.Window.FindFocus() is self.add_pads:
                 self.about.SetFocus()
@@ -429,8 +416,7 @@ class BackupsPage(wx.Panel):
             self.delete.SetFocus()
         else:
             self.list.SetFocus()
-            self.frame.say(reply.get("message") or ("Deleted." if reply.get("ok")
-                                                    else "That did not work."))
+            self.frame.say(reply_text(reply, done="Deleted."))
         self.section.read()
 
     def _on_add_pads(self, _event):

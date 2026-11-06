@@ -258,8 +258,39 @@ class Number(_Field):
             self.control.SetValue(value)
 
 
-def set_choices(choice, labels):
+def percent_words(value):
+    """A slider's value in words, for one that runs 0 to 100."""
+    return f"{value} percent"
+
+
+def set_choices(choice, labels) -> bool:
     """Replace a wx.Choice's items only when they differ: replacing them under the focus makes the
-    screen reader read the list again."""
-    if [choice.GetString(i) for i in range(choice.GetCount())] != labels:
-        choice.Set(labels)
+    screen reader read the list again. True when they were replaced, which clears the selection."""
+    if [choice.GetString(i) for i in range(choice.GetCount())] == labels:
+        return False
+    choice.Set(labels)
+    return True
+
+
+class AppliedChoice:
+    """A list whose choice takes effect only on its Apply button. It shows the desk's value, but
+    moves the selection only when that value, or what the list is showing, changes: the page
+    redraws for every push (a co-host's fader), and a choice made but not yet applied must
+    survive that."""
+
+    def __init__(self, choice):
+        self.choice = choice
+        self._values = []
+        self._shown = None           # (context, value) last put on the list
+
+    def show(self, values, current, labels=None, context=None, force=False):
+        """`values` are the items' values in list order and `current` the desk's. `labels` replaces
+        the items when they differ. `context` names what the list is for (an output, a fader), so
+        moving to another selects its value. `force` selects the desk's value whatever is chosen,
+        as after an Apply the desk refused."""
+        replaced = labels is not None and set_choices(self.choice, labels)
+        self._values = list(values)
+        if force or replaced or (context, current) != self._shown:
+            self._shown = (context, current)
+            self.choice.SetSelection(self._values.index(current) if current in self._values
+                                     else wx.NOT_FOUND)

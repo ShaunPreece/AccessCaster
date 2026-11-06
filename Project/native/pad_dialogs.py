@@ -10,9 +10,9 @@ import pad_actions
 import soundpad
 from native import a11y
 from native.calls import call
-from native.controls import Choice, Number, Slider, Switch
-from native.dialogs import SpeakingDialog, confirm
-from native.pages import group, labelled, reading_box
+from native.controls import Choice, Number, Slider, Switch, percent_words
+from native.dialogs import SpeakingDialog, confirm, ok_cancel
+from native.pages import group, labelled, read_only, reading_box
 
 READ_ONLY = "Editing SMART pads is not enabled on this device yet."
 DEFAULT_MAPPING = ("This pad is on the default mapping, so this does nothing. Turn on the custom "
@@ -167,7 +167,7 @@ class SettingsDialog(SpeakingDialog):
             slider = self._add(Slider(self, box, box_sizer, f["label"], 0, 100,
                                       self._write(pad_actions.action_set_pad_envelope, f["key"]),
                                       *self.field("envelope", f["key"], scale=100),
-                                      words=lambda units: f"{units} percent"))
+                                      words=percent_words))
             slider.acc.description = f["help"]
 
     def _play_mode_set(self, reply):
@@ -244,8 +244,7 @@ class SettingsDialog(SpeakingDialog):
                 self._add(Number(self, box, box_sizer, f["label"], f["min"], f["max"], send,
                                  *self.field("trigger", f["key"]), description=f["help"],
                                  guard=self._trigger_guard, accepted=self._trigger_set))
-        self.sending = labelled(box, box_sizer, "Now sending", lambda p: wx.TextCtrl(
-            p, size=(420, 60), style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
+        self.sending = read_only(box, box_sizer, "Now sending", width=420)
 
     def _trigger_guard(self):
         if self.model["read_only"]:
@@ -363,13 +362,8 @@ class ChangeDialog(SpeakingDialog):
         self.mixer.SetSelection(modes.index(pad["mixer_mode"]) if pad["mixer_mode"] in modes
                                 else 0)
 
-        buttons = wx.StdDialogButtonSizer()
-        self.apply = wx.Button(self, wx.ID_OK, "Apply")
+        self.apply = ok_cancel(self, sizer, "Apply", default=False)
         self.apply_help = a11y.describe(self.apply)
-        buttons.AddButton(self.apply)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         sizer.Add(self.sink, 0)
         self.SetSizer(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_apply, id=wx.ID_OK)

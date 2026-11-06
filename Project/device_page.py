@@ -375,7 +375,7 @@ def overview(fresh: bool = True) -> dict:
         if not isinstance(cell, str) or "|" not in cell:
             return None
         try:
-            return max(0, min(100, int(round(float(cell.split("|", 1)[1]) * 100))))
+            return wording.percent(cell.split("|", 1)[1])
         except ValueError:
             return None
 
@@ -422,7 +422,7 @@ def overview(fresh: bool = True) -> dict:
             "network": dict(network.connection(blob),
                             callme_hosting=bool(rcp_read.first(blob, "sipCallHostingEnabled"))),
             "faders": faders,
-            "monitor_percent": max(0, min(100, int(round(mon[0] * 100)))) if mon else None,
+            "monitor_percent": wording.percent(mon[0]) if mon else None,
             "bank": (bank[0] + 1) if bank else None,       # the desk numbers banks from 0
             "levels_ok": shape_ok,
             "routing": _overview_routing(blob),

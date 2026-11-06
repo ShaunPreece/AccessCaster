@@ -133,6 +133,21 @@ def main() -> int:
               "no effect behind it" in off["message"], False)
         check("and the release really was sent", released, [23])
 
+    print("\nA PRESS THAT FIRED THE WRONG PAD SWITCHES OFF THE ONE IT FIRED")
+    # A stale map sent Robot's press to stream position 23, where pad 20 now sits. Pad 1, a music
+    # bed, is also playing; it has the lower number and must be left alone.
+    fresh = {1: (9, "Music bed", 1, None), 14: (30, "Robot", 2, None),
+             20: (23, "Megaphone", 2, None)}
+    released, said = [], []
+    with patched((pad_shortcuts, {"refresh_pads": lambda: fresh, "_pads_on": {14}}),
+                 (soundpad, {"latched_pads": lambda: [(9, 1, "Music bed"), (23, 20, "Megaphone")],
+                             "unlatch_pad": released.append}),
+                 (pad_shortcuts.speech, {"say": said.append})):
+        pad_shortcuts._pad_verify(14, 23, True)
+        check("the pad at the position written is released", released, [23])
+        check("named from the fresh map", "Megaphone" in (said[-1] if said else ""), True)
+        check("and the pad asked for is not left recorded as on", pad_shortcuts._pads_on, set())
+
     return _testkit.finish()
 
 

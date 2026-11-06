@@ -125,5 +125,9 @@ try:
 except ValueError:
     check("refused", True, True)
 
+print("a create's handle is the record count: the first free stream position")
+with patched((soundpad, {"current_pad_count": lambda: 23})):
+    check("free_pad_handle", soundpad.free_pad_handle(), 23)
+
 print()
 sys.exit(_testkit.finish())

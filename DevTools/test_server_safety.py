@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -194,6 +195,12 @@ gain_result, writes = autogain_run([quiet_take, stopped_silent_take])
 check("a cancel during the check take ends the run as failed", gain_result.get("phase"), "failed")
 check("and puts back the gain the first take set",
       (len(writes), writes[-1] if writes else None), (2, 30))
+
+autogain_actions._job = {"phase": "verifying", "channel": "Mic1", "done": False, "cancel": False,
+                         "seconds": 10.0, "started": time.monotonic()}
+check("the check take counts down like the first", autogain_actions.status().get("seconds_left"),
+      10)
+autogain_actions._job = None
 
 
 print("\nANNOUNCER LOOPS")

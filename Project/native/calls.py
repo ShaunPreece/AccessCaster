@@ -2,21 +2,30 @@
 the UI thread, so a desk read or write never freezes the window. The actions take the HID lock
 themselves, so calls from here queue behind the announcer, the shortcuts and each other.
 """
+import os
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 import wx
+
+import diagnostics
 
 _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="native-call")
 
 
 def call(owner, fn, *args, done=None):
     """Run `fn(*args)` off the UI thread, then `done(reply)` on it, unless `owner` (a window) has
-    been destroyed by then. An exception becomes a refusal reply, like every action's."""
+    been destroyed by then. An exception becomes a refusal reply, like every action's, and a line
+    in the diagnostic log saying where it was raised, which is all a user can send about a button
+    that failed."""
     def work():
         try:
             reply = fn(*args)
         except Exception as exc:
-            reply = {"ok": False, "message": f"Could not reach the desk: {exc}"}
+            where = " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}"
+                               for f in reversed(traceback.extract_tb(exc.__traceback__)))
+            diagnostics.event("window.call_failed", f"{type(exc).__name__}: {exc}", at=where)
+            reply = {"ok": False, "message": f"That did not work: {exc}"}
         if done is not None:
             wx.CallAfter(_deliver, owner, done, reply)
     _pool.submit(work)

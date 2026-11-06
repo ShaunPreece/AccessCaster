@@ -295,7 +295,7 @@ def status() -> dict:
     st = state()
     st["ok"] = True
     started, secs = st.get("started"), st.get("seconds")
-    if st.get("phase") == "listening" and started and secs:
+    if st.get("phase") in ("listening", "verifying") and started and secs:
         st["seconds_left"] = max(0, int(round(secs - (time.monotonic() - started))))
     return st
 

@@ -10,8 +10,8 @@ import wx
 import shortcuts
 from native import a11y
 from native.calls import call
-from native.dialogs import FormDialog, _paragraphs, confirm
-from native.pages import AFTER_FOCUS_MS, labelled, page_body, set_items
+from native.dialogs import FormDialog, paragraphs, confirm
+from native.pages import AFTER_FOCUS_MS, add_button, labelled, page_body, reply_text, set_items
 from native.controls import Switch, set_choices
 
 LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
@@ -77,9 +77,9 @@ class ShortcutsPage(wx.Panel):
         # The Applications key, Shift+F10 and a right-click.
         self.list.Bind(wx.EVT_CONTEXT_MENU, self._on_menu)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.add = self._button(parent, row, "Add a shortcut", self._on_add)
-        self.mods = self._button(parent, row, "Change the keys to hold", self._on_mods)
-        self.restore = self._button(parent, row, "Restore default shortcuts", self._on_restore)
+        self.add = add_button(parent, row, "Add a shortcut", self._on_add)
+        self.mods = add_button(parent, row, "Change the keys to hold", self._on_mods)
+        self.restore = add_button(parent, row, "Restore default shortcuts", self._on_restore)
         sizer.Add(row, 0, wx.ALL, 6)
         # Partly ticked while some of the pad scheme is bound. Ticking adds what is missing;
         # unticking deletes it.
@@ -88,12 +88,6 @@ class ShortcutsPage(wx.Panel):
                                     "Dash and Equals change bank, and P says what is playing.")
         self.pad_set.Bind(wx.EVT_CHECKBOX, self._on_pad_set)
         sizer.Add(self.pad_set, 0, wx.ALL, 6)
-
-    def _button(self, parent, row, label, handler):
-        button = wx.Button(parent, label=label)
-        button.Bind(wx.EVT_BUTTON, handler)
-        row.Add(button, 0, wx.RIGHT, 8)
-        return button
 
     def _unread(self):
         return "The shortcuts have not been read yet." if self.state is None else None
@@ -137,8 +131,7 @@ class ShortcutsPage(wx.Panel):
         """A write's reply: the state it carries, then the sentence once the focus is back."""
         self.show(reply.get("state"), keep)
         if speak or not reply.get("ok"):
-            self._later(reply.get("message") or ("Done." if reply.get("ok")
-                                                 else "That did not work."))
+            self._later(reply_text(reply))
 
     # ---- the list -----------------------------------------------------------------------------
 
@@ -278,7 +271,7 @@ class EditDialog(FormDialog):
         super().__init__(parent, f"Edit shortcut: {row['label']}", "Save", "Shortcut not saved")
         self.row = row
         if row.get("problem"):
-            _paragraphs(self, self.sizer, row["problem"])
+            paragraphs(self, self.sizer, row["problem"])
         self.keys = state.get("keys") or []
         self.key = labelled(self, self.sizer, "Key to press", lambda p: wx.Choice(p))
         set_choices(self.key, self.keys)
@@ -339,7 +332,7 @@ class AddDialog(FormDialog):
         if free in self.keys:
             self.key.SetSelection(self.keys.index(free))
         if not catalogue.get("complete"):
-            _paragraphs(self, self.sizer, catalogue.get("message") or "")
+            paragraphs(self, self.sizer, catalogue.get("message") or "")
         self._fill()
         self.finish_layout()
 

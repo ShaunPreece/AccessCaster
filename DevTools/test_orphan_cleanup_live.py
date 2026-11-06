@@ -34,7 +34,7 @@ def tree_state():
 
 
 def make_orphan():
-    handle = pr.free_handle(sp.current_pad_count())
+    handle = sp.free_pad_handle()
     sub = sp.free_effect_subhandle(SLOT)
     pre = pr.build_blank(SLOT, handle, sub)
     mid = [pr.write_record("padType", "int", 3, handle, pr.PAD_BLOCK),

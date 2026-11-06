@@ -17,6 +17,7 @@ import channels
 import desk_labels
 import desk_model
 import devices
+import diagnostics
 import rcp_transfer
 import wording
 
@@ -47,6 +48,12 @@ class Change(NamedTuple):
 
 # ---- names -----------------------------------------------------------------------------------
 
+def _unnamed(kind: str, number: int, exc: Exception) -> None:
+    """A name that could not be worked out: the announcement falls back to a number rather than
+    stopping, and the log says why."""
+    diagnostics.event("change_words.unnamed", f"{kind} {number}", error=f"{exc}")
+
+
 def source_name(code: int) -> str:
     """A matrix SOURCE code as it is spoken, e.g. 'Mic 1'.
 
@@ -60,9 +67,9 @@ def source_name(code: int) -> str:
             return label
         for s in dev.matrix.sources_for(True):
             if s.get("index") == code:
-                return s.get("label") or f"source {code}"
-    except Exception:
-        pass
+                return s.get("label") or f"Source {code}"
+    except Exception as exc:
+        _unnamed("source", code, exc)
     return f"Source {code}"
 
 
@@ -79,8 +86,8 @@ def strip_name(strip: int) -> str:
                 channels.usb_expanded()).get(vec[strip])
             if label:
                 return label
-    except Exception:
-        pass
+    except Exception as exc:
+        _unnamed("strip", strip, exc)
     return f"Channel {strip + 1}"
 
 
@@ -90,8 +97,8 @@ def output_name(index: int) -> str:
         for out in devices.get_active_device().matrix.outputs:
             if out["index"] == index:
                 return out["label"]
-    except Exception:
-        pass
+    except Exception as exc:
+        _unnamed("output", index, exc)
     return f"Output {index + 1}"
 
 
@@ -133,11 +140,6 @@ def _input_name(key) -> Optional[str]:
 
 # ---- words -----------------------------------------------------------------------------------
 
-def percent(level) -> int:
-    """A 0 to 1 level as the whole percent spoken."""
-    return max(0, min(100, int(round(float(level) * 100))))
-
-
 def level_words(name: str, level: float, *, name_first: bool, say_percent: bool = True) -> str:
     """THE one place a level is turned into words.
 
@@ -145,7 +147,7 @@ def level_words(name: str, level: float, *, name_first: bool, say_percent: bool 
     cuts off the phrase before it, so a name first means the number never arrives until the
     movement stops. SOMETHING WAS SELECTED -> name first: nothing has moved yet, and the question is
     what you have got. `say_percent` is dropped during a run of updates, where the unit is obvious."""
-    pct = percent(level)
+    pct = wording.percent(level)
     if name_first:
         return f"{name} {pct} percent" if say_percent else f"{name} {pct}"
     return f"{pct} percent, {name}" if say_percent else f"{pct}, {name}"
@@ -201,7 +203,7 @@ def describe(name: str, value, kind: str, key, was) -> Optional[Change]:
                           f"{who} {desk_labels.MODULE_LABEL_BY_PROP[name].lower()} "
                           f"{_on_off(value)}", ("processing", strip))
         if name in desk_labels.PROCESSING_SPOKEN and kind == "float":
-            pct = percent(value)
+            pct = wording.percent(value)
             said = (desk_labels.pan_words(pct) if name in desk_labels.PAN_PROPS
                     else f"{pct} percent")
             return Change((name, strip),
@@ -215,8 +217,8 @@ def describe(name: str, value, kind: str, key, was) -> Optional[Change]:
         if effect:
             return Change((name, key[1]), f"{who} {effect} {_on_off(value)}", ("effects", key[1]))
         if name in desk_labels.EFFECT_SPOKEN and kind == "float":
-            return Change((name, key[1]),
-                          f"{who} {desk_labels.EFFECT_SPOKEN[name]} {percent(value)} percent",
+            spoken = desk_labels.EFFECT_SPOKEN[name]
+            return Change((name, key[1]), f"{who} {spoken} {wording.percent(value)} percent",
                           ("effects", key[1]))
         return None
 
@@ -246,7 +248,8 @@ def describe(name: str, value, kind: str, key, was) -> Optional[Change]:
             # A linked cross-point follows the fader: the change is the fader's own level.
             return Change(("level", src), level_words(source_name(src), level, name_first=False),
                           source=src)
-        if before is not None and not before[1] and percent(before[0]) == percent(level):
+        if (before is not None and not before[1]
+                and wording.percent(before[0]) == wording.percent(level)):
             return None          # only the fader under it moved
         return Change(("send", out, src), level_words(
             f"{source_name(src)} in {output_name(out)}", level, name_first=False), source=src)

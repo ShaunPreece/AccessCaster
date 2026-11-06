@@ -39,6 +39,7 @@ import devices
 import diagnostics
 import rcp_read
 import rcp_transfer
+from desk_labels import CUSTOM, MAIN_MIX, MIX_MINUS, OUTPUT_MODE_LABEL
 from paths import data_path, safe_name, write_json
 from wording import count, plural
 
@@ -69,19 +70,22 @@ def load(name: str) -> dict:
     """{ok, safe, scheme} or {ok: False, message}."""
     safe = safe_name(name)
     if not safe or not os.path.isfile(_path(safe)):
-        return {"ok": False, "message": f"Mix scheme {name} not found."}
+        return {"ok": False, "message": f"Mix preset {name} not found."}
     try:
-        with open(_path(safe), "r", encoding="utf-8") as f:
+        with open(_path(safe), encoding="utf-8") as f:
             scheme = json.load(f)
     except (OSError, ValueError) as exc:
         return {"ok": False, "message": f"Could not read the mix preset: {exc}"}
+    outputs = scheme.get("outputs") if isinstance(scheme, dict) else None
+    if not isinstance(outputs, dict) or not all(isinstance(o, dict) for o in outputs.values()):
+        return {"ok": False, "message": "Could not read the mix preset: it is not a mix preset."}
     return {"ok": True, "safe": safe, "scheme": scheme}
 
 
 def delete(name: str) -> dict:
     safe = safe_name(name)
     if not safe or not os.path.isfile(_path(safe)):
-        return {"ok": False, "message": f"Mix scheme {name} not found."}
+        return {"ok": False, "message": f"Mix preset {name} not found."}
     try:
         os.remove(_path(safe))
     except OSError as exc:
@@ -233,7 +237,7 @@ def builtins(device=None) -> list:
             # is that a screen reader does not go down the line, and in Expanded the screen reader
             # arrives on one of those four rather than on USB 1.
             "scheme": {"outputs": {"Chat": {
-                "mode": 2,
+                "mode": CUSTOM,
                 "sources": {s["key"]: {"excluded": s["key"] != _CHAT_KEEP_SOURCE_KEY,
                                        "linked": True}
                             for s in m.all_sources},
@@ -304,11 +308,11 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
             continue
         oi = out["index"]
         mode = ospec.get("mode")
-        if mode not in (0, 1, 2):
+        if mode not in OUTPUT_MODE_LABEL:
             mode = None
         # A scheme saved on a desk where this output offered mix minus, applied to one where it does
         # not, would otherwise write a mode the output has no control for. Fall back to its default.
-        if mode == 1 and not out.get("mixminus"):
+        if mode == MIX_MINUS and not out.get("mixminus"):
             mode = int(out.get("default_mode", 0))
         if mode is not None:
             attempt(lambda oi=oi, mode=mode: rcp_transfer.set_output_routing(oi, mode))
@@ -329,7 +333,7 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
             # EXCLUDED one reads back unlinked at a frozen number that is inert - see capture), so
             # the scheme has nothing to say about its level.
             level = cell.get("level")
-            if excluded or mode != 2 or cell.get("linked") is not False or level is None:
+            if excluded or mode != CUSTOM or cell.get("linked") is not False or level is None:
                 continue
             if on_source_write:
                 on_source_write(si)
@@ -394,20 +398,20 @@ def describe(scheme: dict, device=None, expanded: bool = False) -> str:
 
     def one(out, ospec) -> str:
         mode = ospec.get("mode")
-        if mode == 2:
+        if mode == CUSTOM:
             srcs = {k: c for k, c in (ospec.get("sources") or {}).items() if k in shown}
             kept = [k for k, c in srcs.items() if not c.get("excluded")]
             what = f"a custom mix carrying {len(kept)} of {len(srcs)} sources"
-        elif mode == 1:
+        elif mode == MIX_MINUS:
             what = "mix minus"
-        elif mode == 0:
+        elif mode == MAIN_MIX:
             what = "the main mix"
         else:
             what = "its current mix"
         return f"{out['label']} to {what}"
 
     if not found:
-        return "This scheme names no output this device has, so applying it would do nothing."
+        return "This mix preset names no output this device has, so applying it would do nothing."
     if len(found) <= _DESCRIBE_LIST_LIMIT:
         text = "Sets " + ", and ".join(one(out, spec) for out, spec in found) + "."
     else:
@@ -423,7 +427,7 @@ def describe(scheme: dict, device=None, expanded: bool = False) -> str:
             text += (f": {normal} to their normal mix, and " if normal else ": ")
             text += ", and ".join(one(out, spec) for out, spec in unusual) + "."
     if missing:
-        text += (f" {count(len(missing), 'part')} of this scheme "
+        text += (f" {count(len(missing), 'part')} of this mix preset "
                  f"{plural(len(missing), 'is', 'are')} not on this device and would be "
                  f"skipped: {', '.join(missing)}.")
     return text

@@ -74,51 +74,6 @@ def _cc_message(channel: int, control: int, value: int) -> int:
     return (0xB0 | (channel & 0x0F)) | ((control & 0x7F) << 8) | ((value & 0x7F) << 16)
 
 
-class MidiOut:
-    """One open MIDI OUT handle, as a context manager. For tools and tests that want the handle to
-    end with the block. Long-running code should use the module functions instead, which share one
-    handle for the life of the process."""
-
-    def __init__(self, port=None):
-        self.port = find_port() if port is None else port
-        if self.port is None:
-            raise RuntimeError(f"no {PORT_NAME!r} MIDI port (is the desk on USB? ports: {ports()})")
-        self._h = wintypes.HANDLE()
-
-    def __enter__(self):
-        rc = _winmm.midiOutOpen(ctypes.byref(self._h), self.port, 0, 0, 0)
-        if rc:
-            raise RuntimeError(f"midiOutOpen failed on port {self.port} (rc {rc})")
-        return self
-
-    def __exit__(self, *exc) -> None:
-        _winmm.midiOutReset(self._h)
-        _winmm.midiOutClose(self._h)
-        self._h = None      # so a send after the block says so, instead of "rc 5" from winmm
-
-    def cc(self, channel: int, control: int, value: int) -> None:
-        """One control-change message. `channel` is 0-based (MIDI channel 1 = 0)."""
-        write_guard.refuse_in_tests("play a pad")
-        if self._h is None:
-            raise RuntimeError("this MidiOut is closed (send inside the `with` block)")
-        rc = _winmm.midiOutShortMsg(self._h, wintypes.DWORD(_cc_message(channel, control, value)))
-        if rc:
-            raise RuntimeError(f"midiOutShortMsg failed (rc {rc})")
-
-    def press_pad(self, pad: int) -> None:
-        """Press pad `pad` (1-based, within the bank the desk is on) and hold it."""
-        self.cc(pad - 1, CC_PLAY_PAD, 127)
-
-    def release_pad(self, pad: int) -> None:
-        self.cc(pad - 1, CC_PLAY_PAD, 0)
-
-    def play_pad(self, pad: int, hold_s: float = 0.05) -> None:
-        """Press and release, which is what the desk sees as a finger tap."""
-        self.press_pad(pad)
-        time.sleep(hold_s)
-        self.release_pad(pad)
-
-
 # --- the shared handle ---------------------------------------------------------------------------
 # One handle for the life of the process, because a pad shortcut has to be instant and the open is
 # the slow part. Guarded by a lock: two shortcuts pressed together must not interleave on one handle.

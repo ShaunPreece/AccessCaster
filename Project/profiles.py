@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import time
 
 import channels
+import desk_secrets
 import devices
+import master_outputs
 import rcp_read
 import rcp_transfer
 import recorder
@@ -54,10 +55,9 @@ _MIC_NAME_TO_INT = {"Mic1": 1, "Mic2": 2, "Mic3": 3, "Mic4": 4}
 # curated keys drive restore - so an undecoded property can never be blind-written from here.
 #
 # REDACTION. The dump carries secrets in plain text: the wifi PSK and the SIP/CallMe account
-# password among them. Profiles live in %LOCALAPPDATA% but people do share them, so anything
-# password-shaped is replaced with None and named in the profile's "redacted" list. SSIDs and
+# password among them. Profiles live in %LOCALAPPDATA% but people do share them, so every secret
+# (`desk_secrets`) is replaced with None and named in the profile's "redacted" list. SSIDs and
 # usernames are kept: they identify the setup, not access it.
-_REDACT = re.compile(r"psk|password|passwd|secret|token|rodecode", re.I)
 SNAPSHOT_KEY = "device_snapshot"
 
 # ---- the AS-FOUND baseline --------------------------------------------------------------------
@@ -147,14 +147,14 @@ def pads_dir(safe: str) -> str:
 # ---- save (build the dict from an already-read model blob; no device access) ---------------
 
 def _snapshot(blob: bytes, props: dict | None = None) -> dict:
-    """Every property in the dump, redacted (see _REDACT). Reference only; never written back.
+    """Every property in the dump, secrets redacted. Reference only; never written back.
 
     `props` lets the caller hand in an already-walked dump (save() needs the same walk for the unit
     settings) instead of walking 55 KB twice. NOTE: redaction MUTATES it, so anything read out of
     that dict must be read BEFORE this is called."""
     if props is None:
         props = rcp_read.snapshot_properties(blob)
-    redacted = sorted(n for n in props if _REDACT.search(n))
+    redacted = sorted(n for n in props if desk_secrets.is_secret(n))
     for n in redacted:
         props[n] = [None] * len(props[n])
     return {
@@ -169,7 +169,7 @@ def _snapshot(blob: bytes, props: dict | None = None) -> dict:
 
 
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
-         product_id=None, device_name=None, headphone_output_count=None, baseline=False, show=None) -> dict:
+         product_id=None, device_name=None, baseline=False, show=None) -> dict:
     """Build the full profile from an ALREADY-READ model `blob` + channel read `chans`, and write
     it to profiles/<safe>/profile.json. No device access - the caller did the read (and, for the
     optional `pads` backup, the pad read + file copy) under the lock. `pads` is the metadata list
@@ -183,9 +183,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
 
     DEVICE-AWARENESS: `product_id`/`device_name` stamp the desk the profile was saved on so
     restore can REFUSE a cross-device restore (a Pro II profile's fader vector, matrix shape and
-    channel set do not map onto a Duo). `headphone_output_count` is how many
-    headphone outputs the connected device addresses (devices.HeadphoneTypeSpec.outputs), so we
-    record ONE TYPE PER OUTPUT.
+    channel set do not map onto a Duo).
 
     `baseline` marks this as the AS-FOUND capture (see BASELINE_KEY). It also decides who may
     overwrite whom: an ordinary save REFUSES to replace a baseline, because the one profile that
@@ -208,8 +206,6 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # but relying on that would be a trap for whoever adds the next setting).
     all_props = rcp_read.snapshot_properties(blob)
     unit = _unit_settings(all_props)
-    if headphone_output_count is None:
-        headphone_output_count = len(devices.get_active_device().headphones.outputs)
     def first(n):
         return rcp_read.first(blob, n)
 
@@ -221,16 +217,14 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # SPEAKER level (outputMonLevel, a 0..1 float). Both are recorded RAW, so a profile round-trips
     # them exactly. Like the fader vector, capture is deliberately wider than write: we store every
     # slot's value and apply writes only the slots this device has a confirmed level selector for.
-    # A value that fails to decode is kept as None rather than dropped: the list is POSITIONAL
-    # (index = strip), and dropping one would shift every level after it onto the wrong fader.
-    fader_levels = [int(v) if isinstance(v, (int, float)) else None
-                    for v in rcp_read.values(blob, "faderLevel")]
+    # Each is read on its own node, the one its write goes to, and one that fails to decode is
+    # kept as None: the lists are POSITIONAL (index = strip, or headphone output).
+    fader_levels = []
+    for i in range(devices.get_active_device().fader.count):
+        v = rcp_read.keyed_value(blob, rcp_transfer.fader_key(i), "faderLevel")
+        fader_levels.append(int(v) if isinstance(v, (int, float)) else None)
     mon_level = first("outputMonLevel")
-    # ONE HEADPHONE TYPE PER OUTPUT. The dump carries them in output order, mapped
-    # positionally to the outputs the device addresses.
-    hp_all = [v for v in rcp_read.values(blob, "headphoneType") if v is not None and v != ""]
-    headphone_types = [hp_all[i] if i < len(hp_all) else None
-                       for i in range(int(headphone_output_count))]
+    headphone_types = master_outputs.headphone_types(blob)
 
     # THE OUTPUT MIX MATRIX IS CAPTURED AS A MIX SCHEME. routing_schemes.capture already records
     # the WHOLE matrix - every output's mode, every cross-point's include/exclude, its link state
@@ -455,6 +449,59 @@ def delete(name: str, force: bool = False) -> dict:
 
 # ---- apply (device WRITES; THE CALLER MUST HOLD THE HID LOCK) -------------------------------
 
+class _Restore:
+    """The writes of one restore: each is paced and counted, and a failure is recorded and passed
+    over, so one odd value cannot abort the rest."""
+
+    def __init__(self, progress=None):
+        self.applied = 0
+        self.failed = 0
+        self.errs = []
+        self._progress = progress
+
+    def step(self, msg):
+        """Report a section boundary to the caller's `progress`."""
+        if self._progress:
+            self._progress(msg)
+
+    def write(self, desc, fn):
+        """Run one write. Everything that can raise on a damaged value, conversions included,
+        belongs inside `fn`, so it is counted as this write's failure."""
+        try:
+            fn()
+            self.applied += 1
+        except Exception as exc:
+            self._fail(desc, exc)
+        time.sleep(RESTORE_PACE)
+
+    def _fail(self, desc, exc):
+        self.failed += 1
+        if len(self.errs) < 6:
+            self.errs.append(f"{desc}: {exc}")
+
+    def choice(self, desc, value, allowed, fn):
+        """Write `fn(code)` for a saved code that is one of `allowed`. A code off the list is
+        skipped, since the control itself would refuse it; one that is not a number is a failure.
+        Returns the code written, or None."""
+        try:
+            code = int(value)
+        except (TypeError, ValueError) as exc:
+            self._fail(desc, exc)
+            return None
+        if code not in allowed:
+            return None
+        self.write(desc, lambda: fn(code))
+        return code
+
+    def refuse(self, what):
+        """A whole section the connected desk cannot take."""
+        self.failed += 1
+        self.errs.append(what)
+
+    def result(self) -> dict:
+        return {"applied": self.applied, "failed": self.failed, "errs": self.errs}
+
+
 def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     """Apply a loaded profile to the device. Returns {applied, failed, errs}. Paces the writes and
     keeps going past an individual failure, so one odd value cannot abort the whole restore.
@@ -462,287 +509,277 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     THE CALLER MUST HOLD THE HID LOCK (this module does no locking). progress, if given, is called
     with a short human sentence at each section boundary, so a caller polling from a UI has
     something to say during the ~20 seconds of paced writes instead of one frozen message."""
-    applied = 0
-    failed = 0
-    errs = []
-
-    def step(msg):
-        if progress:
-            progress(msg)
-
-    def w(desc, fn):
-        nonlocal applied, failed
-        try:
-            fn()
-            applied += 1
-        except Exception as exc:
-            failed += 1
-            if len(errs) < 6:
-                errs.append(f"{desc}: {exc}")
-        time.sleep(RESTORE_PACE)
-
+    rs = _Restore(progress)
     if prof.get("midi") is not None:
-        w("MIDI control", lambda: rcp_transfer.set_midi_control(bool(prof["midi"])))
+        rs.write("MIDI control", lambda: rcp_transfer.set_midi_control(bool(prof["midi"])))
+    routing = prof.get("routing") or {}
+    # THE FADER LAYOUT GOES FIRST, and the levels straight after it, before any channel processing.
+    # Processing, effects and faderLevel are all addressed per fader STRIP (channels._strip_index),
+    # so the layout decides where each of them has to be written. Written later, every restored
+    # chain lands against the OLD layout and then has the layout moved out from under it.
+    _restore_layout(rs, routing, fader_count, fader_code_set)
+    _restore_levels(rs, routing)
+    _restore_channels(rs, prof.get("channels") or [])
+    _restore_master(rs, routing)
+    # The unit's own settings go last: none of them affects where another write lands.
+    _restore_unit(rs, prof.get(UNIT_KEY) or {})
+    return rs.result()
 
-    r = prof.get("routing") or {}
-    faders = r.get("faders") or []
-    # THE FADER LAYOUT GOES FIRST, before any channel processing. Processing and effects are
-    # addressed per fader STRIP (channels._strip_index),
-    # so the layout decides where each channel's chain has to be written. Run this block LAST and
-    # every restored chain is written against the OLD layout and then has the layout moved out from
-    # under it, so a profile saved with a reordered layout restores its voicings onto the wrong
-    # channels.
-    # Gated on the device's "fader_write" cap: on a device without it the fader restore is
-    # SKIPPED, and the user told, rather than written.
+
+def _restore_layout(rs, routing, fader_count, fader_code_set):
+    """The fader layout, on a device with the "fader_write" cap; refused, and the user told,
+    elsewhere."""
+    faders = routing.get("faders") or []
     if "fader_write" in devices.get_active_device().caps:
-        step("Restoring the fader layout.")
+        rs.step("Restoring the fader layout.")
         for i, code in enumerate(faders):
             if i < fader_count and code is not None and code in fader_code_set:
-                w(f"fader {i + 1}", lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
+                rs.write(f"fader {i + 1}",
+                         lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
     elif any(c is not None for c in faders):
-        failed += 1
-        errs.append("fader layout: changing faders is not enabled on this device, not restored")
+        rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
 
-    # VIRTUAL FADER LEVELS + THE MONITOR SPEAKER LEVEL. These go straight AFTER the layout and
-    # before anything else, for the same reason the layout goes first: faderLevel is addressed per
-    # STRIP, so the level has to land on the strip the saved layout just put that channel on.
-    # Gated on the device's own "level_write" cap AND on it having a virtual fader, the same
-    # refusal the Routing page's level sliders make. Older profiles carry neither key and skip the
-    # whole block.
+
+def _restore_levels(rs, routing):
+    """The virtual fader levels and the monitor speaker level. Gated on the device's own
+    "level_write" cap AND on it having a virtual fader, the same refusal the Routing page's level
+    sliders make. Older profiles carry neither key and skip the whole block."""
     dev = devices.get_active_device()
     lvl_faders = dev.fader.level_faders if "level_write" in dev.caps else ()
-    saved_levels = r.get("fader_levels") or []
-    mon_level = r.get("monitor_level")
+    saved_levels = routing.get("fader_levels") or []
+    mon_level = routing.get("monitor_level")
     if lvl_faders:
-        step("Restoring fader and monitor levels.")
+        rs.step("Restoring fader and monitor levels.")
         for idx in lvl_faders:
             if idx < len(saved_levels) and saved_levels[idx] is not None:
-                w(f"fader {idx + 1} level", lambda idx=idx, v=saved_levels[idx]:
-                  rcp_transfer.set_fader_level(idx, int(v)))
+                rs.write(f"fader {idx + 1} level", lambda idx=idx, v=saved_levels[idx]:
+                         rcp_transfer.set_fader_level(idx, int(v)))
         if mon_level is not None:
-            w("monitor speaker level", lambda v=mon_level: rcp_transfer.set_monitor_level(float(v)))
+            rs.write("monitor speaker level",
+                     lambda v=mon_level: rcp_transfer.set_monitor_level(float(v)))
     elif saved_levels or mon_level is not None:
-        failed += 1
-        errs.append("fader and monitor levels: setting levels is not enabled on this device, "
-                    "not restored")
+        rs.refuse("fader and monitor levels: setting levels is not enabled on this device, "
+                  "not restored")
 
-    # A MIC TYPE THAT CHANGES IS LET FINISH BEFORE THAT CHANNEL'S CHAIN IS WRITTEN.
-    # A voicing does not just set its default gain: it replaces the strip's whole processing chain,
-    # and it takes the desk a second or two to do it (Pro II). A chain write landing
-    # inside that window is thrown away: one sent 0.12 s after a type change reads back as the
-    # voicing's own value.
-    # Without the wait an end-to-end restore still keeps its chain today, because the writes between
-    # the type and the params take longer than 0.12 s; the wait stops that depending on timing that
-    # varies with the voicing pair, the device and whatever gets written in between.
-    # Only paid when the voicing actually CHANGES, which is why the current types are read once here
-    # rather than a settle being run for every channel.
-    types_now = {}
+
+def _mic_types_now() -> dict:
+    """{mic channel name: its mic type} as the desk holds them before the restore, or {} when
+    unreadable, which makes every type write wait for its voicing."""
     try:
-        for rec in channels.read_channels():
-            if rec.get("kind") == "mic":
-                types_now[rec.get("name")] = rec.get("mic_type")
+        return {rec.get("name"): rec.get("mic_type") for rec in channels.read_channels()
+                if rec.get("kind") == "mic"}
     except Exception:
-        types_now = {}                         # unreadable: settle after every type write instead
+        return {}
 
-    def _chain_of(name):
-        # A FRESH DUMP EVERY TIME. Through the model cache the second read returns the first one's
-        # blob, the two always agree, and the wait below ends at once.
-        try:
-            blob = rcp_read.read_model(fresh=True)
-            rec = next((r for r in channels.read_channels(blob) if r.get("name") == name), None)
-        except Exception:
-            return None
-        return None if rec is None else dict(rec.get("params") or {})
 
-    def _await_voicing(name, timeout=8.0):
-        """Block until two consecutive dumps show the strip's params unchanged, so the chain lands
-        on a settled voicing."""
-        end = time.monotonic() + timeout
-        prev = _chain_of(name)
-        while time.monotonic() < end:
-            cur = _chain_of(name)
-            if cur is not None and cur == prev:
-                return
-            prev = cur
+def _chain_of(name):
+    """The channel's processing params from a FRESH dump. Through the model cache the second read
+    returns the first one's blob, the two always agree, and `_await_voicing` ends at once."""
+    try:
+        blob = rcp_read.read_model(fresh=True)
+        rec = next((r for r in channels.read_channels(blob) if r.get("name") == name), None)
+    except Exception:
+        return None
+    return None if rec is None else dict(rec.get("params") or {})
 
-    # The per-channel writes are the bulk of a restore (every level, effect and processing
-    # parameter, paced), so each channel reports itself: this is where the wait actually is.
-    prof_channels = prof.get("channels") or []
+
+def _await_voicing(name, timeout=8.0):
+    """Block until two consecutive dumps show the strip's params unchanged, so the chain lands on a
+    settled voicing.
+
+    A voicing does not just set its default gain: it replaces the strip's whole processing chain,
+    and it takes the desk a second or two to do it (Pro II). A chain write landing inside that
+    window is thrown away: one sent 0.12 s after a type change reads back as the voicing's own
+    value. Only paid when the voicing actually CHANGES."""
+    end = time.monotonic() + timeout
+    prev = _chain_of(name)
+    while time.monotonic() < end:
+        cur = _chain_of(name)
+        if cur is not None and cur == prev:
+            return
+        prev = cur
+
+
+def _restore_channels(rs, prof_channels):
+    """Every channel's input settings, effects and processing. The bulk of a restore, so each
+    channel reports itself: this is where the wait actually is."""
+    if not prof_channels:
+        return
+    types_now = _mic_types_now()
     for ch_i, ch in enumerate(prof_channels):
         cname = ch.get("name")
-        kind = ch.get("kind")
-        step(f"Restoring {cname} ({ch_i + 1} of {len(prof_channels)}).")
-        if kind == "mic":
+        rs.step(f"Restoring {cname} ({ch_i + 1} of {len(prof_channels)}).")
+        if ch.get("kind") == "mic":
             cnum = _MIC_NAME_TO_INT.get(cname)
             if cnum is None:
                 continue
-            # THE MIC TYPE GOES FIRST, before the gain, for the same reason the fader layout goes
-            # before the processing: CHOOSING A VOICING SETS THAT VOICING'S OWN DEFAULT GAIN.
-            # The defaults: Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
-            # NT1 30, NT1-A 31, RE20 51, SM7B 55. Only Line-in and Instrument leave the gain alone.
-            # Write the gain AFTER the type. The other way round, any restore that actually
-            # CHANGES the voicing throws the restored gain away and leaves the desk on the new
-            # voicing's default. It is invisible to the obvious test, because a restore onto the
-            # state the profile was saved from writes the type it is already on and that write is a
-            # no-op; only a CLEAN restore, where the reset has moved the voicing, shows it.
-            mt = ch.get("mic_type")
-            if mt is not None and int(mt) in channels.MIC_TYPE:
-                changing = types_now.get(cname) != int(mt)
-                w(f"{cname} mic type", lambda cnum=cnum, v=mt: channels.set_mic_type(cnum, int(v)))
-                # See _await_voicing: the chain below is written into the voicing's own window
-                # otherwise, and the desk wins.
-                if changing:
-                    step(f"Waiting for the {cname} voicing to finish applying.")
-                    _await_voicing(cname)
-            if ch.get("level_db") is not None:
-                w(f"{cname} gain", lambda cnum=cnum, v=ch["level_db"]: channels.set_mic_gain(cnum, int(v)))
-            if ch.get("phantom") is not None:
-                w(f"{cname} phantom", lambda cnum=cnum, v=ch["phantom"]: channels.set_phantom(cnum, bool(v)))
-            if ch.get("polarity") is not None:
-                w(f"{cname} polarity", lambda cnum=cnum, v=ch["polarity"]: channels.set_polarity(cnum, bool(v)))
-            # INSTRUMENT GAIN is restored; INPUT TYPE deliberately is not.
-            # inputType is DERIVED from the mic type just restored above (Line-in -> 2,
-            # Instrument -> 1, any mic voicing -> 0), so the path comes back on its
-            # own, and writing it as well could only ever produce a state the desk's own UI cannot
-            # make. The instrument gain is NOT derived the same way - selecting Instrument sets it to
-            # 20 and leaving Instrument does not clear it - so that one does need writing.
-            # inputColour is saved but not restored either: it is a string and there is no string
-            # channel-property writer, so it is SAVE ONLY.
-            if ch.get("instrument_gain") is not None:
-                w(f"{cname} instrument gain", lambda cnum=cnum, v=ch["instrument_gain"]:
-                  channels.set_instrument_gain(cnum, int(v)))
-            fx = ch.get("effects") or {}
-            for eff in ("echo", "reverb"):
-                if fx.get(eff) is not None:
-                    w(f"{cname} {eff}", lambda cnum=cnum, eff=eff, v=fx[eff]:
-                      channels.set_channel_effect(cnum, eff, bool(v)))
-            for pkey in ("echo_params", "reverb_params"):
-                for p, v in (fx.get(pkey) or {}).items():
-                    if v is not None:
-                        w(f"{cname} {p}", lambda cnum=cnum, p=p, v=v:
-                          channels.set_channel_effect_param(cnum, p, float(v)))
-        else:
-            # THE CONNECTED DESK's line channels, not the Pro II's. Testing against the Pro II map
-            # silently never restores a Duo profile's Headset level.
-            if ch.get("level_db") is not None and cname in channels.line_level_channels():
-                w(f"{cname} level", lambda cname=cname, v=ch["level_db"]: channels.set_channel_level(cname, int(v)))
+            _restore_mic(rs, ch, cname, cnum, types_now)
+        # THE CONNECTED DESK's line channels, not the Pro II's. Testing against the Pro II map
+        # silently never restores a Duo profile's Headset level.
+        elif ch.get("level_db") is not None and cname in channels.line_level_channels():
+            rs.write(f"{cname} level", lambda cname=cname, v=ch["level_db"]:
+                     channels.set_channel_level(cname, int(v)))
+        _restore_processing(rs, ch, cname)
 
-        # Processing applies to every channel (mic + line).
-        # ORDER MATTERS (see channels.CHAIN_ADVANCED_PROP): the processing
-        # MODE goes FIRST, because in simple mode the desk derives the chain from the three VoxLab
-        # knobs, so restoring an advanced chain onto a strip left in simple mode can be regenerated
-        # over the top. The preset-name marker goes LAST, because the device blanks it to -1 as soon
-        # as any parameter is written. Older profiles have neither key and simply skip both.
-        if ch.get("advanced") is not None:
-            w(f"{cname} processing mode", lambda cname=cname, v=ch["advanced"]:
-              channels.set_channel_advanced(cname, bool(v)))
-        if ch.get("processing_on") is not None:
-            w(f"{cname} processing", lambda cname=cname, v=ch["processing_on"]:
-              channels.set_processing_enabled(cname, bool(v)))
-        for mod_prop, on in (ch.get("modules") or {}).items():
-            if on is not None:
-                w(f"{cname} {mod_prop}", lambda cname=cname, mod_prop=mod_prop, v=on:
-                  channels.set_processing_module(cname, mod_prop, bool(v)))
-        for prop, v in (ch.get("params") or {}).items():
-            if v is not None and prop in channels.PRESET_FLOAT_PROPS:
-                w(f"{cname} {prop}", lambda cname=cname, prop=prop, v=v:
-                  channels.set_channel_processing(cname, prop, float(v)))
-        if ch.get("preset_index") is not None:
-            w(f"{cname} preset name", lambda cname=cname, v=ch["preset_index"]:
-              channels.set_channel_preset_marker(cname, int(v)))
 
-    # Master/global output-block writes (multitrack, auto-mutes, headphone type, Compellor, delay)
-    # are gated on the device's "output_write" cap, because an unmapped global selector would
-    # append a stray. On a device without the cap they are SKIPPED, and the user told, rather than
-    # written blind.
-    _MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_multitrack",
-                        "usb_expanded",
-                        "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",
-                        "headphone_types", "compellor_on", "compellor_threshold",
-                        "compellor_attack", "compellor_release", "compellor_gain", "delay_on")
-    if "output_write" in devices.get_active_device().caps:
-        step("Restoring master output settings.")
-        if r.get("multitrack") is not None and int(r["multitrack"]) in rcp_transfer.MULTITRACK_MODES:
-            w("multitrack", lambda v=r["multitrack"]: rcp_transfer.set_multitrack_mode(int(v)))
-        if r.get("processing_bypass") is not None:
-            w("raw multitrack recording", lambda v=r["processing_bypass"]:
-              rcp_transfer.set_recording_processing_bypass(bool(v)))
-        # MEMBERSHIP-CHECKED like multitrack above, and here it matters more: the desk stores
-        # out-of-range values for this one, so a profile captured from a desk somebody had left on
-        # a 3 would otherwise try to write that 3 straight back. A profile is not a licence to
-        # restore a value the control itself would refuse.
-        if (r.get("recording_format") is not None
-                and int(r["recording_format"]) in rcp_transfer.RECORDING_FORMATS):
-            w("recording format", lambda v=r["recording_format"]:
-              rcp_transfer.set_recording_format(int(v)))
-        # THE USB MODE GETS ITS OWN SPOKEN STEP, because it is the one write in this whole restore
-        # that the person hears happen: it re-enumerates the desk's USB audio function, so every
-        # RODECaster input and output on the machine drops for a second or two. Restored anyway,
-        # since a profile that saves a setting must put it back, but announced first.
-        # ONE WRITE FOR BOTH HALVES, because the desk keeps them in one property. Restoring them
-        # separately would take two re-enumerations and let the second undo the first.
-        if (r.get("usb_multitrack") is not None
-                and int(r["usb_multitrack"]) in rcp_transfer.MULTITRACK_MODES):
-            step("Setting what the desk sends this computer. Its audio devices will drop out for "
-                 "a couple of seconds.")
-            w("USB multitrack", lambda v=recorder.join_usb_multitrack(
-                r["usb_multitrack"], r.get("usb_expanded")): rcp_transfer.set_usb_multitrack_mode(v))
-        if r.get("usb_processing_bypass") is not None:
-            w("raw USB multitrack", lambda v=r["usb_processing_bypass"]:
-              rcp_transfer.set_usb_multitrack_bypass(bool(v)))
-        if r.get("monitor_auto_mute") is not None:
-            w("monitor auto-mute", lambda v=r["monitor_auto_mute"]: rcp_transfer.set_monitor_auto_mute(bool(v)))
-        if r.get("bt_auto_mute") is not None:
-            w("Bluetooth auto-mute", lambda v=r["bt_auto_mute"]: rcp_transfer.set_bt_auto_mute(bool(v)))
-        # Headphone amp type, ONE PER OUTPUT, positional. Values are validated against the
-        # CONNECTED device's spec rather than a literal, so "Low sensitivity" (2) survives, and the
-        # selector comes from the same spec, so an unmapped headphone output is never written.
-        hp_spec = devices.get_active_device().headphones
-        for out_i, hp_val in enumerate(r.get("headphone_types") or []):
-            if out_i >= len(hp_spec.outputs) or hp_val is None:
-                continue
-            if int(hp_val) not in hp_spec.value_codes:
-                continue
-            hp_index, out_label = hp_spec.outputs[out_i]
-            w(f"{out_label} type", lambda i=hp_index, v=hp_val:
-              rcp_transfer.set_headphone_type(int(v), i))
-        if r.get("compellor_on") is not None:
-            w("Compellor", lambda v=r["compellor_on"]: rcp_transfer.set_master_compellor(bool(v)))
-        for pk, profkey in (("threshold", "compellor_threshold"), ("attack", "compellor_attack"),
-                            ("release", "compellor_release"), ("gain", "compellor_gain")):
-            v = r.get(profkey)
+def _restore_mic(rs, ch, cname, cnum, types_now):
+    """A mic channel's type, gain, input switches and effects."""
+    # THE MIC TYPE GOES FIRST, before the gain: CHOOSING A VOICING SETS THAT VOICING'S OWN DEFAULT
+    # GAIN (Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50, NT1 30, NT1-A 31,
+    # RE20 51, SM7B 55; only Line-in and Instrument leave the gain alone). The other way round, any
+    # restore that CHANGES the voicing leaves the desk on the new voicing's default. A restore onto
+    # the state the profile was saved from cannot show it, because its type write is a no-op; only
+    # a clean restore, where the reset has moved the voicing, does.
+    if ch.get("mic_type") is not None:
+        code = rs.choice(f"{cname} mic type", ch["mic_type"], channels.MIC_TYPE,
+                         lambda v: channels.set_mic_type(cnum, v))
+        if code is not None and types_now.get(cname) != code:
+            rs.step(f"Waiting for the {cname} voicing to finish applying.")
+            _await_voicing(cname)
+    if ch.get("level_db") is not None:
+        rs.write(f"{cname} gain", lambda v=ch["level_db"]: channels.set_mic_gain(cnum, int(v)))
+    if ch.get("phantom") is not None:
+        rs.write(f"{cname} phantom", lambda v=ch["phantom"]: channels.set_phantom(cnum, bool(v)))
+    if ch.get("polarity") is not None:
+        rs.write(f"{cname} polarity",
+                 lambda v=ch["polarity"]: channels.set_polarity(cnum, bool(v)))
+    # INSTRUMENT GAIN is restored; INPUT TYPE deliberately is not. inputType is DERIVED from the
+    # mic type (Line-in -> 2, Instrument -> 1, any mic voicing -> 0), so writing it as well could
+    # only produce a state the desk's own UI cannot make. The instrument gain is not derived:
+    # selecting Instrument sets it to 20 and leaving Instrument does not clear it. inputColour is
+    # SAVE ONLY: it is a string and there is no string channel-property writer.
+    if ch.get("instrument_gain") is not None:
+        rs.write(f"{cname} instrument gain", lambda v=ch["instrument_gain"]:
+                 channels.set_instrument_gain(cnum, int(v)))
+    fx = ch.get("effects") or {}
+    for eff in ("echo", "reverb"):
+        if fx.get(eff) is not None:
+            rs.write(f"{cname} {eff}", lambda eff=eff, v=fx[eff]:
+                     channels.set_channel_effect(cnum, eff, bool(v)))
+    for pkey in ("echo_params", "reverb_params"):
+        for p, v in (fx.get(pkey) or {}).items():
             if v is not None:
-                w(f"Compellor {pk}", lambda pk=pk, v=v: rcp_transfer.set_master_compellor_param(pk, float(v)))
-        if r.get("delay_on") is not None:
-            secs = r.get("delay_seconds")
-            w("output delay", lambda on=r["delay_on"], secs=secs:
-              rcp_transfer.set_output_delay(bool(on), float(secs) if secs is not None else None))
-    elif any(r.get(k) is not None for k in _MASTER_OUT_KEYS):
-        failed += 1
-        errs.append("master output settings (multitrack, auto-mute, headphone, Compellor, delay): "
-                    "read-only on this device, not restored")
+                rs.write(f"{cname} {p}", lambda p=p, v=v:
+                         channels.set_channel_effect_param(cnum, p, float(v)))
 
-    # THE UNIT'S OWN SETTINGS, last: they touch nothing else, and none of them affects where another
-    # write lands (unlike the layout, which has to go first). Order within the block does not matter
-    # either - each is an independent field in its block.
-    # Only values a profile actually recorded are written, and only names in the address table, so a
-    # profile from a newer build carrying a setting THIS build does not know about is skipped rather
-    # than written on a guessed selector. Gated on the device's "unit_settings" cap.
-    unit = prof.get(UNIT_KEY) or {}
-    if unit and "unit_settings" in devices.get_active_device().caps:
-        step("Restoring the desk's own settings.")
-        for prop, v in sorted(unit.items()):
-            if prop not in rcp_transfer.UNIT_SETTING_SEL or not isinstance(v, (int, float)):
-                continue
-            if prop in UNIT_NEVER_RESTORE:
-                continue        # saved for the record, deliberately not written back - see above
-            w(prop, lambda prop=prop, v=v: rcp_transfer.set_unit_setting(prop, v))
-    elif unit:
-        failed += 1
-        errs.append("desk settings (display, buttons, haptics, record button, listen mode): "
-                    "read-only on this device, not restored")
 
-    return {"applied": applied, "failed": failed, "errs": errs}
+def _restore_processing(rs, ch, cname):
+    """A channel's processing, mic or line.
+
+    ORDER MATTERS (see channels.CHAIN_ADVANCED_PROP): the processing MODE goes FIRST, because in
+    simple mode the desk derives the chain from the three VoxLab knobs, so an advanced chain
+    restored onto a strip left in simple mode can be regenerated over the top. The preset-name
+    marker goes LAST, because the device blanks it to -1 as soon as any parameter is written.
+    Older profiles have neither key and skip both."""
+    if ch.get("advanced") is not None:
+        rs.write(f"{cname} processing mode", lambda v=ch["advanced"]:
+                 channels.set_channel_advanced(cname, bool(v)))
+    if ch.get("processing_on") is not None:
+        rs.write(f"{cname} processing", lambda v=ch["processing_on"]:
+                 channels.set_processing_enabled(cname, bool(v)))
+    for mod_prop, on in (ch.get("modules") or {}).items():
+        if on is not None:
+            rs.write(f"{cname} {mod_prop}", lambda mod_prop=mod_prop, v=on:
+                     channels.set_processing_module(cname, mod_prop, bool(v)))
+    for prop, v in (ch.get("params") or {}).items():
+        if v is not None and prop in channels.PRESET_FLOAT_PROPS:
+            rs.write(f"{cname} {prop}", lambda prop=prop, v=v:
+                     channels.set_channel_processing(cname, prop, float(v)))
+    if ch.get("preset_index") is not None:
+        rs.write(f"{cname} preset name", lambda v=ch["preset_index"]:
+                 channels.set_channel_preset_marker(cname, int(v)))
+
+
+_MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_multitrack",
+                    "usb_expanded", "usb_processing_bypass", "monitor_auto_mute", "bt_auto_mute",
+                    "headphone_types", "compellor_on", "compellor_threshold", "compellor_attack",
+                    "compellor_release", "compellor_gain", "delay_on")
+
+
+def _restore_master(rs, r):
+    """The master and global output-block writes (multitrack, auto-mutes, headphone type,
+    Compellor, delay). Gated on the device's "output_write" cap, because an unmapped global
+    selector would append a stray: on a device without it they are refused, not written blind."""
+    if "output_write" not in devices.get_active_device().caps:
+        if any(r.get(k) is not None for k in _MASTER_OUT_KEYS):
+            rs.refuse("master output settings (multitrack, auto-mute, headphone, Compellor, "
+                      "delay): read-only on this device, not restored")
+        return
+    rs.step("Restoring master output settings.")
+    if r.get("multitrack") is not None:
+        rs.choice("multitrack", r["multitrack"], rcp_transfer.MULTITRACK_MODES,
+                  rcp_transfer.set_multitrack_mode)
+    if r.get("processing_bypass") is not None:
+        rs.write("raw multitrack recording", lambda v=r["processing_bypass"]:
+                 rcp_transfer.set_recording_processing_bypass(bool(v)))
+    # Checked against the list like multitrack, and here it matters more: the desk stores
+    # out-of-range values for this one, so a profile captured from a desk left on a 3 would
+    # otherwise write that 3 straight back.
+    if r.get("recording_format") is not None:
+        rs.choice("recording format", r["recording_format"], rcp_transfer.RECORDING_FORMATS,
+                  rcp_transfer.set_recording_format)
+    # THE USB MODE GETS ITS OWN SPOKEN STEP: it re-enumerates the desk's USB audio function, so
+    # every RODECaster input and output on the machine drops for a second or two. ONE WRITE FOR
+    # BOTH HALVES, because the desk keeps them in one property: two writes would take two
+    # re-enumerations and let the second undo the first.
+    if r.get("usb_multitrack") is not None:
+        def usb_mode(mode):
+            rs.step("Setting what the desk sends this computer. Its audio devices will drop out "
+                    "for a couple of seconds.")
+            rcp_transfer.set_usb_multitrack_mode(
+                recorder.join_usb_multitrack(mode, r.get("usb_expanded")))
+        rs.choice("USB multitrack", r["usb_multitrack"], rcp_transfer.MULTITRACK_MODES, usb_mode)
+    if r.get("usb_processing_bypass") is not None:
+        rs.write("raw USB multitrack", lambda v=r["usb_processing_bypass"]:
+                 rcp_transfer.set_usb_multitrack_bypass(bool(v)))
+    if r.get("monitor_auto_mute") is not None:
+        rs.write("monitor auto-mute", lambda v=r["monitor_auto_mute"]:
+                 rcp_transfer.set_monitor_auto_mute(bool(v)))
+    if r.get("bt_auto_mute") is not None:
+        rs.write("Bluetooth auto-mute",
+                 lambda v=r["bt_auto_mute"]: rcp_transfer.set_bt_auto_mute(bool(v)))
+    # Headphone amp type, ONE PER OUTPUT, positional. Values are checked against the CONNECTED
+    # device's spec rather than a literal, so "Low sensitivity" (2) survives, and the selector
+    # comes from the same spec, so an unmapped headphone output is never written.
+    hp_spec = devices.get_active_device().headphones
+    for out_i, hp_val in enumerate(r.get("headphone_types") or []):
+        if out_i >= len(hp_spec.outputs) or hp_val is None:
+            continue
+        hp_index, out_label = hp_spec.outputs[out_i]
+        rs.choice(f"{out_label} type", hp_val, hp_spec.value_codes,
+                  lambda v, i=hp_index: rcp_transfer.set_headphone_type(v, i))
+    if r.get("compellor_on") is not None:
+        rs.write("Compellor",
+                 lambda v=r["compellor_on"]: rcp_transfer.set_master_compellor(bool(v)))
+    for pk, profkey in (("threshold", "compellor_threshold"), ("attack", "compellor_attack"),
+                        ("release", "compellor_release"), ("gain", "compellor_gain")):
+        v = r.get(profkey)
+        if v is not None:
+            rs.write(f"Compellor {pk}",
+                     lambda pk=pk, v=v: rcp_transfer.set_master_compellor_param(pk, float(v)))
+    if r.get("delay_on") is not None:
+        secs = r.get("delay_seconds")
+        rs.write("output delay", lambda on=r["delay_on"], secs=secs:
+                 rcp_transfer.set_output_delay(bool(on), float(secs) if secs is not None else None))
+
+
+def _restore_unit(rs, unit):
+    """The desk's own settings, on a device with the "unit_settings" cap. Only values a profile
+    recorded are written, and only names in the address table, so a setting from a newer build
+    that THIS build does not know is skipped rather than written on a guessed selector."""
+    if not unit:
+        return
+    if "unit_settings" not in devices.get_active_device().caps:
+        rs.refuse("desk settings (display, buttons, haptics, record button, listen mode): "
+                  "read-only on this device, not restored")
+        return
+    rs.step("Restoring the desk's own settings.")
+    for prop, v in sorted(unit.items()):
+        if prop not in rcp_transfer.UNIT_SETTING_SEL or not isinstance(v, (int, float)):
+            continue
+        if prop in UNIT_NEVER_RESTORE:
+            continue        # saved for the record, deliberately not written back
+        rs.write(prop, lambda prop=prop, v=v: rcp_transfer.set_unit_setting(prop, v))
 
 
 def restore_result(safe, res) -> dict:

@@ -15,10 +15,10 @@ import pad_actions
 from native import a11y
 from pad_records import EFFECT_FLAG
 from native.calls import call
-from native.controls import Slider, set_choices
+from native.controls import Slider, percent_words, set_choices
 from native.dialogs import JobDialog, TextDialog, confirm
 from native.pad_dialogs import READ_ONLY
-from native.pages import group, labelled, page_body, select
+from native.pages import group, labelled, page_body, select, set_items
 
 TITLE = "Voice effects"
 NONE_SAVED = "You have not created any effects yet."
@@ -60,10 +60,6 @@ def semitone_words(value):
     if value == 0:
         return "no change"
     return f"{abs(value)} semitone{'s' if abs(value) != 1 else ''} {'up' if value > 0 else 'down'}"
-
-
-def percent_words(value):
-    return f"{value} percent"
 
 
 def device_value(control, value):
@@ -192,8 +188,7 @@ class FxPage(scrolled.ScrolledPanel):
         index = self.saved.GetSelection()
         keep = keep if keep is not None else max(index, 0)
         labels = names or [NONE_SAVED]
-        if [self.saved.GetString(i) for i in range(self.saved.GetCount())] != labels:
-            self.saved.Set(labels)
+        set_items(self.saved, labels)
         select(self.saved, min(keep, len(labels) - 1))
 
     def relayout(self, change=None):

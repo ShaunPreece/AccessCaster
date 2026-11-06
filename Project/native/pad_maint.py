@@ -12,9 +12,10 @@ import soundpad
 import wording
 from native import a11y
 from native.calls import call
+from native.controls import set_choices
 from native.dialogs import JobDialog, ListDialog, confirm, follow_job, report
 from native.pad_dialogs import READ_ONLY, content, where
-from native.pages import page_body, select
+from native.pages import add_button, page_body, reply_text, select
 
 TITLE = "Pad maintenance"
 
@@ -49,10 +50,6 @@ def backup_label(backup):
     return label
 
 
-def _message(reply):
-    return reply.get("message") or ("Done." if reply.get("ok") else "That did not work.")
-
-
 class MaintPage(wx.Panel):
     def __init__(self, section):
         super().__init__(section.frame.host)
@@ -62,20 +59,20 @@ class MaintPage(wx.Panel):
         self._exporting = False
         sizer, parent = page_body(self)
 
-        self.clear_all = self._button(parent, sizer, "Clear all pads",
-                                      "Empties every pad except the built-in System pads.",
-                                      self._on_clear_all)
-        self.restore_backup = self._button(
-            parent, sizer, "Restore the pads from a backup",
+        self.clear_all = add_button(parent, sizer, "Clear all pads", self._on_clear_all,
+                                    "Empties every pad except the built-in System pads.")
+        self.restore_backup = add_button(
+            parent, sizer, "Restore the pads from a backup", self._on_restore_backup,
             "Puts every pad back as a backup on this computer has it, sounds included. Nothing "
-            "else on the desk changes.", self._on_restore_backup)
-        self.restore_fx = self._button(
+            "else on the desk changes.")
+        self.restore_fx = add_button(
             parent, sizer, "Restore the factory voice effects, Censor and Ducking",
+            self._on_restore_fx,
             "Overwrites those eight pads with their factory versions; the factory sounds are not "
-            "restored. Takes two or three minutes.", self._on_restore_fx)
-        self.tidy = self._button(parent, sizer, "Tidy up unused pad audio",
-                                 "Deletes sound files no pad plays, to free pad storage. Cannot "
-                                 "be undone.", self._on_tidy)
+            "restored. Takes two or three minutes.")
+        self.tidy = add_button(parent, sizer, "Tidy up unused pad audio", self._on_tidy,
+                               "Deletes sound files no pad plays, to free pad storage. Cannot be "
+                               "undone.")
 
         line = wx.BoxSizer(wx.HORIZONTAL)
         line.Add(wx.StaticText(parent, label="Sound pad"), 0,
@@ -102,13 +99,6 @@ class MaintPage(wx.Panel):
     def model(self):
         return self.section.model
 
-    def _button(self, parent, sizer, label, description, handler):
-        button = wx.Button(parent, label=label)
-        a11y.describe(button, description)
-        button.Bind(wx.EVT_BUTTON, handler)
-        sizer.Add(button, 0, wx.ALL, 6)
-        return button
-
     def show(self):
         """The sound pads offered for export, keeping the chosen one."""
         index = self.export_choice.GetSelection()
@@ -116,9 +106,9 @@ class MaintPage(wx.Panel):
         chosen = self.sound_pads[index]["grid"] if 0 <= index < len(self.sound_pads) else None
         self.sound_pads = [pad for pad in self.model["pads"]
                            if pad["present"] and pad["type"] == soundpad.PAD_TYPE_SOUND]
-        labels = [f"{where(pad).capitalize()}. {content(pad)}" for pad in self.sound_pads]
-        if labels != self.export_choice.GetItems():
-            self.export_choice.Set(labels or ["No pad has a sound on it"])
+        set_choices(self.export_choice,
+                    [f"{where(pad).capitalize()}. {content(pad)}" for pad in self.sound_pads]
+                    or ["No pad has a sound on it"])
         grids = [pad["grid"] for pad in self.sound_pads]
         select(self.export_choice, grids.index(chosen) if chosen in grids else 0)
 
@@ -225,7 +215,7 @@ class MaintPage(wx.Panel):
         def done(reply):
             self._exporting = False
             # Always spoken: the reply names the file, which is the point of the export.
-            self.frame.say(_message(reply))
+            self.frame.say(reply_text(reply))
         call(self, pad_actions.action_export_pad, pad["grid"], done=done)
 
     def _on_open_folder(self, event):

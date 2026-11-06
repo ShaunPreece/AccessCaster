@@ -15,6 +15,7 @@ import meters
 import output_mixes
 import rcp_read
 import rcp_transfer
+from desk_labels import CUSTOM
 
 
 NOT_RESTORED = ("WARNING: the Chat mix could not be put back. It may still be carrying one "
@@ -133,7 +134,7 @@ class ChatIsolation:
                                    "through it")
             if self.mode_before != 2:
                 self.changed = True
-                rcp_transfer.set_output_routing(self.chat, 2)      # Custom
+                rcp_transfer.set_output_routing(self.chat, CUSTOM)
                 time.sleep(0.3)
             for src in self.sources:
                 want = (src != self.keep)

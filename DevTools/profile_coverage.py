@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # puts Project/ on sys.path, and finds the notes
 import channels
 import desk_firmware
+import master_outputs
 import profiles
 import property_coverage as pc
 import rcp_read
@@ -70,6 +71,8 @@ SAVE_FUNCS = [
     (rcp_read.master_processing, "rcp_read.master_processing"),
     # profile_actions.save_desk takes the firmware version a profile records from this reader.
     (desk_firmware.version, "desk_firmware.version"),
+    # profiles.save reads each headphone output's type on its own node through this helper.
+    (master_outputs.headphone_types, "master_outputs.headphone_types"),
 ]
 # PADS ARE DIFFERENT and must be listed by hand. soundpad.read_pads_live reads far MORE than
 # soundpad.backup_pads keeps: the backup builds its own entry dict and quietly drops the rest, so

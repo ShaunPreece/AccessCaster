@@ -87,7 +87,7 @@ def progress_count(dev, secs: float) -> int:
 PLAYING_MIN = 5     # ~16 expected in 0.8 s at 20 pushes a second; a stop emits one or two
 
 
-def start_playing(dev, midi, pad: int, tries: int = 3) -> bool:
+def start_playing(dev, pad: int, tries: int = 3) -> bool:
     """Get the pad actually PLAYING, confirmed off the push stream, and say so if it will not.
 
     A LATCHING PAD starts on one press and STOPS on the next, so "press it and assume" tests a
@@ -96,20 +96,20 @@ def start_playing(dev, midi, pad: int, tries: int = 3) -> bool:
     """
     for _ in range(tries):
         drain(dev)
-        midi.play_pad(pad)
+        midi_out.play_pad(pad)
         if progress_count(dev, 0.8) >= PLAYING_MIN:
             return True
     return False
 
 
-def stop_playing(dev, midi, pad: int, tries: int = 3) -> bool:
+def stop_playing(dev, pad: int, tries: int = 3) -> bool:
     """The other half of the latch: press until the pushes stop, so the test leaves the desk as it
     found it rather than with a music bed running."""
     for _ in range(tries):
         drain(dev)
         if progress_count(dev, 0.5) < PLAYING_MIN:
             return True
-        midi.play_pad(pad)
+        midi_out.play_pad(pad)
     drain(dev)
     return progress_count(dev, 0.5) < PLAYING_MIN
 
@@ -155,9 +155,9 @@ def main() -> int:
         # Every block below presses a latching pad, so the stop runs however they end: a pad
         # left latched keeps a music bed playing through the desk.
         try:
-            with push_handle("read under push: watch") as watch, midi_out.MidiOut() as m:
+            with push_handle("read under push: watch") as watch:
                 for run in range(args.runs):
-                    playing = start_playing(watch, m, args.pad)
+                    playing = start_playing(watch, args.pad)
                     blob, secs = timed_read()
                     stats = dict(rcp_read._last_read)
                     got = structure(blob)
@@ -182,8 +182,11 @@ def main() -> int:
             old_loop_check(args.pad, len(quiet))
         finally:
             print("\nPUTTING THE DESK BACK")
-            with push_handle("read under push: put back") as watch, midi_out.MidiOut() as m:
-                check_true("the pad is stopped again", stop_playing(watch, m, args.pad))
+            try:
+                with push_handle("read under push: put back") as watch:
+                    check_true("the pad is stopped again", stop_playing(watch, args.pad))
+            finally:
+                midi_out.close()
 
     return _testkit.finish()
 
@@ -196,8 +199,8 @@ def tail_checks(pad: int) -> None:
     runs on to its 4000-read ceiling.
     """
     burst, tail = [], []
-    with push_handle("read under push: tail") as dev, midi_out.MidiOut() as midi:
-        check_true("pad confirmed playing", start_playing(dev, midi, pad))
+    with push_handle("read under push: tail") as dev:
+        check_true("pad confirmed playing", start_playing(dev, pad))
         dev.write(rcp_read.TRIGGER)
         need, got = None, 0
         t0 = time.monotonic()
@@ -243,8 +246,8 @@ def old_loop_check(pad: int, healthy_bytes: int) -> None:
     """
     buf = bytearray()
     playing = False
-    with push_handle("read under push: old loop") as dev, midi_out.MidiOut() as midi:
-        playing = start_playing(dev, midi, pad)
+    with push_handle("read under push: old loop") as dev:
+        playing = start_playing(dev, pad)
         dev.write(rcp_read.TRIGGER)
         t0 = time.monotonic()
         deadline = t0 + 1.5

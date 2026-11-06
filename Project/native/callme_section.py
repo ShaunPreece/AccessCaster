@@ -20,9 +20,10 @@ import callme_actions
 import faders
 from native import a11y
 from native.calls import call
-from native.controls import Switch
-from native.dialogs import confirm
-from native.pages import Page, labelled, page_body, read_only, set_text
+from native.controls import Switch, set_choices
+from native.dialogs import confirm, ok_cancel
+from native.pages import (Page, Reader, add_button, labelled, page_body, read_only, set_items,
+                          set_text)
 
 TITLE = "CallMe"
 UNREAD = "CallMe has not been read yet."
@@ -49,14 +50,8 @@ def problems(data, desk_faders):
     return [r for r in callme.readiness(data.get("online"), on_fader) if not r["ok"]]
 
 
-def _button(parent, row, label, handler):
-    button = wx.Button(parent, label=label)
-    button.Bind(wx.EVT_BUTTON, handler)
-    row.Add(button, 0, wx.RIGHT, 8)
-    return button
 
-
-class CallMeSection:
+class CallMeSection(Reader):
     title = TITLE
     route = "callme"
 
@@ -66,8 +61,7 @@ class CallMeSection:
         self.busy = False            # a press from this section has not returned
         self._seen = None            # the listener's `version` last drawn
         self._ringing = None         # the id of the call last seen ringing
-        self._reading = False
-        self._again = None
+        self._init_reader(owner=frame)
         self._polling = False
         self.call_page = CallPage(self)
         self.dial_page = DialPage(self)
@@ -94,15 +88,10 @@ class CallMeSection:
         elif event in ("read", "faders") and self.data is not None:
             self.call_page.show_ready()
 
-    def read(self, announce=False):
-        if self._reading:
-            self._again = bool(self._again) or announce
-            return
-        self._reading = True
-        call(self.frame, callme_actions.read, done=lambda reply: self._read_done(reply, announce))
+    def fetch(self):
+        return callme_actions.read()
 
-    def _read_done(self, reply, announce):
-        self._reading = False
+    def read_done(self, reply, announce):
         if reply.get("ok"):
             self._ringing = (reply.get("incoming") or {}).get("id")
             self.show(reply)
@@ -113,9 +102,6 @@ class CallMeSection:
                 self.call_page.set_now(reply.get("message") or "Could not read CallMe.")
             if announce:
                 self.frame.say(reply.get("message") or "Could not read CallMe.")
-        if self._again is not None:
-            again, self._again = self._again, None
-            self.read(again)
 
     def show(self, data):
         self.data = data
@@ -224,15 +210,15 @@ class CallPage(wx.Panel):
         self.now = read_only(parent, sizer, "Now")
         self.now.SetValue("Reading the desk.")
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.answer = _button(parent, row, "Answer", self._on_answer)
+        self.answer = add_button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
                                    "extends a call that is about to end.")
         # One fixed label: `callme_actions.action_end` decides at the press, so a call that began ringing a moment
         # ago is declined rather than the guest already on the line being cut off.
-        self.end = _button(parent, row, "Decline or hang up", self._on_end)
+        self.end = add_button(parent, row, "Decline or hang up", self._on_end)
         a11y.describe(self.end, "Declines the call that is ringing, or else hangs up the call "
                                 "that is up.")
-        self.extend = _button(parent, row, "Extend the call", self._on_extend)
+        self.extend = add_button(parent, row, "Extend the call", self._on_extend)
         a11y.describe(self.extend, "Offered in the last five minutes of a call on a plan with an "
                                    "hour limit.")
         sizer.Add(row, 0, wx.ALL, 6)
@@ -283,9 +269,8 @@ class CallPage(wx.Panel):
             return
         labels = desk_faders["labels"]
         names = [f"Fader {i + 1}, currently {label}" for i, label in enumerate(labels)]
-        if [self.fader.GetString(i) for i in range(self.fader.GetCount())] != names:
-            chosen = self.fader.GetSelection()
-            self.fader.Set(names)
+        chosen = self.fader.GetSelection()
+        if set_choices(self.fader, names):
             self.fader.SetSelection(chosen if 0 <= chosen < len(names) else wx.NOT_FOUND)
 
     def _on_put(self, _event):
@@ -304,7 +289,7 @@ class CallPage(wx.Panel):
             if not reply.get("ok"):
                 self.frame.say(reply.get("message") or "That did not work.")
                 return
-            lost =("" if gave_up in (reply.get("labels") or [])
+            lost = ("" if gave_up in (reply.get("labels") or [])
                     else f" {gave_up} is now on no fader.")
             # Worded here: `faders.action_set_fader`'s reply is the Routing page's account of the
             # layout.
@@ -343,10 +328,10 @@ class DialPage(wx.Panel):
         self.list = labelled(parent, sizer, "Contact", lambda p: wx.ListBox(
             p, choices=["Reading the contacts."], size=(420, 160)))
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.call_contact = _button(parent, row, "Call selected contact", self._on_call_contact)
-        self.edit = _button(parent, row, "Edit selected contact", self._on_edit)
-        self.delete = _button(parent, row, "Delete selected contact", self._on_delete)
-        self.add = _button(parent, row, "Add a contact", self._on_add)
+        self.call_contact = add_button(parent, row, "Call selected contact", self._on_call_contact)
+        self.edit = add_button(parent, row, "Edit selected contact", self._on_edit)
+        self.delete = add_button(parent, row, "Delete selected contact", self._on_delete)
+        self.add = add_button(parent, row, "Add a contact", self._on_add)
         sizer.Add(row, 0, wx.ALL, 6)
 
     def show(self, prefer=None):
@@ -354,8 +339,7 @@ class DialPage(wx.Panel):
         code = prefer or (chosen["code"] if chosen else None)
         self.contacts = self.section.data.get("contacts") or []
         labels = [contact_label(c) for c in self.contacts] or ["No contacts yet."]
-        if [self.list.GetString(i) for i in range(self.list.GetCount())] != labels:
-            self.list.Set(labels)
+        set_items(self.list, labels)
         codes = [c["code"] for c in self.contacts]
         self.list.SetSelection(codes.index(code) if code in codes else 0)
 
@@ -447,13 +431,7 @@ class ContactDialog(wx.Dialog):
         self.code_box = wx.TextCtrl(self, value=self._was, size=(320, -1))
         a11y.describe(self.code_box, "Or their guest link.")
         sizer.Add(self.code_box, 0, wx.ALL, 10)
-        buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(self, wx.ID_OK, label="Save")
-        ok.SetDefault()
-        buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        ok_cancel(self, sizer, "Save")
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         self.CentreOnParent()

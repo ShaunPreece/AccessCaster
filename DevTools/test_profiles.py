@@ -17,6 +17,7 @@ Run: python DevTools/test_profiles.py
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import os
 import shutil
 import sys
@@ -58,12 +59,22 @@ def prop_str(name, value):
 # outputs with DIFFERENT types, the second of them "Low sensitivity" (2), the value a literal (0, 1)
 # check drops. Monitor speaker at 3 percent, a realistic resting level.
 FADER_LEVEL_VALUES = [0, 0, 0, 0, 0, 0, 100, 64, 127]
-blob = fake_model.encode(
+
+
+def desk_dump(entries, fader_levels, headphone_types):
+    """A dump of root properties, with each fader level on its own FADER node and each headphone
+    type on its own HEADPHONE node, where their writes go. A type of None is a node without one."""
+    faders = [fake_model.node("FADER", {"faderLevel": int(v)}) for v in fader_levels]
+    headphones = [fake_model.node("HEADPHONE", {} if t is None else {"headphoneType": int(t)})
+                  for t in headphone_types]
+    return fake_model.node("Rodecaster", [(name, value) for _b, name, value in entries],
+                           [fake_model.node("PHYSICALINTERFACE", (), faders)] + headphones)
+
+
+ROOT_PROPS = (
     [prop_int("channelInputSource", c) for c in (0, 7, 2, 3, 10, 11, 1, 8, 9, 9)]
     + [prop_bool("systemMidiControl", True)]
-    + [prop_int("faderLevel", v) for v in FADER_LEVEL_VALUES]
     + [prop_float("outputMonLevel", 0.03)]
-    + [prop_int("headphoneType", 1), prop_int("headphoneType", 2)]
     + [prop_bool("masterCompellorOn", False)]
     # THE UNIT'S OWN SETTINGS. hwScreenBrightness comes FIRST and holds a DIFFERENT value on
     # purpose: it is a superstring of screenBrightness, so a substring search decodes it and
@@ -88,8 +99,10 @@ blob = fake_model.encode(
        prop_bool("disableAllPhysicalButtons", False)]
     # Secrets and an undecoded property, for the full-dump snapshot below.
     + [prop_str("wifiSSID", "SomeNetwork"), prop_str("wifiPSK", "hunter2"),
-       prop_str("sipAccountPassword", "s3cret"), prop_int("someUndecodedSetting", 42)]
+       prop_str("sipAccountPassword", "s3cret"), prop_str("btPairCode", "482913"),
+       prop_int("someUndecodedSetting", 42)]
 )
+blob = desk_dump(ROOT_PROPS, FADER_LEVEL_VALUES, [1, 2])
 
 
 # --- what SAVE records ---------------------------------------------------------------------------
@@ -100,7 +113,7 @@ saved_dir = profiles.PROFILES_DIR
 profiles.PROFILES_DIR = tmp
 try:
     with as_device(devices.PRO2):
-        res = profiles.save("test", blob, [], "1.0.0", 10, headphone_output_count=2)
+        res = profiles.save("test", blob, [], "1.0.0", 10)
     check_true("save reports ok", res.get("ok"))
     prof = profiles.load("test")["prof"]
     r = prof["routing"]
@@ -108,10 +121,21 @@ try:
     check("monitor speaker level captured raw (0..1)", round(r["monitor_level"], 3), 0.03)
     check("one headphone type per output", r["headphone_types"], [1, 2])
 
-    with as_device(devices.PRO2):
-        profiles.save("test1hp", blob, [], "1.0.0", 10, headphone_output_count=1)
+    one_hp = dataclasses.replace(devices.PRO2, headphones=dataclasses.replace(
+        devices.PRO2.headphones, outputs=devices.PRO2.headphones.outputs[:1]))
+    with as_device(one_hp):
+        profiles.save("test1hp", blob, [], "1.0.0", 10)
     r1 = profiles.load("test1hp")["prof"]["routing"]
     check("a device with one headphone output records one type", r1["headphone_types"], [1])
+
+    # Each type is read on its own node, so one that will not decode cannot shift Headphone 2's
+    # type onto Headphone 1.
+    with as_device(devices.PRO2):
+        profiles.save("testhpgap", desk_dump(ROOT_PROPS, FADER_LEVEL_VALUES, [None, 2]), [],
+                      "1.0.0", 10)
+    gap = profiles.load("testhpgap")["prof"]["routing"]
+    check("a headphone with no type saves None, not its neighbour's", gap["headphone_types"],
+          [None, 2])
 
     print("\nSAVE: the desk's own settings (display, buttons, haptics, REC button, listen mode)")
     unit = prof[profiles.UNIT_KEY]
@@ -145,6 +169,8 @@ try:
     check("so is the SIP account password",
           (props.get("sipAccountPassword"), "sipAccountPassword" in snap["redacted"]),
           ([None], True))
+    check("so is a Bluetooth pairing code",
+          (props.get("btPairCode"), "btPairCode" in snap["redacted"]), ([None], True))
     check("the SSID is kept (it identifies the setup, it does not open it)",
           props.get("wifiSSID"), ["SomeNetwork"])
     raw = (Path(tmp) / "test" / "profile.json").read_text(encoding="utf-8")
@@ -167,8 +193,8 @@ try:
     canary.write_text("still here", encoding="utf-8")
 
     with as_device(devices.PRO2):
-        profiles.save("keeper", blob, [], "1.0.0", 10, headphone_output_count=2)
-        profiles.save("movable", blob, [], "1.0.0", 10, headphone_output_count=2)
+        profiles.save("keeper", blob, [], "1.0.0", 10)
+        profiles.save("movable", blob, [], "1.0.0", 10)
     # A pad sound lives INSIDE the profile folder, so it has to travel with a rename and die with
     # a delete. Stand one in to prove the whole folder moves, not just profile.json.
     pad = Path(profiles.pads_dir("movable")) / "13"
@@ -624,6 +650,13 @@ old_unit = profile() # an older profile has no unit block at all
 calls_nounit, res_nounit = apply_pro2(old_unit)
 check("an older profile writes no desk settings and reports no failure",
       (args_of(calls_nounit, "set_unit_setting"), res_nounit["errs"]), ([], []))
+
+print("\nRESTORE: a damaged value is one failure, not the end of the restore")
+calls_bad_fmt, res_bad_fmt = apply_pro2(dict(profile(recording_format="WAV"),
+                                             **{profiles.UNIT_KEY: {"screenBrightness": 90}}))
+check("the settings after it are still written",
+      args_of(calls_bad_fmt, "set_unit_setting"), [("screenBrightness", 90)])
+check("and the bad value counts as one failure", res_bad_fmt["failed"], 1)
 
 print("\nRESTORE on the Duo: the desk settings ARE written")
 # The Duo holds the "unit_settings" cap on all 20 selectors resolving against its OWN TREE plus one

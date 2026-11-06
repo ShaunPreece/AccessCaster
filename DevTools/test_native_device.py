@@ -299,6 +299,39 @@ with wifi_dialogs.NetworksDialog(frame.window, [secured], "Found 1 network.") as
     check("choosing from the list gives its scan entry", pick.choice, secured)
 with wifi_dialogs.NetworksDialog(frame.window, [], "Found no networks.") as pick:
     check("with nothing found there is no list", pick.list, None)
+
+
+class FakeJob:
+    def __init__(self, _parent, _title, _text, begin, stop, closable=True):
+        self.begin, self.result = begin, None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def run(self):
+        self.begin(self)
+        return self.result
+
+    def finish(self, result):
+        self.result = result
+
+
+joins, reports = [], []
+joined = network_reply(True)
+with _testkit.patched(
+        (device_section, {"JobDialog": FakeJob,
+                          "call": lambda _o, fn, *a, done=None: done(fn(*a)),
+                          "report": lambda _p, titles, reply: reports.append(
+                              titles[0] if reply.get("ok") else titles[1])}),
+        (network, {"action_join_wifi": lambda ssid, password: joins.append((ssid, password))
+                   or {"ok": True, "message": "Joined Home.", "wifi": joined["wifi"]}}),
+        (net, {"read": lambda: None})):
+    net._join("Home", "secret", secured, None)
+check("joining hands the name and password to the network module", joins, [("Home", "secret")])
+check("and the dialog finishes with its reply", reports, ["Joined"])
 ro = network_reply(True)
 ro["writable"] = False
 net.shown(ro)

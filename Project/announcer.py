@@ -31,6 +31,7 @@ import recorder
 import settings_file
 import speech
 import tones
+import wording
 
 
 class Hooks:
@@ -561,7 +562,7 @@ def seed(st: dict) -> None:
 def _pct(level):
     """A level as the whole percent we would SAY, or None. Comparing what we would say (rather than
     the raw float) is what stops the same number being announced twice."""
-    return None if level is None else max(0, min(100, int(round(level * 100))))
+    return None if level is None else wording.percent(level)
 
 
 def _selected_phrase(strip_idx: int) -> str:

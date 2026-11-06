@@ -10,12 +10,12 @@ import faders
 import master_outputs
 import mute_solo
 import output_mixes
+from desk_labels import CUSTOM, MIX_MINUS
 from native import a11y
 from native.calls import call
-from native.controls import Slider, Switch, set_choices
+from native.controls import AppliedChoice, Slider, Switch, percent_words, set_choices
 from native.dialogs import confirm
 from native.pages import group, labelled, page_body
-from native.desk_state import CUSTOM, MIX_MINUS
 
 TITLE = "Levels"
 MODE_WORDS = {
@@ -39,10 +39,6 @@ OUTPUTS = [
      "mute_note": "Silences what a paired phone hears; everything else carries on."},
 ]
 AUTO_MUTE_NOTE = "Mutes the output while a mic is live, so speakers cannot feed back into the mics."
-
-
-def percent(value):
-    return f"{value} percent"
 
 
 class LevelsPage(scrolled.ScrolledPanel):
@@ -100,7 +96,7 @@ class LevelsPage(scrolled.ScrolledPanel):
             self, parent, sizer, "Level", 0, 100,
             self._fader_send(faders.action_set_fader_level),
             lambda: self._fader_value("percent"), lambda _value: None,
-            words=percent)
+            words=percent_words)
         self.fader_mute = Switch(
             self, parent, sizer, "Mute", self._fader_send(mute_solo.action_set_fader_mute),
             lambda: self._fader_value("muted"), lambda _on: None)
@@ -157,7 +153,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         box_sizer, box = group(parent, sizer, output["title"])
         level = self._add(Slider(self, box, box_sizer, output["level"], 0, 100,
                                  output["set_level"], *self.field(output["key"], "percent"),
-                                 words=percent))
+                                 words=percent_words))
         level.acc.description = output["level_note"]
         self._add(Switch(self, box, box_sizer, output["mute"],
                          lambda on: faders.action_set_output_mute(output["which"], on),
@@ -190,7 +186,7 @@ class LevelsPage(scrolled.ScrolledPanel):
                 self, box, box_sizer, source["label"], 0, 100,
                 lambda pct, s=source["index"]: self._send_mix(s, pct),
                 lambda s=source["index"]: self._mix_percent(s), lambda _value: None,
-                words=percent)
+                words=percent_words)
         reset = wx.Button(box, label="Reset this output to follow the faders")
         reset.Bind(wx.EVT_BUTTON, self._on_mix_reset)
         box_sizer.Add(reset, 0, wx.ALL, 6)
@@ -267,17 +263,16 @@ class LevelsPage(scrolled.ScrolledPanel):
             apply = wx.Button(parent, label=f"Apply {output} type")
             apply.Bind(wx.EVT_BUTTON, lambda e, p=position: self._on_apply_type(e, p))
             sizer.Add(apply, 0, wx.ALL, 6)
-            self.hp_types.append(choice)
+            self.hp_types.append(AppliedChoice(choice))
 
-    def _show_headphones(self):
+    def _show_headphones(self, force=False):
         values = [value for value, _label in self.model["headphones"]["values"]]
-        for position, choice in enumerate(self.hp_types):
-            now = self.levels["headphone_types"][position]
-            choice.SetSelection(values.index(now) if now in values else wx.NOT_FOUND)
+        for position, applied in enumerate(self.hp_types):
+            applied.show(values, self.levels["headphone_types"][position], force=force)
 
     def _on_apply_type(self, event, position):
         source = event.GetEventObject()
-        index = self.hp_types[position].GetSelection()
+        index = self.hp_types[position].choice.GetSelection()
         if index == wx.NOT_FOUND:
             self.frame.say("Choose a headphone type first.")
             return
@@ -292,7 +287,7 @@ class LevelsPage(scrolled.ScrolledPanel):
             if reply.get("ok"):
                 self.levels["headphone_types"][position] = value
             else:
-                self._show_headphones()
+                self._show_headphones(force=True)
         call(self, master_outputs.action_set_headphone_type, value, position, done=applied)
 
     # ---- showing the desk state ------------------------------------------------------------

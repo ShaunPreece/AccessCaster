@@ -197,5 +197,3 @@ class ChannelPage(wx.Panel):
             self.tabs[index].build()
             self.section.tab_chosen(self.tabs[index].key)
         event.Skip()
-
-

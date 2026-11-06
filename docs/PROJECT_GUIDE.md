@@ -527,8 +527,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **AN OFFLINE TEST CANNOT WRITE TO THE DESK, and that is a GUARD rather than a convention**
   (21st September 2026). `DevTools/_bootstrap` sets `ACCESSCASTER_NO_DEVICE_WRITE` for any script
   named `test_*`, and every write choke point raises on it: `rcp_hid.write_report`,
-  `rcp_transfer.send_record`, `rcp_transfer.send_records_paced`, `midi_out.send_cc` and `MidiOut.cc`. A `test_*_live`
-  suite opts back in automatically, because driving the desk is what it is for.
+  `rcp_transfer.send_record`, `rcp_transfer.send_records_paced` and `midi_out.send_cc`. A
+  `test_*_live` suite opts back in automatically, because driving the desk is what it is for.
   **WHY IT RAISES RATHER THAN SWALLOWING THE WRITE:** a silently dropped write leaves the test
   passing while proving nothing. Earned on 21st September 2026, when a new check in
   `test_latched_pads` called the real `pad_shortcuts._pad_toggle` and disengaged a voice-FX pad on Shaun's
@@ -910,12 +910,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   communications alone. **NEVER THE DESK'S MAIN OUTPUT WHILE THE DRIVER IS BOUND:** the service
   holds its render pin, so a stream there opens and plays nothing, and every screen reader and
   announcement following the default goes silent. A bind read before `System` exists (an arrival
-  from the touchscreen or RODE's app, nothing parked) waits for it (`_wait_for_system`), and
+  from the touchscreen or RODE's app, nothing parked) waits for it (`_wait_for`), and
   leaves the default alone if it never comes. A default that is
   alive and elsewhere was chosen by the user and stays. **So leaving Expanded parks as well**
   (`_write_usb_mode_parked`): `System` goes before the desk's Main output comes back, Windows falls
   back to the laptop speakers, and unparked that fallback reads as the user's choice and stays.
-  The Standard follow-up waits for the desk's Main output (`_wait_for_desk_main`) and moves the
+  The Standard follow-up waits for the desk's Main output (`_wait_for`) and moves the
   parked default onto it. **A leave nobody parked for** (the touchscreen, a dropout) is caught by
   `_note_default`: a default that moved off a desk or driver endpoint which is no longer active is
   Windows falling back, recorded as displaced and treated as parked. It samples on every endpoint
@@ -2030,6 +2030,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A PAGE RE-READ WHILE THE USER IS ON IT SETS ONLY WHAT CHANGED** (`pages.set_text`, `set_items`,
   `select`, `controls.set_choices`): a screen reader reads a focused control again whenever its
   value or selection is set, even to the same thing.
+- **A LIST APPLIED BY ITS BUTTON MOVES ONLY WHEN THE DESK'S VALUE DOES** (`controls.AppliedChoice`:
+  mic type, preset, headphone type, the two USB halves, mix type, the fader's channel). A page
+  redraws on every push, a co-host's fader included, and putting the desk's value back on each
+  redraw throws away a choice the user has made and not yet applied.
 - **A RESTORE OR A FACTORY RESET ENDS WITH `frame.desk_rewritten`, NOT `desk.refresh`**
   (`backups_section`). The pads and the backups are read by their sections, outside the desk state,
   so a desk state refresh alone leaves the Pads pages showing the grid from before.
@@ -2716,8 +2720,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   and only the holder of the single-instance lock gets that far. It is SILENT until then, so the
   offline suites write nothing.
 - **THE LOG NEVER HOLDS A CREDENTIAL.** It is meant to be safe to send to somebody, and every record
-  sent is logged decoded, so `diagnostics.describe_record` hides the value of `wifiPSK` and every
-  `*Password` (`_is_secret`). A new credential property whose name matches neither needs adding.
+  sent is logged decoded, so `diagnostics.describe_record` hides the value of every property
+  `desk_secrets.is_secret` names: the wifi key, every password, the pairing and sign-in codes. A
+  saved profile and the DevTools' files withhold the same ones, so a new credential property is
+  added there once.
 - **MONITOR AUTO-MUTE NEEDS A MIC THAT IS BOTH UNMUTED AND FADED UP, AND RODE'S GUIDE ONLY MENTIONS
   THE FADER.** Their wording is "muted whenever a microphone channel fader is turned up", which is
   incomplete and sends you the wrong way twice: a muted mic with its fader up does NOT engage it.

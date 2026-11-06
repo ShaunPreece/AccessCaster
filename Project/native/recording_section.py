@@ -20,7 +20,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Page, labelled, page_body, set_items
+from native.pages import Page, Reader, add_button, labelled, page_body, read_only, set_items
 
 TITLE = "Recording"
 UNREAD = "The recorder has not been read yet."
@@ -67,7 +67,7 @@ def _with_sentence(action, *args):
     return reply
 
 
-class RecordingSection:
+class RecordingSection(Reader):
     title = TITLE
     route = "recording"
 
@@ -78,8 +78,7 @@ class RecordingSection:
         self.busy = False            # a command from this window has not returned
         self._pushed = None          # the last state pushed while busy
         self._label = None           # the pressed button's label at the press
-        self._reading = False
-        self._again = None           # a read asked for while one runs: whether to announce it
+        self._init_reader(owner=frame)
         self.recorder = RecorderPage(self)
         self.recordings = RecordingsPage(self)
         self.storage = StoragePage(self)
@@ -111,15 +110,10 @@ class RecordingSection:
             elif detail != self.state:
                 self.read()
 
-    def read(self, announce=False):
-        if self._reading:
-            self._again = bool(self._again) or announce
-            return
-        self._reading = True
-        call(self.frame, recording.read, done=lambda reply: self._read_done(reply, announce))
+    def fetch(self):
+        return recording.read()
 
-    def _read_done(self, reply, announce):
-        self._reading = False
+    def read_done(self, reply, announce):
         message = reply.get("message") or ("" if reply.get("ok") else
                                            "Could not read the recorder.")
         if reply.get("ok"):
@@ -128,9 +122,6 @@ class RecordingSection:
             self.recorder.set_sentence(message)
         if announce:
             self.frame.say(message)
-        if self._again is not None:
-            again, self._again = self._again, None
-            self.read(again)
 
     def show(self, data, sentence):
         self.data = data
@@ -193,18 +184,16 @@ class RecorderPage(wx.Panel):
         # (`RecordingSection._commanded`). Neither is ever disabled: a disabled button leaves the
         # tab order from under the user, so one that cannot act says why.
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.transport = self._button(parent, row, START, self._on_transport)
+        self.transport = add_button(parent, row, START, self._on_transport)
         a11y.describe(self.transport, "Starts a recording, or stops the one running.")
-        self.pause = self._button(parent, row, PAUSE, self._on_pause)
+        self.pause = add_button(parent, row, PAUSE, self._on_pause)
         a11y.describe(self.pause, "Pauses a recording, or carries on with a paused one.")
-        self.marker = self._button(parent, row, "Drop a marker", self._on_marker)
+        self.marker = add_button(parent, row, "Drop a marker", self._on_marker)
         a11y.describe(self.marker, "Puts a marker your editor can find at this point of the "
                                    "recording.")
         sizer.Add(row, 0, wx.ALL, 6)
         # Below the buttons, so one Tab after a press reaches what the unit is doing.
-        self.now = labelled(parent, sizer, "Now", lambda p: wx.TextCtrl(
-            p, value="Reading the desk.", size=(460, 60),
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
+        self.now = read_only(parent, sizer, "Now", value="Reading the desk.")
 
         self.multitrack = Choice(
             self, parent, sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
@@ -227,12 +216,6 @@ class RecorderPage(wx.Panel):
         self.Bind(wx.EVT_SHOW, self._on_show)
         self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
         self.show()
-
-    def _button(self, parent, row, label, handler):
-        button = wx.Button(parent, label=label)
-        button.Bind(wx.EVT_BUTTON, handler)
-        row.Add(button, 0, wx.RIGHT, 8)
-        return button
 
     def field(self, key):
         """`current` and `remember` for `key` in the section's recorder payload."""
@@ -410,18 +393,12 @@ class StoragePage(wx.Panel):
             p, choices=["Reading the desk."], size=(460, 80)))
         a11y.describe(self.list, STORAGE_HINT)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        self.eject = self._button(parent, row, "Eject", self._on_eject)
-        self.reconnect = self._button(parent, row, "Reconnect", self._on_reconnect)
+        self.eject = add_button(parent, row, "Eject", self._on_eject)
+        self.reconnect = add_button(parent, row, "Reconnect", self._on_reconnect)
         a11y.describe(self.reconnect, "Brings back a card or drive ejected from here, without "
                                       "taking it out.")
-        self.erase = self._button(parent, row, "Erase", self._on_erase)
+        self.erase = add_button(parent, row, "Erase", self._on_erase)
         sizer.Add(row, 0, wx.ALL, 6)
-
-    def _button(self, parent, row, label, handler):
-        button = wx.Button(parent, label=label)
-        button.Bind(wx.EVT_BUTTON, handler)
-        row.Add(button, 0, wx.RIGHT, 8)
-        return button
 
     def show(self):
         chosen = self._chosen()

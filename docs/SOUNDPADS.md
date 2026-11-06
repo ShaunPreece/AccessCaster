@@ -257,7 +257,7 @@ effect floats are normalised 0..1 EXCEPT pitchShiftSemitones (rides a float64 bl
     framing bug that made counts drift). DevTools/decode_effects.py dumps every effect-object.
 3.2 CREATE SOUND  soundpad.create_sound / assign_create (CLI `soundpad.py create <grid> <wav>
     [name] [colour]`). handoff + phase1 + sync +
-    commit(padType=1) + file write mid-sequence + remount + padFilePath. handle=free_handle(count). NO
+    commit(padType=1) + file write mid-sequence + remount + padFilePath. handle=free_pad_handle(). NO
     region-B/EFFECTS block (see section 2).
     Pool-safe: a sound create+clear keeps region-B unchanged (proven). saw_sync still True without the block.
     File written under its REAL name (pads/<n>/<Name>.<ext>, factory convention) and AS-IS (no

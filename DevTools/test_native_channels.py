@@ -122,6 +122,25 @@ second.book.SetSelection(0)
 check_true("and reads the record when it is built", second.tabs[0].built
            and second.tabs[0].mute.box.GetValue() is True)
 
+# ---- a list applied by its button keeps the user's choice ---------------------------------------
+types = [value for value, _text in data["mic_types"]]
+
+
+def read_mic(mic_type, muted):
+    recs = [record(n, "mic") for n in mics]
+    recs[0].update(mic_type=mic_type, muted=muted)
+    section._desk_event("read", {"ok": True, "channels": recs})
+
+
+read_mic(types[0], False)
+check("the mic type list shows the desk's type", settings.mic_type.GetSelection(), 0)
+settings.mic_type.SetSelection(1)
+read_mic(types[0], True)
+check("a choice not yet applied survives a change elsewhere on the channel",
+      settings.mic_type.GetSelection(), 1)
+read_mic(types[2], True)
+check("a new type from the desk is shown", settings.mic_type.GetSelection(), 2)
+
 frame.window.Destroy()
 _a11y.check_windows("Channels")
 sys.exit(_testkit.finish())

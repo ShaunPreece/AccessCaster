@@ -14,7 +14,6 @@ import desk_firmware
 import devices
 import diagnostics
 import faders
-import master_outputs
 import output_mixes
 import pad_actions
 import pad_shortcuts
@@ -115,7 +114,6 @@ def save_desk(safe: str, include_pads: bool, prog, baseline: bool = False, show=
     res = profiles.save(safe, blob, chans, firmware, faders.active_faders().capture_length,
                         pads=(pad_backup["pads"] if pad_backup else None),
                         product_id=dev.product_id, device_name=dev.name,
-                        headphone_output_count=len(master_outputs.active_headphones().outputs),
                         baseline=baseline, show=show)
     if pad_backup and pad_backup.get("unrecognised"):
         odd = pad_backup["unrecognised"]

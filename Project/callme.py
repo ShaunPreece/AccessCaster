@@ -503,8 +503,6 @@ def spell(code: str) -> str:
     return " ".join(code)
 
 
-
-
 # ---------------------------------------------------------------------------------------------
 # THE WATCHER: what the pushes mean, and what the desk does not remember
 # ---------------------------------------------------------------------------------------------
@@ -697,8 +695,8 @@ class Watcher:
             if self._on_say:
                 try:
                     self._on_say(text)
-                except Exception:
-                    pass
+                except Exception as exc:    # a failed announcement must not stop the watcher
+                    diagnostics.event("callme.say_failed", text, error=f"{exc}")
 
     def _control(self, name, value, was, say, ring) -> None:
         if name == "sipIncomingCallDetails":

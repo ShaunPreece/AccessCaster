@@ -38,6 +38,7 @@ import threading
 from collections import deque
 from typing import NamedTuple, Optional
 
+import diagnostics
 import model_tree
 import rcp_hid
 import rcp_read
@@ -127,7 +128,8 @@ def dump_finished(token: Token, blob: bytes) -> None:
         try:
             revealed_watcher(unheard)
         except Exception as exc:
-            print(f"desk_model: revealed changes not handed on: {exc}", file=sys.stderr)
+            diagnostics.event("desk_model.reveal_failed", "revealed changes not handed on",
+                              error=f"{exc}")
 
 
 def reveal(on: bool) -> None:

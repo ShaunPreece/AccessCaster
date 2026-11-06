@@ -19,7 +19,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch
 from native.dialogs import confirm, report
-from native.pages import AFTER_FOCUS_MS, Page, page_body, read_only, set_text
+from native.pages import AFTER_FOCUS_MS, Page, add_button, page_body, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
 from native.update_dialogs import decide
 
@@ -199,7 +199,7 @@ class GeneralPage(wx.Panel):
             description="Your keyboard shortcuts and spoken announcements only work while "
                         "AccessCaster is running. Off, closing the window quits it.",
             guard=lambda: None if self.data is not None else "Not read yet.")
-        self.export = self._button(parent, sizer, "Save this app's settings to a file",
+        self.export = add_button(parent, sizer, "Save this app's settings to a file",
                                    self._on_export)
         a11y.describe(self.export, "Your keyboard shortcuts, announcement preferences and "
                                    "CallMe contacts belong to AccessCaster rather than to the "
@@ -207,17 +207,11 @@ class GeneralPage(wx.Panel):
                                    "writes one small file you can copy to another computer. It "
                                    "holds nothing about the desk, so it is safe to email to "
                                    "yourself.")
-        self.folder = self._button(parent, sizer, "Open the folder", self._on_folder)
-        self.restore = self._button(parent, sizer, "Restore from a saved settings file",
+        self.folder = add_button(parent, sizer, "Open the folder", self._on_folder)
+        self.restore = add_button(parent, sizer, "Restore from a saved settings file",
                                     self._on_restore)
         a11y.describe(self.restore, "A voice or audio device this computer lacks is skipped, "
                                     "and said.")
-
-    def _button(self, parent, sizer, label, handler):
-        button = wx.Button(parent, label=label)
-        button.Bind(wx.EVT_BUTTON, handler)
-        sizer.Add(button, 0, wx.ALL, 6)
-        return button
 
     def _remember_tray(self, on):
         if self.data is not None:
@@ -302,10 +296,8 @@ class UpdatesPage(wx.Panel):
         self.days = Choice(self, parent, sizer, "Check for updates", [], app_updates.set_interval,
                            *self.field("days"), guard=self._unread, accepted=self._interval_set)
         self.hint = read_only(parent, sizer, "Update status", height=60)
-        self.check_button = wx.Button(parent, label="Check for updates now")
-        a11y.describe(self.check_button, "F12 does the same from anywhere in the window.")
-        self.check_button.Bind(wx.EVT_BUTTON, lambda _e: self.check())
-        sizer.Add(self.check_button, 0, wx.ALL, 6)
+        add_button(parent, sizer, "Check for updates now", lambda _e: self.check(),
+                   "F12 does the same from anywhere in the window.")
 
     def field(self, key):
         def current():

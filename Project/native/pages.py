@@ -12,9 +12,60 @@ itself, rather than through the window's desk state, follows it with `FollowDesk
 """
 import wx
 
+from native import a11y
+from native.calls import call
+
 # When the focus lands somewhere (a menu or dialog closing, the window coming to the front), the
 # screen reader first reads where it landed; a line said before then is cut off by it.
 AFTER_FOCUS_MS = 250
+
+
+def reply_text(reply, done="Done."):
+    """An action's reply as a sentence: its own message, or `done` or "That did not work."."""
+    return reply.get("message") or (done if reply.get("ok") else "That did not work.")
+
+
+class Reader:
+    """Reads for a page or a section, one at a time. A read asked for while one runs is made once
+    it ends, and the requests made meanwhile become that one read: announced if any of them asked,
+    the rest settled by `merge` (by default, the latest request's).
+
+    The subclass calls `_init_reader(owner)`, `owner` being the window whose reply is wanted only
+    while it exists (`calls.call`), and gives `fetch(**asked)`, run on a worker thread, and
+    `read_done(reply, announce, **asked)`, run on the UI thread."""
+
+    def _init_reader(self, owner=None):
+        self._read_owner = owner
+        self._reading = False
+        self._again = None           # (announce, asked) of a read asked for while one runs
+
+    def read(self, announce=False, **asked):
+        if self._reading:
+            if self._again is None:
+                self._again = (announce, asked)
+            else:
+                said, earlier = self._again
+                self._again = (said or announce, self.merge(earlier, asked))
+            return
+        self._reading = True
+        call(self._read_owner or self, lambda: self.fetch(**asked),
+             done=lambda reply: self._read_done(reply, announce, asked))
+
+    def fetch(self, **asked):
+        raise NotImplementedError
+
+    def read_done(self, reply, announce, **asked):
+        raise NotImplementedError
+
+    def merge(self, _earlier, later):
+        return later
+
+    def _read_done(self, reply, announce, asked):
+        self._reading = False
+        self.read_done(reply, announce, **asked)
+        if self._again is not None:
+            (announce, asked), self._again = self._again, None
+            self.read(announce, **asked)
 
 
 class Speaker:
@@ -25,10 +76,8 @@ class Speaker:
         """Speak an action's reply to a change made from `source`. A refusal is always spoken. A
         success only while `source` still has the focus: once the user has moved on, it would cut
         off the screen reader reading where they are now."""
-        if not reply.get("ok"):
-            self.say(reply.get("message") or "That did not work.", recent)
-        elif wx.Window.FindFocus() is source:
-            self.say(reply.get("message") or "Done.", recent)
+        if not reply.get("ok") or wx.Window.FindFocus() is source:
+            self.say(reply_text(reply), recent)
 
 
 class Page:
@@ -74,6 +123,19 @@ def group(parent, sizer, title, proportion=0):
     return box, box.GetStaticBox()
 
 
+def add_button(parent, sizer, label, handler, description=""):
+    """A button on `sizer`, spaced on every side in a column and from the next button in a row."""
+    button = wx.Button(parent, label=label)
+    if description:
+        a11y.describe(button, description)
+    button.Bind(wx.EVT_BUTTON, handler)
+    if sizer.GetOrientation() == wx.HORIZONTAL:
+        sizer.Add(button, 0, wx.RIGHT, 8)
+    else:
+        sizer.Add(button, 0, wx.ALL, 6)
+    return button
+
+
 def labelled(parent, sizer, label, control_factory):
     """A static label then its control on one line. The label is created FIRST because that is what
     names the control: Windows takes a control's name from the static text just before it."""
@@ -100,9 +162,9 @@ def reading_box(parent, width=460, height=60, scroll=False, value=""):
     return box
 
 
-def read_only(parent, sizer, label, height=60, width=460, scroll=False):
+def read_only(parent, sizer, label, height=60, width=460, scroll=False, value=""):
     """A labelled `reading_box`."""
-    return labelled(parent, sizer, label, lambda p: reading_box(p, width, height, scroll))
+    return labelled(parent, sizer, label, lambda p: reading_box(p, width, height, scroll, value))
 
 
 def set_text(box, text):

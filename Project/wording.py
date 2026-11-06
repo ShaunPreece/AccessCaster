@@ -9,6 +9,11 @@ from __future__ import annotations
 import datetime
 
 
+def percent(level) -> int:
+    """A 0 to 1 level as the whole percent spoken."""
+    return max(0, min(100, int(round(float(level) * 100))))
+
+
 def plural(n: int, word: str, many: str | None = None) -> str:
     """`word` or its plural for a count of `n`, without the number: plural(2, "pad") is "pads".
 

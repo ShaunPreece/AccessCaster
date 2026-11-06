@@ -18,7 +18,7 @@ import rcp_read
 import rcp_transfer
 import routing_schemes
 import wording
-from desk_labels import OUTPUT_MODE_LABEL
+from desk_labels import CUSTOM, MAIN_MIX, MIX_MINUS, OUTPUT_MODE_LABEL
 from paths import safe_name
 
 
@@ -72,8 +72,8 @@ def matrix_model() -> dict:
                 "enabled here yet, so these controls are read-only.")
     return {
         "outputs": [{"key": o["key"], "index": o["index"], "label": o["label"],
-                     "modes": [[0, "Main Mix"]] + ([[1, "Mix Minus"]] if o["mixminus"] else [])
-                              + [[2, "Custom"]]}
+                     "modes": [[m, OUTPUT_MODE_LABEL[m]] for m in (MAIN_MIX, MIX_MINUS, CUSTOM)
+                               if m != MIX_MINUS or o["mixminus"]]}
                     for o in outputs],
         "sources": [{"key": s["key"], "index": s["index"], "label": s["label"]} for s in sources],
         "read_only": read_only,
@@ -300,7 +300,7 @@ def action_set_monitor_level(output_index: int, source_index: int, level01: floa
             # Ensure Custom mode + the source unlinked. Both writes are idempotent (no-ops if
             # already so), so they are sent unconditionally: a ~1.5 s model read to check first
             # would lag every slider step.
-            rcp_transfer.set_output_routing(output_index, 2)       # Custom
+            rcp_transfer.set_output_routing(output_index, CUSTOM)
             rcp_transfer.set_cross_point_linked(output_index, source_index, False)
             rcp_transfer.set_cross_point_level(output_index, source_index, v)
     except Exception as exc:
@@ -328,7 +328,7 @@ def action_reset_monitor_output(output_index: int) -> dict:
             for si, _ in _monitor_sources():
                 rcp_transfer.set_cross_point_linked(output_index, si, True)
                 time.sleep(0.05)
-            rcp_transfer.set_output_routing(output_index, 0)       # Main Mix
+            rcp_transfer.set_output_routing(output_index, MAIN_MIX)
     except Exception as exc:
         return {"ok": False, "message": f"Could not reset the output: {exc}"}
     return {"ok": True,
@@ -363,7 +363,7 @@ def apply_matrix(routing: dict) -> dict:
     phone caller).
 
     `mix_scheme` is the WHOLE matrix, keyed by name, applied through routing_schemes.apply - the
-    same proven path the Mix schemes page uses. Every output's cross-point levels come back, not
+    same proven path the Mix preset list uses. Every output's cross-point levels come back, not
     just the monitor ones, and an output the connected desk does not have is skipped by name rather
     than written by index.
     """

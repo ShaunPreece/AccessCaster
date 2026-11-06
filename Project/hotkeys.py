@@ -177,7 +177,6 @@ def parse_binding(mods, key: str):
     return flags, _KEY_VK[key], tidy, ""
 
 
-
 # COMMANDS THAT MUST RUN ON THE PUMP THREAD, because they need the foreground right that the
 # keypress itself grants.
 #
@@ -344,9 +343,7 @@ class HotkeyManager:
                     had.append(command)
                     continue
                 tidy = list(self._mods)
-                clash = next((s for s in self._shortcuts
-                              if s.get("enabled") and s["key"] == key
-                              and sorted(s.get("mods") or []) == sorted(tidy)), None)
+                clash = self._holder(key, tidy)
                 if clash is not None:
                     clashed.append((command, key, clash["command"]))
                     continue
@@ -361,12 +358,26 @@ class HotkeyManager:
     def _free_key(self, mods):
         """The first key of KEYS not already used with these modifiers. Letters first, so a new
         shortcut lands on something sayable rather than on Numpad 7."""
-        taken = {s["key"] for s in self._shortcuts
-                 if s.get("enabled") and sorted(s.get("mods") or []) == sorted(mods)}
-        for name, _vk in KEYS:
-            if name not in taken:
-                return name
-        return ""
+        with self._lock:
+            return next((name for name, _vk in KEYS if self._holder(name, mods) is None), "")
+
+    def _holder(self, key, mods, except_id=None):
+        """The enabled shortcut on `key` with `mods`, other than `except_id`, or None. The caller
+        holds the lock."""
+        want = sorted(mods)
+        return next((s for s in self._shortcuts
+                     if s["id"] != except_id and s.get("enabled") and s.get("key") == key
+                     and sorted(s.get("mods") or []) == want), None)
+
+    def _refused_sentence(self) -> str:
+        """How many shortcuts Windows refused, and which, or "" when it refused none."""
+        with self._lock:
+            refused = [s for s in self._shortcuts if self._status.get(s["id"])]
+        if not refused:
+            return ""
+        return (f"{len(refused)} could not be used, because another program holds "
+                f"{'it' if len(refused) == 1 else 'them'}: "
+                + join_and([self._labeller(s["command"]) for s in refused]) + ".")
 
     def remove(self, shortcut_id: str) -> dict:
         with self._lock:
@@ -427,15 +438,10 @@ class HotkeyManager:
                             "speak": bool(speak)})
             self._shortcuts = out
         self.reload()
-        with self._lock:
-            refused = [s for s in self._shortcuts if self._status.get(s["id"])]
         msg = (f"Restored the {len(self._shortcuts)} default shortcuts, on "
-               f"{join_and([l for n, l, _f in MODIFIERS if n in self._mods])}.")
-        if refused:
-            msg += (f" {len(refused)} could not be used, because another program holds "
-                    f"{'it' if len(refused) == 1 else 'them'}: "
-                    + join_and([self._labeller(s["command"]) for s in refused]) + ".")
-        return {"ok": True, "message": msg}
+               f"{join_and([label for n, label, _f in MODIFIERS if n in self._mods])}.")
+        refused = self._refused_sentence()
+        return {"ok": True, "message": f"{msg} {refused}" if refused else msg}
 
     def set_mods(self, mods) -> dict:
         """Move EVERY shortcut to a new chord. Two shortcuts that end up on the same combination
@@ -460,16 +466,14 @@ class HotkeyManager:
                 else:
                     used.add(s["key"])
         self.reload()
-        bits = [f"Every shortcut now uses {join_and([l for n, l, _f in MODIFIERS if n in tidy])}."]
+        held = join_and([label for n, label, _f in MODIFIERS if n in tidy])
+        bits = [f"Every shortcut now uses {held}."]
         for s in switched_off:
             bits.append(f"{self._labeller(s['command'])} was on the same key as another shortcut, "
                         f"so it is switched off.")
-        with self._lock:
-            refused = [s for s in self._shortcuts if self._status.get(s["id"])]
+        refused = self._refused_sentence()
         if refused:
-            bits.append(f"{len(refused)} could not be used, because another program holds "
-                        f"{'it' if len(refused) == 1 else 'them'}: "
-                        + join_and([self._labeller(s["command"]) for s in refused]) + ".")
+            bits.append(refused)
         return {"ok": True, "message": " ".join(bits)}
 
     def set_enabled(self, on: bool) -> dict:
@@ -485,13 +489,8 @@ class HotkeyManager:
         before Windows sees it: Windows would just refuse the second registration and the error would
         blame "another program" when the other program is us."""
         with self._lock:
-            rows = [dict(s) for s in self._shortcuts]
-        for s in rows:
-            if s["id"] == shortcut_id or not s.get("enabled"):
-                continue
-            if s.get("key") == key and sorted(s.get("mods") or []) == sorted(mods):
-                return self._labeller(s["command"])
-        return None
+            holder = self._holder(key, mods, except_id=shortcut_id)
+        return None if holder is None else self._labeller(holder["command"])
 
     # -- what the UI shows -----------------------------------------------------------------------
     def state(self) -> dict:
@@ -514,7 +513,7 @@ class HotkeyManager:
                 "shortcuts": out,
                 "mods": list(self._mods),
                 "default_mods": list(DEFAULT_MODS),
-                "modifiers": [{"id": n, "label": l} for n, l, _f in MODIFIERS],
+                "modifiers": [{"id": n, "label": label} for n, label, _f in MODIFIERS],
                 "keys": [n for n, _vk in KEYS]}
 
     # -- the pump thread -------------------------------------------------------------------------

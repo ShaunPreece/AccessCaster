@@ -16,6 +16,7 @@ Limits:
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import math
 import threading
@@ -234,41 +235,50 @@ def _friendly_name(dev) -> str:
         return ""
 
 
-def list_endpoints(state_mask: int = STATE_ALL) -> list:
-    """Every audio endpoint Windows knows about: id, name, direction, state. Never raises."""
-    out = []
+@contextlib.contextmanager
+def com_apartment():
+    """COM on this thread for the block. COM is per thread, and this work runs on whatever thread
+    asked for it, so each piece opens its own."""
     comtypes.CoInitialize()
     try:
-        enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator,
-                                            interface=IMMDeviceEnumerator)
-        # Endpoints come and go during an enumeration (an RDP session's audio device does so
-        # constantly), so one failing entry is skipped rather than emptying the list.
-        for flow in (RENDER, CAPTURE):
-            try:
-                coll = enum.EnumAudioEndpoints(flow, state_mask)
-                count = coll.GetCount()
-            except Exception:
-                continue
-            for i in range(count):
-                try:
-                    dev = coll.Item(i)
-                    state = dev.GetState()
-                    out.append({
-                        "id": dev.GetId(),
-                        "name": _friendly_name(dev),
-                        "flow": FLOW_NAMES[flow],
-                        "state": STATE_NAMES.get(state, f"unknown ({state})"),
-                        "active": state == STATE_ACTIVE,
-                    })
-                except Exception:
-                    continue
-    except Exception:
-        return out
+        yield
     finally:
         try:
             comtypes.CoUninitialize()
-        except Exception:
+        except Exception:    # an apartment already torn down at exit has nothing left to undo
             pass
+
+
+def list_endpoints(state_mask: int = STATE_ALL) -> list:
+    """Every audio endpoint Windows knows about: id, name, direction, state. Never raises."""
+    out = []
+    with com_apartment():
+        try:
+            enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator,
+                                                interface=IMMDeviceEnumerator)
+            # Endpoints come and go during an enumeration (an RDP session's audio device does so
+            # constantly), so one failing entry is skipped rather than emptying the list.
+            for flow in (RENDER, CAPTURE):
+                try:
+                    coll = enum.EnumAudioEndpoints(flow, state_mask)
+                    count = coll.GetCount()
+                except Exception:
+                    continue
+                for i in range(count):
+                    try:
+                        dev = coll.Item(i)
+                        state = dev.GetState()
+                        out.append({
+                            "id": dev.GetId(),
+                            "name": _friendly_name(dev),
+                            "flow": FLOW_NAMES[flow],
+                            "state": STATE_NAMES.get(state, f"unknown ({state})"),
+                            "active": state == STATE_ACTIVE,
+                        })
+                    except Exception:
+                        continue
+        except Exception:
+            return out
     return out
 
 
@@ -582,71 +592,58 @@ def _offered_range(vol) -> tuple:
 def endpoint_volume(endpoint_id: str) -> dict:
     """Windows' own level for one endpoint, in dB (see `level_note` for why not percent), with
     the range the control offers."""
-    comtypes.CoInitialize()
-    try:
-        dev, vol = _volume_interface(endpoint_id)
-        db = float(vol.GetMasterVolumeLevel())
-        lo, hi, step, fixed = _offered_range(vol)
-        muted = False
+    with com_apartment():
         try:
-            muted = bool(vol.GetMute())
-        except Exception:
-            pass
-        return {"ok": True, "id": endpoint_id, "name": _friendly_name(dev), "db": db,
-                "min_db": lo, "max_db": hi, "step_db": step, "muted": muted,
-                "fixed": fixed,
-                "note": (FIXED_LEVEL_NOTE if fixed else level_note(db))}
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read the Windows level for that stream: {exc}"}
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+            dev, vol = _volume_interface(endpoint_id)
+            db = float(vol.GetMasterVolumeLevel())
+            lo, hi, step, fixed = _offered_range(vol)
+            muted = False
+            try:
+                muted = bool(vol.GetMute())
+            except Exception:
+                pass
+            return {"ok": True, "id": endpoint_id, "name": _friendly_name(dev), "db": db,
+                    "min_db": lo, "max_db": hi, "step_db": step, "muted": muted,
+                    "fixed": fixed,
+                    "note": (FIXED_LEVEL_NOTE if fixed else level_note(db))}
+        except Exception as exc:
+            return {"ok": False,
+                    "message": f"Could not read the Windows level for that stream: {exc}"}
 
 
 def set_endpoint_mute(endpoint_id: str, muted: bool) -> dict:
     """Mute or unmute the endpoint in Windows, from a control the user pressed, and read it back.
     A Windows-muted input reads exactly like a dead microphone."""
-    comtypes.CoInitialize()
-    try:
-        write_guard.refuse_in_tests("change Windows audio")
-        _dev, vol = _volume_interface(endpoint_id)
-        vol.SetMute(1 if muted else 0, None)
-        got = bool(vol.GetMute())
-        return {"ok": got == bool(muted), "muted": got}
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not change the Windows mute: {exc}"}
-    finally:
+    with com_apartment():
         try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+            write_guard.refuse_in_tests("change Windows audio")
+            _dev, vol = _volume_interface(endpoint_id)
+            vol.SetMute(1 if muted else 0, None)
+            got = bool(vol.GetMute())
+            return {"ok": got == bool(muted), "muted": got}
+        except Exception as exc:
+            return {"ok": False, "message": f"Could not change the Windows mute: {exc}"}
 
 
 def set_endpoint_volume_db(endpoint_id: str, db: float) -> dict:
     """Set Windows' own level for one endpoint, in dB, and read it back: the desk's `... Chat`
     input silently stays at -1.08 dB whatever is written, by dB or by scalar."""
-    comtypes.CoInitialize()
-    try:
-        write_guard.refuse_in_tests("change Windows audio")
-        _dev, vol = _volume_interface(endpoint_id)
-        lo, hi, _step, fixed = _offered_range(vol)
-        if fixed:
-            # The driver's own refusal is "the parameter is incorrect", which names nothing to act on.
-            return {"ok": False, "fixed": True, "message": FIXED_LEVEL_NOTE}
-        want = max(lo, min(hi, float(db)))
-        vol.SetMasterVolumeLevel(c_float(want), None)
-        got = float(vol.GetMasterVolumeLevel())
-        return {"ok": abs(got - want) < 0.2, "db": got, "wanted": want,
-                "note": level_note(got)}
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not set the Windows level: {exc}"}
-    finally:
+    with com_apartment():
         try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+            write_guard.refuse_in_tests("change Windows audio")
+            _dev, vol = _volume_interface(endpoint_id)
+            lo, hi, _step, fixed = _offered_range(vol)
+            if fixed:
+                # The driver's own refusal is "the parameter is incorrect", which names nothing
+                # to act on.
+                return {"ok": False, "fixed": True, "message": FIXED_LEVEL_NOTE}
+            want = max(lo, min(hi, float(db)))
+            vol.SetMasterVolumeLevel(c_float(want), None)
+            got = float(vol.GetMasterVolumeLevel())
+            return {"ok": abs(got - want) < 0.2, "db": got, "wanted": want,
+                    "note": level_note(got)}
+        except Exception as exc:
+            return {"ok": False, "message": f"Could not set the Windows level: {exc}"}
 
 
 def dbfs(peak: float) -> str:

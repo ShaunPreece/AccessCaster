@@ -96,7 +96,5 @@ except ValueError:
 check_true("the custom trigger mapping writes the explicit control number",
            [int_after(r, "padTriggerControl") for r in trig_custom[1] if b"padTriggerControl" in r]
            == [60])
-check_true("free_handle is the record count: the first free stream position",
-           pr.free_handle(23) == 23)
 
 raise SystemExit(_testkit.finish())

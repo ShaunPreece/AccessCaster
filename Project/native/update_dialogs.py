@@ -17,7 +17,7 @@ import wx
 import app_updates
 import desk_access
 from native.calls import call
-from native.dialogs import JobDialog, _paragraphs, report
+from native.dialogs import JobDialog, paragraphs, report
 
 INSTALL, SKIP, LATER = wx.ID_OK, wx.ID_NO, wx.ID_CANCEL
 POLL_MS = 400
@@ -41,12 +41,12 @@ class DecisionDialog(wx.Dialog):
     def __init__(self, parent, offer):
         super().__init__(parent, title=offer["title"])
         sizer = wx.BoxSizer(wx.VERTICAL)
-        _paragraphs(self, sizer, offer["summary"])
+        paragraphs(self, sizer, offer["summary"])
         sizer.Add(wx.StaticText(self, label="What changed"), 0, wx.LEFT | wx.TOP, 12)
         notes = wx.TextCtrl(self, value=offer["notes"], size=(460, 200),
                             style=wx.TE_MULTILINE | wx.TE_READONLY)
         sizer.Add(notes, 0, wx.ALL, 12)
-        _paragraphs(self, sizer, offer["after"])
+        paragraphs(self, sizer, offer["after"])
         row = wx.BoxSizer(wx.HORIZONTAL)
         for button_id, label in ((INSTALL, "Install now"), (SKIP, "Skip this version"),
                                  (LATER, "Later")):

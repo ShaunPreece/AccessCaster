@@ -143,6 +143,6 @@ def set_enabled(on: bool) -> dict:
                 "message": f"Could not change the startup setting: {exc}"}
     return {"ok": True, "enabled": bool(on),
             "message": ("AccessCaster will start when you sign in, in the system tray. It does not "
-                        "open its page: use the tray icon, or your shortcut keys, which work as soon "
-                        "as it is running." if on else
+                        "open its window: use the tray icon, or your shortcut keys, which work as "
+                        "soon as it is running." if on else
                         "AccessCaster will no longer start when you sign in.")}

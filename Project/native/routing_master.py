@@ -9,9 +9,9 @@ import master_outputs
 import usb_audio
 from native import a11y
 from native.calls import call
-from native.controls import Slider, Switch
+from native.controls import AppliedChoice, Slider, Switch, percent_words
 from native.dialogs import JobDialog, confirm
-from native.pages import labelled, page_body
+from native.pages import labelled, page_body, read_only
 
 TITLE = "Master Mix"
 READ_ONLY = "Changing this is not enabled on this device yet."
@@ -29,10 +29,6 @@ DRIVER_INSTALLED = "The driver is installed. If it is not working, RODE's own in
 COMPELLOR = [("threshold", "Compellor threshold"), ("attack", "Compellor attack"),
              ("release", "Compellor release"), ("gain", "Compellor make-up gain")]
 DELAY_MAX_MS = 2000
-
-
-def percent(value):
-    return f"{value} percent"
 
 
 def milliseconds(value):
@@ -91,6 +87,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         self.receives = labelled(parent, sizer, "What this computer receives (Multitrack)",
                                  lambda p: wx.Choice(p, choices=[
                                      label for _mode, label in self.model["usb_modes"]]))
+        self.receives_applied = AppliedChoice(self.receives)
         apply = wx.Button(parent, label="Confirm what this computer receives")
         a11y.describe(apply, self.model["usb_drop_hint"])
         apply.Bind(wx.EVT_BUTTON, self._on_apply_receives)
@@ -99,6 +96,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         self.sends = labelled(parent, sizer, "What this computer sends (USB 1 Input)",
                               lambda p: wx.Choice(p, choices=[
                                   label for _on, label in self.model["usb_expanded"]]))
+        self.sends_applied = AppliedChoice(self.sends)
         a11y.describe(self.sends, self.model["usb_expanded_hint"])
         apply = wx.Button(parent, label="Confirm what this computer sends")
         a11y.describe(apply, self.model["usb_expanded_drop_hint"])
@@ -115,12 +113,11 @@ class MasterMixPage(scrolled.ScrolledPanel):
         # Off, unknown and not read yet all mean no separate tracks are being made.
         return None if self.master["usb_multitrack"] else self.model["bypass_needs_multitrack"]
 
-    def _show_usb(self):
-        for choice, options, value in (
-                (self.receives, self.model["usb_modes"], self.master["usb_multitrack"]),
-                (self.sends, self.model["usb_expanded"], self.master["usb_expanded"])):
-            values = [option for option, _label in options]
-            choice.SetSelection(values.index(value) if value in values else wx.NOT_FOUND)
+    def _show_usb(self, force=False):
+        for applied, options, value in (
+                (self.receives_applied, self.model["usb_modes"], self.master["usb_multitrack"]),
+                (self.sends_applied, self.model["usb_expanded"], self.master["usb_expanded"])):
+            applied.show([option for option, _label in options], value, force=force)
         self.bypass.acc.description = (self.model["bypass_hint"] if self.master["usb_multitrack"]
                                        else self.model["bypass_needs_multitrack"])
 
@@ -166,7 +163,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
             self.frame.reply(source, reply)
             if reply.get("ok"):
                 self.master[key] = value
-            self._show_usb()
+            self._show_usb(force=not reply.get("ok"))
             # `usb_audio` now brings RODE's driver into line with the change: the poll says when
             # it has finished.
             self._poll_driver()
@@ -177,8 +174,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
     def _build_driver(self, parent, sizer):
         """The driver's side of Expanded, read from Windows: without it a desk in Expanded with no
         driver looks the same as one that is working. Then a way to get it."""
-        self.driver_text = labelled(parent, sizer, "Virtual Devices driver", lambda p: wx.TextCtrl(
-            p, size=(460, 60), style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL))
+        self.driver_text = read_only(parent, sizer, "Virtual Devices driver")
         self.install = wx.Button(parent, label="Download and install RODE's Virtual Devices driver")
         self.install_acc = a11y.describe(self.install, DRIVER_UNKNOWN)
         self.install.Bind(wx.EVT_BUTTON, self._on_install)
@@ -290,7 +286,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
             self._add(Slider(self, parent, sizer, label, 0, 100,
                              lambda pct, k=key:
                                  master_outputs.action_set_compellor_param(k, pct / 100),
-                             *self.field(f"compellor_{key}", scale=100), words=percent))
+                             *self.field(f"compellor_{key}", scale=100), words=percent_words))
         self._add(Switch(self, parent, sizer, "Output delay", self._send_delay_on,
                          *self.field("delay_on"),
                          description=(f"Lines the Main Mix outputs up with video, by up to "

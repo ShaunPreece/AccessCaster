@@ -16,7 +16,7 @@ from desk_labels import EFFECT_PARAMS, pan_words
 from native import a11y
 from native.calls import call
 from native.channel_jobs import AutoGain
-from native.controls import Slider, Switch, set_choices
+from native.controls import AppliedChoice, Slider, Switch, percent_words
 from native.dialogs import DeletePresetDialog
 from native.pages import group, labelled
 
@@ -31,9 +31,6 @@ PARAM_TABS = {
     "Tone shaping": ("tone", "Tone and pan"),
     "Pan": ("tone", "Tone and pan"),
 }
-
-def percent_words(value):
-    return f"{value} percent"
 
 
 def pan_note(rec):
@@ -178,6 +175,7 @@ class SettingsTab(Tab):
             self._mic_types = [(value, text) for value, text in data.get("mic_types") or []]
             if self._mic_types:
                 self.mic_type = labelled(self, self.sizer, "Mic type", lambda p: wx.Choice(p))
+                self.mic_type_applied = AppliedChoice(self.mic_type)
                 # Applied by the button, never by arrowing the list: a voicing change makes the
                 # desk move the gain and replace the whole processing chain.
                 apply = wx.Button(self, label="Apply mic type")
@@ -214,14 +212,13 @@ class SettingsTab(Tab):
         source = event.GetEventObject()
         call(self, mute_solo.action_clear_solos, done=lambda reply: self.reply(source, reply))
 
-    def _fill_mic_types(self, current):
+    def _fill_mic_types(self, current, force=False):
         choices = list(self._mic_types)
         if current is not None and all(value != current for value, _ in choices):
             choices.append((current, f"Other model (value {current})"))
         self._mic_type_values = [value for value, _ in choices]
-        set_choices(self.mic_type, [text for _, text in choices])
-        if current in self._mic_type_values:
-            self.mic_type.SetSelection(self._mic_type_values.index(current))
+        self.mic_type_applied.show(self._mic_type_values, current,
+                                   labels=[text for _, text in choices], force=force)
 
     def _on_apply_mic_type(self, event):
         source = event.GetEventObject()
@@ -243,7 +240,7 @@ class SettingsTab(Tab):
             # The desk moved the gain and the processing with the voicing: read it all again.
             self.page.section.refresh(False)
         else:
-            self._fill_mic_types(self.page.rec.get("mic_type"))
+            self._fill_mic_types(self.page.rec.get("mic_type"), force=True)
 
 
 class PresetsTab(Tab):
@@ -255,6 +252,7 @@ class PresetsTab(Tab):
 
     def fill(self):
         self.choice = labelled(self, self.sizer, "Processing preset", lambda p: wx.Choice(p))
+        self.applied = AppliedChoice(self.choice)
         a11y.describe(self.choice, "Sets this channel's processing values, not whether "
                                    "processing is on.")
         self._names = []
@@ -286,10 +284,10 @@ class PresetsTab(Tab):
             first = f"{now['name']}, adjusted since"
         presets = self.page.section.data.get("presets") or []
         self._names = [None] + [p["name"] for p in presets]
-        set_choices(self.choice, [first] + [p["name"] + (" (custom)" if p["custom"] else "")
-                                            for p in presets])
         on = now["name"] if matches else None
-        self.choice.SetSelection(self._names.index(on) if on in self._names else 0)
+        self.applied.show(self._names, on if on in self._names else None,
+                          labels=[first] + [p["name"] + (" (custom)" if p["custom"] else "")
+                                            for p in presets])
 
     def _on_apply(self, event):
         source = event.GetEventObject()

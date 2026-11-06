@@ -36,9 +36,11 @@ def main() -> int:
         return 0
 
     def fire():
-        with midi_out.MidiOut() as m:
-            print(f"CC {midi_out.CC_PLAY_PAD} on channel {args.pad} (pad {args.pad}), 127 then 0")
-            m.play_pad(args.pad, args.hold)
+        print(f"CC {midi_out.CC_PLAY_PAD} on channel {args.pad} (pad {args.pad}), 127 then 0")
+        try:
+            midi_out.play_pad(args.pad, args.hold)
+        finally:
+            midi_out.close()
 
     def fire_in_bank():
         if args.bank is None:

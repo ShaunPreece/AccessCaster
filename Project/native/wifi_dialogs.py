@@ -7,7 +7,7 @@ one.
 """
 import wx
 
-from native.dialogs import _paragraphs
+from native.dialogs import ok_cancel, paragraphs
 
 # `NetworksDialog.choice` for "Network not listed": a network the user names themselves.
 NOT_LISTED = {}
@@ -34,7 +34,7 @@ class NetworksDialog(wx.Dialog):
             self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda _e: self._chosen())
             sizer.Add(self.list, 0, wx.ALL, 10)
         if note:
-            _paragraphs(self, sizer, note)
+            paragraphs(self, sizer, note)
         row = wx.BoxSizer(wx.HORIZONTAL)
         buttons = [(NOT_LISTED_ID, "Network not listed"), (wx.ID_CANCEL, "Cancel")]
         if networks:
@@ -95,15 +95,11 @@ class JoinDialog(wx.Dialog):
                 grid.Add(pair[1], 0)
         sizer.Add(grid, 0, wx.ALL, 10)
         if not name:
-            _paragraphs(self, sizer, "Type the name exactly, capitals included, and leave the "
+            paragraphs(self, sizer, "Type the name exactly, capitals included, and leave the "
                                      "password empty for an open network.")
         elif not self._needs_password:
-            _paragraphs(self, sizer, f"{name} is an open network, so it needs no password.")
-        buttons = wx.StdDialogButtonSizer()
-        buttons.AddButton(wx.Button(self, wx.ID_OK, label="Join"))
-        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, label="Cancel"))
-        buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+            paragraphs(self, sizer, f"{name} is an open network, so it needs no password.")
+        ok_cancel(self, sizer, "Join", default=False)
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_join, id=wx.ID_OK)
         self.Bind(wx.EVT_TEXT_ENTER, self._on_join)
