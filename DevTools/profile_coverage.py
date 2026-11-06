@@ -57,8 +57,8 @@ def out_path() -> Path:
 # 1. What the SAVE path reads, straight out of the code
 # ---------------------------------------------------------------------------
 # Every function a profile save runs through. profiles.save takes an already-read model blob, and
-# the server hands it channels.read_channels' output and (optionally) soundpad.backup_pads', so the
-# save path is the union of all of these.
+# profile_actions.save_desk hands it channels.read_channels' output and (optionally)
+# soundpad.backup_pads', so the save path is the union of all of these.
 SAVE_FUNCS = [
     (profiles.save, "profiles.save"),
     (channels.read_channels, "channels.read_channels"),

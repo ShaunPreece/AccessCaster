@@ -1,8 +1,8 @@
 """The native window's SMART pads (Project/native/pads_section.py,
 pad_dialogs.py, pad_fx.py, pad_maint.py),
 offline: the pad list names each pad and keeps the chosen one across a read, the Settings dialog
-offers only what a pad's type has and shows the read's values on it, its writes reach the server in
-the desk's units, the Change dialog hands back the right plan, Voice effects builds the effect the
+offers only what a pad's type has and shows the read's values on it, its writes reach the pad
+actions in the desk's units, the Change dialog hands back the right plan, Voice effects builds the effect the
 switches and sliders show and refuses a preview with no pad to borrow, and Pad maintenance offers
 only sound pads for export and refuses its jobs on a read-only desk. Nothing is shown and nothing touches a
 desk.

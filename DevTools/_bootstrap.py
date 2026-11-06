@@ -45,8 +45,8 @@ if PROJECT not in sys.path:
 # All three key off the script NAME rather than asking a test to opt in: an opt-in is what a new
 # test forgets, and forgetting must not be able to cost anything.
 #
-# The dev server, the probes and the capture tools are NOT tests and keep the real data dir, which
-# is the point of running them. Set ACCESSCASTER_DATA_DIR yourself to override either way.
+# The probes and the capture tools are NOT tests and keep the real data dir, which is the point of
+# running them. Set ACCESSCASTER_DATA_DIR yourself to override either way.
 if os.path.basename(sys.argv[0] or "").startswith("test_"):
     os.environ.setdefault(
         "ACCESSCASTER_DATA_DIR",

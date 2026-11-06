@@ -76,7 +76,7 @@ def main() -> int:
 
         print("\nEACH MUTE'S REPLY READS THE MODEL, NOT THE DESK")
         # The reply checks every output for one that still hears the channel. A desk read per
-        # mic made a three-mic cough key take a second and a half.
+        # mic would hold a three-mic cough key for a second and a half.
         reads = []
         with patched((rcp_read, {"read_model_stable": lambda fresh=False: reads.append(fresh)}),
                      (rode_app, {"is_open": lambda: False})):
