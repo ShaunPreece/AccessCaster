@@ -132,7 +132,7 @@ after a session that moved code.
 | `paths.py` | 135 | `%LOCALAPPDATA%\AccessCaster` and friends, `read_json` and `write_json`, the one way user-data JSON is read and written, and `safe_name`, the one rule for a name the user gives a saved profile or mix scheme. |
 | `folders.py` | 105 | Where the app's exports go (`documents_folder`, under Documents\AccessCaster, created if need be), and `open_folder_reply`, which opens one in Explorer through `_open_folder_focused`, the one that moves the user into the window it opened. |
 | `write_guard.py` | 32 | `refuse_in_tests(what)`: raises in an offline test (ACCESSCASTER_NO_DEVICE_WRITE) before any desk write, MIDI send or Windows audio change. Every write choke point calls it. |
-| `version.py` | 485 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
+| `version.py` | 486 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
 | `web.py` | 22 | **The one way the app reaches the internet**: `opened(url, timeout)`, `urlopen` with `USER_AGENT` (`AccessCaster/<version>`; Cloudflare refuses Python's default). Called only by `driver_install` and `selfupdate`'s `checker` and `downloader`, which `test_driver_install` asserts. |
 
 --------------------------------------------------------------------------------
@@ -478,11 +478,10 @@ object from a live desk or a saved dump, read only: the extractor for the factor
   icon, RELEASE NOTES, PyInstaller freeze, Inno Setup compile. Uses `AccessCaster.spec`
   (PyInstaller), `installer.iss` (Inno Setup 6), `gen_icon.py` (pillow).
   Entry point is `tray.py`; user data lives in `%LOCALAPPDATA%\AccessCaster`.
-- `ProjectBuilds/make_release_notes.py` -> `Project/ReleaseNotes.html`, generated from
-  `version.py` HISTORY (a LIST, not prose) and gitignored because it is derived. The spec bundles it
-  and `installer.iss` offers it as a ticked post-install action. HTML for heading navigation.
-  The build also writes `ProjectBuilds/release-notes.txt` (`text_notes`, the newest release only),
-  which the update publisher, UpdateKit, puts in the signed index.
+- `ProjectBuilds/make_release_notes.py` -> `ProjectBuilds/release-notes.txt` (`text_notes`, the
+  newest release only), generated from `version.py` HISTORY (a LIST, not prose) and gitignored
+  because it is derived. `installer.iss` shows it as its `InfoAfterFile` page, and the update
+  publisher, UpdateKit, puts it in the signed index.
 - `ProjectAssets/`: `mic_presets.json` (factory presets, module flags included),
   `fx_recipes.json` (voice-FX recipes, shared by both desks), `APP_WALKTHROUGH.txt`,
   `RODE_APP_SECTIONS.txt`.

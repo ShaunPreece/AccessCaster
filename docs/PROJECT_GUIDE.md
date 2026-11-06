@@ -3177,11 +3177,13 @@ shared one; a new copy is how they drifted apart the first time.
   755 lines, because one day's work moves a large file by hundreds.
   A confidently wrong line number is worse than none: you jump, land elsewhere, and grep anyway.
 - **THE RELEASE NOTES ARE GENERATED FROM `version.py` HISTORY, which is a LIST, not prose.**
-  `ProjectBuilds/make_release_notes.py` writes `Project/ReleaseNotes.html` before the freeze; the
-  spec bundles it and the installer offers it, ticked, as a post-install action. It is gitignored:
-  it is derived. A hand-written notes file beside version.py is the second copy this project always
-  ends up disagreeing with, which is why the history became data. HTML rather than text because a
-  screen reader can jump heading to heading through it and cannot through Notepad.
+  `ProjectBuilds/make_release_notes.py` writes the newest release to
+  `ProjectBuilds/release-notes.txt`, which the installer shows as a page of its own after the files
+  are in place (`InfoAfterFile`) and the update publisher puts in the signed index. It is
+  gitignored: it is derived. A hand-written notes file beside version.py is the second copy this
+  project always ends up disagreeing with, which is why the history became data. **UTF-8 WITH A
+  BOM**: Inno Setup reads a text file without one in the ANSI code page. A browser page opened by
+  the installer instead races the app it launches for the front.
 - **THE BUILD NEVER USES THE MACHINE'S GLOBAL PYTHON.** PyInstaller bundles whatever the running
   Python has installed and only warns about an import it cannot resolve (`missing module named wx`
   in `build/.../warn-AccessCaster.txt`), so a global install missing a package freezes cleanly into

@@ -89,6 +89,12 @@ SetupIconFile=..\Project\assets\icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; This version's release notes, on a page of their own once the files are in place, generated from
+; Project\version.py by make_release_notes.py. AFTER rather than before: before, the page stands
+; between the user and what they chose to do, and on a first install "what is new" means nothing.
+; A page of Setup's own keeps the focus in Setup, where a browser opened beside the app races it
+; for the front.
+InfoAfterFile=release-notes.txt
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
@@ -124,20 +130,14 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
     ValueName: "AccessCaster"; ValueData: """{app}\{#AppExe}"" --startup"; \
     Flags: uninsdeletevalue; Tasks: startup
 
+[InstallDelete]
+; The release notes page earlier versions installed beside the exe.
+Type: files; Name: "{app}\ReleaseNotes.html"
+
 [Run]
-; Which window ends up in front, the app's or the release notes, is a race whichever order these
-; run in, so reordering them is not a fix.
 ; Launch the app when the installer finishes.
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent
-; And offer the release notes, TICKED BY DEFAULT. They are generated
-; from Project\version.py at build time (see make_release_notes.py) and ride in the bundle, so this
-; opens a LOCAL file in the default browser: no network, and it works from Program Files. HTML
-; rather than a text file so a screen reader gets real headings to jump between, which a Notepad
-; window cannot give. `shellexec` because the target is a document rather than a program; without it
-; Inno tries to execute the .html itself and fails.
-Filename: "{app}\ReleaseNotes.html"; Description: "See the release notes for this version"; \
-    Flags: shellexec nowait postinstall skipifsilent
 
 [Code]
 { THE FIREWALL RULE AN EARLIER VERSION ADDED, which nothing needs now that the app serves no page

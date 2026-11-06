@@ -9,8 +9,9 @@ here so there is exactly one number to change:
                    Output/AccessCasterSetup-v<version>.exe.
   - the installer: ProjectBuilds/installer.iss takes it as the /DAppVer define and sets
                    AppVersion + the output filename from it.
-  - the release notes: ProjectBuilds/make_release_notes.py turns HISTORY below into the page
-                   the installer offers to open when it finishes.
+  - the release notes: ProjectBuilds/make_release_notes.py turns the newest HISTORY entry into
+                   the page the installer shows once its files are in place, and the update
+                   dialog reads the same text.
 
 Format: SemVer, "MAJOR.MINOR.PATCH" with an optional pre-release label, e.g. "2.63.0" or
 "2.64.0-beta.1". Three parts because the update scheme (`selfupdate/versions.py`) refuses anything

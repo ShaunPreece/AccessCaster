@@ -109,15 +109,11 @@ if (-not (Test-Path "Project\assets\icon.ico")) {
     throw "gen_icon.py reported success but Project\assets\icon.ico is missing."
 }
 
-# The release notes the installer offers to open at the end. GENERATED from Project/version.py
-# HISTORY, never hand-written, so there is no second copy of the history to drift from the first.
-# Written into Project/ (gitignored) on every build, then copied beside the exe after the freeze
-# (see below).
+# This version's release notes, GENERATED from Project/version.py HISTORY: the installer shows them
+# on a page of their own, and the update publisher (UpdateKit) reads them from the same file.
 Write-Host "==> 2/4  Generating release notes from version.py..."
-# The same notes as text, for the update publisher (UpdateKit), which reads the newest release
-# from it rather than having the notes typed again.
 Invoke-Native "release notes" {
-    & $Py ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html ProjectBuilds\release-notes.txt
+    & $Py ProjectBuilds\make_release_notes.py ProjectBuilds\release-notes.txt
 }
 
 Write-Host "==> 3/4  Freezing app with PyInstaller..."
@@ -129,16 +125,6 @@ Invoke-Native "PyInstaller freeze (needs the 'pyinstaller' package)" {
 }
 if (-not (Test-Path "$AppDir\AccessCaster.exe")) {
     throw "PyInstaller did not produce $AppDir\AccessCaster.exe"
-}
-# THE RELEASE NOTES GO BESIDE THE EXE, NOT THROUGH THE SPEC. Bundled as a PyInstaller `data` they
-# land in _internal\, because that is where PyInstaller 6 puts them - and the installer's
-# post-install action opens {app}\ReleaseNotes.html, which would then not exist, so ticking "See
-# what is new" silently does nothing.
-# They are a document for the reader rather than an asset for the app, so the app folder is also
-# where someone would look for them later.
-Copy-Item "Project\ReleaseNotes.html" "$AppDir\ReleaseNotes.html" -Force
-if (-not (Test-Path "$AppDir\ReleaseNotes.html")) {
-    throw "Release notes did not reach $AppDir\ (the installer would offer a missing file)"
 }
 
 Write-Host "==> 4/4  Compiling installer with Inno Setup..."

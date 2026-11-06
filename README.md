@@ -119,8 +119,8 @@ If something does not work with your screen reader, please open an issue.
 2. Run it. Setup asks whether to install **just for you** or **for all users**, and either is
    fine. Installing for all users needs administrator rights; installing just for you does not,
    which is the only difference that matters.
-3. When it finishes, AccessCaster starts and opens its window. It also offers to show you the
-   release notes.
+3. Once the files are in place, Setup shows what is new in this version. When you press Finish,
+   AccessCaster starts and opens its window.
 
 ## Using it
 
