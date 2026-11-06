@@ -195,11 +195,17 @@ sentences = [phrases.available("2.64.0"), phrases.confirm_title("2.64.0"),
              phrases.CHECKING_STAGE, phrases.READY_STAGE, phrases.CANCELLED_DOWNLOAD,
              phrases.COULD_NOT_DOWNLOAD, phrases.WRONG_CHECKSUM, phrases.COULD_NOT_CHECK,
              phrases.CANNOT_CHECK, phrases.ALREADY_CHECKING, phrases.OFFER_CHANGED,
-             phrases.not_back("2.64.0"), phrases.up_to_date("2.63.0"),
+             phrases.not_back("2.64.0", 3), phrases.up_to_date("2.63.0"),
              phrases.skipped("2.64.0"), phrases.just_updated("2.64.0"),
              phrases.update_did_not_take("2.63.0", r"C:\x\AccessCasterSetup-v2.64.0.exe"),
              phrases.settings_status("once a day", None, "2.64.0", datetime.date(2026, 11, 1)),
              phrases.tray_install("2.64.0"), phrases.TRAY_CHECK]
+check("the not-back sentence says the app is still running, in words",
+      phrases.not_back("2.64.0", 3).startswith("AccessCaster is still running three minutes"), True)
+check("and does not send the user to start an app that is running",
+      "Start menu" in phrases.not_back("2.64.0", 3), False)
+check("the dialog's wait is whole minutes, as the sentence says",
+      app_updates.NOT_BACK_WITHIN_S % 60, 0)
 check("no sentence uses a dash a screen reader skips",
       [s for s in sentences if "\u2013" in s or "\u2014" in s], [])
 # A file name's "Setup-v2.64.0" is a name, not a version in prose.

@@ -149,12 +149,15 @@ ALREADY_CHECKING = "AccessCaster is already checking for an update."
 OFFER_CHANGED = ("The update on offer has changed since this was opened. "
                  f"Press {KEY} to see the current one.")
 
-def not_back(version):
-    """Said by the progress dialog when this process is still running long
-    after the installer started, which should have closed it."""
-    return (f"AccessCaster has not come back after installing version "
-            f"{version}. If it does not start by itself, start it from the "
-            "Start menu.")
+def not_back(version, minutes):
+    """Said by the progress dialog when this process is still running
+    `minutes` after the installer started, which should have closed it.
+    Setup can still show a message of its own under /VERYSILENT, and one
+    waiting for an answer is the likeliest reason."""
+    return (f"AccessCaster is still running {_cardinal(minutes)} minutes after "
+            f"the installer for version {version} started, so the update has "
+            "not installed. Setup may be showing a message of its own; if "
+            "not, choose Install update again.")
 
 
 def up_to_date(running):

@@ -26,8 +26,6 @@ POLL_MS = 400
 SPEAK_MS_PER_CHAR = 60
 SPEAK_MIN_MS = 3000
 SPEAK_MAX_MS = 10000
-# An install and restart takes well under this; past it, the install did not take.
-BACK_WITHIN_MS = 180000
 
 
 def reading_ms(sentence):
@@ -144,6 +142,5 @@ class _Follower:
             self.dialog.finish({"ok": False,
                                 "message": job.get("message") or "The update could not start."})
             return
-        # The installer closes this app; still here after this long, the install did not take.
-        wx.CallLater(BACK_WITHIN_MS, lambda: self.dialog and self.dialog.finish(
+        wx.CallLater(app_updates.NOT_BACK_WITHIN_S * 1000, lambda: self.dialog and self.dialog.finish(
             {"ok": False, "message": self.not_back}))

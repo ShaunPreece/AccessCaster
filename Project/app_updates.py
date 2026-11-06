@@ -60,6 +60,10 @@ POLL_S = 3600
 # long sentence to be read first. Past it the dialog is taken to be gone.
 PROCEED_WITHIN_S = 120
 
+# An install and restart takes well under this. Past it, with this process still running, the
+# installer has not closed it, so the install has not happened. Whole minutes: the sentence says it.
+NOT_BACK_WITHIN_S = 180
+
 # How long a report from the far side of a restart waits for the window to take it before it is
 # raised as a notification instead. The restart opens the window, which takes it within seconds.
 REPORT_WAIT_S = 30
@@ -133,7 +137,7 @@ class _Job:
 
     def payload(self) -> dict:
         return {"stage": self.stage, "message": self.message, "version": str(self.offer.version),
-                "not_back": phrases.not_back(self.offer.version)}
+                "not_back": phrases.not_back(self.offer.version, NOT_BACK_WITHIN_S // 60)}
 
 
 class _Watcher(downloader.Watcher):
