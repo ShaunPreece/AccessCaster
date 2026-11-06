@@ -47,6 +47,8 @@ __pycache__/
 /ProjectBuilds/dist/
 /Output/
 /ProjectBuilds/Output/
+# The build's own virtual environment, created by build_installer.ps1 from the pinned requirements.
+/ProjectBuilds/.venv/
 # The exe's Windows version resource, GENERATED from Project/version.py by AccessCaster.spec on
 # every build. Committing it would put the version number in a SECOND place, which is the one thing
 # version.py's single-source-of-truth rule forbids.

@@ -151,14 +151,14 @@ python -m pip install -r requirements.txt
 python Project/tray.py
 ```
 
-To build the installer yourself you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php) and:
+To build the installer yourself you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php). Then:
 
 ```
-python -m pip install -r ProjectBuilds/requirements-build.txt
 powershell -ExecutionPolicy Bypass -File ProjectBuilds\build_installer.ps1
 ```
 
-That produces the standalone app in `ProjectBuilds\dist\AccessCaster\` and the installer in
+The first build creates its own Python environment in `ProjectBuilds\.venv` and installs the pinned
+packages into it, so your global Python is never used for the build. That produces the standalone app in `ProjectBuilds\dist\AccessCaster\` and the installer in
 `ProjectBuilds\Output\AccessCasterSetup-v<version>.exe`.
 
 ### Layout

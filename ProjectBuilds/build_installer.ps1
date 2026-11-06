@@ -8,12 +8,17 @@
 #   powershell -ExecutionPolicy Bypass -File ProjectBuilds\build_installer.ps1
 #
 # BUILD PREREQUISITES (install once per machine; NOT tracked in the repo):
-#   - Python 3.12 on PATH.
-#   - pip packages:  python -m pip install -r ProjectBuilds\requirements-build.txt
+#   - Python 3.12, reachable as `py -3.12` (the python.org installer's launcher) or as `python`.
 #   - Inno Setup 6   (winget install --id JRSoftware.InnoSetup -e), at
 #                    %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
-# Missing any of these FAILS LOUDLY below: PowerShell silently ignores a native tool returning
-# non-zero, so every native call goes through Invoke-Native.
+# Missing either FAILS LOUDLY below: PowerShell silently ignores a native tool returning non-zero,
+# so every native call goes through Invoke-Native.
+#
+# THE BUILD RUNS IN ITS OWN VIRTUAL ENVIRONMENT, ProjectBuilds\.venv (gitignored), never the
+# machine's global Python. PyInstaller bundles whatever the running Python has installed and only
+# warns about an import it cannot find, so a global install missing a package produces an exe that
+# dies on launch. The venv holds exactly the pins in requirements-build.txt and its includes, and is
+# rebuilt from scratch whenever either requirements file changes.
 
 $ErrorActionPreference = "Stop"
 
@@ -41,11 +46,45 @@ $DistDir = "ProjectBuilds\dist"
 $WorkDir = "ProjectBuilds\build"
 $AppDir  = "$DistDir\AccessCaster"
 
-# Preflight: python must be on PATH (the whole build shells out to it).
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    throw "python was not found on PATH. Install Python 3.12 and ensure 'python' runs. " +
+$VenvDir = "ProjectBuilds\.venv"
+$Py      = "$VenvDir\Scripts\python.exe"
+# Fingerprint of the pins. Written into the venv only after its install succeeds, so an interrupted
+# install leaves no stamp and the next build starts the venv again from scratch.
+$Stamp   = "$VenvDir\requirements.sha256"
+$ReqFiles = @("requirements.txt", "ProjectBuilds\requirements-build.txt")
+
+# The Python 3.12 the venv is created from, as the command and arguments that run it.
+function Find-BasePython {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        & py -3.12 -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) { return @("py", "-3.12") }
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        $ver = & python -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $ver -eq "3.12") { return @("python") }
+    }
+    throw "Python 3.12 was not found as 'py -3.12' or 'python'. Install Python 3.12. " +
           "See the BUILD PREREQUISITES at the top of this script."
 }
+
+$pins = ($ReqFiles | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join ""
+$current = if (Test-Path $Stamp) { (Get-Content $Stamp -Raw).Trim() } else { "" }
+if (-not (Test-Path $Py) -or $current -ne $pins) {
+    Write-Host "==> Creating the build environment ($VenvDir) from the pinned requirements..."
+    Remove-Item $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
+    # @() because PowerShell unrolls a one-element array returned from a function into a string.
+    $base = @(Find-BasePython)
+    $baseArgs = @($base | Select-Object -Skip 1)
+    Invoke-Native "Creating the build environment" { & $base[0] @baseArgs -m venv $VenvDir }
+    Invoke-Native "Installing the pinned requirements" {
+        & $Py -m pip install --disable-pip-version-check -r ProjectBuilds\requirements-build.txt
+    }
+    Set-Content -Path $Stamp -Value $pins -Encoding ascii
+}
+
+# Every pin installed at its pinned version, on Python 3.12. A stamp proves the files have not
+# changed, not that the venv still matches them.
+Invoke-Native "Build requirements check (check_build_env.py)" { & $Py ProjectBuilds\check_build_env.py }
 
 # Read the app version from the SINGLE SOURCE OF TRUTH (Project\version.py). It flows into the
 # installer's AppVersion and the output filename (AccessCasterSetup-v<version>.exe). Bump it only
@@ -57,7 +96,7 @@ $SetupExe = "ProjectBuilds\Output\AccessCasterSetup-v$AppVer.exe"
 Write-Host "==> Building AccessCaster v$AppVer"
 
 Write-Host "==> 1/4  Generating app icon (Project\assets\icon.ico)..."
-Invoke-Native "Icon generation (gen_icon.py; needs the 'pillow' package)" { python ProjectBuilds\gen_icon.py }
+Invoke-Native "Icon generation (gen_icon.py; needs the 'pillow' package)" { & $Py ProjectBuilds\gen_icon.py }
 if (-not (Test-Path "Project\assets\icon.ico")) {
     throw "gen_icon.py reported success but Project\assets\icon.ico is missing."
 }
@@ -70,14 +109,14 @@ Write-Host "==> 2/4  Generating release notes from version.py..."
 # The same notes as text, for the update publisher (UpdateKit), which reads the newest release
 # from it rather than having the notes typed again.
 Invoke-Native "release notes" {
-    python ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html ProjectBuilds\release-notes.txt
+    & $Py ProjectBuilds\make_release_notes.py Project\ReleaseNotes.html ProjectBuilds\release-notes.txt
 }
 
 Write-Host "==> 3/4  Freezing app with PyInstaller..."
 # Delete prior output first so a PyInstaller failure cannot be masked by a stale dist\ exe.
 Remove-Item $DistDir, $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 Invoke-Native "PyInstaller freeze (needs the 'pyinstaller' package)" {
-    python -m PyInstaller --noconfirm --clean --distpath $DistDir --workpath $WorkDir `
+    & $Py -m PyInstaller --noconfirm --clean --distpath $DistDir --workpath $WorkDir `
         ProjectBuilds\AccessCaster.spec
 }
 if (-not (Test-Path "$AppDir\AccessCaster.exe")) {

@@ -251,7 +251,7 @@ def _value(blob: bytes, i: int):
     return payload[1:], f"raw{t:#04x}", end
 
 
-def _encode_count(n: int) -> bytes:
+def encode_count(n: int) -> bytes:
     """`_count`'s inverse: the fewest bytes that hold `n`, and a zero length for 0."""
     if n == 0:
         return b"\x00"
@@ -282,7 +282,18 @@ def encode_value(value, kind: str) -> bytes:
         payload = b""
     else:
         raise ValueError(f"no value block for kind {kind!r}")
-    return _encode_count(len(payload)) + payload
+    return encode_count(len(payload)) + payload
+
+
+def encode_node(node: Node) -> bytes:
+    """A node and everything below it in the dump's grammar, `_parse_node`'s inverse."""
+    out = bytearray(node.name.encode("latin1") + b"\x00" + encode_count(len(node.props)))
+    for name, value, kind in node.props:
+        out += name.encode("latin1") + b"\x00" + encode_value(value, kind)
+    out += encode_count(len(node.kids))
+    for kid in node.kids:
+        out += encode_node(kid)
+    return bytes(out)
 
 
 def _read_name(blob: bytes, i: int):

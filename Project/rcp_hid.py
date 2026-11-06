@@ -126,6 +126,24 @@ class RodeInterface:
         )
 
 
+# ---- A SIMULATED BUS -------------------------------------------------------------------------
+# When set, every enumeration and every open goes to this object instead of hidapi, and the real
+# bus is never touched, so a desk that happens to be plugged in cannot be reached. It answers
+# `enumerate() -> list[RodeInterface]` and `open(path)`, which returns an object with hidapi's
+# handle methods (`write`, `read`, `set_nonblocking`, `close`). DevTools/simulate_desk.py installs
+# one before the app starts; nothing in the app sets it.
+bus = None
+
+
+def _open_device(path: bytes):
+    """A hidapi handle open on `path`, or the simulated bus's equivalent."""
+    if bus is not None:
+        return bus.open(path)
+    dev = hid.device()
+    dev.open_path(path)
+    return dev
+
+
 def enumerate_interfaces() -> list[RodeInterface]:
     """Return every RODE HID interface currently connected.
 
@@ -135,6 +153,8 @@ def enumerate_interfaces() -> list[RodeInterface]:
     opened, so nothing else in the log marks the time. Only a slow call is logged; see
     diagnostics.slow.
     """
+    if bus is not None:
+        return list(bus.enumerate())
     at = time.monotonic()
     out: list[RodeInterface] = []
     for d in hid.enumerate(RODE_VENDOR_ID, 0):
@@ -281,9 +301,8 @@ def find_control_interface(
 
 def open_handle(iface: RodeInterface, purpose: str):
     """Open a raw handle on `iface` and record it. The caller owns closing it."""
-    dev = hid.device()
     try:
-        dev.open_path(iface.path)
+        dev = _open_device(iface.path)
     except Exception:
         forget_interfaces()          # the path is gone, so the remembered list is wrong
         raise
@@ -328,8 +347,7 @@ def _path_opens(iface: RodeInterface) -> bool:
     Deliberately NOT through open_handle: it runs many times a second and would bury the
     diagnostic log in opens and closes nobody asked a question about."""
     try:
-        dev = hid.device()
-        dev.open_path(iface.path)
+        dev = _open_device(iface.path)
     except Exception:
         return False
     try:

@@ -247,7 +247,8 @@ def check_code_comments() -> None:
     for folder in ("Project", "DevTools", "ProjectBuilds"):
         for p in sorted((REPO / folder).rglob("*")):
             if (p.suffix not in (".py", ".ps1", ".iss")
-                    or p.name in CODE_EXEMPT or "dist" in p.parts or "build" in p.parts):
+                    or p.name in CODE_EXEMPT
+                    or {"dist", "build", ".venv"} & set(p.parts)):
                 continue
             body = read(p)
             for rx in (CODE_DATE, NARRATIVE):

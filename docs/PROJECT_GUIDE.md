@@ -3176,6 +3176,14 @@ shared one; a new copy is how they drifted apart the first time.
   it is derived. A hand-written notes file beside version.py is the second copy this project always
   ends up disagreeing with, which is why the history became data. HTML rather than text because a
   screen reader can jump heading to heading through it and cannot through Notepad.
+- **THE BUILD NEVER USES THE MACHINE'S GLOBAL PYTHON.** PyInstaller bundles whatever the running
+  Python has installed and only warns about an import it cannot resolve (`missing module named wx`
+  in `build/.../warn-AccessCaster.txt`), so a global install missing a package freezes cleanly into
+  an exe that dies on launch with "No module named 'wx'". `build_installer.ps1` builds in
+  `ProjectBuilds/.venv`, recreated from the pins whenever either requirements file changes, and
+  `ProjectBuilds/check_build_env.py` then refuses the build unless it is Python 3.12 with every pin
+  at its pinned version. A new runtime dependency goes in `requirements.txt` as an exact `==` pin,
+  the only form the check accepts.
 - **A SCRIPT THAT FACTORY-RESETS A DESK MUST CALL `_bootstrap.require_expendable_desk` AND REFUSE
   WITHOUT `--expendable-desk`.** No script in the repo does so today. The exception is
   `test_clean_restore_live.py`, which restores itself: it takes `--yes`, and once its clean restore

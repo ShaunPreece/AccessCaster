@@ -1,5 +1,7 @@
 # What building the installer needs on top of the runtime dependencies.
-# Install with: python -m pip install -r ProjectBuilds/requirements-build.txt
+# build_installer.ps1 installs these into its own venv, ProjectBuilds\.venv, and rebuilds that venv
+# whenever this file or requirements.txt changes. Exact == pins only: check_build_env.py rejects
+# anything else.
 -r ../requirements.txt
 pyinstaller==6.22.0
 pillow==13.0.0        # gen_icon.py
