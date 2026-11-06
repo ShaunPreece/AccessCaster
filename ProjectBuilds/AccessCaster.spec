@@ -41,8 +41,8 @@ if not _m:
     raise SystemExit(f'AccessCaster.spec: could not read __version__ from {_vpath}')
 _VERSION = _m.group(1)
 
-# "MAJOR.MINOR" with a TWO-DIGIT MINOR, so 2.50 is version 2.5 and becomes (2, 50, 0, 0). That
-# ordering is the point: Windows compares these fields numerically, so 2.50 correctly outranks 2.10.
+# "MAJOR.MINOR.PATCH", padded to the four fields Windows compares as numbers, so 2.63.2 becomes
+# (2, 63, 2, 0) and outranks 2.9.0.
 try:
     _parts = [int(p) for p in _VERSION.split('.')]
 except ValueError:

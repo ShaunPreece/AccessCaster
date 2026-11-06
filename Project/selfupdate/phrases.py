@@ -37,7 +37,7 @@ def available(version):
     app's own voice.
 
     IT NAMES BOTH WAYS TO ACT, because a notice nobody can act on is just
-    noise, and the page may not be open when it arrives."""
+    noise, and the window may not be open when it arrives."""
     return (f"AccessCaster version {version} is available. Press {KEY} in the "
             "AccessCaster window, or choose Install update from its tray "
             "menu, to hear what changed and install it.")
@@ -154,7 +154,7 @@ CANNOT_CHECK = "This build of AccessCaster cannot check for updates."
 # another.
 ALREADY_CHECKING = "AccessCaster is already checking for an update."
 
-# The offer the page asked to install is no longer the one held, which only a
+# The offer the decision dialog asked to install is not the one held, which only a
 # check landing between the dialog opening and Install being pressed can do.
 OFFER_CHANGED = ("The update on offer has changed since this was opened. "
                  f"Press {KEY} to see the current one.")
@@ -203,7 +203,7 @@ def update_did_not_take(running, installer_path):
 
 
 def settings_status(how_often, last_checked, skipped, today):
-    """The hint under the page's How often dropdown: how often AccessCaster
+    """The hint under the Updates page's Check for updates dropdown: how often AccessCaster
     looks, when it last did, any version being skipped, and the way to look
     now. Not an announcement; it describes the dropdown and is rewritten
     whenever that changes.

@@ -9,8 +9,7 @@ page, and the only place to edit a release note is version.py.
 WHY HTML RATHER THAN TEXT. A text file opens as one undifferentiated block: reaching the version
 you care about means reading everything above it. HTML gives real headings, so a screen reader user
 presses H to jump version to version, the document title is announced when the window opens, and
-the page can follow the reader's own light/dark preference. It also opens in the browser, which is
-where the app itself lives.
+the page can follow the reader's own light/dark preference.
 
 THE PAGE SAYS "RELEASE NOTES" IN ITS TITLE AND ITS HEADING. Headed with the version and introduced
 as "what is new" instead, the words somebody would go looking for exist only in the file name.

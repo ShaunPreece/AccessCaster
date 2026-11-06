@@ -53,10 +53,10 @@ import argparse
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
-import channel_actions
-import diagnostics
 import _desk
 import backups
+import channel_actions
+import diagnostics
 import faders
 import profile_actions
 import show_actions

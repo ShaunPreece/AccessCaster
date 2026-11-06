@@ -1,6 +1,6 @@
 ﻿; AccessCaster - Inno Setup installer script.
 ;
-; Builds AccessCasterSetup.exe from the PyInstaller onedir output in ProjectBuilds\dist\AccessCaster\.
+; Builds Output\AccessCasterSetup-v<version>.exe from the PyInstaller onedir output in ProjectBuilds\dist\AccessCaster\.
 ; Start Menu shortcut, optional Desktop shortcut, an optional "Start AccessCaster when Windows
 ; starts" task (default OFF), and it launches the app when the install finishes. Uninstalling
 ; removes the program but LEAVES the user's data in %LOCALAPPDATA%\AccessCaster (saved profiles,
@@ -25,8 +25,8 @@
 ;
 ; SAFE BECAUSE THE APP NEVER WRITES BESIDE ITS EXE. paths.py splits read-only bundled assets from
 ; writable user data and forces the latter to %LOCALAPPDATA%\AccessCaster, so a Program Files
-; install is read-only to a standard user and nothing minds. Checked, not assumed: the only read of
-; a bundled path is fx_recipes.json, and every write goes through paths.data_path.
+; install is read-only to a standard user and nothing minds. The bundled files (the help, the icon
+; and the two JSON files) are only ever read, and every write goes through paths.data_path.
 ;
 ; Compile with the installed Inno Setup 6:
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss
@@ -54,8 +54,8 @@ AppVersion={#AppVer}
 AppPublisher={#AppPublisher}
 ; THE SETUP EXE'S OWN FILE PROPERTIES. Without these the installer shows a BLANK version in
 ; Explorer and in the "do you want to run this" dialogs, leaving the filename as the only place the
-; number appears. VersionInfoVersion must be NUMERIC, which "2.50" is: it
-; becomes 2.50.0.0, and Windows compares those fields numerically, so it correctly outranks 2.10.
+; number appears. VersionInfoVersion must be NUMERIC: 2.63.2 becomes 2.63.2.0, and Windows
+; compares those fields as numbers.
 ; AppVersion above stays the DISPLAY string (Programs and Features); these are the binary resource.
 VersionInfoVersion={#AppVer}
 VersionInfoProductVersion={#AppVer}
@@ -68,13 +68,13 @@ VersionInfoDescription={#AppName} Setup
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ; {autopf} FOLLOWS THE CHOICE ABOVE, which is the whole point of using it: Program Files for an
-; all-users install, {localappdata}\Programs for a per-user one. The per-user path is therefore
-; BYTE-IDENTICAL to the old hardcoded value, so an upgrade over an existing install lands in the
-; same folder instead of orphaning it. Keep the leaf name "AccessCaster" (no space) for that reason.
+; all-users install, {localappdata}\Programs for a per-user one. Every per-user install has gone to
+; {localappdata}\Programs\AccessCaster, so an upgrade lands in the same folder instead of orphaning
+; it. Keep the leaf name "AccessCaster" (no space) for that reason.
 DefaultDirName={autopf}\AccessCaster
 DefaultGroupName={#AppName}
 ; THE GROUP NAME MUST FOLLOW DefaultGroupName, NOT THE PREVIOUS INSTALL. Inno's UsePreviousGroup
-; defaults to yes, so an upgrade re-uses the remembered name: measured, a rename then writes
+; defaults to yes, so an upgrade re-uses the remembered name, so a rename writes
 ; correctly-named shortcuts into a folder still called by the OLD name. The user never picks a
 ; group here anyway (DisableProgramGroupPage below), so there is nothing to remember and no choice
 ; of theirs being overridden.
@@ -97,7 +97,7 @@ Name: "startup"; Description: "Start {#AppName} automatically when &Windows star
 
 [Files]
 ; The entire PyInstaller onedir output (AccessCaster.exe + _internal\ with Python and assets).
-; Relative to this .iss, so it is a sibling now that build_installer.ps1 sends --distpath here.
+; Relative to this .iss: build_installer.ps1 sends PyInstaller's --distpath to ProjectBuilds\dist.
 Source: "dist\AccessCaster\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
@@ -115,9 +115,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; a choice each account makes for itself.
 ;
 ; THE --startup FLAG MATTERS AND MUST MATCH Project/autostart.py. Started at sign-in the app comes up
-; in the tray with the announcer and the global shortcuts live and opens NO page; started by hand it
-; opens the page as always. The app can now set this same value itself (a switch under "This app's
-; own settings", for anyone who missed this checkbox), so both write the IDENTICAL string, under the
+; in the tray with the announcer and the global shortcuts live and opens NO window; started by hand
+; it opens its window. The app sets this same value itself (App settings, General, "Start
+; AccessCaster when you sign in to Windows"), so both write the IDENTICAL string, under the
 ; SAME value name so uninsdeletevalue still removes it. DevTools/test_autostart.py reads this file
 ; and asserts they have not drifted, because nothing else would notice.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; \
@@ -125,9 +125,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
     Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-; Which window ends up in front, the app's page or the release notes, is a race whichever order
-; these run in, so reordering them is not a fix.
-; Launch the app when the installer finishes (the "open the server/page when finished" step).
+; Which window ends up in front, the app's or the release notes, is a race whichever order these
+; run in, so reordering them is not a fix.
+; Launch the app when the installer finishes.
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent
 ; And offer the release notes, TICKED BY DEFAULT. They are generated
@@ -171,8 +171,7 @@ const
   different admin account than the one holding the per-user copy, HKCU is that admin's hive and this
   finds nothing - correctly, because it could not cleanly remove another user's install either
   (their uninstaller and their registry entries live in a profile Setup has no business rewriting).
-  So a second user's stray copy stays until that user runs an installer themselves; its firewall
-  rule shows it exists, but it cannot be touched from here. }
+  So a second user's stray copy stays until that user runs an installer themselves. }
 
 function PreviousInstall(Hive: Integer; var UninstallString: String; var Version: String): Boolean;
 begin
