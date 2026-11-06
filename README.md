@@ -99,8 +99,8 @@ Accessibility is the entire point of this project, not an afterthought.
 **What has actually been tested, as opposed to built for**, because those are not the same claim:
 
 - **NVDA: developed and used with it daily**, on a real desk, by a blind user.
-- **JAWS and Narrator: tested, and working.** They see less day-to-day use than NVDA, so reports
-  from people who use them every day are especially welcome.
+- **JAWS and Narrator: tested and working, but less thoroughly than NVDA**, so reports from people
+  who use them every day are especially welcome.
 
 If something does not work with your screen reader, please open an issue.
 
