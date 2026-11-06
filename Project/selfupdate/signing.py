@@ -29,7 +29,6 @@ the nonce-reuse failure that leaks an ECDSA private key does not exist.
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-
 # An Ed25519 signature is always exactly this long. Named rather than a bare
 # 64 beside the key's own 64 hex characters, which are a different 64.
 SIGNATURE_BYTES = 64

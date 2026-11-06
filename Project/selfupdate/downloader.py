@@ -19,7 +19,6 @@ import os
 from . import http
 from .checker import log
 
-
 # The installer is on disk and its SHA-256 matches the index.
 READY = "ready"
 

@@ -20,7 +20,6 @@ from datetime import datetime
 
 from .versions import UpdateVersion
 
-
 FILE_NAME = "index.json"
 SIGNATURE_FILE_NAME = "index.json.sig"
 

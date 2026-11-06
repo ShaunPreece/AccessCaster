@@ -14,7 +14,6 @@ anything, which looks exactly like no release having happened.
 from . import indexfile
 from .versions import UpdateVersion
 
-
 # Where the index files and installers live. One bucket, app then track
 # inside, so the download link is permanent and the version lives in the index
 # rather than in a filename.

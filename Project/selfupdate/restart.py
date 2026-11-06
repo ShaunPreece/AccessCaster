@@ -10,9 +10,8 @@ registered here. Exiting first would leave Restart Manager nothing to restart,
 so AccessCaster would install and never come back.
 
 REGISTERED ONLY WHEN AN INSTALL IS ABOUT TO START, never at launch. The same
-registration also offers to relaunch after a crash, a hang or a reboot, and
-none of those is something this feature was asked to change: the flags below
-switch all three off.
+registration also offers to relaunch after a crash, a hang or a reboot, none
+of which is this feature's business: the flags below switch all three off.
 
 THE RESTARTED APP OPENS ITS WINDOW. The update was started from the window,
 which closed with the app, and App settings there reads what the update did.
@@ -23,7 +22,6 @@ import subprocess
 import sys
 
 from .checker import log
-
 
 # Restart for an installer, and for nothing else:
 # RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT.

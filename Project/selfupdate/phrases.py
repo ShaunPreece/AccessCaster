@@ -1,10 +1,9 @@
 """
 phrases.py
 
-Everything the update feature says, in one place, so the wording is reviewed
-together and unit-tested rather than scattered across the tray, the server and
-the page. The page holds none of it: every sentence it shows or speaks arrives
-from the server.
+The update feature's sentences, in one place, so the wording is reviewed
+together and unit-tested rather than scattered across the tray, `app_updates`
+and the window.
 
 The tone rule this file follows: a screen reader is always talking, so lots of
 short sentences melt into one. A long sentence carrying the thing that matters
@@ -14,8 +13,8 @@ A version is always "version 2.64.0", never "v2.64.0", which a screen reader
 reads as "volt".
 """
 
-# The page's key. THE SPOKEN SENTENCES NAME IT, because it is one press from
-# anywhere on the page. F12 is the same key in Hydra and Claudio, so it is
+# The key that checks now. THE SPOKEN SENTENCES NAME IT, because it is one
+# press from anywhere in the window. F12 is the same key in Hydra and Claudio, so it is
 # learnt once rather than per app.
 KEY = "F12"
 
@@ -151,9 +150,8 @@ OFFER_CHANGED = ("The update on offer has changed since this was opened. "
                  f"Press {KEY} to see the current one.")
 
 def not_back(version):
-    """Said by the page when the app has not come back long after the
-    installer was started. The page keeps this from the moment the hand-off
-    begins, because by the time it is needed there is no server to ask."""
+    """Said by the progress dialog when this process is still running long
+    after the installer started, which should have closed it."""
     return (f"AccessCaster has not come back after installing version "
             f"{version}. If it does not start by itself, start it from the "
             "Start menu.")

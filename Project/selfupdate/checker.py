@@ -24,7 +24,6 @@ import diagnostics
 from . import check as checks
 from . import http, indexfile, signing
 
-
 # Short on purpose: this runs in the background at startup and nothing waits
 # on it, so a server that is slow to answer is given up on rather than kept
 # alive for minutes.
