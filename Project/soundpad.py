@@ -1,7 +1,7 @@
 """Single source of truth for EVERY soundpad operation (read, health, clear, create sound,
 create voice-FX, restore factory FX).
 
-ALL pad logic lives HERE and the web layer calls into it, so no second copy can drift. A pad is
+ALL pad logic lives HERE and the app calls into it, so no second copy can drift. A pad is
 never overwritten in place by a create: that truncates its WAV. A new sound is always clear then
 create.
 
@@ -63,8 +63,8 @@ from wording import count, plural
 # (create/clear/edit) rely on the region-B effect-object pool choreography, which is only VERIFIED
 # on devices carrying the "pad_write" cap. Every device-writing pad primitive calls
 # _require_pad_write() first, so on a device without the cap it refuses BEFORE any HID write and
-# cannot append a pad stray. The UI also disables the controls (server passes a read_only flag),
-# so this is a backstop, not the only guard.
+# cannot append a pad stray. The window also disables the controls (`read_pads_live` reports
+# read_only), so this is a backstop, not the only guard.
 
 class PadWriteUnsupported(RuntimeError):
     """Raised by a pad-write primitive when the active device lacks the 'pad_write' cap."""
@@ -271,7 +271,7 @@ def find_empty_grid(banks: int | None = None, pads_per_bank: int | None = None, 
 
 def preview_start(stack: dict, colour: int = 8, mic: int = 1) -> dict:
     """Create the in-progress effect on an empty scratch pad and engage it live. `mic` is 1..4
-    (Mic 1 is the proven default). Returns {ok, grid} or {ok:False, no_pad:True} if the grid
+    (Mic 1 is the create default). Returns {ok, grid} or {ok:False, no_pad:True} if the grid
     is full. The effect is audible immediately (padActive ON); stream edits via preview_update."""
     grid = find_empty_grid()
     if grid is None:
@@ -448,7 +448,7 @@ def effect_objects(blob=None) -> list:
 
     DETACHED means the node stores `effectsIdx` FIRST. A live pad's object stores it last; the
     special object 65 stores it first but belongs to no pad, so it is not counted as detached. RODE's
-    app leaves detached objects behind (seen after a pad was retyped). No pad binds to one, so a pad
+    app leaves a detached object behind when a pad is retyped. No pad binds to one, so a pad
     clear never collects it, and the only removal is a delete by tree path (_delete_effect_object).
     """
     if blob is None:
@@ -512,7 +512,7 @@ def _health_message(health: dict) -> str:
                 "voice effect cannot go on that pad yet. It is removed automatically once the "
                 "voice-effect pads added after it are cleared.")
     if health.get("partial"):
-        # Harmless while it waits: an FX pad whose object sits after it was heard working. It
+        # Harmless while it waits: an FX pad whose object sits after it still works. It
         # becomes last, and is deleted, once the pads after it are cleared.
         return ("An empty leftover voice-effect entry is stored on the desk. No pad uses it and "
                 "your pads still work; it is removed automatically once the voice-effect pads "
@@ -546,7 +546,7 @@ def _position_of(pidx: int, blob=None):
 
 
 # ----------------------------------------------------------------------------------------------
-# LIVE PAD GRID (what the website renders)
+# LIVE PAD GRID (what the Pads pages show)
 # ----------------------------------------------------------------------------------------------
 
 def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
@@ -947,10 +947,9 @@ def clear_all_pads() -> dict:
 # is when the unit exposes its FAT volume, so a long or repeated dwell is what makes Windows throw
 # a "problem with drive F" toast), so we sit in it as briefly as the device tolerates and write
 # every record for the edit in ONE session rather than one session per record.
-# Device-verified on a Pro II by change-read-back-restore: 0.25/0.12 writes padColourIndex, padLoop
-# and padGain correctly 15/15 times (518 ms per edit against 1048 ms for 0.6/0.3), pool health
-# clean, and even 0.10/0.05 passes 4/4 - so 0.25/0.12 keeps a healthy margin over the point where it
-# starts to matter.
+# Measured on a Pro II: 0.25/0.12 writes padColourIndex, padLoop and padGain correctly with the pool
+# clean, at about 518 ms per edit against 1048 ms for 0.6/0.3, and 0.10/0.05 also works, so
+# 0.25/0.12 keeps a margin over the point where it starts to matter.
 PAD_EDIT_SETTLE_S = 0.25    # after entering transfer mode, before the first record
 PAD_EDIT_DRAIN_S = 0.12     # after the last record, before leaving transfer mode
 
@@ -1571,19 +1570,19 @@ def set_back_channel_member(grid: int, prop: str, on: bool) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------
-# CREATE SOUND  (the held-open one-session create + the website's clear+create entry)
+# CREATE SOUND  (the held-open one-session create + the app's clear+create entry)
 # ----------------------------------------------------------------------------------------------
 
 def safe_dest_filename(src_path: str, dest_name: str | None = None) -> str:
     """The on-device filename to store this sound under, matching the FACTORY convention
     (the factory pads are pads/<n>/Music_Bed.wav, Applause.wav, ... - the real descriptive
-    name, NOT a generic 'sound.wav'; confirmed by clean-table reads). We mirror that.
+    name, NOT a generic 'sound.wav'). We mirror that.
 
     `dest_name` (e.g. the original upload filename) wins; else we use the source basename.
     The stem is sanitised to a FAT-safe set (letters/digits/space/underscore/hyphen/parens),
     whitespace collapsed, capped at 40 chars, defaulting to 'Sound'. The extension is forced
     to .wav or .mp3 (the only formats the device plays); an MP3 MUST keep .mp3 or it plays
-    silent (the firmware trusts the extension - proven)."""
+    silent (the firmware trusts the extension)."""
     base = os.path.basename(dest_name or src_path or "")
     stem, ext = os.path.splitext(base)
     ext = ext.lower()
@@ -1656,15 +1655,15 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
             diagnostics.event("pad.create",
                               f"removed the previous audio for pad {folder}: {', '.join(stale)}")
             t.flush_volume(root)
-    # Report the REAL on-device filename (on_device), NOT os.path.basename(src_wav): the server
-    # uploads via a tempfile (accesscaster_*.wav), so the source basename is the temp name.
+    # Report the REAL on-device filename (on_device), NOT os.path.basename(src_wav): a caller can
+    # pass a temporary copy, whose basename is the temp name.
     return f"created grid pad {target_idx + 1} -> {on_device}"
 
 
 def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
                  replay=True, debug=False, dest_filename=None) -> dict:
     """High-level: put a sound on grid pad `grid` (1-based) via the PROVEN clear+create path
-    (NEVER overwrite-in-place). This is what the website calls.
+    (NEVER overwrite-in-place). This is what the app calls.
 
     NOT gated on the clean pool: a sound create+clear writes NOTHING to region B
     (SOUNDPADS section 2), so it cannot collide with an effect-object orphan.
@@ -2171,10 +2170,9 @@ def heal_fx_pool(progress=None) -> dict:
     """Rebuild any voice-FX pad whose effect DEFINITION is missing, and touch nothing else.
 
     THE DESK REACHES THIS STATE BY ITSELF, which is why this is a repair rather than a diagnostic.
-    Proven against model dumps: one taken before a software reset holds all seven region-B
-    objects, one taken after holds only the special one at 65 with all six FX pad records still
-    present, and a dump of the default show says why - RODE's factory default show ships the FX pad records with their `effectsIdx` pointers and
-    no objects for them to point at. The firmware garbage-collects an object the moment no pad claims
+    After a software reset the six FX pad records are present and region B holds only the special
+    object at 65, because RODE's factory default show ships the FX pad records with their
+    `effectsIdx` pointers and no objects for them to point at. The firmware garbage-collects an object the moment no pad claims
     it but never allocates one (SOUNDPADS.md section 5), and only an explicit effects block (a 0x9d
     frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
     the default show writes the records back, and nothing re-allocates. The user gets six voice-FX
@@ -2182,8 +2180,7 @@ def heal_fx_pool(progress=None) -> dict:
     of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
     pad-keyed GC never reaches it.
 
-    A show IMPORT is NOT affected (a dump after an import holds all seven): an exported show
-    carries the objects. It is the DEFAULT show alone that does not.
+    A show IMPORT is NOT affected: an exported show carries the objects. It is the DEFAULT show alone that does not.
 
     IDEMPOTENT AND CHEAP WHEN HEALTHY: one dump, and no writes at all when nothing is missing. That
     is what lets it sit at the end of every path that can rewrite the pad grid rather than being a
@@ -2331,10 +2328,8 @@ def select_bank(bank: int) -> None:
     AN ORDINARY HID WRITE, and that is the whole answer to the MIDI bank-select question. MIDI
     reaches only the bank the desk is currently on, and RODE's MIDI spec offers CC 0 / CC 1 for the
     bank marked "verify" - which is not needed, because `selectedBank` is an int on the GUI block,
-    the same mapped node as `metering`. Proven with the ENGINE as the judge rather
-    than a read-back: with the
-    bank at 0 a MIDI press fired padIdx 0, and after this write with bank 1 the identical message
-    fired padIdx 6, which is bank 2's first pad on a Duo.
+    the same mapped node as `metering`. The engine follows the write, not just the read-back: after
+    it, the same MIDI message fires the new bank's pad.
 
     Not gated on the `pad_write` cap: this changes a display setting, not a pad record, so it cannot
     leave a stray. It IS visible on the desk, and the desk pushes the change back, which is how the
@@ -2458,7 +2453,7 @@ FACTORY_MIXER_PADS = [(12, 0), (16, 4)]
 # ----------------------------------------------------------------------------------------------
 # backup_pads reads the user grid (banks 1-7) and copies each SOUND pad's audio file off the unit
 # into a profile folder; restore_pads rebuilds that exact set. Both assume THE CALLER HOLDS THE HID
-# LOCK (the server owns it). Voice-FX pads are fingerprinted to a known recipe BY NAME (factory +
+# LOCK (`desk_access.hid_lock`). Voice-FX pads are fingerprinted to a known recipe BY NAME (factory +
 # user presets) - the device stores an FX pad as a recipe stack, not a simple label, so a renamed
 # or custom FX that matches nothing is recorded with fx_recipe=None and reported (restore skips it
 # rather than guessing). System pads (bank 8, padType 6) are never touched.

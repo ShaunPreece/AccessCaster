@@ -344,7 +344,7 @@ class TrayApp:
         diagnostics.flush(force=True)
         path = diagnostics.log_path()
         if not os.path.exists(path):
-            # Nothing has been written yet (the log starts with the server). Show the folder
+            # Nothing has been written yet (the log starts with the service). Show the folder
             # rather than failing silently, so the menu item always does something visible.
             subprocess.Popen(["explorer.exe", diagnostics.folder()])
             return
@@ -374,7 +374,8 @@ class TrayApp:
         return 0
 
     def _toggle_announcer(self) -> None:
-        # Saved or not by the server, by the same rule as the window's switch and the shortcut.
+        # Saved or not by `action_set_announce`, by the same rule as the window's switch and the
+        # shortcut.
         announcer.action_set_announce(not speech.enabled.is_set())
         if self.frame:
             self.frame.reread("settings")

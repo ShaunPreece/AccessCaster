@@ -9,13 +9,11 @@ IT IS DELIBERATELY NOT PART OF A PROFILE. A profile gets restored onto a desk, o
 work, and quietly replacing that person's key bindings as a side effect of restoring a mixer would
 be a genuinely nasty surprise. Two separate things, two separate buttons.
 
-LOCK BOUNDARY, the same rule profiles.py follows: THIS MODULE NEVER IMPORTS THE SERVER and never
-touches a file. It takes the settings dict in and hands a payload or a merged dict back, so the
-server keeps ownership of reading and writing settings.json.
+THIS MODULE NEVER TOUCHES A FILE. It takes the settings dict in and hands a payload or a merged
+dict back, so `settings_file` keeps ownership of reading and writing settings.json.
 
-THE ALLOW-LIST IS THE WHOLE DESIGN. It is an allow-list and not a dump, because three of the keys in
-that file must never travel - see EXCLUDED below, each with its reason. A dump would have carried
-all three, and the first of them is a credential.
+THE ALLOW-LIST IS THE WHOLE DESIGN. It is an allow-list and not a dump, because some of the keys in
+that file must never travel - see EXCLUDED below, each with its reason.
 """
 from __future__ import annotations
 
@@ -36,7 +34,7 @@ PORTABLE = (
     "announcer_volume",
     "announcer_mute_tones",
     "announcer_record_feedback",
-    "announcer_record_tones",      # an export from before the three-way choice
+    "announcer_record_tones",      # the tick box an older export carries
     "record_mute_announcer",
     "clip_warning",
     "callme_contacts",
@@ -46,8 +44,8 @@ PORTABLE = (
     "keep_in_tray",
 )
 
-# WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice, an audio output and a
-# capture stream are all names that may simply not exist on the machine you import onto. They are
+# WHAT TRAVELS BUT NAMES SOMETHING ON ONE PARTICULAR COMPUTER. A voice and an audio output are
+# names that may simply not exist on the machine you import onto. They are
 # still worth carrying - most people move to a similar machine and it just works - but an import
 # REPORTS the ones it could not match rather than applying a name that resolves to nothing and
 # leaving someone wondering why their announcer went quiet.
@@ -180,7 +178,7 @@ def merge_import(payload: dict, current: dict, available: dict | None = None) ->
     somebody's keyboard shortcuts.
 
     `available` optionally maps a MACHINE_SPECIFIC key to the list of names this computer really
-    has (voices, audio outputs, capture streams). A name that is not in its list is NOT applied,
+    has (voices, audio outputs). A name that is not in its list is NOT applied,
     and is named in the report - see MACHINE_SPECIFIC for why silence would be the wrong answer.
     """
     incoming = payload.get("settings") or {}

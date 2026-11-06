@@ -172,7 +172,7 @@ def _saved_record_feedback(saved: dict) -> str:
     mode = saved.get("announcer_record_feedback")
     if mode in RECORD_FEEDBACK:
         return mode
-    # The earlier tick box, "play a tone instead of speaking it".
+    # `announcer_record_tones`, the tick box an older settings file holds: "play a tone instead".
     return "tone" if saved.get("announcer_record_tones") else "speak"
 
 
@@ -440,9 +440,9 @@ def handle_push(push, st: dict) -> None:
         st["enc_down_at"], st["enc_hold"] = None, False
         if held:
             return          # the desk muted; that announcement already named the channel
-        # A CHANNEL BUTTON HOLDS THE ENCODER, AND AN ENCODER PRESS DOES NOT TAKE IT BACK. Measured
-        # on the desk: with `systemChannelSelected` at 0, two encoder presses leave it at 0, and only
-        # the channel button pressed again returns it to -1. Advancing the ring here announces USB 1
+        # A CHANNEL BUTTON HOLDS THE ENCODER, AND AN ENCODER PRESS DOES NOT TAKE IT BACK. With
+        # `systemChannelSelected` at 0, encoder presses leave it at 0, and only the channel button
+        # pressed again returns it to -1. Advancing the ring here announces USB 1
         # and then Chat while the desk has never left Mic 1 - and worse than the wrong words, it
         # leaves `enc_pos` pointing at a ring entry the encoder is not on, which is the same value
         # `_at_limit` reads to decide whether a turn is against a stop. Say what the encoder is
@@ -660,17 +660,15 @@ def _ring_place(st: dict, kind: str, idx: int) -> None:
 
 
 def _note_level(st: dict, kind: str, source: int, level: float) -> None:
-    """Hold a level change to be spoken, and speak it AT ONCE when it is the first one after an
-    encoder press.
+    """Hold a level change to be spoken, and speak it at once unless this target was spoken at the
+    same percentage, or less than `_LEVEL_GAP_S` ago. What is held is said by `flush_pending` once
+    the movement settles, so a sweep always ends on its closing value.
 
     `source` is a SOURCE CODE (0 for the monitor, the knob's index for a headphone): everything
     spoken is keyed by source, because a source can be off-fader and still have a level.
 
-    The PRESS (`encoderPressed`) carries nothing that says WHICH channel it selected, and the target
-    is chosen by touch. So the first movement has to do that job: speaking it immediately means
-    ONE click names the channel, instead of nudging repeatedly and waiting for each nudge to
-    settle to find out what is being held. Later movements in the same gesture still wait for the
-    settle, so a full sweep is one closing phrase rather than a torrent."""
+    Speaking at once is what lets ONE click name the target: the press (`encoderPressed`) carries
+    nothing that says which channel it selected."""
     key = (kind, source)
     now = time.monotonic()
     st.setdefault("levels", {})[key] = level
@@ -716,8 +714,8 @@ def flush_pending(st: dict) -> None:
             # this fires on ANY turn the ring does not see, including a mic gain that is moving
             # perfectly well, so a flat "nothing to adjust" would be wrong.
             #
-            # The way out is MEASURED, not assumed: the channel button TOGGLES
-            # (systemChannelSelected 0, then -1 on the second press), so that is what is named here.
+            # The way out is the channel button, which TOGGLES (systemChannelSelected 0, then -1 on
+            # the second press).
             sel = desk_model.selected_channel()
             if sel is not None and sel >= 0:
                 _say(_selected_phrase(sel)
@@ -750,9 +748,8 @@ def flush_pending(st: dict) -> None:
 
 # The record of what WE have just written, so the desk's echo of it is not read back at us.
 #
-# OUR OWN WRITES *ARE* ECHOED ON THE PUSH STREAM, most of them. Hardware proof, against the running
-# app with no hand on the desk: three level writes come straight back and are announced - "60
-# percent, USB 2 (Secondary)", "80 percent, Monitor".
+# OUR OWN WRITES *ARE* ECHOED ON THE PUSH STREAM, most of them: a level write comes straight back
+# as a push, and unsuppressed it is announced ("80 percent, Monitor").
 #
 # Without the suppression below, every change is said TWICE: the screen reader reads the window's
 # reply and the announcer speaks the echo. The fix is narrow on purpose: suppress the SPEECH for the
@@ -761,9 +758,8 @@ def flush_pending(st: dict) -> None:
 # is the wrong shape. Dragging a slider stays quiet all the way down, and a hand on that same fader
 # is audible again _SELF_ECHO_S after the last write.
 #
-# NOT covered, deliberately: a profile RESTORE, which writes the whole desk at once. Narrating that
-# is a different problem (it wants one "restoring" phrase, not 40 suppressions) and it has its own
-# progress reporting already.
+# A write of the whole desk at once, such as a profile restore, is not marked here: its speech is
+# held by `hold_desk_speech` instead.
 #
 # `live_state` is the running loop's speech state, and None while announcements are off.
 live_state = None

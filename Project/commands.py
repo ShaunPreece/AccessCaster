@@ -186,10 +186,10 @@ _muted_mics = []
 def _cough_key() -> dict:
     """The cough key: mute every mic that is open, and on the next press open again ONLY those.
 
-    IT UNDOES ITSELF RATHER THAN UNMUTING EVERYTHING, and the difference is not cosmetic. Tested on
-    hardware with Mic 1 open and Mics 2-4 muted, an "if any is open, mute all, else unmute all"
-    toggle leaves all four OPEN after two presses, having silently un-muted three channels somebody
-    deliberately shut. A cough key that puts a guest's mic live is worse than no cough key.
+    IT UNDOES ITSELF RATHER THAN UNMUTING EVERYTHING, and the difference is not cosmetic. With
+    Mic 1 open and Mics 2-4 muted, an "if any is open, mute all, else unmute all" toggle leaves all
+    four OPEN after two presses, having silently un-muted three channels somebody deliberately
+    shut. A cough key that puts a guest's mic live is worse than no cough key.
     Remembering what it muted makes the pair of presses a true round trip whatever mixture the desk
     is in.
 

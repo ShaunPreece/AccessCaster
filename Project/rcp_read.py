@@ -29,8 +29,8 @@ TRIGGER = (bytes([0x03]) + (4).to_bytes(4, "little")
 
 # End-of-stream detection. The device streams the whole model as a continuous burst of 256-byte
 # report-04 frames (measured on this unit: 549 frames, ~140 KB, delivered in ~375 ms with sub-
-# millisecond gaps), then goes quiet. 0.12 s of quiet returns a byte-identical blob (10 of 10
-# dumps) where 0.4 s spent half of every ~800 ms dump waiting on a stream that had already ended.
+# millisecond gaps), then goes quiet. 0.12 s of quiet returns a byte-identical blob; a longer wait
+# is spent on a stream that has already ended.
 # READ_TIMEOUT_MS is the per-read block, and it also sets how
 # finely we notice the quiet period, so it is well under QUIET_S.
 QUIET_S = 0.12
@@ -62,12 +62,12 @@ READ_TIMEOUT_MS = 60
 #     every dump measured; it is the first four of the five header bytes model_tree.parse skips.
 #  2. A PUSH IS ONE WHOLE RECORD, ALONE IN ITS FRAME: `04 <len32> <record> <zeros to 256>`. Real
 #     ones are 20 to 30 bytes, so 220-odd bytes of padding, where a dump frame carries 255 dense
-#     bytes with at most a handful of trailing zeros. `_push_record_len` decides it structurally
+#     bytes with at most a handful of trailing zeros. `_push_record` decides it structurally
 #     rather than by size, so the answer does not rest on a threshold.
 #
-# AND THE BURST IS ATOMIC. Over four runs with a pad playing throughout, pushes arrived BEFORE the
-# first dump frame and AFTER the last, never between two of them - 536 uninterrupted dump frames
-# every time. So dropping push frames cannot punch a hole in the middle of a dump.
+# AND THE BURST IS ATOMIC. With a pad playing throughout, pushes arrive BEFORE the first dump frame
+# and AFTER the last, never between two of them. So dropping push frames cannot punch a hole in the
+# middle of a dump.
 #
 # THE QUIET TIMEOUT STAYS, as the backstop for an ABNORMAL read: a replug mid-stream, or a firmware
 # that stops declaring a length. Structure ends a healthy read; silence still ends a broken one.
@@ -207,9 +207,9 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     rather than when the line goes quiet. See the block comment above `PUSH_MAX_RECORD` for why
     both of those are load-bearing rather than tidying.
 
-    The returned blob is the frame payloads CONCATENATED AND NOT TRIMMED, deliberately: it is
-    therefore byte-identical to what a quiet read has always produced, trailing frame padding and
-    all, so no offset or recorded baseline downstream shifts.
+    The returned blob is the frame payloads CONCATENATED AND NOT TRIMMED, deliberately: it matches
+    a read that ends on silence, trailing frame padding and all, so offsets and recorded baselines
+    downstream hold.
     """
     iface = find_control_interface()
     if iface is None:

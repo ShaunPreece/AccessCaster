@@ -7,7 +7,7 @@ soundpad.py owns all pad logic.
 LAYERING (mirrors soundpad.py over pad_records.py):
   rcp_transfer.py  - report-3 byte builders (build_*), the send layer, and the non-per-channel
                      mixer/system/routing functions.
-  rcp_read.py      - the model reader (values, first, path_value, read_model, read_model_stable).
+  rcp_read.py      - the model reader (values, first, keyed_value, read_model, read_model_stable).
   channels.py      - THIS FILE.
 
 TWO ADDRESSING SCHEMES, and every write here uses exactly one. INPUT values live at the channel's
@@ -68,7 +68,7 @@ def _mic_key(channel: int) -> tuple:
 
 
 # Mic input type / voicing: inputMicrophoneType (int), at the same address as the gain. All 11
-# selectable types confirmed 0..10 by stepping RODE's mic locker and reading each back. NOT mapped:
+# selectable types, 0..10, are confirmed. NOT mapped:
 # "Wireless", selectable only with a RODE wireless device paired, which the desk sets by itself when
 # one connects.
 MIC_TYPE = {0: "Line-in", 1: "Instrument", 2: "Dynamic", 3: "Condenser", 4: "PodMic",
@@ -85,9 +85,8 @@ CHANNEL_PROP = {
     # WIRELESS_MUTE_PROP).
     "inputDigitalGain":    {"kind": "int",  "note": "digital/line input gain (non-XLR sources)."},
     # A real stored setting, NOT purely derived: selecting Instrument on a channel sets it to 20, and
-    # switching AWAY from Instrument leaves it at 20 (proven on Mic 3). That asymmetry is
-    # why it has to be restored explicitly, and why Mic 1 and Mic 2 read 20 here - both have been
-    # through Instrument at some point.
+    # switching AWAY from Instrument leaves it at 20. That asymmetry is why it has to be restored
+    # explicitly.
     "inputInstrumentGain": {"kind": "int",  "note": "instrument input gain. Set to 20 when the mic "
                                                    "type becomes Instrument; NOT cleared on the way "
                                                    "back out, so restore it explicitly."},
@@ -97,14 +96,13 @@ CHANNEL_PROP = {
     # restorable.
     "inputColour":         {"kind": "str",  "note": "channel strip colour, AARRGGBB hex string "
                                                    "(decoded). Not restored."},
-    # inputType IS DERIVED FROM inputMicrophoneType. Proven on Mic 3 (nothing plugged in)
-    # by stepping the mic type and reading it back each time:
+    # inputType IS DERIVED FROM inputMicrophoneType:
     #     Line-in (0)    -> inputType 2
     #     Instrument (1) -> inputType 1
     #     Dynamic (2), SM7B (10), PodMic (4), ... any real mic voicing -> inputType 0
     # So inputType is the physical INPUT PATH the desk has put that combo input on: 0 mic, 1
-    # instrument, 2 line. It is NOT the 0/-1 validity flag section 4 of the protocol took it for
-    # (-1 does mark a slot with no physical input), and it is not something to write on its own:
+    # instrument, 2 line. It is not a 0/-1 validity flag (though -1 does mark a slot with no
+    # physical input), and it is not something to write on its own:
     # doing that produces a combination the desk's own UI cannot make, e.g. an SM7B voicing sitting
     # on the line path. Set the MIC TYPE and the path follows.
     "inputType":           {"kind": "int",  "note": "DERIVED input path: 0 mic, 1 instrument, 2 "
@@ -425,8 +423,8 @@ PROCESSING_MODULE_ON = {
 
 
 # THE REST OF THE PER-STRIP CHAIN. The float params, the module bools and channelBypassProcessing
-# are not the whole chain: diffing the RODE app's own fader drag shows two more properties
-# travelling with a channel, and both matter:
+# are not the whole chain: two more properties travel with a channel when it moves fader, and both
+# matter:
 #   channelAdvancedProcessing - simple (the three VoxLab knobs) vs advanced (the 8 modules). In SIMPLE
 #     mode the desk DERIVES the rest of the chain from Depth/Sparkle/Punch, so a chain restored onto a
 #     strip left in the wrong mode can be regenerated over the top.
@@ -554,9 +552,8 @@ def clear_all_solos(blob: bytes | None = None) -> int:
 # at the transmitter, which is a different thing from channelOutputMute above: that one silences the
 # strip inside the desk, this one is the desk telling the mic itself to stop sending.
 #
-# THE ADDRESS IS THE SAME FAMILY, and that is measured, not assumed. Read off a live Duo: ten
-# occurrences, CHANNEL[strip] for every strip, which is byte-for-byte the same set
-# of nodes channelOutputMute and channelCueEnable sit on. Both desks publish ten. So it is a compact
+# THE ADDRESS IS THE SAME FAMILY. Both desks publish it ten times, at CHANNEL[strip] for every
+# strip: the same nodes channelOutputMute and channelCueEnable sit on. So it is a compact
 # bool on proc_key(channel) like every other toggle here, and it needs no capture: a capture
 # would only re-derive an address the tree already gives.
 #
@@ -580,8 +577,8 @@ def set_channel_wireless_mute(channel, on: bool) -> int:
 
 def channel_strip_index(channel) -> int:
     """The 0-based fader STRIP a channel currently sits on (device-aware, same resolution as
-    proc_key). Public because the server needs it to key the announcer's per-strip caches -
-    mute state arrives from the desk keyed by strip, and our own writes have to agree."""
+    proc_key). Public because the announcer's per-strip caches are keyed by it: mute state arrives
+    from the desk keyed by strip, and the app's own writes have to agree."""
     return _channel_strip(channel)
 
 
@@ -693,7 +690,7 @@ PROCESSING_MODULE_BOOLS = (
     "hpfOn", "eqOn", "compressorOn", "noiseGateOn", "deesserOn", "aphexOn", "channelPanOn",
     "eqHighOn", "eqMidOn", "eqLowOn",
 )
-# --- Active-device UI-channel helpers (used by the web server's Channels view) ------------------
+# --- Active-device UI-channel helpers (used by the Channels page) -------------------------------
 # NEVER build one static {name: entry} map from the Pro II channels at import time: it breaks on
 # the Duo, whose channels are "Headset"/"USB1"/... rather than "Mic 3"/"Mic 4". These resolve
 # against the CONNECTED device each call, so the write actions look up the right strip.
@@ -809,7 +806,7 @@ def read_mixer() -> dict:
 # exactly right for editing. Moving a chain between strips needs the opposite: address a STRIP
 # directly, because during a swap the vector is changing underneath us.
 #
-# WHAT IS IN THE CHAIN (settled by diffing the RODE app's own drag):
+# WHAT IS IN THE CHAIN:
 # channelBypassProcessing + the 10 module bools + the float params + the FX block (echoOn/reverbOn
 # and their params) + channelAdvancedProcessing + channelCurrentFxPreset. NOT the routing matrix
 # (source-keyed) and NOT the mic input properties (gain/type/P48/polarity belong to
@@ -986,9 +983,8 @@ def write_chain(strip_idx: int, desired: dict, current: dict | None = None,
 #
 # Without this, "the chain follows the channel" covers just the channels present in BOTH layouts.
 # A channel that goes off-fader loses its chain outright, and one that comes BACK silently inherits
-# whatever voicing sat on the strip it lands on. Measured: a fader move brought
-# Mic 2 back from off-fader onto the strip USB 1 had just left, and Mic 2 came back with USB 1's
-# processing - gate off, EQ flat, processing bypassed.
+# whatever voicing sat on the strip it lands on: a mic brought back onto the strip a line channel
+# has just left comes back with the line channel's processing.
 #
 # Stereo link makes this the common case rather than an edge case, since linking a pair evicts the
 # upper mic and the unlink that returns it may be days later. Hence a FILE, not a memory cache.

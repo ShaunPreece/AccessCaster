@@ -12,8 +12,7 @@ WHAT THE DESK DOES:
     nothing about whether you are recording. Read `recordState` for that.
   * `recordState` is the RESULT: 0 ready, 1 paused, 2 recording, 3 no destination. It reads 3
     until a card or drive is mounted.
-  * PAUSE REALLY PAUSES, and it is measured rather than assumed. A take of 14.1 s wall-clock with a
-    3.2 s pause in the middle produced a 10.8 s file: the paused seconds are not in the recording.
+  * PAUSE REALLY PAUSES: the paused seconds are not in the recording.
   * The desk PUSHES `recordState` on report 0x04 at the RECORDER node within ~30 ms of the change,
     whether the change came from us or from the unit's own REC button. That is what the Watcher
     below listens to, and it is why the app can report the state without polling a 1.5 s model dump.
@@ -129,11 +128,10 @@ def spoken_change(was, now, medium: str = "") -> str:
 
 # MULTITRACK, named for what it DOES rather than for the unit's own word for it.
 #
-# `recordingMultitrackMode` really is the RECORDER's setting and not the USB stream's, MEASURED:
-# two null results and one decisive one. `recordBytesPerSecond` reads 384000 in all three modes and
-# never moves, the Main Multitrack USB endpoint stays absent in all three, but a 10-second take uses
-# 3.50 MB at Off and 26.25 MB at Post-Fader - **7.2 times the data on the drive**. So it must never
-# be labelled "Multitrack USB recording".
+# `recordingMultitrackMode` really is the RECORDER's setting and not the USB stream's.
+# `recordBytesPerSecond` reads 384000 in all three modes and the Main Multitrack USB endpoint stays
+# absent in all three, but a 10-second take uses 3.50 MB at Off and 26.25 MB at Post-Fader: **7.2
+# times the data on the drive**. So it must never be labelled "Multitrack USB recording".
 #
 # EVERY LABEL NAMES THE RESULT, because the unit's own names do not: "Pre-Fader" and "Post-Fader"
 # never say that they ARE multitrack, and "Off" never says you still get a recording, so RODE's
@@ -281,11 +279,9 @@ def read_state(blob: bytes):
     return vals[0] if vals else None
 
 
-# The unit's three fixed storage slots, in the order it reports them. Slot 1 is the USB port, not a
-# second card slot: with a 128 GB pendrive in USB 2 and no memory card in the unit, slot 0 read as
-# empty, slot 1 reported the pendrive's capacity byte-for-byte identically
-# to Windows (123042267136), and slot 2 is the unit's own ~5 GB volume that the SMART pads live on.
-# `storageVolumeRecDestination` agreed: [True, True, False].
+# The unit's three fixed storage slots, in the order it reports them: slot 0 is the memory card,
+# slot 1 is the USB port, not a second card slot, and slot 2 is the unit's own ~5 GB volume that
+# the SMART pads live on. `storageVolumeRecDestination` reads [True, True, False].
 #
 # Two names each, and the second is not decoration: lower-casing the label to drop it into a
 # sentence turns "USB drive" into "usb drive", which a screen reader reads as "uzb".
@@ -312,7 +308,7 @@ def read_volumes(blob: bytes, include_extra: bool = False) -> list:
 
     Parses `storageVolumeState` ("capacity|free|?|inserted|mounted"), which is the ONLY honest
     source: the numeric storageVolumeFree / Capacity / Inserted / Mounted properties all read 0 or
-    False even with a drive mounted, re-confirmed with the pendrive in.
+    False even with a drive mounted.
 
     A FOURTH VOLUME APPEARS WHILE RECORDING: the unit adds a live view of the drive it is writing
     to, a duplicate of that slot whose free space ticks down as the file grows, and it disappears
@@ -382,13 +378,11 @@ def parse_recording(uid, content: str) -> dict:
     THE TIMESTAMP IS A REAL EPOCH IN UTC, and it is shown in THIS COMPUTER'S LOCAL TIME.
 
     DO NOT render it AS UTC on the belief that the unit writes local wall clock into an epoch
-    field. Four takes made to order, each read seconds later, all match this PC's UTC clock to
-    within the time it takes to read the model, with local time at UTC+1. The field is ordinary UTC and the desk's
-    clock is right; rendering it as UTC shows every recording an hour early.
+    field. The field is ordinary UTC and the desk's clock is right; rendering it as UTC shows every
+    recording off by the local zone's offset.
 
-    `systemDateTimezone` does NOT move it either (indices 44, 0 and 12 each produced a take stamped
-    at the same UTC second), so the desk's timezone setting is a touchscreen display matter and
-    cannot be checked from here.
+    `systemDateTimezone` does NOT move it either, so the desk's timezone setting is a touchscreen
+    display matter and cannot be checked from here.
     """
     parts = str(content).split("|")
     if len(parts) < 5:
@@ -490,10 +484,8 @@ def drop_marker() -> None:
     the file - a standard WAV cue point, confirmed on the drive (see the module docstring). So the
     honest report is "sent", with the position we believe it landed at, rather than "done".
 
-    SENT AS A FLOAT (value block `01 09 04`), which is the closest of
-    our builders to the field's own type - the desk echoes it back as `01 09 06`, an eight-byte
-    form we have no builder for. Both this and the plain int form were confirmed landing in the
-    same session, so the exact value type is not what the firmware is keying on."""
+    SENT AS A FLOAT (value block `01 09 04`), which is the closest of our builders to the field's
+    own type - the desk echoes it back as `01 09 06`, an eight-byte form we have no builder for."""
     rcp_transfer.write_at(rcp_transfer.RECORDER, "requestDropMarker", "float", 1.0)
 
 
@@ -507,8 +499,8 @@ def drop_marker() -> None:
 #   - THE FIELD SELF-CLEARS, so the write never confirms itself. `recording.action_delete_recording`
 #     re-reads the recordings list and reports what it finds.
 #
-# SHOWCONTROL also carries a `requestDeleteUID` on the Pro II here: an inert stray left by an
-# address probe.
+# A desk can also carry a `requestDeleteUID` in SHOWCONTROL: an inert stray left by an address
+# probe, which deletes nothing.
 
 def build_delete_request(uid: int) -> bytes:
     """The record that asks the unit to delete recording `uid`."""

@@ -523,7 +523,7 @@ def set_headphone_type(value: int, output: int = 0) -> int:
 # control in the RODE app at all, which never makes a setting unwritable.
 
 # prop -> (block key, kind). `kind` picks the value block. Values are NOT range-checked here; the
-# server owns the value domain (it is UI copy as much as protocol) and this table is just the address.
+# caller owns the value domain (it is UI copy as much as protocol) and this table is just the address.
 UNIT_SETTING_SEL = {
     # OUTPUT block - captured
     "outputPrefader": (OUTPUT, "bool"),          # False = After-fader Listen
@@ -554,8 +554,8 @@ UNIT_SETTING_SEL = {
     # measured display-only, so offering it would be a control that lies. The reason sits next to
     # the decision, in device_page.UNIT_SETTINGS_NOT_ON_PAGE.
     "systemDateTimezone": (SYSTEM, "int"),              # an INDEX into the unit's own list
-    # SYSTEM block: the lockouts. Reversible from here by the same write, and each one was
-    # set and cleared on hardware, but they are the entries most able to make a working desk feel
+    # SYSTEM block: the lockouts. Each is a confirmed write, reversible from here by the same
+    # write, but they are the entries most able to make a working desk feel
     # broken, so whatever offers them has to say what they do in plain words.
     "disableAllHeadphoneOutputs": (SYSTEM, "bool"),
     "disableAllLineoutOutputs": (SYSTEM, "bool"),
@@ -797,7 +797,7 @@ def dismount_volume(root: str) -> bool:
 
 def _flush_volume_powershell(root: str) -> None:
     """Flush through `Write-VolumeCache`: correct, and about two seconds per call."""
-    # CREATE_NO_WINDOW: the server runs under pythonw (no console), so without this each call would
+    # CREATE_NO_WINDOW: the app runs under pythonw (no console), so without this each call would
     # flash a PowerShell window that steals focus.
     no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     subprocess.run(
