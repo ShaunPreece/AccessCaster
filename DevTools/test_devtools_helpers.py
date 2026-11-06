@@ -169,7 +169,7 @@ check("channelWirelessMute, written and read through WIRELESS_MUTE_PROP",
 
 print("\nCODEMAP'S DEVTOOLS COUNT IS WHAT GIT TRACKS")
 tracked = codemap_lines.tracked_devtools_files()
-ignored = Path(_bootstrap.devtools_path("_probe_stub_count_check.json"))
+ignored = Path(_bootstrap.devtools_path("_count_check.tmp"))
 try:
     ignored.write_text("{}", encoding="utf-8")
     check("an ignored file on disk does not change the count",

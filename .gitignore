@@ -8,8 +8,7 @@ captures/
 # we DO version is fx_recipes.json (effect parameters only, no secrets).
 cap_control/
 # Raw model dumps carry plaintext wifi SSIDs + SIP account data. Never commit any .bin
-# dump or a full decoded model snapshot. Targeted, reviewed extracts (duo_*_result.json)
-# are clean and stay versioned.
+# dump or a full decoded model snapshot.
 *.bin
 
 # THE WORKING NOTES LIVE IN A PRIVATE SIBLING REPO, `Claude Projects\_Notes\Access Caster\`, so
@@ -18,17 +17,12 @@ cap_control/
 # a pushed note cannot be taken back.
 #
 # WHAT IS PUBLIC IS THE FINDINGS AND WHAT IS PRIVATE IS THE CONVERSATION. The hardware findings are
-# tracked, in `docs/`: they belong with the code and were only ever private because the notes moved
-# out wholesale. Anything carrying decisions, quotes or open work stays in the private repo. So
-# `docs/` is NOT listed here and `ProjectMemory/` stays denied outright - nothing public should be
-# written under the old notes name.
+# tracked, in `docs/`, with the code. Anything carrying decisions, quotes or open work stays in the
+# private repo. So `docs/` is NOT listed here and `ProjectMemory/` stays denied outright - nothing
+# public should be written under the notes folder's name.
 ProjectMemory/
 ProjectNotes.md
 PICKUP.md
-
-# External reference clone (someone else's RODECaster control project), kept locally
-# for reference but not part of this repo.
-reference-rodecaster-control/
 
 # Python
 __pycache__/
@@ -39,16 +33,8 @@ __pycache__/
 *.bak
 *.tmp
 
-# Runtime logs (server, monitors) - transient.
+# Logs written by DevTools scripts (midi_monitor.log and the like) - transient.
 *.log
-
-# Format-tolerance test audio (~35 MB of self-identifying clips) + scratch test WAVs.
-# The intentionally-versioned factory sounds live in "default sfx/" (NOT ignored).
-/fmt_test/
-/Promo Bed.wav
-
-# Scratch API-response dump (not source).
-/sp.json
 
 # Packaging build artifacts (PyInstaller + Inno Setup output). The spec, installer.iss and
 # build script (in ProjectBuilds/) ARE versioned; their generated output is not. Everything
@@ -66,19 +52,8 @@ __pycache__/
 # version.py's single-source-of-truth rule forbids.
 /ProjectBuilds/version_info.generated.txt
 
-# Raw USB capture "fossils" used only by pad_records.py self-tests; not used by the app and
-# superseded by the from-scratch builders. Kept locally, not uploaded.
-*.pkl
 # Claude Code per-project settings (may contain machine-specific permission paths).
 .claude/
-
-# ui_probe fixtures taken from the connected desk (--stub). make_readonly_stub.py and
-# make_callme_unready_stub.py build two of them; the others are made by hand. The repo carries the
-# checks, not the snapshot.
-DevTools/_probe_stub_*.json
-
-# Scratch space for webcam grabs and throwaway diffs. Never committed.
-.tmpwork/
 
 # Third-party installers fetched for a local test. RODE's driver is theirs to distribute, and the
 # URL in PROJECT_GUIDE is how to get it again.
