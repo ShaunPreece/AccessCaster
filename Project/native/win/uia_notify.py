@@ -192,8 +192,8 @@ class Notifier:
         if self._closed or not text:
             return None
         display = _oleaut32.SysAllocString(text)
-        # The activity id names the kind of line, so a reader that sorts notifications can tell
-        # them apart.
+        # The activity id names this app, so a reader that sorts notifications can tell its lines
+        # from another program's.
         act = _oleaut32.SysAllocString("accesscaster")
         try:
             return _uia.UiaRaiseNotificationEvent(

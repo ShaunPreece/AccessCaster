@@ -113,7 +113,8 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         a11y.describe(refresh, "Use after plugging in headphones or installing a voice.")
         refresh.Bind(wx.EVT_BUTTON, self._on_refresh)
         sizer.Add(refresh, 0, wx.ALL, 6)
-        # Quiet: the server speaks each new level in the announcer's own voice, at that level.
+        # Quiet: `speech.action_set_announce_volume` says each new level in the announcer's own
+        # voice, at that level.
         self.volume = Slider(self, parent, sizer, "Announcement volume", 0, 100,
                              speech.action_set_announce_volume, *self.field("volume"),
                              words=lambda v: "silent" if v == 0 else f"{v} percent", quiet=True,
@@ -144,7 +145,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         return None
 
     def _volume_set(self, reply):
-        # At zero the server says nothing, so the window says it.
+        # At zero `speech.action_set_announce_volume` says nothing, so the window says it.
         if reply.get("volume") == 0:
             self.frame.reply(self.volume.slider, reply)
 
@@ -361,7 +362,7 @@ class UpdatesPage(wx.Panel):
 
     def check(self):
         """Check now. A version already found opens the decision without asking the network
-        again; the server decides that."""
+        again; `app_updates.check_now` decides that."""
         if self._checking:
             return
         self._checking = True

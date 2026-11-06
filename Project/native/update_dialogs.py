@@ -1,9 +1,9 @@
 """AccessCaster's own update: the decision, then the download and the hand-off to the installer.
 
 `app_updates` checks, downloads and starts the installer; these dialogs ask and follow. Every
-sentence comes from the server. Nothing installs without Install now.
+sentence comes from `app_updates`. Nothing installs without Install now.
 
-The hand-off waits for the dialog: once the download is verified, the server does nothing until
+The hand-off waits for the dialog: once the download is verified, `app_updates` does nothing until
 `proceed`, which is called once the dialog cannot be stopped and the closing sentence has had time
 to be read, since the installer closes this app. A screen reader cannot say when it has finished,
 so the wait is estimated from the sentence's length.

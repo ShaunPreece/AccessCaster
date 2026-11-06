@@ -227,7 +227,7 @@ class CallPage(wx.Panel):
         self.answer = _button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
                                    "extends a call that is about to end.")
-        # One fixed label: the server decides at the press, so a call that began ringing a moment
+        # One fixed label: `callme_actions.action_end` decides at the press, so a call that began ringing a moment
         # ago is declined rather than the guest already on the line being cut off.
         self.end = _button(parent, row, "Decline or hang up", self._on_end)
         a11y.describe(self.end, "Declines the call that is ringing, or else hangs up the call "
@@ -306,7 +306,8 @@ class CallPage(wx.Panel):
                 return
             lost =("" if gave_up in (reply.get("labels") or [])
                     else f" {gave_up} is now on no fader.")
-            # Worded here: the server's reply is the Routing page's account of the layout.
+            # Worded here: `faders.action_set_fader`'s reply is the Routing page's account of the
+            # layout.
             self.frame.say(f"CallMe 1 is on fader {index + 1}.{lost}")
             self.section.read()
         call(self, faders.action_set_fader, index, code, done=done)
@@ -428,9 +429,9 @@ class DialPage(wx.Panel):
 
 
 class ContactDialog(wx.Dialog):
-    """A contact's name and code, added or changed. Save goes to the server, which refuses a code
-    it cannot read in a message box, and the dialog stays open until it is accepted; its reply is
-    `reply`."""
+    """A contact's name and code, added or changed. A code `callme_actions.action_contact_save`
+    cannot read is refused in a message box, and the dialog stays open until one is accepted; its
+    reply is `reply`."""
 
     def __init__(self, parent, contact):
         super().__init__(parent, title=f"Edit {contact['name']}" if contact else "Add a contact")

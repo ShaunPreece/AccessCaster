@@ -226,7 +226,8 @@ class JobDialog(SpeakingDialog):
 
 
 def follow_job(parent, title, text, start, status):
-    """A job the server starts and then reports on, in a `JobDialog` that stays until it is done.
+    """A job that runs in the background and reports on itself, in a `JobDialog` that stays until
+    it is done.
     `start()` runs off the UI thread and starts it; `status(reply)` names the status function to
     poll, from the start's reply, or None for a reply that is already the result. Each new stage is
     spoken. Returns the job's last status, or the start's reply when it refused or was final."""

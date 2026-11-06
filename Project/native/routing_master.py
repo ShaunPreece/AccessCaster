@@ -49,7 +49,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         self.read_only = model["read_only"]
         self._shown = []             # every Switch and Slider, which `show` refreshes
         self._writing = False        # a USB mode write from this page has not returned
-        self._switching = False      # the server is still finishing a USB change
+        self._switching = False      # `usb_audio` is still finishing a USB change
         self._driver = None          # the driver's last status, from the poll
         sizer, parent = page_body(self)
         self._build_usb(parent, sizer)
@@ -167,8 +167,8 @@ class MasterMixPage(scrolled.ScrolledPanel):
             if reply.get("ok"):
                 self.master[key] = value
             self._show_usb()
-            # The server is now following the change with RODE's driver: the poll says when it
-            # has finished.
+            # `usb_audio` now brings RODE's driver into line with the change: the poll says when
+            # it has finished.
             self._poll_driver()
         call(self, write, value, done=applied)
 

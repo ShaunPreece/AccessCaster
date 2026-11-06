@@ -3,8 +3,8 @@ the as-found backup), and one for the factory reset. The first-run offer to back
 was found is made from here too.
 
 One list holds every backup, whichever half holds it: a copy on this computer, the unit's own copy
-on its drive, or both under one name (`backups.read_backups`). Which half does the work is the
-server's business; the list only says what a backup can do.
+on its drive, or both under one name (`backups.read_backups`). The `backups` actions decide which
+half does the work; the list only says what a backup can do.
 
 The backups are read once the desk state has first read the desk, on F5, after every job here, and
 once the desk has pushed a change to the shows or its drive (`FollowDesk`): two model dumps
@@ -325,7 +325,8 @@ class BackupsPage(wx.Panel):
 
     @staticmethod
     def _handle(backup):
-        """What the server knows a backup by: a profile name, or the key of one the unit made."""
+        """What the `backups` actions know a backup by: a profile name, or the key of one the unit
+        made."""
         return backup["key"] if backup["kind"] == "unit" else backup["name"]
 
     def _on_backup(self, _event):
@@ -414,7 +415,7 @@ class BackupsPage(wx.Panel):
 
     def _deleted(self, backup, reply):
         if not reply.get("ok") and reply.get("baseline"):
-            # The as-found backup takes a second, deliberate yes, on the server's own words.
+            # The as-found backup takes a second, deliberate yes, in the refusal's own words.
             if confirm(self, "Delete the as-found backup?", reply.get("message") or "",
                        "Delete the as-found backup"):
                 self._delete(backup, force=True)

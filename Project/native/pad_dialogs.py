@@ -282,8 +282,8 @@ class SettingsDialog(SpeakingDialog):
         self.sending.SetValue(text)
 
 
-# The plan a Change dialog hands back: what the job dialog says while it runs, the server call and
-# its arguments, and whether the pad ends up empty.
+# The plan a Change dialog hands back: what the job dialog says while it runs, the action and its
+# arguments, and whether the pad ends up empty.
 Plan = namedtuple("Plan", "working action args clears")
 
 TYPES = [("empty", "Empty"), ("sound", "Sound"), ("fx", "Voice effect"),

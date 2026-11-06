@@ -1,7 +1,7 @@
 """App settings, Keyboard shortcuts: the global shortcuts, their keys, and the dialogs that change
 them.
 
-The server owns everything that can be got wrong (what commands exist, whether a combination is
+`shortcuts` owns everything that can be got wrong (what commands exist, whether a combination is
 legal, whether Windows accepts it): every write's reply carries the whole state (`state`), and the
 page shows that.
 """
@@ -29,7 +29,7 @@ def item_text(row):
 
 
 def mods_text(state, mods):
-    """"Ctrl, Alt and Shift", from the server's own modifier labels."""
+    """"Ctrl, Alt and Shift", from the state's own modifier labels."""
     labels = [m["label"] for m in state.get("modifiers") or [] if m["id"] in (mods or [])]
     if len(labels) < 2:
         return "".join(labels)

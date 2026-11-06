@@ -1,7 +1,6 @@
-"""Desk calls from the window. Every server function runs on a worker thread and its reply comes
-back on the UI thread, so a desk read or write never freezes the window. The server functions
-take the HID lock themselves, so calls from here queue behind the announcer, the shortcuts and
-each other exactly as web requests do.
+"""Desk calls from the window. Each function runs on a worker thread and its reply comes back on
+the UI thread, so a desk read or write never freezes the window. The actions take the HID lock
+themselves, so calls from here queue behind the announcer, the shortcuts and each other.
 """
 from concurrent.futures import ThreadPoolExecutor
 

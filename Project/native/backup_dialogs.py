@@ -15,7 +15,7 @@ RESET_TEXT = (
     "Your wifi, the language and the analytics answer are not part of it and are left alone, and "
     "the recordings on the drive are untouched. The monitor speaker level goes back to its "
     "default, so turn speakers down before you start.\n\n"
-    # No rate is quoted: the one measured is from too few trials to state as a figure.
+    # No rate is quoted: none is known well enough to state as a figure.
     "Resetting rebuilds the desk's USB connection, and it sometimes does not come back on its "
     "own. If the app stops finding the desk afterwards, unplug the USB cable in the socket nearest "
     "the power inlet, wait a few seconds and plug it back in. The reset itself will still have "

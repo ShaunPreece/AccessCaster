@@ -4,7 +4,7 @@ The tree is the table of contents: a topic per `#` heading, its `##` parts kept 
 topic is plain text in a read-only box, a paragraph to a line with a blank
 line between, which a screen reader moves through by line or by paragraph.
 
-The file's format, which the website's guide importer (`importAppGuide.py`) reads as well:
+The file's format, which the website's guide importer reads as well:
 - `# Title` starts a topic and `## Title` a part of one.
 - Blocks are separated by a blank line. A paragraph is a block, one line per paragraph; a second
   line in the same block is a line break the reader keeps.

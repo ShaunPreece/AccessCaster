@@ -158,10 +158,11 @@ def _apply_scheme(scheme: dict, label: str) -> dict:
 
 
 def read_routing_schemes() -> dict:
-    """What the Mix schemes control offers on this desk: the built-ins, then the saved schemes.
+    """What the Output mixes page's Mix preset list offers on this desk: the built-ins, then the
+    saved schemes.
 
     Each entry carries its own DESCRIPTION so the page can say what a scheme would do before it is
-    applied, without a second round trip. A saved scheme's description is worked out from the file
+    applied, without a second read. A saved scheme's description is worked out from the file
     (routing_schemes.describe) rather than stored in it, so it can never describe a desk it no
     longer matches."""
     read_only = write_gate() is not None
