@@ -567,7 +567,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         slider.acc.description = spec["detail"]
         return slider
 
-    def fetch(self, _full):
+    def fetch(self, full):  # passed by keyword; every read here is whole
         return device_page.read_unit_settings()
 
     def shown(self, reply):
@@ -661,7 +661,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
             return NETWORK_UNREAD
         return None if self.data.get("writable") else NETWORK_READ_ONLY
 
-    def fetch(self, _full):
+    def fetch(self, full):  # passed by keyword; every read here is whole
         return network.read_status()
 
     def shown(self, reply):

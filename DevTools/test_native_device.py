@@ -9,6 +9,7 @@ Run: python DevTools/test_native_device.py
 """
 from __future__ import annotations
 
+import inspect
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -149,6 +150,15 @@ followed = {type(fn.__self__._read.__self__).__name__: names
 check("Hardware, Desk settings and Wireless connections follow what they show", followed,
       {"HardwarePage": set(device_page.HARDWARE_PROPS), "UnitPage": set(device_page.UNIT_SETTING_PROPS),
        "NetworkPage": set(network.PROPS)})
+taken = []
+for page in section.views:
+    try:
+        inspect.signature(type(page).fetch).bind(page, full=True)
+        taken.append(type(page).__name__)
+    except TypeError:
+        pass
+check("every page's fetch takes `full` by keyword, as the reader passes it", taken,
+      ["StatePage", "HardwarePage", "UnitPage", "NetworkPage"])
 
 # ---- a read the desk's pushes ask for leaves the USB facts alone --------------------------------
 frame = FakeFrame()

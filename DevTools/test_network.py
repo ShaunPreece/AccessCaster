@@ -68,8 +68,10 @@ reply, sent = run(network.action_scan_wifi,
 check("an unjoined scan cycles the radio", len(sent), 2)
 check("and waits past the stale list, and past a network arriving late",
       [n["ssid"] for n in reply["networks"]], ["A", "B"])
+check("and says what it found", reply["message"].startswith("Found 2 networks."), True)
 reply, _ = run(network.action_scan_wifi, [net_blob(), old])
-check("a list that never cleared is not passed off as a scan", reply["networks"], [])
+check("a list that never cleared is offered, not dropped as no networks",
+      [n["ssid"] for n in reply["networks"]], ["Stale"])
 
 scanned = net_blob(numbered=["Home----PSK", "Cafe----none"])
 reply, sent = run(lambda: network.action_join_wifi("Home", ""), [scanned])
@@ -82,7 +84,8 @@ check("and so does one the scan never saw, which may be open", len(sent), 2)
 
 reply, sent = run(network.action_disconnect_wifi, [net_blob("Home", "10.0.0.2"), net_blob()])
 check("disconnect clears the name and cycles the radio", (reply["ok"], len(sent)), (True, 3))
-check_in("and says the password is gone", "password", reply["message"])
+check("and says only that, the confirmation having warned of the password", reply["message"],
+      "Disconnected from Home.")
 reply, sent = run(network.action_disconnect_wifi, [net_blob("Home", radio=False), net_blob(radio=False)])
 check("with the radio off it only clears the name", (reply["ok"], len(sent)), (True, 1))
 reply, sent = run(network.action_disconnect_wifi, [net_blob("Home", "10.0.0.2")])

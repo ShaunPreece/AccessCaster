@@ -399,8 +399,10 @@ def _cycle_wifi_radio():
 
 def _wait_for_scan() -> list:
     """The results of the scan a radio cycle starts. Old results can outlast the radio going off,
-    so only a list read after the slots have cleared counts, and it is taken once it has held for
-    WIFI_SCAN_SETTLE_S, because networks arrive a few seconds apart."""
+    so a list read after the slots have cleared is taken once it has held for WIFI_SCAN_SETTLE_S,
+    because networks arrive a few seconds apart. On 1.7.7 a full list can stay through the cycle
+    and never clear, which cannot be told from a rescan finding the same networks: that list is
+    the unit's own, made while unjoined, and is returned at the deadline."""
     deadline = time.monotonic() + WIFI_SCAN_TIMEOUT_S
     cleared, last, since, found = False, None, 0.0, []
     while time.monotonic() < deadline:
@@ -413,7 +415,7 @@ def _wait_for_scan() -> list:
             last, since = found, time.monotonic()
         elif cleared and found and time.monotonic() - since >= WIFI_SCAN_SETTLE_S:
             return found
-    return found if cleared else []
+    return found
 
 
 def action_scan_wifi() -> dict:
@@ -483,8 +485,7 @@ def action_disconnect_wifi() -> dict:
         return {"ok": False, "wifi": state,
                 "message": f"The desk did not let go of {ssid or 'its network'}."}
     return {"ok": True, "wifi": state,
-            "message": (f"Disconnected from {ssid or 'the network'}, and the desk has forgotten "
-                        f"it, so joining it again needs its password.")}
+            "message": f"Disconnected from {ssid or 'the network'}."}
 
 
 def _write_gate():

@@ -650,7 +650,10 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   no result arrives. Unjoined, the results clear about 3 s after the radio comes on and fill about
   12 s after it, in `wifiScan1..10` and the WIFISCANRESULT blocks alike (one unnumbered
   `wifiScanResultSSID` per block), before `wifiScan` is written; whether `wifiScan` does anything
-  is unproven. So `network.action_scan_wifi` cycles the radio and refuses while joined.
+  is unproven. So `network.action_scan_wifi` cycles the radio and refuses while joined. On 1.7.7
+  (6th November 2026, Pro II, unjoined with two networks listed) a radio cycle left the list
+  unchanged for 80 s, never clearing, which cannot be told from a rescan finding the same
+  networks. A list that never clears is returned at the deadline, never dropped as no networks.
 - **THERE IS NO WIFI DISCONNECT OR FORGET PROPERTY** (the whole 1.7.6 property list has
   `btDoDisconnect` only). `network.action_disconnect_wifi` writes `wifiSSID` = "" (accepted, reads back
   empty) and cycles the radio. Any `wifiSSID` write loses the stored password: writing the old name
@@ -2027,6 +2030,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   The wifi scan results are never pushed. A followed Hardware read skips `device_page.read_status`,
   which rescans the bus. A name the desk does not publish follows nothing, so
   `test_native_desk_state` checks every list against `PROPERTY_LIST_PRO2.md`.
+- **`pages.Reader` CALLS `fetch` WITH ITS REQUEST AS KEYWORDS** (`fetch(full=...)` on Device's
+  pages, `fetch(prefer=...)` on Backups). A parameter renamed `_full` to mark it unused raises a
+  `TypeError` on the worker, and the page shows "That did not work" with no read.
+  `test_native_device` binds every Device page's `fetch` by keyword.
 - **A PAGE RE-READ WHILE THE USER IS ON IT SETS ONLY WHAT CHANGED** (`pages.set_text`, `set_items`,
   `select`, `controls.set_choices`): a screen reader reads a focused control again whenever its
   value or selection is set, even to the same thing.
