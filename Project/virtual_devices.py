@@ -16,7 +16,8 @@ is visible from the desk:
     service retries every 100 ms but never takes it back from the audio engine. Whatever has a
     stream there when the desk arrives (a screen reader on the default device, a browser, the
     announcer) wins, and the desk stays unbound until that stream goes. `park_output` moves
-    Windows' default off the desk for the arrival; the server retries when it is lost anyway.
+    Windows' default off the desk for the arrival; `usb_audio._virtual_devices_follow` retries
+    when the bind is lost anyway.
   - When it does bind, its endpoints can come back DISABLED: it switches them on by writing
     Windows' audio endpoint registry, which Windows re-reads only on an audio device arrival, and
     after a mode change that write can land after the pass. `reconcile` applies the service's own
@@ -122,7 +123,7 @@ def read_status() -> DriverStatus:
     """What the driver says about itself right now. Cheap: a registry probe and one page of
     shared memory, no COM.
 
-    Block layout, measured against the service's own tray icon: three little-endian dwords,
+    Block layout: three little-endian dwords,
     connected / enabled / a once-a-second heartbeat, then ANSI strings. The desk string starts
     at byte 12 and is overwritten in place, so a shorter string leaves the tail of a longer one
     behind it; the version strings are found by their labels for the same reason."""
@@ -728,11 +729,11 @@ def describe(expanded: Optional[bool] = None) -> dict:
 # RECONCILE ACTS ON ONE SAMPLE, AND THE DRIVER MOVES UNDER IT. A mode write is followed by one
 # reconcile; if the service is still unbound at that instant, reconcile correctly switches the
 # virtual endpoints OFF, and when the service binds a few seconds later nothing switches them back
-# on. Measured: three playback endpoints left disabled with the desk holding all four channels on
-# faders and the service reporting connected.
+# on: they stay disabled while the desk holds its channels on faders and the service reports
+# connected.
 #
-# So the repair cannot be a second sample at a guessed delay. Windows already says when an endpoint
-# moves, through IMMNotificationClient, and that is the signal to reconcile on - whenever it
+# A second sample at a guessed delay cannot repair that. Windows already says when an endpoint
+# moves, through IMMNotificationClient, and that is the signal to reconcile on, whenever it
 # happens, mode write or not.
 _WATCH_SETTLE_S = 1.5            # endpoint changes arrive in bursts; reconcile once the burst ends
 _WATCH_POLL_S = 1.0              # how often an idle watcher looks at `stop`, so Quit unregisters

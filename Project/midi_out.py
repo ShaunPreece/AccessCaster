@@ -13,13 +13,13 @@ the FUNCTION and the MIDI CHANNEL is WHICH pad. Play-a-pad is CC 35, so pad 1 is
 pad 8 is 0xB7. A play is value 127 then value 0, i.e. press then release.
 
 `systemMidiControl` must be ON or the desk ignores the port entirely. That is an ordinary HID write
-(`rcp_transfer.set_midi_control`) and the server arms it at the point of use; `midi_enabled()` here
-is the TOOL shape, which puts the setting back afterwards.
+(`rcp_transfer.set_midi_control`) and `pad_shortcuts` arms it at the point of use;
+`midi_enabled()` here is the TOOL shape, which puts the setting back afterwards.
 
 THE PORT IS OPENED ONCE AND KEPT. `midiOutOpen` is not free and a pad shortcut has to be instant, so
 this module owns one process-wide handle behind a lock, opens it lazily on the first send and
 REOPENS it once if a send fails - which is what a replug looks like from here. Nothing about it is
-exclusive (two `midiOutOpen` calls on this port both succeed, measured), so holding it open cannot
+exclusive (two `midiOutOpen` calls on this port both succeed), so holding it open cannot
 lock another program out.
 
 BANK SELECT IS NOT A MIDI PROBLEM. MIDI reaches only the bank the desk is on, and the bank is an

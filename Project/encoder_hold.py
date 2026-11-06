@@ -6,7 +6,8 @@ gives it the same job there. It runs whether or not announcements are on, and th
 through the announcer like the desk's own.
 
 It follows the encoder's press on the one listener (`desk_live`), and takes the selected channel
-from the desk model (`desk_model`). The write goes through `on_hold`, which the server supplies.
+from the desk model (`desk_model`). The write goes through `on_hold`, which `service.start`
+supplies (`mute_solo.encoder_hold_mute`).
 """
 from __future__ import annotations
 

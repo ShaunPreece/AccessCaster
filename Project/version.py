@@ -3,7 +3,8 @@
 `__version__` is bumped by hand, for a release. It NEVER changes automatically
 (not per build, not per commit). Everything that shows or stamps a version reads from
 here so there is exactly one number to change:
-  - the server:    /api/version (and /api/status) -> the Help & About page's version line.
+  - the app:       the Help page's credit line (`native/help_section`), the update check
+                   (`app_updates`) and the User-Agent of every update request (`selfupdate/http`).
   - the build:     ProjectBuilds/build_installer.ps1 reads it and names the installer
                    Output/AccessCasterSetup-v<version>.exe.
   - the installer: ProjectBuilds/installer.iss takes it as the /DAppVer define and sets
@@ -34,7 +35,8 @@ from __future__ import annotations
 
 __version__ = "2.63.2"
 
-# (version, [paragraph, ...]). Each paragraph is one <p> in the release notes, in order.
+# (version, [(heading, body), ...]). Each entry is a heading and one <p> in the release notes, in
+# order.
 HISTORY = [
     ("2.63.2", [
         ("AccessCaster has its own window",

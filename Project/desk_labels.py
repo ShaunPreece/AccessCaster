@@ -1,7 +1,7 @@
 """What the desk's settings are called: the words the window shows and the announcer speaks.
 
-Pure data, importing nothing that touches the desk, so the window, the server and the announcer all
-name a setting from one table. A table here is ALSO the spec the window builds its controls from,
+Pure data, importing nothing that touches the desk, so the window and the announcer both name a
+setting from one table. A table here is ALSO the spec the window builds its controls from,
 so a label changed here changes the control and the spoken change together.
 """
 from __future__ import annotations

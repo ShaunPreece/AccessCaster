@@ -91,10 +91,10 @@ _STRONG_MODS = ("ctrl", "alt", "win")
 # THE WHOLE APP: two chords is one too many, so there is one thing to hold down and the only
 # question left is which key.
 #
-# IT IS NOT CTRL+ALT+WINDOWS, because the pad scheme needs the NUMBER ROW. Measured rather than
-# assumed, by registering each chord and immediately unregistering it: Ctrl+Alt+Windows is refused
-# all nine digits, and Ctrl+Alt+Shift is given every key the app ships on - the six letters, the
-# nine digits, Dash and Equals. Ctrl+Alt alone is no good either; 1 to 4 are commonly held.
+# IT IS NOT CTRL+ALT+WINDOWS, because the pad scheme needs the NUMBER ROW. Ctrl+Alt+Windows is
+# commonly refused all nine digits, and Ctrl+Alt+Shift is given every key the app ships on: the six
+# letters, the nine digits, Dash and Equals. Ctrl+Alt alone is no good either; 1 to 4 are commonly
+# held. `DevTools/probe_free_chords.py` checks which chords a machine grants.
 #
 # THE HOLDER IS NOT WINDOWS, and the obvious explanation is wrong. Windows does own Win+digit for
 # the taskbar, and Ctrl+Win+digit and Alt+Win+digit with it, but Ctrl+Alt+Win+digit is not a Windows
@@ -184,10 +184,9 @@ def parse_binding(mods, key: str):
 # WINDOWS GIVES A PROCESS THE RIGHT TO SET THE FOREGROUND WHEN A HOTKEY IT REGISTERED IS PRESSED,
 # and that right is transient. Handing the work to a freshly spawned thread spends it: by the time
 # that thread calls SetForegroundWindow the moment has passed, Windows refuses, and the window is
-# then only raisable by forcing it - which puts it in front WITHOUT a real activation. Measured:
-# the window became the foreground window and held it, GetGUIThreadInfo agreed the keyboard focus
-# was ours, and NVDA went on reading the app the user came from, because no activation event was
-# ever raised. Alt-Tabbing to the same window announced it perfectly.
+# then only raisable by forcing it, which puts it in front WITHOUT a real activation: the window
+# is the foreground window and holds the keyboard focus, but no activation event is raised, so a
+# screen reader goes on reading the app the user came from.
 #
 # So the raise runs INLINE, in the WM_HOTKEY handler, where the right still exists. Everything
 # else keeps its own thread: a device write takes seconds and would block the next press.
@@ -328,9 +327,8 @@ class HotkeyManager:
         WHY THIS IS NOT `load(defaults=...)`. Defaults are laid down only on a machine that has
         saved nothing, and that rule has to stay: re-applying them over a saved list would undo
         somebody's deliberate deletion on every start. But that also means a set added in a LATER
-        version can never reach anyone who has already set their keys, which is how the pad scheme
-        would have shipped invisible to every existing install. So this is the same set, applied
-        ONCE, BY ASKING - an explicit action, never a start-up side effect.
+        version can never reach anyone who has already set their keys. So this is the same set,
+        applied ONCE, BY ASKING: an explicit action, never a start-up side effect.
 
         Skips a command that is already bound (you asked for the scheme, not for duplicates) and a
         key that is already taken by something else (yours wins; ours is the newcomer). Reports both,

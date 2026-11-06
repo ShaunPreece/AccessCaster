@@ -1,8 +1,8 @@
 """Fetch RODE's Virtual Devices driver and hand it to Windows to install.
 
 ONE OF TWO THINGS IN THE APP THAT REACH THE INTERNET; the other is AccessCaster's own update check
-(`selfupdate/`). Everything else talks to localhost and the USB cable. This one runs ONLY when the
-user presses the button, never at startup or on a timer. The README and Help list both, because a
+(`selfupdate/`). Everything else stays on this computer and the USB cable. This one runs ONLY
+when the user presses the button, never at startup or on a timer. The README and Help list both, because a
 user who chose this app partly for what it does not do deserves to know exactly what it contacts.
 
 WHY THE APP DOES IT AT ALL, rather than the installer. The Routing page already reports whether the

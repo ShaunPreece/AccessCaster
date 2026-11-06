@@ -252,7 +252,7 @@ def build_mixer_create(target_idx: int, name: str, colour: int, mode: int,
     return pre, mid, []
 
 
-# padTriggerType: 0 Control Change (the captured default), 1 Note.
+# padTriggerType: 0 Control Change (the phase-1 default), 1 Note.
 TRIGGER_TYPE = {"cc": 0, "note": 1}
 TRIGGER_TYPE_LABEL = {0: "Control Change", 1: "Note"}
 

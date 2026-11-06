@@ -4,8 +4,8 @@ When the app is packaged with PyInstaller, the Python files no longer live on di
 their data, so `os.path.dirname(__file__)` stops pointing at the real assets. Worse, the
 install folder may not be a good place to WRITE user data. This module draws the line clearly:
 
-  - resource_path(*parts): READ-ONLY assets that ship WITH the app (static/, docs/, the
-    factory/seed JSON files). Resolved inside the bundle when frozen, or the source tree when
+  - resource_path(*parts): READ-ONLY assets that ship WITH the app (help/, assets/, the
+    factory JSON files). Resolved inside the bundle when frozen, or the source tree when
     running from source.
 
   - data_path(*parts): WRITABLE user data that the app creates and the user owns (saved
@@ -31,8 +31,8 @@ if getattr(sys, "frozen", False):
 else:
     RESOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Writable per-user data dir. LOCALAPPDATA is set on every modern Windows; fall back to the
-# user profile (or, failing that, the resource dir) so non-Windows dev runs still work.
+# Writable per-user data dir. LOCALAPPDATA is set on every modern Windows; the user profile is the
+# fallback when it is not.
 #
 # ACCESSCASTER_DATA_DIR OVERRIDES IT WHOLESALE, and exists so a TEST cannot write to the user's
 # real profiles, schemes and parked chains (see DevTools/_bootstrap). Read once at import, like
@@ -54,7 +54,7 @@ def resource_path(*parts: str) -> str:
     """Absolute path to a read-only bundled asset (e.g. resource_path('help', 'help.txt')).
 
     When frozen, every bundled asset sits flat under RESOURCE_DIR (sys._MEIPASS). Running from
-    source the assets are split across the repo: the app's own files (static/,
+    source the assets are split across the repo: the app's own files (help/help.txt,
     assets/icon.ico) live alongside the code in Project/, while the device data (fx_recipes.json,
     mic_presets.json) lives in the sibling ProjectAssets/ folder. So in source mode we look in both
     Project/ and ../ProjectAssets/ and return the first match.

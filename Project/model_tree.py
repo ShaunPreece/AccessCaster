@@ -89,8 +89,7 @@ def encode_index(i: int, empty_zero: bool = False) -> bytes:
 def encode_path(path, empty_zero: bool = False) -> bytes:
     """The report-3 ADDRESS BYTES for a tree path: `01 01 <levels> [<len><index LE>] x levels`.
 
-    THE ONE ADDRESS FORMAT. Every address shape `rcp_transfer` builds is a special case of this
-    (decoded and checked byte-for-byte):
+    THE ONE ADDRESS FORMAT. Every address shape `rcp_transfer` builds is a special case of this:
 
         01 01 01 01 1c            CHANNEL[0]                 -> path [0x1C]
         01 01 01 02 6e 02         INPUTSOURCE[0]             -> path [0x26E]
@@ -236,9 +235,9 @@ def _value(blob: bytes, i: int):
     if t == 0x05:
         return payload[1:].split(b"\x00")[0].decode("latin1"), "str", end
     if t == 0x06:
-        # 64-bit int. Seen on STORAGEVOLUME[2]'s capacity and free space, where the SAME property
-        # name is a 32-bit 0x01 on the other two volumes: a property's type is per OCCURRENCE, not
-        # per name.
+        # 64-bit int. STORAGEVOLUME[2] carries its capacity and free space in it, where the SAME
+        # property name is a 32-bit 0x01 on the other two volumes: a property's type is per
+        # OCCURRENCE, not per name.
         return int.from_bytes(payload[1:9], "little", signed=True), "int64", end
     if t == 0x08:
         # A COMPOSITE: two or more complete value blocks back to back (padRecordStateRequest is an
@@ -355,8 +354,7 @@ def parse(blob: bytes, spans: list | None = None) -> tuple:
     (node, property name, start, end) for every property: where its value block sits in `blob`.
 
     THE FIRST FOUR OF THOSE FIVE BYTES ARE THE DUMP'S OWN LENGTH, little-endian, counting everything
-    after them (measured on a live Duo: 136675, stable across every dump). That
-    is what lets `rcp_read.read_model_raw` end the read on structure instead of on silence.
+    after them. That is what lets `rcp_read.read_model_raw` end the read on structure instead of on silence.
     """
     start = blob.find(b"Rodecaster\x00")
     if start < 0:

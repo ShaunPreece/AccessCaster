@@ -25,9 +25,9 @@ publishes their cross-points either way. Walking the narrower DISPLAY list would
 depend on the mode it was captured in: one saved in Standard holds no Virtual A cell, so applying it
 in Expanded leaves that cell as it was, and "Everything normal" cannot reset it.
 
-LOCK BOUNDARY: the same rule as profiles.py, and for the same reason (no circular import). This
-module never imports the server. `capture` is pure (it reads an already-read model blob), and
-`apply` performs the device WRITES but ASSUMES THE CALLER HOLDS THE HID LOCK.
+LOCK BOUNDARY: the same rule as profiles.py. `capture` is pure (it reads an already-read model
+blob), and `apply` performs the device WRITES but ASSUMES THE CALLER HOLDS THE HID LOCK
+(`desk_access.hid_lock`), which this module never takes.
 """
 from __future__ import annotations
 
@@ -208,8 +208,8 @@ def builtins(device=None) -> list:
         # carries its scope from `scope_text`, and saying it here says it twice.
         "name": "Everything normal",
         # SHORT ON PURPOSE: a scheme's description is read out every time you arrow onto it, so
-        # it says what happens and stops. The long version (which outputs go to which mode, and the
-        # known-good provenance) is on the Reset all output mixes section below.
+        # it says what happens and stops. The long version (which outputs go to which mode) is the
+        # Reset all output mixes button's description.
         "description": ("Every output back to its normal mix, every source back in and following "
                         "the faders. Wipes any mix you have set by hand."),
         "destructive": True,
@@ -274,8 +274,8 @@ def apply(scheme: dict, device=None, pace: float = WRITE_PACE, on_source_write=N
     written, on the cross-points the scheme recorded as unlinked.
 
     `on_source_write(source_index)` is called just before each write that the desk echoes back on
-    that source, so the server can suppress its announcer for it. Called per write, not once at the
-    start: the echo-suppression window is short and a full-desk apply takes several seconds.
+    that source, so the caller can keep the announcer from speaking it. Called per write, not once
+    at the start: the echo-suppression window is short and a full-desk apply takes several seconds.
     """
     dev = device or devices.get_active_device()
     m = dev.matrix
