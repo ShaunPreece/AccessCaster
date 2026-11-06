@@ -132,7 +132,7 @@ after a session that moved code.
 | `paths.py` | 135 | `%LOCALAPPDATA%\AccessCaster` and friends, `read_json` and `write_json`, the one way user-data JSON is read and written, and `safe_name`, the one rule for a name the user gives a saved profile or mix scheme. |
 | `folders.py` | 105 | Where the app's exports go (`documents_folder`, under Documents\AccessCaster, created if need be), and `open_folder_reply`, which opens one in Explorer through `_open_folder_focused`, the one that moves the user into the window it opened. |
 | `write_guard.py` | 32 | `refuse_in_tests(what)`: raises in an offline test (ACCESSCASTER_NO_DEVICE_WRITE) before any desk write, MIDI send or Windows audio change. Every write choke point calls it. |
-| `version.py` | 486 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
+| `version.py` | 520 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
 | `web.py` | 22 | **The one way the app reaches the internet**: `opened(url, timeout)`, `urlopen` with `USER_AGENT` (`AccessCaster/<version>`; Cloudflare refuses Python's default). Called only by `driver_install` and `selfupdate`'s `checker` and `downloader`, which `test_driver_install` asserts. |
 
 --------------------------------------------------------------------------------

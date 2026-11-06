@@ -34,17 +34,17 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "2.63.2"
+__version__ = "3.0.0"
 
-# (version, [(heading, body), ...]). Each entry is a heading and one <p> in the release notes, in
-# order.
+# (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
+# notes, in order.
 HISTORY = [
-    ("2.63.2", [
+    ("3.0.0", [
         ("AccessCaster has its own window",
-         "The web page is replaced by a Windows window: a tree of categories on the left and the "
+         "AccessCaster 3 is a Windows app. The web page is replaced by a Windows window: a tree of categories on the left and the "
          "chosen page on the right. F6 moves between them, Alt and 1 to 9 jump to a category, and "
          "Ctrl and Tab move between pages, or between tabs on a page with tabs. F5 reads the "
-         "category from the unit again. Remote access has gone with the web page, so nothing "
+         "category from the desk again. Remote access has gone with the web page, so nothing "
          "outside this computer can reach AccessCaster, and it no longer needs a firewall rule. "
          "Installing over an earlier version offers to remove the one it added."),
 
@@ -52,7 +52,7 @@ HISTORY = [
          "Your shortcuts and announcements keep working from the notification area, and opening "
          "AccessCaster again brings the window back where you left it. To have closing the window "
          "quit instead, turn off Keep running in the system tray on the App settings General page. "
-         "If the unit is part-way through something, such as a restore, Quit tells you and waits."),
+         "If the desk is part-way through something, such as a restore, Quit tells you and waits."),
 
         ("AccessCaster tells you when there is a new version",
          "Once a day, or as often as you choose, AccessCaster checks for a newer version and shows a "
@@ -63,19 +63,19 @@ HISTORY = [
          "refuses any version that is not signed as ours."),
 
         ("App settings, on Alt plus 8",
-         "Everything about AccessCaster itself, rather than the unit, is in one place: "
+         "Everything about AccessCaster itself, rather than the desk, is in one place: "
          "announcements, keyboard shortcuts, starting at sign-in, saving these settings to a file, "
          "and updates. Help moves to Alt plus 9."),
 
-        ("Install the unit's firmware updates",
+        ("Install the desk's firmware updates",
          "When RODE has a new firmware version, the Device page's Hardware section offers to "
-         "install it. AccessCaster backs the unit up first, then lets the unit download and install "
+         "install it. AccessCaster backs the desk up first, then lets the desk download and install "
          "the update and restart, and tells you the version it comes back on. It takes about five "
-         "minutes, and the unit's setup screens may then need someone sighted."),
+         "minutes, and the desk's setup screens may then need someone sighted."),
 
         ("Wifi: scan, join and disconnect",
-         "Scan for networks lists what the unit can see, and choosing one asks only for its "
-         "password. Disconnect leaves the network the unit is on; joining it again needs the "
+         "Scan for networks lists what the desk can see, and choosing one asks only for its "
+         "password. Disconnect leaves the network the desk is on; joining it again needs the "
          "password."),
 
         ("The desk's state in the status bar",
@@ -109,6 +109,40 @@ HISTORY = [
         ("Troubleshooting in the help",
          "A new help topic answers questions such as my desk has stopped responding, I can't hear a "
          "channel, and my screen reader has gone silent."),
+
+        ("Changes made elsewhere are spoken",
+         "When something changes on the desk's touchscreen or in RODE's app, AccessCaster says what "
+         "changed, in one sentence. While RODE's app is open, it saves them up and says them when "
+         "you come back to AccessCaster or close RODE's app."),
+
+        ("The window keeps up with the desk",
+         "Pages update by themselves when something changes on the desk, so you no longer need F5 "
+         "to see it."),
+
+        ("Using RODE's app at the same time",
+         "AccessCaster tells you when RODE's app opens, and keeps up with what it changes. A new "
+         "help topic in Troubleshooting explains how the two work together."),
+
+        ("When no desk is connected",
+         "The window's title says no desk connected, and pages that need a desk tell you why they "
+         "are empty instead of showing controls that cannot work."),
+
+        ("Bank shortcuts skip empty banks",
+         "The bank keys step only through banks with pads on them, and never into the system bank."),
+
+        ("A failed shortcut is heard with announcements off",
+         "It plays the failed sound, so you know it did nothing."),
+
+        ("The clip warning comes back after an audio drop",
+         "If Windows loses the desk's audio for a moment, Warn when the main mix clips starts working "
+         "again on its own."),
+
+        ("Wifi scanning on firmware 1.7.7",
+         "Scan for networks lists what the desk can see, instead of sometimes saying there are none."),
+
+        ("Unit is now desk",
+         "Everything AccessCaster shows and says calls it the desk. Your saved settings and shortcuts "
+         "are unchanged."),
     ]),
     ("2.62", [
         ("CallMe: take guests' calls without the touchscreen",
