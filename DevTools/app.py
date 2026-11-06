@@ -10,13 +10,15 @@ dialog on screen, while desk work is running. The window is found from Python: a
 FindWindow from this tooling does not see it.
 
 START COMES UP IN THE TRAY, as at sign-in (`--startup`), so it takes nobody's focus; `--window`
-opens the window as a person starting it would.
+opens the window as a person starting it would. It runs on the build's venv, `ProjectBuilds/.venv`,
+the one Python that has the app's dependencies.
 
 START NEVER RUNS A SECOND COPY. A second copy hands over to the first and brings its window up on
 the screen of whoever is working, so start refuses while one is running.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -32,6 +34,8 @@ TRAY_CLASS = "AccessCasterTray"     # tray.TRAY_CLASS; tray itself is not import
 STARTUP_FLAG = "--startup"          # autostart.STARTUP_FLAG
 QUIT_WAIT_S = 20.0
 START_WAIT_S = 20.0
+# The app's dependencies, wx among them, are installed only in the build's venv.
+PYTHONW = _bootstrap.repo_path("ProjectBuilds", ".venv", "Scripts", "pythonw.exe")
 
 # Detached from this console and in its own process group, so the app outlives the shell that
 # started it.
@@ -76,7 +80,10 @@ def start_app(window: bool = False) -> bool:
     if _window():
         print("AccessCaster is already running.")
         return False
-    args = [sys.executable.replace("python.exe", "pythonw.exe"), "tray.py"]
+    if not os.path.isfile(PYTHONW):
+        print(f"AccessCaster cannot start: there is no {PYTHONW}. Run the build once to make it.")
+        return False
+    args = [PYTHONW, "tray.py"]
     subprocess.Popen(args if window else [*args, STARTUP_FLAG],
                      cwd=_bootstrap.PROJECT, creationflags=_DETACHED, close_fds=True)
     if _wait(True, START_WAIT_S):

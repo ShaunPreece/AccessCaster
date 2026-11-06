@@ -162,7 +162,8 @@ included: run it only with the owner's say-so.
 
 **Running the app from source.** `app.py` `status` / `quit` / `start` / `restart`: quit is the
 tray's own WM_CLOSE, start comes up in the tray (`--window` to open it) and refuses while a copy is
-running. Quit it before a script that drives the desk, start it after.
+running, on the build venv's `pythonw.exe` whatever Python runs `app.py`. Quit it before a script
+that drives the desk, start it after.
 `simulate_desk.py` runs the app against a simulated Pro II through `rcp_hid.bus`, with no desk and
 the real bus untouched: a factory Pro II built from the layout fixture, `FACTORY_DEFAULTS_PRO2.txt`
 and `PROPERTY_LIST_PRO2.md`, or `--dump` a saved one. It answers dumps and stores writes, pushes
