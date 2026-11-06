@@ -144,6 +144,10 @@ class _Watcher(downloader.Watcher):
     def __init__(self, job):
         self.job = job
 
+    def downloading(self):
+        with _lock:
+            self.job.stage, self.job.message = DOWNLOADING, phrases.DOWNLOADING
+
     def checking(self):
         checker.log("checking the download")
         with _lock:

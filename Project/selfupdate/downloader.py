@@ -46,14 +46,18 @@ _BLOCK = 1 << 20
 
 
 class Watcher:
-    """The stage change a caller wants to hear about while a download runs,
+    """The stage changes a caller wants to hear about while a download runs,
     and the one question the download asks back. The default answers nothing
     and refuses nothing, so a caller with no interface to drive passes none of
     this.
 
-    `checking` marks the hash of the finished file, a wait long enough to need
-    explaining, or it reads as the one that has hung.
+    `checking` marks the hash of a file, a wait long enough to need
+    explaining, or it reads as the one that has hung. An installer already on
+    disk is checked first, so a retry can go checking, downloading, checking.
     """
+
+    def downloading(self):
+        """The bytes are about to be fetched."""
 
     def checking(self):
         """The bytes are in and the file on disk is about to be hashed."""
@@ -107,6 +111,7 @@ def download(index, folder, open_url=None, watcher=None):
         # above, and worse, offered to the user as "the installer is still on
         # disk, run it by hand" after a failure.
         part = target + ".part"
+        watcher.downloading()
         try:
             _write_to(index.url, part, open_url, watcher)
         except _Stopped:

@@ -112,9 +112,13 @@ class _Follower:
         job = reply.get("job")
         if not job or job["stage"] == self.stage:
             return
+        first = self.stage is None
         self.stage = job["stage"]
         self.not_back = job.get("not_back") or ""
-        if self.stage == app_updates.CHECKING:
+        # A retry with a damaged installer on disk goes checking, downloading, checking. The first
+        # downloading is the dialog's opening text, so only a return to it is said.
+        if self.stage == app_updates.CHECKING or (self.stage == app_updates.DOWNLOADING
+                                                  and not first):
             self.dialog.say(job["message"])
         elif self.stage == app_updates.READY:
             busy = desk_access.work_in_progress()

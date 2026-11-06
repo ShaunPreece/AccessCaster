@@ -189,6 +189,25 @@ with tempfile.TemporaryDirectory() as folder:
     check("a cancel stops it and leaves nothing behind", (outcome, os.listdir(folder)),
           (downloader.CANCELLED, []))
 
+    class _Stages(downloader.Watcher):
+        def __init__(self):
+            self.seen = []
+
+        def downloading(self):
+            self.seen.append("downloading")
+
+        def checking(self):
+            self.seen.append("checking")
+    Path(folder, downloader.file_name_for(V("2.64.0"))).write_bytes(b"damaged")
+    stages = _Stages()
+    outcome, _ = downloader.download(offer_of(), folder, open_url=lambda u: _Response(payload),
+                                     watcher=stages)
+    check("a damaged installer on disk is fetched again", outcome, downloader.READY)
+    check("and the stages say so in order", stages.seen, ["checking", "downloading", "checking"])
+    stages = _Stages()
+    downloader.download(offer_of(), folder, open_url=lambda u: _Response(payload), watcher=stages)
+    check("a good one on disk is only checked", stages.seen, ["checking"])
+
 print("\nTHE WORDING")
 sentences = [phrases.available("2.64.0"), phrases.confirm_title("2.64.0"),
              phrases.CONFIRM_AFTER, phrases.CHECKING, phrases.DOWNLOADING,
