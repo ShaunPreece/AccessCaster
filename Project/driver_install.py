@@ -30,10 +30,10 @@ import re
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 import zipfile
 
 import paths
+import web
 
 # The file RODE's own installer pulls. No version in the path: they replace it in place.
 ZIP_URL = "https://update.rode.com/virtual_dev_driver/RODECasterDriver_WIN.zip"
@@ -72,8 +72,7 @@ def _no_step(_text: str) -> None:
 def _download(dest: str, on_step=_no_step) -> str:
     on_step("Downloading the driver from RODE.")
     try:
-        req = urllib.request.Request(ZIP_URL, headers={"User-Agent": "AccessCaster"})
-        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_S) as r, open(dest, "wb") as f:
+        with web.opened(ZIP_URL, DOWNLOAD_TIMEOUT_S) as r, open(dest, "wb") as f:
             total = 0
             while True:
                 chunk = r.read(64 * 1024)

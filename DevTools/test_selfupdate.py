@@ -26,11 +26,12 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path; import FIRST)
 import _testkit
 import app_updates
 import settings_file
+import web
 from _testkit import check, check_true, patched
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from selfupdate import check as checks
-from selfupdate import checker, downloader, http, indexfile, interval, phrases, restart, signing
+from selfupdate import checker, downloader, indexfile, interval, phrases, restart, signing
 from selfupdate.versions import UpdateVersion
 from version import HISTORY, __version__
 
@@ -135,7 +136,7 @@ check_true("the shipped key is a real one", signing.is_configured())
 check("a signature of the wrong length is refused",
       signing.verify(document, b"x" * 63, key_hex), False)
 check_true("the request names AccessCaster, not Python, which Cloudflare refuses",
-           http.USER_AGENT.startswith("AccessCaster/") and "urllib" not in http.USER_AGENT)
+           web.USER_AGENT.startswith("AccessCaster/") and "urllib" not in web.USER_AGENT)
 
 print("\nTHE DOWNLOAD")
 payload = b"MZ" + os.urandom(4096)

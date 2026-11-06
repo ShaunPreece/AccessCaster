@@ -20,9 +20,10 @@ answering with silence.
 """
 
 import diagnostics
+import web
 
 from . import check as checks
-from . import http, indexfile, signing
+from . import indexfile, signing
 
 # Short on purpose: this runs in the background at startup and nothing waits
 # on it, so a server that is slow to answer is given up on rather than kept
@@ -37,7 +38,7 @@ def fetch(url, cap=indexfile.MAX_BYTES):
     """Read a small file, or None for every failure, so the caller has one
     case to handle rather than a taxonomy it would only ever log."""
     try:
-        with http.opened(url, TIMEOUT) as response:
+        with web.opened(url, TIMEOUT) as response:
             # The declared length is checked first where there is one, so an
             # oversized file is refused before it is read at all. It is only a
             # claim, which is why the read below is capped too.

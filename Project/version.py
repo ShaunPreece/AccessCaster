@@ -4,7 +4,7 @@
 (not per build, not per commit). Everything that shows or stamps a version reads from
 here so there is exactly one number to change:
   - the app:       the Help page's credit line (`native/help_section`), the update check
-                   (`app_updates`) and the User-Agent of every update request (`selfupdate/http`).
+                   (`app_updates`) and the User-Agent of every web request (`web`).
   - the build:     ProjectBuilds/build_installer.ps1 reads it and names the installer
                    Output/AccessCasterSetup-v<version>.exe.
   - the installer: ProjectBuilds/installer.iss takes it as the /DAppVer define and sets

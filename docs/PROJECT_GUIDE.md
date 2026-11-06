@@ -988,10 +988,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   that string, compared WHOLE against the certificate's O= field (`subject_organisation`), never
   searched for in the subject, and it is the whole of what makes the download safe to run.
 - **THE APP REACHES THE INTERNET IN TWO PLACES AND NO OTHER: this driver download, from its button
-  only, and its own update check and download (`selfupdate/http.py`), to
-  `updates.slightperception.com` only.** Everything else talks to the USB cable.
-  `test_driver_install.py` asserts it by scanning `Project/` for a `urlopen`. The README
-  and Help list both, because somebody who chose this app partly for what it does not do deserves
+  only, and its own update check and download, to `updates.slightperception.com` only.**
+  Everything else talks to the USB cable. Both go through `web.opened`, the only `urlopen`;
+  `test_driver_install.py` asserts both by scanning `Project/`. The README and Help list both, because somebody who chose this app partly for what it does not do deserves
   to be told exactly what it contacts. A third caller means changing all three together.
 - **CHECK THE SIGNATURE, NEVER A HASH.** The URL carries no version and RODE replace the file in
   place, so a pinned hash refuses every release they ship, which trains people to skip the check.

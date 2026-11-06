@@ -26,7 +26,8 @@ What goes where:
   downloader.py the installer download and the proof it is the right file
   restart.py    being started again by the installer
   phrases.py    every sentence the feature says
-  http.py       the one opener, with our own User-Agent
+
+The requests go through `web.opened`, beside this package, with the app's own User-Agent.
 
 When to ask, how to tell the user, and the hand-off to the installer are
 `app_updates.py`, beside this package.

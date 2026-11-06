@@ -16,7 +16,8 @@ tests the thing it is about to run.
 import hashlib
 import os
 
-from . import http
+import web
+
 from .checker import log
 
 # The installer is on disk and its SHA-256 matches the index.
@@ -152,7 +153,7 @@ def _ready_unless_stopped(target, watcher):
 
 
 def _open_url(url):
-    return http.opened(url, TIMEOUT)
+    return web.opened(url, TIMEOUT)
 
 
 def _write_to(url, path, open_url, watcher):

@@ -114,18 +114,25 @@ check("and points at the manual route for a repair",
 
 print("\nWHAT THE APP CONTACTS, AND NOTHING ELSE")
 # The README and Help both list what reaches the internet: RODE's driver download, on a button
-# press, and AccessCaster's own update check and download. Asserted rather than trusted: no other
-# module fetches anything. Matched on the ACT of fetching a URL rather than on the import.
+# press, and AccessCaster's own update check and download. Asserted rather than trusted: only
+# `web` fetches a URL, and only those two ask it to. Matched on the ACT of fetching, not the import.
 proj = _bootstrap.PROJECT
-callers = []
-for path in glob.glob(os.path.join(proj, "**", "*.py"), recursive=True):
-    with open(path, encoding="utf-8") as source:
-        for line in source:
-            if not re.search(r"urlopen\s*\(|urlretrieve\s*\(", line):
-                continue
-            callers.append(os.path.relpath(path, proj).replace(os.sep, "/"))
-check("only the driver download and the update opener reach beyond this computer",
-      sorted(set(callers)), ["driver_install.py", "selfupdate/http.py"])
+
+
+def modules_matching(pattern):
+    found = set()
+    for path in glob.glob(os.path.join(proj, "**", "*.py"), recursive=True):
+        with open(path, encoding="utf-8") as source:
+            if any(re.search(pattern, line) for line in source):
+                found.add(os.path.relpath(path, proj).replace(os.sep, "/"))
+    return sorted(found)
+
+
+check("only the web module fetches a URL", modules_matching(r"urlopen\s*\(|urlretrieve\s*\("),
+      ["web.py"])
+check("and only the driver download and the update ask it to",
+      modules_matching(r"\bweb\.opened\s*\("),
+      ["driver_install.py", "selfupdate/checker.py", "selfupdate/downloader.py"])
 check("and the update opener is only ever pointed at our own update server",
       update_check.ROOT, "https://updates.slightperception.com/")
 
