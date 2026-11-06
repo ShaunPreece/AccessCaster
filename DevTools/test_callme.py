@@ -9,9 +9,7 @@ DevTools/probe_callme_live.py.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import callme
@@ -56,6 +54,8 @@ def hear(w, path, name, value):
     kind = KIND[type(value)]
     was = desk_model.apply_push(path, name, value, kind)
     w.apply(desk_live.Push(tuple(path), name, value, kind, None, was))
+
+
 DEFAULT_NAME = "RÃ\u0098DE-CallMe"      # "RØDE-CallMe" as the latin-1 decoder hands it over
 
 print("the answer record")

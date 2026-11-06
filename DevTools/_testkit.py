@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import struct
 from unittest import mock
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
@@ -122,6 +123,24 @@ def patched(*targets):
             for name, value in attrs.items():
                 stack.enter_context(mock.patch.object(owner, name, value))
         yield
+
+
+# Value blocks for `push`, one per value type, each in the desk's own encoding.
+def v_bool(on: bool) -> bytes:
+    return bytes([0x01, 0x01, 0x02 if on else 0x03])
+
+
+def v_int(value: int) -> bytes:
+    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
+
+
+def v_float(value: float) -> bytes:
+    return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", value)
+
+
+def v_str(text: str) -> bytes:
+    body = b"\x05" + text.encode() + b"\x00"
+    return bytes([0x01, len(body)]) + body
 
 
 def push(path, name: str, value_block: bytes) -> bytes:

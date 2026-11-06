@@ -19,45 +19,20 @@ import backups
 import profile_actions
 import show_actions
 import wx
+from _native_fakes import FakeFrame as BaseFrame, first_focusable
 from _testkit import check, check_in, check_true, patched
 from native import backup_dialogs, backups_section, dialogs
 
 app = wx.App()
 
 
-class FakeDesk:
-    def subscribe(self, fn):
-        self.listener = fn
-
-    def watch(self, names, fn):
-        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
-
-
-class FakeFrame:
+class FakeFrame(BaseFrame):
     def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
-        self.desk = FakeDesk()
-        self.said = []
+        super().__init__()
         self.rewritten = 0
-
-    def say(self, text, recent=False):
-        self.said.append(text)
 
     def desk_rewritten(self):
         self.rewritten += 1
-
-
-def first_focusable(window):
-    for child in window.GetChildren():
-        if isinstance(child, (wx.Panel, wx.StaticBox)):
-            found = first_focusable(child)
-            if found is not None:
-                return found
-        elif child.AcceptsFocus() and child.IsShown() and child.IsEnabled():
-            return child
-    return None
 
 
 def backup(name, kind="profile", pads=0, baseline=False, **values):
@@ -108,7 +83,7 @@ frame = FakeFrame()
 section = backups_section.BackupsSection(frame)
 page = section.page
 check("before a read the list says so", page.list.GetItems(), ["Reading the backups."])
-check("a desk read starts the first read", True, hasattr(frame.desk, "listener"))
+check_true("a desk read starts the first read", frame.desk.listener is not None)
 check("the backups follow the shows and the drive",
       [(names, fn.__self__._read.__self__) for names, fn in frame.desk.watched],
       [(set(show_actions.SHOW_STATE_PROPS), section)])

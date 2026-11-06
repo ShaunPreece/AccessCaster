@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import sys
 import time
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
 import announcer
@@ -24,11 +22,7 @@ import rcp_read
 import service
 import speech
 
-service.install_announcer_hooks()
-
 SAID: list[tuple[float, str]] = []
-_t0 = time.monotonic()
-speech.say = lambda text: SAID.append((time.monotonic() - _t0, text))
 
 
 def speak(text: str, enabled: bool) -> None:
@@ -40,6 +34,9 @@ def speak(text: str, enabled: bool) -> None:
 def main() -> int:
     secs = float(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1][0].isdigit() else 40.0
     do_speak = "--speak" in sys.argv
+    service.install_announcer_hooks()
+    started = time.monotonic()
+    speech.say = lambda text: SAID.append((time.monotonic() - started, text))
 
     # Read the desk once, which the desk model adopts, so the announcer can NAME channels rather
     # than say "Channel N".

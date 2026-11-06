@@ -135,13 +135,15 @@ after a session that moved code.
 | `version.py` | 485 | Version string, manually bumped, plus `HISTORY`, the release notes' only source. A correction to the help earns no entry there. |
 
 --------------------------------------------------------------------------------
-## DevTools/ (151 files; the ones worth knowing)
+## DevTools/ (152 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, takes the single-instance lock for a
 `*_live.py` run, and resolves `docs/` and the notes),
 `_redact.py` (`redact`: the property values never printed, saved or published, `desk_secrets`'
-secrets and what identifies a setup), `_testkit.py` (the offline harness, below) and `_desk.py`, for the scripts that drive a
+secrets and what identifies a setup), `_testkit.py` (the offline harness, below), `_native_fakes.py` (the main window, desk state,
+job dialog and text dialog the `test_native_*` suites build on, and `first_focusable`, where a
+dialog's focus lands) and `_desk.py`, for the scripts that drive a
 real desk:
 `service` (the app's service in this process, refused while AccessCaster holds the desk; `start`
 brings up its watchers, `announce` the announcer), `wait_for_job` (a background job,
@@ -193,7 +195,7 @@ itself off),
 `test_app_settings` (the export allow-list: **that this machine's state cannot leave in the
 file**, and that an import merges rather than replacing it),
 `test_pad_actions`, `test_pad_records`, `test_preview_writer` (live preview edits share one session, newest wins, never written to a pad not named Preview, nor an effect edit to a pad no effect object binds), `test_pad_restore_from_backup` (a backup's pads alone: its own pad folder, the extras cleared, nothing else written, another desk's backup refused), `test_pad_volume` (only a drive on the desk is taken for its pad volume, never a stick holding a `pads` folder, and the desk's letter waits until it reads), `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
-`test_restore_warnings`, `test_selfupdate` (the update scheme's rules, the signed check against a generated key, the download, the wording, and the job the window follows), `test_server_safety` (the `.bad` copy of a JSON file that will not parse, and Chat isolation's put-back), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
+`test_restore_warnings`, `test_selfupdate` (the update scheme's rules, the signed check against a generated key, the download, the wording, and the job the window follows), `test_service_safety` (the service's guards: the `.bad` copy of a JSON file that will not parse, the fader level write, a held pad released on exit, Chat isolation's put-back, a stopped auto gain, and a superseded announcer loop), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
 `test_devtools_helpers` (`_desk`'s device count, settled chain, job wait and stray counts, the live schemes test putting the mixes back after a failed read, the dead-property probe's restore, the bind probe's verdict, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
 did not take),
 `test_virtual_devices` (RODE's driver status block parsed as its tray reads it, and the spoken
@@ -241,8 +243,12 @@ process, which is what makes it valid for the `app` layer. Every trial proves th
 reading the new show uuid, so "no drop" can never be "no reset", and it stops dead on the first drop.
 **EACH TRIAL IS AN UNBACKED FACTORY RESET, so expendable desks only.** Result 3rd September 2026: 45
 resets, every layer clean.
+**`probe_import_drop.py` repeats a show import until the desk leaves the bus**, with `--delta`
+silent, reversible settings disturbed before each trial so every import has a known amount to
+rewrite, and the job's duration printed as the proof it did. `--via profile` runs the same trials
+through a profile restore. Quit AccessCaster first: it runs the app's service itself.
 
-**`test_fader_chains.py` covers the off-fader chain store and all three `_follow_chains` cases**
+**`test_fader_chains.py` covers the off-fader chain store and all three `faders.follow_chains` cases**
 (moved / left / returned), including a return that does not land being parked again. It mocks
 `channels.write_chain` and points `_paths.data_path` at a scratch file, so it never touches the
 user's real parked chains.

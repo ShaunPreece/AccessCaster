@@ -18,6 +18,7 @@ import model_tree
 import rcp_hid
 import rcp_read
 
+
 def service(start: bool = False, announce: bool = False):
     """Claim the desk for a script that drives it, and join the announcer to the app as the app does.
 
@@ -174,8 +175,9 @@ def advanced_processing(ch: int) -> bool:
     """Whether mic `ch`'s strip has advanced processing on, from a fresh dump."""
     entry = next(e for e in channels.active_ui_channels()
                  if e.get("kind") == "mic" and channels.mic_channel_number(e) == ch)
-    flags = rcp_read.values(rcp_read.read_model_stable(fresh=True), channels.CHAIN_ADVANCED_PROP)
-    return bool(flags[channels._strip_index(entry)])
+    return bool(rcp_read.keyed_value(rcp_read.read_model_stable(fresh=True),
+                                     channels.proc_key(entry["name"]),
+                                     channels.CHAIN_ADVANCED_PROP))
 
 
 def put_chain_back(ch: int, chain: dict, advanced: bool) -> None:

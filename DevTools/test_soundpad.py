@@ -10,9 +10,7 @@ from __future__ import annotations
 import io
 import sys
 from contextlib import redirect_stdout
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import soundpad

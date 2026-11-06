@@ -9,14 +9,17 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
+import announcer
 import desk_live
 import desk_model
+import devices
 import encoder_hold
-from _testkit import check, push
-
-
-def v_bool(on: bool) -> bytes:
-    return bytes([0x01, 0x01, 0x02 if on else 0x03])
+import mute_solo
+import rcp_read
+import rcp_transfer
+import rode_app
+from _testkit import as_device, check, hold_desk, patched, push, v_bool
+from _testkit import hold as hold_value
 
 
 def watcher():
@@ -69,15 +72,6 @@ hold(w, 1.0)
 check("a channel button pressed again hands the encoder back", held, [])
 
 print("\nTHE HOLD'S WRITE TAKES THE MUTE FROM THE DESK MODEL")
-import announcer  # noqa: E402
-import devices  # noqa: E402
-import rcp_read  # noqa: E402
-import rcp_transfer  # noqa: E402
-import mute_solo  # noqa: E402
-import rode_app  # noqa: E402
-from _testkit import as_device, hold_desk, patched  # noqa: E402
-from _testkit import hold as hold_value  # noqa: E402
-
 reads, writes = [], []
 fakes = ((rcp_read, {"read_model_stable":
                      lambda fresh=False: reads.append(fresh) or desk_model.snapshot()}),

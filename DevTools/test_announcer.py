@@ -9,7 +9,6 @@ Run: python DevTools/test_announcer.py
 """
 from __future__ import annotations
 
-import struct
 import sys
 import time
 
@@ -32,6 +31,7 @@ import settings_file
 import speech
 import usb_audio
 from _testkit import addr, check, check_true, patched, push, where
+from _testkit import v_bool, v_float, v_int, v_str
 
 service.install_announcer_hooks()   # the mixer pads' quiet
 
@@ -43,23 +43,6 @@ devices.force_device(devices.PRO2)
 
 SPOKEN: list[str] = []
 speech.say = lambda text: SPOKEN.append(text)          # capture instead of speak
-
-
-def v_bool(on: bool) -> bytes:
-    return bytes([0x01, 0x01, 0x02 if on else 0x03])
-
-
-def v_int(value: int) -> bytes:
-    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
-
-
-def v_float(value: float) -> bytes:
-    return bytes([0x01, 0x09, 0x04]) + struct.pack("<d", value)
-
-
-def v_str(text: str) -> bytes:
-    body = b"\x05" + text.encode() + b"\x00"
-    return bytes([0x01, len(body)]) + body
 
 
 LAYOUT = [0, 7, 2, 3, 10, 11, 1, 8, 9, 9]      # USB 1 on strip 1, Mic 2 up on fader 7 (strip 6)
@@ -248,8 +231,6 @@ dump_slice = (b"\x04" + b"\x30" * 40 + rec[5:5 + int.from_bytes(rec[1:5], "littl
 said, _ = run([dump_slice], cold_cache=False)
 check("a model-dump slice is ignored", said, [])
 
-print("\nSPOKEN POSITIONS: IMMEDIATE, INTERRUPTING, NEVER STACKING")
-
 
 def xpoint_packet(source_code: int, output: int, level: float) -> bytes:
     """A pushed fader position: mixLevelWithAnchor on the cross-point selector for (source, output),
@@ -290,6 +271,8 @@ fader_hold = {"pending": None, "at": 0.0, "enc_down_at": 1.0, "enc_hold": False}
 run([state_packet("channelOutputMute", 6, True)], st=fader_hold, cold_cache=False)
 check("a virtual fader hold places the ring on that fader", fader_hold["enc_pos"],
       announcer._encoder_ring().index(("fader", 6)))
+
+print("\nSPOKEN POSITIONS: IMMEDIATE, INTERRUPTING, NEVER STACKING")
 
 
 def fresh_st():

@@ -18,25 +18,12 @@ import _a11y
 import _testkit
 import shortcuts
 import wx
+from _native_fakes import FakeFrame
 from _testkit import check, check_in, check_true, patched
 from native import app_settings_section, help_section, shortcuts_page
 from version import __version__
 
 app = wx.App()
-
-
-class FakeFrame:
-    def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
-        self.said = []
-
-    def say(self, text, recent=False):
-        self.said.append(text)
-
-    def reply(self, source, reply, recent=False):
-        self.said.append(reply.get("message"))
 
 
 MODIFIERS = [{"id": "ctrl", "label": "Ctrl"}, {"id": "alt", "label": "Alt"},

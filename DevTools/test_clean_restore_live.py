@@ -23,11 +23,9 @@ Usage: python DevTools/test_clean_restore_live.py --yes [--keep-profile]
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _desk
 import channel_actions

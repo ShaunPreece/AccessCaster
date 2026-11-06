@@ -20,10 +20,9 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import _bootstrap
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
+REPO = pathlib.Path(_bootstrap.REPO)
 CODEMAP = pathlib.Path(_bootstrap.docs_path("CodeMap.md"))
 
 TABLE_ROW = re.compile(r"^(\|\s*`([A-Za-z_][\w./]*\.(?:py|js|ps1|html|css))`\s*\|\s*)(\d+)(\s*\|)")
@@ -43,12 +42,9 @@ def line_count(path: pathlib.Path) -> int:
 
 
 def find_source(name: str) -> pathlib.Path | None:
-    """The file a table row names, looked for where the map says things live."""
-    for folder in ("Project",):
-        p = REPO / folder / name
-        if p.exists():
-            return p
-    return None
+    """The file a table row names, in Project/, where the file table's rows live."""
+    p = REPO / "Project" / name
+    return p if p.exists() else None
 
 
 def rewrite(text: str) -> tuple[str, list]:

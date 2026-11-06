@@ -24,7 +24,7 @@ import fake_model
 import rcp_hid
 import rcp_read
 import rcp_transfer
-from _testkit import check, check_true, patched, push
+from _testkit import check, check_true, patched, push, v_int
 from fake_model import node
 
 FADER, POT = "FADER", "POT"
@@ -46,14 +46,6 @@ def dump(mute1=False, source2=5, bank=0, selected=-1, mon=0.5):
         node("SYSTEM", {"systemChannelSelected": selected, "systemFirmwareVersion": "1.7.7"}),
         node("SOUNDPADS", {}, [node("PAD", {"padActive": False}) for _ in range(2)]),
     ])
-
-
-def v_bool(on: bool) -> bytes:
-    return bytes([0x01, 0x01, 0x02 if on else 0x03])
-
-
-def v_int(value: int) -> bytes:
-    return bytes([0x01, 0x05, 0x01]) + int(value).to_bytes(4, "little", signed=True)
 
 
 def adopt(blob, token=None):

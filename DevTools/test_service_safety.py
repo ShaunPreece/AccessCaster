@@ -12,7 +12,7 @@ THE RULES THIS PINS:
 
 No device and no speech: the desk calls are stubbed.
 
-    python DevTools/test_server_safety.py
+    python DevTools/test_service_safety.py
 """
 from __future__ import annotations
 
@@ -20,9 +20,7 @@ import os
 import sys
 import tempfile
 import time
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
 import announcer

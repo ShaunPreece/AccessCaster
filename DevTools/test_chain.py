@@ -16,6 +16,10 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import channels as c
 import devices
+import faders
+import mic_presets
+import rcp_read
+import rcp_transfer
 from _testkit import as_device, check, check_in, hold_desk, patched
 
 # PIN THE DESK AND ITS FADER LAYOUT. `proc_key` resolves a channel to the strip it is sitting
@@ -114,11 +118,6 @@ check("all three Q values ARE in the chain, because Q is independent and writabl
 # chain on its old strip and hands USB 1 a mic voicing with the gate on. No device: the layout read,
 # the chain read/write and the fader write are all stubbed.
 # ---------------------------------------------------------------------------------------------
-import faders  # noqa: E402
-import mic_presets  # noqa: E402
-import rcp_read  # noqa: E402
-import rcp_transfer  # noqa: E402
-
 PRO2_DEFAULT = list(devices.PRO2_FADERS.default_vector)   # (0,1,2,3,10,11,7,8,9)
 # A layout in real use: USB 1 (code 7) pulled onto strip 1 so a real fader controls the PC audio,
 # which pushes Mic 2 (code 1) down to strip 6. A reset from here sends USB 1 to strip 6, where Mic

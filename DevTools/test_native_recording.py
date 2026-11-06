@@ -19,30 +19,11 @@ import announcer
 import recorder
 import recording
 import wx
+from _native_fakes import FakeFrame, FakeJob
 from _testkit import check, check_in, check_true, patched
 from native import recording_section
 
 app = wx.App()
-
-
-class FakeDesk:
-    def subscribe(self, fn):
-        self.listener = fn
-
-
-class FakeFrame:
-    def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
-        self.desk = FakeDesk()
-        self.said = []
-
-    def say(self, text, recent=False):
-        self.said.append(text)
-
-    def reply(self, source, reply, recent=False):
-        self.said.append(reply.get("message"))
 
 
 def take(uid, name, duration="2 minutes", when="Monday at 10:00"):
@@ -304,31 +285,17 @@ check("a desk whose storage cannot be changed says so", frame.said[-1],
       recording_section.NO_STORAGE_WRITE)
 
 
-class FakeJob:
-    def __init__(self, _parent, title, _text, begin, stop, closable=True):
-        self.title, self.begin = title, begin
-        self.result = None
+class EraseJob(FakeJob):
+    def __init__(self, parent, title, text, begin, stop, closable=True):
+        super().__init__(parent, title, text, begin, stop, closable)
         check("the erase cannot be closed half way", (stop, closable), (None, False))
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc):
-        return False
-
-    def run(self):
-        self.begin(self)
-        return self.result
-
-    def finish(self, result):
-        self.result = result
 
 
 reports = []
 section.show(payload(), "")
 reads.clear()
 with patched(sync, confirm, (recording_section, {
-        "JobDialog": FakeJob, "report": lambda _p, titles, reply: reports.append(
+        "JobDialog": EraseJob, "report": lambda _p, titles, reply: reports.append(
             titles[0] if reply.get("ok") else titles[1])}),
         (recording, {"action_storage_erase": lambda index: calls.append(("erase", index))
                   or {"ok": True, "recorder": payload(), "message": "Erased."}})):

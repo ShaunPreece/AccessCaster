@@ -36,11 +36,8 @@ Usage: python DevTools/announcer_echo_check.py
 """
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import announcer
 import channel_actions

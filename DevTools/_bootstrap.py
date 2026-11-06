@@ -127,33 +127,3 @@ def require_expendable_desk(what: str) -> None:
             f"There is no undo, and it is wrong for a desk anybody works on.\n"
             f"Back the unit up first, then pass {EXPENDABLE_FLAG} if you meant it.\n\n")
         raise SystemExit(2)
-
-
-def test_wav(name: str = "accesscaster-test-tone.wav", seconds: float = 0.5) -> str:
-    """A small WAV to upload in a round-trip test, GENERATED rather than shipped.
-
-    THE REPO CARRIES NO AUDIO - RODE's factory pad sounds are theirs, and the unit restores its own
-    on a factory reset - so a test that needs a file makes one. A generated tone is the better
-    fixture anyway: it is tiny, its contents are known, and it cannot be confused with a real pad
-    sound if it is ever left on a desk.
-
-    Written once into the temp dir and reused. Mono 22.05 kHz 16-bit, which is well inside what the
-    pad player accepts (see pad_actions.action_add_sound: every rate and depth tried plays natively).
-    """
-    import math
-    import struct
-    import wave
-
-    path = os.path.join(tempfile.gettempdir(), name)
-    if os.path.isfile(path) and os.path.getsize(path) > 0:
-        return path
-    rate, freq = 22050, 440.0
-    frames = bytearray()
-    for n in range(int(rate * seconds)):
-        frames += struct.pack("<h", int(0.3 * 32767 * math.sin(2 * math.pi * freq * n / rate)))
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(bytes(frames))
-    return path

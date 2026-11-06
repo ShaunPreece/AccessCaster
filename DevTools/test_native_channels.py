@@ -14,35 +14,24 @@ import _testkit
 import channels
 import desk_labels
 import wx
+from _native_fakes import FakeDesk as BaseDesk, FakeFrame as BaseFrame
 from _testkit import check, check_true
 from native import channels_section
 
 app = wx.App()
 
 
-class FakeDesk:
+class FakeDesk(BaseDesk):
     def __init__(self, data):
+        super().__init__()
         self.channels = data
 
-    def subscribe(self, fn):
-        self.listener = fn
 
-
-class FakeFrame:
+class FakeFrame(BaseFrame):
     def __init__(self, data):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        super().__init__(FakeDesk(data))
         wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
         self.tree = wx.TreeCtrl(self.window)
-        self.desk = FakeDesk(data)
-        self.said = []
-
-    def say(self, text, recent=False):
-        self.said.append(text)
-
-    def reply(self, source, reply, recent=False):
-        self.said.append(reply.get("message"))
 
     def pages_changed(self, section):
         pass
@@ -89,6 +78,7 @@ first.book.SetSelection(dyn)
 check_true("a tab the user moves to is built", first.tabs[dyn].built)
 check_true("its controls are made", len(first.tabs[dyn].controls) > 0)
 check("the chosen tab is remembered", section.tab_key, "dyn")
+
 
 def native_change(page, new):
     """A change as the native tab control makes it on Windows: PAGE_CHANGING names the old tab."""

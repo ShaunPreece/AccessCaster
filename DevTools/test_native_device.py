@@ -18,6 +18,7 @@ import device_page
 import desk_labels
 import network
 import wx
+from _native_fakes import FakeFrame as BaseFrame, FakeJob
 from _testkit import check, check_in, check_not_in, check_true
 from native import device_section, firmware_dialog, wifi_dialogs
 from native.firmware_dialog import FirmwareDialog
@@ -25,31 +26,13 @@ from native.firmware_dialog import FirmwareDialog
 app = wx.App()
 
 
-class FakeDesk:
-    def subscribe(self, fn):
-        self.listener = fn
-
-    def watch(self, names, fn):
-        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
-
-
-class FakeFrame:
+class FakeFrame(BaseFrame):
     def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
-        self.desk = FakeDesk()
-        self.said = []
+        super().__init__()
         self.status = []
 
     def set_status(self, text):
         self.status.append(text)
-
-    def say(self, text, recent=False):
-        self.said.append(text)
-
-    def reply(self, source, reply, recent=False):
-        self.said.append(reply.get("message"))
 
 
 def overview(**values):
@@ -299,24 +282,6 @@ with wifi_dialogs.NetworksDialog(frame.window, [secured], "Found 1 network.") as
     check("choosing from the list gives its scan entry", pick.choice, secured)
 with wifi_dialogs.NetworksDialog(frame.window, [], "Found no networks.") as pick:
     check("with nothing found there is no list", pick.list, None)
-
-
-class FakeJob:
-    def __init__(self, _parent, _title, _text, begin, stop, closable=True):
-        self.begin, self.result = begin, None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc):
-        return False
-
-    def run(self):
-        self.begin(self)
-        return self.result
-
-    def finish(self, result):
-        self.result = result
 
 
 joins, reports = [], []

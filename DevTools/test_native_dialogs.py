@@ -21,21 +21,11 @@ import _a11y
 import _testkit
 import native
 import wx
+from _native_fakes import first_focusable
 from _testkit import check, check_true, patched
 from native import callme_section, dialogs, routing_mixes, shortcuts_page, update_dialogs
 
 app = wx.App()
-
-
-def first_focusable(window):
-    for child in window.GetChildren():
-        if isinstance(child, (wx.Panel, wx.StaticBox)):
-            found = first_focusable(child)
-            if found is not None:
-                return found
-        elif child.AcceptsFocus() and child.IsShown() and child.IsEnabled():
-            return child
-    return None
 
 
 modules = [importlib.import_module(f"native.{info.name}")

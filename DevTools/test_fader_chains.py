@@ -34,7 +34,7 @@ import channels
 import device_page
 import faders
 import rcp_read
-from _testkit import check, check_in
+from _testkit import check, check_in, patched
 
 
 def chain(tag):
@@ -82,25 +82,28 @@ def fake_write_chain(strip_idx, desired, current=None, delay=0.02):
             "props": []}
 
 
-def install(before):
-    """Point the chain and fader calls at the fakes and seed the desk from a pre-write snapshot."""
+def desk(before, write_chain=fake_write_chain):
+    """`patched` targets pointing the chain and fader calls at the fakes, with the desk seeded
+    from a pre-write snapshot."""
     WRITES.clear()
     STATE.clear()
-    STATE.update({i: c for i, c in enumerate(before)})
-    channels.write_chain = fake_write_chain
-    channels.read_chains = lambda blob=None, strips=None: [STATE.get(i) for i in range(len(before))]
-    channels.chain_diff = lambda desired, current: [] if desired == current else ["differs"]
-    rcp_read.read_model = lambda *a, **k: b""
-    faders.active_faders = lambda: FakeSpec()
-    faders.channel_name = lambda code, spec=None: f"Ch{code}"
-    device_page.hardware_id = lambda: "DESK-TEST"
+    STATE.update(enumerate(before))
+    return ((channels, {"write_chain": write_chain,
+                        "read_chains": lambda blob=None, strips=None: [STATE.get(i)
+                                                                       for i in range(len(before))],
+                        "chain_diff": lambda desired, current: (
+                            [] if desired == current else ["differs"])}),
+            (rcp_read, {"read_model": lambda *a, **k: b""}),
+            (faders, {"active_faders": lambda: FakeSpec(),
+                      "channel_name": lambda code, spec=None: f"Ch{code}"}),
+            (device_page, {"hardware_id": lambda: "DESK-TEST"}))
 
 
 print()
 print("follow_chains: a channel that MOVES strip")
 before = [chain(0), chain(1), chain(2)]
-install(before)
-note = faders.follow_chains([0, 1, 2], [1, 0, 2], before)
+with patched(*desk(before)):
+    note = faders.follow_chains([0, 1, 2], [1, 0, 2], before)
 check("both chains travel with their channels", sorted(WRITES)[:2],
       sorted([(0, chain(1)), (1, chain(0))])[:2])
 check_in("and the note says what followed", "followed", note)
@@ -108,8 +111,8 @@ check_in("and the note says what followed", "followed", note)
 print()
 print("follow_chains: a channel that LEAVES the layout")
 before = [chain(0), chain(1), chain(2)]
-install(before)
-note = faders.follow_chains([0, 1, 2], [0, 7, 2], before)
+with patched(*desk(before)):
+    note = faders.follow_chains([0, 1, 2], [0, 7, 2], before)
 check("the departing channel's chain is parked", channels._parked_load(channels._ORPHAN_FILE)
       .get("DESK-TEST", {}).get("1"), chain(1))
 check_in("and the user is told it is kept, not lost", "comes back", note)
@@ -119,8 +122,8 @@ check_in("the note is about PROCESSING, not the layout (reported separately)",
 print()
 print("follow_chains: a channel that RETURNS from off-fader")
 before = [chain(0), chain(5), chain(2)]         # strip 1 holds a STRANGER's voicing
-install(before)
-note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
+with patched(*desk(before)):
+    note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
 check("its own parked chain is written back onto the strip it landed on",
       STATE[1], chain(1))
 check("and it is NOT left on the previous occupant's voicing", STATE[1] == chain(5), False)
@@ -130,8 +133,8 @@ check_in("the note says the channel got its processing back", "got its own proce
 print()
 print("follow_chains: a channel returns with NOTHING parked")
 before = [chain(0), chain(5), chain(2)]
-install(before)
-note = faders.follow_chains([0, 7, 2], [0, 4, 2], before)
+with patched(*desk(before)):
+    note = faders.follow_chains([0, 7, 2], [0, 4, 2], before)
 check("nothing is written for it (we have no chain to write)",
       [w for w in WRITES if w[0] == 1], [])
 check_in("but the user is TOLD it is on whatever was there", "no stored processing", note)
@@ -139,11 +142,17 @@ check_in("but the user is TOLD it is on whatever was there", "no stored processi
 print()
 print("follow_chains: a return that does not land is parked again")
 before = [chain(0), chain(5), chain(2)]
-install(before)
 channels.park_chain("DESK-TEST", 1, chain(1))
-channels.write_chain = lambda strip_idx, desired, current=None, delay=0.02: (
-    WRITES.append((strip_idx, desired)) or {"written": 0, "props": []})   # write silently does nothing
-note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
+
+
+def silent_write(strip_idx, desired, current=None, delay=0.02):
+    """A chain write the desk takes and does nothing with."""
+    WRITES.append((strip_idx, desired))
+    return {"written": 0, "props": []}
+
+
+with patched(*desk(before, write_chain=silent_write)):
+    note = faders.follow_chains([0, 7, 2], [0, 1, 2], before)
 check_in("the failure is reported, not swallowed", "warning", note)
 check("and the chain is parked again rather than dropped",
       channels.take_chain("DESK-TEST", 1), chain(1))

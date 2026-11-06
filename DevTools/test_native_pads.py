@@ -22,6 +22,8 @@ import pad_actions
 import profile_actions
 import soundpad
 import wx
+from _native_fakes import FakeDesk as BaseDesk, FakeFrame as BaseFrame, FakeJob
+from _native_fakes import first_focusable, text_dialog
 from _testkit import as_device, check, check_in, check_true, patched
 from native import dialogs, pad_dialogs, pad_fx, pad_maint, pads_section
 
@@ -58,48 +60,21 @@ def model_with(pads, **values):
     return model
 
 
-class FakeDesk:
+class FakeDesk(BaseDesk):
     channels = {"channels": [{"name": "Mic1", "label": "Mic 1", "kind": "mic"},
                              {"name": "Mic2", "label": "Mic 2", "kind": "mic"},
                              {"name": "USB1", "label": "USB 1", "kind": "line"}]}
 
-    def subscribe(self, fn):
-        self.listener = fn
 
-    def watch(self, names, fn):
-        self.watched = getattr(self, "watched", []) + [(set(names), fn)]
-
-
-class FakeFrame:
+class FakeFrame(BaseFrame):
     def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        super().__init__(FakeDesk())
         wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
         self.tree = wx.TreeCtrl(self.window)
-        self.desk = FakeDesk()
-        self.said = []
         self.changed = 0
-
-    def say(self, text, recent=False):
-        self.said.append(text)
 
     def pages_changed(self, _section):
         self.changed += 1
-
-    def open_web_page(self, _route):
-        pass
-
-
-def first_focusable(window):
-    for child in window.GetChildren():
-        if isinstance(child, (wx.Panel, wx.StaticBox)):
-            found = first_focusable(child)
-            if found is not None:
-                return found
-        elif child.AcceptsFocus() and child.IsShown() and child.IsEnabled():
-            return child
-    return None
 
 
 def controls_named(dialog, label):
@@ -293,38 +268,13 @@ with as_device(devices.PRO2):
     check("the saved effects are listed", fx.saved.GetStrings(), ["Mine"])
     started, jobs, shown = [], [], []
 
-    class Job:
+    class Job(FakeJob):
         """The wait dialog: runs its begin, which the patched call answers at once."""
-        def __init__(self, _parent, title, _text, begin, **kwargs):
-            jobs.append((title, kwargs.get("closable")))
-            self.begin, self.result = begin, None
+        def __init__(self, parent, title, text, begin, **options):
+            super().__init__(parent, title, text, begin, **options)
+            jobs.append((title, self.closable))
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            pass
-
-        def finish(self, result):
-            self.result = result
-
-        def run(self):
-            self.begin(self)
-            return self.result
-
-    class Result:
-        def __init__(self, _parent, title, text, *_a, **_k):
-            shown.append((title, text))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            pass
-
-        def ShowModal(self):
-            return wx.ID_OK
-
+    Result = text_dialog(shown)
     section.show(model)
     with patched((pad_fx, {"JobDialog": Job, "TextDialog": Result,
                            "call": lambda _o, fn, *a, done=None: started.append((fn, a))
@@ -418,21 +368,7 @@ with as_device(devices.PRO2):
     check_in("the question says how long it can take", "up to 4 minutes", questions[0])
 
     shown = []
-
-    class Result:
-        def __init__(self, _parent, title, text, *_a, **_k):
-            shown.append((title, text))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            pass
-
-        def ShowModal(self):
-            return wx.ID_OK
-
-    with patched((dialogs, {"TextDialog": Result})):
+    with patched((dialogs, {"TextDialog": text_dialog(shown)})):
         maint._finished(maint.restore_backup, {"reply": {"ok": True, "message": "Back."}},
                         ("Pads restored", "Pads not restored"))
         maint._finished(maint.restore_backup, {"reply": {"ok": False, "message": "No."}},

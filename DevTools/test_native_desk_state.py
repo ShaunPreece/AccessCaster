@@ -107,6 +107,7 @@ with as_device(devices.PRO2):
     check_true("and still rebuilds the window", store._rebuild is not None)
     watcher.stop()
 
+
 # FollowDesk: one read once a burst of pushes has stopped, and none while a dialog is open.
 class _Desk:
     def watch(self, names, fn):

@@ -182,13 +182,7 @@ def run_job(start_result):
     """Start a command and wait for the one job to finish, then return its final status."""
     if not start_result.get("ok"):
         return start_result                      # refused before the job ever started
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        st = show_actions.show_job_status()
-        if st.get("done"):
-            return st
-        time.sleep(0.02)
-    raise AssertionError("the job never finished")
+    return wait_for_job(show_actions.show_job_status, 20, 0.02)
 
 
 def reset_desk():
@@ -450,9 +444,7 @@ busy = show_actions.action_show_import(1)
 check("a second command is refused while one runs", busy["ok"], False)
 check_in("and says why", "already running", busy["message"])
 _held.set()
-_deadline = time.monotonic() + 10
-while time.monotonic() < _deadline and show_actions._show_job.busy():
-    time.sleep(0.02)
+wait_for_job(show_actions.show_job_status, 10, 0.02)
 check("and the held job releases it again", show_actions._show_job.busy(), False)
 
 print("the write gate")

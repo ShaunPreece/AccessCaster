@@ -34,7 +34,6 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # puts Project/ on sys.path, and finds the notes
 import channels
 import desk_firmware
@@ -45,6 +44,7 @@ import rcp_read
 import rcp_transfer
 
 REPO = Path(__file__).resolve().parent.parent
+
 
 # DEVICE-SCOPED for the same reason as PROPERTY_COVERAGE: this report is built on
 # pc.read_property_list(), which carries the per-desk occurrence counts. Reuses that module's slug so
@@ -264,8 +264,9 @@ RESTORED_BY = {
     "padMixerBackChannelUsb1Comms": "soundpad.restore_pads -> set_back_channel_member.",
     "padMixerBackChannelUsb2Main": "soundpad.restore_pads -> set_back_channel_member.",
     # --- recorded for reference, deliberately never written back ---------------------------
-    "wifiSSID": "SAVE ONLY: recorded so a profile says which network the desk was on. Joining a "
-                "network is not a write we have decoded, and the PSK must never be stored.",
+    "wifiSSID": "SAVE ONLY: recorded so a profile says which network the desk was on. Rejoining "
+                "needs the PSK, which a profile must never store, and a write to wifiSSID drops "
+                "the stored password, so restoring the name alone would leave the desk unjoined.",
     "wifiIpAddress": "SAVE ONLY: reference only; the address is assigned by the network.",
     "systemFirmwareVersion": "SAVE ONLY: stamped so a restore can be judged against the firmware "
                              "it was taken from.",
@@ -303,6 +304,7 @@ def restored_by(name: str) -> str:
             return how
     return ""
 
+
 # Every property the app can WRITE but a profile does not save, with a verdict. Anything writable
 # and unsaved that is not listed here fails the run, so a new writable setting cannot be added to
 # the app without someone deciding whether a profile should carry it.
@@ -323,7 +325,7 @@ NOT_SAVED = {
     # of them is a factory reset: a profile that "restored" it would wipe the desk it was restoring.
     "showControlExport": ("ok", "A COMMAND: 'back the desk up now'. It self-clears, and a backup "
                                 "is an event rather than a setting, so there is nothing to put "
-                                "back. Offered as a button on the Profiles page instead."),
+                                "back. Offered as 'Back up the desk now' on the Backups page instead."),
     "showControlImport": ("ok", "A COMMAND taking a show's uid: 'load this backup'. Restoring a "
                                 "number here would replace the whole desk with whatever backup "
                                 "happened to sit at that position, which is the opposite of what "
@@ -356,12 +358,12 @@ NOT_SAVED = {
     "btVisible": ("ok", "Bluetooth discoverability. It IS writable, and that is why the "
                         "verdict has to be deliberate: it is a momentary state you turn on to pair "
                         "a phone, so restoring a saved True would silently advertise the desk to "
-                        "the room. Turned on from the Wireless connections tab when it is wanted."),
-    "wifiPSK": ("ok", "THE WIFI PASSWORD, and the rule is absolute: it stays out of profiles, the "
-                      "API, the browser and every log line. It is READABLE off the desk, which is "
-                      "exactly why a profile must not carry it - a backup file on the PC would be "
-                      "a plaintext copy of the user's network key. wifiSSID is not saved either, "
-                      "since an SSID with no key restores nothing usable."),
+                        "the room. Turned on from the Wireless connections page when it is wanted."),
+    "wifiPSK": ("ok", "THE WIFI PASSWORD, and the rule is absolute: it stays out of profiles, "
+                      "replies and every log line. It is READABLE off the desk, which is exactly "
+                      "why a profile must not carry it - a backup file on the PC would be a "
+                      "plaintext copy of the user's network key. wifiSSID is saved for reference "
+                      "only, since an SSID with no key restores nothing usable."),
     # ---- SIP / CallMe: only meaningful during a call, and several hold credentials ---------
     "padSIPCallSlot": ("ok", "CallMe pad plumbing; set by the create path from the pad's type."),
     "padSIPPhoneBookEntry": ("ok", "CallMe phone-book link; SIP-only and credential-adjacent."),

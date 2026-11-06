@@ -6,6 +6,8 @@ Generates ProjectMemory/PROPERTY_COVERAGE_<DESK>.md - the THIRD yardstick alongs
   python DevTools/property_coverage.py            # regenerate the markdown
   python DevTools/property_coverage.py --check     # print the summary only, write nothing
 
+Either way it exits 1 if a property matches no rule, so a new firmware's names cannot go unjudged.
+
 NO DEVICE NEEDED and nothing is written to hardware: this reads the generated
 docs/PROPERTY_LIST_<DESK>.md and greps our source. Re-run it whenever that list or the code
 changes; the file it writes is generated, so edit THIS script, never the markdown.
@@ -26,7 +28,6 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # puts Project/ on sys.path, and finds docs/ and the notes
 
 REPO = Path(__file__).resolve().parent.parent
@@ -50,6 +51,7 @@ def list_path(slug: str | None = None) -> Path:
 
 def out_path(slug: str | None = None) -> Path:
     return Path(_bootstrap.notes_path("ProjectMemory", f"PROPERTY_COVERAGE_{slug or _slug()}.md"))
+
 
 # The app's own surface. DevTools scripts are scanned separately and reported apart: a property only
 # a dev script has ever touched is NOT a shipped feature.
@@ -316,20 +318,19 @@ RULES: list[tuple[str, str, str, str]] = [
     (r"^streamerXPreset(Created|Name)$", "chain gap", "low",
      "Per-strip but Streamer X naming; expected irrelevant to Pro II/Duo, confirm and dismiss."),
     (r"^(channelListenSource|channelTalkbackEnable)$", "live state", "med",
-     "Per-strip LIVE STATE, not chain. Phase 2 shows whether the RODE app moves it on a fader drag; "
-     "do not guess."),
+     "Per-strip LIVE STATE, not chain. Whether the RODE app moves it on a fader drag is not "
+     "established, so it stays out of the chain set; do not guess."),
 
     (r"^duckerDepth$", "candidate feature", "med",
-     "Auto-duck depth. Read ad hoc during the bed-gating investigation, never exposed as a control."),
+     "Auto-duck depth. Never exposed as a control."),
 
     # ---- metering and physical control position: the accessibility headline --------------
     (r"^(meterLevel[LR]|meterPeak[LR]|meterStereo|broadcastMeters|assignableMeterSource)$",
      "live state", "-",
-     "METER VALUES: CLOSED as unavailable over the control protocol. Phase 1 saw nothing "
-     "pushed into a live mic; phase 2 saw nothing with the RODE app connected (it sends ONE record, "
-     "its dump trigger, in 37 s - USB capture), and nothing in Broadcast meter style either. The "
-     "arrays are frozen placeholders. THE ROUTE IS WASAPI on the desk's USB AUDIO streams (main mix, "
-     "Chat, recording), which needs no protocol work: Never blind-write these."),
+     "METER VALUES: not available over the control protocol. Nothing is pushed into them with a "
+     "live mic, with the RODE app connected (it sends one record, its dump trigger) or in Broadcast "
+     "meter style: the arrays are frozen placeholders. The app meters through WASAPI on the desk's "
+     "USB audio streams (meters.py). Never blind-write these."),
     (r"^fader(Level|Max|Min)$", "internal/derived", "-",
      "NOT the physical fader position, whatever the name suggests: it does not move while fader 1 "
      "goes from top to halfway. The live position is mixLevelWithAnchor, which "
@@ -339,8 +340,8 @@ RULES: list[tuple[str, str, str, str]] = [
      "the live control position. Not tested in isolation"),
     (r"^(mutePressed|soloPressed|recButtonPressed|padButtonPressed|padButtonPreview|encoderSignal|"
      r"screenTouched|onOffSw)$", "live state", "med",
-     "Physical control PRESS events. The announcer already decodes the report-04 equivalents; these "
-     "are edges, not state (see the mute-state backlog item, which wants channelOutputMute polling)."),
+     "Physical control PRESS events. The announcer decodes the report-04 equivalents; these are "
+     "edges, not state."),
     (r"^tx", "live state", "high",
      "Wireless TX telemetry: battery, RSSI, signal quality, charging, pad, remote mute, device type. "
      "A flat wireless mic is invisible to a blind operator today."),
@@ -349,8 +350,8 @@ RULES: list[tuple[str, str, str, str]] = [
     (r"^(recordState|recordTimeMs|recordBytesPerSecond|requestRecordState|requestDropMarker|"
      r"lastRecordingID|requestDeleteUID|recordingTotalCount|recordingTotalDuration|"
      r"recordingProcessingBypass|recordingCompressionQuality)$", "candidate feature", "high",
-     "The recorder: start/stop, elapsed time, marker drop, raw-vs-processed, quality, recording list. "
-     "Spoken record state is a real gap; needs a phase-3 capture for start/stop ordering."),
+     "The recorder's elapsed time, total duration and last take. The app already starts, pauses "
+     "and stops the recorder, drops markers, and reads and speaks its state (recorder.py)."),
     (r"^storageVolume", "candidate feature", "high",
      "SD/USB storage x3: inserted, mounted, formatted, free, capacity, name, record destination, "
      "eject, erase. 'The card is nearly full' before a show, with no touchscreen."),
@@ -360,21 +361,25 @@ RULES: list[tuple[str, str, str, str]] = [
      "On-device player transport: state, position, progress, speed, fade in/out envelope, file path."),
 
     # ---- outputs, lockouts, shows -------------------------------------------------------
-    (r"^output(Mon|BT)", "candidate feature", "high",
-     "Monitor speaker and Bluetooth output LEVEL/MUTE (and fixed-level). We already write the "
-     "auto-mute toggles but never the level or the mute itself. HIGH because outputMonLevel is what "
-     "the encoder actually moves, it is PUSHED live, and a blind operator who nudges the encoder "
-     "has no other way to put the monitor level back from software."),
+    (r"^output(Mon|BT)", "live state", "low",
+     "Monitor speaker and Bluetooth output state the app does not show, such as whether an "
+     "auto-mute is engaged right now. The app writes the auto-mute switches and the monitor level "
+     "and mute."),
     (r"^(showControl|currentShow)", "candidate feature", "med",
-     "The device's own Shows: export, import, new-from-default, delete, lockout, progress, plus the "
-     "current show's name/UUID/icon. Compare against our home-grown Profiles BEFORE duplicating work."),
+     "The desk's own show machinery that the app does not drive: progress, lockout and updating "
+     "flags, the combined export-import, a muted new-from-default, and the current show's icon. "
+     "The app exports, imports, deletes and factory-resets shows through shows.py."),
 
     # ---- touchscreen takeover -----------------------------------------------------------
     (r"^bt", "candidate feature", "high",
-     "Bluetooth pairing: scan, pair, connect, disconnect, pair code, paired list. Touchscreen-only "
-     "today, so this is core to the replace-the-touchscreen plan."),
+     "Bluetooth. network.py reads the paired list and the scan list by names built at run time, "
+     "which this scan cannot see, and switches discoverability; pairing from the phone is the "
+     "route offered. Scanning, pairing, connecting and unpairing are not sent: the btDo commands "
+     "take an address in a format not yet seen."),
     (r"^wifi", "candidate feature", "high",
-     "Wifi scan and join. Touchscreen-only today. Values include the PSK: never log or commit them."),
+     "Wifi. network.py joins, scans and disconnects, and reads the numbered scan slots by names "
+     "built at run time, which this scan cannot see. Values include the PSK: never log or commit "
+     "them."),
     (r"^(ipAddress|subnetMask|primaryDns|secondaryDns|staticIpSet|wiredConnected|nonHTTPSInterface)$",
      "candidate feature", "low",
      "Network status and static IP configuration."),
@@ -422,7 +427,8 @@ RULES: list[tuple[str, str, str, str]] = [
     (r"^eqParamMode", "internal/derived", "-",
      "Global EQ editor mode (x1): app UI state, not device audio."),
     (r"^(update|download|osUpdateAvailable|appUpdateAvailable)", "internal/derived", "-",
-     "Firmware update machinery. Deliberately out of scope: we do not want a mis-write anywhere near it."),
+     "Firmware update requests the app does not send: the resets and the update over USB. "
+     "desk_firmware runs the desk's own network update; these wipe or reflash the desk."),
     (r"^build", "internal/derived", "-",
      "Firmware/GUI build strings and git SHAs; diagnostics only (we already read systemFirmwareVersion)."),
     (r"^(streamerX|activeStreamerXMixPreset|streammixmixLevel)", "internal/derived", "-",
@@ -434,10 +440,11 @@ RULES: list[tuple[str, str, str, str]] = [
      "Mirrors of the connected RODE app's own settings, not device state."),
     (r"^cell", "internal/derived", "-",
      "Cellular accessory support; not present on these desks."),
-    (r"^sip|^(dtmfMode|rodeCallQuality|receiveJitterBuffer|incoming|enableVideoStream|presenter|"
+    (r"^sip|^(autoReconnect|dtmfMode|rodeCallQuality|receiveJitterBuffer|incoming|enableVideoStream|presenter|"
      r"share(Anom|Resource))", "internal/derived", "low",
-     "CallMe/SIP telephony (41 properties) and its call-quality plumbing. Only matters if CallMe is "
-     "in use; several hold credentials, so never log or commit values."),
+     "CallMe/SIP telephony and its call-quality and reconnect plumbing (autoReconnect lives in "
+     "SIPADVANCED). Only matters if CallMe is in use; several hold credentials, so never log or "
+     "commit values."),
     (r"^padSIP", "internal/derived", "-",
      "Per-pad SIP call-slot flash/lock state; SIP-only."),
     (r"^systemBetaMode$|^systemSerialNumber$", "internal/derived", "-",
@@ -445,17 +452,20 @@ RULES: list[tuple[str, str, str, str]] = [
     (r"^icecast", "candidate feature", "med",
      "Streaming the mix to an Icecast server: address, port, mountpoint, username, password, "
      "bitrate, TLS, a connect command and its state. Not decoded or exercised. The password, like "
-     "the wifi key, must never reach a profile, a log or the browser."),
+     "the wifi key, must never reach a profile, a reply or a log."),
     (r"^proxy", "candidate feature", "low",
      "The desk's network proxy: on/off, address, port and credentials. Not decoded; a set-up step "
-     "few desks need, and the password must never reach a profile, a log or the browser."),
+     "few desks need, and the password must never reach a profile, a reply or a log."),
     (r"^(requestSignIn|requestSignOut|hasValidToken|userCode|userName|verificationURL|"
      r"verificationURLBare|responsePending|errorMessage)$", "candidate feature", "low",
      "The desk's RODE account sign-in: the commands, the code and address the touchscreen shows "
      "for finishing a sign-in in a browser, and the outcome. Not decoded; a one-off set-up step."),
-    (r"^cloudUpload(Request|Cancel)UID$", "internal/derived", "-",
-     "Commands to upload a recording to RODE's cloud or cancel one, which need the account above. "
-     "Out of scope with it."),
+    (r"^cloudUpload(Multitrack)?(Request|Cancel)UID$", "internal/derived", "-",
+     "Commands to upload a recording, or its multitrack, to RODE's cloud or cancel one, which need "
+     "the account above. Out of scope with it."),
+    (r"^encoderColour$", "live state", "-",
+     "The encoder ring's colour: derived live state that decays on a timer. It does not say what "
+     "the encoder is assigned to; presses around the ring do not move it."),
     (r"^show(Icon|StorageType)$", "internal/derived", "-",
      "Per-show metadata in the desk's show list. The app lists and restores shows by name and "
      "snapshot and needs neither."),
@@ -503,10 +513,10 @@ def build() -> tuple[str, dict]:
         tag, value, note = ("-", "-", "") if cov in ("read", "write", "read+write", "referenced") \
             else classify(name)
         sites = (entry or {}).get("sites") or (entry or {}).get("csites") or []
-        where = ", ".join(f"{f}:{l}" for f, l, _r in sites[:2])
+        where = ", ".join(f"{f}:{line}" for f, line, _r in sites[:2])
         if not where and name in dev and dev[name]["code"]:
             where = "DevTools only: " + ", ".join(
-                f"{f}:{l}" for f, l, _r in (dev[name]["sites"] or dev[name]["csites"])[:1])
+                f"{f}:{line}" for f, line, _r in (dev[name]["sites"] or dev[name]["csites"])[:1])
         rows.append(dict(name=name, type=ptype, occ=occ, cov=cov, tag=tag,
                          value=value, note=note, where=where))
 
@@ -554,7 +564,7 @@ def build() -> tuple[str, dict]:
             w(f"- **{tag}: {tags[tag]}**")
     w("")
     w("`chain gap` = per-strip properties missing from our chain set (blind spot 1). `live state` =")
-    w("changes as the desk is used, so it is read-only telemetry (phase 1). `candidate feature` =")
+    w("changes as the desk is used, so it is read-only telemetry. `candidate feature` =")
     w("something we could expose. `internal/derived` = device internals, other products, or")
     w("machinery we deliberately stay away from.")
     w("")
@@ -631,12 +641,13 @@ def main() -> None:
     print("classes: " + ", ".join(f"{k}={v}" for k, v in sorted(stats["tags"].items())))
     if unclassified:
         print(f"UNCLASSIFIED ({len(unclassified)}): {', '.join(unclassified)}")
-    if "--check" in sys.argv:
-        return
-    out = out_path()
-    out.write_text(text, encoding="utf-8")
-    # relpath, not relative_to: the notes are OUTSIDE this repo, so the answer starts with "..".
-    print(f"wrote {Path(os.path.relpath(out, REPO)).as_posix()} ({len(text.splitlines())} lines)")
+    if "--check" not in sys.argv:
+        out = out_path()
+        out.write_text(text, encoding="utf-8")
+        # relpath, not relative_to: the notes are OUTSIDE this repo, so the answer starts with "..".
+        print(f"wrote {Path(os.path.relpath(out, REPO)).as_posix()} ({len(text.splitlines())} lines)")
+    if unclassified:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

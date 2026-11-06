@@ -54,7 +54,9 @@ with as_device(devices.PRO2):
     check("everything goes in one session", sessions, ["open", "closed"])
     check("each batch re-asserts the pad and carries its edits", sent, [3, 2])
 
-    reads.clear(), sessions.clear(), sent.clear()
+    reads.clear()
+    sessions.clear()
+    sent.clear()
     with patched(*fakes(name="Applause")):
         try:
             soundpad.preview_write({(17, "reverbOn"): (True, "bool")}, more=dict)

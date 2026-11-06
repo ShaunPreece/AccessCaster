@@ -17,34 +17,23 @@ import _testkit
 import callme_actions
 import faders
 import wx
+from _native_fakes import FakeDesk as BaseDesk, FakeFrame as BaseFrame
 from _testkit import check, check_true, patched
 from native import callme_section
 
 app = wx.App()
 
 
-class FakeDesk:
+class FakeDesk(BaseDesk):
     def __init__(self):
+        super().__init__()
         self.faders = ON_FADER
 
-    def subscribe(self, fn):
-        self.listener = fn
 
-
-class FakeFrame:
+class FakeFrame(BaseFrame):
     def __init__(self):
-        self.window = wx.Frame(None)
-        self.host = wx.Panel(self.window)
-        self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
-        self.desk = FakeDesk()
-        self.said = []
+        super().__init__(FakeDesk())
         self.opened = []
-
-    def say(self, text, recent=False):
-        self.said.append(text)
-
-    def reply(self, source, reply, recent=False):
-        self.said.append(reply.get("message"))
 
     def go_to(self, route, key):
         self.opened.append((route, key))

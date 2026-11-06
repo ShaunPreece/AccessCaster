@@ -95,6 +95,8 @@ check("implausible number passes through", shows._describe_modified(42), "42")
 check("text passes through", shows._describe_modified("last Tuesday"), "last Tuesday")
 
 print("what each action takes")
+
+
 def params(fn):
     return list(inspect.signature(fn).parameters)
 

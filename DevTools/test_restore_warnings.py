@@ -34,16 +34,17 @@ import pad_shortcuts
 import profile_actions
 import profiles
 import rcp_read
-from _testkit import check
+from _testkit import check, patched
 
 devices.force_device(devices.PRO2)      # or the answer comes from whatever is on the USB port
 
 
 def warnings_for(prof, vec, levels):
     """Run the warning against a desk in a known state."""
-    faders.read_fader_vector = lambda blob=None, spec=None: list(vec)
-    rcp_read.values = lambda blob, name, kind=None: (list(levels) if name == "faderLevel" else [])
-    return backups._restore_silence_warnings(prof, b"a blob")
+    with patched((faders, {"read_fader_vector": lambda blob=None, spec=None: list(vec)}),
+                 (rcp_read, {"values": lambda blob, name, kind=None: (
+                     list(levels) if name == "faderLevel" else [])})):
+        return backups._restore_silence_warnings(prof, b"a blob")
 
 
 NORMAL = [0, 1, 2, 3, 10, 11, 7, 8, 9]          # Mic1-4, Bluetooth, pads, USB1, Chat, USB2
@@ -89,30 +90,32 @@ check("is silent", got, [])
 
 print("\nlevels follow the channels when the profile has none of its own")
 CALLS = []
-faders.follow_levels = lambda old, new, before, spec: CALLS.append((list(old), list(new),
-                                                                     list(before))) or ""
-faders.level_write_gate = lambda: None
-profiles.apply = lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}
-output_mixes.apply_matrix = lambda routing: {"ok": True, "applied": 0, "message": ""}
-pad_shortcuts.rearm_midi = lambda: None
-pad_shortcuts.pads_stale = lambda: None
-rcp_read.read_model = lambda *a, **k: b"blob"
-
 _seq = [list(NORMAL), list(SWAPPED)]          # before the write, then after it
-faders.read_fader_vector = lambda blob=None, spec=None: _seq.pop(0) if _seq else list(SWAPPED)
-rcp_read.values = lambda blob, name, kind=None: (list(FADER7_DOWN)
-                                                 if name == "faderLevel" else [])
+RESTORE_FAKES = (
+    (faders, {"follow_levels": lambda old, new, before, spec: CALLS.append(
+                  (list(old), list(new), list(before))) or "",
+              "level_write_gate": lambda: None,
+              "read_fader_vector": lambda blob=None, spec=None: (
+                  _seq.pop(0) if _seq else list(SWAPPED))}),
+    (profiles, {"apply": lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}}),
+    (output_mixes, {"apply_matrix": lambda routing: {"ok": True, "applied": 0, "message": ""}}),
+    (pad_shortcuts, {"rearm_midi": lambda: None, "pads_stale": lambda: None}),
+    (rcp_read, {"read_model": lambda *a, **k: b"blob",
+                "values": lambda blob, name, kind=None: (
+                    list(FADER7_DOWN) if name == "faderLevel" else [])}))
 
 
 def run_restore(prof):
     CALLS.clear()
     _seq[:] = [list(NORMAL), list(SWAPPED)]
-    profiles.load = lambda name: {"ok": True, "safe": name, "prof": prof}
     job = type("J", (), {"step": lambda self, m: None, "tick": lambda self, m: None})()
     # Reach the worker directly: start() would put it on a thread and we want the call, not a race.
     started = {}
-    profile_actions.restore_job.start = lambda work, **kw: started.setdefault("res", work(job)) or {"ok": True}
-    profile_actions.restore_profile("any")
+    with patched(*RESTORE_FAKES,
+                 (profiles, {"load": lambda name: {"ok": True, "safe": name, "prof": prof}}),
+                 (profile_actions.restore_job, {"start": lambda work, **kw: (
+                     started.setdefault("res", work(job)) or {"ok": True})})):
+        profile_actions.restore_profile("any")
     return CALLS
 
 

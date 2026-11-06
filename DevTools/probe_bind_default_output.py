@@ -101,11 +101,6 @@ def hid_interfaces(match: str = "vid_19f7") -> dict:
     return found
 
 
-def post_mode(mode: int) -> dict:
-    """Set the desk's USB output mode. The desk re-enumerates, so the reply can take a while."""
-    return usb_audio.action_set_usb_multitrack(mode)
-
-
 class Sampler(threading.Thread):
     """Count arrivals of the desk in the Expanded multitrack mode, and binds of the service.
 
@@ -146,7 +141,7 @@ class Sampler(threading.Thread):
             time.sleep(0.2)
 
 
-def pick_target(eps: list) -> "vd.Endpoint | None":
+def pick_target(eps: list) -> vd.Endpoint | None:
     """A live playback device that is neither the desk's nor the driver's."""
     return next((e for e in eps if e.flow == "playback" and e.state == "active"
                  and not e.desk and not e.virtual), None)
@@ -188,26 +183,26 @@ def main() -> None:
         print("Could not read the desk's USB output mode, so it could not be put back. Stopping.")
         return
     print(f"default was : {was_default.name if was_default else '?'}")
-    if args.control:
-        print("control run : the default output is not moved")
-    else:
-        print(f"moving to   : {target.name}")
-        policy.SetDefaultEndpoint(target.id, vd.E_CONSOLE)
-        policy.SetDefaultEndpoint(target.id, vd.E_MULTIMEDIA)
-
-    if not expanded_before:
-        print("switching USB 1 input to Expanded ...", flush=True)
-        usb_audio.action_set_usb_expanded(True)
-        time.sleep(10)
     sampler = Sampler()
-    sampler.start()
     try:
+        if args.control:
+            print("control run : the default output is not moved")
+        else:
+            print(f"moving to   : {target.name}")
+            policy.SetDefaultEndpoint(target.id, vd.E_CONSOLE)
+            policy.SetDefaultEndpoint(target.id, vd.E_MULTIMEDIA)
+        if not expanded_before:
+            print("switching USB 1 input to Expanded ...", flush=True)
+            usb_audio.action_set_usb_expanded(True)
+            time.sleep(10)
+        sampler.start()
         for i in range(1, args.cycles + 1):
             print(f"cycle {i}: mix only ...", flush=True)
-            post_mode(0)
+            usb_audio.action_set_usb_multitrack(0)
             time.sleep(4)
             print(f"cycle {i}: post-fader ...", flush=True)
-            post_mode(2)
+            # The desk re-enumerates on each mode change, so the reply can take a while.
+            usb_audio.action_set_usb_multitrack(2)
             # The service binds within about three seconds of an arrival or not at all, but the
             # app's own follow-up may still be making arrivals of its own, so give the cycle room
             # rather than calling a miss early.
@@ -216,14 +211,15 @@ def main() -> None:
             print(f"cycle {i}: connected={st.connected}  "
                   f"arrivals so far={sampler.arrivals} binds={sampler.binds}", flush=True)
     finally:
-        sampler.stop.set()
-        sampler.join(timeout=3)
+        if sampler.is_alive():
+            sampler.stop.set()
+            sampler.join(timeout=3)
         if not expanded_before:
             res = usb_audio.action_set_usb_expanded(False)
             print("USB 1 input restored to Standard" if res.get("ok") else
                   f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
             time.sleep(10)
-        res = post_mode(mode_before)
+        res = usb_audio.action_set_usb_multitrack(mode_before)
         print(f"USB output mode restored to {mode_before}" if res.get("ok") else
               f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {res.get('message')}")
         if not args.control and not args.keep_default and was_default is not None:
