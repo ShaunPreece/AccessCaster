@@ -216,8 +216,8 @@ def settings_status(how_often, last_checked, skipped, today):
     # honestly find nothing while a newer version exists.
     turned_down = f" You chose to skip version {skipped}." if skipped else ""
     return (f"AccessCaster looks for a new version {how_often}.{looked}"
-            f"{turned_down} Check for updates now, or {KEY} anywhere on this "
-            "page, looks now, whatever this is set to.")
+            f"{turned_down} Check for updates now, or {KEY} anywhere in the "
+            "AccessCaster window, looks now, whatever this is set to.")
 
 
 _WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven",

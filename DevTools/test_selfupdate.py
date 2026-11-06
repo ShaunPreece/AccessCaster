@@ -226,6 +226,9 @@ check("and does not send the user to start an app that is running",
       "Start menu" in phrases.not_back("2.64.0", 3), False)
 check("the dialog's wait is whole minutes, as the sentence says",
       app_updates.NOT_BACK_WITHIN_S % 60, 0)
+check("the settings hint gives F12 the whole AccessCaster window",
+      "F12 anywhere in the AccessCaster window" in phrases.settings_status(
+          "once a day", None, "", datetime.date(2026, 11, 1)), True)
 check("no sentence uses a dash a screen reader skips",
       [s for s in sentences if "\u2013" in s or "\u2014" in s], [])
 # A file name's "Setup-v2.64.0" is a name, not a version in prose.

@@ -297,7 +297,7 @@ class UpdatesPage(wx.Panel):
                            *self.field("days"), guard=self._unread, accepted=self._interval_set)
         self.hint = read_only(parent, sizer, "Update status", height=60)
         add_button(parent, sizer, "Check for updates now", lambda _e: self.check(),
-                   "F12 does the same from anywhere in the window.")
+                   "F12 does the same from anywhere in the AccessCaster window.")
 
     def field(self, key):
         def current():
