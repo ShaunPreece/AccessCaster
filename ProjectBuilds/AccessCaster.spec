@@ -42,7 +42,8 @@ if not _m:
 _VERSION = _m.group(1)
 
 # "MAJOR.MINOR.PATCH", padded to the four fields Windows compares as numbers, so 2.63.2 becomes
-# (2, 63, 2, 0) and outranks 2.9.0.
+# (2, 63, 2, 0) and outranks 2.9.0. Release versions only: AccessCaster ships no pre-release
+# builds, so a version with a label such as "-beta.1" stops the build here, by design.
 try:
     _parts = [int(p) for p in _VERSION.split('.')]
 except ValueError:

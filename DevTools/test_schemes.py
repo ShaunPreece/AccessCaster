@@ -24,8 +24,6 @@ import rcp_transfer
 import routing_schemes
 from _testkit import as_device, check, check_true, patched
 
-routing_schemes.WRITE_PACE = 0        # nothing leaves the process, so nothing needs pacing
-
 
 class capture_writes:
     """Intercept every device write routing_schemes.apply can make, recording it instead.
@@ -181,7 +179,7 @@ for bad in ("list", "flat"):
 
 print("\nAPPLY: the writes, and the order they go out in")
 with as_device(devices.PRO2), capture_writes() as w:
-    res = routing_schemes.apply({"outputs": {"Chat": scheme["outputs"]["Chat"]}})
+    res = routing_schemes.apply({"outputs": {"Chat": scheme["outputs"]["Chat"]}}, pace=0)
 check_true("apply reports ok", res["ok"])
 check("only the output the scheme names is touched", res["outputs"], ["Chat"])
 check("its mode is written FIRST (leaving Custom would discard the cross-points)",
@@ -194,7 +192,7 @@ check("and nothing else was written", w.modes(), [(8, 2)])
 
 print("\nAPPLY: manual levels ride with the mix")
 with as_device(devices.PRO2), capture_writes() as w:
-    routing_schemes.apply({"outputs": {"Headphone1": scheme["outputs"]["Headphone1"]}})
+    routing_schemes.apply({"outputs": {"Headphone1": scheme["outputs"]["Headphone1"]}}, pace=0)
 check("the one unlinked cross-point gets its level back", w.levels(), [("level", 0, 7, 0.4)])
 check("and it is unlinked first, or the write would be ignored",
       ("link", 0, 7, False) in w.log, True)
@@ -203,12 +201,12 @@ print("\nAPPLY: a level is never written where it would not mean anything")
 main_mix = {"outputs": {"Headphone2": {"mode": 0, "sources": {
     "USB1": {"excluded": False, "linked": False, "level": 0.4}}}}}
 with as_device(devices.PRO2), capture_writes() as w:
-    routing_schemes.apply(main_mix)
+    routing_schemes.apply(main_mix, pace=0)
 check("an output on Main Mix takes no manual level (it follows the faders)", w.levels(), [])
 excluded_level = {"outputs": {"Headphone2": {"mode": 2, "sources": {
     "USB1": {"excluded": True, "linked": False, "level": 0.4}}}}}
 with as_device(devices.PRO2), capture_writes() as w:
-    routing_schemes.apply(excluded_level)
+    routing_schemes.apply(excluded_level, pace=0)
 check("nor does a source that is excluded from the mix", w.levels(), [])
 
 
@@ -216,7 +214,7 @@ check("nor does a source that is excluded from the mix", w.levels(), [])
 
 print("\nCROSS-DEVICE: a Pro II scheme applied to a Duo")
 with as_device(devices.DUO), capture_writes() as w:
-    res = routing_schemes.apply(scheme)
+    res = routing_schemes.apply(scheme, pace=0)
 duo_out_keys = [o["key"] for o in devices.DUO.matrix.outputs]
 check("only outputs the Duo really has are written",
       sorted({o for _k, o, _m in [e for e in w.log if e[0] == "mode"]}),
@@ -231,7 +229,7 @@ check("and nothing was written to index 2 or 3 (the Pro II's Headphone 3 and 4)"
 print("\nMIX MINUS is not written to an output that does not offer it")
 mm = {"outputs": {"Headphone1": {"mode": 1, "sources": {}}}}
 with as_device(devices.PRO2), capture_writes() as w:
-    routing_schemes.apply(mm)
+    routing_schemes.apply(mm, pace=0)
 check("it falls back to that output's default mode", w.modes(), [(0, 0)])
 
 
@@ -270,7 +268,7 @@ check("'Chat = my mic only' excludes the Duo's Headset, which the Pro II has no 
 
 print("\nBUILT-IN 'everything normal' resets every output, write for write")
 with as_device(devices.PRO2), capture_writes() as w:
-    routing_schemes.apply(b["normal"]["scheme"])
+    routing_schemes.apply(b["normal"]["scheme"], pace=0)
 check("every output gets its default mode",
       sorted(w.modes()), sorted((o["index"], o["default_mode"]) for o in devices.PRO2.matrix.outputs))
 check("every cross-point of every output is re-included",

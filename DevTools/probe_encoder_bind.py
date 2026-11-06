@@ -15,8 +15,11 @@ whether it puts the encoder on the virtual faders and monitor, as a real double 
 A TURN MOVES WHATEVER THE TOUCHSCREEN HAS SELECTED, which can be Mic 1's gain whatever
 `systemChannelSelected` says. Run only with the owner's say-so, while Mic 1 is not in use.
 
-Every level is checked against the start at the end and written back if a turn was not undone.
-Writes: encoderSignal, selectedBank (back to where it was), systemChannelSelected (back to -1).
+However it ends, the probe puts back the bank and `systemChannelSelected`, and writes back the
+monitor level, the virtual faders and the mic gains wherever a turn was not undone. A headphone
+pot or a line channel's Level that a turn moved is printed for a person to put back: neither has a
+confirmed write.
+Writes: encoderSignal, selectedBank, systemChannelSelected, and on the way out the levels above.
 Quit AccessCaster first (`python DevTools/app.py quit`).
 
 Run: python DevTools/probe_encoder_bind.py [rebind]
@@ -28,6 +31,7 @@ import time
 
 import _bootstrap  # noqa: F401
 import _desk
+import channels
 import desk_access
 import model_tree
 import rcp_read
@@ -41,9 +45,18 @@ SETTLE_S = 0.8
 
 
 def read():
+    """(levels, state, blob): the levels by stream position, the state by name, and the dump."""
     blob = rcp_read.read_model_stable(fresh=True)
     return ({name: list(rcp_read.values(blob, name)) for name in LEVELS},
-            {name: rcp_read.first(blob, name) for name in STATE})
+            {name: rcp_read.first(blob, name) for name in STATE}, blob)
+
+
+def mic_gains(blob) -> dict:
+    """{mic channel: gain in dB} read at the address `channels.set_mic_gain` writes to."""
+    try:
+        return {ch: channels.mic_gain(blob, ch) for ch in channels.MIC_CHANNELS}
+    except RuntimeError:        # this desk's mic writes are not enabled
+        return {}
 
 
 def moved(before, after):
@@ -59,9 +72,9 @@ def turn(step: int) -> None:
 
 
 def bound(label: str) -> bool:
-    before, state = read()
+    before, state, _blob = read()
     turn(+1)
-    after, _ = read()
+    after, _state, _blob = read()
     change = moved(before, after)
     if change:
         turn(-1)
@@ -69,17 +82,29 @@ def bound(label: str) -> bool:
     return bool(change)
 
 
-def put_back(start) -> None:
-    now, _ = read()
+def put_back(start, start_state, start_blob) -> None:
+    """Put the channel selection, the bank and every level with a confirmed write back as found."""
+    _levels, state, _blob = read()
+    if state["systemChannelSelected"] != start_state["systemChannelSelected"]:
+        t.write_at(t.SYSTEM, "systemChannelSelected", "int", start_state["systemChannelSelected"])
+        time.sleep(SETTLE_S)
+    if state["selectedBank"] != start_state["selectedBank"]:
+        soundpad.select_bank(start_state["selectedBank"])
+        time.sleep(SETTLE_S)
+    now, _state, blob = read()
     left = moved(start, now)
-    if not left:
+    was_gain, now_gain = mic_gains(start_blob), mic_gains(blob)
+    gains = {ch: g for ch, g in was_gain.items() if g is not None and now_gain.get(ch) != g}
+    if not left and not gains:
         print("every level is as it was at the start")
         return
-    print(f"NOT BACK, writing the start values: {left}")
+    print(f"NOT BACK, writing the start values: {left} mic gains {gains}")
     for i, _was, _now in left.get("outputMonLevel", []):
         t.set_monitor_level(start["outputMonLevel"][i])
     for i, _was, _now in left.get("faderLevel", []):
         t.set_fader_level(i, start["faderLevel"][i])
+    for ch, db in gains.items():
+        channels.set_mic_gain(ch, db)
     time.sleep(SETTLE_S)
     rest = moved(start, read()[0])
     print("now back" if not rest else f"STILL DIFFERENT, by hand: {rest}")
@@ -96,26 +121,26 @@ def double_press() -> None:
 def main() -> int:
     _desk.service()
     with desk_access.hid_lock:
-        start, state = read()
+        start, state, start_blob = read()
         bank = state["selectedBank"]
         print(f"start: {state}")
-        if sys.argv[1:] == ["rebind"]:
-            double_press()
-            bound("after a software double press")
-            put_back(start)
-            print(f"end: {read()[1]}")
-            return 0
-        bound("1. as found")
+        try:
+            if sys.argv[1:] == ["rebind"]:
+                double_press()
+                bound("after a software double press")
+                return 0
+            bound("1. as found")
 
-        soundpad.select_bank(1 if bank == 0 else 0)
-        time.sleep(SETTLE_S)
-        soundpad.select_bank(bank)
-        time.sleep(SETTLE_S)
-        if not bound("2. after a bank change and back"):
-            double_press()
-            bound("3. after selecting and deselecting a channel")
-        put_back(start)
-        print(f"end: {read()[1]}")
+            soundpad.select_bank(1 if bank == 0 else 0)
+            time.sleep(SETTLE_S)
+            soundpad.select_bank(bank)
+            time.sleep(SETTLE_S)
+            if not bound("2. after a bank change and back"):
+                double_press()
+                bound("3. after selecting and deselecting a channel")
+        finally:
+            put_back(start, state, start_blob)
+            print(f"end: {read()[1]}")
     return 0
 
 

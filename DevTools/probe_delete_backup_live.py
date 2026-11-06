@@ -14,7 +14,8 @@ TWO BRANCHES, AND THE SECOND IS THE ONE THAT MATTERS:
 
 WHAT IT CHECKS. That the named backup goes, that the OTHERS do not, that the drive's free space
 goes UP for a show delete (the only direct evidence the 24 MB file actually left), and that the
-as-found baseline is still refused without `force` after all of it.
+as-found baseline is still listed after all of it. Its refusal without `force` is checked offline
+by `test_backups`: a live attempt would delete it for real if that refusal ever broke.
 
 IRREVERSIBLE, so it takes the names on the command line rather than choosing for you.
 
@@ -121,11 +122,5 @@ after, _raw = names()
 print(f"   {len(after)} backup(s) left")
 check("the as-found baseline is still there",
       any(n.startswith("As found") for n in after), True)
-base = next((n for n in after if n.startswith("As found")), None)
-if base:
-    r = backups.action_delete_backup(base)       # NOT forced: this must REFUSE
-    check("and deleting it without force is still refused", r.get("ok"), False)
-    print(f"   it said: {r.get('message','')!r}")
-    check("so it is still listed afterwards", base in names()[0], True)
 
 sys.exit(_testkit.finish())

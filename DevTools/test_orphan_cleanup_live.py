@@ -55,6 +55,7 @@ def main() -> int:
             print(f"padIdx {idx} is not empty; refusing.")
             return 2
     before = tree_state()
+    was_clean = sp.pool_health()["clean"]
     try:
         make_orphan()
         h = sp.pool_health()
@@ -77,6 +78,12 @@ def main() -> int:
             if sp._position_of(idx)[0] is not None:
                 print(f"  clearing the pad left on padIdx {idx}")
                 sp.clear_grid_pad(idx + 1)
+        # A mixer pad's clear does not collect its effect object, so a run that failed between
+        # making the orphan and cleaning it leaves the orphan behind. A pool that was not clean
+        # before the run is left for a person: its orphans are not this run's.
+        if was_clean and not sp.pool_health()["clean"]:
+            print("  the pool is not clean: removing what this run left")
+            sp.clean_pool()
     return _testkit.finish()
 
 

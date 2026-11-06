@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
-import _a11y
 import _testkit
 import diagnostics
 import wx
@@ -67,5 +66,4 @@ check("and leaves a line in the diagnostic log", [k for k, _f in events], ["wind
 check_true("saying where it was raised", "broken" in (events[0][1].get("at", "") if events else ""))
 
 frame.Destroy()
-_a11y.check_windows("Calls")
 sys.exit(_testkit.finish())

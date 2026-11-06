@@ -139,6 +139,9 @@ def probe(label, expect_at, write, test_val, restore_val, expect_extra=0, ignore
         write(test_val)
     except Exception as e:
         check_true("the write", False, f"raised {type(e).__name__}: {e}")
+        # A multi-step write (a fader swap, a stereo link) can raise after its first record has
+        # landed. Writing the baseline over a record that never landed changes nothing.
+        _put_back(write, restore_val, restore_extra, before)
         return
     # The test value is on the desk from here, so the restore runs however the checks end: a dump
     # that fails part way must not leave it there.

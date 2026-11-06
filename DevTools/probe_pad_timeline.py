@@ -65,38 +65,41 @@ def main() -> int:
     time.sleep(0.3)
     try:
         with midi_out.midi_enabled():
-            soundpad.select_bank(bank)
-            time.sleep(0.4)
-            for gap in gaps:
-                # Get to silence, whatever it takes, and SAY how many presses that needed.
-                tries = 0
-                while reader.playing_at(time.monotonic()) and tries < 4:
+            # The stop runs however the gaps end, while MIDI is on and the reader still
+            # runs: a latching pad left playing keeps a bed going through the desk.
+            try:
+                soundpad.select_bank(bank)
+                time.sleep(0.4)
+                for gap in gaps:
+                    # Get to silence, whatever it takes, and SAY how many presses that needed.
+                    tries = 0
+                    while reader.playing_at(time.monotonic()) and tries < 4:
+                        midi_out.play_pad(slot)
+                        tries += 1
+                        time.sleep(1.2)
+                    t_start = time.monotonic()
                     midi_out.play_pad(slot)
-                    tries += 1
+                    time.sleep(gap)
+                    t_second = time.monotonic()
+                    midi_out.play_pad(slot)
+                    time.sleep(1.5)
+                    started = reader.playing_at(t_start + 0.35)
+                    still = reader.playing_at(t_second + 1.2)
+                    verdict = ("press 1 never started it - IGNORE THIS ROW" if not started
+                               else "second press STOPPED it" if not still
+                               else "second press was IGNORED, still playing")
+                    print(f"  gap {gap:4.1f}s: {verdict}")
+                    prog = [e for e in reader.since(t_start) if e[1] == "padProgress"]
+                    print(f"            {len(prog)} progress pushes, "
+                          f"first at +{prog[0][0] if prog else float('nan'):.2f}s, "
+                          f"last at +{prog[-1][0] if prog else float('nan'):.2f}s")
+                    time.sleep(0.5)
+            finally:
+                for _ in range(4):
+                    if not reader.playing_at(time.monotonic()):
+                        break
+                    midi_out.play_pad(slot)
                     time.sleep(1.2)
-                t_start = time.monotonic()
-                midi_out.play_pad(slot)
-                time.sleep(gap)
-                t_second = time.monotonic()
-                midi_out.play_pad(slot)
-                time.sleep(1.5)
-                started = reader.playing_at(t_start + 0.35)
-                still = reader.playing_at(t_second + 1.2)
-                verdict = ("press 1 never started it - IGNORE THIS ROW" if not started
-                           else "second press STOPPED it" if not still
-                           else "second press was IGNORED, still playing")
-                print(f"  gap {gap:4.1f}s: {verdict}")
-                prog = [e for e in reader.since(t_start) if e[1] == "padProgress"]
-                print(f"            {len(prog)} progress pushes, "
-                      f"first at +{prog[0][0] if prog else float('nan'):.2f}s, "
-                      f"last at +{prog[-1][0] if prog else float('nan'):.2f}s")
-                time.sleep(0.5)
-            # Leave it silent.
-            for _ in range(4):
-                if not reader.playing_at(time.monotonic()):
-                    break
-                midi_out.play_pad(slot)
-                time.sleep(1.2)
     finally:
         midi_out.close()
         reader.stop.set()

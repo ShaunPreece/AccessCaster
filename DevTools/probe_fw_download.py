@@ -3,8 +3,9 @@
 Proves the download half of an update with nothing installed: `downloadInitiateRequested` starts
 the download, `updateDownloadProgress` reports it, and `downloadCancelRequested` stops it and
 deletes what was staged. The cancel is sent once progress passes `--cancel-at` percent, or
-after `--max-s`. If progress still moves after the cancel, the desk's wifi is switched off, which
-ends any download, and the script says so.
+after `--max-s`, and however the watch ends, so an interrupted run never leaves the desk
+downloading. If progress still moves after the cancel, the desk's wifi is switched off until it
+stops, then switched back on and read back.
 
 A cancel sent mid-download holds the desk's engine for about two and a half minutes, every model
 dump coming back empty; the read afterwards waits that out.
@@ -30,6 +31,7 @@ import rcp_transfer
 from _desk import push_handle, pushes
 
 WATCH = ("update", "download", "appUpdateAvailable", "osUpdateAvailable", "systemFirmwareVersion")
+WIFI_OFF_LIMIT_S = 120   # how long the wifi stays off waiting for a download to stop
 
 
 def state(wait_s: float = 0.0):
@@ -56,6 +58,27 @@ def write(st, name, value=True):
     print(f"wrote {name} = {value} at {st[name][0]}", flush=True)
 
 
+def wifi_on():
+    return rcp_read.block_value(rcp_read.read_model_stable(fresh=True), "NETWORK", "wifi")
+
+
+def progress_now():
+    return state(wait_s=300).get("updateDownloadProgress", (None, None))[1]
+
+
+def wait_until_still(limit_s: float) -> bool:
+    """True once two readings 8 s apart show the same download progress."""
+    deadline = time.monotonic() + limit_s
+    last = progress_now()
+    while time.monotonic() < deadline:
+        time.sleep(8)
+        now = progress_now()
+        if now == last:
+            return True
+        last = now
+    return False
+
+
 def main(cancel_at: int, max_s: float) -> int:
     before = state()
     values = {k: v for k, (_p, v) in before.items()}
@@ -80,23 +103,25 @@ def main(cancel_at: int, max_s: float) -> int:
             # Ten seconds of stillness after the cancel is the evidence the download stopped.
             return cancelled_at is not None and time.monotonic() - last_move > 10
 
-        for at, path, name, val in pushes(dev, max_s + 60, stop=done):
-            if not name.startswith(WATCH):
-                continue
-            print(f"  +{at:6.1f}s {path} {name} = {val!r}", flush=True)
-            if name == "updateDownloadProgress":
-                if val != progress:
-                    last_move = time.monotonic()
-                progress = val or 0
-            if name == "updateDownloaded" and val:
-                print("WARNING: the download finished before the cancel.", flush=True)
-            if cancelled_at is None and (progress >= cancel_at or at >= max_s):
+        try:
+            for at, path, name, val in pushes(dev, max_s + 60, stop=done):
+                if not name.startswith(WATCH):
+                    continue
+                print(f"  +{at:6.1f}s {path} {name} = {val!r}", flush=True)
+                if name == "updateDownloadProgress":
+                    if val != progress:
+                        last_move = time.monotonic()
+                    progress = val or 0
+                if name == "updateDownloaded" and val:
+                    print("WARNING: the download finished before the cancel.", flush=True)
+                if cancelled_at is None and (progress >= cancel_at or at >= max_s):
+                    write(before, "downloadCancelRequested")
+                    cancelled_at, last_move = time.monotonic(), time.monotonic()
+        finally:
+            if cancelled_at is None:
                 write(before, "downloadCancelRequested")
-                cancelled_at, last_move = time.monotonic(), time.monotonic()
-        if cancelled_at is None:
-            write(before, "downloadCancelRequested")
-            cancelled_at = time.monotonic()
-            time.sleep(10)
+                cancelled_at = time.monotonic()
+                time.sleep(10)
         print(f"download ran {cancelled_at - start:.1f}s before the cancel", flush=True)
 
     time.sleep(3)
@@ -106,8 +131,22 @@ def main(cancel_at: int, max_s: float) -> int:
     later = state()
     second = later.get("updateDownloadProgress", (None, None))[1]
     if second not in (0, None) and second != first:
-        print(f"STILL DOWNLOADING after the cancel ({first} then {second}): switching the wifi off.")
-        rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", False)
+        if not wifi_on():
+            print(f"STILL DOWNLOADING after the cancel ({first} then {second}), with the wifi "
+                  "already off, so the download is not on wifi. Check the desk.")
+        else:
+            print(f"STILL DOWNLOADING after the cancel ({first} then {second}): switching the "
+                  "wifi off until it stops.", flush=True)
+            rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", False)
+            try:
+                stopped = wait_until_still(WIFI_OFF_LIMIT_S)
+                print("the download stopped" if stopped else
+                      f"STILL MOVING after {WIFI_OFF_LIMIT_S} s with the wifi off", flush=True)
+            finally:
+                rcp_transfer.write_at(rcp_transfer.NETWORK, "wifi", "bool", True)
+            time.sleep(2)
+            print("wifi switched back on" if wifi_on() else
+                  "WIFI DID NOT COME BACK ON: switch it on in the desk's network settings.")
         later = state()
     changed = {k: (values.get(k), v) for k, (_p, v) in later.items() if values.get(k) != v}
     print("changed from before:", changed or "nothing", flush=True)

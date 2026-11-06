@@ -67,6 +67,13 @@ def main() -> int:
         print("restore ok:", res["ok"], " pool clean:", res["health"]["clean"])
         return 0 if res["ok"] else 1
 
+    # A failed run keeps its backup for --restore. Backing up into it again would overwrite the
+    # original pad list and mix the earlier run's sound files into this run's comparison.
+    if os.path.exists(BACKUP_DIR):
+        print(f"a backup from an earlier run is still in {BACKUP_DIR}; run --restore, or delete "
+              "the folder if the pads are already back. Stopping.")
+        return 2
+
     pool_before = soundpad.pool_health()
     if not pool_before["clean"]:
         print("the pool is not clean before the test; stopping.", pool_before)
