@@ -1921,7 +1921,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   one only after PAGE_CHANGED, so building on PAGE_CHANGING alone leaves the user on an empty
   panel ("scrolledpanel"). A tab's panel exists from the start, so the
   tab control lists every tab; `ChannelPage.show` skips a tab not yet built, which reads the
-  record when it is. `DevTools/probe_ui_stalls.py` measures it.
+  record when it is.
 - **CTRL+TAB IS THE TAB CONTROL'S WHEREVER THE FOCUS IS INSIDE ONE** (`MainFrame._in_tabs`), the
   Windows convention; elsewhere, including the tree, it steps the section's pages.
 - **A PAGE NEVER READS THE DESK WHEN IT IS SHOWN.** Arrowing the tree shows every page passed, so a
@@ -2779,7 +2779,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   - "Two of two Duo resets dropped." A miscount: that reset was recorded as clean.
 - **WHAT DOES NOT REPRODUCE IT:** 45 factory resets and 11 exports, isolated one variable at a time
   (command alone / one open read handle / two / a full dump every 1.5 s through the rebuild window /
-  an export). Not one logged a removal at all. `DevTools/test_usb_drop_live.py --layers ...`.
+  an export). Not one logged a removal at all.
 - **WHAT DOES NOT RECOVER IT**, all tried elevated: removing the dead port nodes,
   `pnputil /scan-devices`, restarting every Realtek hub, restarting the root hub ("System reboot is
   needed"), `pnputil /restart-device` on the xHCI controller (succeeded, changed nothing).
@@ -2791,8 +2791,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   21st September 2026 with the event-log fingerprint (see "A show import can take the desk off the
   bus" above). An import reads the show off the removable drive and
   the removal takes the File-Stor Gadget volume with it, which is the mass-storage lead this entry
-  always pointed at. **An import is a SAFE trial** - reversible, one replug per drop - unlike the
-  factory resets `test_usb_drop_live.py` uses, so this can finally be run until it is caught.
+  always pointed at. **An import is a SAFE trial** - reversible, one replug per drop - unlike a
+  factory reset, so this can be run until it is caught: `DevTools/probe_import_drop.py`.
 - **`updateRebootRequested` = True on the SYSTEM block REBOOTS THE DESK** (Duo, 3rd September 2026:
   off the bus at t+12 s, back at t+38 s, firmware unchanged, flag self-clearing). It is the reboot
   trigger the NTP work wanted, and it is a repeatable way to exercise a re-enumeration - so every use
@@ -3178,18 +3178,27 @@ shared one; a new copy is how they drifted apart the first time.
   ends up disagreeing with, which is why the history became data. HTML rather than text because a
   screen reader can jump heading to heading through it and cannot through Notepad.
 - **A SCRIPT THAT FACTORY-RESETS A DESK MUST CALL `_bootstrap.require_expendable_desk` AND REFUSE
-  WITHOUT `--expendable-desk`.** One does: `test_usb_drop_live.py` (one reset per trial). The
-  exception is `test_clean_restore_live.py`, which restores itself: it takes `--yes`, and once its
-  clean restore has started it puts the desk back from its own profile, however the run ends. A
-  capitalised warning in the docstring is NOT the guard, and this is measured, not theoretical: `test_usb_drop_live.py` opened with "EXPENDABLE DESKS ONLY" and was still run
-  over Shaun's working Pro II on 16th September 2026 by a sweep that selected tests by filename. The
-  reader it warned was not the thing that ran it.
+  WITHOUT `--expendable-desk`.** No script in the repo does so today. The exception is
+  `test_clean_restore_live.py`, which restores itself: it takes `--yes`, and once its clean restore
+  has started it puts the desk back from its own profile, however the run ends. A capitalised
+  warning in the docstring is NOT the guard, and this is measured, not theoretical: a reset script
+  that opened with "EXPENDABLE DESKS ONLY" was still run over Shaun's working Pro II on 16th
+  September 2026 by a sweep that selected tests by filename. The reader it warned was not the thing
+  that ran it.
 - **A `test_*.py` SCRIPT GETS A THROWAWAY DATA DIR, AUTOMATICALLY.** `_bootstrap` sets
   `ACCESSCASTER_DATA_DIR` to a temp folder when `sys.argv[0]` starts with `test_`, before the first
   Project import, which is the only moment it can work: `profiles.PROFILES_DIR` and
   `routing_schemes.SCHEMES_DIR` are derived from `paths.DATA_DIR` at import. It is keyed on the NAME
   rather than an opt-in call because an opt-in is what a new test forgets. The probes and the
   capture tools are not tests and keep the real data dir, which is the point of running them.
+- **A `test_native_*` SUITE RUNS ON A DESKTOP OF ITS OWN** (`_bootstrap._own_desktop`, keyed on
+  the name). A modal dialog activates as it opens, and on the user's desktop it takes their
+  keyboard focus; on the `AccessCasterTests` desktop it can never be the foreground window, and its
+  modal loop runs unchanged. `SetThreadDesktop` refuses a thread that already owns a window, so the
+  move must stay ahead of the wx import. A window suite checks its windows through wx only, never
+  through a screen reader or a UI Automation client on the user's desktop, which cannot see them.
+- **Run the offline suites with `DevTools/run_tests.py`**, never a hand-picked glob: it never
+  selects a `_live` suite.
 - **A `Project/` function called only by a probe or a live test in `DevTools/` is in use, not dead.**
   A dead-code sweep that searches `Project/` alone reports it as unused.
 - **THE GENERATED REFERENCES ARE ONE FILE PER DESK, and must stay that way:**

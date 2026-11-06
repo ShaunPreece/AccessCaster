@@ -136,7 +136,7 @@ after a session that moved code.
 | `web.py` | 22 | **The one way the app reaches the internet**: `opened(url, timeout)`, `urlopen` with `USER_AGENT` (`AccessCaster/<version>`; Cloudflare refuses Python's default). Called only by `driver_install` and `selfupdate`'s `checker` and `downloader`, which `test_driver_install` asserts. |
 
 --------------------------------------------------------------------------------
-## DevTools/ (152 files; the ones worth knowing)
+## DevTools/ (149 files; the ones worth knowing)
 
 **Shared helpers.** `_bootstrap.py` (puts `Project/` on the path, gives a `test_*` script its
 throwaway data dir, silence and the device-write refusal, takes the single-instance lock for a
@@ -186,7 +186,9 @@ left over makes the next run's first press a stop rather than a start.
 timestamps every push while the main thread presses at known times, so nothing is inferred from a
 rate measured in a gap. Three earlier probes were deleted for getting that wrong.
 
-**Offline Python suites, no device - 60 of them, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `hold_desk(vec)` gives the desk model a trusted read of the pinned layout's skeleton with that fader layout, and `hold` / `hold_layout` change it as a push would; every suite addresses its writes on the pinned `layout_fixture.PRO2_177` layout, `on_layout` switches it and `addr(key)` gives a key's path; `decode_record` and `snapshot` read the desk's record and dump formats, `push` builds a pushed frame): `test_addressing` (every write path, on every saved desk layout, lands where it always has and follows a moved block; the lookup refuses a missing node or property; no position in `Project/`), `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state, and refuses when that state cannot be read; Open AccessCaster goes to the tray's window), `test_cough_key` (the cough key skips a mic on no fader, its two presses are a round trip, and a second press that fails keeps the mics it did not open), `test_tray_icon` (the tray icon added again when Explorer restarts), `test_native_desk_state` (pushed frames land on the right channel's record in the window's desk state, and a recording state is passed on), `test_native_channels` (a channel page and each of its tabs built only when shown, a tab following the one last chosen, a newer record reaching only the tabs built), `test_native_calls` (a held arrow key sends as it goes, a list only at the end), `test_native_dialogs` (every native dialog lands on its first control and focuses nothing from its constructor), `test_native_rules` (the source rules: no SetFocus in any dialog's constructor, no Simplebook and a Notebook only for a channel page's tabs, `native.win` imported only by `a11y` and `announce`), and every `test_native_*` suite ends with `_a11y.check_windows`, which walks each window it built for a label before every text box, list and slider, a label on every button and group box, and no single-line read-only box, `test_native_backups` (the backups list and its detail, the restore question, each job's call and the status it follows, the as-found backup's second yes, the reset's question and its refused tick), `test_native_pads` (the pad list, what each pad type's Settings dialog offers and the units its writes go in, the Change dialog's plans, the voice effect as built and the preview's refusals, and Pad maintenance's export list and refusals), `test_native_callme` (the call, details, plan and code from the payload, the Not ready for calls showing only the fixes that apply and the fader fix's wording, a poll redrawing only on a new version and saying a ringing call only with announcements off, each press's action, a contact chosen by code, hosting refused mid-call), `test_native_recording` (the recordings and volumes listed, Record starting or resuming by the state, each transport refusal, a pushed state read only when it is news, the raw switch's refusal, and the delete, eject, reconnect and erase calls), `test_native_device` (the Current state report and the status bar's summary from an overview, re-read after desk events, the hardware and wireless readings, the unit settings from the spec with a value off the list kept and a read-only desk refused, the wifi controls only with the radio on, and F5 reading only the page shown), `test_native_app_settings` (the shortcut list, its selection across a write and a delete, the pad keys switch partly ticked, the voices offered, the after-update report waiting for the window to come to the front, and the help read from help.txt into topics), `test_announcer_suspend`,
+**Run them all with `run_tests.py`**: every `test_*.py` not named `_live`, each in its own process (`_bootstrap` acts on the script's name, and suites pin module state for their whole run), one line per suite and a tally, the output of a failure only; words narrow the run by name, and a suite that does not import `_bootstrap` is refused. About a minute for all of them.
+
+**Offline Python suites, no device, all on the shared harness `_testkit.py`** (`check`, `check_true`, `check_in` and `check_not_in` record a failure, `finish` is the exit status; `as_device` pins the desk for a block over `devices.force_device`; `patched` replaces attributes for a block over `mock.patch.object`; `hold_desk(vec)` gives the desk model a trusted read of the pinned layout's skeleton with that fader layout, and `hold` / `hold_layout` change it as a push would; every suite addresses its writes on the pinned `layout_fixture.PRO2_177` layout, `on_layout` switches it and `addr(key)` gives a key's path; `decode_record` and `snapshot` read the desk's record and dump formats, `push` builds a pushed frame): `test_addressing` (every write path, on every saved desk layout, lands where it always has and follows a moved block; the lookup refuses a missing node or property; no position in `Project/`), `test_announcer`, `test_commands` (a toggle shortcut writes the opposite of the real state, and refuses when that state cannot be read; Open AccessCaster goes to the tray's window), `test_cough_key` (the cough key skips a mic on no fader, its two presses are a round trip, and a second press that fails keeps the mics it did not open), `test_tray_icon` (the tray icon added again when Explorer restarts), `test_native_desk_state` (pushed frames land on the right channel's record in the window's desk state, and a recording state is passed on), `test_native_channels` (a channel page and each of its tabs built only when shown, a tab following the one last chosen, a newer record reaching only the tabs built), `test_native_calls` (a held arrow key sends as it goes, a list only at the end), `test_native_dialogs` (every native dialog lands on its first control and focuses nothing from its constructor), `test_native_rules` (the source rules: no SetFocus in any dialog's constructor, no Simplebook and a Notebook only for a channel page's tabs, `native.win` imported only by `a11y` and `announce`), and every `test_native_*` suite ends with `_a11y.check_windows`, which walks each window it built for a label before every text box, list and slider, a label on every button and group box, and no single-line read-only box, `test_native_backups` (the backups list and its detail, the restore question, each job's call and the status it follows, the as-found backup's second yes, the reset's question and its refused tick), `test_native_pads` (the pad list, what each pad type's Settings dialog offers and the units its writes go in, the Change dialog's plans, the voice effect as built and the preview's refusals, and Pad maintenance's export list and refusals), `test_native_callme` (the call, details, plan and code from the payload, the Not ready for calls showing only the fixes that apply and the fader fix's wording, a poll redrawing only on a new version and saying a ringing call only with announcements off, each press's action, a contact chosen by code, hosting refused mid-call), `test_native_recording` (the recordings and volumes listed, Record starting or resuming by the state, each transport refusal, a pushed state read only when it is news, the raw switch's refusal, and the delete, eject, reconnect and erase calls), `test_native_device` (the Current state report and the status bar's summary from an overview, re-read after desk events, the hardware and wireless readings, the unit settings from the spec with a value off the list kept and a read-only desk refused, the wifi controls only with the radio on, and F5 reading only the page shown), `test_native_app_settings` (the shortcut list, its selection across a write and a delete, the pad keys switch partly ticked, the voices offered, the after-update report waiting for the window to come to the front, and the help read from help.txt into topics), `test_announcer_suspend`,
 `test_pad_banks` (the bank shortcuts skip empty banks and the system bank, and stop at the ends), `test_encoder_home` (a lost encoder put back after a turn nothing follows, and left alone after a level, with a channel selected, against a stop and within the gap), `test_encoder_hold` (a hold with a channel button selected mutes that channel once per hold, and nothing else does), `test_rode_app` (RODE's app warned of once per run, and while it is open every layout-addressed write reads the desk), `test_desk_model` (a dump adopted with what was pushed during it replayed on top; trusted only with the listener up, on the dump's connection and with no structural change since; our writes landing only on a fixed node carrying the property; through the listener, a subscriber told the replaced value after the model holds the new one, and our writes only to a subscription that asked), `test_announcer_remember` (start-up is on unless the remember option holds it off; a take's switch-back is never saved), `test_desk_listener` (the one listener over a fake handle: each subscriber hears only the names it asked for, `Connected` first, `Lost` then `Connected` with the gap across a drop, a slow follower holding up nobody, and `PushListener`'s waits), `test_announcer_reconnect` (the desk listener and the announcer following it across a re-enumeration: the listener must resolve
 the interface again rather than reopen a remembered path, because the desk returns under a
 different product id; and the announcer started with no desk waits for it rather than switching
@@ -197,7 +199,7 @@ itself off),
 file**, and that an import merges rather than replacing it),
 `test_pad_actions`, `test_pad_records`, `test_preview_writer` (live preview edits share one session, newest wins, never written to a pad not named Preview, nor an effect edit to a pad no effect object binds), `test_pad_restore_from_backup` (a backup's pads alone: its own pad folder, the extras cleared, nothing else written, another desk's backup refused), `test_pad_volume` (only a drive on the desk is taken for its pad volume, never a stick holding a `pads` folder, and the desk's letter waits until it reads), `test_preset_now`, `test_profiles`, `test_recorder`, `test_schemes`,
 `test_restore_warnings`, `test_selfupdate` (the update scheme's rules, the signed check against a generated key, the download, the wording, and the job the window follows), `test_service_safety` (the service's guards: the `.bad` copy of a JSON file that will not parse, the fader level write, a held pad released on exit, Chat isolation's put-back, a stopped auto gain, and a superseded announcer loop), `test_shows`, `test_shows_sim`, `test_specs`, `test_storage_state`,
-`test_devtools_helpers` (`_desk`'s device count, settled chain, job wait and stray counts, the live schemes test putting the mixes back after a failed read, the dead-property probe's restore, the bind probe's verdict, and `property_list.py --check` with nothing to compare against), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
+`test_devtools_helpers` (`_desk`'s device count, settled chain, job wait and stray counts, the live schemes test putting the mixes back after a failed read, the dead-property probe's restore, the bind probe's verdict, `property_list.py --check` with nothing to compare against, and `run_tests` never choosing a `_live` suite), `test_soundpad` (transfer mode is always left, and a pad restore reports a create or setting that
 did not take),
 `test_virtual_devices` (RODE's driver status block parsed as its tray reads it, and the spoken
 outcomes). `watch_vad_endpoints.ps1` is the live companion: it prints a line whenever the set of
@@ -234,16 +236,6 @@ restore write, for a value the desk DRAGS others along with (the mic voicing rep
 whole chain; `outputMonFixed` unmutes the monitor). `ignore={names}` exempts a write-only trigger
 from the restore assertion but still PRINTS it, so it can never hide. Passes end to end on a Pro II,
 31st August 2026.
-**`test_usb_drop_live.py` isolates ONE LAYER AT A TIME for the USB drop**, the fault where a desk goes off
-the bus and only a physical replug returns it. `--layers` composes any of `handles1`, `handles2`,
-`poll`, `export`, `exportonly` and `app` (that last one exclusive, and it is the CONTROL: if every
-layer is clean and the app still drops, the layer list is wrong). No layers means the command alone.
-Presence comes from PowerShell `Get-PnpDevice`, NOT `hid.enumerate`, which opens each device on
-Windows and would put traffic inside the window that has to stay quiet; it is also a separate
-process, which is what makes it valid for the `app` layer. Every trial proves the reset RAN by
-reading the new show uuid, so "no drop" can never be "no reset", and it stops dead on the first drop.
-**EACH TRIAL IS AN UNBACKED FACTORY RESET, so expendable desks only.** Result 3rd September 2026: 45
-resets, every layer clean.
 **`probe_import_drop.py` repeats a show import until the desk leaves the bus**, with `--delta`
 silent, reversible settings disturbed before each trial so every import has a known amount to
 rewrite, and the job's duration printed as the proof it did. `--via profile` runs the same trials
@@ -290,6 +282,8 @@ must match its recipe, a one-param edit must be caught, then put back byte-clean
 `test_orphan_cleanup_live` (makes an attached orphan, then a partial object, on padIdx 16 and
 17, and checks each is removed and the whole tree returns to where it started),
 `test_player_live` (loads a file into the unit's own player and watches for movement),
+`test_factory_sfx_live` (lists the pad volume in transfer mode to see which factory WAVs are on
+the desk; writes nothing),
 `test_eq_q_live`, `test_meters_live`, `test_network_scan_live` (needs `--wifi` / `--bt` and exits 2
 without them),
 `test_flush_verify_live` (the licence for the fast flush: write a pad, leave transfer mode,
@@ -319,7 +313,7 @@ arriving after the burst. Also runs the PRE-FIX loop on purpose, on a cut-down c
 faults stay demonstrated. Read-only apart from `systemMidiControl`, which it restores; needs nobody
 at the desk).
 
-**Six live tests were DELETED and their ANSWERS are the reason they are gone.** Do not rewrite
+**Seven live tests were DELETED and their ANSWERS are the reason they are gone.** Do not rewrite
 them expecting a new answer:
 - `test_storage_mount_live` - walked every `transferModeType` x `storageVolumeTransfer` pair and
   reported what Windows mounts. The answer is "pad storage, always"; the route, if there is one,
@@ -334,6 +328,8 @@ them expecting a new answer:
   path. Answer: WAV and MP3, two values, and it is `recorder.RECORDING_FORMAT_LABEL` now.
 - `test_tone_live` - wrote `toneGeneration` on TEST 0x290 and measured the main-mix endpoint.
 - `test_voxlab_derive` - the VoxLab knob derivation, now in `channels.VOXLAB_KNOB_PROPS`.
+- `test_usb_drop_live` - factory-reset the desk once per trial with one layer of app traffic at a
+  time. Answer: 45 resets, every layer clean (PROJECT_GUIDE part 2, "USB dropout").
 
 **Address and selector work:** **`tree_tool.py` FIRST - it parses the dump as the tree it actually
 is and gives any node its real address (`--find`, `--prop`, `--anchors`); `probe_path_write.py` is
@@ -343,7 +339,12 @@ pushed record names its own path),
 `input_sources.py` (the 30-entry INPUTSOURCE table with the reserved slots marked, `--save` /
 `--diff` two dumps: what a mode switch adds is how Expanded's four source codes were found, and
 it is how to confirm them on a Duo),
-`probe_derived_write.py`, `cap_probe.py` (drive one control with USBPcap running),
+`probe_derived_write.py`, `cap_probe.py` (drive one control with USBPcap running; the rest of the
+capture chain is `cap_server.ps1`, the elevated server that starts and stops USBPcap on commands
+in `cap_control/cmd.txt`, `setup_capture_task.ps1`, which registers it as the on-demand task
+`AccessCasterCapServer` and is a route to admin rights without a prompt while registered,
+`gen_traffic.py` and `pick_hub.py`, which find the root hub the desk is on, and
+`capture_analyze.py`, which reads and diffs the `.pcap` files with no tshark),
 `state_observatory.py snap` / `diff` / `watch` (block-aware snapshots of every property
 occurrence, secrets redacted, `--quiet` for the self-moving ones; the tool for "the desk just did
 something, what changed?"),
@@ -389,7 +390,7 @@ This is what found `btDoScan` alive.
 call push, `answer [slot]` answers the next incoming call, `hangup <slot>` ends one and `dial
 <code>` places one, every record built by `callme`.
 
-**`probe_update_check.py`** asks the desk to check for a firmware update and logs every update push; it never installs. **`probe_fw_download.py`** starts the desk's own update download and cancels it once progress passes `--cancel-at` percent (wifi off if it will not stop); it never installs, and refuses with a download staged or the erase flag set. **`test_diagnostics.py`** pins the log's repeat folding against its flusher. **`test_desk_firmware.py`** runs `desk_firmware.install` offline against a simulated desk: the order of requests, the restart asked for only when the desk stays, never with the erase flag set, a stalled download stopping the update without a cancel, an unpushed end read back. **`probe_storage_live.py`** ejects or erases the card or drive and logs the desk's answer, refusing the internal pad storage (anything `recorder.read_volumes` does not mark `can_record`); an erase writes nothing without `--yes`.
+**`probe_update_check.py`** asks the desk to check for a firmware update and logs every update push; it never installs. **`probe_fw_download.py`** starts the desk's own update download and cancels it once progress passes `--cancel-at` percent (wifi off if it will not stop); it never installs, and refuses with a download staged or the erase flag set. **`test_diagnostics.py`** pins the log's repeat folding against its flusher. **`test_desk_firmware.py`** runs `desk_firmware.install` offline against a simulated desk: the order of requests, the restart asked for only when the desk stays, never with the erase flag set, a stalled download stopping the update without a cancel, an unpushed end read back. **`probe_storage_live.py`** ejects or erases the card or drive and logs the desk's answer, refusing the internal pad storage (anything `recorder.read_volumes` does not mark `can_record`); an erase writes nothing without `--yes`. **`probe_driver_fetch_live.py`** runs RODE's driver download for real up to the hand-over to Windows: the URL still answers, the zip still holds one MSI, and the MSI is still signed by Freedman Electronics. It never installs, and is a `probe_` because it reaches the internet.
 
 **`probe_delete_backup_live.py`** drives `action_delete_backup` down both its branches against a
 real desk: a `show:<snapshot>` with no profile beside it, and a named backup whose two halves must
@@ -409,9 +410,6 @@ computer's copy behind when it had simply not finished.
 
 **`bind_history.py`** reads the per-attempt history the app itself records and compares bound
 attempts with missed ones field by field; `--last N` limits the table.
-
-**`probe_ui_stalls.py`** runs the app as `tray.py` does and reports every stall of the wx thread
-over 200 ms in its first 25 seconds, with the code it was in, counted across 20 ms stack samples.
 
 **`probe_bind_hold.py`** is the causal test of the bind: it holds a stream on the desk's Main
 output from the moment it appears and reports whether the service bound before, during or after
@@ -458,12 +456,10 @@ pad. Run it directly to list ports or fire a pad), `state_observatory.py`
 `ui_map.json` (drive the RODE app),
 `announcer_echo_check.py`, `announcer_live_check.py` (prints what the announcer would say for
 each control moved at the desk, read-only; `--speak` says it aloud), `list_pads.py` (the pad table
-in stream order, with each pad's bank and number), `watch_backchannel.py` (samples Mic 1 and USB 2's mute
-and cue flags through the running service while a Back Channel pad is held, which is the only way
-to tell a pad that did nothing from one that did its job and tidied up).
+in stream order, with each pad's bank and number), `decode_effects.py` (every voice-FX effect
+object from a live desk or a saved dump, read only: the extractor for the factory recipes).
 
-**Device writers, the small accidental-damage surface:** `gui_drive`, `inject_button`,
-plus the live tests above.
+**Device writers, the small accidental-damage surface:** `gui_drive`, plus the live tests above.
 
 --------------------------------------------------------------------------------
 ## Build and assets

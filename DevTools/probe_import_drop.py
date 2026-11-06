@@ -23,9 +23,8 @@ cannot be read as a clean result.
 
 IT RUNS THE APP'S SERVICE ITSELF, THE WATCHERS INCLUDED, so the desk sees the handles it sees
 when the app is running and nothing more. Quit AccessCaster first. Presence comes from PowerShell
-`Get-PnpDevice` for the same reason `test_usb_drop_live` uses it: `hid.enumerate` OPENS each device
-on Windows, so asking the question would put traffic on the wire inside the window that has to
-stay quiet.
+`Get-PnpDevice`, not `hid.enumerate`, which OPENS each device on Windows, so asking the question
+would put traffic on the wire inside the window that has to stay quiet.
 
 EVERYTHING IT DISTURBS IS SILENT AND REVERSIBLE: mic gains and virtual fader levels, both of which
 a profile and a show carry. It never touches phantom power (a pop on a live mic), the monitor

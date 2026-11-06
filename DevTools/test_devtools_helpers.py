@@ -10,7 +10,9 @@ THE RULES THIS PINS:
   * a job has finished only when its status reads `running` false;
   * the stray check counts occurrences, not names;
   * the live probes put back what they wrote even when a read after the write fails;
-  * `property_list.py --check` with no list to compare against says so and writes nothing.
+  * `property_list.py --check` with no list to compare against says so and writes nothing;
+  * the offline runner never selects a `_live` suite, however it is asked, and refuses a suite
+    that does not import `_bootstrap`.
 
 No device: the PowerShell call, the chain reads and the output path are stubbed.
 
@@ -38,6 +40,7 @@ import probe_dead_props_write
 import property_coverage
 import property_list
 import rcp_transfer
+import run_tests
 import test_schemes_live
 from _testkit import as_device, check, check_true, patched
 
@@ -184,5 +187,14 @@ with tempfile.TemporaryDirectory(prefix="ac_property_list_") as tmp:
         status = property_list.main()
     check("it fails", status, 1)
     check("and writes nothing", missing.exists(), False)
+
+print("\nTHE OFFLINE RUNNER NEVER PICKS A LIVE SUITE")
+chosen = run_tests.offline_suites()
+check_true("it finds the offline suites", "test_addressing.py" in chosen, "test_addressing missing")
+check("no _live suite in a full run", [n for n in chosen if n.endswith("_live.py")], [])
+check("none when one is asked for by name", run_tests.offline_suites(["schemes_live"]), [])
+with patched((run_tests, {"imports_bootstrap": lambda name: False})):
+    check("a suite without _bootstrap is refused, not run",
+          run_tests.run_suite("test_addressing.py")[0], "REFUSED")
 
 sys.exit(_testkit.finish())

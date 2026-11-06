@@ -56,6 +56,35 @@ if os.path.basename(sys.argv[0] or "").startswith("test_"):
     if os.path.basename(sys.argv[0] or "").endswith("_live.py"):
         os.environ.setdefault("ACCESSCASTER_ALLOW_DEVICE_WRITE", "1")
 
+
+def _own_desktop() -> None:
+    """Move this thread to a desktop of its own, so no window it makes can take the user's focus.
+
+    SetThreadDesktop refuses a thread that already owns a window or a hook, so it has to run before
+    anything that might make one, wx above all."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.CreateDesktopW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p,
+                                      wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    user32.CreateDesktopW.restype = wintypes.HANDLE
+    user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
+    user32.SetThreadDesktop.restype = wintypes.BOOL
+    generic_all = 0x10000000
+    desktop = user32.CreateDesktopW("AccessCasterTests", None, None, 0, generic_all, None)
+    if not desktop or not user32.SetThreadDesktop(desktop):
+        raise SystemExit(f"Could not give this suite a desktop of its own (Windows error "
+                         f"{ctypes.get_last_error()}), so its windows would take the focus.")
+
+
+# A WINDOW SUITE NEVER TAKES THE USER'S FOCUS. A `test_native_*` suite builds real wx windows, and a
+# modal dialog activates as it opens, so it would take the keyboard focus from whatever the user is
+# in. On a desktop of its own a window can never be the user's foreground window, while a modal loop
+# still runs exactly as it does on screen. The windows are only walked through wx, never through UI
+# Automation, so nothing a suite checks needs them to be visible.
+if sys.platform == "win32" and os.path.basename(sys.argv[0] or "").startswith("test_native_"):
+    _own_desktop()
+
 # A LIVE SUITE NEVER SHARES THE DESK WITH THE RUNNING APP: two processes writing to it interleave
 # their transfers. The app's single-instance lock says which one has it, so a `*_live.py` run
 # takes the lock or stops here. Scripts of other names that drive the desk take it through
@@ -118,8 +147,8 @@ def require_expendable_desk(what: str) -> None:
 
     FOR SCRIPTS THAT FACTORY-RESET. It is a flag rather than a warning in the header because a
     sweep that runs every offline test reads no headers: "expendable desks only" in capitals at the
-    top of `test_usb_drop_live.py` stops nothing, and the script factory-resets a working desk ten times
-    over. A warning protects a reader; a flag protects the desk.
+    top of a script stops nothing, and the script factory-resets a working desk once per trial. A
+    warning protects a reader; a flag protects the desk.
     """
     if EXPENDABLE_FLAG not in sys.argv:
         sys.stderr.write(

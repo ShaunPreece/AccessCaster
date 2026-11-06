@@ -4,8 +4,8 @@ calls SetFocus raises a second focus event, and the screen reader reads the cont
 control to land on comes first, and no dialog's constructor focuses anything. The source check
 walks every wx.Dialog in Project/native, so a new dialog is held to it without being listed here.
 The pad dialogs' first control is checked in test_native_pads. A job dialog's ticking runs for
-exactly as long as the dialog, and not at all when it is told not to. Built hidden: nothing is
-shown.
+exactly as long as the dialog, and not at all when it is told not to. The job dialogs run a real
+modal loop, so they are shown, on the suite's own desktop (`_bootstrap`), never the user's.
 
 Run: python DevTools/test_native_dialogs.py
 """
