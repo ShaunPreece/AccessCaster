@@ -320,7 +320,9 @@ def preview_write(edits: dict, more, name: str | None = PREVIEW_NAME) -> None:
         pad = nodes.get(grid - 1)
         if pad is None or (name is not None and (pad.name or "") != name):
             raise ValueError("The preview pad is no longer there. Start preview again.")
-        sub = next((o.index for o in objects if o.effects_idx == grid - 1), len(objects))
+        # None when no effect object binds the pad: an effect edit is then refused, because the
+        # only other address is a PADEFFECTS child that does not exist.
+        sub = next((o.index for o in objects if o.effects_idx == grid - 1), None)
         targets[grid] = (pad.position, sub)
     deadline = time.monotonic() + PREVIEW_SESSION_S
     with _transfer_mode(0.4):
@@ -331,9 +333,12 @@ def preview_write(edits: dict, more, name: str | None = PREVIEW_NAME) -> None:
                 recs.append(pr.write_record("padActive", "bool", True, pos, pr.PAD_BLOCK))
             for (grid, param), (value, kind) in edits.items():
                 pos, sub = targets[grid]
-                recs.append(pr.write_record(param, kind, value, pos, pr.PAD_BLOCK)
-                            if param == "padEffectInput"
-                            else pr.write_record(param, kind, value, sub, pr.FX_BLOCK))
+                if param == "padEffectInput":
+                    recs.append(pr.write_record(param, kind, value, pos, pr.PAD_BLOCK))
+                elif sub is None:
+                    raise ValueError("The preview pad has no effect to edit. Start preview again.")
+                else:
+                    recs.append(pr.write_record(param, kind, value, sub, pr.FX_BLOCK))
             t.send_records_paced(recs, delay=0.1)
             if time.monotonic() >= deadline:
                 break

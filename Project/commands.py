@@ -206,13 +206,12 @@ def _cough_key() -> dict:
         return _fail("This desk has no mic channels.")
     if _muted_mics:
         names, _muted_mics = _muted_mics, []
-        opened = []
-        for name in names:
+        for i, name in enumerate(names):
             res = mute_solo.action_set_channel_mute(name, False)
             if not res.get("ok"):
+                _muted_mics = names[i:]     # still muted by this key, so the next press opens them
                 return _fail(res.get("message", "The mics could not be opened."))
-            opened.append(name)
-        return _said(f"{wording.count(len(opened), 'mic')} open again.")
+        return _said(f"{wording.count(len(names), 'mic')} open again.")
     try:
         if not desk_model.trusted():
             with desk_access.hid_lock:
@@ -307,26 +306,30 @@ def _channel_commands() -> list:
     return out
 
 
-def _muted_now(name: str) -> bool:
-    """Whether a channel is muted. The desk model answers for free while it is trusted; a read is
-    the fallback, the same trade the cough key makes."""
+def _muted_now(name: str) -> dict:
+    """Whether a channel is muted, as `_channel_read` answers. The desk model answers for free
+    while it is trusted; a read is the fallback, the same trade the cough key makes."""
     if desk_model.trusted():
         muted = desk_model.mutes()
         strip = channels.channel_strip_index(name)
         if strip in muted:
-            return muted[strip]
-    return _channel_read(name).get("muted", False)
+            return {"ok": True, "muted": muted[strip]}
+    return _channel_read(name)
 
 
 def _channel_read(name: str) -> dict:
-    """One channel's state from a fresh read: mute, solo, processing and phantom."""
+    """One channel's state from a fresh read: mute, solo, processing and phantom, or a failure
+    with the sentence to speak. A toggle never guesses: writing the opposite of a state it could
+    not read turns things on that were meant to go off."""
     res = channel_actions.action_get_channels()
+    if not res.get("ok"):
+        return _fail(res.get("message", f"Could not read {name} from the desk."))
     for c in res.get("channels", []):
         if c.get("name") == name:
-            return {"muted": bool(c.get("muted")), "solo": bool(c.get("solo")),
+            return {"ok": True, "muted": bool(c.get("muted")), "solo": bool(c.get("solo")),
                     "processing_on": bool(c.get("processing_on")),
                     "phantom": bool(c.get("phantom"))}
-    return {}
+    return _fail(f"The desk did not report {name}.")
 
 
 def _run_chan(arg: str) -> dict:
@@ -337,19 +340,23 @@ def _run_chan(arg: str) -> dict:
     if ch is None:
         return _fail(f"This desk has no channel called {name}.")
     if what == "mute":
-        return mute_solo.action_set_channel_mute(name, not _muted_now(name))
+        now = _muted_now(name)
+        if not now["ok"]:
+            return now
+        return mute_solo.action_set_channel_mute(name, not now["muted"])
     # Solo, processing and phantom have no push-fed cache, so each reads the channel first. About a
     # second and a half, and worth it: a shortcut that guesses the current state and writes the
     # opposite is a shortcut that does the wrong thing every other press.
     full = _channel_read(name)
+    if not full["ok"]:
+        return full
     if what == "solo":
-        return mute_solo.action_set_channel_solo(name, not full.get("solo", False))
+        return mute_solo.action_set_channel_solo(name, not full["solo"])
     if what == "proc":
-        return channel_actions.action_set_processing_enabled(
-            name, not full.get("processing_on", False))
+        return channel_actions.action_set_processing_enabled(name, not full["processing_on"])
     if what == "phantom":
         mic = channels.mic_channel_number(ch)
-        return channel_actions.action_set_phantom(mic, not full.get("phantom", False))
+        return channel_actions.action_set_phantom(mic, not full["phantom"])
     return _fail(f"Unknown channel command {what}.")
 
 
@@ -508,10 +515,13 @@ def _run_out(arg: str) -> dict:
         # The two output mutes are UNIT SETTINGS (that is the write path action_set_output_mute
         # uses), so their current value comes from the unit-settings read, not the routing one.
         prop = "outputMonMute" if which == "monitor" else "outputBTMute"
-        now = False
-        for s in device_page.read_unit_settings().get("settings", []):
-            if s.get("prop") == prop:
-                now = bool(s.get("value"))
+        read = device_page.read_unit_settings()
+        if not read.get("ok"):
+            return _fail(read.get("message", "The desk's settings could not be read."))
+        now = next((bool(s.get("value")) for s in read.get("settings", [])
+                    if s.get("prop") == prop), None)
+        if now is None:
+            return _fail("The desk did not report that output's mute.")
         return faders.action_set_output_mute(which, not now)
     if what == "automute":
         try:
@@ -536,9 +546,13 @@ def _unit_commands() -> list:
 
 def _run_unit(arg: str) -> dict:
     if arg == "midi":
-        now = bool(device_page.read_unit_settings().get("midi"))
-        return device_page.action_set_midi(not now)
+        read = device_page.read_unit_settings()
+        if not read.get("ok") or read.get("midi") is None:
+            return _fail(read.get("message", "The desk did not report MIDI control."))
+        return device_page.action_set_midi(not read["midi"])
     net = network.read_status()
+    if not net.get("ok"):
+        return _fail(net.get("message", "The desk's network settings could not be read."))
     if arg == "wifi":
         now = bool((net.get("wifi") or {}).get("on"))
         return network.action_set_wifi(not now)

@@ -884,6 +884,15 @@ GREETING_ON = "Announcements on."
 GREETING_STARTED = "AccessCaster started."
 
 
+def _greet(greeting: str) -> None:
+    """Say the greeting, unless the RECORDER is putting announcements back: its stop phrase
+    already says they are back on, and the pump keeps only the newest phrase, so a greeting would
+    silence it."""
+    if greeting and not _quiet_start.is_set():
+        speech.say(greeting)
+    _quiet_start.clear()
+
+
 def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
     global live_state
     if gen is None:
@@ -894,14 +903,18 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
 
     if not current():
         return                        # superseded before it started; the newer loop greets
-    if rcp_transfer.find_control_interface() is None:
-        speech.say("The control announcer could not open the device.")
-        speech.enabled.clear()
-        return
     st = {"pending": None, "at": 0.0, "levels": {}, "levels_at": 0.0, "enc_pos": None,
           "enc_down_at": None, "enc_hold": False, "said": {}}
+    # NO DESK YET IS NOT A FAILURE: the app can start before the desk is switched on, and the
+    # subscription below hears it arrive. The greeting is said now, so a start at sign-in is still
+    # heard, and the desk's arrival is said and seeded when it comes.
+    waiting_for_desk = rcp_transfer.find_control_interface() is None
     announced_on = False
-    seed(st)
+    if waiting_for_desk:
+        _greet(f"{greeting} The desk is not connected yet." if greeting else "")
+        announced_on = True
+    else:
+        seed(st)
     live_state = st
     # Every push: anything changed elsewhere is worded (`_note_change`).
     sub = desk_live.subscribe("announcer")
@@ -922,13 +935,12 @@ def _loop(gen: int | None = None, greeting: str = GREETING_ON) -> None:
                     st["usb_mode"] = desk_model.usb_mode()
                 elif isinstance(event, desk_live.Connected):
                     if not announced_on:
-                        # Quiet when the RECORDER is putting announcements back: the stop phrase
-                        # already says they are back on, and the pump keeps only the newest phrase,
-                        # so a greeting here would silence it.
-                        if greeting and not _quiet_start.is_set():
-                            speech.say(greeting)
-                        _quiet_start.clear()
+                        _greet(greeting)
                         announced_on = True
+                    elif waiting_for_desk:
+                        waiting_for_desk = False
+                        seed(st)
+                        _say(f"{devices.get_active_device().name} connected.")
                     elif event.gap is not None and event.gap >= _RECONNECT_SPEAK_AFTER_S:
                         # Back after a real gap. Read the desk first: mutes, levels and the fader
                         # layout can all have moved while we were deaf, and Expanded mode

@@ -1324,6 +1324,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 
 ## Soundpads
 
+- **A PREVIEW EFFECT EDIT NEEDS AN OBJECT THAT BINDS THE PAD** (`soundpad.preview_write`). With none,
+  it is refused: `pad_records.child_path` checks nothing, so the only other address is a PADEFFECTS
+  child that does not exist.
 - **A LIVE PREVIEW EDIT IS WRITTEN ONLY TO A PAD STILL NAMED "Preview"** (`soundpad.preview_write`,
   `name=PREVIEW_NAME`). Edits are queued (`pad_actions._PreviewWriter`) and can be written after the
   preview has ended; without the check, a late one lands on whatever pad was made since at that
@@ -1846,6 +1849,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Native window
 
+- **THE TRAY ICON IS ADDED AGAIN ON `TaskbarCreated`** (`tray.TrayApp._on_taskbar_created`). Explorer's
+  restart removes every notification icon, and without it the app runs on with Quit and its menu
+  out of reach. `test_tray_icon` checks it.
 - **THE WINDOW BELONGS TO THE TRAY, AND CLOSING IT HIDES IT** (`MainFrame._on_close` vetoes; only
   Quit's `Close(force=True)` destroys it). It is built the first time it is wanted, never at
   sign-in. On close the window hides BEFORE its page, so Windows records the focused control as it
@@ -2864,6 +2870,9 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Global keyboard shortcuts
 
+- **A TOGGLE SHORTCUT REFUSES WHEN IT CANNOT READ THE STATE** (`commands._channel_read`, `_run_out`,
+  `_run_unit`). It writes the opposite of what it read, so a failed read taken as "off" turns on
+  what the press meant to turn off.
 - **A PAD SHORTCUT WRITES TO THE DESK UNDER `desk_access.hid_lock`, THROUGH `pad_shortcuts._desk`**, which gives
   up after `_DESK_WAIT_S` and says the desk is busy. A `padActive` or bank write sent while a profile
   restore has the desk in transfer mode lands inside the transfer.
@@ -3101,6 +3110,9 @@ shared one; a new copy is how they drifted apart the first time.
 
 ## The announcer, speech and pad-shortcut modules
 
+- **THE ANNOUNCER STARTED WITH NO DESK WAITS FOR IT** (`announcer._loop`). It greets at once, says the
+  desk is not connected yet, and seeds and says the desk when the listener connects. Switching
+  itself off there leaves announcements off for good once the desk arrives.
 - **THE ANNOUNCER REACHES THE APP ONLY THROUGH ITS HOOKS.** `announcer.Hooks` is everything the
   announcer needs from the app (the device lock, the mixer pads, what a reconnect means), and
   `service.start` installs `_AnnouncerHooks`, whose methods look the state up when called,

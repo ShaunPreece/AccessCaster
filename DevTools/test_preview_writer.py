@@ -35,10 +35,10 @@ def nodes(name="Preview"):
             SimpleNamespace(idx=0, position=0, name="Applause", type=1)]
 
 
-def fakes(name="Preview"):
+def fakes(name="Preview", bound=True):
+    objects = [SimpleNamespace(index=7, effects_idx=16)] if bound else []
     return ((soundpad, {"pad_nodes": lambda blob=None: nodes(name),
-                        "effect_objects": lambda blob=None: [SimpleNamespace(index=7,
-                                                                             effects_idx=16)],
+                        "effect_objects": lambda blob=None: objects,
                         "_transfer_mode": session}),
             (soundpad.rr, {"read_model": lambda *a, **k: reads.append(1) or b""}),
             (soundpad.t, {"send_records_paced": lambda recs, delay=0: sent.append(len(recs))}),
@@ -66,6 +66,19 @@ with as_device(devices.PRO2):
     with patched(*fakes(name="Robot")):
         soundpad.preview_update(17, "echoMix", 0.4)
     check("an in-place edit of any pad still writes", sent, [2])
+
+    sent.clear()
+    with patched(*fakes(bound=False)):
+        try:
+            soundpad.preview_write({(17, "reverbMix"): (0.5, "float")}, more=dict)
+            refused = False
+        except ValueError:
+            refused = True
+    check_true("an effect edit on a pad no effect object binds is refused and sends nothing",
+               refused and not sent)
+    with patched(*fakes(bound=False)):
+        soundpad.preview_update(17, "padEffectInput", 1, "int")
+    check("its mic input, on the pad itself, still writes", sent, [2])
 
     # ---- the writer: batching, newest wins, failures reported --------------------------------
     batches_seen = []

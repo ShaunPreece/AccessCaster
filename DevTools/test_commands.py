@@ -31,7 +31,7 @@ writes = []
 stub = types.ModuleType("channel_actions")
 mutes = types.ModuleType("mute_solo")
 announcer.live_state = {"muted": {channels.channel_strip_index("Mic1"): True}}
-stub.action_get_channels = lambda: {"channels": [
+stub.action_get_channels = lambda: {"ok": True, "channels": [
     {"name": "Mic1", "muted": True, "solo": True, "processing_on": True, "phantom": True}]}
 mutes.action_set_channel_mute = lambda name, on: writes.append(("mute", on)) or {}
 mutes.action_set_channel_solo = lambda name, on: writes.append(("solo", on)) or {}
@@ -50,6 +50,25 @@ announcer.live_state = None
 writes.clear()
 commands.run("chan.mute:Mic1")
 check("mute with no announcer cache falls back to a read", writes, [("mute", False)])
+
+print("\nA TOGGLE WHOSE READ FAILS refuses rather than guessing")
+import device_page  # noqa: E402
+import network  # noqa: E402
+
+failed_read = {"ok": False, "message": "Could not read the desk."}
+good_read = stub.action_get_channels
+stub.action_get_channels = lambda: failed_read
+for cmd in ("mute", "solo", "proc", "phantom"):
+    writes.clear()
+    res = commands.run(f"chan.{cmd}:Mic1")
+    check(f"{cmd} with a failed read writes nothing", writes, [])
+    check(f"{cmd} with a failed read says why", (res["ok"], res["message"]),
+          (False, failed_read["message"]))
+stub.action_get_channels = good_read
+with _testkit.patched((device_page, {"read_unit_settings": lambda: failed_read}),
+                      (network, {"read_status": lambda: failed_read})):
+    for cid in ("out.mute:monitor", "unit.midi", "unit.wifi", "unit.bt"):
+        check(f"{cid} with a failed read fails", commands.run(cid)["ok"], False)
 
 print("\nOPEN ACCESSCASTER goes to the tray's window")
 import app_window  # noqa: E402

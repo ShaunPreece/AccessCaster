@@ -54,6 +54,21 @@ def main() -> int:
         said, writes = press({0: True, 1: True, 2: True})
         check("press 2 opens exactly what press 1 muted", writes, [("Mic1", False), ("Mic3", False)])
 
+        print("\nA SECOND PRESS THAT FAILS PART-WAY KEEPS WHAT IT DID NOT OPEN")
+        opened = []
+
+        def open_until_second(name, on):
+            opened.append(name)
+            return {"ok": len(opened) == 1}
+
+        commands._muted_mics = ["Mic1", "Mic2", "Mic3"]
+        with patched((mute_solo, {"action_set_channel_mute": open_until_second})):
+            res = commands._cough_key()
+        check("the press says it failed", res["ok"], False)
+        check("the mics not yet opened are held for the next press", commands._muted_mics,
+              ["Mic2", "Mic3"])
+        commands._muted_mics = []
+
         print("\nEVERY MIC ON A FADER ALREADY MUTED")
         said, writes = press({0: True, 1: True, 2: True})
         check("nothing is written", writes, [])

@@ -169,6 +169,22 @@ print("\nTHE APP'S OWN START-UP NAMES THE APP")
 with Rig(speak_after=0.05, greeting=announcer.GREETING_STARTED) as rig:
     check("it greets with the app's name", rig.said, ["AccessCaster started."])
 
+print("\nSTARTED BEFORE THE DESK IS SWITCHED ON")
+rig = Rig(speak_after=0.05)
+rig.iface = None                          # nothing on the bus when the announcer starts
+with rig:
+    check("it greets at once and says the desk is not there yet", rig.said,
+          ["Announcements on. The desk is not connected yet."])
+    check("and stays on, waiting for it",
+          (rig.thread.is_alive(), speech.enabled.is_set()), (True, True))
+    check("nothing is seeded from a desk that is not there", rig.seeded, 0)
+    rig.iface = STANDARD
+    time.sleep(0.4)
+    check("the desk arriving is said", rig.said[-1],
+          f"{devices.get_active_device().name} connected.")
+    check("and seeds the desk model", rig.seeded, 1)
+    check("without a second greeting", len(rig.said), 2)
+
 print("\nA BLIP TOO SHORT TO HAVE LOST ANYTHING STAYS QUIET")
 with Rig(speak_after=5.0) as rig:
     rig.re_enumerate(EXPANDED, gap=0.05)

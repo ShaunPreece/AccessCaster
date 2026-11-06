@@ -221,6 +221,8 @@ class TrayApp:
     # -- hidden window that receives the tray callbacks -------------------------------------------
     def _create_window(self) -> None:
         hinst = win32gui.GetModuleHandle(None)
+        # The shell broadcasts this when Explorer restarts, with every notification icon gone.
+        taskbar_created = win32gui.RegisterWindowMessage("TaskbarCreated")
         wc = win32gui.WNDCLASS()
         wc.hInstance = hinst
         wc.lpszClassName = TRAY_CLASS
@@ -232,6 +234,7 @@ class TrayApp:
             WM_SHOW_WINDOW: lambda h, m, w, l: self._show_window(),
             win32con.WM_QUERYENDSESSION: lambda h, m, w, l: 1,
             win32con.WM_ENDSESSION: self._on_end_session,
+            taskbar_created: self._on_taskbar_created,
         }
         class_atom = win32gui.RegisterClass(wc)
         self.hwnd = win32gui.CreateWindow(class_atom, APP_NAME, win32con.WS_OVERLAPPED,
@@ -260,6 +263,16 @@ class TrayApp:
         # is fully operable from the keyboard / by a screen-reader user.
         win32gui.Shell_NotifyIcon(win32gui.NIM_SETVERSION,
                                   (self.hwnd, _TRAY_ICON_ID, 0, NOTIFYICON_VERSION_4))
+
+    def _on_taskbar_created(self, hwnd, msg, wparam, lparam):
+        """Explorer has restarted and the icon has gone with it: add it again, or the app runs on
+        with Quit and the menu out of reach."""
+        if not self._quitting:
+            try:
+                self._add_icon()
+            except win32gui.error as exc:
+                diagnostics.event("tray.icon_readd_failed", str(exc))
+        return 0
 
     def _remove_icon(self) -> None:
         try:
