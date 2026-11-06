@@ -17,8 +17,7 @@ restoring your settings.
 
 AccessCaster talks to the unit over the same USB control channel the official app uses, and
 presents those controls in a native Windows window, operable entirely from the keyboard.
-It is built and used with NVDA; see Accessibility below for what has and has not been tested
-elsewhere.
+It is built and used with NVDA, and tested with JAWS and Narrator; see Accessibility below.
 
 ## What it does
 
@@ -99,13 +98,11 @@ Accessibility is the entire point of this project, not an afterthought.
 
 **What has actually been tested, as opposed to built for**, because those are not the same claim:
 
-- **NVDA: developed and used with it daily**, on a real desk, by a blind user. This is the one that
-  is genuinely exercised.
-- **JAWS and Narrator: not tested, and feedback is wanted.** Building to the standards above should
-  mean they behave the same, but "should" is not "does".
+- **NVDA: developed and used with it daily**, on a real desk, by a blind user.
+- **JAWS and Narrator: tested, and working.** They see less day-to-day use than NVDA, so reports
+  from people who use them every day are especially welcome.
 
-If you use JAWS or Narrator and something does not work, please open an issue. Reports from a screen
-reader this has not been exercised on are the most useful thing anyone can send.
+If something does not work with your screen reader, please open an issue.
 
 ## Requirements
 
@@ -228,5 +225,5 @@ Copyright (C) 2026 Shaun Preece.
 
 ## Contributing
 
-Issues and pull requests are welcome, especially accessibility feedback from JAWS and Narrator
-users, and reports of anything that does not behave on your setup.
+Issues and pull requests are welcome, especially accessibility feedback from screen reader users,
+and reports of anything that does not behave on your setup.
