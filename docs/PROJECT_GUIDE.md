@@ -585,9 +585,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `autoReconnect`'s real home is SIPADVANCED, beside the CallMe and Icecast settings: it is not a
   Bluetooth setting, whatever its neighbours in SYSTEM suggested.
   `systemHapticSetting` in RECBUTTON has a known origin: a haptics write sent to a selector by
-  number, with its arguments the wrong way round, which landed on selector 2. The `btVisible` copy was written up
-  in `server.py` as possibly belonging to a sibling RODE product sharing this schema - reasonable,
-  and wrong.
+  number, with its arguments the wrong way round, which landed on selector 2. The `btVisible` copy reads
+  as possibly belonging to a sibling RODE product sharing this schema - reasonable, and wrong.
   **A STRAY THEREFORE COSTS MORE THAN A BAD READING: IT GROWS A THEORY.** Nobody doubts a property
   they can see in the dump, so the explanation gets written into the code and outlives the stray.
   When one is found, grep for anything written to explain it.
