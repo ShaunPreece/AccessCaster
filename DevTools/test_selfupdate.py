@@ -143,9 +143,8 @@ digest = hashlib.sha256(payload).hexdigest()
 
 
 class _Response(io.BytesIO):
-    def __init__(self, data, length=True, die_after=None):
+    def __init__(self, data, die_after=None):
         super().__init__(data)
-        self.headers = {"Content-Length": str(len(data))} if length else {}
         self._die_after = die_after
 
     def read(self, n=-1):
@@ -242,7 +241,6 @@ registered = []
 
 
 def fake_download(offer, folder, open_url=None, watcher=None):
-    watcher.progress(50, 100)
     watcher.checking()
     return downloader.READY, os.path.join(folder, downloader.file_name_for(offer.version))
 

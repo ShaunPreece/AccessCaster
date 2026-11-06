@@ -46,22 +46,14 @@ _BLOCK = 1 << 20
 
 
 class Watcher:
-    """What the caller wants to know while a download runs, and the one
-    question the download asks back.
+    """The stage change a caller wants to hear about while a download runs,
+    and the one question the download asks back. The default answers nothing
+    and refuses nothing, so a caller with no interface to drive passes none of
+    this.
 
-    One object rather than three callbacks because the three belong together:
-    anything watching the progress wants the stage change and the chance to
-    stop it. The default answers nothing and refuses nothing, so a caller with
-    no interface to drive passes none of this.
-
-    `checking` marks the point where the bar stops moving: the hash of a large
-    file takes long enough that a wait showing no movement has to be
-    explained, or it reads as the one that has hung.
+    `checking` marks the hash of the finished file, a wait long enough to need
+    explaining, or it reads as the one that has hung.
     """
-
-    def progress(self, received, total):
-        """`total` is 0 when the server did not say, which a caller showing a
-        bar has to treat as "no percentage", not as "nothing yet"."""
 
     def checking(self):
         """The bytes are in and the file on disk is about to be hashed."""
@@ -158,21 +150,8 @@ def _open_url(url):
     return http.opened(url, TIMEOUT)
 
 
-def _length_of(response):
-    """How many bytes the server says are coming, or 0 if it did not say. A
-    chunked or compressed response legitimately has no length, and a caller
-    showing a bar needs to tell that from a zero-byte file."""
-    try:
-        return max(0, int(response.headers.get("Content-Length") or 0))
-    except (AttributeError, TypeError, ValueError):
-        return 0
-
-
 def _write_to(url, path, open_url, watcher):
     with open_url(url) as response, open(path, "wb") as out:
-        total = _length_of(response)
-        received = 0
-        watcher.progress(0, total)
         while True:
             if watcher.cancelled():
                 raise _Stopped()
@@ -180,8 +159,6 @@ def _write_to(url, path, open_url, watcher):
             if not block:
                 break
             out.write(block)
-            received += len(block)
-            watcher.progress(received, total)
 
 
 def _hash_matches(path, expected):

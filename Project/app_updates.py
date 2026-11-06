@@ -128,24 +128,17 @@ class _Job:
         self.offer = offer
         self.stage = DOWNLOADING
         self.message = phrases.DOWNLOADING
-        self.received = 0
-        self.total = 0
         self.installer = None
         self.cancel = threading.Event()
 
     def payload(self) -> dict:
-        percent = (min(100, self.received * 100 // self.total) if self.total > 0 else None)
-        return {"stage": self.stage, "message": self.message, "percent": percent,
-                "version": str(self.offer.version),
+        return {"stage": self.stage, "message": self.message, "version": str(self.offer.version),
                 "not_back": phrases.not_back(self.offer.version)}
 
 
 class _Watcher(downloader.Watcher):
     def __init__(self, job):
         self.job = job
-
-    def progress(self, received, total):
-        self.job.received, self.job.total = received, total
 
     def checking(self):
         checker.log("checking the download")
