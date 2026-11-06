@@ -115,8 +115,18 @@ CANCELLED_DOWNLOAD = ("The update was cancelled. AccessCaster has not "
                       f"changed, and {KEY} offers it again whenever you want "
                       "it.")
 
+# After the desk's own sentence naming a change part-way through, which an
+# update must not interrupt: the installer closes the app as Windows does at
+# shutdown. The first refuses before the download, the second once it is ready.
+AFTER_DESK_WORK = "Install the update once it finishes."
+AFTER_DESK_WORK_KEPT = ("Install the update again once it finishes. The "
+                        "download is kept.")
+
+# An install that failed to start and gave no reason of its own.
+COULD_NOT_START = "The update could not start."
+
 # A download that did not finish.
-COULD_NOT_DOWNLOAD = ("Could not download the update. Nothing has changed, "
+COULD_NOT_DOWNLOAD =("Could not download the update. Nothing has changed, "
                       "and AccessCaster will try again another day.")
 
 # The downloaded file did not match the checksum in the index.

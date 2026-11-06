@@ -1,7 +1,8 @@
 """AccessCaster's own update: the decision, then the download and the hand-off to the installer.
 
 `app_updates` checks, downloads and starts the installer; these dialogs ask and follow. Every
-sentence comes from `app_updates`. Nothing installs without Install now.
+sentence is from `selfupdate.phrases`, most of them handed over in `app_updates`' replies. Nothing
+installs without Install now.
 
 The hand-off waits for the dialog: once the download is verified, `app_updates` does nothing until
 `proceed`, which is called once the dialog cannot be stopped and the closing sentence has had time
@@ -16,6 +17,7 @@ import wx
 
 import app_updates
 import desk_access
+from selfupdate import phrases
 from native.calls import call
 from native.dialogs import JobDialog, paragraphs, report
 
@@ -97,14 +99,14 @@ class _Follower:
         self.dialog = dialog
         busy = desk_access.work_in_progress()
         if busy:
-            dialog.finish({"ok": False, "message": f"{busy} Install the update once it finishes."})
+            dialog.finish({"ok": False, "message": f"{busy} {phrases.AFTER_DESK_WORK}"})
             return
         call(dialog, app_updates.install, self.version, done=self._started)
 
     def _started(self, reply):
         if not reply.get("ok"):
             self.dialog.finish({"ok": False,
-                                "message": reply.get("message") or "The update could not start."})
+                                "message": reply.get("message") or phrases.COULD_NOT_START})
             return
         self.dialog.poll(app_updates.job, self._stage, every_ms=POLL_MS)
 
@@ -125,8 +127,8 @@ class _Follower:
             if busy:
                 # Cancelling keeps the verified installer, so the next attempt skips the download.
                 call(self.dialog, app_updates.cancel)
-                self.dialog.finish({"ok": False, "message": f"{busy} Install the update again "
-                                    "once it finishes. The download is kept."})
+                self.dialog.finish({"ok": False,
+                                    "message": f"{busy} {phrases.AFTER_DESK_WORK_KEPT}"})
                 return
             # Nothing can stop it from here: the installer is about to close this app.
             self.dialog.hold()
@@ -144,7 +146,7 @@ class _Follower:
         if not reply.get("ok"):
             job = reply.get("job") or {}
             self.dialog.finish({"ok": False,
-                                "message": job.get("message") or "The update could not start."})
+                                "message": job.get("message") or phrases.COULD_NOT_START})
             return
         wx.CallLater(app_updates.NOT_BACK_WITHIN_S * 1000, lambda: self.dialog and self.dialog.finish(
             {"ok": False, "message": self.not_back}))

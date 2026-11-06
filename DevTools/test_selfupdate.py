@@ -218,7 +218,8 @@ sentences = [phrases.available("2.64.0"), phrases.confirm_title("2.64.0"),
              phrases.skipped("2.64.0"), phrases.just_updated("2.64.0"),
              phrases.update_did_not_take("2.63.0", r"C:\x\AccessCasterSetup-v2.64.0.exe"),
              phrases.settings_status("once a day", None, "2.64.0", datetime.date(2026, 11, 1)),
-             phrases.tray_install("2.64.0"), phrases.TRAY_CHECK]
+             phrases.tray_install("2.64.0"), phrases.TRAY_CHECK, phrases.AFTER_DESK_WORK,
+             phrases.AFTER_DESK_WORK_KEPT, phrases.COULD_NOT_START]
 check("the not-back sentence says the app is still running, in words",
       phrases.not_back("2.64.0", 3).startswith("AccessCaster is still running three minutes"), True)
 check("and does not send the user to start an app that is running",
