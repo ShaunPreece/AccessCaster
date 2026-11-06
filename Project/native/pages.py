@@ -3,7 +3,8 @@
 A SECTION is one branch of the tree. It has a `title`, a `route` (its name for `frame.go_to`), a
 `pages` list, and optionally `start()` (called once the service is up), `refresh(announce)` (F5)
 and `read()` (after a job that rewrites the desk). When its pages change it calls
-`frame.pages_changed(self)`, and the frame rebuilds the branch.
+`frame.pages_changed(self)`, and the frame rebuilds the branch. A section whose pages only make
+sense once the desk has been read shows `StatusPages` until then.
 
 A PAGE is one leaf: a `key` that survives a rebuild, a `title` for the tree, and the `window` shown
 on the right. Every page window is a child of `frame.host`. A window with `before_show()` has it
@@ -244,3 +245,38 @@ class MessagePage(wx.Panel):
 
     def set_text(self, text):
         self.text.SetValue(text)
+
+
+class StatusPages:
+    """A section's pages until its first good read: each a `MessagePage` under the title its real
+    page will have, all saying why there is nothing yet, with a button that reads again. A page
+    built before there is anything to show would offer controls that can only refuse, so the real
+    pages are built from the first good read and `replace` puts them in the tree.
+
+    `titles` is [(key, title)]; the section's `pages` are set here, and `refresh(announce)` is what
+    the button calls."""
+
+    def __init__(self, section, titles, button, text="Starting AccessCaster."):
+        self.section = section
+        self.titles = titles
+        self.windows = [MessagePage(section.frame.host, text, button=button,
+                                    on_button=lambda: section.refresh(True)) for _title in titles]
+        section.pages = self._pages(self.windows)
+
+    def _pages(self, windows):
+        return [Page(key, title, window)
+                for (key, title), window in zip(self.titles, windows, strict=True)]
+
+    def set_text(self, text):
+        for window in self.windows:
+            window.set_text(text)
+
+    def replace(self, windows):
+        """Put the real pages in the tree, in the order of `titles`."""
+        frame = self.section.frame
+        # The page under the focus is about to leave the tree.
+        focus = wx.Window.FindFocus()
+        if focus is not None and any(window.IsDescendant(focus) for window in self.windows):
+            frame.tree.SetFocus()
+        self.section.pages = self._pages(windows)
+        frame.pages_changed(self.section)

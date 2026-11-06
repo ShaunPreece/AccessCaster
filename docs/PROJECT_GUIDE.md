@@ -1859,6 +1859,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `present` shows the page first, so activation lands the focus back on that control. A closed
   window says nothing (`say`). With `keep_in_tray` off, closing quits instead, through the same
   `_request_quit` as the tray's Quit.
+- **A PAGE THAT ONLY MEANS SOMETHING WITH A DESK IS BUILT FROM THE FIRST GOOD READ**
+  (`pages.StatusPages`: Pads, Recording, CallMe). Until then each of its pages is one sentence
+  saying why, and a Read again button. Built earlier, it offers a page of controls that can only
+  refuse. A section that reads for itself sets the sentence from a FAILED desk state read too, or
+  it says "Reading" for as long as no desk is there. Channels and Routing do the same with one
+  status page; Backups and the app's own settings need no desk.
 - **A QUITTING COPY HOLDS THE SINGLE-INSTANCE LOCK UNTIL ITS PROCESS ENDS**, after its icon window
   has gone. A launch that finds the lock held and no window therefore waits for it
   (`tray._claim_when_free`) before calling it another account's copy; without that, quitting and

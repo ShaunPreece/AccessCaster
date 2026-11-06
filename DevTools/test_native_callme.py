@@ -60,19 +60,28 @@ def payload(version=1, **values):
 sync = (callme_section, {"call": lambda _o, fn, *a, done=None: done(fn(*a))})
 frame = FakeFrame()
 section = callme_section.CallMeSection(frame)
-section._timer.Stop()
 reads = []
 section.read = lambda announce=False: reads.append(announce)
-call_page, dial, incoming, plan = (section.call_page, section.dial_page, section.incoming_page,
-                                   section.plan_page)
 
 # ---- before a read ---------------------------------------------------------------------------
-call_page._on_answer(wx.CommandEvent())
-check("a press before a read is refused", frame.said[-1], callme_section.UNREAD)
-check_true("and Not ready for calls is hidden", not call_page.ready.IsShown())
+check("before a read each page is only a sentence and Read again",
+      [(p.title, type(p.window).__name__) for p in section.pages],
+      [("Current call", "MessagePage"), ("Make a call", "MessagePage"),
+       ("Incoming calls", "MessagePage"), ("Plan", "MessagePage")])
+section.read_done({"ok": False, "message": "Could not read the desk: no desk."}, False)
+check("a failed read says why on every page",
+      [w.text.GetValue() for w in section.status.windows],
+      ["Could not read the desk: no desk."] * 4)
+check_true("and builds no page", section.call_page is None and frame.changed == 0)
 
 # ---- the payload on the pages ----------------------------------------------------------------
 section.show(payload(details=[{"label": "Bitrate", "value": "64 kbps"}]))
+section._timer.Stop()
+call_page, dial, incoming, plan = (section.call_page, section.dial_page, section.incoming_page,
+                                   section.plan_page)
+check_true("a good read puts the real pages in the tree", frame.changed == 1
+           and [p.window for p in section.pages] == [call_page, dial, incoming, plan])
+check_true("Not ready for calls is hidden while nothing is wrong", not call_page.ready.IsShown())
 check("the call line", call_page.now.GetValue(), "No call.")
 check("the details, a sentence a line", call_page.details.GetValue(), "Bitrate: 64 kbps.")
 check("the plan", plan.plan.GetValue(), "Plan: Free.")

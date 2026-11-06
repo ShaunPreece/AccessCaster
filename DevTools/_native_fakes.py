@@ -25,15 +25,22 @@ class FakeDesk:
 
 
 class FakeFrame:
-    """The main window: a hidden frame holding the host panel a section builds into, with every
-    sentence the section speaks collected in `said`."""
+    """The main window: a hidden frame holding the tree and the host panel a section builds into,
+    with every sentence the section speaks collected in `said` and each `pages_changed` counted in
+    `changed`."""
 
     def __init__(self, desk: FakeDesk | None = None):
         self.window = wx.Frame(None)
+        wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
+        self.tree = wx.TreeCtrl(self.window)
         self.host = wx.Panel(self.window)
         self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
         self.desk = desk if desk is not None else FakeDesk()
         self.said: list[str] = []
+        self.changed = 0
+
+    def pages_changed(self, _section):
+        self.changed += 1
 
     def say(self, text, recent=False):
         self.said.append(text)

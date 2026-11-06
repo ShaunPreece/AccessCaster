@@ -2,7 +2,7 @@
 card or drive, and the card and drive themselves.
 
 The recorder is not in the desk state. The section reads it (`recording.read`, one model
-dump) after the desk state's first read, on F5, after a job that rewrites the desk, and when the
+dump) after each desk state read until one succeeds, on F5, after a job that rewrites the desk, and when the
 desk pushes a recording state the page is not showing (the desk state's "recorder" event): the
 unit's own REC button, and a card or drive going in or out. A command's reply carries the same
 payload, so a press is shown from its reply without another dump; its buttons follow the push the
@@ -20,10 +20,10 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Page, Reader, add_button, labelled, page_body, read_only, set_items
+from native.pages import Reader, StatusPages, add_button, labelled, page_body, read_only, set_items
 
 TITLE = "Recording"
-UNREAD = "The recorder has not been read yet."
+PAGES = [("recorder", "Recorder"), ("recordings", "Recordings"), ("storage", "Card and drive")]
 BUSY = "One moment: the desk is still carrying out your last press."
 NOWHERE = ("The desk has nowhere to record to. Put a memory card in, or a USB drive in the second "
            "USB port.")
@@ -47,7 +47,7 @@ def recording_label(take):
 def volumes(data):
     """The card slot and the USB drive. Never the internal storage, which holds the pad sounds, and
     never the live view of the drive being written to, a duplicate that exists only mid-take."""
-    return [v for v in (data or {}).get("volumes") or []
+    return [v for v in data.get("volumes") or []
             if v.get("can_record") and not v.get("live_view")]
 
 
@@ -79,17 +79,17 @@ class RecordingSection(Reader):
         self._pushed = None          # the last state pushed while busy
         self._label = None           # the pressed button's label at the press
         self._init_reader(owner=frame)
-        self.recorder = RecorderPage(self)
-        self.recordings = RecordingsPage(self)
-        self.storage = StoragePage(self)
-        self.pages = [Page("recorder", "Recorder", self.recorder),
-                      Page("recordings", "Recordings", self.recordings),
-                      Page("storage", "Card and drive", self.storage)]
+        # Built from the first good read (`show`).
+        self.recorder = self.recordings = self.storage = None
+        self.status = StatusPages(self, PAGES, "Read the recorder again")
         frame.desk.subscribe(self._desk_event)
 
     @property
     def state(self):
         return self.data.get("state") if self.data else None
+
+    def start(self):
+        self.status.set_text("Reading the recorder from the desk.")
 
     def refresh(self, announce):
         self.read(announce)
@@ -104,9 +104,8 @@ class RecordingSection(Reader):
             # at once; the reply fills in the rest. No push means the state did not change.
             if self.busy:
                 self._pushed = detail
-                if self.data is not None:
-                    self.data["state"] = detail
-                    self.recorder.show_state()
+                self.data["state"] = detail
+                self.recorder.show_state()
             elif detail != self.state:
                 self.read()
 
@@ -119,13 +118,18 @@ class RecordingSection(Reader):
         if reply.get("ok"):
             self.show(reply, message)
         elif self.data is None:
-            self.recorder.set_sentence(message)
+            self.status.set_text(message)
         if announce:
             self.frame.say(message)
 
     def show(self, data, sentence):
         self.data = data
         self.sentence = sentence
+        if self.recorder is None:
+            self.recorder = RecorderPage(self)
+            self.recordings = RecordingsPage(self)
+            self.storage = StoragePage(self)
+            self.status.replace([self.recorder, self.recordings, self.storage])
         for page in (self.recorder, self.recordings, self.storage):
             page.show()
 
@@ -193,17 +197,17 @@ class RecorderPage(wx.Panel):
                                    "recording.")
         sizer.Add(row, 0, wx.ALL, 6)
         # Below the buttons, so one Tab after a press reaches what the unit is doing.
-        self.now = read_only(parent, sizer, "Now", value="Reading the desk.")
+        self.now = read_only(parent, sizer, "Now")
 
         self.multitrack = Choice(
             self, parent, sizer, "Tracks", sorted(recorder.MULTITRACK_LABEL.items()),
             recording.action_set_multitrack, *self.field("multitrack"),
-            description=f"{recorder.MULTITRACK_HINT} {USB_POINTER}", guard=self._unread,
+            description=f"{recorder.MULTITRACK_HINT} {USB_POINTER}",
             accepted=lambda _reply: self._show_bypass())
         self.format = Choice(
             self, parent, sizer, "Save recordings as",
             sorted(recorder.RECORDING_FORMAT_LABEL.items()), recording.action_set_recording_format,
-            *self.field("format"), description=recorder.RECORDING_FORMAT_HINT, guard=self._unread)
+            *self.field("format"), description=recorder.RECORDING_FORMAT_HINT)
         self.bypass = Switch(self, parent, sizer, "Record the separate tracks raw",
                              recording.action_set_processing_bypass,
                              *self.field("processing_bypass"), guard=self._bypass_refused)
@@ -220,31 +224,25 @@ class RecorderPage(wx.Panel):
     def field(self, key):
         """`current` and `remember` for `key` in the section's recorder payload."""
         def current():
-            return self.section.data.get(key) if self.section.data else None
+            return self.section.data.get(key)
 
         def remember(value):
-            if self.section.data:
-                self.section.data[key] = value
+            self.section.data[key] = value
         return current, remember
 
     def _remember_mute(self, on):
         self._mute = on
 
-    def _unread(self):
-        return UNREAD if self.section.data is None else None
-
     def _bypass_refused(self):
-        # Off, unknown and not read yet all mean no separate tracks are being made.
-        return self._unread() or (None if self.section.data.get("multitrack")
-                                  else recorder.BYPASS_NEEDS_MULTITRACK)
+        # Off and unknown both mean no separate tracks are being made.
+        return None if self.section.data.get("multitrack") else recorder.BYPASS_NEEDS_MULTITRACK
 
     def set_sentence(self, text):
         if self.now.GetValue() != text:
             self.now.SetValue(text)
 
     def show(self):
-        if self.section.data is not None:
-            self.set_sentence(self.section.sentence)
+        self.set_sentence(self.section.sentence)
         for control in (self.multitrack, self.format, self.bypass, self.mute):
             control.show()
         self._show_bypass()
@@ -287,38 +285,29 @@ class RecorderPage(wx.Panel):
             self.set_sentence(reply["message"])
 
     def _show_bypass(self):
-        data = self.section.data or {}
-        self.bypass.acc.description = (recorder.BYPASS_HINT if data.get("multitrack")
+        self.bypass.acc.description = (recorder.BYPASS_HINT if self.section.data.get("multitrack")
                                        else recorder.BYPASS_NEEDS_MULTITRACK)
 
     # ---- the transport ---------------------------------------------------------------------
 
     def _on_transport(self, event):
         state = self.section.state
-        refusal = self._unread() or (NOWHERE if state == recorder.NO_DESTINATION else None)
-        if refusal:
-            self.frame.say(refusal)
+        if state == recorder.NO_DESTINATION:
+            self.frame.say(NOWHERE)
             return
         self.section.command(event.GetEventObject(), recording.action_record,
                              "stop" if state in RUNNING else "start")
 
     def _on_pause(self, event):
         state = self.section.state
-        refusal = self._unread()
-        if not refusal and state not in RUNNING:
-            refusal = "Nothing is recording."
-        if refusal:
-            self.frame.say(refusal)
+        if state not in RUNNING:
+            self.frame.say("Nothing is recording.")
             return
         self.section.command(event.GetEventObject(), recording.action_record,
                              "resume" if state == recorder.PAUSED else "pause")
 
     def _on_marker(self, event):
         # `recording` refuses a marker with nothing recording, from its listener's state.
-        refusal = self._unread()
-        if refusal:
-            self.frame.say(refusal)
-            return
         self.section.command(event.GetEventObject(), recording.action_drop_marker)
 
 
@@ -333,7 +322,7 @@ class RecordingsPage(wx.Panel):
         self.takes = []              # the recordings as listed; empty when the list holds a note
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Recording", lambda p: wx.ListBox(
-            p, choices=["Reading the desk."], size=(460, 220)))
+            p, size=(460, 220)))
         a11y.describe(self.list, LIST_HINT)
         self.delete = wx.Button(parent, label="Delete selected recording")
         a11y.describe(self.delete, "Deletes it from the card or drive. This cannot be undone; you "
@@ -363,8 +352,7 @@ class RecordingsPage(wx.Panel):
     def _on_delete(self, _event):
         data = self.section.data
         take = self._chosen()
-        refusal = (UNREAD if data is None else
-                   "There are no recordings on the desk." if take is None else
+        refusal = ("There are no recordings on the desk." if take is None else
                    None if data.get("can_delete") else
                    data.get("delete_note") or "Deleting is not available.")
         if refusal:
@@ -390,7 +378,7 @@ class StoragePage(wx.Panel):
         self.shown = []              # the volumes as listed
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Card or drive", lambda p: wx.ListBox(
-            p, choices=["Reading the desk."], size=(460, 80)))
+            p, size=(460, 80)))
         a11y.describe(self.list, STORAGE_HINT)
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.eject = add_button(parent, row, "Eject", self._on_eject)
@@ -420,10 +408,7 @@ class StoragePage(wx.Panel):
 
     def _refused(self, volume):
         """The refusal every storage action shares, or None."""
-        data = self.section.data
-        if data is None:
-            return UNREAD
-        if data.get("storage_writable") is False:
+        if self.section.data.get("storage_writable") is False:
             return NO_STORAGE_WRITE
         if volume is None:
             return "The desk reports no card slot or drive."

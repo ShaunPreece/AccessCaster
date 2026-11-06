@@ -69,12 +69,6 @@ class FakeDesk(BaseDesk):
 class FakeFrame(BaseFrame):
     def __init__(self):
         super().__init__(FakeDesk())
-        wx.StaticText(self.window, label="Categories")    # as MainFrame names its tree
-        self.tree = wx.TreeCtrl(self.window)
-        self.changed = 0
-
-    def pages_changed(self, _section):
-        self.changed += 1
 
 
 def controls_named(dialog, label):
@@ -111,9 +105,14 @@ with as_device(devices.PRO2):
     check("the pads follow every pad property the grid is built from",
           [(names, fn.__self__._read.__self__) for names, fn in frame.desk.watched],
           [(set(soundpad.PAD_GRID_PROPS), section)])
+    section.start()
+    section._desk_event("read", {"ok": False, "message": "Could not read the desk: no desk."})
+    check("a desk that cannot be read says why on every status page, not that it is reading",
+          [status.text.GetValue() for status in section.status.windows],
+          ["Could not read the desk: no desk."] * 3)
     section.show({"pads": [], "health_message": "Could not read the pad layout."})
     check("a failed first read says why on every status page",
-          [status.text.GetValue() for status in section.statuses],
+          [status.text.GetValue() for status in section.status.windows],
           ["Could not read the pad layout."] * 3)
     section.show(model)
     page = section.page

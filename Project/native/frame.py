@@ -51,6 +51,7 @@ SECTIONS = [
 
 
 APP_TITLE = "AccessCaster"
+NO_DESK_TITLE = f"{APP_TITLE}, no desk connected"
 
 
 class MainFrame(Speaker, wx.Frame):
@@ -184,12 +185,14 @@ class MainFrame(Speaker, wx.Frame):
             self._notifier.say(text, recent)
 
     def _desk_event(self, event, reply):
-        """The title names the desk while one is connected."""
-        if event == "read":
-            name = reply.get("device_name") if reply.get("ok") else None
+        """The title names the desk while one is connected, and says when none can be reached: it is
+        what the screen reader's read-title command and Alt+Tab give, from anywhere. The status bar
+        says why."""
+        if event == "read" and reply.get("ok"):
+            name = reply.get("device_name")
             title = f"{APP_TITLE}, {name}" if name else APP_TITLE
-        elif event == "lost":
-            title = APP_TITLE
+        elif event in ("read", "lost"):
+            title = NO_DESK_TITLE
         else:
             return
         if self.GetTitle() != title:

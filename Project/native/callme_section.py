@@ -2,8 +2,8 @@
 taking incoming calls, and the plan.
 
 The state is the CallMe listener's (`callme_actions.watcher`), which hears every change the unit
-pushes. The section reads the whole of it (`callme_actions.read`, one model dump) after the desk
-state's first read, on F5 and after a fix; while one of its pages is shown it asks the listener
+pushes. The section reads the whole of it (`callme_actions.read`, one model dump) after each desk
+state read until one succeeds, on F5 and after a fix; while one of its pages is shown it asks the listener
 (`callme_actions.read_live`, no device read) every `POLL_MS`, and redraws only when its `version`
 moves. Every sentence comes from `callme_actions` or `callme`.
 
@@ -22,11 +22,12 @@ from native import a11y
 from native.calls import call
 from native.controls import Switch, set_choices
 from native.dialogs import confirm, ok_cancel
-from native.pages import (Page, Reader, add_button, labelled, page_body, read_only, set_items,
-                          set_text)
+from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only,
+                          set_items, set_text)
 
 TITLE = "CallMe"
-UNREAD = "CallMe has not been read yet."
+PAGES = [("call", "Current call"), ("dial", "Make a call"), ("incoming", "Incoming calls"),
+         ("plan", "Plan")]
 BUSY = "One moment: the desk is still carrying out your last press."
 POLL_MS = 1000
 NO_LINK = "There is no guest link while incoming calls are off."
@@ -63,21 +64,28 @@ class CallMeSection(Reader):
         self._ringing = None         # the id of the call last seen ringing
         self._init_reader(owner=frame)
         self._polling = False
+        # Built from the first good read (`_build`).
+        self.call_page = self.dial_page = self.incoming_page = self.plan_page = None
+        self.views = []
+        self._timer = None
+        self.status = StatusPages(self, PAGES, "Read CallMe again")
+        frame.desk.subscribe(self._desk_event)
+
+    def _build(self):
         self.call_page = CallPage(self)
         self.dial_page = DialPage(self)
         self.incoming_page = IncomingPage(self)
         self.plan_page = PlanPage(self)
         self.views = [self.call_page, self.dial_page, self.incoming_page, self.plan_page]
-        self.pages = [Page("call", "Current call", self.call_page),
-                      Page("dial", "Make a call", self.dial_page),
-                      Page("incoming", "Incoming calls", self.incoming_page),
-                      Page("plan", "Plan", self.plan_page)]
         self._timer = wx.Timer(self.call_page)
         self.call_page.Bind(wx.EVT_TIMER, lambda _e: self.poll(), self._timer)
         for view in self.views:
             view.Bind(wx.EVT_SHOW, self._on_show)
         self.call_page.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
-        frame.desk.subscribe(self._desk_event)
+        self.status.replace(self.views)
+
+    def start(self):
+        self.status.set_text("Reading CallMe from the desk.")
 
     def refresh(self, announce):
         self.read(announce)
@@ -99,13 +107,15 @@ class CallMeSection(Reader):
                 self.frame.say(reply.get("now") or "CallMe read.")
         else:
             if self.data is None:
-                self.call_page.set_now(reply.get("message") or "Could not read CallMe.")
+                self.status.set_text(reply.get("message") or "Could not read CallMe.")
             if announce:
                 self.frame.say(reply.get("message") or "Could not read CallMe.")
 
     def show(self, data):
         self.data = data
         self._seen = data.get("version")
+        if self.call_page is None:
+            self._build()
         for view in self.views:
             view.show()
 
@@ -125,7 +135,7 @@ class CallMeSection(Reader):
         self._timer.Stop()
 
     def poll(self):
-        if self._polling or self.data is None:
+        if self._polling:
             return
         self._polling = True
         call(self.frame, callme_actions.read_live, done=self._polled)
@@ -148,9 +158,6 @@ class CallMeSection(Reader):
     def act(self, source, action, *args, working=""):
         """A press: `action(*args)` off the UI thread, its reply spoken from `source`, then the
         listener asked at once, since the reply can change which buttons apply."""
-        if self.data is None:
-            self.frame.say(UNREAD)
-            return
         if self.busy:
             self.frame.say(BUSY)
             return
@@ -168,15 +175,11 @@ class CallMeSection(Reader):
     def field(self, key):
         """`current` and `remember` for `key` in the payload."""
         def current():
-            return self.data.get(key) if self.data else None
+            return self.data.get(key)
 
         def remember(value):
-            if self.data:
-                self.data[key] = value
+            self.data[key] = value
         return current, remember
-
-    def unread(self):
-        return UNREAD if self.data is None else None
 
 
 class CallPage(wx.Panel):
@@ -208,7 +211,6 @@ class CallPage(wx.Panel):
         self.ready_sizer.Add(self.put, 0, wx.ALL, 6)
 
         self.now = read_only(parent, sizer, "Now")
-        self.now.SetValue("Reading the desk.")
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.answer = add_button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
@@ -279,9 +281,9 @@ class CallPage(wx.Panel):
             self.frame.say("Choose a fader first.")
             return
         desk_faders = self.section.frame.desk.faders
-        code = self.section.data.get("callme1_code") if self.section.data else None
+        code = self.section.data.get("callme1_code")
         if code is None or not desk_faders:
-            self.frame.say(UNREAD)
+            self.frame.say("The desk has not said where CallMe 1 is. Press F5 to read it again.")
             return
         gave_up = desk_faders["labels"][index]
 
@@ -326,7 +328,7 @@ class DialPage(wx.Panel):
         sizer.Add(self.dial, 0, wx.ALL, 6)
 
         self.list = labelled(parent, sizer, "Contact", lambda p: wx.ListBox(
-            p, choices=["Reading the contacts."], size=(420, 160)))
+            p, size=(420, 160)))
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.call_contact = add_button(parent, row, "Call selected contact", self._on_call_contact)
         self.edit = add_button(parent, row, "Edit selected contact", self._on_edit)
@@ -348,9 +350,6 @@ class DialPage(wx.Panel):
         return self.contacts[index] if self.contacts and index != wx.NOT_FOUND else None
 
     def _none_chosen(self):
-        if self.section.data is None:
-            self.frame.say(UNREAD)
-            return True
         if self._chosen() is None:
             self.frame.say("No contacts yet. Add a contact first.")
             return True
@@ -371,9 +370,6 @@ class DialPage(wx.Panel):
                          working=f"Calling {contact['name']}, please wait.")
 
     def _on_add(self, _event):
-        if self.section.data is None:
-            self.frame.say(UNREAD)
-            return
         self._edit_contact(None)
 
     def _on_edit(self, _event):
@@ -407,7 +403,7 @@ class DialPage(wx.Panel):
         call(self, callme_actions.action_contact_delete, contact["code"], done=done)
 
     def _contacts_changed(self, reply, prefer=None):
-        if reply.get("contacts") is not None and self.section.data is not None:
+        if reply.get("contacts") is not None:
             self.section.data["contacts"] = reply["contacts"]
             self.show(prefer)
 
@@ -470,8 +466,7 @@ class IncomingPage(wx.Panel):
                         "working.",
             guard=self._hosting_refused, accepted=self._hosted)
         self.ringtone = Switch(self, parent, sizer, "Ring for incoming calls",
-                               callme_actions.action_ringtone, *section.field("ringtone"),
-                               guard=section.unread)
+                               callme_actions.action_ringtone, *section.field("ringtone"))
         self.code = read_only(parent, sizer, "Your CallMe code", height=None, width=260)
         self.link = read_only(parent, sizer, "Guest link", height=None)
         a11y.describe(self.link, "Opens in any web browser. Nothing to install.")
@@ -487,9 +482,6 @@ class IncomingPage(wx.Panel):
         set_text(self.link, data.get("link") or "")
 
     def _hosting_refused(self):
-        unread = self.section.unread()
-        if unread:
-            return unread
         if self.section.data.get("hosting_locked"):
             return "Incoming calls cannot be switched while a call is up."
         return None
@@ -500,9 +492,9 @@ class IncomingPage(wx.Panel):
             self.section.show(reply)
 
     def _on_copy(self, _event):
-        link = (self.section.data or {}).get("link")
+        link = self.section.data.get("link")
         if not link:
-            self.frame.say(self.section.unread() or NO_LINK)
+            self.frame.say(NO_LINK)
             return
         if wx.TheClipboard.Open():
             try:
@@ -524,11 +516,9 @@ class PlanPage(wx.Panel):
         self.frame = section.frame
         sizer, parent = page_body(self)
         self.plan = read_only(parent, sizer, "Your plan", height=100)
-        self.plan.SetValue("Reading the desk.")
         self.auto = Switch(self, parent, sizer, "Extend calls automatically",
                            callme_actions.action_auto_extend, *section.field("auto_extend"),
-                           description="On plans with an hour limit, five minutes before the end.",
-                           guard=section.unread)
+                           description="On plans with an hour limit, five minutes before the end.")
 
     def show(self):
         set_text(self.plan, lines(self.section.data.get("plan")))

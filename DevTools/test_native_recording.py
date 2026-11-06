@@ -75,11 +75,20 @@ reads = []
 with patched((announcer, {"record_mutes_announcer": lambda: True})):
     section = recording_section.RecordingSection(frame)
 section.read = lambda announce=False: reads.append(announce)
-rec, takes, storage = section.recorder, section.recordings, section.storage
 
-check("before a read Start recording refuses", (rec._on_transport(None), frame.said[-1])[1],
-      recording_section.UNREAD)
+check("before a read each page is only a sentence and Read again",
+      [(p.title, type(p.window).__name__) for p in section.pages],
+      [("Recorder", "MessagePage"), ("Recordings", "MessagePage"),
+       ("Card and drive", "MessagePage")])
+section.read_done({"ok": False, "message": "Could not read the recorder: no desk."}, False)
+check("a failed read says why on every page",
+      [w.text.GetValue() for w in section.status.windows],
+      ["Could not read the recorder: no desk."] * 3)
+check_true("and builds no page", section.recorder is None and frame.changed == 0)
 section.show(payload(takes=[take(5, "REC0005"), take(4, "REC0004")]), "Ready to record.")
+rec, takes, storage = section.recorder, section.recordings, section.storage
+check_true("a good read puts the real pages in the tree", frame.changed == 1
+           and [p.window for p in section.pages] == [rec, takes, storage])
 check("the sentence is on the page", rec.now.GetValue(), "Ready to record.")
 check("the recordings are listed newest first",
       [takes.list.GetString(i) for i in range(takes.list.GetCount())],

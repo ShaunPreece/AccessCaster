@@ -15,12 +15,10 @@ from native import a11y
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import (FollowDesk, MessagePage, Page, Reader, labelled, page_body, read_only,
+from native.pages import (FollowDesk, Reader, StatusPages, labelled, page_body, read_only,
                           reply_text, select, set_items, set_text)
 
 TITLE = "SMART pads"
-# Every page is built from the first good read; until then each is a sentence saying why it is not
-# there. As (key, title).
 PAGES = [("pads", "Pads"), ("fx", "Voice effects"), ("maint", "Pad maintenance")]
 # How long after a Settings dialog closes the pads are read again: past `controls._Field.DELAY_MS`,
 # so a write still waiting to go out has been sent first.
@@ -38,29 +36,25 @@ class PadsSection(Reader):
         self.fx = None
         self.maint = None
         self._init_reader(owner=frame)
-        self.statuses = [MessagePage(frame.host, "Starting AccessCaster.",
-                                     button="Read the pads again", on_button=lambda: self.read(True))
-                         for _page in PAGES]
-        self.pages = [Page(key, title, status)
-                      for (key, title), status in zip(PAGES, self.statuses, strict=True)]
+        self.status = StatusPages(self, PAGES, "Read the pads again")
         frame.desk.subscribe(self._desk_event)
         FollowDesk(frame, soundpad.PAD_GRID_PROPS, self.read)
 
     def start(self):
-        self._set_status("Reading the pads from the desk.")
-
-    def _set_status(self, text):
-        for status in self.statuses:
-            status.set_text(text)
+        self.status.set_text("Reading the pads from the desk.")
 
     def refresh(self, announce):
         self.read(announce)
 
     def _desk_event(self, event, reply):
         # The first read waits for the desk state's, so Channels fill first; a desk that was not
-        # there at start is read when it arrives.
-        if event == "read" and reply.get("ok") and self.model is None:
+        # there at start is read when it arrives. Until then the pages say why they are empty.
+        if event != "read" or self.model is not None:
+            return
+        if reply.get("ok"):
             self.read()
+        else:
+            self.status.set_text(reply.get("message") or "Could not read the desk.")
 
     def fetch(self):
         return pad_actions.soundpad_model()
@@ -74,19 +68,14 @@ class PadsSection(Reader):
         if not model.get("pads"):
             text = model.get("health_message") or "Could not read the pads."
             if self.page is None:
-                self._set_status(text)
+                self.status.set_text(text)
             elif announce:
                 self.frame.say(text)
             return
         self.model = model
         if self.page is None:
             self.page, self.fx, self.maint = PadsPage(self), FxPage(self), MaintPage(self)
-            focus = wx.Window.FindFocus()
-            if focus is not None and any(status.IsDescendant(focus) for status in self.statuses):
-                self.frame.tree.SetFocus()
-            self.pages = [Page(key, title, window) for (key, title), window
-                          in zip(PAGES, (self.page, self.fx, self.maint), strict=True)]
-            self.frame.pages_changed(self)
+            self.status.replace([self.page, self.fx, self.maint])
         else:
             for window in (self.page, self.fx, self.maint):
                 window.show()
