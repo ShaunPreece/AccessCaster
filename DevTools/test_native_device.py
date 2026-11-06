@@ -238,7 +238,8 @@ check_in("a setting the desk did not report says so", "did not report",
 check("a writable desk hides the note", unit.note.IsShown(), False)
 check("and refuses nothing", unit._guard(), None)
 unit.shown({"ok": True, "settings": settings, "midi": None, "writable": False,
-            "device_name": "RODECaster Duo"})
+            "device_name": "RODECaster Duo",
+            "read_only_note": "These settings can be read but not changed on the RODECaster Duo."})
 check("a read-only desk refuses the writes", unit._guard(), device_section.UNIT_SETTINGS_OFF)
 check_in("and the note names it", "RODECaster Duo", unit.note.GetValue())
 
