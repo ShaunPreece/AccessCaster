@@ -217,6 +217,24 @@ check("a mic on a Duo's tenth strip reads its own mute", mic1["muted"], True)
 check("and its own echo", mic1["effects"]["echo"], True)
 check("and no reverb parameter, not the pad's", mic1["effects"]["reverb_params"]["reverbMix"], None)
 
+# The fader layout is read strip by strip. A stray channelInputSource in another block, ahead of the
+# strips, would shift every fader's channel by one in a read of every occurrence.
+stray_dump = fake_model.node("Rodecaster", (), [
+    fake_model.node("SYSTEM", {"channelInputSource": 5}),
+    *[fake_model.node("CHANNEL", {"channelInputSource": code, "channelOutputMute": code == 2})
+      for code in (0, 1, 2)],
+])
+check("a stray ahead of the strips does not shift the layout",
+      rcp_read.strip_values(stray_dump, "channelInputSource"), [0, 1, 2])
+check("nor the strips' mutes", rcp_read.strip_values(stray_dump, "channelOutputMute"),
+      [False, False, True])
+check("a strip without the property reads None in its own place",
+      rcp_read.strip_values(fake_model.node("Rodecaster", (), [
+          fake_model.node("CHANNEL", {"channelInputSource": 0}),
+          fake_model.node("CHANNEL", {"channelOutputMute": False}),
+          fake_model.node("CHANNEL", {"channelInputSource": 2})]), "channelInputSource"),
+      [0, None, 2])
+
 # ---- 2. A moved block is followed ---------------------------------------------------------------
 # A firmware that inserts one node ahead of CHANNEL moves CHANNEL and everything after it by one,
 # which is the case the lookup exists for. Every record must follow its block.

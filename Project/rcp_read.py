@@ -498,6 +498,21 @@ def keyed_value(blob: bytes, key, name: str, default=None):
     return default
 
 
+def strip_values(blob: bytes, name: str) -> list:
+    """`name` on every root CHANNEL node, indexed by strip: CHANNEL[i]'s value at position i, or
+    None where that node does not carry it.
+
+    THE READ FOR ANY PER-STRIP PROPERTY, the fader layout (`channelInputSource`) above all. Each
+    value comes from its own strip's node, so a stray copy of the name anywhere else in the dump
+    cannot shift the list: with `values()`, one stray ahead of the strips moves every fader's
+    channel along by one."""
+    idx = _index(blob)
+    if idx.layout is None:
+        return []
+    return [keyed_value(blob, ("CHANNEL", strip), name)
+            for strip in range(idx.layout.count("CHANNEL"))]
+
+
 # ---- THE ADDRESS BOOK OF THE ATTACHED DESK ------------------------------------------------
 # Every write is addressed through `layout()`: the attached desk's own tree, never a position
 # written down in the code. It is learned from a stable dump and kept for as long as the desk stays

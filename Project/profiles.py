@@ -209,7 +209,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     def first(n):
         return rcp_read.first(blob, n)
 
-    cis = rcp_read.values(blob, "channelInputSource")
+    cis = rcp_read.strip_values(blob, "channelInputSource")
     midi = first("systemMidiControl")
 
     # The two levels the desk otherwise keeps to itself: each fader's

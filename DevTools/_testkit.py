@@ -192,14 +192,14 @@ def hold_layout(vec) -> None:
     desk_model.dump_finished(desk_model.dump_starting(), desk_model.snapshot())
 
 
-def hold_desk(vec=None) -> None:
+def hold_desk(vec=None, without=()) -> None:
     """The desk model freshly read from the pinned layout's shape (`layout_fixture.skeleton`), and
     trusted: every property 0 but the selected channel, which rests at -1 (none), and the fader
-    layout, `vec`."""
+    layout, `vec`. The property names in `without` are absent from the dump."""
     values = {(_key_of("systemChannelSelected"), "systemChannelSelected"): -1}
     for strip, code in enumerate(vec or ()):
         values[(rcp_transfer.channel_key(strip), "channelInputSource")] = code
     desk_model._reset()
     desk_model.set_connected(True)
     desk_model.dump_finished(desk_model.dump_starting(),
-                             layout_fixture.skeleton(layout_fixture.PRO2_177, values))
+                             layout_fixture.skeleton(layout_fixture.PRO2_177, values, without))

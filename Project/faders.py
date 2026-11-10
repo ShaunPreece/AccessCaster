@@ -246,7 +246,7 @@ def read_fader_vector(blob=None, spec=None):
     spec = spec or active_faders()
     if blob is None:
         blob = rcp_read.read_model()
-    cis = rcp_read.values(blob, "channelInputSource")
+    cis = rcp_read.strip_values(blob, "channelInputSource")
     return [cis[i] if i < len(cis) else None for i in range(spec.count)]
 
 

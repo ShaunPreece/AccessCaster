@@ -38,7 +38,7 @@ def from_dump(blob: bytes) -> dict:
         reply["matrix"] = rcp_read.read_matrix_state(blob)
         reply["matrix_model"] = output_mixes.matrix_model()
         spec = faders.active_faders()
-        cis = list(rcp_read.values(blob, "channelInputSource"))
+        cis = rcp_read.strip_values(blob, "channelInputSource")
         layout = [cis[i] if i < len(cis) else None for i in range(spec.count)]
         reply["faders"] = {"model": faders.fader_model(), "layout": layout,
                            "labels": [faders.channel_name(c, spec) for c in layout],

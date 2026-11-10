@@ -267,7 +267,7 @@ def strip_vector() -> list:
         vec = desk_model.strip_vector()
         if vec:
             return vec
-    return list(_r.values(_r.read_model(fresh=True), "channelInputSource"))
+    return _r.strip_values(_r.read_model(fresh=True), "channelInputSource")
 
 
 def _strip_index(entry) -> int:
@@ -757,8 +757,8 @@ def mic_gain_and_processing(mic: int):
     if entry is None:
         return None, None
     gain = input_value(blob, entry, "inputMicrophoneGain")
-    bypass = _r.values(blob, "channelBypassProcessing")
-    vec = _r.values(blob, "channelInputSource")
+    bypass = _r.strip_values(blob, "channelBypassProcessing")
+    vec = _r.strip_values(blob, "channelInputSource")
     try:
         strip = vec.index(entry.get("source_code"))
     except ValueError:
@@ -1047,7 +1047,7 @@ def read_channels(blob: bytes | None = None) -> list:
     model = _r.read_model_stable() if blob is None else blob
 
     chains = read_chains(model)
-    src_vec = _r.values(model, "channelInputSource")
+    src_vec = _r.strip_values(model, "channelInputSource")
 
     def strip_of(ch):
         try:

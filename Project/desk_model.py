@@ -305,8 +305,12 @@ def first(name: str, kind: Optional[str] = None, default=None):
 
 
 def strip_vector() -> Optional[list]:
-    """The fader layout, `channelInputSource` by strip, or None before the first read."""
-    return values("channelInputSource") or None
+    """The fader layout, `channelInputSource` on each strip's own node, or None before the first
+    read. Read by key, as `rcp_read.strip_values` reads a dump."""
+    book = _layout
+    count = book.count("CHANNEL") if book is not None else 0
+    vec = [value(rcp_transfer.channel_key(strip), "channelInputSource") for strip in range(count)]
+    return vec or None
 
 
 def mutes() -> dict:

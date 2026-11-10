@@ -32,7 +32,7 @@ OUT_DIR = Path(__file__).resolve().parent / "captures" / "strip_chains"
 def _live() -> tuple[list, list]:
     """(fader layout, every strip's chain) from one fresh dump."""
     blob = rcp_read.read_model_stable(fresh=True)
-    return rcp_read.values(blob, "channelInputSource"), channels.read_chains(blob)
+    return rcp_read.strip_values(blob, "channelInputSource"), channels.read_chains(blob)
 
 
 def _pending(saved: list, live: list) -> list:

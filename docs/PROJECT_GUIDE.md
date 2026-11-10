@@ -605,7 +605,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **Read a property BY BLOCK and instance, never "first occurrence in the stream".** A stray copy of
   `btVisible` in SYSTEM once made the Network page report "not discoverable" while the radio was, and
   `MIX` / `RCSYNCMIX` share six names legitimately. Use `rcp_read.block_value()` /
-  `iter_block_properties()`.
+  `iter_block_properties()`. A per-strip property, the fader layout (`channelInputSource`) above
+  all, is read with `rcp_read.strip_values()` (`desk_model.strip_vector()` on the picture): one
+  stray copy read through `values()` moves every fader's channel along by one.
 - **`requestRecordState`, `requestDropMarker` and `requestDeleteUID` are self-clearing REQUESTS.**
   Never read one for status; read the thing it acts on (`recordState`, or the recordings list).
 - **RECORDINGS = 0x28F, PROVEN 29th August 2026** by deleting a real recording (list 20 -> 19,

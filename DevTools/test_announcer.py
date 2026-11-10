@@ -589,8 +589,7 @@ tap(st)
 check("then round to fader 7, named from the layout", SPOKEN, ["Mic 2 0 percent"])
 # With no level known it names the target and says NOTHING about the level, rather than inventing
 # a zero - the level only appears once the desk has been read.
-desk_model._reset()
-layout(LAYOUT)
+desk(LAYOUT, without=("faderLevel",))
 check("a level never read is not invented", announcer._ring_phrase(fresh_st(), 2),
       "USB 2 (Secondary)")
 desk(LAYOUT)

@@ -67,7 +67,7 @@ def read_model(*_a, **k):
     return b""
 
 
-with patched((rcp_read, {"read_model": read_model, "values": lambda blob, name: list(LAYOUT)})):
+with patched((rcp_read, {"read_model": read_model, "strip_values": lambda blob, name: list(LAYOUT)})):
     hold_desk(LAYOUT)
     check("with RODE's app closed, the trusted model is used", (channels.strip_vector(), reads),
           (LAYOUT, []))

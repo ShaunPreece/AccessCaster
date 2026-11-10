@@ -57,7 +57,7 @@ def on_faders(blob) -> set:
     link assertions below ask only about sources the desk can actually answer for.
     """
     dev = devices.get_active_device()
-    return set(rcp_read.values(blob, "channelInputSource")[:dev.fader.count])
+    return set(rcp_read.strip_values(blob, "channelInputSource")[:dev.fader.count])
 
 
 # The stray test is occurrence counts (`stray_counts`), not the model's byte length: the LENGTH

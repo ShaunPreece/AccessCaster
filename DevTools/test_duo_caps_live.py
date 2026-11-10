@@ -366,7 +366,7 @@ if "processing" in dev.caps:
 # ---- fader_write -------------------------------------------------------------------------------
 if "fader_write" in dev.caps:
     blob, _snap = snapshot()
-    vec = rr.values(blob, "channelInputSource")
+    vec = rr.strip_values(blob, "channelInputSource")
     print(f"\n=== fader_write: strip sources ===\n  layout now: {vec}")
     # Swap the sources on two strips and put them back. Uses the desk's own vector, so whatever
     # the layout is when this runs, it is restored to exactly that.
@@ -396,7 +396,7 @@ if "fader_write" in dev.caps:
         # every value in the diff is a multiple of 1/127, which is the tell.
         probe(f"fader_write: swap strip {a_i} ({orig_a}) and strip {b_i} ({orig_b})",
               None, swap, True, False, ignore={"sipSlotCallDisconnect"})
-        after = rr.values(rr.read_model_stable(fresh=True), "channelInputSource")
+        after = rr.strip_values(rr.read_model_stable(fresh=True), "channelInputSource")
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- stereo_link -------------------------------------------------------------------------------
@@ -408,7 +408,7 @@ if "stereo_link" in dev.caps and pair is None:
           f"{'holds' if MIC1_PAIR else 'leaves out'} Mic 1 ===")
 elif "stereo_link" in dev.caps:
     code, lower, upper, label = pair
-    vec = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
+    vec = list(rr.strip_values(rr.read_model_stable(fresh=True), "channelInputSource"))
     print(f"\n=== stereo_link: {label} ===\n  layout now: {vec}")
     if code in vec:
         print(f"  skipped: {label} is already linked, so there is no round trip to make")
@@ -461,13 +461,13 @@ elif "stereo_link" in dev.caps:
         probe(f"stereo_link: link and unlink {label}",
               None, link, True, False, ignore={"sipSlotCallDisconnect"},
               restore_extra=restore_mutes, one_way=pair_levels)
-        after = list(rr.values(rr.read_model_stable(fresh=True), "channelInputSource"))
+        after = list(rr.strip_values(rr.read_model_stable(fresh=True), "channelInputSource"))
         check_true("the fader layout is exactly as it was", after == vec, f"{after} != {vec}")
 
 # ---- level_write -------------------------------------------------------------------------------
 if "level_write" in dev.caps:
     blob, levels = snapshot()
-    vec = rr.values(blob, "channelInputSource")
+    vec = rr.strip_values(blob, "channelInputSource")
 
     # A VIRTUAL fader, and one that actually has a source on it - an empty strip (-1) moves no
     # cross-points, so it would prove only that the byte landed, which a dead address proves too.

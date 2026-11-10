@@ -196,7 +196,7 @@ def _callme1_on_fader():
     count = devices.get_active_device().fader.count
     try:
         with desk_access.hid_lock:
-            layout = rcp_read.values(rcp_read.read_model(), "channelInputSource")[:count]
+            layout = rcp_read.strip_values(rcp_read.read_model(), "channelInputSource")[:count]
     except Exception:
         return None
     return callme.CALLME1_SOURCE in layout

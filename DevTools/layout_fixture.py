@@ -49,25 +49,27 @@ def from_dump(blob: bytes) -> list:
     return _runs(root.kids, True)
 
 
-def _encode(runs, values=None, prefix=()) -> list:
+def _encode(runs, values=None, prefix=(), without=frozenset()) -> list:
     values = values or {}
     nodes, seen = [], Counter()
     for name, count, props, kids in runs:
         for _ in range(count):
             key = prefix + (name, seen[name])
             seen[name] += 1
-            nodes.append(fake_model.node(name, [(p, values.get((key, p), 0)) for p in props],
-                                         _encode(kids, values, key)))
+            nodes.append(fake_model.node(name, [(p, values.get((key, p), 0)) for p in props
+                                                if p not in without],
+                                         _encode(kids, values, key, without)))
     return nodes
 
 
-def skeleton(name: str, values=None) -> bytes:
+def skeleton(name: str, values=None, without=()) -> bytes:
     """A model dump with a saved fixture's shape, for a suite that needs the desk model
     (`desk_model`) to hold a desk: it addresses exactly as `load(name)` does. Every property is 0
-    but those `values` names, as {(layout key, property): value}."""
+    but those `values` names, as {(layout key, property): value}, and the property names in
+    `without` are left off every node, as a dump that does not carry them."""
     with open(os.path.join(FIXTURES, f"layout_{name}.json"), encoding="utf-8") as fh:
         runs = json.load(fh)
-    return fake_model.node("Rodecaster", (), _encode(runs, values or {}))
+    return fake_model.node("Rodecaster", (), _encode(runs, values or {}, (), frozenset(without)))
 
 
 def load(name: str) -> model_tree.Layout:
