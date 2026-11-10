@@ -76,12 +76,19 @@ def quit_app() -> bool:
     return False
 
 
+def _cannot_start() -> str:
+    """Why a source run cannot start, or "" when it can."""
+    if not os.path.isfile(PYTHONW):
+        return f"AccessCaster cannot start: there is no {PYTHONW}. Run the build once to make it."
+    return ""
+
+
 def start_app(window: bool = False) -> bool:
     if _window():
         print("AccessCaster is already running.")
         return False
-    if not os.path.isfile(PYTHONW):
-        print(f"AccessCaster cannot start: there is no {PYTHONW}. Run the build once to make it.")
+    if _cannot_start():
+        print(_cannot_start())
         return False
     args = [PYTHONW, "tray.py"]
     subprocess.Popen(args if window else [*args, STARTUP_FLAG],
@@ -104,6 +111,10 @@ def main() -> int:
     if what == "start":
         return 0 if start_app(window) else 1
     if what == "restart":
+        # Checked before quitting, so a restart that cannot start leaves the running copy alone.
+        if _cannot_start():
+            print(_cannot_start() + " The running copy was left alone.")
+            return 1
         return 0 if quit_app() and start_app(window) else 1
     print(__doc__)
     return 2
