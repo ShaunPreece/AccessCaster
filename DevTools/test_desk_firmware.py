@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import desk_firmware as fw
+import devices
 from _testkit import check, check_in, patched
 
 PATH = (15,)
@@ -219,5 +220,17 @@ desk = Desk(base(), comes_back="1.7.6")
 res, _steps = run(desk)
 check("a desk back on the old version is a failure", res["ok"], False)
 check_in("named as such", "reports firmware 1.7.6, not 1.7.7", res["message"])
+
+# ---- firmware older than any tested ----------------------------------------------------------
+def untested(version):
+    with _testkit.as_device(devices.DUO), patched((fw, {"version": lambda _blob: version})):
+        return fw.untested(b"")
+
+
+check("a desk older than the oldest tested is named, with the floor", untested("1.2.1"),
+      {"version": "1.2.1", "tested": "1.7.3"})
+check("versions compare by number, not as text", untested("1.10.0"), None)
+check("the oldest tested itself is fine", untested("1.7.3"), None)
+check("an unread version says nothing", untested(None), None)
 
 sys.exit(_testkit.finish())

@@ -162,7 +162,12 @@ def desk_summary(d):
         alerts.append((f"firmware {update['version']}" if update.get("version")
                        else "a firmware update") + " is available, on the Device page under "
                       "Hardware")
-    muted = [c["label"] for c in d.get("muted") or []]
+    old = d.get("firmware_untested")
+    if old:
+        alerts.append(f"the desk's firmware is {old['version']} and this app is tested on "
+                      f"{old['tested']} and later, so some settings may not read or take until it "
+                      f"is updated")
+    muted =[c["label"] for c in d.get("muted") or []]
     soloed = [c["label"] for c in d.get("soloed") or []]
     if muted:
         alerts.append("muted: " + ", ".join(muted))
@@ -192,13 +197,16 @@ def desk_summary(d):
     return " ".join(parts)
 
 
-def firmware_line(version, update):
+def firmware_line(version, update, untested=None):
     update = update or {}
-    if not update.get("available"):
-        return version or "Unknown"
-    return (f"{version or 'Unknown'}. "
-            + (f"Version {update['version']}" if update.get("version") else "An update")
-            + " is available.")
+    notes = []
+    if untested:
+        notes.append(f"This app is tested on {untested['tested']} and later, so some settings may "
+                     f"not read or take.")
+    if update.get("available"):
+        notes.append((f"Version {update['version']}" if update.get("version") else "An update")
+                     + " is available.")
+    return " ".join([f"{version or 'Unknown'}."] + notes) if notes else version or "Unknown"
 
 
 def hardware_lines(d):
@@ -437,7 +445,8 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
         set_text(self.status, "\n".join(hardware_lines(state)))
         if state.get("ok"):
             set_text(self.firmware, firmware_line(state.get("firmware"),
-                                                  state.get("firmware_update")))
+                                                  state.get("firmware_update"),
+                                                  state.get("firmware_untested")))
             set_text(self.wired, wired_text(state.get("wired_connected")))
             self._show_install(state.get("firmware_update"))
         if status is None:
@@ -458,7 +467,8 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
             reply = job.run()
         if reply.get("ok"):
             set_text(self.firmware, firmware_line(reply.get("firmware"),
-                                                  reply.get("firmware_update")))
+                                                  reply.get("firmware_update"),
+                                                  reply.get("firmware_untested")))
             self._show_install(reply.get("firmware_update"))
             self.section.state.read()       # the summary names a waiting update
         report(self, ("Firmware check", "Firmware check failed"), reply)

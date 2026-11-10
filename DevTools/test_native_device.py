@@ -98,6 +98,17 @@ check_in("the recorder is a reading", "Recorder: ready. 3 recordings on the desk
 check("a firmware update is named after the version",
       device_section.firmware_line("1.7.6", {"available": True, "version": "1.7.7"}),
       "1.7.6. Version 1.7.7 is available.")
+check("firmware older than tested says so, before the update",
+      device_section.firmware_line("1.2.1", {"available": True, "version": "1.7.7"},
+                                   {"version": "1.2.1", "tested": "1.7.3"}),
+      "1.2.1. This app is tested on 1.7.3 and later, so some settings may not read or take. "
+      "Version 1.7.7 is available.")
+check("a current firmware is just its version", device_section.firmware_line("1.7.7", None),
+      "1.7.7")
+check_in("firmware older than tested is an alert",
+         "The desk's firmware is 1.2.1 and this app is tested on 1.7.3 and later",
+         device_section.desk_summary(overview(firmware_untested={"version": "1.2.1",
+                                                                 "tested": "1.7.3"})))
 check("no mic slots is not none connected", device_section.mic_lines({}),
       ["Wireless mics: the desk did not report any, so there is nothing to show."])
 facts = device_section.network_facts({"wifi": {"on": False}, "bluetooth": {"visible": True},

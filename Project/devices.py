@@ -603,6 +603,10 @@ class DeviceModel:
     pad: PadSpec = PadSpec(pads_per_bank=8)
     fader: FaderSpec = PRO2_FADERS
     headphones: HeadphoneTypeSpec = HEADPHONE_TYPES
+    # The oldest firmware this app has run on with this desk. Older firmware lays the model out
+    # differently (the Pro II's 1.6.8 had a 247-cell routing matrix where 1.7.3 has 516), so reads
+    # guarded on a shape refuse and writes may not take. `desk_firmware.untested` says so.
+    oldest_tested_firmware: str = "1.7.3"
 
     # --- Where a channel's INPUT values live -------------------------------------------------
     # ONE ADDRESS, ON EVERY DESK: INPUTSOURCE[source_code]. Read there, written there.

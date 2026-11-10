@@ -30,10 +30,12 @@ here writes it, and nothing restarts the desk while it reads True.
 """
 from __future__ import annotations
 
+import re
 import time
 
 import desk_live
 import desk_model
+import devices
 import diagnostics
 import model_tree
 import rcp_hid
@@ -95,6 +97,23 @@ def update(blob: bytes) -> dict:
     offered_version = sys_val("updateVersion") or ""
     return {"available": available, "version": offered_version if available else "",
             "no_internet": bool(sys_val("updateNoInternet"))}
+
+
+def _release(text) -> tuple | None:
+    """A firmware version as a comparable tuple, "1.7.3" -> (1, 7, 3), or None if it has none."""
+    m = re.match(r"\s*(\d+(?:\.\d+)*)", text or "")
+    return tuple(int(p) for p in m.group(1).split(".")) if m else None
+
+
+def untested(blob: bytes) -> dict | None:
+    """{"version", "tested"} when the desk's firmware is older than any this app has run on with
+    that desk (`DeviceModel.oldest_tested_firmware`), else None, as it is for an unread version."""
+    fw = version(blob)
+    floor = devices.get_active_device().oldest_tested_firmware
+    have, oldest = _release(fw), _release(floor)
+    if have is None or oldest is None or have >= oldest:
+        return None
+    return {"version": fw, "tested": floor}
 
 
 def values(state: dict) -> dict:

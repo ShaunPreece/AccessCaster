@@ -120,4 +120,5 @@ def action_check() -> dict:
     fw = desk_firmware.version(blob) or "unknown"
     msg = (_update_sentence(upd)
            or f"Your desk is up to date. Firmware {fw} is the latest.")
-    return {"ok": True, "firmware": fw, "firmware_update": upd, "message": msg}
+    return {"ok": True, "firmware": fw, "firmware_update": upd,
+            "firmware_untested": desk_firmware.untested(blob), "message": msg}

@@ -65,6 +65,7 @@ def read_hardware() -> dict:
     # controls.
     out["firmware"] = desk_firmware.version(blob)
     out["firmware_update"] = desk_firmware.update(blob)
+    out["firmware_untested"] = desk_firmware.untested(blob)
     wired = next((v for v in val("wiredConnected") if v is not None), None)
     out["wired_connected"] = bool(wired) if wired is not None else None
     return out
@@ -358,9 +359,9 @@ def overview(fresh: bool = True) -> dict:
                 "message": f"Could not read the desk: {exc}"}
 
     spec = dev.fader
-    vec = rcp_read.values(blob, "channelInputSource")
-    mutes = rcp_read.values(blob, "channelOutputMute")
-    cues = rcp_read.values(blob, "channelCueEnable")
+    vec = rcp_read.strip_values(blob, "channelInputSource")
+    mutes = rcp_read.strip_values(blob, "channelOutputMute")
+    cues = rcp_read.strip_values(blob, "channelCueEnable")
 
     # The anchor lookup, guarded on the matrix keeping its expected shape - the same guard
     # rcp_read uses, because a connected SIP caller shifts the grid and every index would be wrong.
@@ -416,6 +417,7 @@ def overview(fresh: bool = True) -> dict:
             # you sound wrong, with nothing on screen to say why.
             "pads_engaged": _pads_engaged(blob),
             "firmware_update": desk_firmware.update(blob),
+            "firmware_untested": desk_firmware.untested(blob),
             # Always reported, unlike the exceptions above: whether the unit is online decides
             # whether CallMe and the firmware check can work at all. `callme_hosting` lets the
             # spoken summary call an offline unit a problem only when guests expect to reach it.
