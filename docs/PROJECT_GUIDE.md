@@ -1417,8 +1417,15 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `disk_usage > 0` were each added after a failure of this class and the volume passed BOTH and then
   died on the first real read with EINVAL (29th August 2026, the as-found baseline, pad 1). The
   readiness test has to do the SAME KIND of I/O as the use it gates, or it is not a test. Do not
-  "optimise" `pad_volume_readable` out of the wait loop: a not-ready volume returning False is what
-  keeps the remount loop going, and this guards backup, restore AND create.
+  "optimise" `_pad_read_error` out of `_volume_state`: a volume reporting UNREADABLE is what keeps
+  the remount loop going, and this guards backup, restore AND create.
+- **`find_pad_volume` re-sends `remountPadStorage` slowly (`SETTLING_REMOUNT_S`) while the desk's
+  drive has a volume that does not read yet**, and at the short interval only while it has none.
+  The re-send is what recovers a half-mounted volume, but it also restarts a mount still settling:
+  a user's PC (Pro II, fw 1.7.7) had the volume mounted on G: and rejected for 30 s under a re-send
+  every 6 s. Only a WRITER passes `empty_ok` (a volume with no `pads` folder): a reader taking an
+  empty listing for the truth backs up nothing. A wait that gives up says which state it saw
+  (`pad_volume_problem`, logged as `transfer.volume_missing`), and every message uses it.
 - **The pad volume is the drive on the DESK'S OWN USB DEVICE, found by hardware
   (`desk_drives.on_desk`), never by what is on it.** A USB stick holding a copy of the pad folder
   passes every content test, and taking it sends uploads to it and lets the tidy delete its files.

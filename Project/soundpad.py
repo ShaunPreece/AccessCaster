@@ -1655,9 +1655,9 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
 
     with _transfer_mode(1.0):
         t.remount_pad_storage()
-        root = t.find_pad_volume()
+        root = t.find_pad_volume(empty_ok=True)
         if root is None:
-            raise RuntimeError("volume did not mount")
+            raise RuntimeError(t.pad_volume_problem())
         n, saw = send_create_full(pre, mid, file_copy, post, debug=debug)
         diagnostics.event("pad.create", f"sent {n} bytes; saw device sync = {saw}")
         time.sleep(0.4)
@@ -2396,8 +2396,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         t.remount_pad_storage()
         root = t.find_pad_volume()
         if root is None:
-            return {"ok": False, "message": "The desk's pad storage did not appear, so nothing "
-                                            "was exported. Try again in a moment."}
+            return {"ok": False, "message": f"{t.pad_volume_problem()} Nothing was exported."}
         src = _pad_audio_source(root, int(grid), wanted)
         if src is None:
             return {"ok": False,
@@ -2533,7 +2532,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
             t.remount_pad_storage()
             root = t.find_pad_volume()
             if root is None:
-                raise RuntimeError("pad storage volume did not mount for the backup")
+                raise RuntimeError(f"{t.pad_volume_problem()} The pad sounds were not backed up.")
             for e in sound:
                 # NO PER-PAD PROGRESS LINE, deliberately. Copying a pad takes about a second, so a
                 # line each is speech that interrupts itself. The caller says how many are coming
@@ -2628,10 +2627,10 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
     removed, freed, kept = [], 0, 0
     with _transfer_mode(1.0):
         t.remount_pad_storage()
-        root = t.find_pad_volume()
+        root = t.find_pad_volume(empty_ok=True)
         if root is None:
             return {"ok": False, "removed": [], "bytes_freed": 0, "kept": 0,
-                    "message": "The pad storage volume did not mount, so nothing was deleted."}
+                    "message": f"{t.pad_volume_problem()} Nothing was deleted."}
         for d in _pad_audio_dirs(root):
             folder = os.path.basename(d)
             grid = int(folder) if folder.isdigit() else None
@@ -2868,7 +2867,7 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
             # ONE transfer-mode session for every audio comparison (reads only, nothing written).
             with _transfer_mode(1.0):
                 t.remount_pad_storage()
-                root = t.find_pad_volume()
+                root = t.find_pad_volume(empty_ok=True)
                 if root is None:
                     # THE VOLUME DID NOT MOUNT, so no sound pad can be compared and every one of
                     # them is about to be rewritten. SAY SO: silently doing the maximum work looks

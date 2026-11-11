@@ -99,7 +99,7 @@ ON-DEVICE FILENAME = the REAL name, matching the FACTORY (confirmed by clean-tab
   the low-level builder still DEFAULTS to "sound.wav" so the byte-for-byte selftest is unchanged.
 
 VOLUME SAFETY: rcp_transfer.find_pad_volume requires a volume that READS BYTES
-  (`pad_volume_readable`), not one that merely exists or reports a size: a half-mounted volume passes
+  (`_volume_state`, through `_pad_read_error`), not one that merely exists or reports a size: a half-mounted volume passes
   both of those and then fails the first real read with EINVAL. A create either gets a readable
   volume or aborts BEFORE sending any pad record. See PROJECT_GUIDE part 2 under `find_pad_volume`.
   Only a drive on the desk's own USB device is considered (`desk_drives.on_desk`), so a USB stick

@@ -843,12 +843,13 @@ class quiet_drive_errors:
         return False
 
 
-def pad_volume_readable(root: str) -> bool:
-    """Can we actually READ BYTES off this pad volume right now?
+def _pad_read_error(root: str) -> str:
+    """Why the pad folder on `root` cannot be read right now, or "" when it reads.
 
-    The readiness test has to do the same KIND of I/O the caller is about to do, or it passes on a
-    volume the first real read then fails on. Listing a directory is not enough: it can be served
-    from the mount's metadata while the media is still not ready.
+    It READS BYTES from the first pad file: the readiness test has to do the same KIND of I/O the
+    caller is about to do, or it passes on a volume the first real read then fails on. Listing a
+    directory is not enough: it can be served from the mount's metadata while the media is still
+    not ready.
     """
     base = os.path.join(root, "pads")
     try:
@@ -862,10 +863,10 @@ def pad_volume_readable(root: str) -> bool:
                     if os.path.isfile(path):
                         with open(path, "rb") as fh:
                             fh.read(4096)
-                        return True
-            return True       # a grid with no audio at all: nothing to read, and that is not an error
-    except OSError:
-        return False
+                        return ""
+            return ""         # a grid with no audio at all: nothing to read, and that is not an error
+    except OSError as exc:
+        return str(exc)
 
 
 def _drive_roots() -> list[str]:
@@ -873,63 +874,134 @@ def _drive_roots() -> list[str]:
     return [f"{letter}:\\" for letter in string.ascii_uppercase[3:]]
 
 
-def _is_pad_volume(root: str) -> bool:
-    """Does `root` hold a pad folder that can be read right now?
+# What `_volume_state` finds on a desk drive.
+ABSENT = "absent"            # no volume: the letter with no media, or a size-0 phantom
+READY = "ready"              # a `pads` folder whose files read
+EMPTY = "empty"              # a volume that lists, with no `pads` folder at all
+UNREADABLE = "unreadable"    # a volume with a `pads` folder that will not read
 
-    THREE checks, because each weaker one has been passed by a volume that then failed:
-      * isdir(<root>\\pads) - passed by a size-0 PHANTOM letter left after a stuck transfer, which
-        fails every write with EINVAL;
-      * shutil.disk_usage(root).total > 0 - passed by the first entry after the desk has been idle,
-        which then fails the first file read with EINVAL;
-      * pad_volume_readable(root) - reads bytes, which is what the caller does next.
+
+def _volume_state(root: str) -> tuple[str, str]:
+    """(state, detail) for the desk drive at `root`.
+
+    The checks run in this order because each weaker test has been passed by a volume that then
+    failed: a size-0 PHANTOM letter left after a stuck transfer passes `isdir(pads)` and fails every
+    write with EINVAL, so size is tested first; the first entry after the desk has been idle passes
+    size and `isdir` and fails the first file read with EINVAL, so a pad file is read
+    (`_pad_read_error`), which is what the caller does next.
     """
-    if not os.path.isdir(os.path.join(root, "pads")):
-        return False
     try:
         with quiet_drive_errors():
-            ready = shutil.disk_usage(root).total > 0
-        return ready and pad_volume_readable(root)
-    except OSError:
-        return False
+            if shutil.disk_usage(root).total <= 0:
+                return ABSENT, "size 0"
+            if not os.path.isdir(os.path.join(root, "pads")):
+                entries = os.listdir(root)
+                return EMPTY, f"no pads folder, {len(entries)} entries at the root"
+    except OSError as exc:
+        return ABSENT, str(exc)
+    error = _pad_read_error(root)
+    return (UNREADABLE, error) if error else (READY, "")
 
 
 # The root found during a held transfer_session. Every find in the session returns this one, so the
 # batch cannot move to another volume part way through.
 _session_pad_root: str | None = None
+# Why the last `find_pad_volume` that gave up found nothing, as a sentence for the user.
+_last_problem = ""
+
+# How long a desk volume must list with no `pads` folder before an `empty_ok` wait takes it: a
+# volume still mounting can list an empty root for a moment.
+EMPTY_SETTLE_S = 2.0
+# The re-issue interval while a desk volume is present but not yet readable. The volume usually
+# reads 2.5 s after entry and has taken over 8 s; this is how long a PC gets before its mount is
+# restarted.
+SETTLING_REMOUNT_S = 12.0
 
 
-def find_pad_volume(timeout_s: float = 30.0, reissue_remount_every: float = 6.0):
+def pad_volume_problem() -> str:
+    """Why the last wait for the pad volume gave up, as a sentence, or "" when it found one."""
+    return _last_problem
+
+
+def _problem(states: dict) -> str:
+    """The sentence for a wait that ended with `states`, {root: (state, detail)}."""
+    if not states:
+        return ("Windows did not show the desk's pad storage as a drive. Check the desk is "
+                "connected directly by USB.")
+    for root, (state, detail) in sorted(states.items()):
+        if state == UNREADABLE:
+            return (f"The desk's pad storage appeared as {root[:2]}, but Windows could not read "
+                    f"it ({detail}). Security software that blocks or scans removable drives can "
+                    f"cause this.")
+        if state == EMPTY:
+            return f"The desk's pad storage appeared as {root[:2]}, but it holds no pads folder."
+    letters = ", ".join(root[:2] for root in sorted(states))
+    return f"The desk's pad storage drive, {letters}, stayed empty in Windows."
+
+
+def find_pad_volume(timeout_s: float = 45.0, reissue_remount_every: float = 6.0,
+                    empty_ok: bool = False):
     """Wait for the pad-storage FAT volume to mount; return its root path (e.g. 'F:\\'), or None
-    if it never appears within timeout_s.
+    if it never appears within timeout_s, with the reason in `pad_volume_problem`.
 
     Only a drive on the desk's own USB device can be the pad volume (`desk_drives.on_desk`), so a
     USB stick holding a copy of the pad folder is never taken for it: an upload would go to the
     stick and the tidy would delete its files. The desk's letter stays assigned out of transfer
-    mode and after a stuck one, as an empty or not-yet-ready drive, which `_is_pad_volume` rejects
-    until the volume reads bytes. The re-arm can be slow (over 8 s after a fresh enter), so the
-    timeout is generous and remountPadStorage is re-issued periodically in case the first one was
-    swallowed.
+    mode and after a stuck one, as an empty or not-yet-ready drive, which `_volume_state` reports
+    ABSENT until a volume is there and UNREADABLE until it reads bytes.
+
+    `empty_ok` takes a volume with no `pads` folder once it has stayed that way for
+    EMPTY_SETTLE_S, for a caller that writes (creating a pad makes the folder). A caller that reads
+    leaves it False: an empty listing taken for the truth would back up nothing.
+
+    remountPadStorage is re-issued every `reissue_remount_every` while no desk drive has a volume,
+    in case the first one was swallowed. While a volume is there but not ready it is re-issued
+    only every SETTLING_REMOUNT_S: the request re-presents the media, which is what recovers a
+    half-mounted volume that fails its first read, but it also restarts a mount still settling, so
+    on a PC slower to settle than a short interval the volume would never become readable. Each
+    state a desk drive passes through is logged once.
     """
-    global _session_pad_root
-    deadline = time.monotonic() + timeout_s
-    next_remount = time.monotonic() + reissue_remount_every
-    while time.monotonic() < deadline:
+    global _session_pad_root, _last_problem
+    now = time.monotonic()
+    deadline = now + timeout_s
+    last_remount = now       # every caller sends one just before it waits
+    states: dict = {}
+    empty_since: dict = {}
+    candidates: list = []
+    while now < deadline:
         if _transfer_hold > 0 and _session_pad_root:
             candidates = [_session_pad_root]
         else:
             candidates = sorted(desk_drives.on_desk(_drive_roots()))
+        mounted = False
         for root in candidates:
-            if _is_pad_volume(root):
+            state = _volume_state(root)
+            if states.get(root) != state:
+                states[root] = state
+                diagnostics.event("transfer.volume", f"{root} {state[0]}", why=state[1])
+            mounted = mounted or state[0] != ABSENT
+            if state[0] == EMPTY:
+                empty_since.setdefault(root, now)
+            else:
+                empty_since.pop(root, None)
+            if state[0] == READY or (empty_ok and state[0] == EMPTY
+                                     and now - empty_since[root] >= EMPTY_SETTLE_S):
                 if _transfer_hold > 0:
                     _session_pad_root = root
+                _last_problem = ""
                 return root
-        if time.monotonic() >= next_remount:
+        interval = max(reissue_remount_every, SETTLING_REMOUNT_S) if mounted \
+            else reissue_remount_every
+        if now - last_remount >= interval:
             try:
                 remount_pad_storage()
             except Exception as exc:
                 diagnostics.event("transfer.remount_failed", str(exc))
-            next_remount = time.monotonic() + reissue_remount_every
+            last_remount = now
         time.sleep(0.5)
+        now = time.monotonic()
+    _last_problem = _problem({root: states[root] for root in candidates if root in states})
+    diagnostics.event("transfer.volume_missing", _last_problem)
     return None
 
 
