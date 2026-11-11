@@ -34,11 +34,29 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
+    ("3.1.0", [
+        ("Fader names can no longer be one place out",
+         "On some desks AccessCaster named every fader after the channel on the fader next to it, "
+         "and changes made in RODE Central did not show. It now reads each fader's channel from "
+         "that fader alone, so a stray setting elsewhere on the desk cannot move them."),
+
+        ("Copying sounds to the SMART pads on more computers",
+         "On some computers, copying a sound to a pad, or saving a backup with its pads, stopped "
+         "with \"did not mount\" even though the desk's pad storage had appeared. AccessCaster now "
+         "gives the storage longer to settle before asking the desk again, which was restarting it "
+         "on slower computers. If it still cannot read the storage, the message now says what it "
+         "found, such as security software blocking removable drives."),
+
+        ("A warning when the desk's firmware is older than any tested",
+         "If your desk's firmware is older than 1.7.3, the oldest AccessCaster has been tested on, "
+         "the status bar summary and the Device page's Firmware line say so, because some settings "
+         "may not read or take until it is updated."),
+    ]),
     ("3.0.0", [
         ("AccessCaster has its own window",
          "AccessCaster 3 is a Windows app. The web page is replaced by a Windows window: a tree of categories on the left and the "
