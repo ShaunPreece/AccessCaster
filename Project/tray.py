@@ -209,11 +209,14 @@ class TrayApp:
         if not self._starting and app_updates.take_request():
             self.frame.check_updates()
 
-    def _show_from_any_thread(self) -> bool:
+    def _show_from_any_thread(self) -> bool | None:
         """`app_window.show`. The Open AccessCaster shortcut calls this on the hotkey thread, inline,
         where the foreground right exists (hotkeys._FOREGROUND_COMMANDS). The window is shown on
         the wx thread by a SENT message, so the shortcut's handler is still running when it returns,
-        and the raise happens back on the calling thread."""
+        and the raise happens back on the calling thread. None while quitting: there is no window
+        to show."""
+        if self._quitting:
+            return None
         if threading.get_ident() == self._ui_thread:
             hwnd = self._show_window()
         else:

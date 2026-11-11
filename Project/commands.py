@@ -283,8 +283,11 @@ def _open_window() -> dict:
     # `app_window.raise_window`'s problem and is documented there.
     if app_window.show is None:
         return _said("")
-    if app_window.show():
+    shown = app_window.show()
+    if shown:
         return _said("")
+    if shown is None:
+        return _said("AccessCaster is closing.")
     return _said("AccessCaster is open behind this window. Alt+Tab reaches it.")
 
 

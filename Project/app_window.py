@@ -8,8 +8,9 @@ import os
 
 import diagnostics
 
-# show() -> bool, callable from any thread: shows the window, creating it if need be, and returns
-# whether Windows made it the foreground window.
+# show() -> bool | None, callable from any thread: shows the window, creating it if need be, and
+# returns whether Windows made it the foreground window, or None while the app is closing, when
+# there is no window to show.
 show = None
 
 
