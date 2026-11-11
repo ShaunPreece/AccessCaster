@@ -69,6 +69,11 @@ _size = 0
 _active = False
 _start_time = 0.0
 _pending = None          # the open repeat group: {"key", "count", "first", "last"}
+# Events from before `start`, written once it runs: the window opens before the service starts the
+# log, and what happened to it is otherwise lost. None once written. Capped, for a process that
+# never starts the log.
+_early: list | None = []
+_EARLY_MAX = 50
 
 
 # ---- where it lives ------------------------------------------------------------------------
@@ -132,12 +137,12 @@ def _body(detail: str, fields: dict) -> str:
     return "  ".join(parts)
 
 
-def _emit(now: float, kind: str, body: str) -> None:
+def _emit(now: float, kind: str, body: str, thread: str | None = None) -> None:
     """Write one line. Caller holds the lock."""
     global _fh, _size
     if _fh is None:
         return
-    thread = threading.current_thread().name
+    thread = thread or threading.current_thread().name
     line = (f"{_stamp(now)}  +{now - _start_time:.1f}s  {thread[:20]}  {kind}"
             + (f"  {body}" if body else "") + "\n")
     _fh.write(line)
@@ -159,7 +164,7 @@ def _close_group(now: float | None = None) -> None:
 
 
 def event(kind: str, detail: str = "", **fields) -> None:
-    """Record one thing that happened. Never raises, and is a cheap no-op until `start()`.
+    """Record one thing that happened. Never raises. Before `start()` it is kept in `_early`.
 
     The FIRST of any event is always written immediately; an identical one straight after it joins
     a repeat group instead of adding a line. `kind` is the dotted category, `detail` the sentence
@@ -167,6 +172,12 @@ def event(kind: str, detail: str = "", **fields) -> None:
     """
     global _pending
     if not _active:
+        try:
+            if _early is not None and len(_early) < _EARLY_MAX:
+                _early.append((time.time(), threading.current_thread().name, kind,
+                               _body(detail, fields)))
+        except Exception:
+            pass
         return
     try:
         body = _body(detail, fields)
@@ -400,7 +411,7 @@ def start(context: str, **fields) -> str | None:
     Called once, from `service.start`: the single place every entry point goes through,
     and the only process that should be writing this file. Set ACCESSCASTER_NO_DIAG_LOG to refuse.
     """
-    global _fh, _size, _active, _start_time
+    global _fh, _size, _active, _start_time, _early
     if _active:
         return log_path()
     if os.environ.get("ACCESSCASTER_NO_DIAG_LOG"):
@@ -417,6 +428,9 @@ def start(context: str, **fields) -> str | None:
         banner.update(fields)
         with _lock:
             _emit(_start_time, "app.start", _body(context, banner))
+            for at, thread, kind, body in _early or ():
+                _emit(at, kind, body, thread)
+            _early = None
         _install_hooks()
         threading.Thread(target=_flusher, name="diag-flush", daemon=True).start()
         return path

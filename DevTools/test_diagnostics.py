@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -38,5 +39,20 @@ with patched((diagnostics, state), (diagnostics.time, {"time": lambda: clock[0]}
     diagnostics.flush(force=True)
     check("a single event is never followed by a count",
           out.getvalue().splitlines()[-1].endswith("no control interface to watch on"), True)
+
+print("AN EVENT FROM BEFORE THE LOG STARTS")
+with tempfile.TemporaryDirectory() as folder:
+    path = str(Path(folder) / "diagnostic.log")
+    before = {"_fh": None, "_active": False, "_start_time": 0.0, "_size": 0, "_pending": None,
+              "_early": [], "log_path": lambda: path, "_install_hooks": lambda: None}
+    with patched((diagnostics, before)):
+        diagnostics.event("window.raise", "app window", activated=False)
+        diagnostics.start("AccessCaster starting")
+        diagnostics._fh.close()
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        check("is written after the banner", ["app.start" in lines[0], "window.raise" in lines[1]],
+              [True, True])
+        check("with its own thread", " MainThread " in lines[1], True)
+        check("and only once", diagnostics._early, None)
 
 sys.exit(_testkit.finish())
