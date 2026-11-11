@@ -81,6 +81,12 @@ DefaultGroupName={#AppName}
 UsePreviousGroup=no
 DisableProgramGroupPage=yes
 DisableDirPage=auto
+; A RUNNING COPY THAT DOES NOT CLOSE IS ENDED. Restart Manager asks the app to close and, under
+; "yes", reports "unable to automatically close all applications" if it is still running, which
+; leaves an update stuck on an error the user has to answer. 3.0.0's quit can stall with the update
+; dialog open, so the copy being replaced is ended instead; RestartApplications still brings it
+; back. By then the app has refused to start the update over desk work, so nothing is half written.
+CloseApplications=force
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 OutputDir=Output

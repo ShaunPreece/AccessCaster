@@ -79,6 +79,11 @@ WM_OPEN_WINDOW = win32con.WM_USER + 21
 # raises it, because the right to take the foreground is the sender's (`_show_from_any_thread`).
 WM_SHOW_WINDOW = win32con.WM_USER + 22
 _SHOW_TIMEOUT_MS = 10000
+# How long Quit waits for the open dialogs to end before ending the process anyway. Each ends within
+# one 50 ms pass, so only a dialog whose loop will not end takes this long.
+DIALOGS_END_WITHIN_S = 2.0
+# How the process ends when it cannot wait for the window (`TrayApp._end_now`). Replaced in tests.
+_exit = os._exit
 
 # Shell notification-icon constants not all exposed by win32con.
 NIN_SELECT = win32con.WM_USER + 0        # left-click / Space on the selected icon
@@ -140,6 +145,7 @@ class TrayApp:
         self._ui_thread = threading.get_ident()
         self._starting = True             # the service is still coming up
         self._quitting = False
+        self._ended = False               # `_end_now` has run
         self._window_gone = False         # quit has closed the window and its dialogs
         self._last_open = float("-inf")
         self._create_window()
@@ -152,7 +158,7 @@ class TrayApp:
         # window. wx's own answer to the query closes the window, which hides it, and so refuses to
         # let Windows end the session; these replace it.
         app.Bind(wx.EVT_QUERY_END_SESSION, lambda event: None)
-        app.Bind(wx.EVT_END_SESSION, lambda event: self._quit())
+        app.Bind(wx.EVT_END_SESSION, lambda event: self._end_now("Windows is closing the app"))
         if open_window:
             self.open_window()
         # Started at sign-in, the announcer's greeting is what says the app is running. With the
@@ -379,12 +385,32 @@ class TrayApp:
 
     def _on_end_session(self, hwnd, msg, wparam, lparam):
         """Windows is ending the session, or the installer's Restart Manager is closing the app to
-        replace its files (lParam ENDSESSION_CLOSEAPP). Either way stop as Quit does: the shortcuts,
-        the HID handles and the port are let go, and an update can then restart the app. Without
-        an answer here Restart Manager cannot close the app while its window is hidden."""
+        replace its files (lParam ENDSESSION_CLOSEAPP). Without an answer here Restart Manager
+        cannot close the app while its window is hidden."""
         if wparam:
-            self._quit()
+            self._end_now("Windows is closing the app")
         return 0
+
+    def _end_now(self, why: str) -> None:
+        """End the process at once: the service lets go of the shortcuts, the HID handles and the
+        port, then the process exits without unwinding the window.
+
+        For Windows ending the session and the installer closing the app, which both expect the
+        process gone promptly. Quit's own path ends each open dialog's modal loop first, and an
+        update always has its dialog open when the installer closes the app; a loop that does not
+        end there leaves the process running and the installer unable to replace it. Both the icon
+        window and wx deliver the end of the session, so this runs once."""
+        if self._ended:
+            return
+        self._ended = True
+        self._quitting = True
+        diagnostics.event("app.end_now", why)
+        try:
+            self._remove_icon()
+            service.stop(why)
+        except Exception as exc:
+            diagnostics.event("app.end_now_failed", f"{type(exc).__name__}: {exc}")
+        _exit(0)
 
     def _toggle_announcer(self) -> None:
         # Saved or not by `action_set_announce`, by the same rule as the window's switch and the
@@ -418,20 +444,30 @@ class TrayApp:
         if self._quitting:
             return
         self._quitting = True
+        diagnostics.event("app.quitting", "closing the window and its dialogs")
         self._remove_icon()
-        self._close_window(set())
+        self._close_window(set(), time.monotonic())
 
-    def _close_window(self, ended: set[int]) -> None:
+    def _close_window(self, ended: set[int], since: float) -> None:
         # A dialog open in the window runs a loop of its own inside this one, and the process waits
         # on it. Only the innermost loop can be ended, so the dialogs end newest first, each once
         # the one inside it has returned. `ended` holds the ids of those already asked to end.
         modal = dialogs.modal_dialogs()
         if modal:
+            if time.monotonic() - since > DIALOGS_END_WITHIN_S:
+                self._end_now(f"{modal[-1].GetTitle()!r} did not close")
+                return
             newest = modal[-1]
             if id(newest) not in ended:
                 ended.add(id(newest))
-                newest.EndModal(wx.ID_CANCEL)
-            wx.CallLater(50, self._close_window, ended)
+                try:
+                    newest.EndModal(wx.ID_CANCEL)
+                except Exception as exc:
+                    # wxPython raises a failed wx assertion as an exception. The check below still
+                    # has to run, or the quit stops here with the icon already gone.
+                    diagnostics.event("app.end_modal_failed", f"{type(exc).__name__}: {exc}",
+                                      dialog=newest.GetTitle())
+            wx.CallLater(50, self._close_window, ended, since)
             return
         if self.frame:
             self.frame.Close(force=True)

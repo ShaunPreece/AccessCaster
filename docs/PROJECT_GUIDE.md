@@ -1844,6 +1844,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   WM_QUERYENDSESSION and WM_ENDSESSION) and `/RESTARTAPPLICATIONS` brings it back with `--updated`,
   registered by `restart.register` just before. The restart opens the window, which the install
   closed, and App settings there takes the update's report.
+- **A SESSION END ENDS THE PROCESS AT ONCE** (`TrayApp._end_now`: the service stopped, then
+  `os._exit`). It never goes through Quit's dialog unwinding: the update's own dialog is always
+  open when Setup closes the app, and a 3.0.0 update stalled there with the icon gone and the
+  process alive, so Setup could not replace it. Quit itself gives the dialogs
+  `DIALOGS_END_WITHIN_S`, then ends the process the same way. **`installer.iss` has
+  `CloseApplications=force`**, so a copy that still does not close (3.0.0 among them) is ended by
+  Setup rather than left for the user to answer an error. `test_native_update_quit` runs each
+  case in a child process with the real exit.
 - **`/VERYSILENT`, never `/SILENT`**: under `/SILENT` Setup's progress window takes focus on its
   Cancel button and a Space cancels the install. **And the installer must not prompt during a
   silent run**: removing the firewall rule an earlier version added needs a permission prompt, so
@@ -1890,7 +1898,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   and `service.stop` ends both and waits for their restores, since the process exit kills a daemon
   thread before its `finally` runs. A session end
   (Windows shutting down, or the installer's Restart Manager) is NOT refused: it goes straight to
-  `_quit`, because a refusal there cannot hold anything open. So an app update checks instead,
+  `_end_now`, because a refusal there cannot hold anything open. So an app update checks instead,
   before it downloads and again before it hands over (`update_dialogs._Follower`).
 - **THE PROCESS RUNS ITS OWN `wx.GUIEventLoop`, NOT `app.MainLoop`** (`tray.main`). wxPython's
   `MainLoop` returns at once when no window exists, so a sign-in start would exit, and it ends
@@ -1901,7 +1909,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   with another modal open over it is a wx assertion that leaves its loop running: the window stays
   disabled, the job's clock keeps ticking, and the process outlives its own Quit. The tray's Still
   working opens over a running `JobDialog`, so `JobDialog.finish` waits for any dialog over it to
-  close, and Quit (`tray._close_window`) ends dialogs newest first, one per loop return.
+  close, and Quit (`tray._close_window`) ends dialogs newest first, one per loop return. An
+  `EndModal` that raises is logged (`app.end_modal_failed`) and the pass carries on.
 - **THE TRAY'S OWN WINDOW TAKES THE PROCESS'S FIRST `ShowWindow`** (`_create_window`). The first
   call takes the show state the launcher asked for, whatever it passes, so a hidden launch would
   hide the main window while wx records it as shown, and no later `Show` brings it up.
