@@ -5,8 +5,12 @@ stays None. `raise_window` brings a window to the front with a real activation.
 """
 
 import os
+import time
 
 import diagnostics
+
+# How long `raise_window` waits for the foreground switch to finish before judging it.
+_SETTLE_S = 0.5
 
 # show() -> bool | None, callable from any thread: shows the window, creating it if need be, and
 # returns whether Windows made it the foreground window, or None while the app is closing, when
@@ -50,8 +54,15 @@ def raise_window(hwnd: int) -> bool:
     # end - see hotkeys._FOREGROUND_COMMANDS, where dispatching to a worker thread was spending it.
     user32.SetForegroundWindow(hwnd)
     # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED: the caller stays silent on a
-    # success, so a refusal reported as success would be silent too.
+    # success, so a refusal reported as success would be silent too. The switch can still be under
+    # way when SetForegroundWindow returns, with no foreground window at all, so the answer is
+    # waited for: a refusal leaves the old window in front at once, a switch ends on this one.
+    started = time.monotonic()
     got = user32.GetForegroundWindow()
+    while got != hwnd and time.monotonic() - started < _SETTLE_S:
+        time.sleep(0.02)
+        got = user32.GetForegroundWindow()
+    waited_ms = round((time.monotonic() - started) * 1000)
     ok = bool(got) and got == hwnd
     # LOG THE FOCUS WINDOW, NOT JUST THE FOREGROUND ONE. They are different things and only the
     # second is what a screen reader follows, so "the window came up but my screen reader still
@@ -79,7 +90,7 @@ def raise_window(hwnd: int) -> bool:
             user32.GetWindowTextW(h, b, n + 1)
             return (b.value or "")[:40]
 
-        diagnostics.event("window.raise", "app window", activated=ok,
+        diagnostics.event("window.raise", "app window", activated=ok, waited_ms=waited_ms,
                           wanted=f"{hwnd}", foreground=f"{got}",
                           fg_title=_title(got),
                           active=f"{gti.hwndActive}", active_title=_title(gti.hwndActive),
