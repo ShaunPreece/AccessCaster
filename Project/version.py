@@ -34,23 +34,31 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.1.0"
+__version__ = "3.1.1"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
-    ("3.1.0", [
-        ("Fader names can no longer be one place out",
-         "On some desks AccessCaster named every fader after the channel on the fader next to it, "
-         "and changes made in RODE Central did not show. It now reads each fader's channel from "
-         "that fader alone, so a stray setting elsewhere on the desk cannot move them."),
+    ("3.1.1", [
+        ("Updating no longer gets stuck",
+         "Installing an update could stop with Setup saying it was unable to close all "
+         "applications. AccessCaster now closes as soon as Setup asks, and Setup closes a copy "
+         "that does not, then starts AccessCaster again as before."),
 
-        ("Copying sounds to the SMART pads on more computers",
-         "On some computers, copying a sound to a pad, or saving a backup with its pads, stopped "
-         "with \"did not mount\" even though the desk's pad storage had appeared. AccessCaster now "
-         "gives the storage longer to settle before asking the desk again, which was restarting it "
-         "on slower computers. If it still cannot read the storage, the message now says what it "
-         "found, such as security software blocking removable drives."),
+        ("Open AccessCaster brings the window to the front",
+         "The Open AccessCaster shortcut sometimes said to use Alt+Tab, when the window was in "
+         "fact coming to the front. It now waits for Windows to finish bringing it forward."),
+
+        ("Fader names read from each fader alone",
+         "AccessCaster now reads each fader's channel from that fader alone, so a stray setting "
+         "elsewhere on the desk cannot shift every fader's name along by one."),
+
+        ("Copying sounds to the SMART pads",
+         "Copying a sound to a pad, or saving a backup with its pads, could stop with \"did not "
+         "mount\" on some computers even though the desk's pad storage had appeared. AccessCaster "
+         "now waits longer before asking the desk to try again, and accepts pad storage that holds "
+         "no pads yet. If it still cannot use the storage, the message says what it found, such "
+         "as security software blocking removable drives."),
 
         ("A warning when the desk's firmware is older than any tested",
          "If your desk's firmware is older than 1.7.3, the oldest AccessCaster has been tested on, "
