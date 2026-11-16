@@ -31,22 +31,19 @@ from paths import safe_name
 # declined) is remembered against that serial so the dialog does not reappear at every launch, and
 # pads can be added to an existing baseline afterwards.
 _BASELINE_ASKED_KEY = "baseline_asked"
-# MEASURED: a full backup of a 16-pad desk, 8 of them sound pads and 19.7 MB of audio, takes 4.6
-# SECONDS END TO END, settings read included. Most of that is fixed cost (the model read, then
-# entering transfer mode and mounting); the copying itself is a fraction of a second per file.
+# A full backup of a 16-pad desk, 8 of them sound pads and 19.7 MB of audio, takes 4.6 SECONDS END
+# TO END, settings read included. Most of that is fixed cost (the model read, then entering
+# transfer mode and mounting); the copying itself is a fraction of a second per file.
 #
-# DO NOT QUOTE PAD_RESTORE_SECONDS HERE. That 15 s/pad is genuinely measured, but for the other
-# direction: a restore WRITES over transfer mode and the desk has to take each file, while a backup
-# only READS a mounted FAT volume. Reusing it tells people a 16-pad backup takes four minutes when
-# it takes five seconds, which is the kind of wrong that makes somebody skip the backup.
+# DO NOT QUOTE PAD_RESTORE_SECONDS HERE. Its 15 s a pad is for the other direction: a restore
+# WRITES over transfer mode and the desk has to take each file, while a backup only READS a mounted
+# FAT volume. Quoting it tells people a 16-pad backup takes four minutes when it takes five
+# seconds, which is the kind of wrong that makes somebody skip the backup.
 #
-# Reading off the mounted pad volume runs at ~20 MB/s (12.14 MB in 0.56 s, and seven smaller files
-# at 12-21 MB/s), so the whole grid moves in about a second.
-#
-# SO THE HONEST SHAPE IS THROUGHPUT, NOT A PER-PAD CONSTANT. This grid's biggest pad is 12 MB; a
-# ten-minute bed at 100 MB would take five seconds on its own. One second per pad is right for pads
-# this size and is rounded up; if somebody's grid is all long beds it will under-quote, which costs
-# little at a second a pad.
+# Reading off the mounted pad volume runs at about 20 MB/s (12 to 21 MB/s per file), so the time
+# is throughput, not a per-pad constant: a 12 MB pad is under a second, and a ten-minute bed at
+# 100 MB takes five seconds on its own. One second a pad is rounded up for ordinary pads, and
+# under-quotes a grid of long beds, which costs little at a second a pad.
 PAD_BACKUP_SECONDS = 1
 
 

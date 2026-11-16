@@ -335,7 +335,7 @@ def handle(iface: RodeInterface, purpose: str):
 # ---- WAITING OUT A RE-ENUMERATION ----------------------------------------------------------
 # Reconfiguring the desk's USB audio function takes it off the bus for about two and a half
 # seconds, and it returns under a DIFFERENT product id and path, because the id encodes that
-# configuration. Measured on a Pro II, fw 1.7.6: gone 60 ms after the write, back at t+2.5 s.
+# configuration. On a Pro II, firmware 1.7.6: gone 60 ms after the write, back at t+2.5 s.
 REENUM_EXPECT_S = 1.0        # how long to watch for it to LEAVE before deciding it never will
 REENUM_TIMEOUT_S = 20.0      # how long to then wait for it to come BACK
 REENUM_SETTLE_S = 0.3        # ... and a breath after that, so the next write does not race it

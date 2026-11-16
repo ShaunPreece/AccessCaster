@@ -15,8 +15,8 @@ journalled after it started replayed on top, so a change made during the read is
 
 TRUSTED (`trusted`) means the listener has the desk open, a dump has been adopted since the desk
 last appeared (`rcp_hid.connection_epoch`), and no STRUCTURAL change has arrived, and nothing has
-called `distrust`, since that dump started. A picture that is not trusted still answers with the last values it had, which is right
-for naming (the last fader layout seen beats "Channel 4") and wrong for acting: a caller about to
+called `distrust`, since that dump started. A picture that is not trusted still answers with the
+last values it had, which is right for naming (the last fader layout seen beats "Channel 4") and wrong for acting: a caller about to
 toggle something or address a write checks `trusted()` and reads the desk when it is not, and that
 read is adopted here like any other.
 

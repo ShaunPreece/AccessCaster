@@ -365,7 +365,8 @@ def parse(blob: bytes, spans: list | None = None) -> tuple:
     (node, property name, start, end) for every property: where its value block sits in `blob`.
 
     THE FIRST FOUR OF THOSE FIVE BYTES ARE THE DUMP'S OWN LENGTH, little-endian, counting everything
-    after them. That is what lets `rcp_read.read_model_raw` end the read on structure instead of on silence.
+    after them. That is what lets `rcp_read.read_model_raw` end the read on structure instead of on
+    silence.
     """
     start = blob.find(b"Rodecaster\x00")
     if start < 0:

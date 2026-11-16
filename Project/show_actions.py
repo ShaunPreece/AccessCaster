@@ -92,7 +92,7 @@ def _locked_dump():
     """One fresh model dump, taking the HID lock only for the dump itself.
 
     Passed to shows.wait_for so a forty-second wait does not hold the lock through its sleeps. See
-    the note on shows.wait_for: holding it across the wait blocked the announcer and read as a
+    the note on shows.wait_for: holding it across the wait blocks the announcer and reads as a
     frozen app."""
     with desk_access.hid_lock:
         return rcp_read.read_model_stable(fresh=True)
@@ -306,8 +306,8 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # unit would reject it, and THE UNIT DOES NOT: a backup sharing the loaded uuid
             # restores, with showControlLastError staying 0. Since a uuid only changes on a factory
             # reset, that refusal blocks the ordinary case this feature exists for - change
-            # something, put it back - and leaves shows usable only straight after a reset. The unit's own refusal
-            # (error 1) is reported below; we simply never guess it in advance.
+            # something, put it back - and leaves shows usable only straight after a reset. The
+            # unit's own refusal (error 1) is reported below; it is never guessed in advance.
             before = shows.restore_fingerprint(blob)
             err_before = shows.read_last_error(blob)
             shown = as_name or match["name"]     # see the docstring: the user's name wins

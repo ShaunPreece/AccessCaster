@@ -108,9 +108,9 @@ def capture(safe: str, blob: bytes, device=None, only: str = "") -> dict:
     later would silently move somebody's mix.
 
     LEVELS AND LINK STATE ARE PART OF THE SCHEME. Saving only the include/exclude flags would
-    restore a mix whose balance is wrong, which sounds like a working recall until you listen. A level is recorded only where the cross-point is UNLINKED: a
-    linked one has no level of its own, it follows the channel fader, and writing a number there
-    would quietly unlink it.
+    restore a mix whose balance is wrong, which sounds like a working recall until you listen. A
+    level is recorded only where the cross-point is UNLINKED: a linked one has no level of its own,
+    it follows the channel fader, and writing a number there would quietly unlink it.
 
     AN EXCLUDED CROSS-POINT RECORDS NOTHING BUT "excluded". Excluding a source UNLINKS it as part of
     the same operation, and an unlink FREEZES the level at wherever that fader stood, so every
@@ -363,7 +363,7 @@ def scope_text(scheme: dict, device=None) -> str:
     you arrow past it, and it cannot be put on the list as a description without a screen
     reader re-announcing it over the option name.
 
-    DERIVED, NEVER STORED. A preset saved on a Pro 2 and read on a Duo names outputs that desk does
+    DERIVED, NEVER STORED. A preset saved on a Pro II and read on a Duo names outputs that desk does
     not have, and a stored phrase would then be a lie."""
     dev = device or devices.get_active_device()
     have = {o["key"]: o for o in dev.matrix.outputs}

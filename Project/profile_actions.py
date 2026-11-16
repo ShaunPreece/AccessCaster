@@ -140,8 +140,8 @@ def snapshot_profile(name: str, include_pads: bool = False, baseline: bool = Fal
 
 
 # Profile restore runs in a background thread (the settings, then an optional pad rebuild at about
-# PAD_RESTORE_SECONDS a pad), so the page is not blocked and can poll progress for live-region
-# announcements.
+# PAD_RESTORE_SECONDS a pad), so the window stays responsive and polls its progress to speak each
+# step.
 restore_job = desk_access.BackgroundJob("A profile restore is already running.",
                                         "Could not restore the profile", "A restore is running.",
                                         rewrites_desk=True)

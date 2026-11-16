@@ -56,7 +56,7 @@ def from_db(db: float) -> float:
 
 
 def percentile(values: list, fraction: float) -> float:
-    """The value `fraction` of the way up a sorted list. Plain nearest-rank: with 600 readings the
+    """The value `fraction` of the way up a sorted list. Plain nearest-rank: with a take's 300 readings the
     difference between interpolation methods is far below anything that matters here."""
     if not values:
         return 0.0

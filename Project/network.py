@@ -128,7 +128,7 @@ def read_status() -> dict:
             "paired": bt_paired,
             "scan": slots("btScan", 10),
         },
-        # The third radio on the Wireless connections tab. The channels reply uses the same
+        # The third radio on the Wireless connections page. The channels reply uses the same
         # helper, so the two readings cannot drift apart.
         "wireless_mics": wireless_mics(blob),
         # WHAT CAN BE CHANGED HERE: the wifi radio, the network joined and discoverability.

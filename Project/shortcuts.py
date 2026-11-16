@@ -3,8 +3,7 @@ AccessCaster - the global keyboard shortcuts: the manager that joins the keys to
 shipped defaults, and the Keyboard shortcuts page's state and actions.
 
 The Windows plumbing is hotkeys.py, what a shortcut can do is commands.py, and the pad shortcuts are
-pad_shortcuts.py. This module does not import the server; commands does, to run what a key asks
-for.
+pad_shortcuts.py. What a key asks of the desk is carried out through commands.
 """
 
 from __future__ import annotations
@@ -70,8 +69,8 @@ def manager():
     if _manager is None:
         # Replies go through speech.say, which enforces the announcer switch: a recording's
         # suspension silences the very keys you reach for mid-take, and a shortcut that FAILS is
-        # silent too. Turning announcements back ON still speaks, because announcer.action_set_announce(True)
-        # has run by the time the reply is handed over.
+        # silent too. Turning announcements back ON still speaks, because
+        # announcer.action_set_announce(True) has run by the time the reply is handed over.
         mgr = hotkeys.HotkeyManager(speak=speech.say,
                                     runner=commands.run,
                                     labeller=_label,
@@ -224,8 +223,8 @@ def action_add_pad_shortcuts() -> dict:
     """Put the whole pad scheme onto this machine's shortcut list, on request.
 
     THE ONE THING A SHIPPED DEFAULT CANNOT DO. Defaults land only on a machine that has saved
-    nothing, so anybody who has already chosen their own keys never gets it. This is the "Use the SMART pad keys" switch ticked, so it stays an explicit choice
-    rather than a start-up surprise, and it can be ticked again after switching desks - a Duo has six
+    nothing, so anybody who has already chosen their own keys never gets it. This is the "Use the
+    SMART pad keys" switch ticked, so it stays an explicit choice rather than a start-up surprise, and it can be ticked again after switching desks - a Duo has six
     pads in a bank where a Pro II has eight, and the missing two are added without disturbing
     anything."""
     mgr = manager()

@@ -140,7 +140,7 @@ def action_set_fader_mute(fader: int, on: bool) -> dict:
     """Mute whatever is on one fader, addressed by FADER rather than by channel name.
 
     Same property and the same announcer publish as action_set_channel_mute; only the way in
-    differs. It exists because the Levels tab's rows ARE strips, and two of the things a strip can
+    differs. It exists because the Levels page's rows ARE strips, and two of the things a strip can
     hold have no channel name to look up: an EMPTY fader, and a stereo-linked PAIR (its own source
     code, deliberately absent from the assignable channel list). Routing those through a by-name
     call would mean either refusing to mute a linked pair or teaching the channel table about pairs,
@@ -170,7 +170,7 @@ def action_set_fader_solo(fader: int, on: bool) -> dict:
     IT KEEPS THE SAFETY WORDING, which is the whole condition on offering solo in a second place. A
     solo replaces the headphone feed, so left on by accident the desk sounds broken with nothing
     saying why - and a switch that only knew about its own fader would be exactly that trap. The
-    reply names everything the headphones now carry, not just this one, and the Levels tab carries
+    reply names everything the headphones now carry, not just this one, and the Levels page carries
     the same one-press Clear all solos that the Channels page has."""
     refusal, code, spec = _write_fader_toggle(fader, channels.CUE_PROP, on, "Solo", "solo")
     if refusal is not None:
@@ -221,8 +221,8 @@ def action_set_channel_wireless_mute(name: str, on: bool) -> dict:
 
     THE REPLY SAYS WHAT WAS SENT, NOT WHAT HAPPENED, and that is deliberate. The write is addressed
     correctly (the property sits on the same CHANNEL node as the mute) but is unverified with a
-    paired transmitter, and a channel with nothing paired has nothing to obey it. Claiming "the mic is muted" would be the app reading its own write back as an
-    outcome."""
+    paired transmitter, and a channel with nothing paired has nothing to obey it. Claiming "the mic
+    is muted" would be the app reading its own write back as an outcome."""
     ch = channels.ui_channel(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}

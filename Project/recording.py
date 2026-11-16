@@ -46,9 +46,9 @@ def _state_changed(was, now) -> None:
 
     THE NOTICE IS SPOKEN BEFORE THE SILENCE, and only when the recording was started ON THE UNIT.
     Started from this app, the reply carries the same words to the window instead, spoken by the
-    screen reader rather than by this app, and therefore cannot land in the take. Started on the unit there is
-    no reply to carry it, so one short phrase at the top of the recording is the price of the
-    operator knowing what just happened.
+    screen reader rather than by this app, and therefore cannot land in the take. Started on the
+    unit there is no reply to carry it, so one short phrase at the top of the recording is the price
+    of the operator knowing what just happened.
 
     A PAUSE GIVES ANNOUNCEMENTS BACK until the take resumes. Nothing reaches the take while it is
     paused, and without speech a paused desk sounds exactly like a recording one. A resume from the
@@ -240,7 +240,7 @@ def read_live() -> dict:
     snap = w.snapshot()
     snap["ok"] = True
     # The same sentence the page read produces, built from the listener's state plus the
-    # destination and room noted at the last full read. One wording, two endpoints.
+    # destination and room noted at the last full read. One wording, two reads.
     snap["message"] = _sentence(snap.get("state"), snap.get("elapsed") or "")
     return snap
 
@@ -581,7 +581,7 @@ def action_set_processing_bypass(on: bool) -> dict:
     """The RECORDER's raw switch: what the unit writes to its card or drive.
 
     Two actions rather than one with a `which`, because the two destinations live on different
-    pages and each endpoint belongs to the page that calls it. They share the sentence, not the
+    pages and each action belongs to the page that calls it. They share the sentence, not the
     route."""
     gate = _options_gate()
     if gate is not None:

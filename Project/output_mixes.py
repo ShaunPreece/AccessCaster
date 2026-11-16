@@ -343,10 +343,9 @@ def action_reset_all_outputs() -> dict:
     breaks channel Mute: a mute only reaches cross-points that follow the fader, so an output with
     that source unlinked keeps carrying it and you still hear a muted mic in your own cans.
 
-    HONESTY: the default modes are a KNOWN-GOOD set taken from a saved profile, NOT a capture of a
-    factory-reset unit (see the provenance comment on PRO2_MATRIX_OUTPUTS). So this is called
-    "defaults", never "factory". Every write is reversible and read-back verifiable, and the UI
-    tells the user to save a profile first.
+    The default modes match a factory-reset desk (the comment on devices.PRO2_MATRIX_OUTPUTS).
+    Every write is reversible and read-back verifiable, and the UI tells the user to save a profile
+    first.
 
     THIS IS THE "Everything normal" BUILT-IN MIX SCHEME, applied through the one scheme path
     (routing_schemes.apply). The button stays because it is where people look for it and it carries

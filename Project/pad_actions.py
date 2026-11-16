@@ -295,9 +295,8 @@ def action_clear_all_pads() -> dict:
         return {"ok": False, "message": f"Could not clear all pads: {exc}"}
 
 
-# Pad-defaults restore runs in a background thread (it takes ~a minute) so the page is not blocked
-# and can poll progress for live-region announcements. This state is the single source the status
-# endpoint reports.
+# The factory voice-effect restore and a backup's pads-only restore run as this one background job
+# (about a minute), so the window stays responsive and polls its progress to speak each step.
 restore_job = desk_access.BackgroundJob("A pad restore is already running.",
                                              "The pad restore failed", "A pad restore is running.",
                                              rewrites_desk=True)
@@ -504,8 +503,8 @@ def action_preview_stop(grid: int) -> dict:
 
 
 def cleanup_preview_on_exit() -> None:
-    """If the server stops (watchdog/quit/Ctrl-C) while a live preview is engaged, clear the
-    scratch pad so no effect is left on the mic. Best effort; failures are ignored."""
+    """When the app quits while a live preview is engaged, clear the scratch pad so no effect is
+    left on the mic. Best effort; failures are ignored."""
     if _preview_grid is None:
         return
     try:

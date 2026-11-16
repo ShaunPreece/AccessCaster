@@ -324,8 +324,8 @@ class _Tee:
 
     THE POINT OF IT: the codebase already prints the things worth knowing - the shortcut count,
     the watchdog's stop reason, a startup read that failed - and in the frozen
-    windowed build `sys.stdout` is None, so all of it is discarded. Teeing means every existing
-    diagnostic starts being recorded without a single call site changing.
+    windowed build `sys.stdout` is None, so all of it is discarded. The tee records every
+    one of those prints with no change at the call site.
     """
 
     def __init__(self, under, kind: str):

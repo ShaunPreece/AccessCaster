@@ -365,7 +365,7 @@ class PushListener:
     wire for the whole time the desk is busy, which on a factory reset is exactly when it
     re-enumerates its USB audio function. The desk pushes what changed instead.
 
-    MEASURED ON A DUO. A factory reset pushes 3267 frames covering 195 distinct properties, from
+    ON A DUO, a factory reset pushes 3267 frames covering 195 distinct properties, from
     0.02 s after the command to t+4.96 s as one continuous burst with no gap of half a second in
     it. `currentShowUUID` is among them, so the new show id, the desk's only confirmation that a
     reset happened, arrives on its own. An impossible export pushes just three frames
@@ -450,8 +450,8 @@ class PushListener:
         going until t+4.96 s, so a caller that acts the moment its answer lands is writing to a desk
         that is still rewriting itself, and on a reset that is also while it re-enumerates.
 
-        `idle` is comfortably above the burst's own internal gaps: measured over 3267 frames, not
-        one gap reached half a second."""
+        `idle` is comfortably above the burst's own internal gaps: in a reset's 3267 frames, no gap
+        reaches half a second."""
         started = time.monotonic()
         deadline = started + timeout
         while True:

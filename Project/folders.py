@@ -37,8 +37,9 @@ def _open_folder_focused(folder: str) -> None:
     moved to is, to a screen-reader user, indistinguishable from nothing having happened.
 
     Windows will not let a background process take the foreground on its own, so this borrows the
-    input state of the window that HAS it (AttachThreadInput), which is the documented way. `AllowSetForegroundWindow` is called first because
-    when it does work it is cheaper and needs no window handle.
+    input state of the window that HAS it (AttachThreadInput), which is the documented way.
+    `AllowSetForegroundWindow` is called first because when it does work it is cheaper and needs no
+    window handle.
 
     FAILING TO FOCUS IS NOT FAILING TO OPEN. The folder is what was asked for; the focus is the
     courtesy. So everything after `startfile` is best-effort and swallows its own errors - reporting

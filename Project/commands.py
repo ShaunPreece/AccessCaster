@@ -163,7 +163,7 @@ def _run_app(arg: str) -> dict:
 
 def _toggle_announcer() -> dict:
     """Toggle the spoken announcer, and the case the whole shortcut layer exists for: the announcer
-    talking over a guest is something you fix NOW, not after finding the window and the tab.
+    talking over a guest is something you fix NOW, not after finding the window and the page.
 
     TURNING IT OFF IS SILENT, ON PURPOSE. The case this shortcut exists for is realising mid-take
     that announcements are going into the mix, and "announcements off" spoken into that mix is the
@@ -471,8 +471,8 @@ def _callme_commands() -> list:
 
 
 def _callme_contact_commands() -> list:
-    # BOUND BY NAME, NOT BY CODE: a code is what gets edited when its owner's changes, and the
-    # shortcut has to survive that edit.
+    # BOUND BY NAME, NOT BY CODE: a contact's code is what gets edited when RODE issues its owner a
+    # new one, and the shortcut has to survive that edit.
     return [_cmd(f"callme.contact:{c['name']}", "CallMe", f"Call {c['name']}")
             for c in callme_actions.contacts()]
 
@@ -599,12 +599,11 @@ def _run_scheme(arg: str) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------
-# PADS: every type that does something when fired from software, which since MIDI is all of them.
+# PADS: every type that does something when fired from software, which with MIDI is all of them.
 # ---------------------------------------------------------------------------------------------
 # SOUND PADS ARE HERE BECAUSE OF MIDI, NOT BECAUSE HID CAN FIRE THEM. Writing `padActive` switches
-# a sound pad's flag and the unit plays nothing. MIDI
-# lifts that limit. Voice-effect and mixer pads go over HID, where the flag IS the state; the
-# dispatch is per pad in pad_shortcuts.fire_pad.
+# a sound pad's flag and the unit plays nothing; MIDI plays it. Voice-effect and mixer pads go over
+# HID, where the flag IS the state; the dispatch is per pad in pad_shortcuts.fire_pad.
 PAD_TYPES = (soundpad.PAD_TYPE_SOUND, soundpad.PAD_TYPE_VOICE_FX, soundpad.PAD_TYPE_MIXER)
 
 

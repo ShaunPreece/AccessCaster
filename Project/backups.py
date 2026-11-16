@@ -26,15 +26,15 @@ from paths import safe_name
 def _removable_volume_ready() -> bool:
     """Is there a card or USB drive in the unit with room for a show?
 
-    A show can ONLY go to removable storage: measured, every export takes about 24 MB off the USB
+    A show can ONLY go to removable storage: every export takes about 24 MB off the USB
     drive and leaves the internal volume untouched, and that internal volume is the SMART pad
     partition, which reports it cannot even record. So with nothing inserted there is nowhere for a
     backup to go, and asking for one times out rather than failing cleanly.
 
     ANSWERED BY `recorder.destination`, LIKE EVERY OTHER CALLER. A hand-rolled inserted/mounted/
     can_record loop here would be a SECOND OPINION on whether a backup is possible, and the
-    Backups page, the Recording section and this could disagree. Deliberately NOT fresh: the short-lived cache is what keeps this cheap
-    enough to ask on a page load."""
+    Backups page, the Recording section and this could disagree. Deliberately NOT fresh: the
+    short-lived cache is what keeps this cheap enough to ask on a page load."""
     try:
         with desk_access.hid_lock:
             blob = rcp_read.read_model()
@@ -306,8 +306,7 @@ def action_delete_backup(name: str, force: bool = False) -> dict:
 def action_restore_backup(name: str, clean: bool = False) -> dict:
     """RESTORE A BACKUP, from this computer's copy. See RESTORE_USES_THE_PROFILE below.
 
-    THE SHOW IMPORT CRASHES THE DESK ABOUT ONE TIME IN SIX, so this does not use it. Measured on a
-    Pro II with the diagnostic log running:
+    THE SHOW IMPORT CRASHES THE DESK ABOUT ONE TIME IN SIX, so this does not use it. On a Pro II:
 
         PROFILE restores :   9   failed: 0   median 126s
         SHOW imports     :  31   failed: 5   median   6s
@@ -410,7 +409,7 @@ def action_show_reset(backup_first: bool = True) -> dict:
         # REBUILD THE VOICE EFFECTS THE DEFAULT SHOW DOES NOT BRING WITH IT. Without this the reset
         # hands back six voice-FX pads with the right name, type and colour that do nothing at all,
         # and says "factory SMART pads" while it does so - see soundpad.heal_fx_pool for the
-        # mechanism and the captures that prove it.
+        # mechanism.
         step("Rebuilding the factory voice effects...")
         with desk_access.hid_lock:
             healed = soundpad.heal_fx_pool(progress=step)

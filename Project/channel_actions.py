@@ -95,7 +95,7 @@ def action_set_mic_type(channel: int, type_value: int) -> dict:
     it is undone here on purpose: the voicing's own chain is what the user asked for by naming their
     microphone, and it is what the desk and the RODE app both do. What must not happen is saying
     nothing, which leaves a screen-reader user with a panel full of stale numbers and no idea their
-    compressor moved. So it is COUNTED and ANNOUNCED, exactly as the gain is, and the client re-reads
+    compressor moved. So it is COUNTED and ANNOUNCED, exactly as the gain is, and the window re-reads
     the panel on success."""
     if channel not in channels.MIC_CHANNELS:
         return {"ok": False, "message": f"Mic channel {channel} is not valid."}

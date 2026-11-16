@@ -115,7 +115,7 @@ def action_set_headphone_type(value: int, output: int = 0) -> dict:
     """Set a headphone output's amp type. `output` is an INDEX into the active device's headphone
     outputs (0 = Headphone 1, 1 = Headphone 2), `value` an amp-type code from that device's
     HeadphoneTypeSpec (0=NTH-100, 1=High sensitivity, 2=Low sensitivity). This resolves the
-    output from the spec, so the client never names one that is not confirmed."""
+    output from the spec, so a caller never names one that is not confirmed."""
     gate = write_gate()
     if gate is not None:
         return gate
