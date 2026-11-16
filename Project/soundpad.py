@@ -737,10 +737,10 @@ def free_effect_subhandle(target_idx: int) -> int:
     """Effects sub-handle for a pad = REUSE the pad's FIRST existing effect object's index under
     PADEFFECTS; only APPEND (the object count) if the pad has no object yet.
 
-    WHY REUSE, NOT APPEND: the LIVE FX engine binds a pad to the
-    FIRST region-B effect-object whose effectsIdx == padIdx. Appending our effect at the end left
-    the first object empty, so the engine binds silence and the pad goes dead after a reboot. The
-    RODE app writes to the pad's FIRST matching object, so that index is reused. A hard-coded 0x0B,
+    WHY REUSE, NOT APPEND: the LIVE FX engine binds a pad to the FIRST region-B effect-object whose
+    effectsIdx == padIdx. An effect appended at the end leaves the first object empty, so the engine
+    binds silence and the pad goes dead after a reboot. The RODE app writes to the pad's FIRST
+    matching object, so that index is reused. A hard-coded 0x0B,
     the total object count, or a plain append each silence this pad's effect or another's.
     """
     objects = effect_objects()
@@ -1108,8 +1108,7 @@ PAD_PROP = {
 # payload, the writer and the profile share ONE definition. The firmware's default, which is what a
 # pad is stuck with unless these are written, is a Control Change on control = padIdx (bank 1 pad 1
 # = CC 0, counting up), channel 1, value 127 on press and 0 on release.
-# padTriggerMode IS latching versus momentary, as the desk's own MIDI output shows
-# (DevTools/midi_monitor.py):
+# padTriggerMode IS latching versus momentary:
 #   mode 1 (the app's default): press sends the ON value, the NEXT press sends the OFF value.
 #     LATCHING.
 #   mode 0: the ON value at press and the OFF value at release, one message each. MOMENTARY.
@@ -1685,8 +1684,8 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
     If the grid pad is already occupied it is cleared first (app-style), then a fresh sound pad is
     created at padIdx = grid-1, writing pads/<grid>/<real name> (factory convention - see
     safe_dest_filename). The folder is always the grid number, the app's FAT layout (grid pad N ->
-    pads/N/), because the audio tidy keeps only what is in a pad's own folder. `dest_filename` (e.g. the original upload name) sets the on-device
-    filename; without it the source basename is used. `replay` True = re-press restarts from the
+    pads/N/), because the audio tidy keeps only what is in a pad's own folder. `dest_filename`
+    (e.g. the original upload name) sets the on-device filename; without it the source basename is used. `replay` True = re-press restarts from the
     start (factory behaviour); False = pause/resume.
     """
     return _replace_slot(grid, "sound", lambda: assign_create(
@@ -1920,10 +1919,10 @@ def safe_assign_fx_recipe(target_idx: int, name: str, recipe: dict, colour: int 
 
 
 def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict:
-    """High-level: put a factory voice effect on grid pad `grid` (1-based). SELF-HEALING: instead
-    of refusing on a polluted pool, safe_assign_fx_recipe scrubs the target slot (clears any pad,
-    GCs any leftover orphan object for this padIdx) and then does the proven create, so it cannot
-    leave a duplicate. Reports health after. `active` defaults False so assigning an effect leaves
+    """High-level: put a voice effect, factory or the user's own, on grid pad `grid` (1-based).
+    SELF-HEALING: instead of refusing on a polluted pool, safe_assign_fx_recipe scrubs the target
+    slot (clears any pad, GCs any leftover orphan object for this padIdx) and then does the proven
+    create, so it cannot leave a duplicate. Reports health after. `active` defaults False so assigning an effect leaves
     the pad at REST (matching the factory) and never leaves a mic processing; the live preview path
     passes active=True itself."""
     pidx = grid - 1
@@ -2189,15 +2188,16 @@ def heal_fx_pool(progress=None) -> dict:
     THE DESK REACHES THIS STATE BY ITSELF, which is why this is a repair rather than a diagnostic.
     After a software reset the six FX pad records are present and region B holds only the special
     object at 65, because RODE's factory default show ships the FX pad records with their
-    `effectsIdx` pointers and no objects for them to point at. The firmware garbage-collects an object the moment no pad claims
-    it but never allocates one (SOUNDPADS.md section 5), and only an explicit effects block (a 0x9d
+    `effectsIdx` pointers and no objects for them to point at. The firmware garbage-collects an
+    object the moment no pad claims it but never allocates one (SOUNDPADS.md section 5), and only an explicit effects block (a 0x9d
     frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
     the default show writes the records back, and nothing re-allocates. The user gets six voice-FX
     pads with the right name, type and colour that make no sound and process no mic - the exact class
     of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
     pad-keyed GC never reaches it.
 
-    A show IMPORT is NOT affected: an exported show carries the objects. It is the DEFAULT show alone that does not.
+    A show IMPORT is NOT affected: an exported show carries the objects. It is the DEFAULT show
+    alone that does not.
 
     IDEMPOTENT AND CHEAP WHEN HEALTHY: one dump, and no writes at all when nothing is missing. That
     is what lets it sit at the end of every path that can rewrite the pad grid rather than being a
@@ -2838,8 +2838,8 @@ def _fx_effect_matches(saved: dict, pad_props: dict | None, objects: list, pool_
 
 def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
     """Which of these saved pads are ALREADY on the unit exactly as saved, and can be left alone.
-    CALLER HOLDS THE HID LOCK. Never raises: any trouble means an empty set, i.e. restore everything,
-    which is the same work as before this optimisation existed."""
+    CALLER HOLDS THE HID LOCK. Never raises: any trouble means an empty set, so every pad is
+    restored."""
     try:
         if progress:
             progress("Checking which SMART pads already match.")
@@ -2909,8 +2909,8 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
     files come from src_dir/<grid>/<file>. CALLER HOLDS THE HID LOCK, and should also hold ONE
     `rcp_transfer.transfer_session()` around this: without it every
     create enters transfer mode, remounts the volume and leaves again for itself - sixteen cycles
-    for sixteen pads, each one popping a Windows device sound as the volume mounts. The
-    per-pad calls are unchanged; while a session is held they simply do nothing. Returns {ok,
+    for sixteen pads, each one popping a Windows device sound as the volume mounts. While a session
+    is held, the per-pad transfer-mode calls do nothing. Returns {ok,
     results, skipped, health}. Waits for each pad to register before the next create (the stale-handle
     guard against a stale free handle)."""
     results = []
