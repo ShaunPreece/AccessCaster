@@ -46,12 +46,12 @@ def raise_window(hwnd: int) -> bool:
     # tells a screen reader the window came forward.
     #
     # DO NOT ADD A WORKAROUND HERE IF IT FAILS. Every one of them - a minimize/restore flip, an
-    # Alt tap, AttachThreadInput - puts the window in front WITHOUT a real activation: measured,
-    # the window became foreground and held it, GetGUIThreadInfo agreed the keyboard focus was
-    # ours, and NVDA went on reading the app the user came from. Alt-Tabbing to the same window
-    # announced it perfectly, which is what proved the window and the screen reader were both
-    # fine. A refusal here means the CALLER has lost the foreground right, and the fix is at that
-    # end - see hotkeys._FOREGROUND_COMMANDS, where dispatching to a worker thread was spending it.
+    # Alt tap, AttachThreadInput - puts the window in front WITHOUT a real activation: the window
+    # holds the foreground and the keyboard focus (GetGUIThreadInfo agrees), and the screen reader
+    # goes on reading the app the user came from, while Alt+Tab to the same window is announced
+    # normally. A refusal here means the CALLER has lost the foreground right, and the fix is at
+    # that end: see hotkeys._FOREGROUND_COMMANDS, whose commands run on the hotkey thread because
+    # a hop to a worker thread spends the right.
     user32.SetForegroundWindow(hwnd)
     # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED: the caller stays silent on a
     # success, so a refusal reported as success would be silent too. The switch can still be under
