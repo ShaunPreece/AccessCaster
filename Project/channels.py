@@ -23,7 +23,7 @@ import devices  # per-device model (mic selectors, channel order) keyed by produ
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
 import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
-import rcp_transfer as _t  # low-level byte builders + send layer (build_*, send_record, send_records_paced)
+import rcp_transfer as _t  # byte builders and the send layer (build_*, send_record, send_records_paced)
 import recorder  # outputMultiMode's two halves
 import rode_app  # RODE's app open: its fader moves are not pushed
 
@@ -376,7 +376,7 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
     All land on the channel's OWN node, exactly as the RODE app does when you pick a preset.
 
     MODULES ARE PART OF A PRESET. Without them it is a silent no-op: applied to a strip whose
-    modules are switched off it writes all 33 parameters, reports the preset name, and sounds
+    modules are switched off it writes every parameter, reports the preset name, and sounds
     exactly the same, because nothing in the chain is engaged. A preset carries its module set as
     DATA (see ProjectAssets/mic_presets.json and mic_presets._read_channel_preset_props, which records
     the live states on "save as"),

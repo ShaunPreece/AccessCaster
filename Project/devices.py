@@ -44,7 +44,8 @@ class MatrixSpec:
                       the routing matrix stands still.
       cell_count    : expected number of blocks IN `block` (a guard - if the live count
                       differs the matrix changed shape, e.g. a SIP caller, so reads refuse).
-      output_count  : number of outputs (read_output_modes yields this many).
+      output_count  : how many outputs the grid read covers, from index 0. read_output_modes
+                      yields at least this many (13 on both desks).
       source_indices: the channelInputSource codes we EXPOSE as matrix rows.
       row_stride    : blocks per source in the flat list (Pro II = 13).
     """
@@ -448,8 +449,8 @@ CHANNELS_PRO2 = (
     #
     # THE CHAIN DOES NOTHING TO THE PADS AUDIO, on either desk: pan hard over, maximum HPF, full
     # EQ cuts, a slammed noise gate and zero make-up gain are all inaudible, where pan on a mic
-    # moves it to one ear. **RODE's own guide says so** ("You can add processing to any audio channel except
-    # the SMART pads") and so does their app, which offers no processing for it. A write landing
+    # moves it to one ear. **RODE's own guide says so** ("You can add processing to any audio
+    # channel except the SMART pads") and so does their app, which offers no processing for it. A write landing
     # at its own address proves an address is live, never that it reaches audio.
     # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
     # channels.read_channels, which is where that is enforced, and native/channel_tabs.build_tabs.
@@ -492,8 +493,8 @@ CHANNELS_DUO = (
 # so restore writes only 9: writing slot 9 would show the layout tidy a duplicated source.
 PRO2_FADERS = FaderSpec(
     count=9, physical=6, capture_len=10,
-    # Faders 1-6 are analog pots; virtual faders 7-9 carry a settable level (FaderSpec.level_faders). 10 assignable sources over 9 faders, so one is always
-    # off-fader.
+    # Faders 1-6 are analog pots; virtual faders 7-9 carry a settable level
+    # (FaderSpec.level_faders). 10 assignable sources over 9 faders, so one is always off-fader.
     assignable=_assignable_view(CHANNELS_PRO2),
     # Only ADJACENT inputs link, which is RODE's own restriction, so these three are the whole set.
     stereo_pairs=((4, 0, 1, "Mic 1 + 2"), (5, 1, 2, "Mic 2 + 3"), (6, 2, 3, "Mic 3 + 4")),

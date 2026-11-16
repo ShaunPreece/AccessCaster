@@ -417,7 +417,8 @@ def iter_block_properties(blob: bytes):
     `MIX`/`RCSYNCMIX` and `MIXMINUSES`/`RCSYNCMIXMINUES` share six property names, and NETWORK
     carries `ipAddress` / `wifiIpAddress` / `cellIpAddress` as separate names per transport. And
     accidentally, as a STRAY appended by one malformed write, which reads back like a real property
-    and does nothing until a factory reset removes it. Either way, anything reading a duplicated name must say which block it means.
+    and does nothing until a factory reset removes it. Either way, anything reading a duplicated
+    name must say which block it means.
     """
     yield from _index(blob).flat
 
@@ -728,8 +729,9 @@ def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
                                    f"so the live {cannot} cannot be read reliably right now."))
     out = {}
     # EVERY ROW THE GRID CARRIES, whatever mode the desk is in, so the read can never be narrower
-    # than what the page offers and a mix scheme captured in Standard still records the Expanded cross-points. The
-    # cells all exist on the wire; which of them to DISPLAY is `sources_for`'s question.
+    # than what the page offers and a mix scheme captured in Standard still records the Expanded
+    # cross-points. The cells all exist on the wire; which of them to DISPLAY is `sources_for`'s
+    # question.
     rows = m.all_source_indices
     for o in range(m.output_count):
         out[o] = {}

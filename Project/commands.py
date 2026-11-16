@@ -170,9 +170,9 @@ def _toggle_announcer() -> dict:
     exact thing the key was pressed to stop. Turning them back ON still speaks, so the pair always
     leaves you knowing where you are. The silence is safe here in a way it would not be elsewhere:
     what the shortcut did is immediately audible as the announcer going quiet. Every OTHER shortcut
-    can be silenced too, per shortcut, on the Keyboard shortcuts tab.
+    can be silenced too, per shortcut, on the Keyboard shortcuts page.
 
-    The same toggle as the Announcements tab's switch and the tray's, with the same lifetime: saved
+    The same toggle as the Announcements page's switch and the tray's, with the same lifetime: saved
     only when "Start with announcements the way I left them" is ticked."""
     on = not speech.enabled.is_set()
     res = announcer.action_set_announce(on)
@@ -239,7 +239,7 @@ def _cough_key() -> dict:
 def _say_state() -> dict:
     """Speak the short version of the Device page's current-state report, from anywhere.
 
-    Costs a model read, so it speaks "Reading the unit" first: a key that appears to do nothing for
+    Costs a model read, so it speaks "Reading the desk" first: a key that appears to do nothing for
     a second and a half is a key you press again. By exception like the page's own report - what is
     muted, what is soloed, whether it is recording, what pads are latched - so "nothing to report"
     is itself the answer and takes one sentence to hear."""
