@@ -1,4 +1,4 @@
-"""Generate assets/icon.ico, the AccessCaster app icon, from code so it is reproducible.
+"""Generate Project/assets/icon.ico, the AccessCaster app icon, from code so it is reproducible.
 
 A dark rounded square with a light "AC" monogram and a small red "on air" dot. Written as a
 multi-resolution .ico (16 up to 256 px) so Windows picks a crisp size for the tray, the window
@@ -12,7 +12,6 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 SIZE = 256
-# icon.ico lives with the app, in Project/assets/ (this script is in the sibling ProjectBuilds/).
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "Project", "assets", "icon.ico")
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]

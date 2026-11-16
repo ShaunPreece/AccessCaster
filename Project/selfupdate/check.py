@@ -1,7 +1,4 @@
-"""
-check.py
-
-Whether a fetched index means there is an update to offer, and where a track's
+"""Whether a fetched index means there is an update to offer, and where a track's
 files live.
 
 PURE, and separate from the fetching, so every rule below is a unit test
@@ -36,7 +33,7 @@ SKIPPED = "skipped"
 
 # The index could not be fetched, could not be read, or did not verify.
 #
-# SILENT, and that is a decision rather than laziness. A user cannot act on
+# SILENT, deliberately. A user cannot act on
 # "the update server did not answer", the next check costs nothing, and a
 # failure that speaks turns a week offline into a week of being told so. The
 # one exception is a check the user ASKED for, where silence would read as the

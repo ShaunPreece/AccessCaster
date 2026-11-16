@@ -1,9 +1,9 @@
 """Windows' `a11y.describe`: a wx.Accessible, which wx serves to screen readers as MSAA. wx
 implements wx.Accessible on Windows only.
 
-Only the description and the value are overridden. Everything else (name, role, state) is left unimplemented,
-which makes wx fall through to the control's standard accessibility, so the control still reads as
-the native checkbox or slider it is.
+Only the description and the value are overridden. Everything else (name, role, state) is left
+unimplemented, which makes wx fall through to the control's standard accessibility, so the control
+still reads as the native checkbox or slider it is.
 """
 import wx
 

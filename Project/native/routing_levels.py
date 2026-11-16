@@ -1,5 +1,5 @@
-"""Routing's Levels page: the levels the desk keeps to itself. The virtual faders with their mute and
-solo, the monitor speakers and the Bluetooth output, how loud each source is in each monitor
+"""Routing's Levels page: the levels the desk keeps to itself. The virtual faders with their mute
+and solo, the monitor speakers and the Bluetooth output, how loud each source is in each monitor
 output, and the headphone amp types. Drawn from the window's desk state, so a turn of the encoder
 or a fader shows here as it happens.
 """

@@ -1,7 +1,4 @@
-"""
-phrases.py
-
-The update feature's sentences, in one place, so the wording is reviewed
+"""The update feature's sentences, in one place, so the wording is reviewed
 together and unit-tested rather than scattered across the tray, `app_updates`
 and the window.
 

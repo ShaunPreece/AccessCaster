@@ -1,7 +1,4 @@
-"""
-signing.py
-
-Checking that an index file was written by us.
+"""Checking that an index file was written by us.
 
 WHY THIS EXISTS AT ALL. The index names the installer to download and the hash
 it should have, so a checksum alone proves nothing: anybody who could replace

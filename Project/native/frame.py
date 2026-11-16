@@ -162,9 +162,9 @@ class MainFrame(Speaker, wx.Frame):
             wx.CallAfter(self._activated)
 
     def _activated(self):
-        # Another program forcing this window to the front (SetForegroundWindow, as a self drive
-        # does) activates it even while a dialog has it disabled, unlike Alt+Tab, and the focus
-        # is then nowhere: hand it to the dialog in front.
+        # Another program forcing this window to the front (SetForegroundWindow) activates it
+        # even while a dialog has it disabled, unlike Alt+Tab, and the focus is then nowhere:
+        # hand it to the dialog in front.
         shown = modal_dialogs()
         if shown:
             shown[-1].Raise()

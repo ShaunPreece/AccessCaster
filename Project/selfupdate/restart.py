@@ -1,7 +1,4 @@
-"""
-restart.py
-
-Asking Windows to start AccessCaster again after the installer has closed it.
+"""Asking Windows to start AccessCaster again after the installer has closed it.
 
 ACCESSCASTER DOES NOT EXIT ITSELF TO INSTALL. The installer's Restart Manager
 asks the running app to close (`tray.py` answers WM_QUERYENDSESSION and

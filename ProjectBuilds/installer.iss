@@ -35,8 +35,8 @@
 #define AppExe "AccessCaster.exe"
 #define AppPublisher "Shaun Preece"
 ; THE APP ID GUID LIVES IN ONE PLACE: HERE. Both the AppId directive below and the [Code] check that
-; finds a previous install are built from this define, so they cannot drift apart - and if they did,
-; the check would silently find nothing, which is the worst kind of broken.
+; finds a previous install are built from this define, so they cannot drift apart; if they did,
+; the check would silently find no previous install.
 ; The braces are added at each use site, because Inno's [Setup] parser needs them doubled and the
 ; Pascal string does not.
 #define AppIdGuid "A1C7E2F4-3B9D-4E6A-8C21-5F0D9B7E14A2"
@@ -68,7 +68,7 @@ VersionInfoDescription={#AppName} Setup
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ; {autopf} FOLLOWS THE CHOICE ABOVE, which is the whole point of using it: Program Files for an
-; all-users install, {localappdata}\Programs for a per-user one. Every per-user install has gone to
+; all-users install, {localappdata}\Programs for a per-user one. A per-user install lives in
 ; {localappdata}\Programs\AccessCaster, so an upgrade lands in the same folder instead of orphaning
 ; it. Keep the leaf name "AccessCaster" (no space) for that reason.
 DefaultDirName={autopf}\AccessCaster
@@ -146,8 +146,8 @@ Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName} now"; \
     Flags: nowait postinstall skipifsilent
 
 [Code]
-{ THE FIREWALL RULE AN EARLIER VERSION ADDED, which nothing needs now that the app serves no page
-  to the network. A netsh rule is machine-wide and removing it needs admin, so the delete is
+{ THE FIREWALL RULE AN EARLIER VERSION ADDED, which nothing needs: the app serves no page to the
+  network. A netsh rule is machine-wide and removing it needs admin, so the delete is
   elevated on its own through the 'runas' verb; in an all-users install Setup is elevated already
   and 'runas' simply runs it. A marker records that a rule was added, so only a machine that has
   one is asked.
@@ -175,7 +175,7 @@ const
 
   IT CAN ONLY EVER SEE THE HIVE OF WHOEVER RUNS SETUP. If an elevated Setup is running as a
   different admin account than the one holding the per-user copy, HKCU is that admin's hive and this
-  finds nothing - correctly, because it could not cleanly remove another user's install either
+  finds nothing, correctly, because it could not cleanly remove another user's install either
   (their uninstaller and their registry entries live in a profile Setup has no business rewriting).
   So a second user's stray copy stays until that user runs an installer themselves. }
 
@@ -216,8 +216,8 @@ begin
                 'apps list as a second entry with the same name.' + #13#10#13#10 +
                 'Remove that personal copy now?', mbConfirmation, MB_YESNO) = IDYES then
         { /SILENT rather than /VERYSILENT so a failure still shows itself, and the result is
-          ignored on purpose: see the comment on Result above. Your saved profiles, presets and
-          settings are untouched either way - they live in %LOCALAPPDATA%\AccessCaster, which no
+          ignored on purpose: see the comment on Result above. The user's saved profiles, presets
+          and settings are untouched either way: they live in %LOCALAPPDATA%\AccessCaster, which no
           uninstaller removes. }
         Exec(RemoveQuotes(Uninst), '/SILENT /NORESTART /SUPPRESSMSGBOXES', '',
              SW_SHOW, ewWaitUntilTerminated, ResultCode);
@@ -258,7 +258,7 @@ end;
 
 { NOT ON A SILENT RUN. An update from inside the app runs Setup silently, and a permission prompt
   appearing in the middle of an update nobody is watching is unexplained. An allow-rule for a
-  program that no longer listens does no harm meanwhile. }
+  program that does not listen does no harm meanwhile. }
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and not WizardSilent and FirewallRuleAdded then

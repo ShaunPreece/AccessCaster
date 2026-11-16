@@ -1,7 +1,4 @@
-"""
-checker.py
-
-Fetches a track's index and its signature, checks the signature, and says
+"""Fetches a track's index and its signature, checks the signature, and says
 whether there is an update to offer.
 
 THE ORDER IS FETCH, VERIFY, THEN PARSE, and it is not interchangeable.
@@ -68,8 +65,8 @@ def run(running, skipped, get=None, public_key_hex=None,
     """Check the track this build follows. `running` is the version actually
     running, `skipped` the version the user chose not to hear about again.
 
-    `get` and `public_key_hex` are injected by the tests: the shipped private
-    key is offline by design, so the happy path can only be exercised against
+    `get` and `public_key_hex` are injected by the tests: the signing private
+    key is kept offline, so the happy path can only be exercised against
     a key pair the test generated itself."""
     # Nothing to check against, so do not ask. Asking and then refusing every
     # answer would look identical to a server that is down, and would hide the

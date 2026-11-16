@@ -1,7 +1,4 @@
-"""
-downloader.py
-
-Fetches the installer named by a verified index and proves it is the right one
+"""Fetches the installer named by a verified index and proves it is the right one
 before anything can run it.
 
 THE HASH IS TAKEN FROM THE FINISHED FILE ON DISK, not computed while

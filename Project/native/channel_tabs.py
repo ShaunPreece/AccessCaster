@@ -21,7 +21,7 @@ from native.dialogs import DeletePresetDialog
 from native.pages import group, labelled
 
 # Which tab each parameter group (desk_labels.PROCESSING_CONTROLS) goes on, so the
-# strip stays one row. A group not listed here gets a tab of its own.
+# tab strip stays one row. A group not listed here gets a tab of its own.
 PARAM_TABS = {
     "Equaliser": ("eq", "Equaliser"),
     "High-pass filter": ("eq", "Equaliser"),

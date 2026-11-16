@@ -1,7 +1,4 @@
-"""
-interval.py
-
-How often AccessCaster looks for a new version of itself, as a number of DAYS,
+"""How often AccessCaster looks for a new version of itself, as a number of DAYS,
 with 0 meaning never.
 
 Days rather than hours: a release happens every week or two, so a rung

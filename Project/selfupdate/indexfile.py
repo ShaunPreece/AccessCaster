@@ -1,7 +1,4 @@
-"""
-indexfile.py
-
-The index document: the one small file per track that AccessCaster reads to decide
+"""The index document: the one small file per track that AccessCaster reads to decide
 whether it is out of date. It says which version is current, where to get it,
 what it should hash to, what changed, and when it was released.
 
