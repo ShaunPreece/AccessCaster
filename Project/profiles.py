@@ -62,13 +62,16 @@ SNAPSHOT_KEY = "device_snapshot"
 
 # ---- the AS-FOUND baseline --------------------------------------------------------------------
 # One profile per desk may be marked as the baseline: the state the unit was in before this app ever
-# wrote to it, captured on first run (baseline.baseline_status). It is an ordinary profile in every
+# wrote to it, captured the first time the app meets that desk (baseline.baseline_status), and
+# filed under the desk's USB serial (HARDWARE_ID_KEY). It is an ordinary profile in every
 # other way - same format, same restore path - but it is the only copy of the desk as it came, and
 # a factory reset gives factory settings, not these, so nothing rebuilds it. It gets two
 # protections that a normal profile does not: an ordinary save can never overwrite that name (a name
 # collision would silently replace the one thing that cannot be recreated), and deleting it takes a
 # deliberate second step rather than the same click as any other profile.
 BASELINE_KEY = "baseline"
+# The USB serial of the desk a profile was saved from; "" or absent when it was not known.
+HARDWARE_ID_KEY = "hardware_id"
 
 # ---- the paired show ---------------------------------------------------------------------------
 # {"snapshot": int, "uuid": str, "name": str}: the desk's own backup taken at the same moment as
@@ -169,7 +172,7 @@ def _snapshot(blob: bytes, props: dict | None = None) -> dict:
 
 
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
-         product_id=None, device_name=None, baseline=False, show=None) -> dict:
+         product_id=None, device_name=None, baseline=False, show=None, hardware_id="") -> dict:
     """Build the full profile from an ALREADY-READ model `blob` + channel read `chans`, and write
     it to profiles/<safe>/profile.json. No device access - the caller did the read (and, for the
     optional `pads` backup, the pad read + file copy) under the lock. `pads` is the metadata list
@@ -252,6 +255,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
         # key was saved on a Pro II; it is allowed and relies on the per-write guards.
         "product_id": product_id,
         "device_name": device_name,
+        # The unit, by USB serial: which desk an as-found backup belongs to (find_baseline).
+        HARDWARE_ID_KEY: hardware_id or "",
         "midi": bool(midi) if midi is not None else None,
         # The full per-channel state straight from the live read (read_channels gives every UI
         # channel: level, processing on/modules/params, and for mics phantom/polarity/type and
@@ -336,15 +341,31 @@ def is_baseline(prof: dict) -> bool:
     return bool((prof or {}).get(BASELINE_KEY))
 
 
-def find_baseline() -> dict:
-    """{name, pads, saved_at, device_name} for the baseline profile, or {} if there is none.
+def _baseline_of(prof: dict, hardware_id: str, product_id) -> bool:
+    """Is `prof` the as-found baseline of the desk with this serial and model?
 
-    Reads each profile once. The store is small (a handful of profiles), and this only runs when the
+    A baseline saved without a serial matches any desk of its model, a profile with no product id
+    being a Pro II's. Such a baseline was the only one the store could hold, so the desk it came from
+    is the likeliest owner; the cost of a wrong match is one desk not offered its own."""
+    if not is_baseline(prof):
+        return False
+    saved = prof.get(HARDWARE_ID_KEY) or ""
+    if saved:
+        return bool(hardware_id) and saved == hardware_id
+    saved_pid = prof.get("product_id")
+    return saved_pid is None or saved_pid == product_id
+
+
+def find_baseline(hardware_id: str, product_id) -> dict:
+    """{name, pads, saved_at, device_name, product_id} for the baseline of the desk with this USB
+    serial and model, or {} if it has none.
+
+    Reads each profile once. The store is small (a handful of profiles), and this runs when the
     page asks whether to offer a first-run capture, so the cost is not worth caching and getting
     wrong."""
     for name in _list_profile_names():
         got = load(name)
-        if got.get("ok") and is_baseline(got["prof"]):
+        if got.get("ok") and _baseline_of(got["prof"], hardware_id, product_id):
             prof = got["prof"]
             return {"name": got["safe"], "pads": len(prof.get("pads") or []),
                     "saved_at": prof.get("saved_at"), "device_name": prof.get("device_name"),

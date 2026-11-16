@@ -24,6 +24,7 @@ import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import baseline
 import device_page
+import devices
 import profile_actions
 import profiles
 import settings_file
@@ -68,8 +69,11 @@ try:
     print("\nIT IS MARKED, AND THE PAGE CAN FIND IT")
     got = profiles.load(name)
     check_true("marked as the baseline", profiles.is_baseline(got["prof"]))
-    found = profiles.find_baseline()
+    pid = devices.get_active_device().product_id
+    check("filed under this desk's serial", got["prof"].get(profiles.HARDWARE_ID_KEY), hw)
+    found = profiles.find_baseline(hw, pid)
     check("found by name", found["name"], name)
+    check("and no other unit's", profiles.find_baseline("NOT-THIS-DESK", pid), {})
     check("with no pads yet", found["pads"], 0)
     check("and the desk it came from is stamped on it", found["device_name"], s["device_name"])
     after = baseline.baseline_status()
@@ -111,7 +115,7 @@ try:
     check("the settings snapshot is untouched",
           prof[profiles.SNAPSHOT_KEY]["property_count"], before_snapshot)
     check_true("and it is still the baseline", profiles.is_baseline(prof))
-    check("the page now sees pads in it", profiles.find_baseline()["pads"], 1)
+    check("the page now sees pads in it", profiles.find_baseline(hw, pid)["pads"], 1)
     check("so it stops offering to add them",
           baseline.action_baseline_add_pads().get("ok"), False)
 

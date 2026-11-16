@@ -1,6 +1,6 @@
 """
 AccessCaster - the as-found baseline: a profile of the desk as it was on the day the app met it,
-offered once per desk on first run.
+offered once per desk, the first time the window reads that desk.
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from paths import safe_name
 # works on a desk with no card or drive in it.
 #
 # It is offered ONCE PER DESK, not once per install: plug in a second unit later and it gets its own
-# offer. The answer (captured, or declined) is remembered against the hardware id so the dialog does
-# not reappear at every launch, and declining does not close the door - the Backups page can still
-# capture one, and pads can be added to an existing baseline afterwards.
+# offer and its own baseline, each filed under the desk's USB serial. The answer (captured, or
+# declined) is remembered against that serial so the dialog does not reappear at every launch, and
+# pads can be added to an existing baseline afterwards.
 _BASELINE_ASKED_KEY = "baseline_asked"
 # MEASURED: a full backup of a 16-pad desk, 8 of them sound pads and 19.7 MB of audio, takes 4.6
 # SECONDS END TO END, settings read included. Most of that is fixed cost (the model read, then
@@ -55,6 +55,24 @@ def _baseline_asked() -> list:
     return [str(x) for x in got] if isinstance(got, list) else []
 
 
+def _this_desk() -> tuple:
+    """(USB serial, product id) of the connected desk; the serial is "" when no desk is known."""
+    return device_page.hardware_id(), devices.get_active_device().product_id
+
+
+def offer_pending(hardware_id: str, product_id) -> bool:
+    """Is this desk still to be offered its as-found backup? False for an unknown desk ("" serial),
+    which cannot be offered anything."""
+    return bool(hardware_id and hardware_id not in _baseline_asked()
+                and not profiles.find_baseline(hardware_id, product_id))
+
+
+def settled(hardware_id: str, product_id) -> bool:
+    """Has this desk's as-found question been settled: captured, declined, or never needed? Only
+    then may anything be written to it unasked. False for an unknown desk."""
+    return bool(hardware_id) and not offer_pending(hardware_id, product_id)
+
+
 def _note_baseline_asked() -> None:
     """Remember that this desk has had its offer, so the dialog is a first-run event and not a nag."""
     here = device_page.hardware_id()
@@ -69,10 +87,18 @@ def _baseline_name() -> str:
     Kept inside paths.safe_name's character set (letters, digits, spaces, dashes) and its 40
     character limit, which is why there are no brackets and the desk is named without the
     "RODECaster" every desk shares: the longest date, "30th September 2026", leaves room for no
-    more. The date is spoken rather than numeric because a profile name is heard."""
+    more. The date is spoken rather than numeric because a profile name is heard.
+
+    Numbered when the name is taken, as it is by a second desk of the same model met the same day:
+    a baseline saved under a taken name would replace that profile."""
     when = f"As found {wording.spoken_date(datetime.date.today())}"
     desk = devices.get_active_device().name.removeprefix("RODECaster ").strip()
-    return safe_name(f"{when} {desk}"[:40]) or when
+    base = safe_name(f"{when} {desk}"[:37]) or when
+    name, n = base, 1
+    while profiles.load(name).get("ok"):
+        n += 1
+        name = f"{base} {n}"
+    return name
 
 
 def baseline_status() -> dict:
@@ -82,16 +108,13 @@ def baseline_status() -> dict:
     device I/O at all. The page asks this on every load, right after the status read that publishes
     the hardware id, so "do we know this desk's id" is exactly as good as "is a desk connected" here
     and costs nothing."""
-    existing = profiles.find_baseline()
-    here = device_page.hardware_id()
-    connected = bool(here)
-    asked = here in _baseline_asked() if here else False
+    here, product_id = _this_desk()
+    existing = profiles.find_baseline(here, product_id) if here else {}
     return {
         "ok": True,
-        # Only offer when there is a desk to read, nothing captured yet, and we have not already
-        # asked. No desk means no offer rather than a dialog that could not do anything anyway.
-        "offer": bool(connected and not existing and not asked),
-        "connected": connected,
+        # No desk means no offer rather than a dialog that could not do anything anyway.
+        "offer": offer_pending(here, product_id),
+        "connected": bool(here),
         "baseline": existing or None,
         "suggested_name": _baseline_name(),
         "device_name": devices.get_active_device().name,
@@ -102,18 +125,22 @@ def baseline_status() -> dict:
 def action_baseline_skip() -> dict:
     """Decline the first-run capture. Remembered per desk so it is asked once, not every launch."""
     _note_baseline_asked()
-    return {"ok": True, "message": "No baseline was captured. You can still capture one from the "
-                                   "Backups page at any time, though it will then record the desk "
-                                   "as it is now rather than as you found it."}
+    return {"ok": True, "message": "No backup was taken. You can still back the desk up from the "
+                                   "Backups page at any time, though that records it as it is "
+                                   "then rather than as you found it."}
 
 
 def action_baseline_save(include_pads: bool = True) -> dict:
     """Capture the as-found baseline. Runs on the same worker and reports through the same progress
     dialog as an ordinary profile save; only the name, the marking and the protections differ."""
-    existing = profiles.find_baseline()
+    here, product_id = _this_desk()
+    if not here:
+        return {"ok": False, "message": "No desk is connected to back up. Nothing was changed."}
+    existing = profiles.find_baseline(here, product_id)
     if existing:
-        return {"ok": False, "message": f"This desk already has a baseline, {existing['name']}, "
-                                        f"and there can only be one. Nothing was changed."}
+        return {"ok": False, "message": f"This desk already has an as-found backup, "
+                                        f"{existing['name']}, and a desk has only one. Nothing "
+                                        f"was changed."}
     _note_baseline_asked()          # asked and answered, whichever way the capture then goes
     return profile_actions.snapshot_profile(_baseline_name(), include_pads=include_pads, baseline=True)
 
@@ -124,9 +151,10 @@ def action_baseline_add_pads() -> dict:
     The settings snapshot is left EXACTLY as it was captured (profiles.attach_pads, not a re-save):
     re-reading the desk would quietly turn an as-found record into a record of today, which is the
     one thing a baseline must never become."""
-    existing = profiles.find_baseline()
+    existing = profiles.find_baseline(*_this_desk())
     if not existing:
-        return {"ok": False, "message": "There is no baseline on this computer to add pads to."}
+        return {"ok": False, "message": "This desk has no as-found backup on this computer to add "
+                                        "pads to."}
     if existing.get("pads"):
         return {"ok": False, "message": f"{existing['name']} already has "
                                         f"{wording.count(existing['pads'], 'SMART pad')} saved."}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import channels
 import desk_access
 import desk_firmware
+import desk_live
 import devices
 import network
 import rcp_hid
@@ -543,8 +544,11 @@ def hardware_id() -> str:
     called from a channel read that the UI does on every visit to the page. And read_status takes
     the HID lock, which is not reentrant, so calling it from anywhere that already holds the lock
     would deadlock the app rather than merely be slow. "" is a perfectly good answer here: it only
-    means a preference goes untagged until the first status read, which the page does on load."""
-    return _id_cache[1]
+    means a preference goes untagged until the first status read, which the page does on load.
+
+    The listener's serial comes first: it is replaced each time a desk is opened, so it follows a
+    desk swap, which the status read's copy only does at the next status read."""
+    return desk_live.serial() or _id_cache[1]
 
 
 def desk_record(key: str) -> dict:

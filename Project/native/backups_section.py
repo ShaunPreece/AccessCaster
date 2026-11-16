@@ -164,7 +164,10 @@ class BackupsSection(Reader):
         self.data = None
         self.last_name = ""          # the name the last backup was given, offered again
         self._init_reader(owner=frame)
-        self._offered = False
+        # The as-found offer is due at the first read of a desk, which after a drop off the bus may
+        # be another desk. `_offering` covers the ask in flight.
+        self._offer_due = True
+        self._offering = False
         self.page = BackupsPage(self)
         self.reset = ResetPage(self)
         self.pages = [Page("backups", TITLE, self.page), Page("reset", "Factory settings",
@@ -176,13 +179,16 @@ class BackupsSection(Reader):
         self.read(announce)
 
     def _desk_event(self, event, reply):
+        if event == "lost":
+            self._offer_due = True
+            return
         if event != "read":
             return
         # Backups on this computer are listed whether or not a desk is there.
         if self.data is None and not self._reading:
             self.read()
-        if reply.get("ok") and not self._offered:
-            self._offered = True
+        if reply.get("ok") and self._offer_due and not self._offering:
+            self._offering = True
             call(self.frame, _baseline_offer, done=self._offer_baseline)
 
     def read(self, announce=False, prefer=None):
@@ -207,10 +213,15 @@ class BackupsSection(Reader):
     # ---- the as-found backup ---------------------------------------------------------------
 
     def _offer_baseline(self, status):
-        # Asked once per desk, and never on top of a dialog already open: it is offered again at
-        # the next start.
-        if not status.get("offer") or modal_open():
+        # Asked once per desk, and never on top of a dialog already open: it stays due, and is
+        # offered again at the next full read of the desk.
+        self._offering = False
+        if not status.get("offer"):
+            self._offer_due = False
             return
+        if modal_open():
+            return
+        self._offer_due = False
         dialog = BaselineDialog(self.frame, status)
         with dialog:
             answer = dialog.ShowModal()

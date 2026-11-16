@@ -245,6 +245,7 @@ class FakeIface:
     product_id = 0x0037
     interface_number = 9
     path = b"fake"
+    serial_number = "GVTEST01"
 
 
 class FakeDev:

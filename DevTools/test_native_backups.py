@@ -11,6 +11,7 @@ Run: python DevTools/test_native_backups.py
 from __future__ import annotations
 
 import sys
+import types
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
@@ -160,6 +161,52 @@ with patched(fakes):
     page._deleted(page._chosen(), {"ok": True, "started": True, "message": "Deleting."})
 check("a delete that started a job on the drive follows it",
       jobs[-1], ("Deleting backup", show_actions.show_job_status))
+
+# ---- the as-found offer: due at the first read of each desk ------------------------------------
+offers, status, modal = [], {"offer": True}, {"open": False}
+
+
+class FakeOffer:
+    def __init__(self, *_args):
+        self.include_pads = types.SimpleNamespace(GetValue=lambda: True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def ShowModal(self):
+        offers.append(1)
+        return wx.ID_CANCEL
+
+
+with patched((backups_section, {"call": lambda _o, fn, *a, done=None: done(fn(*a)),
+                                "_baseline_offer": lambda: dict(status),
+                                "BaselineDialog": FakeOffer,
+                                "modal_open": lambda: modal["open"]})):
+    section._offer_due, section._offering = True, False
+    section._desk_event("read", {"ok": True})
+    check("the first read of a desk offers its as-found backup", len(offers), 1)
+    section._desk_event("read", {"ok": True})
+    check("a later read of the same desk does not", len(offers), 1)
+    section._desk_event("lost", None)
+    section._desk_event("read", {"ok": True})
+    check("the first read after the desk drops offers again, for whichever desk is back",
+          len(offers), 2)
+    section._desk_event("lost", None)
+    modal["open"] = True
+    section._desk_event("read", {"ok": True})
+    check("never over another dialog", len(offers), 2)
+    modal["open"] = False
+    section._desk_event("read", {"ok": True})
+    check("but at the next read", len(offers), 3)
+    section._desk_event("lost", None)
+    status["offer"] = False
+    section._desk_event("read", {"ok": True})
+    status["offer"] = True
+    section._desk_event("read", {"ok": True})
+    check("a desk with nothing to offer is not asked again until a desk drops", len(offers), 3)
 
 # ---- the factory reset -------------------------------------------------------------------------
 section.data = data([], can_backup=False)

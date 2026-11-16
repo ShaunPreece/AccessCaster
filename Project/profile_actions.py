@@ -11,6 +11,7 @@ from __future__ import annotations
 import channels
 import desk_access
 import desk_firmware
+import device_page
 import devices
 import diagnostics
 import faders
@@ -114,7 +115,7 @@ def save_desk(safe: str, include_pads: bool, prog, baseline: bool = False, show=
     res = profiles.save(safe, blob, chans, firmware, faders.active_faders().capture_length,
                         pads=(pad_backup["pads"] if pad_backup else None),
                         product_id=dev.product_id, device_name=dev.name,
-                        baseline=baseline, show=show)
+                        baseline=baseline, show=show, hardware_id=device_page.hardware_id())
     if pad_backup and pad_backup.get("unrecognised"):
         odd = pad_backup["unrecognised"]
         grids = wording.join_and(str(g) for g in odd)

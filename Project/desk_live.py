@@ -116,6 +116,9 @@ _connected = threading.Event()
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
 _start_lock = threading.Lock()
+# The USB serial of the desk the listener has open, "" while it has none. Set before `Connected` is
+# broadcast, so a subscriber told of a connection can ask which desk it is.
+_serial = ""
 
 
 def start() -> None:
@@ -149,6 +152,12 @@ def connected() -> bool:
 
 def wait_connected(timeout: float) -> bool:
     return _connected.wait(timeout)
+
+
+def serial() -> str:
+    """The USB serial of the desk open right now, or "" when none is. It changes with a desk swap,
+    which a serial read once at start-up would miss."""
+    return _serial if _connected.is_set() else ""
 
 
 def subscribe(purpose: str, names=None, own_writes: bool = False) -> Subscription:
@@ -219,6 +228,7 @@ def decode(frame: bytes) -> Optional[Push]:
 
 
 def _run() -> None:
+    global _serial
     dev = None
     misses = 0                  # consecutive failed opens, for the back-off
     lost_at = None              # when the last open handle failed, while deaf
@@ -242,6 +252,7 @@ def _run() -> None:
                 _stop.wait(RETRY_S if misses <= RETRY_FAST_TRIES else RETRY_SLOW_S)
                 continue
             misses = 0
+            _serial = iface.serial_number or ""
             gap = None if lost_at is None else time.monotonic() - lost_at
             lost_at = None
             _broadcast(Connected(gap))

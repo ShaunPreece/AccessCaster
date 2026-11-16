@@ -47,6 +47,7 @@ class FakeIface:
         self.product_id = product_id
         self.path = path
         self.interface_number = 9
+        self.serial_number = "GVTEST01"
 
 
 class FakeDev:

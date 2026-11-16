@@ -20,7 +20,16 @@ a write to a property a node lacks appends it.
 
 WHAT IT DOES NOT: push anything of its own (no knob, fader, meter or pad activity), act on a
 request property (recording, firmware, shows, wifi scans and pad creation store the request and
-nothing follows), or present audio endpoints to Windows, so the level meters see no desk.
+nothing follows), or present audio endpoints to Windows, so the level meters see no desk. The one
+exception is the firmware check (`updateCheckRequested`), answered as the desk answers it, with
+`--offer-firmware` naming a version to offer.
+
+A SECOND DESK. `--swap-after` takes the desk off the bus after that many seconds and brings back a
+factory desk under another serial (`SERIAL_2`), as unplugging one desk and plugging in another
+does. The automatic firmware check runs here too (`firmware_auto.ALLOWED`), on the short
+`--firmware-poll` schedule, since every write it makes reaches the simulated desk.
+
+    python DevTools/simulate_desk.py --swap-after 120 --offer-firmware 1.8.0
 
 ITS DATA DIR IS %LOCALAPPDATA%\\AccessCaster-Simulated, so profiles, backups and settings made
 against it never mix with the real ones. Only one copy of AccessCaster runs at a time, so quit the
@@ -51,6 +60,8 @@ FIXTURE = "layout_pro2_1.7.7.json"
 FIRMWARE = "1.7.7"                  # the fixture's firmware, which the synthetic desk reports
 PRODUCT_ID = 0x0037                 # devices.PID_PRO2
 SERIAL = "SIMULATED"
+SERIAL_2 = "SIMULATED-2"            # the desk `--swap-after` brings back
+SWAP_GAP_S = 3.0                    # how long the swap leaves the bus empty
 PATH = b"simulated-desk-MI_09"
 
 # Nodes the factory dump holds below a root node. The layout fixture lists root nodes and
@@ -179,21 +190,41 @@ class SimulatedDesk:
     HID input reports reach every open handle, as they do on Windows, so the app's listener sees
     each dump go past exactly as it does on a real desk."""
 
-    def __init__(self, root: model_tree.Node, log=None):
+    def __init__(self, root: model_tree.Node, log=None, offer_firmware: str = ""):
         self.root = root
         self.log = log or (lambda text: None)
+        self.offer_firmware = offer_firmware
+        self.serial = SERIAL
+        self.present = True
         self.lock = threading.Lock()
         self.handles: set = set()
 
     # The bus, as rcp_hid.bus calls it.
     def enumerate(self):
+        if not self.present:
+            return []
         return [rcp_hid.RodeInterface(path=PATH, product_id=PRODUCT_ID, interface_number=9,
                                       usage_page=rcp_hid.CONTROL_USAGE_PAGE,
                                       usage=rcp_hid.CONTROL_USAGE,
-                                      product_string="RODECaster Pro II", serial_number=SERIAL)]
+                                      product_string="RODECaster Pro II",
+                                      serial_number=self.serial)]
+
+    def swap(self, root: model_tree.Node, serial: str) -> None:
+        """Leave the bus, every open handle failing as a pulled cable does, then come back as
+        another desk."""
+        with self.lock:
+            self.present = False
+            handles = list(self.handles)
+        for h in handles:
+            h.unplugged()
+        self.log(f"unplugged {self.serial}")
+        threading.Event().wait(SWAP_GAP_S)
+        with self.lock:
+            self.root, self.serial, self.present = root, serial, True
+        self.log(f"plugged in {serial}")
 
     def open(self, path: bytes):
-        if path != PATH:
+        if path != PATH or not self.present:
             raise OSError("open failed: no such simulated device")
         handle = SimulatedHandle(self)
         with self.lock:
@@ -241,6 +272,31 @@ class SimulatedDesk:
                 node.props.append((name, value, kind))
                 self.log(f"STRAY: {node.name}{path} had no {name}, appended as the desk would")
         self.log(f"write {node.name}{path} {name} = {value!r}")
+        if name == "updateCheckRequested" and value is True:
+            threading.Thread(target=self._firmware_check, args=(node, list(path)), daemon=True,
+                             name="sim-firmware-check").start()
+
+    def _firmware_check(self, node: model_tree.Node, path: list) -> None:
+        """The desk's answer to Check for Update: `updateChecking` up, then down with the request
+        cleared and, with a version to offer, an OS update named."""
+        self._set_push(node, path, "updateChecking", True, "bool")
+        threading.Event().wait(0.6)
+        if self.offer_firmware:
+            self._set_push(node, path, "osUpdateAvailable", True, "bool")
+            self._set_push(node, path, "updateVersion", self.offer_firmware, "str")
+        self._set_push(node, path, "updateNoInternet", False, "bool")
+        self._set_push(node, path, "updateChecking", False, "bool")
+        self._set_push(node, path, "updateCheckRequested", False, "bool")
+        self.log(f"firmware check answered: {self.offer_firmware or 'nothing newer'}")
+
+    def _set_push(self, node, path, name, value, kind) -> None:
+        """Set a property on `node` and push it, as the desk pushes what it changes itself."""
+        with self.lock:
+            node.props = [(p, value, kind) if p == name else (p, v, k) for p, v, k in node.props]
+        rec = (model_tree.encode_path(path) + name.encode("latin1") + bytes(1)
+               + model_tree.encode_value(value, kind))
+        frame = bytes([0x04]) + len(rec).to_bytes(4, "little") + rec
+        self._send(frame.ljust(256, bytes(1)))
 
     def _send(self, report: bytes) -> None:
         with self.lock:
@@ -263,6 +319,12 @@ class SimulatedHandle:
         self.blocking = True
         self.open = True
 
+    def unplugged(self) -> None:
+        """The cable is out: the read waiting now, and every one after, fails."""
+        with self.ready:
+            self.open = False
+            self.ready.notify_all()
+
     def deliver(self, report: bytes) -> None:
         with self.ready:
             self.queue.append(report)
@@ -282,6 +344,8 @@ class SimulatedHandle:
             if not self.queue and self.blocking:
                 self.ready.wait(None if timeout_ms is None or timeout_ms < 0
                                 else timeout_ms / 1000.0)
+            if not self.open:
+                raise OSError("read failed: the simulated desk was unplugged")
             return list(self.queue.popleft()[:size]) if self.queue else []
 
     def set_nonblocking(self, flag) -> int:
@@ -315,6 +379,14 @@ def main() -> int:
                                    "Pro II")
     ap.add_argument("--check", action="store_true", help="build the desk, read one dump back "
                                                          "through the app's reader, and stop")
+    ap.add_argument("--swap-after", type=float, metavar="SECONDS",
+                    help="unplug the desk after this long and plug in a factory desk with "
+                         "another serial")
+    ap.add_argument("--offer-firmware", default="", metavar="VERSION",
+                    help="answer a firmware check by offering this version")
+    ap.add_argument("--firmware-poll", type=float, default=20.0, metavar="SECONDS",
+                    help="how often the automatic firmware check looks, and how long it settles "
+                         "after a desk connects (default 20)")
     args = ap.parse_args()
     if args.check:
         return _check()
@@ -332,7 +404,14 @@ def main() -> int:
             root = model_tree.parse(fh.read())[0]
     else:
         root = synthetic_model()
-    rcp_hid.bus = SimulatedDesk(root, lambda text: diagnostics.event("sim.desk", text))
+    desk = SimulatedDesk(root, lambda text: diagnostics.event("sim.desk", text),
+                         offer_firmware=args.offer_firmware)
+    rcp_hid.bus = desk
+    import firmware_auto
+    firmware_auto.ALLOWED = True
+    firmware_auto.POLL_S = firmware_auto.SETTLE_S = args.firmware_poll
+    if args.swap_after:
+        threading.Timer(args.swap_after, desk.swap, args=(synthetic_model(), SERIAL_2)).start()
     print(f"Simulated desk ready ({args.dump or 'factory Pro II'}); data in "
           f"{os.environ['ACCESSCASTER_DATA_DIR']}. Quit from the tray icon to stop.", flush=True)
     import tray

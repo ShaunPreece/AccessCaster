@@ -15,6 +15,7 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _a11y
 import _testkit
+import desk_firmware
 import device_page
 import desk_labels
 import network
@@ -158,8 +159,10 @@ check("opening Current state reads the desk: free space is never pushed", reads[
 section.state.Hide()
 followed = {type(fn.__self__._read.__self__).__name__: names
             for names, fn in frame.desk.watched}
-check("Hardware, Desk settings and Wireless connections follow what they show", followed,
-      {"HardwarePage": set(device_page.HARDWARE_PROPS), "UnitPage": set(device_page.UNIT_SETTING_PROPS),
+check("Hardware, Desk settings and Wireless connections follow what they show, and the summary a "
+      "firmware update", followed,
+      {"StatePage": set(desk_firmware.UPDATE_PROPS),
+       "HardwarePage": set(device_page.HARDWARE_PROPS), "UnitPage": set(device_page.UNIT_SETTING_PROPS),
        "NetworkPage": set(network.PROPS)})
 taken = []
 for page in section.views:

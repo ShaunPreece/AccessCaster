@@ -16,9 +16,10 @@ without anything of ours having to describe it. The menu offers:
   - Check for updates    or "Install update to version X" once one is waiting (app_updates.py)
   - Quit                 stop the service and exit
 
-The icon is also how the update feature reaches somebody who is not looking at the window: a new
-version is announced as a WINDOWS NOTIFICATION from it (`_notify`), which a screen reader reads
-without the focus moving and without the app's own voice talking over it.
+The icon is also how the automatic checks reach somebody who is not looking at the window: a new
+version of the app, or of the desk's firmware, is announced as a WINDOWS NOTIFICATION from it
+(`_notify`), which a screen reader reads without the focus moving and without the app's own voice
+talking over it.
 
 Accessibility: the icon registers as NOTIFYICON_VERSION_4 so the shell delivers proper keyboard
 selection (NIN_KEYSELECT) and context-menu (WM_CONTEXTMENU) notifications, i.e. the whole thing
@@ -48,6 +49,7 @@ import app_window
 import autostart
 import desk_access
 import diagnostics
+import firmware_auto
 import instance
 import rode_app
 import service
@@ -148,9 +150,12 @@ class TrayApp:
         self._ended = False               # `_end_now` has run
         self._window_gone = False         # quit has closed the window and its dialogs
         self._last_open = float("-inf")
+        self._notice = "app"              # what the last notification was about: "app" or "firmware"
         self._create_window()
         self._add_icon()
         app_updates.notify = self._notify
+        firmware_auto.notify = lambda text: self._notify(text, firmware_auto.NOTIFICATION_TITLE,
+                                                          "firmware")
         rode_app.on_seen = self._rode_app_seen
         app_updates.open_window = lambda: win32gui.PostMessage(self.hwnd, WM_OPEN_WINDOW, 0, 0)
         app_window.show = self._show_from_any_thread
@@ -296,9 +301,13 @@ class TrayApp:
         if event in (win32con.WM_CONTEXTMENU, win32con.WM_RBUTTONUP):
             self._show_menu()
         elif event == NIN_BALLOONUSERCLICK:
-            # The only notifications this icon raises are the update's, so choosing one is asking
-            # for the decision. With nothing waiting it simply shows the window.
-            if app_updates.held_version() is not None:
+            # Choosing either notice is asking for its decision: the firmware's install question,
+            # or the app's update. With no app update waiting it shows the window.
+            if self._notice == "firmware":
+                self.open_window()
+                if self.frame is not None and not self._starting:
+                    self.frame.install_firmware()
+            elif app_updates.held_version() is not None:
                 app_updates.request_decision()
             else:
                 self.open_window()
@@ -372,13 +381,17 @@ class TrayApp:
             return
         subprocess.Popen(["notepad.exe", path])
 
-    def _notify(self, text: str) -> None:
-        """Raise a Windows notification from the tray icon. Called from any thread: Shell_NotifyIcon
-        posts to the shell and does not need this window's thread."""
+    def _notify(self, text: str, title: str = update_phrases.NOTIFICATION_TITLE,
+                notice: str = "app") -> None:
+        """Raise a Windows notification from the tray icon; `notice` is what choosing it opens.
+        Called from any thread: Shell_NotifyIcon posts to the shell and does not need this
+        window's thread. The icon shows one notification at a time, so the last one raised is the
+        one a click answers."""
         if len(text) > _NOTIFY_MAX:
             text = text[:_NOTIFY_MAX - 1].rsplit(" ", 1)[0]
+        self._notice = notice
         nid = (self.hwnd, _TRAY_ICON_ID, win32gui.NIF_INFO, 0, 0, "", text, 10000,
-               update_phrases.NOTIFICATION_TITLE, NIIF_INFO | NIIF_RESPECT_QUIET_TIME)
+               title, NIIF_INFO | NIIF_RESPECT_QUIET_TIME)
         win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
 
     def _rode_app_seen(self) -> None:

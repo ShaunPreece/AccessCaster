@@ -23,6 +23,7 @@ import diagnostics
 import encoder_hold
 import encoder_home
 import faders
+import firmware_auto
 import level_check
 import mute_solo
 import pad_actions
@@ -116,6 +117,8 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     # AccessCaster's own update: says what the last one did, then checks now and then. Silent
     # unless a version is found, and never from a source run.
     app_updates.start()
+    # The desk's firmware check, on the same schedule, once its as-found question is settled.
+    firmware_auto.start()
     # The CallMe listener: a call rings whatever page is open, and it has to be heard whether or
     # not anyone is announcing. It seeds itself from a dump whenever the desk is opened.
     callme_actions.load_contacts()

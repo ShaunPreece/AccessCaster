@@ -21,7 +21,7 @@ from paths import resource_path
 from version import __version__
 
 TITLE = "Help and About"
-SUPPORT_URL = "https://www.slightperception.com/support"
+SUPPORT_URL = "https://slightperception.com/support/"
 CREDIT = "Version {}. Developed by Shaun Preece."
 SUPPORT_TOPIC = "Support this project"
 

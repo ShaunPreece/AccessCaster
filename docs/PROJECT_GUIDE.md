@@ -383,6 +383,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 --------------------------------------------------------------------------------
 ## Writing to the device
 
+- **NOTHING IS WRITTEN TO A DESK UNASKED UNTIL ITS AS-FOUND QUESTION IS SETTLED** (`baseline.settled`:
+  captured, declined, or never needed). The as-found backup must record the desk before this app
+  changes anything, and a desk met for the first time is only offered it once the window reads it.
+  Anything that writes on its own (the automatic firmware check, `firmware_auto`) checks this first,
+  and an unidentified desk counts as unsettled.
+
 - **DO NOT SHORTEN THE PAD-CREATE SLEEPS OR THE 60 ms HID PACING.** Two of four proposed speedups
   were built and measured 29th August 2026 (16.29 s per pad down to 13.79 s). The other two were
   exactly these, and they must stay undone: the fixed sleeps and the pacing are WHAT MAKES A CREATE
@@ -1287,8 +1293,9 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   free with the enumeration, without opening anything. `VER` read `FBB9-CBE2` that afternoon and
   `0576-FC06` by the evening, so everything filed under it - applied mic presets, the baseline
   offer, parked chains - was being silently orphaned. The app no longer sends `VER` at all (see the
-  Expanded entry below). Profiles were never affected: they gate on `product_id`, which is the
-  model, not the unit.
+  Expanded entry below). A restore gates on `product_id`, which is the model, not the unit; the
+  as-found backup is the unit's, filed under the serial (`profiles.HARDWARE_ID_KEY`). One saved
+  without a serial belongs to any desk of its model.
 - **`inputColour` is a STRING** (AARRGGBB hex), not an int. There is no string channel-property
   writer at all, so it is SAVE ONLY in a profile: read and backed up, never restored.
 - **`inputType` is DERIVED from the mic type** (0 mic, 1 instrument, 2 line, -1 no physical input).
@@ -1834,6 +1841,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **CHECKING IS AUTOMATIC, INSTALLING NEVER IS.** An automatic check only ever raises a Windows
   notification from the tray icon (`app_updates.notify`). Never the app's own voice: speech nobody
   asked for talks over the screen reader.
+- **THE DESK'S FIRMWARE IS CHECKED ON THE SAME SCHEDULE** (`firmware_auto`, `app_updates.check_days`),
+  per desk, and only on a desk whose as-found question is settled, with no job running, not
+  recording and not in a call (`firmware.check_unasked`). A skipped check is not stamped; a made one
+  is, whatever it found. Each version is notified once per desk (`firmware_check_told`), and the
+  tray's `_notice` sends a click on that notification to Device > Hardware's install question
+  (`HardwarePage.ask_install`) rather than the app's update decision. A notification, never a
+  modal: the check runs unseen, often with the window closed, and a modal would take focus
+  mid-task.
 - **THE DOWNLOAD IS TWO DIALOGS ON THE PAGE, NOT ONE**, handed over in one tick (`startUpdate`).
   The other apps carry the whole update in one dialog; on this page that would be a progress view
   revealed inside an open dialog, which a screen reader never reads (see Web UI below).
@@ -2066,9 +2081,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A RESTORE OR A FACTORY RESET ENDS WITH `frame.desk_rewritten`, NOT `desk.refresh`**
   (`backups_section`). The pads and the backups are read by their sections, outside the desk state,
   so a desk state refresh alone leaves the Pads pages showing the grid from before.
-- **THE WINDOW READS THE DEVICE STATUS AS THE SERVICE COMES UP** (`MainFrame.start`). Only
-  `device_page.read_status` publishes the hardware id every per-desk setting is filed under: without it
-  the pan links save against no desk and the as-found backup is never offered.
+- **THE HARDWARE ID FOLLOWS THE DESK THE LISTENER HAS OPEN** (`desk_live.serial`, set before
+  `Connected` is broadcast), falling back to the last `device_page.read_status`, which the window
+  still makes as the service comes up (`MainFrame.start`). A status read alone misses a desk swap,
+  and every per-desk setting would then be filed under the desk that left.
+- **THE AS-FOUND OFFER IS DUE AT THE FIRST READ AFTER A DESK CONNECTS** (`BackupsSection._offer_due`,
+  set again by `lost`), not once per session: a desk swapped in mid-session is another desk. Never
+  over an open dialog; it stays due for the next full read.
 - **THE PADS ARE READ AGAIN `REREAD_AFTER_MS` AFTER A SETTINGS DIALOG THAT WROTE, LONGER THAN
   `_Field.DELAY_MS`.** A write still waiting in `LatestWins` when the dialog closes is still sent,
   but its reply has no dialog to land on; reading sooner would read the pad before it.

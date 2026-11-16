@@ -80,6 +80,9 @@ INSTALLER_ARGS = ["/VERYSILENT", "/RESTARTAPPLICATIONS", "/NORESTART"]
 # close this one.
 _DETACHED = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
+# Said after the shared `phrases.settings_status`, because the firmware check is this app's alone.
+FIRMWARE_TOO = " The same schedule checks the connected desk's firmware."
+
 # Job stages, as the window reads them.
 DOWNLOADING = "downloading"
 CHECKING = "checking"
@@ -202,7 +205,15 @@ def _auto_check_allowed() -> bool:
     return True
 
 
+def check_days() -> int:
+    """How often, in days, the automatic checks run (`interval.NEVER` for only when asked). The
+    desk's firmware check (`firmware_auto`) keeps the same schedule, so one setting covers both."""
+    return interval.normalise(_setting(_DAYS_KEY, interval.DEFAULT))
+
+
 def _notify(text: str) -> None:
+    """A Windows notification from the tray icon: how an automatic check that finds something says
+    so, without speaking over the screen reader."""
     checker.log(f"notice: {text}")
     if notify is not None:
         try:
@@ -531,7 +542,8 @@ def _settings_payload() -> dict:
             "choices": [{"days": d, "label": label}
                         for d, label in zip(interval.CHOICES, interval.LABELS, strict=True)],
             "hint": phrases.settings_status(interval.describe(days), last,
-                                            _setting(_SKIPPED_KEY) or "", datetime.date.today())}
+                                            _setting(_SKIPPED_KEY) or "", datetime.date.today())
+            + FIRMWARE_TOO}
 
 
 def state() -> dict:

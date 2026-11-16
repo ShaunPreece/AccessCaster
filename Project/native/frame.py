@@ -179,6 +179,13 @@ class MainFrame(Speaker, wx.Frame):
             if hasattr(section, "check_updates"):
                 section.check_updates()
 
+    def install_firmware(self):
+        """The firmware notification chosen: Device > Hardware, and its install question."""
+        self.go_to("status", "hardware")
+        for section in self.sections:
+            if hasattr(section, "install_firmware"):
+                section.install_firmware()
+
     def say(self, text, recent=False):
         # A closed window says nothing: the user has left it.
         if self.IsShown():

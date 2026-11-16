@@ -307,7 +307,7 @@ Puts the desk back from this computer's copy, which takes a minute or two, longe
 Renaming only changes the name on this computer, so a backup made on the desk cannot be renamed. Deleting removes both copies and cannot be undone.
 
 * The as-found backup
-The first time AccessCaster meets a desk, it offers to back it up exactly as it was, before the app changes anything. It is the only record of how your desk arrived, so deleting it asks twice.
+The first time AccessCaster meets a desk, it offers to back it up exactly as it was, before the app changes anything. It is the only record of how your desk arrived, so deleting it asks twice. Each desk has its own, so a second desk is offered one the first time AccessCaster reads it, even if you plug it in while the app is running.
 
 * Factory settings
 Puts every setting and every SMART pad back as the desk left the factory, including RODE's factory pad sounds. Your wifi, the language and your recordings are kept. The desk is backed up first unless you untick that, and that backup is your only way back. Unlike the desk's own reset, this skips the setup wizard that only works by touchscreen.
@@ -351,7 +351,7 @@ Use the SMART pad keys adds a set along the number row: 1 to 8 play the pads of 
 Start AccessCaster when you sign in to Windows starts it in the tray, so your shortcuts work from the moment you sign in. Keep running in the system tray when the window is closed is on to begin with; switch it off and closing the window quits the app. Save this app's settings to a file keeps your shortcuts, announcement choices and CallMe contacts in one small file, to restore later or copy to another computer.
 
 * Updates
-AccessCaster looks for a newer version of itself once a day, or as often as you set, and never installs one without asking. Press F12, or use the tray menu, to hear what changed, then Install now, Skip this version or Later. Installing closes AccessCaster for a moment and starts it again on the new version. It only contacts updates.slightperception.com, and refuses any version that is not signed as ours.
+AccessCaster looks for a newer version of itself once a day, or as often as you set, and never installs one without asking. Press F12, or use the tray menu, to hear what changed, then Install now, Skip this version or Later. Installing closes AccessCaster for a moment and starts it again on the new version. It only contacts updates.slightperception.com, and refuses any version that is not signed as ours. On the same schedule, AccessCaster asks a connected desk whether RODE has newer firmware, and if it has, a Windows notification tells you, once for each version. Choosing the notification opens Device, Hardware and asks whether to install it, as Install firmware there does. Nothing is installed without asking, and a desk is not asked until it has been offered its as-found backup.
 
 # Troubleshooting
 

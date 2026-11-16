@@ -37,6 +37,14 @@ def _update_sentence(upd: dict) -> str:
     return ""
 
 
+def _live_use(blob: bytes) -> tuple:
+    """(recording, in a CallMe call) on the desk in `blob`. Raises when the calls cannot be read."""
+    recording = recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED)
+    in_call = any(slot.get("state") not in (None, "Idle")
+                  for slot in callme.read(blob).get("slots") or [])
+    return recording, in_call
+
+
 def read_install() -> dict:
     """Whether the unit's waiting firmware update can be installed now: `version`, and `refusal`
     as a sentence when it cannot."""
@@ -46,10 +54,8 @@ def read_install() -> dict:
     except Exception as exc:
         return {"ok": False, "message": f"Could not read the desk: {exc}"}
     state = desk_firmware.read(blob)
-    recording = recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED)
     try:
-        in_call = any(slot.get("state") not in (None, "Idle")
-                      for slot in callme.read(blob).get("slots") or [])
+        recording, in_call = _live_use(blob)
     except Exception as exc:
         # An update restarts the desk, so a call that cannot be ruled out refuses it.
         return {"ok": False, "message": f"Could not tell whether a CallMe call is up: {exc}"}
@@ -98,10 +104,38 @@ def action_check() -> dict:
 
     `updateCheckRequested` is the touchscreen's Check for Update: the desk raises `updateChecking`
     and clears both within about a second."""
-    listener = desk_live.PushListener()
+    return _ask_rode()
+
+
+def check_unasked(hardware_id: str) -> dict:
+    """The automatic check, made only when nothing could mind it: the desk read is still the desk
+    with `hardware_id`, nothing is part-way through, and the desk is neither recording nor in a
+    call. `skipped` names what stopped it, and then nothing was written."""
+    busy = desk_access.work_in_progress()
+    if busy:
+        return {"ok": False, "skipped": busy}
     try:
         with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)
+        recording, in_call = _live_use(blob)
+    except Exception as exc:
+        return {"ok": False, "skipped": f"the desk could not be read: {exc}"}
+    if desk_live.serial() != hardware_id:
+        return {"ok": False, "skipped": "another desk is connected"}
+    if recording or in_call:
+        return {"ok": False, "skipped": "the desk is recording" if recording
+                else "a CallMe call is up"}
+    return _ask_rode(blob)
+
+
+def _ask_rode(blob: bytes | None = None) -> dict:
+    """Have the desk ask RODE's server for an update, and say what it found. `blob` is a read made
+    just before, to find the request's node without reading again."""
+    listener = desk_live.PushListener()
+    try:
+        with desk_access.hid_lock:
+            if blob is None:
+                blob = rcp_read.read_model_stable(fresh=True)
             found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
             if not found:
                 return {"ok": False, "message": "This desk does not offer a firmware check."}

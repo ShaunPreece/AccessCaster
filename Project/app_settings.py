@@ -72,6 +72,9 @@ EXCLUDED = {
     "app_update_last_checked": "it is when this copy last looked for an update",
     "app_update_skipped": "it names a version this copy was asked not to offer",
     "app_update_installing": "it is this copy's record of an update in progress",
+    # PER-DESK FIRMWARE CHECK STATE (firmware_auto.py), filed under each desk's serial.
+    "firmware_check_last": "it is when each desk on this computer last checked for firmware",
+    "firmware_check_told": "it names the firmware each desk on this computer was last told about",
 }
 
 # Every settings key this module has an opinion about. A key in settings.json that is in NONE of

@@ -25,6 +25,7 @@ class FakeIface:
     product_id = 0x0037
     interface_number = 9
     path = b"fake"
+    serial_number = "GVTEST01"
 
 
 class FakeDev:
@@ -89,6 +90,7 @@ with patched((rcp_hid, {"find_control_interface": desk.find, "open_handle": desk
           "Connected")
     mutes = desk_live.subscribe("mutes", {"channelOutputMute"})
     check("a later subscriber hears it too, with no gap", mutes.get(1.0), desk_live.Connected(None))
+    check("the open desk's serial is published", desk_live.serial(), "GVTEST01")
 
     print("\nPUSHES")
     desk.send(push([3, 1], "channelOutputMute", v_bool(True)))

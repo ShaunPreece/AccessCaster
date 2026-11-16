@@ -11,6 +11,7 @@ state changes, and read from the desk whenever Current state is opened.
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+import desk_firmware
 import desk_labels
 import device_page
 import firmware
@@ -316,7 +317,10 @@ class DeviceSection:
                       Page("network", "Wireless connections", self.network)]
         self._summary_timer = None
         frame.desk.subscribe(self._desk_event)
-        for view, names in ((self.hardware, device_page.HARDWARE_PROPS),
+        # The status bar's summary names a firmware update the desk offers, and an automatic check
+        # (`firmware_auto`) finds one with nothing on the window changing.
+        for view, names in ((self.state, desk_firmware.UPDATE_PROPS),
+                            (self.hardware, device_page.HARDWARE_PROPS),
                             (self.unit, device_page.UNIT_SETTING_PROPS),
                             (self.network, network.PROPS)):
             FollowDesk(frame, names, view.follow)
@@ -340,6 +344,9 @@ class DeviceSection:
     def read(self):
         for view in self.views:
             view.read()
+
+    def install_firmware(self):
+        self.hardware.ask_install()
 
     def refresh(self, announce):
         shown = [view for view in self.views if view.IsShown()]
@@ -485,6 +492,12 @@ class HardwarePage(_Reader, scrolled.ScrolledPanel):
             self.FitInside()
 
     def _on_install(self, _event):
+        self.ask_install()
+
+    def ask_install(self):
+        """The install question, after the desk is read for what it offers and what would refuse
+        it. Also how the firmware notification lands, so a cancel or a refusal leaves the user on
+        this page."""
         call(self, firmware.read_install, done=self._ask_install)
 
     def _ask_install(self, ready):
