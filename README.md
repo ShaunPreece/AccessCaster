@@ -193,7 +193,7 @@ somebody who has hardware we do not: a second Pro II, a Duo with a card in it, a
 transmitter, a headset for the Duo's 3.5mm jack. Several of them are minutes of work if you have
 the right desk and impossible for us. Negatives are worth as much as findings.
 
-Also in `docs/`: the code map, the parity target, the soundpad reference, and a generated list of
+Also in `docs/`: the parity target, the soundpad reference, and a generated list of
 every property each desk publishes.
 
 All of it is shared freely. Nothing in it is official, and none of it came from RODE.

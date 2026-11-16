@@ -20,7 +20,7 @@ import callme_actions
 import faders
 from native import a11y
 from native.calls import call
-from native.controls import Switch, set_choices
+from native.controls import Switch, record_field, set_choices
 from native.dialogs import confirm, ok_cancel
 from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only,
                           set_items, set_text)
@@ -174,12 +174,7 @@ class CallMeSection(Reader):
 
     def field(self, key):
         """`current` and `remember` for `key` in the payload."""
-        def current():
-            return self.data.get(key)
-
-        def remember(value):
-            self.data[key] = value
-        return current, remember
+        return record_field(lambda: self.data, key)
 
 
 class CallPage(wx.Panel):

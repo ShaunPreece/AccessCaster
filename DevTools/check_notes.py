@@ -7,7 +7,7 @@ WHY IT EXISTS. The notes rules split into two kinds, and only one kind holds on 
 MECHANICAL ones - no em dashes, no ISO dates, headings, Now/Next length - are kept reliably. The
 ones that need a THRESHOLD JUDGED are not, because judgement gets stretched in the writer's favour:
 a refactor ends up in the FEATURE log, a session runs long with no /clear nudge. So the judged ones
-are converted into checks here. Same move as deriving the CodeMap line numbers.
+are converted into checks here.
 
 It does NOT check taste. It cannot tell a good invariant from a bad one, and does not try. Each
 check catches one specific way these files go wrong.
@@ -286,19 +286,6 @@ def check_private_citations() -> None:
                  f'cites the private "{m.group(0)}". State the fact instead.')
 
 
-# ---------------------------------------------------------------------------
-# 9. CodeMap's numbers match the source
-# ---------------------------------------------------------------------------
-# codemap_lines.py derives every count in CodeMap.md. Run here too, because a
-# separate tool is one more thing to remember, and this is the one run before every finish.
-def check_codemap_lines() -> None:
-    import codemap_lines
-    _fixed, drift = codemap_lines.rewrite(read(codemap_lines.CODEMAP))
-    if drift:
-        fail("CodeMap.md", f"{len(drift)} line number(s) out of date, first: {drift[0]}. "
-                           f"Run python DevTools/codemap_lines.py to correct them.")
-
-
 # profile_coverage.py's drift guard: a property a profile saves with no restore verdict, or one the
 # app can write with no verdict on whether a profile carries it. Run here because nothing else runs it.
 def check_profile_coverage() -> None:
@@ -322,7 +309,6 @@ def main() -> int:
     check_duplicates()
     check_code_comments()
     check_private_citations()
-    check_codemap_lines()
     check_profile_coverage()
     for n in NOTES:
         print("  note: " + n)

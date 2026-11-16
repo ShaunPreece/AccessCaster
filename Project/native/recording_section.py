@@ -18,7 +18,7 @@ import recorder
 import recording
 from native import a11y
 from native.calls import call
-from native.controls import Choice, Switch
+from native.controls import Choice, Switch, record_field
 from native.dialogs import JobDialog, confirm, report
 from native.pages import Reader, StatusPages, add_button, labelled, page_body, read_only, set_items
 
@@ -223,12 +223,7 @@ class RecorderPage(wx.Panel):
 
     def field(self, key):
         """`current` and `remember` for `key` in the section's recorder payload."""
-        def current():
-            return self.section.data.get(key)
-
-        def remember(value):
-            self.section.data[key] = value
-        return current, remember
+        return record_field(lambda: self.section.data, key)
 
     def _remember_mute(self, on):
         self._mute = on

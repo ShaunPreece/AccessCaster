@@ -18,7 +18,7 @@ import firmware
 import network
 from native import a11y
 from native.calls import call
-from native.controls import Choice, Slider, Switch
+from native.controls import Choice, Slider, Switch, record_field
 from native.dialogs import JobDialog, confirm, follow_job, report
 from native.firmware_dialog import FirmwareDialog
 from native.pages import FollowDesk, Page, Reader, add_button, group, page_body, read_only, set_text
@@ -168,7 +168,7 @@ def desk_summary(d):
         alerts.append(f"the desk's firmware is {old['version']} and this app is tested on "
                       f"{old['tested']} and later, so some settings may not read or take until it "
                       f"is updated")
-    muted =[c["label"] for c in d.get("muted") or []]
+    muted = [c["label"] for c in d.get("muted") or []]
     soloed = [c["label"] for c in d.get("soloed") or []]
     if muted:
         alerts.append("muted: " + ", ".join(muted))
@@ -549,12 +549,7 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
         self.SetupScrolling(scroll_x=False)
 
     def field(self, prop):
-        def current():
-            return self.values.get(prop)
-
-        def remember(value):
-            self.values[prop] = value
-        return current, remember
+        return record_field(lambda: self.values, prop)
 
     def _unread(self):
         return UNIT_UNREAD if self.data is None else None
@@ -671,13 +666,7 @@ class NetworkPage(_Reader, scrolled.ScrolledPanel):
         self.SetupScrolling(scroll_x=False)
 
     def field(self, part, key):
-        def current():
-            return ((self.data or {}).get(part) or {}).get(key)
-
-        def remember(value):
-            if self.data:
-                self.data[part][key] = value
-        return current, remember
+        return record_field(lambda: self.data, part, key)
 
     def _guard(self):
         if self.data is None:

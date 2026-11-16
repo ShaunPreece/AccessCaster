@@ -17,6 +17,26 @@ from native.calls import LatestWins, call
 from native.pages import labelled
 
 
+def record_field(record, *path):
+    """`current` and `remember` for the value at `path` in the dict `record()` returns. A record
+    not read yet (None), or a part it lacks, reads as None and remembers nothing."""
+    def holder():
+        held = record()
+        for part in path[:-1]:
+            held = held.get(part) if isinstance(held, dict) else None
+        return held if isinstance(held, dict) else None
+
+    def current():
+        held = holder()
+        return None if held is None else held.get(path[-1])
+
+    def remember(value):
+        held = holder()
+        if held is not None:
+            held[path[-1]] = value
+    return current, remember
+
+
 class Switch:
     """A checkbox. `send(on)` runs on a worker thread and returns an action's reply, which is
     spoken. `guard()`, if given, returns a sentence to refuse with before anything is sent.

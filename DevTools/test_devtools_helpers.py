@@ -28,11 +28,10 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-import _bootstrap
+import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _desk
 import _testkit
 import capture_analyze
-import codemap_lines
 import devices
 import fake_model
 import probe_bind_hold
@@ -166,16 +165,6 @@ print("\nA PROPERTY USED THROUGH A NAME CONSTANT COUNTS AS USED")
 found = property_coverage.scan(property_coverage.APP_GLOBS, ["channelWirelessMute"])
 check("channelWirelessMute, written and read through WIRELESS_MUTE_PROP",
       property_coverage.coverage_of(found.get("channelWirelessMute")), "read+write")
-
-print("\nCODEMAP'S DEVTOOLS COUNT IS WHAT GIT TRACKS")
-tracked = codemap_lines.tracked_devtools_files()
-ignored = Path(_bootstrap.devtools_path("_count_check.tmp"))
-try:
-    ignored.write_text("{}", encoding="utf-8")
-    check("an ignored file on disk does not change the count",
-          codemap_lines.tracked_devtools_files(), tracked)
-finally:
-    ignored.unlink(missing_ok=True)
 
 print("\nproperty_list --check WITH NOTHING TO COMPARE AGAINST")
 with tempfile.TemporaryDirectory(prefix="ac_property_list_") as tmp:

@@ -17,7 +17,7 @@ import clip_warning
 import speech
 from native import a11y
 from native.calls import call
-from native.controls import Choice, Slider, Switch
+from native.controls import Choice, Slider, Switch, record_field
 from native.dialogs import confirm, report
 from native.pages import AFTER_FOCUS_MS, Page, add_button, page_body, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
@@ -126,13 +126,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         self.SetupScrolling(scroll_x=False)
 
     def field(self, key):
-        def current():
-            return self.data.get(key) if self.data else None
-
-        def remember(value):
-            if self.data:
-                self.data[key] = value
-        return current, remember
+        return record_field(lambda: self.data, key)
 
     def _unread(self):
         return "The announcement settings have not been read yet." if self.data is None else None
@@ -300,13 +294,7 @@ class UpdatesPage(wx.Panel):
                    "F12 does the same from anywhere in the AccessCaster window.")
 
     def field(self, key):
-        def current():
-            return ((self.data or {}).get("settings") or {}).get(key)
-
-        def remember(value):
-            if self.data:
-                self.data["settings"][key] = value
-        return current, remember
+        return record_field(lambda: self.data, "settings", key)
 
     def _unread(self):
         return "The update settings have not been read yet." if self.data is None else None

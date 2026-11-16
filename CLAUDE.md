@@ -21,8 +21,6 @@ dead link for everyone else, so state the fact instead. Check with:
 - `docs/PROJECT_GUIDE.md`: **the first thing to read.** Part 1 is how it all works, for someone
   starting from scratch. Part 2 is the load-bearing invariants: **grep it for the property, member
   or helper you are about to change**, not for the file name.
-- `docs/CodeMap.md`: where things are, one row per file.
-  Update it in the same edit that adds, deletes, renames or moves anything.
 - `docs/PARITY.md`: the parity target, every feature the desk and the app have. No status column,
   by design, so it cannot go stale.
 - `docs/POSSIBLE_LEADS.txt`: what could not be settled here for want of hardware, written for a

@@ -102,10 +102,10 @@ def repo_path(*parts: str) -> str:
 
 
 def docs_path(*parts: str) -> str:
-    """An absolute path inside the PUBLIC reference docs, e.g. docs_path('CodeMap.md').
+    """An absolute path inside the PUBLIC reference docs, e.g. docs_path('PARITY.md').
 
     `docs/` holds the hardware FINDINGS and ships with the code: the protocol guide, the generated
-    per-desk property lists, the parity target, the code map and the soundpad reference. Use this
+    per-desk property lists, the parity target and the soundpad reference. Use this
     for anything a stranger recreating the project would need.
 
     USE `notes_path` INSTEAD for anything carrying decisions, quotes or open work. That is the
@@ -123,7 +123,7 @@ NOTES = os.path.join(os.path.dirname(REPO), "_Notes", os.path.basename(REPO))
 
 
 def notes_path(*parts: str) -> str:
-    """An absolute path inside this project's notes, e.g. notes_path('ProjectMemory', 'CodeMap.md').
+    """An absolute path inside this project's notes, e.g. notes_path('ProjectNotes.md').
 
     FALLS BACK TO THE REPO when the notes are not beside it, which is what a fresh public clone
     looks like. The coverage reports then write their output into the clone instead of failing

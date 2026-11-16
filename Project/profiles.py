@@ -201,8 +201,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     existing = load(safe)
     if existing.get("ok") and is_baseline(existing["prof"]) and not baseline:
         return {"ok": False, "message":
-                f"{safe} is the as-found baseline of this desk, the only record of how it was "
-                f"before this app changed anything, so it cannot be replaced by an ordinary save. "
+                f"{safe} is an as-found baseline, the only record of how a desk was before this "
+                f"app changed anything, so it cannot be replaced by an ordinary save. "
                 f"Choose another name."}
     # ONE walk of the dump, shared by the unit settings below and by the full snapshot. Read the
     # unit settings out of it FIRST: _snapshot redacts in place (none of these is password-shaped,
@@ -353,7 +353,7 @@ def _baseline_of(prof: dict, hardware_id: str, product_id) -> bool:
     if saved:
         return bool(hardware_id) and saved == hardware_id
     saved_pid = prof.get("product_id")
-    return saved_pid is None or saved_pid == product_id
+    return (saved_pid if saved_pid is not None else devices.PID_PRO2) == product_id
 
 
 def find_baseline(hardware_id: str, product_id) -> dict:

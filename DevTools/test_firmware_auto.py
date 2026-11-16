@@ -54,6 +54,7 @@ check("one saved without a serial: any desk of its model",
 check("and an unstamped model is a Pro II's", profiles._baseline_of(prof(pid=None), "B", PRO2),
       True)
 check("but not a desk of another model", profiles._baseline_of(prof(), "D", DUO), False)
+check("nor is an unstamped one a Duo's", profiles._baseline_of(prof(pid=None), "D", DUO), False)
 check("an ordinary profile is nobody's baseline",
       profiles._baseline_of(prof("A", base=False), "A", PRO2), False)
 
