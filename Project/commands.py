@@ -301,7 +301,10 @@ def _channel_commands() -> list:
         name, label = ch["name"], ch["label"]
         out.append(_cmd(f"chan.mute:{name}", "Channels", f"Mute or unmute {label}"))
         out.append(_cmd(f"chan.solo:{name}", "Channels", f"Listen to {label} on its own, or stop"))
-        out.append(_cmd(f"chan.proc:{name}", "Channels", f"Processing on or off for {label}"))
+        # A bus has no processing in the app: its chain reaches no audio (devices, the SMART pads
+        # note).
+        if ch.get("kind") != "bus":
+            out.append(_cmd(f"chan.proc:{name}", "Channels", f"Processing on or off for {label}"))
         if ch.get("kind") == "mic":
             out.append(_cmd(f"chan.phantom:{name}", "Channels",
                             f"48 volt phantom power on or off for {label}"))

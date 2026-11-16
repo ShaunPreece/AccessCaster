@@ -96,7 +96,7 @@ def build_export(settings: dict) -> dict:
         "settings": values,
         # Named so a human reading the file can tell what it is and what it deliberately omits.
         "note": ("AccessCaster's own settings: keyboard shortcuts, announcement preferences, "
-                 "the level check and CallMe contacts. It does NOT contain any desk settings "
+                 "the clip warning and CallMe contacts. It does NOT contain any desk settings "
                  "(those are profiles)."),
     }
 

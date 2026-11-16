@@ -160,17 +160,25 @@ def _read_channel_preset_props(channel: int) -> dict:
     slot, and processing is per fader STRIP. On a reordered layout - a line
     channel on fader 2 pushing Mic 2 to strip 6 - "save Mic 2's settings as a preset" then silently
     saves whatever chain sits on strip 1. The strip is resolved the same way every other processing
-    read and write does it (channels._channel_strip, off the live fader vector). The processing MODE
-    is saved too, so applying a saved advanced voicing restores advanced mode rather than landing on
-    a strip that re-derives it from the VoxLab knobs."""
-    blob = rcp_read.read_model_stable()
-    idx = channels._channel_strip(channel)
-    out = {}
-    for p in _PRESET_PROPS:
-        vals = rcp_read.values(blob, p)
-        if idx < len(vals):
-            out[p] = vals[idx]
-    return out
+    read and write does it (channels.channel_strip_index, off the live fader vector). The
+    processing MODE is saved too, so applying a saved advanced voicing restores advanced mode rather
+    than landing on a strip that re-derives it from the VoxLab knobs."""
+    found = _strip_props(rcp_read.read_model_stable(), channel)
+    return {p: found[p] for p in _PRESET_PROPS if p in found}
+
+
+def _strip_props(blob: bytes, channel: int) -> dict:
+    """{property: value} for the chain on a channel's strip, read from that strip's own node
+    (`channels.read_chains`), so a stray copy of a name elsewhere in the dump cannot shift it.
+    A property the node does not carry is left out."""
+    strip = channels.channel_strip_index(channel)
+    chains = channels.read_chains(blob)
+    if strip >= len(chains):
+        return {}
+    chain = chains[strip]
+    found = {**chain["bools"], **chain["floats"],
+             channels.CHAIN_PRESET_MARKER_PROP: chain["marker"]}
+    return {p: v for p, v in found.items() if v is not None}
 
 
 # Plain names for the module flags, for the "switched on" sentence. Spelled as the Channels page
@@ -184,16 +192,12 @@ _MODULE_LABEL = {"hpfOn": "high-pass filter", "eqOn": "equaliser", "compressorOn
 def _read_channel_modules(channel: int) -> dict:
     """The module on/off flags for one mic channel's STRIP, plus its master processing state.
 
-    Same strip resolution as every other processing read (channels._channel_strip off the live
-    fader vector), so it is correct on a reordered layout. CALLER HOLDS THE HID LOCK."""
-    blob = rcp_read.read_model(fresh=True)
-    idx = channels._channel_strip(channel)
-    out = {}
-    for p in channels.PROCESSING_MODULE_BOOLS:
-        vals = rcp_read.values(blob, p)
-        out[p] = vals[idx] if idx < len(vals) else None
-    bypass = rcp_read.values(blob, "channelBypassProcessing")
-    out["_processing_on"] = (None if idx >= len(bypass) else not bypass[idx])
+    Same strip resolution as every other processing read (channels.channel_strip_index off the
+    live fader vector), so it is correct on a reordered layout. CALLER HOLDS THE HID LOCK."""
+    found = _strip_props(rcp_read.read_model(fresh=True), channel)
+    out = {p: found.get(p) for p in channels.PROCESSING_MODULE_BOOLS}
+    bypass = found.get("channelBypassProcessing")
+    out["_processing_on"] = None if bypass is None else not bypass
     return out
 
 

@@ -355,7 +355,7 @@ def fire_pad(pad_idx: int) -> dict:
     which of the two things happened."""
     entry = _pad_entry(pad_idx)
     if entry is None:
-        return _said("That pad is empty now. Choose another on the Keyboard shortcuts tab.",
+        return _said("That pad is empty now. Choose another on the Keyboard shortcuts page.",
                      ok=False)
     position, name, pad_type, play_mode = entry
     if pad_type == soundpad.PAD_TYPE_SOUND:

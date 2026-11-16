@@ -528,7 +528,7 @@ def read_solos(blob: bytes | None = None) -> list:
     """The live solo state of every strip, indexed by STRIP (same indexing as the mute vector)."""
     if blob is None:
         blob = _r.read_model_stable()
-    return _r.values(blob, CUE_PROP)
+    return _r.strip_values(blob, CUE_PROP)
 
 
 def clear_all_solos(blob: bytes | None = None) -> int:

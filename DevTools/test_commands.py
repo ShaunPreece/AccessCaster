@@ -101,5 +101,15 @@ with _testkit.patched((faders, {"action_set_fader_level":
 expected = round(desk_model.fader_level(6) * 100) + commands.LEVEL_STEP
 check("fader 7 is index 6, stepped from its own level", levels, [(6, expected)])
 
+print("\nA BUS has no processing, so no processing shortcut")
+import channel_actions  # noqa: E402
+
+offered = [c["id"] for c in commands._channel_commands()]
+check("no processing shortcut for the SMART pads", "chan.proc:SMARTpads" in offered, False)
+check("its mute is still offered", "chan.mute:SMARTpads" in offered, True)
+refused = channel_actions.action_set_processing_enabled("SMARTpads", True)
+check("a processing switch for it is refused, saying why", (refused["ok"], refused["message"]),
+      (False, "SMART pads has no processing to switch."))
+
 print()
 sys.exit(_testkit.finish())

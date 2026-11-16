@@ -23,7 +23,9 @@ import _testkit
 import channels
 import devices
 import fake_model
+import faders
 import layout_fixture as lf
+import mic_presets
 import model_tree
 import pad_records as pr
 import rcp_hid
@@ -234,6 +236,27 @@ check("a strip without the property reads None in its own place",
           fake_model.node("CHANNEL", {"channelOutputMute": False}),
           fake_model.node("CHANNEL", {"channelInputSource": 2})]), "channelInputSource"),
       [0, None, 2])
+
+# Every other per-strip read takes the same route. A stray of each name ahead of the strips: the
+# solos, the virtual faders' mutes and solos, and a preset's chain must each read their own strip.
+strays = {"channelCueEnable": True, "channelOutputMute": True, "eqLowGain": 0.9, "hpfOn": True}
+strip_dump = fake_model.node("Rodecaster", (), [
+    fake_model.node("SYSTEM", strays),
+    *[fake_model.node("CHANNEL", {"channelInputSource": code, "channelCueEnable": i == 7,
+                                  "channelOutputMute": i == 6, "eqLowGain": 0.1 * i,
+                                  "hpfOn": i == 1})
+      for i, code in enumerate((0, 1, 2, 3, 10, 11, 7, 8, 9))],
+])
+check("the solos read each strip's own", channels.read_solos(strip_dump),
+      [i == 7 for i in range(9)])
+with as_device(devices.PRO2):
+    virtual = faders.fader_levels(strip_dump)["faders"]
+check("a virtual fader's mute is its own strip's", [f["muted"] for f in virtual],
+      [True, False, False])
+check("and its solo", [f["soloed"] for f in virtual], [False, True, False])
+with patched((channels, {"channel_strip_index": lambda _channel: 1})):
+    chain = mic_presets._strip_props(strip_dump, 2)
+check("a preset reads its own strip's chain", (chain["eqLowGain"], chain["hpfOn"]), (0.1, True))
 
 # ---- 2. A moved block is followed ---------------------------------------------------------------
 # A firmware that inserts one node ahead of CHANNEL moves CHANNEL and everything after it by one,

@@ -438,7 +438,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                     target[spare] = upper
             # Mutes are read before the write, since a linked mic has no strip of its own to read
             # afterwards.
-            mutes = rcp_read.values(blob, "channelOutputMute")
+            mutes = rcp_read.strip_values(blob, "channelOutputMute")
 
             def muted_now(code):
                 i = next((j for j, c in enumerate(vec) if c == code), None)
@@ -656,8 +656,8 @@ def fader_levels(blob: bytes) -> dict:
     # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
     # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
     # the encoder cycles onto the virtual faders (announcer._encoder_ring).
-    mutes = rcp_read.values(blob, "channelOutputMute")
-    solos = rcp_read.values(blob, channels.CUE_PROP)
+    mutes = rcp_read.strip_values(blob, "channelOutputMute")
+    solos = rcp_read.strip_values(blob, channels.CUE_PROP)
     mon = rcp_read.values(blob, "outputMonLevel")
     # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
     # They ride on this read rather than on `read_routing_live` because they belong beside the
@@ -669,7 +669,7 @@ def fader_levels(blob: bytes) -> dict:
         # offering a mute for nothing.
         if idx >= len(vec) or is_empty_fader(vec[idx]) or idx >= len(values):
             return None
-        return bool(values[idx])
+        return None if values[idx] is None else bool(values[idx])
 
     faders = []
     for idx in spec.level_faders:

@@ -187,6 +187,9 @@ def action_set_processing_enabled(name: str, on: bool) -> dict:
     ch = channels.ui_channel(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
+    if ch["kind"] == "bus":
+        # Its strip takes the write and reads it back, and none of it reaches the audio.
+        return {"ok": False, "message": f"{ch['label']} has no processing to switch."}
     with desk_access.hid_lock:
         channels.set_processing_enabled(name, on)
     return {"ok": True,
