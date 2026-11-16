@@ -22,7 +22,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Switch, record_field, set_choices
 from native.dialogs import confirm, ok_cancel
-from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only,
+from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only, select,
                           set_items, set_text)
 
 TITLE = "CallMe"
@@ -338,7 +338,7 @@ class DialPage(wx.Panel):
         labels = [contact_label(c) for c in self.contacts] or ["No contacts yet."]
         set_items(self.list, labels)
         codes = [c["code"] for c in self.contacts]
-        self.list.SetSelection(codes.index(code) if code in codes else 0)
+        select(self.list, codes.index(code) if code in codes else 0)
 
     def _chosen(self):
         index = self.list.GetSelection()

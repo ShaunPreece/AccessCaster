@@ -9,7 +9,7 @@ import faders
 from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Switch, set_choices
-from native.pages import labelled, page_body
+from native.pages import labelled, page_body, select
 
 TITLE = "Fader assignment"
 READ_ONLY = "Changing the fader layout is not enabled on this device yet."
@@ -76,7 +76,7 @@ class FadersPage(scrolled.ScrolledPanel):
                  for i, fader in enumerate(self.model["faders"])]
         chosen = self.fader.GetSelection()
         set_choices(self.fader, names)
-        self.fader.SetSelection(chosen if 0 <= chosen < len(names) else 0)
+        select(self.fader, chosen if 0 <= chosen < len(names) else 0)
         self._show_fader()
         for link in self.links:
             link.show()

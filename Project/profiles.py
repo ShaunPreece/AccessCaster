@@ -617,9 +617,10 @@ def _await_voicing(name, timeout=8.0):
     value. Only paid when the voicing actually CHANGES."""
     end = time.monotonic() + timeout
     prev = _chain_of(name)
-    while time.monotonic() < end:
+    # A desk that cannot be read now answers no sooner by being asked again at once.
+    while prev is not None and time.monotonic() < end:
         cur = _chain_of(name)
-        if cur is not None and cur == prev:
+        if cur is None or cur == prev:
             return
         prev = cur
 

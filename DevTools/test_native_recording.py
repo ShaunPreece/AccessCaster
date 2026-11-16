@@ -107,6 +107,32 @@ check("no card or drive says so in the list", takes.list.GetString(0),
       "Nothing to list: there is no card or drive in the desk.")
 check("and leaves nothing to delete", takes._chosen(), None)
 
+
+def selections_on_reshow(*lists):
+    """How many times `lists` are re-selected when the same read is shown again: a screen reader
+    reads a focused list again whenever its selection is set, even to the same item."""
+    calls = []
+
+    def counting(real):
+        def select(index):
+            calls.append(index)
+            real(index)
+        return select
+    for listbox in lists:
+        listbox.SetSelection = counting(listbox.SetSelection)
+    try:
+        section.show(payload(takes=[take(5, "REC0005")]), "")
+        calls.clear()
+        section.show(payload(takes=[take(5, "REC0005")]), "")
+        return len(calls)
+    finally:
+        for listbox in lists:
+            del listbox.SetSelection
+
+
+check("the same read shown again re-selects nothing", selections_on_reshow(takes.list,
+                                                                           storage.list), 0)
+
 # ---- the raw switch waits for separate tracks ------------------------------------------------
 section.show(payload(multitrack=0), "")
 check("the raw switch is refused on the mixed track only", rec._bypass_refused(),

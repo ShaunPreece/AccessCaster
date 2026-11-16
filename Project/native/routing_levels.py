@@ -15,7 +15,7 @@ from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Slider, Switch, percent_words, set_choices
 from native.dialogs import confirm
-from native.pages import group, labelled, page_body
+from native.pages import group, labelled, page_body, select
 
 TITLE = "Levels"
 MODE_WORDS = {
@@ -124,7 +124,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         labels = self.section.desk.faders["labels"]
         set_choices(self.fader, [f"Fader {index + 1}: {labels[index]}"
                                  for index in self.model["faders"]])
-        self.fader.SetSelection(min(self._fader_position, len(self.model["faders"]) - 1))
+        select(self.fader, min(self._fader_position, len(self.model["faders"]) - 1))
         self._show_fader()
 
     def _show_fader(self):

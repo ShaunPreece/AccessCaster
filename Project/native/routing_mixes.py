@@ -11,7 +11,7 @@ from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Switch, set_choices
 from native.dialogs import DeletePresetDialog, FormDialog, NameDialog, confirm
-from native.pages import group, labelled, page_body
+from native.pages import group, labelled, page_body, select
 
 TITLE = "Output mixes"
 READ_ONLY = "Changing output mixes is not enabled on this device yet."
@@ -205,15 +205,15 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         for button in (apply, save, delete):
             sizer.Add(button, 0, wx.ALL, 6)
 
-    def read_schemes(self, select=None):
-        """Read the preset list (files, not the desk). `select` is a saved preset's name to choose
+    def read_schemes(self, prefer=None):
+        """Read the preset list (files, not the desk). `prefer` is a saved preset's name to choose
         once it is there."""
         def read(reply):
             if reply.get("ok"):
-                self._fill_schemes(reply, select)
+                self._fill_schemes(reply, prefer)
         call(self, output_mixes.read_routing_schemes, done=read)
 
-    def _fill_schemes(self, data, select):
+    def _fill_schemes(self, data, prefer):
         chosen = self._scheme()
         schemes = [{"builtin": True, "name": b["id"], "label": b["name"],
                     "text": _scheme_text(b["name"], b.get("scope")),
@@ -226,10 +226,9 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         self._schemes = schemes
         set_choices(self.scheme, [s["text"] for s in schemes])
         keys = [(s["builtin"], s["name"]) for s in schemes]
-        want = (False, select) if select else (
+        want = (False, prefer) if prefer else (
             (chosen["builtin"], chosen["name"]) if chosen else None)
-        self.scheme.SetSelection(keys.index(want) if want in keys else (0 if keys else
-                                                                         wx.NOT_FOUND))
+        select(self.scheme, keys.index(want) if want in keys else (0 if keys else wx.NOT_FOUND))
         self._show_scheme()
 
     def _scheme(self):
@@ -268,7 +267,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
                 return
             reply = dialog.reply
         self.frame.reply(source, reply)
-        self.read_schemes(select=reply.get("name"))
+        self.read_schemes(prefer=reply.get("name"))
 
     def _on_delete_scheme(self, event):
         source = event.GetEventObject()

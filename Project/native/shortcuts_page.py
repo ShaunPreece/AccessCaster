@@ -11,7 +11,8 @@ import shortcuts
 from native import a11y
 from native.calls import call
 from native.dialogs import FormDialog, paragraphs, confirm
-from native.pages import AFTER_FOCUS_MS, add_button, labelled, page_body, reply_text, set_items
+from native.pages import (AFTER_FOCUS_MS, add_button, labelled, page_body, reply_text, select,
+                          set_items)
 from native.controls import Switch, set_choices
 
 LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
@@ -111,7 +112,7 @@ class ShortcutsPage(wx.Panel):
         self.rows = state.get("shortcuts") or []
         set_items(self.list, [item_text(row) for row in self.rows] or [EMPTY])
         ids = [row["id"] for row in self.rows]
-        self.list.SetSelection(ids.index(keep) if keep in ids else 0)
+        select(self.list, ids.index(keep) if keep in ids else 0)
         self.list_acc.description = LIST_HINT + ("" if state.get("enabled") else OFF_NOTE)
         self.enabled.show()
         label = f"Change the keys to hold, now {mods_text(state, state.get('mods'))}"

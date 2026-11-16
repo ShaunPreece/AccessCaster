@@ -94,6 +94,25 @@ check("the contacts, each with its code spelt",
 section.show(payload(details=[]))
 check("no call up says so", call_page.details.GetValue(), "No call is up.")
 
+# A screen reader reads a focused list again whenever its selection is set, even to the same item,
+# and the listener redraws every page on any change it hears.
+dial.list.SetSelection(1)
+reselected = []
+real_select = dial.list.SetSelection
+
+
+def counted_select(index):
+    reselected.append(index)
+    real_select(index)
+
+
+dial.list.SetSelection = counted_select
+section.show(payload(version=2))
+del dial.list.SetSelection
+check("a redraw keeps the chosen contact without re-selecting it", (reselected,
+                                                                     dial._chosen()["name"]),
+      ([], "Bob"))
+
 # ---- not ready -------------------------------------------------------------------------------
 frame.desk.faders = OFF_FADER
 frame.desk.listener("faders", None)

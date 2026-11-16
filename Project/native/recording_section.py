@@ -20,7 +20,8 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch, record_field
 from native.dialogs import JobDialog, confirm, report
-from native.pages import Reader, StatusPages, add_button, labelled, page_body, read_only, set_items
+from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only, select,
+                          set_items)
 
 TITLE = "Recording"
 PAGES = [("recorder", "Recorder"), ("recordings", "Recordings"), ("storage", "Card and drive")]
@@ -338,7 +339,7 @@ class RecordingsPage(wx.Panel):
             labels = ["No recordings on the desk."]
         set_items(self.list, labels)
         uids = [take["uid"] for take in self.takes]
-        self.list.SetSelection(uids.index(uid) if uid in uids else 0)
+        select(self.list, uids.index(uid) if uid in uids else 0)
 
     def _chosen(self):
         index = self.list.GetSelection()
@@ -391,11 +392,11 @@ class StoragePage(wx.Panel):
                   or ["The desk reports no card slot or drive."])
         indices = [v["index"] for v in self.shown]
         if index in indices:
-            self.list.SetSelection(indices.index(index))
+            select(self.list, indices.index(index))
         else:
             # The one with something in it, which is nearly always the one wanted.
             in_use = [i for i, v in enumerate(self.shown) if v.get("inserted") or v.get("ejected")]
-            self.list.SetSelection(in_use[0] if in_use else 0)
+            select(self.list, in_use[0] if in_use else 0)
 
     def _chosen(self):
         index = self.list.GetSelection()

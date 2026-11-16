@@ -16,6 +16,7 @@ import desk_labels
 import device_page
 import firmware
 import network
+import recorder
 from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch, record_field
@@ -102,7 +103,7 @@ def overview_lines(d):
                      "SMART pads page.")
     if d.get("recording"):
         lines.append("A recording is PAUSED. The Recording section carries on or stops it."
-                     if d["recording"].get("state") == 1 else
+                     if d["recording"].get("state") == recorder.PAUSED else
                      "The desk is RECORDING. The Recording section pauses or stops it.")
     for volume in d.get("storage_low") or []:
         lines.append(f"{volume['label']} is nearly full: {volume['free_pct']} percent left, "
@@ -150,7 +151,7 @@ def desk_summary(d):
     alerts = [f"Pad {p['grid']}, {p['name']}, is switched on and processing a live channel"
               for p in d.get("pads_engaged") or []]
     if d.get("recording"):
-        alerts.append("a recording is paused" if d["recording"].get("state") == 1
+        alerts.append("a recording is paused" if d["recording"].get("state") == recorder.PAUSED
                       else "the desk is recording")
     alerts += [f"{v['label']} is nearly full, {v['free_pct']} percent left"
                for v in d.get("storage_low") or []]

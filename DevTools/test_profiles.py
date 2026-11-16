@@ -505,6 +505,16 @@ check_true("and the instrument gain still follows the type, which is what sets i
            names_of(mic_calls).index("set_mic_type")
            < names_of(mic_calls).index("set_instrument_gain"))
 
+print("\nRESTORE: the voicing wait gives up at once on a desk that cannot be read")
+chain_reads = []
+with patched((profiles, {"_chain_of": lambda name: chain_reads.append(name)})):
+    profiles._await_voicing("Mic1", timeout=0.5)
+check("one failed read, not a stream of them until the timeout", chain_reads, ["Mic1"])
+settled = iter([{"gain": 1}, {"gain": 2}, {"gain": 2}])
+with patched((profiles, {"_chain_of": lambda _name: next(settled)})):
+    profiles._await_voicing("Mic1", timeout=5)
+check("a voicing still settles on two equal reads", next(settled, "spent"), "spent")
+
 print("\nRESTORE: the SMART pads bus is a channel like any other")
 # Its strip carries a full chain and the desk processes pads through it.
 # Leaving it out of the channel list is what makes a clean restore put its custom chain back at

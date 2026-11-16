@@ -188,8 +188,8 @@ class GeneralPage(wx.Panel):
                                 guard=self._autostart_refused, accepted=lambda _r: self.read())
         self.keep_in_tray = Switch(
             self, parent, sizer, "Keep running in the system tray when the window is closed",
-            app_settings_actions.action_set_keep_in_tray, lambda: (self.data or {}).get("keep_in_tray"),
-            self._remember_tray,
+            app_settings_actions.action_set_keep_in_tray,
+            *record_field(lambda: self.data, "keep_in_tray"),
             description="Your keyboard shortcuts and spoken announcements only work while "
                         "AccessCaster is running. Off, closing the window quits it.",
             guard=lambda: None if self.data is not None else "Not read yet.")
@@ -206,10 +206,6 @@ class GeneralPage(wx.Panel):
                                     self._on_restore)
         a11y.describe(self.restore, "A voice or audio device this computer lacks is skipped, "
                                     "and said.")
-
-    def _remember_tray(self, on):
-        if self.data is not None:
-            self.data["keep_in_tray"] = on
 
     def _autostart_refused(self):
         if self.data is None:
