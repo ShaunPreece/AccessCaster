@@ -661,7 +661,7 @@ def fader_levels(blob: bytes) -> dict:
     mon = rcp_read.values(blob, "outputMonLevel")
     # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
     # They ride on this read rather than on `read_routing_live` because they belong beside the
-    # monitor level on the Levels tab, and this is the read that tab already makes.
+    # monitor level on the Levels page, and this is the read that page already makes.
     outs = rcp_read.snapshot_properties(blob)
     vec = read_fader_vector(blob, spec)
     def switch(values, idx):

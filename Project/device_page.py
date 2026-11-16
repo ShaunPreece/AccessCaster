@@ -62,7 +62,7 @@ def read_hardware() -> dict:
     }
 
     # ---- firmware and the wired network. Neither is a connection you can make or change, so they
-    # sit with the other facts the unit reports about itself rather than on a tab of wireless
+    # sit with the other facts the unit reports about itself rather than on a page of wireless
     # controls.
     out["firmware"] = desk_firmware.version(blob)
     out["firmware_update"] = desk_firmware.update(blob)
@@ -167,12 +167,12 @@ def read_unit_settings() -> dict:
         return {"ok": False, "message": f"Could not read the desk's settings: {exc}"}
     values = _unit_setting_values(blob)
     settings = [dict(s, value=values.get(s["prop"])) for s in UNIT_SETTINGS]
-    # MIDI LIVES ON THIS TAB, not on one of its own for a single switch, so its value is reported
-    # here and the tab still makes exactly ONE call. It is NOT a UNIT_SETTINGS
+    # MIDI LIVES ON THE UNIT SETTINGS PAGE, not on a page of its own for a single switch, so its
+    # value is reported here and the page still makes exactly ONE call. It is NOT a UNIT_SETTINGS
     # entry and deliberately so: that spec drives the profile's restore set as well as the page, and
-    # MIDI already has its own write (rcp_transfer.set_midi_control) and its own key in a profile. Adding it there would write it twice on every
-    # restore. Read off the dump we already have, by exact name for the reason in
-    # _unit_setting_values.
+    # MIDI already has its own write (rcp_transfer.set_midi_control) and its own key in a profile.
+    # Adding it there would write it twice on every restore. Read off the dump we already have, by
+    # exact name for the reason in _unit_setting_values.
     midi = (rcp_read.snapshot_properties(blob).get("systemMidiControl") or [None])[0]
     gate = _unit_settings_gate()
     return {"ok": True, "settings": settings, "device_name": dev.name,
@@ -249,8 +249,8 @@ def _overview_routing(blob: bytes) -> dict:
     the one that matters, which defeats the point of a troubleshooting summary. So we report an
     output only when its MODE differs from the default, or when it EXCLUDES a source.
 
-    Two things shape the wording. First, the defaults in devices.py are a known-good set rather
-    than a factory capture (see the provenance comment there), so this says "usually" and never
+    Two things shape the wording. First, the defaults in devices.py are the Pro II's factory
+    modes, and an output set otherwise on purpose is not a fault, so this says "usually" and never
     "wrong". Second, a Mix Minus output carries no exclusion flags at all, because the
     self-exclusion is implicit in the mode, so mode is reported before exclusions."""
     dev = devices.get_active_device()
@@ -306,7 +306,7 @@ def _storage_low(blob: bytes) -> list:
     already read. [] when everything has room, which is what lets the overview stay by-exception.
 
     The parsing and the "nearly full" judgement both live in `recorder.read_volumes`, so this
-    warning, the Hardware tab and the Recording page's destination cannot disagree about which
+    warning, the Hardware page and the Recording page's destination cannot disagree about which
     volume is which or when one is short of room. Never raises: an unreadable volume is reported as
     nothing rather than taking the whole overview down with it."""
     try:

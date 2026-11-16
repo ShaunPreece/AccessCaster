@@ -19,7 +19,7 @@ import time as _time
 
 import desk_live  # the one listener, whose chain pushes untrust the fader layout
 import desk_model  # the desk as last seen: the fader layout and the USB mode
-import devices  # per-device model (mic selectors, channel order) keyed by product id
+import devices  # per-device model (channel table, fader and matrix shape) keyed by product id
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
 import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
@@ -112,7 +112,7 @@ CHANNEL_PROP = {
 
 def set_mic_gain(channel: int, db: int) -> int:
     """Set a mic channel's input gain in dB (app: Audio Setup > channel gear > Level). channel 1-4
-    (Pro II) / 1-2 (Duo). Decoded property 'inputMicrophoneGain'. Sent in normal mode."""
+    (Pro II) / 1-2 (Duo). Property 'inputMicrophoneGain'. Sent in normal mode."""
     return _t.write_at(_mic_key(channel), "inputMicrophoneGain", "int", db)
 
 
@@ -156,7 +156,7 @@ def set_mic_type(channel: int, type_value: int) -> int:
     THIS ALSO MOVES THE GAIN. The desk gives each voicing its own default preamp gain and applies it
     on selection, so a caller that has just set a gain has to write this FIRST or lose it (see
     profiles.apply, and channel_actions.action_set_mic_type which reads the gain back and says so).
-    Measured on Mic 3:
+    The defaults, in dB:
 
         Dynamic 45, Condenser 25, PodMic 50, Broadcaster 27, Procaster 50,
         NT1 30, NT1-A 31, RE20 51, SM7B 55
@@ -174,9 +174,9 @@ def set_instrument_gain(channel: int, value: int) -> int:
 # ============================================================================
 # PER-CHANNEL PROCESSING (EQ / comp / gate / de-esser / HPF / pan / VoxLab / Aphex)
 # ----------------------------------------------------------------------------
-# The RODE app drives the channel-strip DSP over report-3 as GLOBAL records: the property NAME selects
-# the parameter and the SELECTOR selects the channel. Float params use value-type 0x04 (normalised 0..1).
-#   01 01 01 01 <sel>  <propName> 00  01 09 04  <float64 LE>
+# Each channel-strip DSP parameter is a property on the strip's CHANNEL node: the node picks the
+# channel and the property NAME picks the parameter. Floats use value-type 0x04 (normalised 0..1):
+#   <address> <propName> 00  01 09 04  <float64 LE>
 # ============================================================================
 
 # The names behind a 1-based channel NUMBER (1-4 = Mic 1-4, then the Pro II's factory order), so a
@@ -333,7 +333,7 @@ PROCESSING_PROPS = frozenset({
 })
 # Extra channel-processing parameters a PRESET writes: the Aphex aural-exciter / big-bottom and the
 # Depth/Sparkle/Punch (VoxLab) macros (all normalised 0..1 floats). aphexBBTune/aphexAETune are the two
-# Aphex frequency TUNE knobs, decoded.
+# Aphex frequency TUNE knobs.
 PRESET_EXTRA_FLOAT_PROPS = frozenset({
     "aphexBBDrive", "aphexAEMix", "channelDepth", "channelSparkle", "channelPunch",
     "aphexBBTune", "aphexAETune",
@@ -413,7 +413,7 @@ def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> i
 
 
 # Per-channel PROCESSING module on/off toggles (compact BOOL on the channel's processing node).
-# Decoded. The Aphex aural-exciter + Big Bottom share ONE enable (aphexOn).
+# The Aphex aural-exciter + Big Bottom share ONE enable (aphexOn).
 PROCESSING_MODULE_ON = {
     "hpf": "hpfOn", "eq": "eqOn", "compressor": "compressorOn", "noiseGate": "noiseGateOn",
     "deesser": "deesserOn", "aphex": "aphexOn", "pan": "channelPanOn",
@@ -623,7 +623,7 @@ _CHANNEL_FX_PARAM_SET = {p for ps in CHANNEL_FX_PARAMS.values() for p in ps}
 def set_channel_effect_param(channel: int, param: str, value01: float) -> int:
     """Set one channel-effect PARAM (echo*/reverb*) on a mic channel 1-4, value normalised 0..1.
     Float64 on the channel-FX node fx_key(channel) = EFFECTS_PARAMETERS[the channel's
-    LIVE strip index (device-aware); byte-for-byte the app's own write."""
+    LIVE strip index] (device-aware); byte-for-byte the app's own write."""
     _require_processing()
     if not 1 <= channel <= 4:
         raise ValueError(f"channel must be 1-4, got {channel}")
@@ -731,12 +731,10 @@ def input_value(blob: bytes, ch: dict, prop: str, dev=None):
 
     ONE lookup, because there is one address: INPUTSOURCE[source_code] (DeviceModel.input_key).
 
-    NO per-device "override" node is tried first. On a Duo that override is the dead MIX block, so
-    after any write the app READS BACK ITS OWN INERT COPY and reports it as the desk's setting,
-    which makes the gain display go stale the moment anybody touches the desk itself. Reading only
-    the live address fixes the display for the same reason it fixes the write, and it leaves the
-    stale copies where they are: harmless once nothing
-    reads them, and not removable without a factory reset.
+    NO per-device "override" node is read. On a Duo the candidate is the dead MIX block, which holds
+    inert copies of earlier writes, so reading it reports one of those as the desk's setting and
+    the display goes stale the moment anybody touches the desk itself. The copies stay on the desk,
+    harmless while nothing reads them and removable only by a factory reset.
 
     Returns None when this desk does not publish that value for that channel (a bus has no input).
     """

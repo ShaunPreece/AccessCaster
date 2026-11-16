@@ -815,8 +815,8 @@ class quiet_drive_errors:
     A half-mounted removable volume makes the OS raise a HARD ERROR dialog on behalf of whichever
     process touched it, and our recovery for that state is simply to wait and retry - so the dialog
     reports a condition we are already handling, and it lands on the user as a modal they have to
-    find and dismiss with a screen reader. SEM_FAILCRITICALERRORS turns the dialog back into the error code
-    the caller already catches. Thread-scoped (SetThreadErrorMode, not SetErrorMode) so a background
+    find and dismiss with a screen reader. SEM_FAILCRITICALERRORS turns the dialog back into the
+    error code the caller already catches. Thread-scoped (SetThreadErrorMode, not SetErrorMode) so a background
     pad worker cannot suppress dialogs for the rest of the process. No-op off Windows.
     """
 
@@ -1027,7 +1027,7 @@ def _selftest() -> None:
         ("031a000000010101010f73797374656d4d696469436f6e74726f6c00010103",
          build_record("systemMidiControl", "bool", False, [0x0F])),
         # inputMicrophoneGain Mic 1 = 56 dB and Mic 2 = 51 dB, and Mic 1 phantom on: INPUTSOURCE,
-        # whose two-byte index is the "selector plus trailer" of the old reading.
+        # at a two-byte index.
         ("0321000000010101026e02696e7075744d6963726f70686f6e654761696e0001050138000000",
          build_record("inputMicrophoneGain", "int", 56, [0x26E])),
         ("0321000000010101026f02696e7075744d6963726f70686f6e654761696e0001050133000000",

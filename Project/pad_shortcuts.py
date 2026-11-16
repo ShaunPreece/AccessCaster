@@ -207,8 +207,8 @@ def _pad_name(position: int):
 #
 # UNCONDITIONALLY, AND NEVER READ-THEN-WRITE. Reading first costs a model dump (about 1.5 s) in
 # front of a keypress, and a remembered value can be stale in the one direction that matters. The
-# write is idempotent and measured at 0.004 s, so there is nothing to save. Said out loud ONCE, because the
-# user did not ask for it and would otherwise have a setting changed silently.
+# write is idempotent and measured at 0.004 s, so there is nothing to save. Said out loud ONCE,
+# because the user did not ask for it and would otherwise have a setting changed silently.
 _midi_armed = False
 
 

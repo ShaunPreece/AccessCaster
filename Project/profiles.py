@@ -566,7 +566,7 @@ def _restore_layout(rs, routing, fader_count, fader_code_set):
 
 def _restore_levels(rs, routing):
     """The virtual fader levels and the monitor speaker level. Gated on the device's own
-    "level_write" cap AND on it having a virtual fader, the same refusal the Routing page's level
+    "level_write" cap AND on it having a virtual fader, the same refusal the Levels page's
     sliders make. Older profiles carry neither key and skip the whole block."""
     dev = devices.get_active_device()
     lvl_faders = dev.fader.level_faders if "level_write" in dev.caps else ()

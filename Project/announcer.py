@@ -794,8 +794,8 @@ def mark_self_gain(key, is_mic: bool) -> None:
     """Mark a gain/level write of ours under the SAME label the push side builds for it.
 
     The two sides name a gain differently - the writer has a mic number or a channel name, the push
-    has an ADDRESS - so we resolve ours to that same address and let change_words.gain_name do the naming,
-    rather than keeping two naming schemes in step. `key` is the mic number (mic strips) or the
+    has an ADDRESS - so we resolve ours to that same address and let change_words.gain_name do the
+    naming, rather than keeping two naming schemes in step. `key` is the mic number (mic strips) or the
     channel name (line strips)."""
     try:
         dev = devices.get_active_device()

@@ -184,8 +184,7 @@ RECORDING_FORMAT_HINT = ("The mixed file only; separate tracks are always WAV. W
 # above decides what it writes to the card or drive. Measured: switching this one makes the Main
 # Multitrack USB device appear with 20 channels, and moves nothing on the drive.
 #
-# The labels say WHO RECEIVES IT, because "multitrack" on its own is the word that made these two
-# indistinguishable in the first place.
+# The labels say WHO RECEIVES IT, because "multitrack" on its own does not tell these two apart.
 USB_MULTITRACK_LABEL = {
     0: "Just the mix (2 channels)",
     1: "Every channel, pre-fader",
@@ -315,7 +314,8 @@ def read_volumes(blob: bytes, include_extra: bool = False) -> list:
     to, a duplicate of that slot whose free space ticks down as the file grows, and it disappears
     again on stop. Listing it would name the same drive twice, and labels keyed on the NUMBER of
     volumes would rename every slot mid-take. So the extras are dropped by default and the labels
-    are keyed on the INDEX, which does not move. `include_extra=True` returns them for anything that wants the live figure."""
+    are keyed on the INDEX, which does not move. `include_extra=True` returns them for anything
+    that wants the live figure."""
     states = rcp_read.values(blob, "storageVolumeState", "str")
     dests = [bool(v) for v in rcp_read.values(blob, "storageVolumeRecDestination", "bool")]
     ejects = [bool(v) for v in rcp_read.values(blob, "storageVolumeEject", "bool")]

@@ -6,10 +6,10 @@ about to cough, start the recording. Opening the window and finding the control 
 for all three. A global hotkey works while the window is closed and while another application has
 focus, which is exactly the case the rest of this app cannot serve.
 
-Windows' own RegisterHotKey is the mechanism, and it has two properties worth having: the OS owns the binding, so
-no keyboard hook and no key logging is involved, and a combination another program already owns is
-REFUSED at registration rather than silently stolen. See `_apply_now` for what we do with that
-refusal.
+Windows' own RegisterHotKey is the mechanism, and it has two properties worth having: the OS owns
+the binding, so no keyboard hook and no key logging is involved, and a combination another program
+already owns is REFUSED at registration rather than silently stolen. See `_apply_now` for what we
+do with that refusal.
 
 THE THREAD. RegisterHotKey delivers WM_HOTKEY to the THREAD that registered it, and only while that
 thread pumps messages. So this module owns one daemon thread that registers everything and then sits

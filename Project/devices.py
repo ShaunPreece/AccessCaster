@@ -450,8 +450,8 @@ CHANNELS_PRO2 = (
     # THE CHAIN DOES NOTHING TO THE PADS AUDIO, on either desk: pan hard over, maximum HPF, full
     # EQ cuts, a slammed noise gate and zero make-up gain are all inaudible, where pan on a mic
     # moves it to one ear. **RODE's own guide says so** ("You can add processing to any audio
-    # channel except the SMART pads") and so does their app, which offers no processing for it. A write landing
-    # at its own address proves an address is live, never that it reaches audio.
+    # channel except the SMART pads") and so does their app, which offers no processing for it. A
+    # write landing at its own address proves an address is live, never that it reaches audio.
     # So the bus keeps MUTE, SOLO and its fader, and has no chain in the app - see
     # channels.read_channels, which is where that is enforced, and native/channel_tabs.build_tabs.
     # DO NOT PUT THE CHAIN BACK on the strength of a write reading back cleanly. It will.

@@ -559,8 +559,8 @@ def _restore_default(enum, policy, eps: list, connected: bool, parked: str = "",
     it can find, which on a laptop is the built-in speakers; RODE's own instruction is to select
     `System (RØDECaster)` then, and nothing else will do while the service is bound: it holds the
     render pin behind the desk's Main output, so a stream there opens and plays nothing. The desk's
-    Main output is the target only while the service is not bound. A PARKED default stays parked until the
-    service binds, because moving it onto the desk's Main output is what keeps the service from
+    Main output is the target only while the service is not bound. A PARKED default stays parked
+    until the service binds, because moving it onto the desk's Main output is what keeps the service from
     binding; in Standard (`standard`) there is no bind to wait for, and it goes back to the desk.
     Console and multimedia roles move together; communications is left alone, because a call
     app's output is a choice this app knows nothing about."""

@@ -849,8 +849,8 @@ def send_create_full(pre, mid, file_copy_fn, post, delay=0.06,
 def clear_pad(position: int, debug: bool = False) -> str:
     """Clear the pad at 0-based stream `position`. The ENTIRE clear is: padActive ON ->
     padActive OFF -> select-begin, then exit transfer mode, and NOTHING else. It sends NO
-    remountPadStorage (writes no files), so it does NOT mount drive F and produces NO Windows
-    "drive has a problem" toast.
+    remountPadStorage (writes no files), so it does NOT mount the pad volume and produces NO
+    Windows "drive has a problem" toast.
 
     Re-read positions first - they shift when a record drops.
 
@@ -865,7 +865,7 @@ def clear_pad(position: int, debug: bool = False) -> str:
     if iface is None:
         raise RuntimeError("no control interface (close the RODE app)")
 
-    # NO remountPadStorage -> no drive-F mount/toast. Leaving transfer mode is what completes the clear.
+    # NO remountPadStorage, so no volume mount or toast. Leaving transfer mode completes the clear.
     with _transfer_mode(1.0):
         dev = rcp_hid.open_handle(iface, "pad clear")
         n = 0
@@ -958,7 +958,7 @@ def clear_all_pads() -> dict:
 
 # Time spent INSIDE transfer mode for an in-place pad edit. Transfer mode is the fragile part (it
 # is when the unit exposes its FAT volume, so a long or repeated dwell is what makes Windows throw
-# a "problem with drive F" toast), so we sit in it as briefly as the device tolerates and write
+# a "problem with this drive" toast), so we sit in it as briefly as the device tolerates and write
 # every record for the edit in ONE session rather than one session per record.
 # Measured on a Pro II: 0.25/0.12 writes padColourIndex, padLoop and padGain correctly with the pool
 # clean, at about 518 ms per edit against 1048 ms for 0.6/0.3, and 0.10/0.05 also works, so
@@ -1335,7 +1335,7 @@ def set_pad_properties(grid: int, updates, kinds: dict | None = None, blob=None)
     mount). Verify by read-back.
 
     `updates` is a list of (name, value) pairs (or a dict) applied in order. Writing them together
-    matters: transfer mode is the fragile, drive-F-mounting part, so two settings that always change
+    matters: transfer mode is the fragile, volume-mounting part, so two settings that always change
     together (play mode + loop) cost one short session instead of two.
 
     `kinds` overrides the kind per property; otherwise it comes from the PAD_PROP registry.
@@ -1685,8 +1685,9 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
     created at padIdx = grid-1, writing pads/<grid>/<real name> (factory convention - see
     safe_dest_filename). The folder is always the grid number, the app's FAT layout (grid pad N ->
     pads/N/), because the audio tidy keeps only what is in a pad's own folder. `dest_filename`
-    (e.g. the original upload name) sets the on-device filename; without it the source basename is used. `replay` True = re-press restarts from the
-    start (factory behaviour); False = pause/resume.
+    (e.g. the original upload name) sets the on-device filename; without it the source basename is
+    used. `replay` True = re-press restarts from the start (factory behaviour); False =
+    pause/resume.
     """
     return _replace_slot(grid, "sound", lambda: assign_create(
         grid - 1, grid, src_wav, name=name, colour=colour,
@@ -1922,8 +1923,8 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
     """High-level: put a voice effect, factory or the user's own, on grid pad `grid` (1-based).
     SELF-HEALING: instead of refusing on a polluted pool, safe_assign_fx_recipe scrubs the target
     slot (clears any pad, GCs any leftover orphan object for this padIdx) and then does the proven
-    create, so it cannot leave a duplicate. Reports health after. `active` defaults False so assigning an effect leaves
-    the pad at REST (matching the factory) and never leaves a mic processing; the live preview path
+    create, so it cannot leave a duplicate. Reports health after. `active` defaults False so
+    assigning an effect leaves the pad at REST (matching the factory) and never leaves a mic processing; the live preview path
     passes active=True itself."""
     pidx = grid - 1
     key = _resolve_recipe(effect_name)
@@ -2189,8 +2190,8 @@ def heal_fx_pool(progress=None) -> dict:
     After a software reset the six FX pad records are present and region B holds only the special
     object at 65, because RODE's factory default show ships the FX pad records with their
     `effectsIdx` pointers and no objects for them to point at. The firmware garbage-collects an
-    object the moment no pad claims it but never allocates one (SOUNDPADS.md section 5), and only an explicit effects block (a 0x9d
-    frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
+    object the moment no pad claims it but never allocates one (SOUNDPADS.md section 5), and only
+    an explicit effects block (a 0x9d frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
     the default show writes the records back, and nothing re-allocates. The user gets six voice-FX
     pads with the right name, type and colour that make no sound and process no mic - the exact class
     of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
@@ -2563,8 +2564,8 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
 #
 # CLEARING A PAD DELETES NO AUDIO, and that is not an oversight in clear_pad: a clear is HID-only ON
 # PURPOSE (no remountPadStorage, no file writes), which is why clearing a pad raises no Windows
-# "drive F has a problem" toast. It drops the pad RECORD and its region-B effect object and leaves
-# the wav on the card, and a new sound create writes a NEW file beside it under its own name. So
+# "problem with this drive" toast. It drops the pad RECORD and its region-B effect object and leaves
+# the wav on the pad volume, and a new sound create writes a NEW file beside it under its own name. So
 # without this sweep every replacement and every restore-to-defaults leaks the previous audio:
 # measured on a working desk, 53.3 MB of 73.0 MB was files no pad pointed at.
 #

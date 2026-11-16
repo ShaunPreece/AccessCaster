@@ -609,8 +609,7 @@ def snapshot_properties(blob: bytes) -> dict:
 # ---- Routing matrix read-back (the output Custom mixes) ---------------------
 # On the CORRECTLY-ASSEMBLED stream (read_model strips the per-frame report id) the
 # matrix is a clean grid: cell (output, source) -> the (13*source + output)th mixDisabled
-# block, i.e. read_index == cross-point selector - 76. Verified for all 99 cells, zero
-# mismatches. See RODECASTER_PROTOCOL.txt section 5.
+# block, the same MIX node a cross-point write addresses. See RODECASTER_PROTOCOL.txt section 5.
 
 # Matrix shape (sources exposed, healthy mixDisabled block count, output count, read
 # stride) is per-device in devices.py (Pro II: 10 sources, 390 blocks, 11 outputs,
