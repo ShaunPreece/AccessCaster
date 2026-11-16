@@ -3,13 +3,14 @@
 A profile is a JSON snapshot of EVERY setting the app can read AND write, so it round-trips the
 whole desk: MIDI; for every channel the device exposes (Mic 1-4, Bluetooth, USB1, Chat, USB2, and
 the SMART pads bus, which has a chain but no level) the level, plus for mics phantom/polarity/mic
-type and the always-on echo+reverb effects, and for every channel the full processing chain (master on/off, each module's on/off, all 33 params); and routing (the full
-nine-fader layout, the virtual fader levels and the monitor speaker level, multitrack mode, the two
-auto-mutes, each headphone output's amp type, the Master Compellor on/off + its four params, and
-output delay); and the unit's own settings (screen and button brightness, auto-brightness, screen
-dim time, meter style, haptics, what the record button does, listen mode and the monitor's fixed
-output level). SMART pad SOUNDS are files, not settings: an optional pad backup copies them into
-the profile's own pads/ folder (pads_dir) and records their metadata under "pads".
+type and the always-on echo+reverb effects, and for every channel the full processing chain
+(master on/off, each module's on/off, all 33 params); and routing (the full nine-fader layout, the
+virtual fader levels and the monitor speaker level, multitrack mode, the two auto-mutes, each
+headphone output's amp type, the Master Compellor on/off + its four params, and output delay); and
+the unit's own settings (screen and button brightness, auto-brightness, screen dim time, meter
+style, haptics, what the record button does, listen mode and the monitor's fixed output level).
+SMART pad SOUNDS are files, not settings: an optional pad backup copies them into the profile's own
+pads/ folder (pads_dir) and records their metadata under "pads".
 
 FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2), holding its pads/ audio
 beside it.
@@ -78,10 +79,10 @@ HARDWARE_ID_KEY = "hardware_id"
 # this profile. Present only when there was a card or drive in the unit to export to, since a show
 # can only live on removable storage (the internal volume is the pads partition and cannot hold
 # one). This is what lets ONE Backups list carry both. Restore always reads this file, never the
-# show, because a show import crashes the desk about one time in six (backups.action_restore_backup);
-# the show stays as a complete copy on the drive. The profile also supplies the NAME, because the
-# unit calls every export after the loaded show and gives no way to rename one, so a shows-only list
-# reads as several identical lines.
+# show, because a show import crashes the desk about one time in six
+# (backups.action_restore_backup); the show stays as a complete copy on the drive. The profile also
+# supplies the NAME, because the unit calls every export after the loaded show and gives no way to
+# rename one, so a shows-only list reads as several identical lines.
 SHOW_KEY = "show"
 
 # ---- the unit's own settings (display, buttons, haptics, listen mode) --------------------------
@@ -90,8 +91,8 @@ SHOW_KEY = "show"
 # (Name-by-name is safe too: the tree index matches whole names, not substrings.)
 #
 # WHY IT IS SAFE TO RESTORE THESE and not, say, an undecoded property: every one has a CONFIRMED
-# selector-plus-name pairing, read back on hardware. The restore is still gated on the device's own
-# "unit_settings" cap, so a desk whose selectors were never observed refuses instead of guessing.
+# selector-plus-name pairing. The restore is still gated on the device's own "unit_settings" cap,
+# so a desk whose selectors were never observed refuses instead of guessing.
 UNIT_KEY = "unit"
 
 # SAVED BUT NEVER WRITTEN BACK. Two entries in the address table are not settings at all, they are
@@ -215,9 +216,9 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     cis = rcp_read.strip_values(blob, "channelInputSource")
     midi = first("systemMidiControl")
 
-    # The two levels the desk otherwise keeps to itself: each fader's
-    # faderLevel (0..127, per STRIP, only the VIRTUAL slots are ours to write) and the monitor
-    # SPEAKER level (outputMonLevel, a 0..1 float). Both are recorded RAW, so a profile round-trips
+    # The two levels the desk otherwise keeps to itself: each fader's faderLevel (0..127, per
+    # STRIP, only the VIRTUAL slots are ours to write) and the monitor SPEAKER level
+    # (outputMonLevel, a 0..1 float). Both are recorded RAW, so a profile round-trips
     # them exactly. Like the fader vector, capture is deliberately wider than write: we store every
     # slot's value and apply writes only the slots this device has a confirmed level selector for.
     # Each is read on its own node, the one its write goes to, and one that fails to decode is
@@ -234,14 +235,15 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # and, where unlinked, its manual level - keyed by NAME rather than by index, so a profile
     # stores that scheme verbatim rather than keeping a second, weaker copy of the same read.
     #
-    # It covers EVERY output, not only the monitor ones, so a level set on the REC, USB or Chat mix is
-    # backed up; and it records nothing but `excluded` for an excluded cross-point, whose "level" is
-    # an inert number frozen where the fader stood (see PROJECT_GUIDE).
-    # Writing a manual level to a non-monitor cross-point is a confirmed write, so no new capability
-    # is being assumed here.
+    # It covers EVERY output, not only the monitor ones, so a level set on the REC, USB or Chat mix
+    # is backed up; and it records nothing but `excluded` for an excluded cross-point, whose
+    # "level" is an inert number frozen where the fader stood (see PROJECT_GUIDE). Writing a manual
+    # level to a non-monitor cross-point is a confirmed write, so no new capability is being
+    # assumed here.
     #
     # The read refuses if the matrix changed shape (a phone caller) or if this device's matrix read
-    # is unverified, so we store null + a note rather than a wrong snapshot. Same blob, no extra read.
+    # is unverified, so we store null + a note rather than a wrong snapshot. Same blob, no extra
+    # read.
     mix = routing_schemes.capture(safe, blob)
     mix_scheme = mix["scheme"] if mix.get("ok") else None
     matrix_note = "" if mix.get("ok") else mix.get("message", "matrix not readable")
@@ -269,18 +271,18 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             "fader_levels": fader_levels,
             "monitor_level": mon_level,
             "multitrack": first("recordingMultitrackMode"),
-            # The rest of the "what do I end up with" set. Saving the multitrack
-            # MODE without its processing bypass backed up half a decision: a profile taken on
-            # raw pre-fader tracks would come back processed, which is not recoverable after the
-            # take. `usb_multitrack` is the USB destination's own mode (see recorder.py).
+            # The rest of the "what do I end up with" set. The multitrack MODE without its
+            # processing bypass is half a decision: a profile taken on raw pre-fader tracks would
+            # come back processed, which is not recoverable after the take. `usb_multitrack` is
+            # the USB destination's own mode (see recorder.py).
             "processing_bypass": first("recordingProcessingBypass"),
             # And WHAT IT IS WRITTEN AS, for the same reason: a profile that restores what the take
             # contains but not whether it is a WAV or an MP3 has backed up half the decision, and
             # neither half is recoverable once the take exists.
             "recording_format": first("recordingCompressionQuality"),
-            # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). An OLD profile
-            # holds a bare 0-2 in `usb_multitrack` and no `usb_expanded`, which reads correctly as
-            # "that output mode, Standard" - true of every profile saved before Expanded was known.
+            # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). A profile with
+            # a bare 0-2 in `usb_multitrack` and no `usb_expanded` reads as "that output mode,
+            # Standard".
             "usb_multitrack": recorder.split_usb_multitrack(first("outputMultiMode"))[0],
             "usb_expanded": recorder.split_usb_multitrack(first("outputMultiMode"))[1],
             "usb_processing_bypass": first("outputMultiBypass"),
@@ -290,9 +292,10 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             # The master bus's Compellor and output delay, seven keys, built in rcp_read so the
             # page and the backup cannot drift apart.
             **rcp_read.master_processing(blob),
-            # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above).
+            # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above), and
+            # why not when it could not be read (a phone caller).
             "mix_scheme": mix_scheme,
-            "matrix_note": matrix_note,             # set if the matrix could not be read (phone caller)
+            "matrix_note": matrix_note,
         },
         # The unit's own settings (display, button brightness, haptics, REC button, listen mode,
         # fixed output level). Read above, before _snapshot redacts the shared walk.
@@ -345,8 +348,8 @@ def _baseline_of(prof: dict, hardware_id: str, product_id) -> bool:
     """Is `prof` the as-found baseline of the desk with this serial and model?
 
     A baseline saved without a serial matches any desk of its model, a profile with no product id
-    being a Pro II's. Such a baseline was the only one the store could hold, so the desk it came from
-    is the likeliest owner; the cost of a wrong match is one desk not offered its own."""
+    being a Pro II's. Such a baseline was the only one the store could hold, so the desk it came
+    from is the likeliest owner; the cost of a wrong match is one desk not offered its own."""
     if not is_baseline(prof):
         return False
     saved = prof.get(HARDWARE_ID_KEY) or ""

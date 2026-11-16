@@ -191,7 +191,8 @@ class Slider:
 class _Field:
     """What `Choice` and `Number` share. Arrowing either fires a change per step, so the writes go
     through `LatestWins`, which sends only the newest value once the control has been still for
-    `DELAY_MS`; the reply is spoken once it has settled. `guard()` refuses before anything is sent."""
+    `DELAY_MS`; the reply is spoken once it has settled. `guard()` refuses before anything is
+    sent."""
 
     DELAY_MS = 400     # longer than the gap between arrow presses, so arrowing through writes once
 

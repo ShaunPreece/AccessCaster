@@ -3,9 +3,9 @@ or what it does changed, each in a dialog named with the pad (`pad_dialogs`); Vo
 (`pad_fx`); and Pad maintenance (`pad_maint`).
 
 The pads are not part of the window's desk state: they come from a model dump of their own
-(`pad_actions.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on F5,
-after a change made here, and once the desk has pushed a change to a pad (`FollowDesk`). Never on
-show, like every page.
+(`pad_actions.soundpad_model`, about 1.5 s), read once the desk state has first read the desk, on
+F5, after a change made here, and once the desk has pushed a change to a pad (`FollowDesk`). Never
+on show.
 """
 import wx
 

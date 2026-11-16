@@ -3,9 +3,9 @@ taking incoming calls, and the plan.
 
 The state is the CallMe listener's (`callme_actions.watcher`), which hears every change the unit
 pushes. The section reads the whole of it (`callme_actions.read`, one model dump) after each desk
-state read until one succeeds, on F5 and after a fix; while one of its pages is shown it asks the listener
-(`callme_actions.read_live`, no device read) every `POLL_MS`, and redraws only when its `version`
-moves. Every sentence comes from `callme_actions` or `callme`.
+state read until one succeeds, on F5 and after a fix; while one of its pages is shown it asks the
+listener (`callme_actions.read_live`, no device read) every `POLL_MS`, and redraws only when its
+`version` moves. Every sentence comes from `callme_actions` or `callme`.
 
 Whether CallMe 1 is on a fader is the one fact taken from the window's desk state instead
 (`problems`): the listener does not follow the faders, and the desk state does.
@@ -210,8 +210,8 @@ class CallPage(wx.Panel):
         self.answer = add_button(parent, row, "Answer", self._on_answer)
         a11y.describe(self.answer, "Answers the call that is ringing. With nothing ringing, "
                                    "extends a call that is about to end.")
-        # One fixed label: `callme_actions.action_end` decides at the press, so a call that began ringing a moment
-        # ago is declined rather than the guest already on the line being cut off.
+        # One fixed label: `callme_actions.action_end` decides at the press, so a call that began
+        # ringing a moment ago is declined rather than the guest already on the line being cut off.
         self.end = add_button(parent, row, "Decline or hang up", self._on_end)
         a11y.describe(self.end, "Declines the call that is ringing, or else hangs up the call "
                                 "that is up.")

@@ -12,8 +12,8 @@ Arrowing the tree shows each page and leaves the focus in the tree. Selecting a 
 pages shows its first page.
 
 The window belongs to the tray (`tray.TrayApp`), which runs the service. Closing it hides it, and
-the tray shows it again with `present`; only Quit destroys it. With `app_settings_actions.keep_in_tray` off,
-closing asks the tray to quit (`quit_app`).
+the tray shows it again with `present`; only Quit destroys it. With
+`app_settings_actions.keep_in_tray` off, closing asks the tray to quit (`quit_app`).
 """
 import wx
 

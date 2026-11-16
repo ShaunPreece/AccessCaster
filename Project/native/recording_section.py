@@ -1,9 +1,9 @@
 """Recording: the unit's recorder (what to record, and start, pause and stop), the recordings on its
 card or drive, and the card and drive themselves.
 
-The recorder is not in the desk state. The section reads it (`recording.read`, one model
-dump) after each desk state read until one succeeds, on F5, after a job that rewrites the desk, and when the
-desk pushes a recording state the page is not showing (the desk state's "recorder" event): the
+The recorder is not in the desk state. The section reads it (`recording.read`, one model dump)
+after each desk state read until one succeeds, on F5, after a job that rewrites the desk, and when
+the desk pushes a recording state the page is not showing (the desk state's "recorder" event): the
 unit's own REC button, and a card or drive going in or out. A command's reply carries the same
 payload, so a press is shown from its reply without another dump; its buttons follow the push the
 press causes, which arrives first.
