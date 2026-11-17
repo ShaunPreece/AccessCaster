@@ -1698,10 +1698,9 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
     created at padIdx = grid-1, writing pads/<grid>/<real name> (factory convention - see
     safe_dest_filename). The folder is always the grid number, the app's FAT layout (grid pad N ->
     pads/N/), which is also where a tidy keeps the audio of a pad that reports no padFilePath.
-    `dest_filename`
-    (e.g. the original upload name) sets the on-device filename; without it the source basename is
-    used. `replay` True = re-press restarts from the start (factory behaviour); False =
-    pause/resume.
+    `dest_filename` (e.g. the original upload name) sets the on-device filename; without it the
+    source basename is used. `replay` True = re-press restarts from the start (factory behaviour);
+    False = pause/resume.
     """
     return _replace_slot(grid, "sound", lambda: assign_create(
         grid - 1, grid, src_wav, name=name, colour=colour,
