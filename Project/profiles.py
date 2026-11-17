@@ -86,9 +86,8 @@ HARDWARE_ID_KEY = "hardware_id"
 SHOW_KEY = "show"
 
 # ---- the unit's own settings (display, buttons, haptics, listen mode) --------------------------
-# Writable (rcp_transfer.UNIT_SETTING_SEL), and a profile carries them. They are read in ONE pass
-# with snapshot_properties rather than name by name, because there are forty-odd of them.
-# (Name-by-name is safe too: the tree index matches whole names, not substrings.)
+# Writable (rcp_transfer.UNIT_SETTING_SEL), and a profile carries them, each read on the node its
+# write goes to (rcp_transfer.unit_setting).
 #
 # WHY IT IS SAFE TO RESTORE THESE and not, say, an undecoded property: every one has a CONFIRMED
 # selector-plus-name pairing. The restore is still gated on the device's own "unit_settings" cap,
@@ -277,8 +276,8 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             "monitor_auto_mute": output("outputMonAutoMute"),
             "bt_auto_mute": output("outputBTAutoMute"),
             "headphone_types": headphone_types,                # one per addressable output
-            # The master bus's Compellor and output delay, seven keys, built in rcp_read so the
-            # page and the backup cannot drift apart.
+            # The master bus's Compellor and output delay, seven keys, built in master_outputs so
+            # the page and the backup cannot drift apart.
             **master_outputs.master_processing(blob),
             # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above), and
             # why not when it could not be read (a phone caller).
@@ -286,7 +285,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             "matrix_note": matrix_note,
         },
         # The unit's own settings (display, button brightness, haptics, REC button, listen mode,
-        # fixed output level). Read above, before _snapshot redacts the shared walk.
+        # fixed output level).
         UNIT_KEY: unit,
         # wifi is recorded for reference only; it is not re-applied on restore.
         "wifi": {"ssid": rcp_read.keyed_value(blob, rcp_transfer.NETWORK, "wifiSSID") or "",

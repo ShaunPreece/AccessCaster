@@ -34,8 +34,8 @@ import desk_drives  # which drive letter is the desk's own volume
 import devices  # per-device matrix and fader shape
 import diagnostics  # the app's own account of every record it sends
 import model_tree  # the tree grammar, and with it the ONE address format
-import rcp_read  # the attached desk's layout, which every write address is looked up in
 import rcp_hid  # write-generation counter (invalidates cached model reads)
+import rcp_read  # the attached desk's layout, which every write address is looked up in
 import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
 

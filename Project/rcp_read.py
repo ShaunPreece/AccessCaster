@@ -570,7 +570,8 @@ def pin_layout(book):
 
 
 def layout_of(blob: bytes):
-    """The `model_tree.Layout` of a dump. Raises ModelUnreadable if it does not parse."""
+    """The `model_tree.Layout` of a dump, or None for an empty one. Raises ModelUnreadable if it
+    does not parse."""
     return _index(blob).layout
 
 
