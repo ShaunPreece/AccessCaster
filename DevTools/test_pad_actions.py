@@ -158,4 +158,54 @@ for name, call in EDITS:
     check(f"{name} marks the pad map stale", bool(marked), True)
 
 print()
+print("the factory voice-effect restore creates through the safe create (T3-244)")
+safe_calls = []
+
+
+def fake_safe(idx, name, recipe, colour=8, active=True):
+    safe_calls.append((name, active))
+    return {"ok": True, "health": {"clean": True}, "objects_for_pad": 1}
+
+
+with as_device(devices.PRO2), patched(
+        (soundpad, {"safe_assign_fx_recipe": fake_safe,
+                    "assign_create_fx_recipe": lambda *_a, **_k: safe_calls.append("bypass"),
+                    "_position_of": lambda idx: (None, None, None),
+                    "create_mixer": lambda grid, mode: {"created": True},
+                    "pool_health": lambda *_a, **_k: {"clean": True},
+                    "_health_message": lambda health: ""}),
+        (soundpad.time, {"sleep": lambda _s: None})):
+    res = soundpad.restore_factory_fx_pads(live=True)
+check("every factory voice effect goes through the safe create, at rest",
+      sorted(safe_calls), sorted((nm, False) for nm, _grid in soundpad.factory_fx_names()))
+check("and the restore reports success", res["ok"], True)
+
+with as_device(devices.PRO2), patched(
+        (soundpad, {"safe_assign_fx_recipe": lambda *_a, **_k: {
+                        "ok": False, "health": {"clean": False}, "objects_for_pad": 2},
+                    "_position_of": lambda idx: (None, None, None),
+                    "create_mixer": lambda grid, mode: {"created": True},
+                    "pool_health": lambda *_a, **_k: {"clean": False},
+                    "_health_message": lambda health: "Pad pool needs a rebuild."}),
+        (soundpad.time, {"sleep": lambda _s: None})):
+    res = soundpad.restore_factory_fx_pads(live=True)
+check("a create that leaves the pool unclean is a failure", res["ok"], False)
+
+print()
+print("clear_all_pads stops at a pad the desk will not clear (T3-245)")
+cleared_at = []
+with as_device(devices.PRO2), patched(
+        (soundpad, {"pad_positions": lambda blob=None: [(0, 4, soundpad.PAD_TYPE_SOUND, "Applause")],
+                    "clear_pad": lambda pos, debug=False: cleared_at.append(pos),
+                    "clean_pool": lambda *_a, **_k: None,
+                    "pool_health": lambda *_a, **_k: {"clean": True},
+                    "_health_message": lambda health: ""}),
+        (soundpad.time, {"sleep": lambda _s: None})):
+    res = soundpad.clear_all_pads()
+check("one attempt, not 96", cleared_at, [0])
+check("the reply is a failure", res["ok"], False)
+check("nothing is counted as cleared", res["cleared"], 0)
+check_in("and the stuck pad is named", "pad 5, bank 1, Applause, did not clear", res["message"])
+
+print()
 raise SystemExit(_testkit.finish())

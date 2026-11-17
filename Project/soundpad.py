@@ -529,7 +529,7 @@ def _health_message(health: dict) -> str:
         n = len(health["missing"])
         return (f"{count(n, 'voice-effect pad')} {plural(n, 'has', 'have')} no effect to play, so "
                 f"{plural(n, 'it does', 'they do')} nothing. Use \"Restore the factory voice "
-                f"effects, Censor and Ducking\" on the SMART pads page to rebuild.")
+                f"effects, Censor and Ducking\" on the Pad maintenance page to rebuild.")
     return ("One voice-effect pad has a duplicate effect definition that needs a manual rebuild "
             "(clear and recreate that pad). Other pads are unaffected.")
 
@@ -650,6 +650,8 @@ def read_pads_live(min_banks: int = 3, max_banks: int | None = None,
             "gain": (round(info["gain"], 1) if (info and info["gain"] is not None) else None),
             # Filename the pad plays (basename of padFilePath), sound pads only; null elsewhere.
             "file": (os.path.basename(file_paths.get(pidx) or "") or None) if is_sound else None,
+            # The whole padFilePath, which is what locates the file: see pad_volume_path.
+            "file_path": (file_paths.get(pidx) or None) if is_sound else None,
             # which mixer action (0-4), for mixer pads only; lets the UI pre-select the mode.
             "mixer_mode": (mixer_modes.get(pidx) if is_mixer else None),
             # Momentary(0)/Latching(1), mixer pads only.
@@ -934,25 +936,33 @@ def clear_all_pads() -> dict:
     they shift as records drop. Clearing FX pads GCs their region-B objects; a final clean_pool
     mops up any stray orphan, so the pool ends minimal-clean (just the special object). Returns the
     count cleared, the names, and final health. Destructive - the caller must confirm first."""
-    cleared, names = 0, []
+    cleared, names, stuck = 0, [], None
+    positions = pad_positions()
     # Safety bound: 96 comfortably exceeds any device's user-pad count (Pro II 8x7=56, Duo 6x7=42),
     # so the loop always drains the whole grid; it is device-agnostic (it clears whatever it reads).
     for _ in range(96):
-        target = None
-        for pos, pidx, ptype, name in pad_positions():
-            if pidx is not None and ptype != SYSTEM_PAD_TYPE:   # skip System pads
-                target = (pos, name)
-                break
+        target = next(((pos, pidx, name) for pos, pidx, ptype, name in positions
+                       if pidx is not None and ptype != SYSTEM_PAD_TYPE), None)
         if target is None:
             break
         clear_pad(target[0])
-        cleared += 1
-        names.append(target[1])
         time.sleep(0.3)
+        positions = pad_positions()
+        # A clear the desk does not take leaves the pad in place, and clearing it again does no
+        # better, so the loop stops there rather than retrying it to the bound.
+        if any(pidx == target[1] for _pos, pidx, _type, _name in positions):
+            stuck = target
+            break
+        cleared += 1
+        names.append(target[2])
     clean_pool()                                       # mop up any stray orphan left in the pool
     health = pool_health()
     msg = (f"Cleared {count(cleared, 'pad')}." if cleared else "There were no user pads to clear.")
-    return {"ok": health["clean"], "cleared": cleared, "names": names,
+    if stuck is not None:
+        msg = (f"Cleared {count(cleared, 'pad')}, but {pad_place(stuck[1] + 1)}"
+               f"{f', {stuck[2]},' if stuck[2] else ''} did not clear, so the pads after it were "
+               f"left as they are.")
+    return {"ok": health["clean"] and stuck is None, "cleared": cleared, "names": names,
             "message": msg + " " + _health_message(health), "health": health}
 
 
@@ -1652,6 +1662,9 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
                           f"wrote {os.path.basename(src_wav)} -> pads/{folder}/{on_device} "
                           "(mid-sequence)")
 
+    # The audio every OTHER pad plays, read before the session: the tidy below must not delete a
+    # file another pad points at from inside this pad's folder.
+    in_use = pad_audio_in_use(p for p in pad_nodes(rr.read_model()) if p.idx != target_idx)
     with _transfer_mode(1.0):
         t.remount_pad_storage()
         root = t.find_pad_volume(empty_ok=True)
@@ -1663,7 +1676,7 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
         # Remove the audio this pad USED to play, before the session closes. Free, because the
         # volume is already mounted and we know exactly which file to keep: the one just written.
         # `post` has already written padFilePath, so the pad is pointing at the keeper by now.
-        stale = tidy_pad_folder(root, folder, on_device)
+        stale = tidy_pad_folder(root, folder, on_device, in_use)
         if stale:
             diagnostics.event("pad.create",
                               f"removed the previous audio for pad {folder}: {', '.join(stale)}")
@@ -1684,7 +1697,8 @@ def create_sound(grid: int, src_wav: str, name="Sound", colour=5,
     If the grid pad is already occupied it is cleared first (app-style), then a fresh sound pad is
     created at padIdx = grid-1, writing pads/<grid>/<real name> (factory convention - see
     safe_dest_filename). The folder is always the grid number, the app's FAT layout (grid pad N ->
-    pads/N/), because the audio tidy keeps only what is in a pad's own folder. `dest_filename`
+    pads/N/), which is also where a tidy keeps the audio of a pad that reports no padFilePath.
+    `dest_filename`
     (e.g. the original upload name) sets the on-device filename; without it the source basename is
     used. `replay` True = re-press restarts from the start (factory behaviour); False =
     pause/resume.
@@ -2080,18 +2094,15 @@ def restore_one(pad_name: str, live: bool):
         diagnostics.event("pad.restore_fx",
                           "[dry-run] would clear (if present) then create the factory recipe")
         return
-    if pos is not None:
-        diagnostics.event("pad.restore_fx", "clearing existing pad...")
-        diagnostics.event("pad.restore_fx", str(clear_slot(pos, ptype)))
-        time.sleep(1.2)
-    diagnostics.event("pad.restore_fx", "creating factory recipe...")
-    # active=False IS LOAD-BEARING: assign_create_fx_recipe defaults to active=True (for the live
-    # preview), which ENGAGES the effect on the live mic the moment the pad is made. A restored
-    # factory pad must be AT REST. In a run of restores each clear switches the previous pad off,
-    # so only the last one would stay latched, and nothing on the grid shows it.
-    diagnostics.event("pad.restore_fx",
-                      str(assign_create_fx_recipe(padidx, pad_name, recipe, colour=colour,
-                                                  active=False)))
+    diagnostics.event("pad.restore_fx", "clearing the slot and creating the factory recipe...")
+    # active=False IS LOAD-BEARING: the create defaults to active=True (for the live preview),
+    # which ENGAGES the effect on the live mic the moment the pad is made. A restored factory pad
+    # must be AT REST. In a run of restores each clear switches the previous pad off, so only the
+    # last one would stay latched, and nothing on the grid shows it.
+    res = safe_assign_fx_recipe(padidx, pad_name, recipe, colour=colour, active=False)
+    diagnostics.event("pad.restore_fx", f"objects for the pad: {res['objects_for_pad']}")
+    if not res["ok"]:
+        raise RuntimeError(_health_message(res["health"]))
     time.sleep(1.0)
 
 
@@ -2252,7 +2263,7 @@ def heal_fx_pool(progress=None) -> dict:
         bits.append("Could not rebuild "
                     + ", ".join(f"{u['name'] or 'the pad'} (pad {u['grid']})" for u in unrecognised)
                     + ": the name matches no voice effect this app knows, so there is nothing to "
-                      "rebuild it from. Assign an effect to it on the SMART pads page.")
+                      "rebuild it from. Assign an effect to it on the Pads page.")
     if failed:
         bits.append("Failed to rebuild "
                     + "; ".join(f"{f['name']} (pad {f['grid']}): {f['error']}" for f in failed))
@@ -2397,7 +2408,7 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
         root = t.find_pad_volume()
         if root is None:
             return {"ok": False, "message": f"{t.pad_volume_problem()} Nothing was exported."}
-        src = _pad_audio_source(root, int(grid), wanted)
+        src = _pad_audio_source(root, int(grid), pad.get("file_path"))
         if src is None:
             return {"ok": False,
                     "message": f"{place} says it plays {wanted or 'a file'}, but that file is "
@@ -2415,16 +2426,46 @@ def export_pad_audio(grid: int, dest_dir: str) -> dict:
                             f"The pad on the desk is unchanged.")}
 
 
-def _pad_audio_source(root: str, grid: int, wanted: str | None):
-    """Path on the mounted volume of the file grid pad `grid` plays, or None. `wanted` is the
-    desk's own answer (padFilePath's basename); the first file in the pad's folder is the fallback
-    only for a pad whose padFilePath the model does not report."""
+def pad_volume_path(file_path) -> str | None:
+    """A padFilePath as a path relative to the mounted pad volume ("pads/1/Music_Bed.wav"), or None
+    when it is empty or lies outside the volume."""
+    text = str(file_path or "")
+    if not text.startswith(pr.PAD_VOLUME_ROOT):
+        return None
+    return text[len(pr.PAD_VOLUME_ROOT):].strip("/") or None
+
+
+def _on_volume(root: str, rel: str) -> str:
+    return os.path.join(root, *rel.split("/"))
+
+
+def pad_audio_in_use(pads) -> tuple[set, set]:
+    """What the sound pads among `pads` (Pad records) play: (the volume-relative paths, lower-cased
+    because the volume is FAT, and the grid numbers of sound pads whose file cannot be located,
+    no padFilePath or one outside the volume). A tidy keeps every file in such a pad's grid
+    folder, the one the app's own creates write to."""
+    paths, open_grids = set(), set()
+    for p in pads:
+        if p.idx is None or p.type != PAD_TYPE_SOUND:
+            continue
+        rel = pad_volume_path(p.props.get("padFilePath"))
+        if rel is None:
+            open_grids.add(p.idx + 1)
+        else:
+            paths.add(rel.lower())
+    return paths, open_grids
+
+
+def _pad_audio_source(root: str, grid: int, file_path: str | None):
+    """Path on the mounted volume of the file grid pad `grid` plays, or None. `file_path` is the
+    desk's own answer (padFilePath). Only a pad that reports no padFilePath falls back to the first
+    file in its grid folder; a named file that is missing, or lies outside the volume, is None."""
+    if file_path:
+        rel = pad_volume_path(file_path)
+        cand = _on_volume(root, rel) if rel else None
+        return cand if cand and os.path.isfile(cand) else None
     folder = os.path.join(root, "pads", str(grid))
-    if wanted:
-        cand = os.path.join(folder, wanted)
-        if os.path.isfile(cand):
-            return cand
-    srcs = [s for s in glob.glob(os.path.join(folder, "*")) if os.path.isfile(s)]
+    srcs = sorted(s for s in glob.glob(os.path.join(folder, "*")) if os.path.isfile(s))
     return srcs[0] if srcs else None
 
 
@@ -2508,7 +2549,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
             # What the desk says this pad plays, used below to copy the RIGHT file out of a folder
             # that may hold leftovers. Popped before the entry is saved: "file" is the profile's
             # record, and two keys naming the same thing would be one to drift.
-            "live_file": p.get("file"),
+            "live_path": p.get("file_path"),
         }
         if p["type"] == PAD_TYPE_VOICE_FX:            # voice FX: match the pad name to a known
             key = _safe_match_recipe(p["name"])       # recipe (factory OR a saved custom preset)
@@ -2540,7 +2581,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
                 # quiet_drive_errors: if a read fails, the caller reports it in the progress dialog,
                 # so Windows must not ALSO throw its own modal "problem with this drive" box.
                 with t.quiet_drive_errors():
-                    src = _pad_audio_source(root, e["grid"], e.get("live_file"))
+                    src = _pad_audio_source(root, e["grid"], e.get("live_path"))
                     if src is None:
                         continue
                     fn = os.path.basename(src)
@@ -2555,7 +2596,7 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
                 e["file"] = fn
                 copied += 1
     for e in pads:
-        e.pop("live_file", None)          # working field only; never goes in the profile
+        e.pop("live_path", None)          # working field only; never goes in the profile
     return {"pads": pads, "files_copied": copied, "unrecognised": unrecognised}
 
 
@@ -2572,8 +2613,9 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
 # calls and voicemails, so the owner has to know where that audio ends up, and a hidden copy of it
 # on the computer is the wrong answer. Overwriting a pad means the old sound is no longer wanted.
 #
-# WHAT IS AUTHORITATIVE: a live pad's padFilePath (read_pads_live's "file"). Never the directory
-# listing - a folder can hold several files and only the desk knows which one is played.
+# WHAT IS AUTHORITATIVE: each live pad's whole padFilePath (pad_audio_in_use). Never the directory
+# listing - a folder can hold several files and only the desk knows which one is played - and never
+# the grid number alone, since a pad can play a file outside its own grid's folder.
 
 def _pad_audio_dirs(root: str):
     """Every pads/<n>/ folder on the mounted volume. Confined to root/pads by construction: this is
@@ -2582,10 +2624,21 @@ def _pad_audio_dirs(root: str):
     return [d for d in glob.glob(os.path.join(base, "*")) if os.path.isdir(d)]
 
 
-def tidy_pad_folder(root: str, grid: int, keep: str) -> list:
-    """Delete everything in pads/<grid>/ EXCEPT the file named `keep`. For use INSIDE an existing
-    transfer-mode session, which is why it costs a pad assignment nothing: no extra mount, no model
-    read, and the caller already knows the filename it just wrote. Returns the names removed.
+def _in_use(root: str, f: str, in_use: tuple) -> bool:
+    """Whether file `f` on the mounted volume is one a pad plays, by `pad_audio_in_use`'s answer."""
+    paths, open_grids = in_use
+    rel = os.path.relpath(f, root).replace(os.sep, "/")
+    parts = rel.split("/")
+    in_open_folder = (len(parts) == 3 and parts[0] == "pads" and parts[1].isdigit()
+                      and int(parts[1]) in open_grids)
+    return rel.lower() in paths or in_open_folder
+
+
+def tidy_pad_folder(root: str, grid: int, keep: str, in_use: tuple) -> list:
+    """Delete everything in pads/<grid>/ EXCEPT the file named `keep` and any file another pad
+    plays (`in_use`, from `pad_audio_in_use` over the other pads). For use INSIDE an existing
+    transfer-mode session, which is why it costs a pad assignment no extra mount. Returns the names
+    removed.
 
     A FACTORY SOUND IS DELETED LIKE ANY OTHER and that is deliberate: the desk keeps its own copy
     and a software factory reset restores all eight, so the file here is not the only copy and
@@ -2595,7 +2648,7 @@ def tidy_pad_folder(root: str, grid: int, keep: str) -> list:
         return removed                       # without a keeper we cannot safely delete anything
     folder = os.path.join(root, "pads", str(grid))
     for f in glob.glob(os.path.join(folder, "*")):
-        if not os.path.isfile(f) or os.path.basename(f) == keep:
+        if not os.path.isfile(f) or os.path.basename(f) == keep or _in_use(root, f, in_use):
             continue
         try:
             os.remove(f)
@@ -2615,9 +2668,8 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
     at all, that is EITHER a desk with an empty grid (where deleting all the audio is right) or a
     read that went wrong (where it would be a disaster). Callers that know the grid is meant to be
     empty - clear-all-pads - pass True; everything else refuses and says so."""
-    live = read_pads_live()["pads"]
-    keep = {(p["grid"], p["file"]) for p in live if p.get("file")}
-    if not keep and not allow_empty:
+    in_use = pad_audio_in_use(pad_nodes(rr.read_model_stable(fresh=True)))
+    if not any(in_use) and not allow_empty:
         return {"ok": False, "removed": [], "bytes_freed": 0, "kept": 0,
                 "message": "No pad reported a sound file, so nothing was deleted. That is either an "
                            "empty pad grid or a failed read, and the two are indistinguishable from "
@@ -2633,11 +2685,10 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
                     "message": f"{t.pad_volume_problem()} Nothing was deleted."}
         for d in _pad_audio_dirs(root):
             folder = os.path.basename(d)
-            grid = int(folder) if folder.isdigit() else None
             for f in sorted(glob.glob(os.path.join(d, "*"))):
                 if not os.path.isfile(f):
                     continue
-                if grid is not None and (grid, os.path.basename(f)) in keep:
+                if _in_use(root, f, in_use):
                     kept += 1
                     continue
                 try:
@@ -2753,23 +2804,23 @@ def _pad_metadata_matches(saved: dict, live: dict) -> bool:
 
 
 def _pad_audio_matches(root: str, grid: int, saved_file: str, local_path: str,
-                       live_file: str | None = None) -> bool:
+                       live_path: str | None = None) -> bool:
     """True when the sound this pad PLAYS is byte-for-byte the backup's copy.
 
-    live_file is the filename the desk reports for the pad (padFilePath). It is what makes this
-    safe in a folder holding leftovers from earlier replacements: what matters is the file the pad
-    points AT, not what else happens to sit beside it. Given no live_file we fall back to requiring
-    exactly one file in the folder, since then we cannot tell which one is played.
+    live_path is the desk's padFilePath for the pad. It is what makes this safe in a folder holding
+    leftovers from earlier replacements: what matters is the file the pad points AT, not what else
+    happens to sit beside it. Given no live_path we fall back to requiring exactly one file in the
+    grid folder, since then we cannot tell which one is played.
 
     Name, then size, then a full content hash. The hash is the only one that actually proves it, and
     reading a couple of megabytes off the mounted volume costs a fraction of one pad rebuild."""
     if not saved_file or not os.path.isfile(local_path):
         return False
-    if live_file:
-        if live_file != saved_file:
+    if live_path:
+        if os.path.basename(live_path) != saved_file:
             return False                      # the pad plays something else entirely
-        on_unit_path = os.path.join(root, "pads", str(grid), live_file)
-        if not os.path.isfile(on_unit_path):
+        on_unit_path = _pad_audio_source(root, grid, live_path)
+        if on_unit_path is None:
             return False
     else:
         on_unit = [f for f in glob.glob(os.path.join(root, "pads", str(grid), "*"))
@@ -2882,9 +2933,9 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
                 else:
                     for e in sound:
                         local = os.path.join(src_dir, str(e["grid"]), e.get("file") or "")
-                        live_name = (live_by_grid.get(e["grid"]) or {}).get("file")
+                        live_path = (live_by_grid.get(e["grid"]) or {}).get("file_path")
                         if _pad_audio_matches(root, e["grid"], e.get("file"), local,
-                                              live_file=live_name):
+                                              live_path=live_path):
                             unchanged.add(e["grid"])
         # WHY PADS ARE BEING REBUILT, in one line, because "it still finds pads to restore" is
         # otherwise unanswerable from outside.
@@ -3069,23 +3120,27 @@ def clear_pads_not_in(pads: list, progress=None) -> dict:
     clear only completes when the desk leaves transfer mode, so each one needs its own.
 
     A factory reset refills the factory pads, so after a clean restore a slot the profile saved
-    EMPTY holds a factory pad unless it is cleared here. Returns {ok, cleared, failed}."""
+    EMPTY holds a factory pad unless it is cleared here. Returns {ok, cleared, failed, reasons}:
+    grid numbers, and {grid: why} for each failed one."""
     spec = active_pad_spec()
     keep = {e.get("grid") for e in pads}
     user_range = spec.user_banks * spec.pads_per_bank
     extra = sorted(pidx for _pos, pidx, ptype, _name in pad_positions()
                    if pidx is not None and pidx < user_range and ptype != SYSTEM_PAD_TYPE
                    and pidx + 1 not in keep)
-    cleared, failed = [], []
+    cleared, failed, reasons = [], [], {}
     for n, pidx in enumerate(extra, 1):
         if progress:
             progress(f"Clearing pad {pidx + 1}, which the profile has empty ({n} of {len(extra)}).")
         try:
             clear_grid_pad(pidx + 1)
             cleared.append(pidx + 1)
-        except Exception:
+        except Exception as exc:
             failed.append(pidx + 1)
-    return {"ok": not failed, "cleared": cleared, "failed": failed}
+            reasons[pidx + 1] = str(exc)
+            diagnostics.event("pad.clear_failed", "a pad the profile has empty", grid=pidx + 1,
+                              error=str(exc))
+    return {"ok": not failed, "cleared": cleared, "failed": failed, "reasons": reasons}
 
 
 # ----------------------------------------------------------------------------------------------

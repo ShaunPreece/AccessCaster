@@ -124,7 +124,7 @@ def refresh_pads() -> dict:
 # that refuses and the read-out that describes it must not disagree about what is wrong or what to
 # do about it.
 _FX_EMPTY = ("{name} has no effect behind it, so it would change nothing. Use Restore the "
-             "factory voice effects on the SMART pads page to rebuild it.")
+             "factory voice effects on the Pad maintenance page to rebuild it.")
 
 
 def _pad_entry(pad_idx: int):

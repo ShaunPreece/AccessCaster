@@ -1394,6 +1394,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`tidy_unused_pad_audio` REFUSES to run when the live read reports no pad files at all** unless
   the caller passes `allow_empty`. "Empty grid" and "failed read" are indistinguishable from there,
   and one of them would wipe every sound.
+- **A pad's audio is found by its whole `padFilePath`, never by its grid folder.** The app's own
+  creates write to `pads/<grid>/`, but a pad can name a file anywhere on the volume, and both
+  tidies delete what they do not keep. `soundpad.pad_volume_path` and `pad_audio_in_use` are the
+  one route, for the tidies, export, backup and the restore's match check; a sound pad with no
+  `padFilePath` keeps its whole grid folder. `DevTools/test_profiles.py` pins it.
 - **`clear_pad` is HID-only ON PURPOSE** (no `remountPadStorage`, no file writes, hence no drive
   toast). It leaves the wav behind; the sweep or the manual button collects it.
 - **Every pad write enters transfer mode through `soundpad._transfer_mode`**, whose `finally` always

@@ -128,4 +128,10 @@ if got:
 new = {"routing": {"faders": SWAPPED, "fader_levels": ALL_UP}, "pads": []}
 check("a profile carrying its own levels does NOT", len(run_restore(new)), 0)
 
+print("a pad the restore could not clear is reported with its reason (T3-247)")
+words = profile_actions._pad_restore_words(
+    {"results": []}, {"cleared": [], "failed": [9],
+                                 "reasons": {9: "the desk did not answer"}}, None)
+check("the reason reaches the reply", "pad 9, the desk did not answer" in words, True)
+
 sys.exit(_testkit.finish())

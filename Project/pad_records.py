@@ -36,7 +36,10 @@ from rcp_transfer import (PADEFFECTS, SOUNDPADS, _frame, address_of, build_recor
 PAD_BLOCK = SOUNDPADS
 FX_BLOCK = PADEFFECTS
 
-PAD_FILE_PATH_FMT = "/Application/emmc-data/pads/{n}/{name}"
+# Where the pad volume the app mounts sits in the desk's own filesystem: a padFilePath under it is
+# the same path relative to the mounted volume.
+PAD_VOLUME_ROOT = "/Application/emmc-data/"
+PAD_FILE_PATH_FMT = PAD_VOLUME_ROOT + "pads/{n}/{name}"
 
 
 

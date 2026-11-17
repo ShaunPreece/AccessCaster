@@ -263,11 +263,6 @@ def fader_model() -> dict:
     """Static layout the Fader assignment UI renders: the connected device's faders + the
     channels that can be placed on them (device-aware, see devices.FaderSpec)."""
     spec = active_faders()
-    if spec.physical < spec.count:
-        phys_note = (f" Faders 1 to {spec.physical} are the physical faders; the rest are "
-                     f"virtual faders.")
-    else:
-        phys_note = ""
     return {
         "faders": [{"index": i, "label": fader_label(i, spec), "physical": i < spec.physical}
                    for i in range(spec.count)],
@@ -286,12 +281,6 @@ def fader_model() -> dict:
                         "one fader controls the pair. Only inputs next to each other can link. The "
                         "fader the second input leaves becomes empty, and unlinking gives that input "
                         "its fader and its processing back."),
-        # NEVER WRITE A FADER ON `change`. A closed select fires on EVERY arrow press, and arrowing
-        # a closed select is how a screen-reader user reads one, so writing on change means simply
-        # browsing the list performs the swap. Each fader applies on Enter.
-        "note": ("Choose which channel sits on each fader." + phys_note + " Putting a channel "
-                 "on a fader that already holds it elsewhere swaps the two. Nothing is sent to the "
-                 "desk until you press Enter."),
     }
 
 
@@ -454,6 +443,14 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             new = read_fader_vector(spec=spec)
             if chains_before is not None:
                 chain_note = follow_chains(vec, new, chains_before)
+            if on and int(pair_code) not in new:
+                return {"ok": False, "faders": new,
+                        "labels": [channel_name(c, spec) for c in new],
+                        "stereo": stereo_link_state(new, spec),
+                        "message": " ".join(filter(None, [
+                            f"The desk did not take the link for {label}.",
+                            _where_now(lower, new, spec), _where_now(upper, new, spec),
+                            chain_note]))}
             if on:
                 pair_muted = lower_muted or upper_muted
                 _settle_mutes(new, {int(pair_code): pair_muted})
@@ -492,6 +489,13 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
     msg += mute_note
     return {"ok": True, "faders": new, "labels": [channel_name(c, spec) for c in new],
             "stereo": stereo_link_state(new, spec), "message": msg}
+
+
+def _where_now(code: int, vec, spec) -> str:
+    """Which fader `code` sits on in `vec`, as a sentence."""
+    if code in vec:
+        return f"{channel_name(code, spec)} is on {fader_label(vec.index(code), spec)}."
+    return f"{channel_name(code, spec)} is off-fader."
 
 
 def _tidy_fader_target(vec, fader_index, code, order):

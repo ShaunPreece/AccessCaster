@@ -354,6 +354,9 @@ check("an unrecognised effect (no recipe) means rebuild",
       f(dict(SAVED_FX, fx_recipe=None, fx_stack=None), FX_PAD, [FX_OBJ], True), False)
 check("no live pad means rebuild", f(SAVED_FX, None, [FX_OBJ], True), False)
 
+VOL = soundpad.pr.PAD_VOLUME_ROOT
+NOTHING_ELSE = (set(), set())     # no other pad plays anything
+
 print("\nPAD VERIFY: audio comparison (name, then size, then a full content hash)")
 vtmp = tempfile.mkdtemp(prefix="ac_pad_verify_")
 try:
@@ -384,19 +387,19 @@ try:
     check("a grid with no file on the desk is caught",
           a(str(root), 7, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
     # Leftovers. A pad folder can hold a file from an earlier replacement. Which file the pad PLAYS
-    # is what matters, and only the desk can say - padFilePath, passed in as live_file.
+    # is what matters, and only the desk can say - padFilePath, passed in as live_path.
     (root / "pads" / "5" / "leftover.wav").write_bytes(b"RIFF" + b"\t" * 64)
     check("with no word from the desk, two files in a folder is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav")), False)
     check_true("but told which file the pad plays, a leftover beside it is irrelevant",
                a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav"),
-                 live_file="airhorn.wav"))
+                 live_path=VOL + "pads/5/airhorn.wav"))
     check("a pad that plays the leftover instead is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav"),
-            live_file="leftover.wav"), False)
+            live_path=VOL + "pads/5/leftover.wav"), False)
     check("a pad playing a file that is not there at all is caught",
           a(str(root), 5, "airhorn.wav", str(backup / "5" / "airhorn.wav"),
-            live_file="vanished.wav"), False)
+            live_path=VOL + "pads/5/vanished.wav"), False)
 finally:
     shutil.rmtree(vtmp, ignore_errors=True)
 
@@ -413,7 +416,7 @@ try:
     # Something OUTSIDE pads/ that must never be considered, whatever else happens.
     (root / "important.wav").write_bytes(b"D" * 10)
 
-    removed = soundpad.tidy_pad_folder(str(root), 1, "Music_Bed.wav")
+    removed = soundpad.tidy_pad_folder(str(root), 1, "Music_Bed.wav", NOTHING_ELSE)
     check("the pad's own audio survives",
           (root / "pads" / "1" / "Music_Bed.wav").is_file(), True)
     check("the file it replaced is gone", (root / "pads" / "1" / "Stray.wav").is_file(), False)
@@ -425,12 +428,53 @@ try:
     # No keeper means no deletions: without knowing what to keep it could delete the live sound.
     (root / "pads" / "1" / "Stray.wav").write_bytes(b"B" * 50)
     check("with no keeper named, nothing is deleted at all",
-          soundpad.tidy_pad_folder(str(root), 1, ""), [])
+          soundpad.tidy_pad_folder(str(root), 1, "", NOTHING_ELSE), [])
     check("so both files are still there",
           sorted(f.name for f in (root / "pads" / "1").iterdir()),
           ["Music_Bed.wav", "Stray.wav"])
     check("only pads/ folders are ever listed",
           sorted(os.path.basename(d) for d in soundpad._pad_audio_dirs(str(root))), ["1", "17"])
+finally:
+    shutil.rmtree(ttmp, ignore_errors=True)
+
+
+print("\nTIDY PAD AUDIO: a pad's file is found by its whole padFilePath (T3-243)")
+ttmp = tempfile.mkdtemp(prefix="ac_tidy_path_")
+try:
+    root = Path(ttmp)
+    for folder, name in (("3", "X.wav"), ("3", "Old.wav"), ("7", "Kept.wav"), ("9", "Gone.wav")):
+        (root / "pads" / folder).mkdir(parents=True, exist_ok=True)
+        (root / "pads" / folder / name).write_bytes(b"A" * 10)
+    # Grid 5 plays a file in grid 3's folder; grid 7 is a sound pad that reports no padFilePath.
+    pads = [soundpad.Pad(0, 4, soundpad.PAD_TYPE_SOUND, "Elsewhere",
+                         {"padFilePath": VOL + "pads/3/X.wav"}),
+            soundpad.Pad(1, 6, soundpad.PAD_TYPE_SOUND, "Unknown", {})]
+    in_use = soundpad.pad_audio_in_use(pads)
+    check("the in-use set holds the whole path and the folder it cannot locate",
+          in_use, ({"pads/3/x.wav"}, {7}))
+    check("a sound created on grid 3 keeps the file grid 5 plays",
+          soundpad.tidy_pad_folder(str(root), 3, "New.wav", in_use), ["Old.wav"])
+    check("so pads/3/X.wav is still there", (root / "pads" / "3" / "X.wav").is_file(), True)
+
+    @contextlib.contextmanager
+    def no_transfer(_settle):
+        yield
+
+    with patched((soundpad, {"pad_nodes": lambda blob=None: pads, "_transfer_mode": no_transfer}),
+                 (soundpad.rr, {"read_model_stable": lambda **_k: b""}),
+                 (soundpad.t, {"remount_pad_storage": lambda: None,
+                               "find_pad_volume": lambda **_k: str(root),
+                               "flush_volume": lambda _root: None})):
+        res = soundpad.tidy_unused_pad_audio()
+    check("the sweep keeps both pads' audio",
+          [(root / "pads" / f / n).is_file() for f, n in (("3", "X.wav"), ("7", "Kept.wav"))],
+          [True, True])
+    check("and removes only the file nothing plays", res["removed"], ["pads/9/Gone.wav"])
+    check("export reads the file the pad names, wherever it is",
+          soundpad._pad_audio_source(str(root), 5, VOL + "pads/3/X.wav"),
+          str(root / "pads" / "3" / "X.wav"))
+    check("and finds nothing rather than another file when the named one is missing",
+          soundpad._pad_audio_source(str(root), 7, VOL + "pads/7/Missing.wav"), None)
 finally:
     shutil.rmtree(ttmp, ignore_errors=True)
 

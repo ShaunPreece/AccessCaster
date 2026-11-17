@@ -28,8 +28,8 @@
 ; install is read-only to a standard user and nothing minds. The bundled files (the help, the icon
 ; and the two JSON files) are only ever read, and every write goes through paths.data_path.
 ;
-; Compile with the installed Inno Setup 6:
-;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss
+; Build it with ProjectBuilds\build_installer.ps1, which freezes the app, writes the release notes
+; and passes the version.
 
 #define AppName "AccessCaster"
 #define AppExe "AccessCaster.exe"
@@ -40,10 +40,9 @@
 ; The braces are added at each use site, because Inno's [Setup] parser needs them doubled and the
 ; Pascal string does not.
 #define AppIdGuid "A1C7E2F4-3B9D-4E6A-8C21-5F0D9B7E14A2"
-; App version. build_installer.ps1 passes the real value from Project\version.py via
-; ISCC /DAppVer=<version>. The fallback below is only used for a manual ISCC compile.
+; App version, passed by build_installer.ps1 from Project\version.py as ISCC /DAppVer=<version>.
 #ifndef AppVer
-  #define AppVer "0.0"
+  #error AppVer is not defined: build with ProjectBuilds\build_installer.ps1
 #endif
 
 [Setup]

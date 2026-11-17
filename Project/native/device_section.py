@@ -100,7 +100,7 @@ def overview_lines(d):
     for pad in d.get("pads_engaged") or []:
         lines.append(f"Pad {pad['grid']}, {pad['name']}, is switched on and processing a live "
                      "channel. Press that pad on the desk to switch it off, or clear it from the "
-                     "SMART pads page.")
+                     "Pads page.")
     if d.get("recording"):
         lines.append("A recording is PAUSED. The Recording section carries on or stops it."
                      if d["recording"].get("state") == recorder.PAUSED else

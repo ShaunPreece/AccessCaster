@@ -32,8 +32,10 @@ import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
 import channels
 import device_page
+import devices
 import faders
 import rcp_read
+import rcp_transfer
 from _testkit import check, check_in, patched
 
 
@@ -178,6 +180,21 @@ check("a pair muted while linked mutes both",
       {MIC3: True, MIC4: True})
 check("a link made outside the app hands the pair's mute to both",
       faders._unlink_mutes(None, True, MIC3, MIC4), {MIC3: True, MIC4: True})
+
+print()
+print("action_set_stereo_link: a desk that does not take the link (T3-250)")
+# The desk ignores every source write, so the read-back layout never carries the pair code.
+with _testkit.as_device(devices.PRO2), patched(
+        (faders, {"_stereo_link_gate": lambda: None, "chain_follow_on": lambda: False,
+                  "read_fader_vector": lambda blob=None, spec=None:
+                      list(devices.PRO2.fader.default_vector)}),
+        (rcp_read, {"read_model": lambda *a, **k: b"",
+                    "strip_values": lambda blob, name: [False] * 9}),
+        (rcp_transfer, {"set_fader_source": lambda i, code: None})):
+    res = faders.action_set_stereo_link(4, True)
+check("the reply is a refusal, not an exception", res["ok"], False)
+check_in("and it says the desk did not take the link", "did not take the link", res["message"])
+check_in("and where Mic 1 is now", "Mic 1 is on", res["message"])
 
 print()
 raise SystemExit(_testkit.finish())

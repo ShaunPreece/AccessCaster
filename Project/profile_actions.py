@@ -334,8 +334,11 @@ def _pad_restore_words(pad_res: dict, extra: dict | None, tidy: dict | None) -> 
         msg += (f" Cleared {wording.plural(len(extra['cleared']), 'pad')} "
                 f"{wording.join_and(map(str, extra['cleared']))}, empty in the profile.")
     if extra and extra["failed"]:
+        reasons = extra.get("reasons") or {}
         msg += (f" Could not clear {wording.plural(len(extra['failed']), 'pad')} "
-                f"{wording.join_and(map(str, extra['failed']))}, which the profile has empty.")
+                f"{wording.join_and(map(str, extra['failed']))}, which the profile has empty: "
+                + "; ".join(f"pad {g}, {reasons.get(g) or 'no reason given'}"
+                            for g in extra["failed"]) + ".")
     if tidy and tidy.get("removed"):
         msg += " " + tidy["message"]
     return msg
