@@ -244,9 +244,8 @@ CROSS_POINT_OUTPUT_STRIDE = 1  # output is the fast axis
 CROSS_POINT_SOURCE_STRIDE = 13 # source is the slow axis (13 destinations)
 
 # Output index (the matrix column). 0-10 are confirmed on a Pro II. 11/12 are INFERRED to
-# be the CallMe 2/3 outputs (the desk has 3 call slots; the app only shows CallMe 1 until more
-# callers connect, so they were never captured), which is why `_check_cross_point` refuses them
-# unless the caller opts in.
+# be the CallMe 2/3 outputs (the desk has 3 call slots) and unconfirmed, which is why
+# `_check_cross_point` refuses them unless the caller opts in.
 CROSS_POINT_OUTPUT_INDEX = {
     "Headphone1": 0, "Headphone2": 1, "Headphone3": 2, "Headphone4": 3,
     "Monitor": 4, "REC": 5, "Bluetooth": 6, "USB1": 7,
@@ -532,8 +531,9 @@ def set_headphone_type(value: int, output: int = 0) -> int:
 # read back and restore, with the model unchanged in length and occurrence counts. Several have no
 # control in the RODE app at all, which never makes a setting unwritable.
 
-# prop -> (block key, kind). `kind` picks the value block. Values are NOT range-checked here; the
-# caller owns the value domain (it is UI copy as much as protocol) and this table is just the address.
+# prop -> (block key, kind). `kind` picks the value block. Values are NOT range-checked here beyond
+# clamping a float to 0..1; the caller owns the value domain (it is UI copy as much as protocol) and
+# this table is just the address.
 UNIT_SETTING_SEL = {
     # OUTPUT block - captured
     "outputPrefader": (OUTPUT, "bool"),          # False = After-fader Listen

@@ -1,15 +1,14 @@
-"""The control announcer: speaks the desk's own button presses aloud (an accessibility aid).
+"""The control announcer: speaks what happens on the desk aloud (an accessibility aid).
 
-A background thread follows what the desk pushes (`desk_live`) and speaks bank changes / mute /
-solo / encoder presses through `speech`, so a screen-reader user knows what a physical press did
-without seeing the touchscreen.
+A background thread follows what the desk pushes (`desk_live`) and speaks it through `speech`:
+bank changes, mutes and solos by channel, what the encoder is on and the levels it moves, the
+headphone knobs, and any other change `change_words` can word, so a screen-reader user knows what
+a physical press did without seeing the touchscreen.
 
-DEVICE-AGNOSTIC: the decoder keys off the report-04 PROPERTY NAMES
-(selectedBank / cmutePressed / csoloPressed / encoderPressed), which are protocol-level and shared
-across both desks, NOT a Pro II physical control-map or channel-index table. It speaks generic
-"Bank N" / "Mute" / "Solo" / "Select" (no per-channel index), so the Duo's fewer faders/banks need
-no special-casing. It is also strictly READ-ONLY, so even if a name ever differs on a future desk
-the worst case is a missed announcement, never a mis-write.
+The decoder keys off the report-04 PROPERTY NAMES (selectedBank, mutePressed, channelOutputMute,
+encoderPressed and the rest), which both desks share, and takes each desk's shape (the encoder
+ring, the channel names) from `devices`. It is strictly READ-ONLY, so a name that differs on a
+future desk costs a missed announcement, never a mis-write.
 
 Switching announcements on subscribes to the listener and switching them off unsubscribes; the
 listener itself, and the reconnect after a re-enumeration, belong to `desk_live`.
@@ -846,7 +845,7 @@ def announce_mute(strip_idx: int, on: bool) -> None:
 def mark_self_solo(strip_idx: int) -> None:
     """Mark a solo WE wrote, so a future firmware that echoes it does not get it spoken twice.
 
-    Measured: this desk pushes NOTHING back for a software solo, so the mark is a no-op on it. It is
+    This desk pushes NOTHING back for a software solo, so the mark is a no-op on it. It is
     here anyway because the announcer's solo branch speaks every channelCueEnable push it sees, so a
     firmware that starts echoing would have a channel announcing its own solo on top of the UI."""
     mark_self_write(("solo", int(strip_idx)))

@@ -623,8 +623,9 @@ class Watcher:
             return json.loads(json.dumps(dict(d, version=self.version)))
 
     def quiet_connect(self, slot_index: int, on: bool) -> None:
-        """Keep "Connected" unsaid for a call this app is answering, whose reply says it instead.
-        Switched back off if the reply gives up waiting, so a late connection is still heard."""
+        """Keep "Connected" or "extended" unsaid for a call this app is answering or extending,
+        whose reply says it instead. Switched back off if the reply gives up waiting, so a late
+        change is still heard."""
         with self._lock:
             if on:
                 self._quiet.add(slot_index)
