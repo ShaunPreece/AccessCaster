@@ -64,7 +64,8 @@ print("ENCODER RING IS DERIVED FROM THE DEVICE, NOT HARDCODED")
 # The ring is the faders with no physical pot, then the monitor. Pro II: 6 physical of 9, so
 # faders 7/8/9 + monitor - which must match the desk's own ring order exactly.
 with as_device(devices.PRO2):
-    check("Pro II ring unchanged", announcer._encoder_ring(), announcer._ENCODER_RING_PRO2)
+    check("Pro II ring unchanged", announcer._encoder_ring(),
+          (("fader", 6), ("fader", 7), ("fader", 8), ("monitor", 0)))
 with as_device(devices.DUO):
     # Duo: 4 physical of 9, so five virtual faders (indices 4-8) then the monitor. The ORDER is
     # unobserved on that desk; what matters here is that it is not the Pro II's three.

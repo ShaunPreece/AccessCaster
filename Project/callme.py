@@ -236,11 +236,6 @@ def _props(node) -> dict:
 # WRITES
 # ---------------------------------------------------------------------------------------------
 
-def _block(payload: bytes) -> bytes:
-    """One value block: a one-byte length, then the type byte and its data."""
-    return bytes([0x01, len(payload)]) + payload
-
-
 def build_answer(call_id: int, slot: int, path) -> bytes:
     """Answer the ringing call into `slot`, or decline it with slot -1.
 
@@ -248,10 +243,8 @@ def build_answer(call_id: int, slot: int, path) -> bytes:
     matter and neither looks like it does: the string alone is stored and ignored, and with a TRUE
     bool the call is set up but its audio never opens, failing 60 s later as "rtp stream error"."""
     value = json.dumps({"id": int(call_id), "sip_slot": int(slot)}, separators=(",", ":"))
-    inner = _block(b"\x05" + value.encode("ascii") + b"\x00") + _block(b"\x03")
-    payload = (rcp_transfer.build_address(list(path)) + b"sipIncomingCallAccept\x00"
-               + _block(b"\x08" + inner))
-    return rcp_transfer._frame(payload)
+    return rcp_transfer.build_record("sipIncomingCallAccept", "pair",
+                                     [(value, "str"), (False, "bool")], path)
 
 
 def build_hangup(path) -> list:
@@ -262,11 +255,9 @@ def build_hangup(path) -> list:
     (which leaves the call alone) and the second raises it. (False, False) then (True, False) ends
     a call as "Local drop"; (True, True) over (True, True) and (False, True) over (True, True) do
     nothing."""
-    def rec(first: bool) -> bytes:
-        inner = _block(b"\x02" if first else b"\x03") + _block(b"\x03")
-        return rcp_transfer._frame(rcp_transfer.build_address(list(path))
-                                   + b"sipSlotCallDisconnect\x00" + _block(b"\x08" + inner))
-    return [rec(False), rec(True)]
+    return [rcp_transfer.build_record("sipSlotCallDisconnect", "pair",
+                                      [(first, "bool"), (False, "bool")], path)
+            for first in (False, True)]
 
 
 def build_extend(path) -> list:
@@ -276,11 +267,9 @@ def build_extend(path) -> list:
     A single bool is stored and ignored. The pair is lowered first and then raised, the shape the
     hang-up pair needs, because a write of the value already held may do nothing; whether Extend
     strictly needs the lowering is unmeasured."""
-    def rec(on: bool) -> bytes:
-        flag = _block(b"\x02" if on else b"\x03")
-        return rcp_transfer._frame(rcp_transfer.build_address(list(path))
-                                   + b"sipSlotCallExtend\x00" + _block(b"\x08" + flag + flag))
-    return [rec(False), rec(True)]
+    return [rcp_transfer.build_record("sipSlotCallExtend", "pair",
+                                      [(on, "bool"), (on, "bool")], path)
+            for on in (False, True)]
 
 
 def build_dial(code: str, slot: int, path) -> list:
@@ -292,11 +281,10 @@ def build_dial(code: str, slot: int, path) -> list:
     nothing. The first record clears the property to its factory value, a plain empty string,
     which starts nothing. The slot goes Connecting at once; a declined call ends as "486 Rejected"
     and an unknown code as "404 Not Found" within half a second."""
-    head = rcp_transfer.build_address(list(path)) + b"sipOutgoingCallDetails\x00"
+    name = "sipOutgoingCallDetails"
     value = json.dumps({"dest": RODE_PREFIX + code, "sip_slot": int(slot)}, separators=(",", ":"))
-    inner = _block(b"\x05" + value.encode("ascii") + b"\x00") + _block(b"\x03")
-    return [rcp_transfer._frame(head + _block(b"\x05\x00")),
-            rcp_transfer._frame(head + _block(b"\x08" + inner))]
+    return [rcp_transfer.build_record(name, "str", "", path),
+            rcp_transfer.build_record(name, "pair", [(value, "str"), (False, "bool")], path)]
 
 
 # ---------------------------------------------------------------------------------------------

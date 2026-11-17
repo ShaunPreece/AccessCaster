@@ -20,6 +20,7 @@ from __future__ import annotations
 import threading
 import time
 
+import announcer
 import autogain
 import autogain_actions
 import chat_isolation
@@ -109,7 +110,7 @@ def _stop(speak: bool = True, run_id: int | None = None) -> str:
     # The stop tone as soon as nothing is listening, not after the restore below: it is the
     # answer to the press, and the restore takes a second or more.
     if w is not None:
-        meters.cue("stop")
+        meters.cue("stop", despite_off=not announcer.suspended_for_record)
     trouble = ""
     if iso is not None:
         try:
@@ -218,6 +219,6 @@ def action_channel_level_check(name: str = "") -> dict:
     # A BEEP RATHER THAN A SENTENCE to say it has started. The check speaks a level within a second
     # and a half, so anything said here is read over the first reading - and this is the moment the
     # user starts talking, which is not a moment to be listening to the computer.
-    meters.cue("start")
+    meters.cue("start", despite_off=not announcer.suspended_for_record)
     return {"ok": True, "running": True, "seconds": _CHECK_S, "channel": src["label"],
             "message": win, "level_note": meters.level_note(w.volume_db)}

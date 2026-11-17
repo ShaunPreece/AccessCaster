@@ -2139,8 +2139,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **THE CLIP WARNING WATCHES A RECORDING ENDPOINT AND SPEAKS ONLY THROUGH `speech.say`**
   (`clip_warning._main_mix_stream`, `_clip_start`). The desk's playback endpoint reads this computer's
   own audio, so a watch on it hears the screen reader and its own words. `speech.say` follows the
-  announcer, so the warning is silent while a recording suspends it; `meters.clip_alert` plays on
-  the default output, usually the desk, and would land in the take, so `clip_sound` stays False.
+  announcer, and so does the clipping cue (`meters.Watcher._rasp_then_speak`), so the warning is
+  silent while a recording suspends it.
 - **THE WINDOW FITS ITS DISPLAY, AND ITS STATUS BAR IS NOT ELLIPSIZED** (`MainFrame._fit_to_screen`,
   the `CreateStatusBar` style). NVDA+End finds a status bar at the window's bottom-left corner;
   with that corner off the screen it reads its own copy of the bottom line instead, which keeps the

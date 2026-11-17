@@ -373,6 +373,10 @@ NOT_SAVED = {
     "sipIncomingCallAccept": ("ok", "A COMMAND: answer or decline the call ringing now. Restoring "
                                     "it would act on whoever happened to be calling."),
     "sipOutgoingCallDetails": ("ok", "A COMMAND: place a call. Restoring it would dial somebody."),
+    "sipSlotCallDisconnect": ("ok", "A COMMAND: hang up the call on a slot. Restoring it would end "
+                                    "a call in progress."),
+    "sipSlotCallExtend": ("ok", "A COMMAND: extend the expiring call on a slot. There is no call "
+                                "to extend when a profile is restored."),
     # ---- storage and firmware: commands ------------------------------------------------------
     "storageVolumeEject": ("ok", "A COMMAND: eject a card or drive. Nothing to put back."),
     "storageVolumeErase": ("ok", "A COMMAND, and it ERASES a card or drive. Restoring it would "

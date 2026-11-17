@@ -801,4 +801,43 @@ try:
 except ValueError as exc:
     check_true("ValueError, naming the property", "definitelyNotAProperty" in str(exc))
 
+print("\nA PAD-VOLUME FLUSH THAT FAILS LEAVES A TRACE")
+
+
+class _Call:
+    """A kernel32 function that returns `result`, with the attributes ctypes setup assigns."""
+    def __init__(self, result):
+        self.result = result
+
+    def __call__(self, *_args):
+        return self.result
+
+
+class _Kernel32:
+    def __init__(self, handle, flushed):
+        self.CreateFileW = _Call(handle)
+        self.FlushFileBuffers = _Call(flushed)
+        self.CloseHandle = _Call(1)
+
+
+class _PowerShellFailed:
+    returncode = 1
+    stderr = b"Write-VolumeCache : No MSFT_Volume objects found"
+
+
+for label, handle, flushed, first in (
+        ("no volume handle", 0, 0, "no volume handle"),
+        ("a flush Windows refuses", 0x1234, 0, "FlushFileBuffers failed")):
+    events = []
+    k32 = _Kernel32(handle, flushed)
+    with patched((rcp_transfer.diagnostics,
+                  {"event": lambda kind, detail="", log=events.append, **f: log((kind, detail, f))}),
+                 (rcp_transfer.ctypes, {"WinDLL": lambda *_a, k32=k32, **_k: k32}),
+                 (rcp_transfer.subprocess, {"run": lambda *_a, **_k: _PowerShellFailed()})):
+        rcp_transfer.flush_volume("Q:\\")
+    check(f"{label}: the fast path's failure is logged",
+          [(k, d) for k, d, _f in events[:1]], [("transfer.flush_fallback", first)])
+    check(f"{label}: and so is the PowerShell exit code",
+          [(k, f.get("exit_code")) for k, _d, f in events[1:]], [("transfer.flush_failed", 1)])
+
 sys.exit(_testkit.finish())

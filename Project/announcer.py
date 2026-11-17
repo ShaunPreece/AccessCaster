@@ -226,17 +226,12 @@ _RUN_S = 1.5           # within this of the last update on the same target, say 
 # exactly the observed ring - faders 7/8/9 then monitor - byte for byte. The Duo (physical 4, count 9)
 # yields faders 5-9 then monitor, which is the same RULE but an UNOBSERVED order on that desk; a wrong
 # guess costs one spoken phrase because the first real movement re-seats us (see _ring_place).
-_ENCODER_RING_PRO2 = (("fader", 6), ("fader", 7), ("fader", 8), ("monitor", 0))
 
 
 def _encoder_ring() -> tuple:
     """The encoder's press-cycle order for the CONNECTED desk: virtual faders, then monitor level."""
-    try:
-        spec = devices.get_active_device().fader
-        ring = tuple(("fader", i) for i in range(spec.physical, spec.count)) + (("monitor", 0),)
-        return ring if len(ring) > 1 else _ENCODER_RING_PRO2
-    except Exception:
-        return _ENCODER_RING_PRO2
+    spec = devices.get_active_device().fader
+    return tuple(("fader", i) for i in range(spec.physical, spec.count)) + (("monitor", 0),)
 
 
 # The headphone pots. Each POT node under PHYSICALINTERFACE[0] publishes its OWN potMin and potMax

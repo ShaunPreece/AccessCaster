@@ -175,7 +175,7 @@ def autogain_run(takes):
                               "ChatIsolation": _Isolation}),
             (autogain, {"chat_endpoint": lambda: {"id": "chat"},
                                "measure_endpoint": lambda *a, **k: next(answers)(*a, **k)}),
-            (meters, {"cue": lambda name: None})):
+            (meters, {"cue": lambda name, despite_off: None})):
         autogain_actions._run("Mic1", 1, 5.0)
     state = autogain_actions.state()
     autogain_actions._job = None

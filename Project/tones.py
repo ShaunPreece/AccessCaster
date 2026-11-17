@@ -68,18 +68,21 @@ DURATION_S = 2 * NOTE_S + GAP_S
 TONE_VERSION = 3
 
 
-def _note_samples(freqs) -> list:
-    frames = int(SAMPLE_RATE * NOTE_S)
+def _faded_note(freq: float, seconds: float) -> list:
+    """One sine note with a linear fade in and out. Both ends matter: without the fade the step
+    between two notes is a click, and a click is louder and more startling than the cue."""
+    frames = int(SAMPLE_RATE * seconds)
     fade = max(1, int(SAMPLE_RATE * FADE_S))
+    return [PEAK * min(1.0, n / fade, (frames - n) / fade)
+            * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE) for n in range(frames)]
+
+
+def _note_samples(freqs) -> list:
     out = []
     for i, freq in enumerate(freqs):
         if i:
             out += [0.0] * int(SAMPLE_RATE * GAP_S)
-        for n in range(frames):
-            # Linear fade in and out, PER NOTE. Both ends matter: without the fade the step between
-            # the two notes is a click, and a click is louder and more startling than the cue.
-            gain = min(1.0, n / fade, (frames - n) / fade)
-            out.append(PEAK * gain * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE))
+        out += _faded_note(freq, NOTE_S)
     return out
 
 
@@ -101,14 +104,30 @@ def record_cue_seconds(name: str) -> float:
 
 
 def _beep_samples(freq, count, note_s, gap_s) -> list:
-    frames = int(SAMPLE_RATE * note_s)
-    fade = max(1, int(SAMPLE_RATE * FADE_S))
     out = []
     for i in range(count):
         if i:
             out += [0.0] * int(SAMPLE_RATE * gap_s)
-        out += [PEAK * min(1.0, n / fade, (frames - n) / fade)
-                * math.sin(2.0 * math.pi * freq * n / SAMPLE_RATE) for n in range(frames)]
+        out += _faded_note(freq, note_s)
+    return out
+
+
+# THE METER CUES, for auto gain and the level check: name -> ((Hz, seconds), ...), played back to
+# back. A tone arrives at once where "talk now" would queue behind the screen reader. Rising for
+# start, one low tone for stop, and a low falling pair for clipping, which sits below every other
+# cue so it cannot be taken for a mute.
+METER_CUES = {
+    "meter_start": ((660.0, 0.09), (990.0, 0.13)),
+    "meter_stop": ((440.0, 0.22),),
+    "meter_clip": ((320.0, 0.11), (240.0, 0.16)),
+}
+METER_VERSION = 1
+
+
+def _meter_samples(notes) -> list:
+    out = []
+    for freq, seconds in notes:
+        out += _faded_note(freq, seconds)
     return out
 
 
@@ -196,6 +215,21 @@ def _usable(path: str) -> bool:
         return False
 
 
+def _recipe(name: str):
+    """(the function that makes the named cue's samples, its version), or None for no such cue."""
+    if name == "ring":
+        return _ring_samples, RING_VERSION
+    if name == "working":
+        return _working_samples, WORKING_VERSION
+    if name in RECORD_CUES:
+        return (lambda: _beep_samples(*RECORD_CUES[name])), RECORD_VERSION
+    if name in METER_CUES:
+        return (lambda: _meter_samples(METER_CUES[name])), METER_VERSION
+    if TONES.get(name):
+        return (lambda: _note_samples(TONES[name])), TONE_VERSION
+    return None
+
+
 def tone_path(name: str) -> str:
     """Absolute path to the named tone's WAV, generating it if it is not there yet.
 
@@ -203,16 +237,10 @@ def tone_path(name: str) -> str:
     WAV that plays as a click forever after. Returns "" for a name we do not have, rather than
     raising: a missing cue must never take the announcer down with it.
     """
-    if name == "ring":
-        make, version = _ring_samples, RING_VERSION
-    elif name == "working":
-        make, version = _working_samples, WORKING_VERSION
-    elif name in RECORD_CUES:
-        make, version = (lambda: _beep_samples(*RECORD_CUES[name])), RECORD_VERSION
-    elif TONES.get(name):
-        make, version = (lambda: _note_samples(TONES[name])), TONE_VERSION
-    else:
+    recipe = _recipe(name)
+    if recipe is None:
         return ""
+    make, version = recipe
     folder = data_path("tones")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"{name}-v{version}.wav")

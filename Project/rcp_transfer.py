@@ -81,11 +81,15 @@ def value_block(kind: str, value) -> bytes:
     bool   01 01 <02 on / 03 off>      enabled is 0x02 and disabled 0x03, NOT 1 and 0
     float  01 09 04 <f64 LE>           every processing parameter, as the RODE app sends it
     str    01 <vlen> 05 <ascii> 00     null-terminated
+    pair   01 <vlen> 08 <block> <block>  a composite: `value` is [(value, kind), (value, kind)]
 
-    Encoded by `model_tree.encode_value`, the one value encoder; a write is limited to these four
+    Encoded by `model_tree.encode_value`, the one value encoder; a write is limited to these
     kinds, and a string to ASCII.
     """
-    if kind not in ("int", "bool", "float", "str"):
+    if kind == "pair":
+        for half, half_kind in value:
+            value_block(half_kind, half)
+    elif kind not in ("int", "bool", "float", "str"):
         raise ValueError(f"no value block for kind {kind!r}")
     if kind == "str":
         str(value).encode("ascii")
@@ -300,15 +304,12 @@ def _check_cross_point(output_index: int, source_index: int, allow_inferred: boo
             f"{dev.name} (exposed {sorted(valid_sources)}).")
 
 
-# The link request's value, verbatim: a composite of two complete value blocks.
-_MIX_LINK_REQUEST_VALUE = bytes([0x01, 0x07, 0x08, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02])
-
-
 def build_mix_link_request(path, link: bool) -> bytes:
     """mixLinkRequest (link=True) / mixUnlinkRequest (link=False) on a cross-point's path, with the
-    constant request payload. Byte-for-byte what the app sends for a cross-point's chain icon."""
-    name_b = (b"mixLinkRequest" if link else b"mixUnlinkRequest")
-    return _frame(build_address(list(path)) + name_b + b"\x00" + _MIX_LINK_REQUEST_VALUE)
+    constant request value, a pair of True bools. Byte-for-byte what the app sends for a
+    cross-point's chain icon."""
+    name = "mixLinkRequest" if link else "mixUnlinkRequest"
+    return build_record(name, "pair", [(True, "bool"), (True, "bool")], path)
 
 
 def build_cross_point_link(key, link: bool) -> bytes:
@@ -746,10 +747,15 @@ def flush_volume(root: str) -> None:
         device = "\\\\.\\" + root[0] + ":"      # the volume's DOS device path, \\.\X:
         handle = k32.CreateFileW(device, GENERIC_WRITE, FILE_SHARE_READ_WRITE,
                                  None, OPEN_EXISTING, 0, None)
-        if handle not in (0, INVALID_HANDLE, None):
+        if handle in (0, INVALID_HANDLE, None):
+            diagnostics.event("transfer.flush_fallback", "no volume handle",
+                              root=root, error=ctypes.get_last_error())
+        else:
             try:
                 if k32.FlushFileBuffers(handle):
                     return
+                diagnostics.event("transfer.flush_fallback", "FlushFileBuffers failed",
+                                  root=root, error=ctypes.get_last_error())
             finally:
                 k32.CloseHandle(handle)
     except Exception as exc:
@@ -815,12 +821,17 @@ def _flush_volume_powershell(root: str) -> None:
     # CREATE_NO_WINDOW: the app runs under pythonw (no console), so without this each call would
     # flash a PowerShell window that steals focus.
     no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    subprocess.run(
+    done = subprocess.run(
         ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache {root[0]}"],
         check=False,
         capture_output=True,
         creationflags=no_window,
     )
+    if done.returncode != 0:
+        # Both flushes failed: a pad's audio may reach the desk truncated.
+        stderr = (done.stderr or b"").decode("utf-8", "replace").strip()
+        diagnostics.event("transfer.flush_failed", stderr[-300:], root=root,
+                          exit_code=done.returncode)
 
 
 class quiet_drive_errors:
@@ -1079,6 +1090,11 @@ def _selftest() -> None:
          build_record("mixDisabled", "bool", True, [258])),
         ("0322000000010101" "020f01" "6d69784c6576656c57697468416e63686f72" "00010705302e357c3000",
          build_record("mixLevelWithAnchor", "str", cross_point_level_value(0.5), [271])),
+        # A cross-point's chain icon: a pair of True bools, as a composite value.
+        ("031d000000010101" "01f5" "6d69784c696e6b52657175657374" "00" "010708010102010102",
+         build_mix_link_request([245], True)),
+        ("031f000000010101" "01f5" "6d6978556e6c696e6b52657175657374" "00" "010708010102010102",
+         build_mix_link_request([245], False)),
         # faderLevel on fader 7, in the form the desk pushes: the zero first index has no bytes.
         ("031800000001010200010a6661646572" "4c6576656c0001050140000000",
          build_fader_level([0, 0x0A], 64)),

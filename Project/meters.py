@@ -27,6 +27,8 @@ import comtypes
 import comtypes.client
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
 
+import diagnostics
+import speech
 import write_guard
 
 CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
@@ -277,8 +279,8 @@ def list_endpoints(state_mask: int = STATE_ALL) -> list:
                         })
                     except Exception:
                         continue
-        except Exception:
-            return out
+        except Exception as exc:
+            diagnostics.event("meters.enumerate_failed", str(exc))
     return out
 
 
@@ -346,17 +348,17 @@ WAKE_BUFFER_100NS = 10_000_000
 
 def _is_capture_endpoint(enum, endpoint_id: str) -> bool:
     """True if this endpoint is an input, by asking Windows which list it is in. Never inferred
-    from the name: the capture and playback halves of a stream differ only by a prefix."""
-    try:
-        coll = enum.EnumAudioEndpoints(CAPTURE, STATE_ALL)
-        for i in range(coll.GetCount()):
-            try:
-                if coll.Item(i).GetId() == endpoint_id:
-                    return True
-            except Exception:
-                continue
-    except Exception:
-        return False
+    from the name: the capture and playback halves of a stream differ only by a prefix.
+
+    Raises when the capture list cannot be read: an input taken for an output gets no engine waker,
+    reads 0, and would be called silent."""
+    coll = enum.EnumAudioEndpoints(CAPTURE, STATE_ALL)
+    for i in range(coll.GetCount()):
+        try:
+            if coll.Item(i).GetId() == endpoint_id:
+                return True
+        except Exception:
+            continue                     # an endpoint removed mid-enumeration
     return False
 
 
@@ -454,8 +456,9 @@ class Meter:
             self.volume_db, self.ceiling = reading_scale(
                 float(self._vol.GetMasterVolumeLevel()), self.is_capture)
             self.muted = bool(self._vol.GetMute())
-        except Exception:
-            pass
+        except Exception as exc:
+            # The previous ceiling stands, so the clip threshold may be stale.
+            diagnostics.event("meters.volume_read_failed", str(exc), endpoint=self.name)
         return self.ceiling
 
     def peak(self) -> float:
@@ -485,39 +488,13 @@ class Meter:
             pass
 
 
-def cue(kind: str) -> None:
-    """A short tone marking the start or end of a timed step: a tone arrives at once, where "talk
-    now" queues behind the screen reader. Rising for start, one low tone for stop, both distinct
-    from the two-tone clipping rasp.
-
-    Synchronous, so nobody talks over their own start signal. It plays on the default output, often
-    the desk, but auto gain's isolated mix excludes that source, so it never reaches a measurement.
-    """
-    tones = {"start": ((660, 90), (990, 130)), "stop": ((440, 220),)}.get(kind)
-    if not tones:
-        return
-    try:
-        import winsound  # noqa: PLC0415  (Windows only, and only when it fires)
-        for freq, ms in tones:
-            winsound.Beep(freq, ms)
-    except Exception:
-        pass                         # no sound device, or not Windows: the words still happen
-
-
-def clip_alert() -> None:
-    """A short rasp for clipping, on a thread so the meter loop never waits for it.
-
-    Two low tones from `winsound.Beep` rather than a system sound, which may be configured to
-    nothing and ships no asset. It plays on the default output, often the desk itself, so during a
-    recording it lands in the take; the page says so."""
-    def _beep():
-        try:
-            import winsound  # noqa: PLC0415  (Windows only, and only when it fires)
-            winsound.Beep(320, 110)
-            winsound.Beep(240, 160)
-        except Exception:
-            pass                       # no sound device, or not Windows: the speech still happens
-    threading.Thread(target=_beep, daemon=True).start()
+def cue(kind: str, despite_off: bool) -> None:
+    """The tone marking the start or end of a timed step, "start" or "stop" (`tones.METER_CUES`),
+    on the announcer's output. Returns once it has played, so nobody talks over their own start
+    signal. `despite_off` plays it with announcements off, as the answer to a press in the window;
+    a caller passes False while a recording has suspended the announcer, so it stays out of the
+    take."""
+    speech.tone_and_wait(f"meter_{kind}", despite_off=despite_off)
 
 
 # The line between silence and signal: -60 dBFS, about a live mic's floor in a quiet room.
@@ -525,6 +502,10 @@ SILENCE = 0.001
 # Below this a spoken level says "quiet" once and then nothing: under -50 dBFS is a room or a
 # noise floor, not anything worth riding a fader to.
 QUIET = 10 ** (-50 / 20)
+# The bands `describe` and `verdict` both sort a peak into.
+NEAR_CLIP = 0.89                 # about -1 dBFS
+HOT = 0.5                        # about -6 dBFS
+HEALTHY = 0.126                  # about -18 dBFS
 
 
 def level_note(volume_db: float) -> str:
@@ -679,11 +660,11 @@ def describe(peak: float, active_fraction: float, name: str, wake_failed: bool =
             return (f"{name}: CLIPPING at {at}, but Windows is adding {volume_db:.1f} dB to this "
                     f"input. Use Set it to no change below before touching the desk.")
         return f"{name}: CLIPPING at {at}. Turn it down."
-    if peak >= 0.89:                      # about -1 dBFS
+    if peak >= NEAR_CLIP:
         return f"{name}: very hot, {at}, close to clipping."
-    if peak >= 0.5:                       # about -6 dBFS
+    if peak >= HOT:
         return f"{name}: strong, peaking at {at}."
-    if peak >= 0.126:                     # about -18 dBFS
+    if peak >= HEALTHY:
         return f"{name}: healthy, peaking at {at}."
     if active_fraction > 0.2:
         return f"{name}: live but quiet, peaking at only {at}. It would record thin."
@@ -704,11 +685,11 @@ def verdict(peak: float, active_fraction: float, volume_db: float = 0.0,
         return "Nothing came through at all."
     if peak >= clip_at * trusted_ceiling(ceiling):
         return f"Audio is CLIPPING. {down}."
-    if peak >= 0.89:                      # -1 dBFS
+    if peak >= NEAR_CLIP:
         return f"Audio is very close to clipping. {down}."
-    if peak >= 0.5:                       # -6 dBFS
+    if peak >= HOT:
         return f"Audio is usable but hot. {down} a little to be safe."
-    if peak >= 0.126:                     # -18 dBFS
+    if peak >= HEALTHY:
         return "Audio is good."
     if active_fraction > 0.2:
         return f"Audio is too quiet to record well. {up}."
@@ -824,10 +805,14 @@ class Watcher:
 
                 if v >= clip_level and (now - last_clip) >= self.clip_gap:
                     last_clip = now
-                    # The rasp first, since it arrives whole; the words then say which stream.
+                    words = f"{self.name} clipping"
                     if self.clip_sound:
-                        clip_alert()
-                    self._speak(f"{self.name} clipping")
+                        # The rasp first, since it arrives whole; the words then say which stream.
+                        # On a thread, so the meter loop never waits for the cue.
+                        threading.Thread(target=self._rasp_then_speak, args=(words,),
+                                         daemon=True).start()
+                    else:
+                        self._speak(words)
 
                 if v > SILENCE:
                     if was_silent and self.warn_silence:
@@ -868,3 +853,10 @@ class Watcher:
             self._say(text)
         except Exception:
             pass          # a meter must never be able to take the announcer, or the app, down
+
+    def _rasp_then_speak(self, text: str):
+        """The clipping cue, then `text`, which would replace the cue if queued while it waits. The
+        cue follows the announcer like the words, so a recording that suspends it keeps both out of
+        the take."""
+        speech.tone_and_wait("meter_clip")
+        self._speak(text)

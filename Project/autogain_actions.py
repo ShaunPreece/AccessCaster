@@ -178,15 +178,16 @@ def _take(instruction: str, phase: str, seconds: float, endpoint_id: str, iso):
     measurement, corrected for the fader, or None if the run was cancelled before it ended.
 
     The tone finishes before the take starts, not because it would otherwise be measured (it plays
-    out on USB 1, and the isolated mix excludes everything except the microphone) but because the
-    person should not start talking over their own start signal."""
+    on the announcer's output, and the isolated mix excludes everything except the microphone) but
+    because the person should not start talking over their own start signal."""
     _lead(instruction)
     if _cancelled():
         return None
-    meters.cue("start")
+    audible = not announcer.suspended_for_record
+    meters.cue("start", despite_off=audible)
     _set(phase=phase, seconds=seconds, started=time.monotonic(), message="Listening.")
     result = autogain.measure_endpoint(endpoint_id, seconds, should_stop=_cancelled)
-    meters.cue("stop")
+    meters.cue("stop", despite_off=audible)
     if _cancelled():
         return None
     # POST-FADER, corrected: the cross-point carries the channel at its own level, so the gain

@@ -130,7 +130,7 @@ class _Item:
     which are spoken instead if the file cannot be played."""
     text: str
     cue_path: str = ""
-    # Set once a say_and_wait phrase has played, been superseded, or failed.
+    # Set once a say_and_wait phrase or tone_and_wait cue has played, been superseded, or failed.
     done: threading.Event | None = None
 
     @property
@@ -403,13 +403,28 @@ def tone(name: str, despite_off: bool = False) -> bool:
     tone, in which case the caller must speak: a cue that silently does nothing is worse than the
     sentence it was replacing. Nothing cuts a cue off. `despite_off` plays it with announcements
     off, for a shortcut that failed (`shortcuts._failed`)."""
+    return _tone(name, despite_off, None)
+
+
+def tone_and_wait(name: str, despite_off: bool = False) -> bool:
+    """`tone`, returning once the cue has finished playing, so a sentence queued after it cannot
+    replace it while it waits, and nobody starts talking over a start signal. Returns at once when
+    the cue is not played, and after _SAY_AND_WAIT_TIMEOUT_S at worst."""
+    done = threading.Event()
+    if not _tone(name, despite_off, done):
+        return False
+    done.wait(_SAY_AND_WAIT_TIMEOUT_S)
+    return True
+
+
+def _tone(name: str, despite_off: bool, done: threading.Event | None) -> bool:
     try:
         path = tones.tone_path(name)
     except Exception:
         return False
     if not path:
         return False
-    _submit(_Item(name, cue_path=path), "cue " + name, despite_off)
+    _submit(_Item(name, cue_path=path, done=done), "cue " + name, despite_off)
     return True
 
 

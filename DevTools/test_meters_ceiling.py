@@ -18,6 +18,7 @@ Usage: python DevTools/test_meters_ceiling.py
 """
 from __future__ import annotations
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -25,7 +26,8 @@ from pathlib import Path
 import _bootstrap  # noqa: F401
 import _testkit
 import meters
-from _testkit import check, check_true
+import tones
+from _testkit import check, check_true, patched
 
 
 def close(label, got, want, tol=1e-3):
@@ -183,5 +185,70 @@ try:
 except OSError:
     raised = True
 check("then raises, so a Watcher on it ends and can be reopened", raised, True)
+
+print("\nAN ENDPOINT READ THAT FAILS IS NOT TAKEN FOR AN ANSWER")
+
+
+class _BrokenEnumerator:
+    def EnumAudioEndpoints(self, *_a):
+        raise OSError("enumerator gone")
+
+
+try:
+    meters._is_capture_endpoint(_BrokenEnumerator(), "endpoint")
+    raised = False
+except OSError:
+    raised = True
+check("an unreadable capture list raises, rather than calling an input an output", raised, True)
+
+events = []
+
+
+def _no_enumerator(*_a, **_k):
+    raise OSError("class not registered")
+
+
+with patched((meters.diagnostics, {"event": lambda kind, detail="", **f: events.append(kind)}),
+             (meters.comtypes.client, {"CreateObject": _no_enumerator})):
+    listed = meters.list_endpoints()
+check("an enumerator that cannot be created lists nothing", listed, [])
+check("and says why in the log", events, ["meters.enumerate_failed"])
+
+
+class _BrokenVolume:
+    def GetMasterVolumeLevel(self):
+        raise OSError("volume read failed")
+
+
+m = object.__new__(meters.Meter)
+m.name, m._vol, m.is_capture, m.ceiling = "Desk", _BrokenVolume(), True, 0.5
+events = []
+with patched((meters.diagnostics, {"event": lambda kind, detail="", **f: events.append(kind)})):
+    kept = m.refresh_ceiling()
+check("a failed volume read keeps the last ceiling", kept, 0.5)
+check("and logs it", events, ["meters.volume_read_failed"])
+
+print("\nTHE METER CUES PLAY ON THE ANNOUNCER'S OUTPUT")
+played = []
+with patched((meters.speech, {"tone_and_wait": lambda name, despite_off=False:
+                              played.append((name, despite_off))})):
+    meters.cue("start", despite_off=True)
+    meters.cue("stop", despite_off=False)
+    watcher = object.__new__(meters.Watcher)
+    watcher._say = said.append
+    watcher._rasp_then_speak("Desk clipping")
+check("the clipping words follow the cue", said[-1:], ["Desk clipping"])
+check("every cue meters plays is a generated tone",
+      [n for n, _off in played if n not in tones.METER_CUES], [])
+check("start and stop pass on the caller's choice; the clipping cue follows the announcer",
+      [off for _n, off in played], [True, False, False])
+project = Path(meters.__file__).parent
+kinds = {k for f in project.glob("*.py")
+         for k in re.findall(r'meters\.cue\("(\w+)"', f.read_text(encoding="utf-8"))}
+check("the callers were found", sorted(kinds), ["start", "stop"])
+check("every kind a caller asks for has a tone",
+      sorted(k for k in kinds if f"meter_{k}" not in tones.METER_CUES), [])
+check("nothing beeps through winsound, which plays on the system default output",
+      "winsound" in src, False)
 
 sys.exit(_testkit.finish())
