@@ -184,13 +184,18 @@ def unit_setting_words(spec: dict, value) -> str:
     return str(value)
 
 
-def pan_words(value):
-    """A pan position, 0 to 100 with 50 the centre, in words: a bare percentage gives no
-    direction."""
-    if value == 50:
+def pan_offset_words(offset) -> str:
+    """A pan offset, -100 to 100 with 0 the centre, in words: a bare percentage gives no
+    direction. Every pan the app speaks is worded here."""
+    if offset == 0:
         return "centre"
-    if value <= 0:
+    if offset <= -100:
         return "hard left"
-    if value >= 100:
+    if offset >= 100:
         return "hard right"
-    return f"{(50 - value) * 2} percent left" if value < 50 else f"{(value - 50) * 2} percent right"
+    return f"{-offset} percent left" if offset < 0 else f"{offset} percent right"
+
+
+def pan_words(value) -> str:
+    """A pan position, 0 to 100 with 50 the centre, in words."""
+    return pan_offset_words(round((value - 50) * 2))

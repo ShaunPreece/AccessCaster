@@ -13,6 +13,8 @@ import _a11y
 import _testkit
 import channels
 import desk_labels
+import device_page
+import pan_link
 import wx
 from _native_fakes import FakeDesk as BaseDesk, FakeFrame as BaseFrame
 from _testkit import check, check_true
@@ -130,6 +132,21 @@ check("a choice not yet applied survives a change elsewhere on the channel",
       settings.mic_type.GetSelection(), 1)
 read_mic(types[2], True)
 check("a new type from the desk is shown", settings.mic_type.GetSelection(), 2)
+
+# ---- a pan link ---------------------------------------------------------------------------------
+links, written = {}, {}
+with _testkit.patched(
+        (device_page, {"desk_record": lambda _key: links,
+                       "save_desk_record": lambda _key, value: links.update(value)}),
+        (channels, {"set_channel_processing":
+                    lambda _name, prop, v: written.__setitem__(prop, round(v * 100))})):
+    pan_link.action_link_pan(mics[0], True, 40, 60)
+    pan_link.action_set_linked_pan(mics[0], 10, 20, 80)
+check("a link at centre starts again from legs moved since",
+      written, {"channelPanL": 30, "channelPanR": 90})
+check("a pan position and its offset are worded alike",
+      [desk_labels.pan_words(p) for p in (0, 30, 50, 70, 100)],
+      ["hard left", "40 percent left", "centre", "40 percent right", "hard right"])
 
 frame.window.Destroy()
 _a11y.check_windows("Channels")

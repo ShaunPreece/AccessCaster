@@ -95,6 +95,7 @@ def _run(name: str, mic: int, seconds: float) -> None:
     """The whole job: prepare, listen in silence, decide, apply, restore, report."""
     restore_processing = False
     iso = None
+    win = ""        # what Windows' Chat device was changed by; every reply after the change says it
     try:
         _set(phase="preparing", message="Getting ready. Do not talk yet.")
         with desk_access.hid_lock:
@@ -142,18 +143,18 @@ def _run(name: str, mic: int, seconds: float) -> None:
             if cancelled and target != gain_before:
                 _write_gain(mic, gain_before)
         if cancelled:
-            _set(phase="failed", done=True, message="Cancelled. The gain was not changed.")
+            _set(phase="failed", done=True, message=f"{win}Cancelled. The gain was not changed.")
             return
         _set(phase="working", message="Working it out.")
 
         if not decision["ok"]:
-            _set(phase="failed", done=True, result=result, message=decision["reason"])
+            _set(phase="failed", done=True, result=result, message=win + decision["reason"])
             return
         words = _words(name, gain_before, target, result, win, check)
         _set(phase="done", done=True, gain_after=target, result=result, check=check,
              message=words)
     except Exception as exc:
-        _set(phase="failed", done=True, message=f"Auto gain stopped: {exc}")
+        _set(phase="failed", done=True, message=f"{win}Auto gain stopped: {exc}")
     finally:
         # THE CHAT MIX AND THE PROCESSING ARE ALWAYS PUT BACK, whatever went wrong, and both
         # restores are VERIFIED: a silent failure leaves the operator sounding different with no

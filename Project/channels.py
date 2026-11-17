@@ -1022,6 +1022,15 @@ def park_link(device_id: str, pair_code: int, lower: bool, upper: bool, pair: bo
            "upper_fader": upper_fader})
 
 
+def peek_link(device_id: str, pair_code: int) -> dict | None:
+    """What `park_link` kept for `pair_code`, left in place, or None if the app did not make the
+    link. An unlink reads it here and takes it only once the desk shows the pair gone, so a failed
+    unlink keeps it for the retry."""
+    per_device = _parked_load(_LINK_FILE).get(str(device_id or ""))
+    record = per_device.get(str(int(pair_code))) if isinstance(per_device, dict) else None
+    return record if isinstance(record, dict) else None
+
+
 def take_link(device_id: str, pair_code: int) -> dict | None:
     """Pop what `park_link` kept for `pair_code`, or None if the app did not make the link."""
     return _take(_LINK_FILE, device_id, pair_code)

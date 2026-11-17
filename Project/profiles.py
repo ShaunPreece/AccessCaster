@@ -29,6 +29,7 @@ import time
 import channels
 import desk_secrets
 import devices
+import diagnostics
 import master_outputs
 import rcp_read
 import rcp_transfer
@@ -580,7 +581,8 @@ def _mic_types_now() -> dict:
     try:
         return {rec.get("name"): rec.get("mic_type") for rec in channels.read_channels()
                 if rec.get("kind") == "mic"}
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("restore.mic_types_unread", str(exc))
         return {}
 
 
@@ -590,7 +592,8 @@ def _chain_of(name):
     try:
         blob = rcp_read.read_model(fresh=True)
         rec = next((r for r in channels.read_channels(blob) if r.get("name") == name), None)
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("restore.chain_unread", str(exc), channel=name)
         return None
     return None if rec is None else dict(rec.get("params") or {})
 

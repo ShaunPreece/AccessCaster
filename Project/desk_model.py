@@ -95,7 +95,8 @@ def dump_finished(token: Token, blob: bytes) -> None:
     found = []
     try:
         root, _used, _tail = model_tree.parse(blob, found)
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("desk_model.parse_failed", str(exc), size=len(blob))
         return
     props, spans, paths = {}, {}, {}
     for node in model_tree.walk(root):

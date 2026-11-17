@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import channels
 import desk_access
+import desk_labels
 import device_page
 
 _LINKS_KEY = "pan_links"
@@ -29,24 +30,17 @@ def shift_pan_legs(base, offset: int) -> list:
     return [max(0, min(100, int(b) + int(offset))) for b in base]
 
 
+def legs_moved(link: dict, left, right) -> bool:
+    """Whether legs now at `left` and `right` (percent) have moved since the link last wrote them
+    (the desk, a preset, an unlinked write), so the link starts again from where they are."""
+    expect = shift_pan_legs(link["base"], link["offset"])
+    return abs(expect[0] - left) > 1 or abs(expect[1] - right) > 1
+
+
 def linked_pan_offset(link: dict, left, right) -> int:
     """Where the linked control sits for legs now at `left` and `right` (percent): the stored
-    offset, or 0 when the legs have moved since (the desk, a preset, an unlinked write), which
-    links afresh from where they are. `action_set_linked_pan` makes the same call."""
-    expect = shift_pan_legs(link["base"], link["offset"])
-    if abs(expect[0] - left) > 1 or abs(expect[1] - right) > 1:
-        return 0
-    return int(link["offset"])
-
-
-def pan_offset_words(offset: int) -> str:
-    if offset == 0:
-        return "centre"
-    if offset <= -100:
-        return "hard left"
-    if offset >= 100:
-        return "hard right"
-    return f"{-offset} percent left" if offset < 0 else f"{offset} percent right"
+    offset, or centre for legs that have moved since."""
+    return 0 if legs_moved(link, left, right) else int(link["offset"])
 
 
 def action_link_pan(name: str, on: bool, left: float, right: float) -> dict:
@@ -68,7 +62,7 @@ def action_link_pan(name: str, on: bool, left: float, right: float) -> dict:
 def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> dict:
     """Move a linked stereo pan: both legs shift by `offset` (-100 to 100) from where they were
     when linked. `left` and `right` are where the caller shows the legs now, in percent; if they
-    have moved since, the link starts again from them, as `linked_pan_offset` showed it."""
+    have moved since, the link starts again from them."""
     ch = channels.ui_channel_map().get(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
@@ -76,7 +70,7 @@ def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> 
     link = links.get(name)
     if link is None:
         return {"ok": False, "message": f"{ch['label']}'s pan sides are not linked."}
-    if linked_pan_offset(link, left, right) != link["offset"]:
+    if legs_moved(link, left, right):
         link = {"base": [int(round(left)), int(round(right))], "offset": 0}
     off = max(-100, min(100, int(offset)))
     legs = shift_pan_legs(link["base"], off)
@@ -89,4 +83,4 @@ def action_set_linked_pan(name: str, offset: int, left: float, right: float) -> 
     links[name] = {"base": link["base"], "offset": off}
     _save_pan_links(links)
     return {"ok": True, "pan_links": links, "legs": dict(zip(PAN_LEGS, legs)),
-            "message": f"{ch['label']} pan {pan_offset_words(off)}."}
+            "message": f"{ch['label']} pan {desk_labels.pan_offset_words(off)}."}

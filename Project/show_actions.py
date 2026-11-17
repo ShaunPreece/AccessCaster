@@ -396,7 +396,9 @@ def wake_channels() -> dict:
         return {"ok": False, "woken": [],
                 "message": "The desk is not answering, so its mic channels could not be woken."}
     woken, failed = [], []
-    for ch in channels.MIC_CHANNELS:
+    mics = [channels.mic_channel_number(c) for c in channels.active_ui_channels()
+            if c.get("kind") == "mic"]
+    for ch in mics:
         try:
             now = channels.mic_gain(blob, ch)
             if now is None:

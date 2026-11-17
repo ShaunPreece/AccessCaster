@@ -100,10 +100,14 @@ def put_back(start, start_state, start_blob) -> None:
         print("every level is as it was at the start")
         return
     print(f"NOT BACK, writing the start values: {left} mic gains {gains}")
-    for i, _was, _now in left.get("outputMonLevel", []):
-        t.set_monitor_level(start["outputMonLevel"][i])
-    for i, _was, _now in left.get("faderLevel", []):
-        t.set_fader_level(i, start["faderLevel"][i])
+    # Restored from keyed reads, not the positional lists `moved` compares: a stray faderLevel
+    # ahead of the FADER nodes would shift a positional list by one.
+    was_mon = rcp_read.keyed_value(start_blob, t.OUTPUT, "outputMonLevel")
+    if was_mon is not None and rcp_read.keyed_value(blob, t.OUTPUT, "outputMonLevel") != was_mon:
+        t.set_monitor_level(was_mon)
+    for i, (was, level) in enumerate(zip(t.fader_levels(start_blob), t.fader_levels(blob))):
+        if was is not None and level != was:
+            t.set_fader_level(i, was)
     for ch, db in gains.items():
         channels.set_mic_gain(ch, db)
     time.sleep(SETTLE_S)

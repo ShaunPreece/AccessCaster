@@ -7,8 +7,8 @@ Per trial: Expanded with the mix only, then post-fader. The moment the new Main 
 playback endpoint appears, a silent shared-mode stream is started on it and held HOLD_S seconds,
 then stopped. Each trial reports whether the service bound before the hold (it won the race),
 during it, or after release. Every trial is two USB arrivals, so audio through the desk drops out
-each time. Runs the app's service itself, so quit AccessCaster first. Restores Standard, mix
-only, however the run ends.
+each time. Runs the app's service itself, so quit AccessCaster first. Restores the USB mode it
+found, however the run ends.
 """
 import sys
 import threading
@@ -17,7 +17,10 @@ import time
 import _bootstrap  # noqa: F401  (puts Project/ on the path)
 import comtypes
 import comtypes.client
+import desk_access
 import meters
+import rcp_read
+import recorder
 import virtual_devices as vd
 import _desk
 import usb_audio
@@ -128,23 +131,34 @@ def main() -> int:
     # behaviour across an arrival, and this measures the bind with them in place.
     _desk.service(start=True)
     trials = int(sys.argv[1]) if len(sys.argv) > 1 else 3
+    with desk_access.hid_lock:
+        mode_before, expanded_before = recorder.split_usb_multitrack(
+            recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True)))
+    if mode_before is None or expanded_before is None:
+        print("Could not read the desk's USB mode, so it could not be put back. Stopping.")
+        return 1
     comtypes.CoInitialize()
     enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
                                         interface=meters.IMMDeviceEnumerator)
     try:
-        post(usb_audio.action_set_usb_expanded, True)
-        settle()
+        if not expanded_before:
+            post(usb_audio.action_set_usb_expanded, True)
+            settle()
         for n in range(1, trials + 1):
             trial(n, enum)
     finally:
-        put_back()
+        put_back(mode_before, expanded_before)
     return 0
 
 
-def put_back() -> None:
-    """Standard, mix only. Each step is tried even when the one before it failed."""
-    for action, arg in ((usb_audio.action_set_usb_expanded, False),
-                        (usb_audio.action_set_usb_multitrack, 0)):
+def put_back(mode_before: int, expanded_before: bool) -> None:
+    """The USB mode the run found. Each step is tried even when the one before it failed.
+
+    A desk found in Expanded is never switched out of it, because switching Expanded off takes
+    Game, Music, A and B off their faders (`usb_audio._clear_extended_faders`)."""
+    steps: list[tuple] = [] if expanded_before else [(usb_audio.action_set_usb_expanded, False)]
+    steps.append((usb_audio.action_set_usb_multitrack, mode_before))
+    for action, arg in steps:
         try:
             post(action, arg)
             settle()

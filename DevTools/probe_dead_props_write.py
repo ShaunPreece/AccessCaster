@@ -88,12 +88,13 @@ def probe(prop: str, reason: str) -> str:
     target = (not resting) if kind == "bool" else int(resting) + 1
     print(f"{prop} ({kind}) in {node.name}: {resting!r} -> {target!r}")
 
-    write(node, prop, kind, target)
     try:
+        write(node, prop, kind, target)
         verdict = classify(prop, root, before)
     finally:
-        # Written whatever the classification found, so a failed dump or a Ctrl+C still puts the
-        # property back. Writing the resting value over a swallowed write changes nothing.
+        # Written whatever happened since the test write, so a failed dump or a Ctrl+C in its
+        # settle still puts the property back. Writing the resting value over a swallowed or
+        # unsent write changes nothing.
         write(node, prop, kind, resting)
     root3, after = snapshot()
     if values_of(root3, prop) != values_of(root, prop):

@@ -220,4 +220,34 @@ check("Mic 4 goes back to the fader it left, not the first empty one",
 check("and the faders end as they started", LAYOUT, list(devices.PRO2.fader.default_vector))
 
 print()
+print("action_set_stereo_link: an unlink that fails keeps the link's record")
+FAIL_ONCE = [True]
+
+
+def set_source_failing_once(i, code):
+    if FAIL_ONCE.pop() if FAIL_ONCE else False:
+        raise OSError("the desk did not answer")
+    LAYOUT[i] = code
+
+
+with _testkit.as_device(devices.PRO2), patched(
+        (faders, {"_stereo_link_gate": lambda: None, "chain_follow_on": lambda: False,
+                  "read_fader_vector": lambda blob=None, spec=None: list(LAYOUT)}),
+        (device_page, {"hardware_id": lambda: "DESK-UNLINK"}),
+        (rcp_read, {"read_model": lambda *a, **k: b"",
+                    "strip_values": lambda blob, name: [False] * 9}),
+        (rcp_transfer, {"set_fader_source": set_source})):
+    faders.action_set_stereo_link(6, True)
+    with patched((rcp_transfer, {"set_fader_source": set_source_failing_once})):
+        failed = faders.action_set_stereo_link(6, False)
+        record = channels.peek_link(faders._layout_store_key(), 6)
+        retried = faders.action_set_stereo_link(6, False)
+    left = channels.peek_link(faders._layout_store_key(), 6)
+check("the failed unlink says so", failed["ok"], False)
+check("and keeps the record for the retry", (record or {}).get("upper_fader"), 3)
+check("the retry succeeds", retried["ok"], True)
+check("and puts Mic 4 back on the fader it left", retried["faders"][3], 3)
+check("then the record is taken", left, None)
+
+print()
 raise SystemExit(_testkit.finish())

@@ -24,6 +24,7 @@ from desk_labels import (
     PROCESSING_CONTROLS,
     PROCESSING_MODULES,
     PROCESSING_SPOKEN,
+    pan_words,
 )
 
 _PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c in g["controls"]}
@@ -278,6 +279,6 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
     with desk_access.hid_lock:
         channels.set_channel_processing(name, prop, v)
     pct = round(v * 100)
-    where = pan_link.pan_offset_words((pct - 50) * 2) if ctrl.get("pan") else f"{pct} percent"
+    where = pan_words(pct) if ctrl.get("pan") else f"{pct} percent"
     return {"ok": True,
             "message": f"{ch['label']} {PROCESSING_SPOKEN[prop].lower()} set to {where}."}

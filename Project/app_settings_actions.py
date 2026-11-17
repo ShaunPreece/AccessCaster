@@ -15,6 +15,7 @@ import app_settings
 import autostart  # the HKCU Run entry, shared with installer.iss
 import callme
 import clip_warning
+import diagnostics
 import folders
 import meters
 import settings_file
@@ -57,14 +58,14 @@ def _available() -> dict:
             out["announcer_voice"] = list(lists["voices"])
         if lists.get("outputs"):
             out["announcer_output"] = list(lists["outputs"])
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("settings_import.voices_unread", str(exc))
     try:
         found = meters.desk_streams()
         if found.get("streams"):
             out["meter_stream"] = [s["name"] for s in found["streams"] if s.get("name")]
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("settings_import.streams_unread", str(exc))
     return out
 
 

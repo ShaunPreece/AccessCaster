@@ -304,7 +304,7 @@ def _settle_mutes(new_vec, wanted: dict) -> list:
 
 
 def _unlink_mutes(kept, pair_muted: bool, lower: int, upper: int) -> dict:
-    """Each mic's mute after an unlink. `kept` is `channels.take_link`'s record.
+    """Each mic's mute after an unlink. `kept` is `channels.peek_link`'s record.
 
     A pair whose mute is unchanged since the link was never muted or opened by anybody, so each mic
     gets back what it had: a muted Mic 3 linked with an open Mic 4 unlinks the same way. A pair muted
@@ -425,7 +425,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                             "labels": [channel_name(c, spec) for c in vec],
                             "stereo": stereo_link_state(vec, spec),
                             "message": f"{label} is not linked."}
-                kept = channels.take_link(_layout_store_key(), pair_code)
+                kept = channels.peek_link(_layout_store_key(), pair_code)
                 target[seat] = lower
                 spare = (kept or {}).get("upper_fader")
                 if not (isinstance(spare, int) and 0 <= spare < len(target)
@@ -469,6 +469,8 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                     mute_note = (f" {label} is muted, because {names(because)} was." if because
                                  else f" {label} is muted.")
             else:
+                if int(pair_code) not in new:
+                    channels.take_link(_layout_store_key(), pair_code)
                 wanted = _unlink_mutes(kept, pair_muted, lower, upper)
                 opened = _settle_mutes(new, wanted)
                 muted = [c for c in (lower, upper) if wanted[c] and c in new]

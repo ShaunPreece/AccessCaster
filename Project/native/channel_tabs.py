@@ -12,7 +12,7 @@ import channel_actions
 import mic_presets
 import mute_solo
 import pan_link
-from desk_labels import EFFECT_PARAMS, pan_words
+from desk_labels import EFFECT_PARAMS, pan_offset_words, pan_words
 from native import a11y
 from native.calls import call
 from native.channel_jobs import AutoGain
@@ -429,7 +429,7 @@ class StereoPan:
             for ctrl in legs]
         self.linked = Slider(page, parent, sizer, "Pan", -100, 100,
                              lambda off: pan_link.action_set_linked_pan(name, off, *self._legs_now),
-                             self._offset, lambda _off: None, words=pan_link.pan_offset_words,
+                             self._offset, lambda _off: None, words=pan_offset_words,
                              unread=0, accepted=self._moved)
         self._shown_linked = None
 

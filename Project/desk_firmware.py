@@ -162,7 +162,9 @@ class Desk:
         """The desk's USB product id while its control interface is on the bus, else None."""
         try:
             iface = rcp_hid.find_control_interface(fresh=True)
-        except Exception:
+        except Exception as exc:
+            # Read as "the desk has left", which moves an install on to its restart step.
+            diagnostics.event("firmware.present_unread", str(exc))
             return None
         return iface.product_id if iface is not None else None
 
@@ -170,7 +172,8 @@ class Desk:
         """The desk is on the bus under its flashing identity."""
         try:
             return any(i.product_id == FLASHING_PID for i in rcp_hid.enumerate_interfaces())
-        except Exception:
+        except Exception as exc:
+            diagnostics.event("firmware.flashing_unread", str(exc))
             return False
 
 

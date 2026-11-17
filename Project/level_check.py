@@ -177,10 +177,6 @@ def action_channel_level_check(name: str = "") -> dict:
         return {"ok": False, "running": False,
                 "message": "The desk's Chat audio device is not available on this computer, so "
                            "there is no way to listen to one channel on its own."}
-    # Windows out of the way on the endpoint actually being metered: its level scales every reading
-    # and its mute would make a working microphone read as silence. Said in the reply, not silently.
-    win = chat_isolation.endpoint_to_unity(endpoint["id"])
-
     try:
         with desk_access.hid_lock:
             iso = chat_isolation.ChatIsolation(src["index"])
@@ -199,6 +195,10 @@ def action_channel_level_check(name: str = "") -> dict:
                                 f"Routing, Output mixes.")}
         return {"ok": False, "running": False, "message": f"Could not listen to {src['label']} on "
                                                           f"its own: {why}"}
+    # Windows out of the way on the endpoint actually being metered: its level scales every reading
+    # and its mute would make a working microphone read as silence. Done once the isolation holds,
+    # so a refused check leaves Windows alone, and said in every reply after it.
+    win = chat_isolation.endpoint_to_unity(endpoint["id"])
     w = meters.Watcher(endpoint["id"], speech.say,
                        clip_at=clip_warning.CLIP_AT, clip_gap=4.0,
                        warn_silence=False,        # a check is not a watch: no went-silent nagging
@@ -209,7 +209,7 @@ def action_channel_level_check(name: str = "") -> dict:
         with _lock:
             _watcher, _iso = None, iso
         _stop(speak=False)             # the mix still has to go back
-        return {"ok": False, "running": False, "message": err}
+        return {"ok": False, "running": False, "message": win + err}
     with _lock:
         _run_id += 1
         run_id = _run_id

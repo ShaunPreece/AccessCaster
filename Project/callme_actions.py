@@ -197,7 +197,8 @@ def _callme1_on_fader():
     try:
         with desk_access.hid_lock:
             layout = rcp_read.strip_values(rcp_read.read_model(), "channelInputSource")[:count]
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("callme.layout_unread", str(exc))
         return None
     return callme.CALLME1_SOURCE in layout
 

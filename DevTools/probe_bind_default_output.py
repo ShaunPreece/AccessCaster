@@ -147,6 +147,33 @@ def pick_target(eps: list) -> vd.Endpoint | None:
                  and not e.desk and not e.virtual), None)
 
 
+def put_back(policy, was_default: vd.Endpoint | None, mode_before: int,
+             expanded_before: bool) -> None:
+    """Windows' default output first, since it needs no desk, then the USB mode. Each step is
+    tried even when the one before it failed: a read can raise while the desk re-enumerates."""
+    if was_default is not None:
+        try:
+            policy.SetDefaultEndpoint(was_default.id, vd.E_CONSOLE)
+            policy.SetDefaultEndpoint(was_default.id, vd.E_MULTIMEDIA)
+            print(f"default restored to: {was_default.name}")
+        except Exception as exc:
+            print(f"DEFAULT OUTPUT NOT RESTORED to {was_default.name}: {exc}")
+    if not expanded_before:
+        try:
+            res = usb_audio.action_set_usb_expanded(False)
+            print("USB 1 input restored to Standard" if res.get("ok") else
+                  f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
+        except Exception as exc:
+            print(f"USB 1 INPUT NOT RESTORED to Standard: {exc}")
+        time.sleep(10)
+    try:
+        res = usb_audio.action_set_usb_multitrack(mode_before)
+        print(f"USB output mode restored to {mode_before}" if res.get("ok") else
+              f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {res.get('message')}")
+    except Exception as exc:
+        print(f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {exc}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cycles", type=int, default=6)
@@ -214,18 +241,8 @@ def main() -> None:
         if sampler.is_alive():
             sampler.stop.set()
             sampler.join(timeout=3)
-        if not expanded_before:
-            res = usb_audio.action_set_usb_expanded(False)
-            print("USB 1 input restored to Standard" if res.get("ok") else
-                  f"USB 1 INPUT NOT RESTORED to Standard: {res.get('message')}")
-            time.sleep(10)
-        res = usb_audio.action_set_usb_multitrack(mode_before)
-        print(f"USB output mode restored to {mode_before}" if res.get("ok") else
-              f"USB OUTPUT MODE NOT RESTORED to {mode_before}: {res.get('message')}")
-        if not args.control and not args.keep_default and was_default is not None:
-            policy.SetDefaultEndpoint(was_default_id, vd.E_CONSOLE)
-            policy.SetDefaultEndpoint(was_default_id, vd.E_MULTIMEDIA)
-            print(f"default restored to: {was_default.name}")
+        put_back(policy, None if args.control or args.keep_default else was_default,
+                 mode_before, expanded_before)
 
     print()
     for line in sampler.events:

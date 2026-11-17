@@ -2022,10 +2022,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   levels the check is speaking. The server toggles, so a press is right whatever the label says.
 - **A STEREO PAN'S THREE SLIDERS ARE BUILT ONCE AND THE LINK ONLY SHOWS OR HIDES THEM**
   (`channel_tabs.StereoPan`), so linking leaves the focus on the switch.
-- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST IS `pan_link.linked_pan_offset` ALONE**, which the
-  window asks (`channel_tabs.StereoPan`). It shows centre for legs moved since the link, and
-  `action_set_linked_pan` starts the link again from those legs on the next move; a second copy of the test would
+- **A PAN LINK'S "HAVE THE LEGS MOVED" TEST IS `pan_link.legs_moved` ALONE.** The window shows
+  centre for legs moved since the link (`linked_pan_offset`, asked by `channel_tabs.StereoPan`),
+  and `action_set_linked_pan` starts the link again from those legs on the next move. Comparing
+  offsets instead cannot tell moved legs from a link at centre; a second copy of the test would
   let the slider's position and the written legs disagree.
+- **EVERY PAN IS WORDED BY `desk_labels.pan_offset_words`**; `pan_words` converts a position to
+  an offset and calls it, so the reply and the announcer word one pan the same way.
 - **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
   or entering Custom moves the output's cross-points on the desk, which it does not push. Its own
   cross-point writes need nothing: the desk pushes back neither `mixDisabled` nor `outputMixMinus`

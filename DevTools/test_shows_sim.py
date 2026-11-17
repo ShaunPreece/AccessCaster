@@ -21,6 +21,7 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
 import _testkit
+import channels
 import desk_live
 import devices
 import fake_model
@@ -382,6 +383,19 @@ with patched((show_actions, {"wake_channels": lambda: {"ok": True, "woken": [1],
     res = run_job(show_actions.action_show_import(9))
 check("an import whose wake missed a mic still restores", res["ok"], True)
 check_in("and says how to wake a silent mic", "if a mic is silent", res["message"])
+
+print("the channel wake on a Duo")
+# The Duo has two mics: a wake that walked the Pro II's four would count mics 3 and 4 as failed and
+# tell the user to wake a silent mic by hand after every reset.
+reset_desk()
+nudged = []
+with as_device(devices.DUO), patched(
+        (channels, {"mic_gain": lambda _blob, _ch: 40,
+                    "set_mic_gain": lambda ch, db: nudged.append(ch)})):
+    wake = show_actions.wake_channels()
+check("it wakes the Duo's two mics", wake["woken"], [1, 2])
+check("and fails none", wake["failed"], [])
+check("each is nudged and put back", nudged, [1, 1, 2, 2])
 
 print("deleting both halves of a backup")
 # THE SHOW GOES FIRST, AND A FAILED SHOW DELETE KEEPS THE PROFILE: the profile is the only name
