@@ -112,6 +112,17 @@ check("it refuses rather than downloading again", r.get("ok"), False)
 check("and points at the manual route for a repair",
       "software page" in (r.get("message") or "").lower(), True)
 
+print("\nTHE SOFTWARE PAGE BUTTON WITH NO BROWSER TO OPEN IT")
+# webbrowser.open says it failed by returning False, not by raising.
+with patched((usb_audio.webbrowser, {"open": lambda _url: False})):
+    r = usb_audio.action_open_driver_page()
+check("it reports the failure", r.get("ok"), False)
+check_true("and gives the address to type in", di.PAGE_URL in (r.get("message") or ""),
+           str(r.get("message")))
+with patched((usb_audio.webbrowser, {"open": lambda _url: True})):
+    r = usb_audio.action_open_driver_page()
+check("an opened page is reported as opening", r.get("ok"), True)
+
 print("\nWHAT THE APP CONTACTS, AND NOTHING ELSE")
 # The README and Help both list what reaches the internet: RODE's driver download, on a button
 # press, and AccessCaster's own update check and download. Asserted rather than trusted: only

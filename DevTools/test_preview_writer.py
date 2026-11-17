@@ -127,6 +127,33 @@ with as_device(devices.PRO2):
         while writer._failure is None and time.monotonic() < deadline:
             time.sleep(0.01)
 
+    # A write that fails after its preview has ended belongs to that preview, not the next one.
+    release = threading.Event()
+
+    def failing_late(edits, more):
+        release.wait(2)
+        raise ValueError("The preview pad is no longer there.")
+
+    def wait_for_failure(writer):
+        deadline = time.monotonic() + 2
+        while writer._failure is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    with patched((soundpad, {"preview_write": failing_late})):
+        writer = pad_actions._PreviewWriter()
+        writer.submit(17, "echoMix", 0.5, "float")
+        time.sleep(0.1)                  # the writer has taken the edit and is writing it
+        writer.forget(17)
+        release.set()
+        wait_for_failure(writer)
+        check("an ended preview's failure is not reported by the next preview",
+              writer.submit(17, "echoMix", 0.6, "float"), {"ok": True})
+        wait_for_failure(writer)
+        reply = writer.submit(17, "echoMix", 0.7, "float")
+        check_true("but a failure in the current preview still is",
+                   not reply["ok"] and "no longer there" in reply["message"])
+        wait_for_failure(writer)
+
     writer = pad_actions._PreviewWriter()
     writer._pending = {(17, "echoMix"): (0.5, "float"), (5, "robotMix"): (0.2, "float")}
     writer.forget(17)

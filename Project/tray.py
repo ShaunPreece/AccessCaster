@@ -266,7 +266,8 @@ class TrayApp:
         flags = win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE
         try:
             return win32gui.LoadImage(0, path, win32con.IMAGE_ICON, 0, 0, flags)
-        except Exception:
+        except win32gui.error as exc:
+            diagnostics.event("tray.icon_missing", f"{path}: {exc}")
             return win32gui.LoadIcon(0, win32con.IDI_APPLICATION)
 
     def _add_icon(self) -> None:

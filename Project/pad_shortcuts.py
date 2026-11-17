@@ -322,7 +322,7 @@ def _pad_verify(pad_idx: int, position: int, want_on: bool) -> None:
     try:
         fresh = refresh_pads()
         with desk_access.hid_lock:
-            latched = {pi for _pos, pi, _nm in soundpad.latched_pads()}
+            latched = {p.idx for p in soundpad.latched_pads()}
         if not want_on or pad_idx in latched:
             return
         wrong = next((pi for pi, entry in fresh.items() if entry[0] == position), None)

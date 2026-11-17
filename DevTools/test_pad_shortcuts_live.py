@@ -156,8 +156,8 @@ def main() -> int:
         # Silence while the follower still runs: it is what says what is still playing.
         silence(pads, "left playing by this run")
         pad_shortcuts.release_held()
-        for pos, _pi, _nm in soundpad.latched_pads():
-            soundpad.unlatch_pad(pos)
+        for pad in soundpad.latched_pads():
+            soundpad.unlatch_pad(pad.position)
         if was_bank is not None:
             soundpad.select_bank(was_bank)
         print(f"\nrestored: bank {(was_bank or 0) + 1}, nothing engaged or held")

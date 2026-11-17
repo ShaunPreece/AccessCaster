@@ -2199,14 +2199,14 @@ def restore_factory_fx_pads(live: bool = True, progress=None) -> dict:
     stuck = unlatch_all()
     note = ""
     if stuck:
-        note = (" NOTE: " + ", ".join(nm for _p, _i, nm in stuck)
+        note = (" NOTE: " + ", ".join(p.name for p in stuck)
                 + " " + plural(len(stuck), "was", "were")
                 + " left switched on and processing a live channel; that has been switched off.")
 
     return {
         "ok": not failed,
         "results": results,
-        "unlatched": [nm for _p, _i, nm in stuck],
+        "unlatched": [p.name for p in stuck],
         "message": (f"All {len(done)} factory effect and mixer pads restored on pads "
                     f"{', '.join(str(r['grid']) for r in done)}. Worth an ear-check on each."
                     if not failed else
@@ -2298,8 +2298,8 @@ def heal_fx_pool(progress=None) -> dict:
             "health": pool_health(), "message": " ".join(bits)}
 
 
-def latched_pads(blob=None) -> list:
-    """[(position, padIdx, name)] for every pad the desk currently has ENGAGED (padActive true).
+def latched_pads(blob=None) -> list[Pad]:
+    """Every pad the desk currently has ENGAGED (padActive true).
 
     A latched pad changes nothing on the grid (name, type, colour, presence), only `padActive`. A
     latched VOICE-FX pad is the dangerous case: it is silent in itself and processes a live mic, so
@@ -2310,7 +2310,7 @@ def latched_pads(blob=None) -> list:
     engaged, so unlatching one switches off the desk's own state."""
     if blob is None:
         blob = rr.read_model_stable()
-    return [(p.position, p.idx, p.name) for p in pad_nodes(blob)
+    return [p for p in pad_nodes(blob)
             if p.type != SYSTEM_PAD_TYPE and p.props.get("padActive") is True]
 
 
@@ -2403,8 +2403,8 @@ def current_bank(blob=None):
 def unlatch_all(blob=None) -> list:
     """Switch off every engaged pad, and report what was switched off. [] when there was nothing."""
     found = latched_pads(blob)
-    for position, _pi, _nm in found:
-        unlatch_pad(position)
+    for pad in found:
+        unlatch_pad(pad.position)
         time.sleep(0.2)
     return found
 

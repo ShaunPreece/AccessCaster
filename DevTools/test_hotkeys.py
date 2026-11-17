@@ -54,6 +54,9 @@ def main():
     check_true("a combination reads as a sentence",
                hotkeys.combo_text(["win", "ctrl", "alt"], "A") == "Ctrl, Alt, Windows and A",
                hotkeys.combo_text(["win", "ctrl", "alt"], "A"))
+    check_true("a chord with no key names only its modifiers",
+               hotkeys.combo_text(["ctrl", "alt"], "") == "Ctrl and Alt",
+               hotkeys.combo_text(["ctrl", "alt"], ""))
 
     # --- the defaults are laid down when nothing has been saved ---------------------------------
     # THE WHOLE RUN IS ON CTRL+SHIFT, a chord nothing ships on: the real app is very likely RUNNING

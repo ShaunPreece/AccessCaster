@@ -98,9 +98,8 @@ def overview_lines(d):
     # A latched pad first: a voice effect makes no noise of its own, so the only symptom is
     # sounding wrong.
     for pad in d.get("pads_engaged") or []:
-        lines.append(f"Pad {pad['grid']}, {pad['name']}, is switched on and processing a live "
-                     "channel. Press that pad on the desk to switch it off, or clear it from the "
-                     "Pads page.")
+        lines.append(f"Pad {pad['grid']}, {pad['name']}, {pad['state']}. Press that pad on the "
+                     "desk to switch it off, or clear it from the Pads page.")
     if d.get("recording"):
         lines.append("A recording is PAUSED. The Recording section carries on or stops it."
                      if d["recording"].get("state") == recorder.PAUSED else
@@ -148,7 +147,7 @@ def desk_summary(d):
     level, the monitor level) stay on Current state. Empty when the unit could not be read."""
     if not d or not d.get("ok"):
         return ""
-    alerts = [f"Pad {p['grid']}, {p['name']}, is switched on and processing a live channel"
+    alerts = [f"Pad {p['grid']}, {p['name']}, {p['state']}"
               for p in d.get("pads_engaged") or []]
     if d.get("recording"):
         alerts.append("a recording is paused" if d["recording"].get("state") == recorder.PAUSED

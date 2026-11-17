@@ -12,6 +12,7 @@ import desk_access
 import desk_firmware
 import desk_live
 import devices
+import diagnostics
 import network
 import rcp_hid
 import rcp_read
@@ -277,17 +278,28 @@ def _overview_routing(blob: bytes) -> dict:
     return {"ok": True, "reason": "", "notes": notes}
 
 
+# What an engaged pad is doing, by padType, completing "Pad 15, Robot, ...".
+_ENGAGED_STATE: dict[int | None, str] = {
+    soundpad.PAD_TYPE_VOICE_FX: "is switched on and processing a live channel",
+    soundpad.PAD_TYPE_MIXER: "is switched on, so its mixer action is still in effect",
+}
+
+
 def _pads_engaged(blob: bytes) -> list:
-    """Pads the desk currently has ENGAGED, named, from a dump already read. [] when none are.
+    """Pads the desk currently has ENGAGED, from a dump already read: each pad's grid number, name
+    and `state`, the words saying what it is doing. [] when none are.
 
     A VOICE-FX pad is the one worth catching: it processes a live channel and is otherwise silent,
     so the only symptom is sounding wrong. Never raises - this decorates the overview, and an
     unreadable pad table is not worth failing the whole page for."""
     try:
-        return [{"grid": pi + 1, "name": nm, "kind": "voice effect" if pi is not None else "pad"}
-                for _pos, pi, nm in soundpad.latched_pads(blob)]
-    except Exception:
+        latched = soundpad.latched_pads(blob)
+    except Exception as exc:
+        diagnostics.event("overview.pads_failed", f"{type(exc).__name__}: {exc}")
         return []
+    return [{"grid": p.idx + 1, "name": p.name,
+             "state": _ENGAGED_STATE.get(p.type, "is switched on")}
+            for p in latched if p.idx is not None]
 
 
 def _storage_low(blob: bytes) -> list:
@@ -301,7 +313,8 @@ def _storage_low(blob: bytes) -> list:
     try:
         return [{"label": v["label"], "free_pct": v["free_pct"], "free_mb": v["free_mb"]}
                 for v in recorder.read_volumes(blob) if v["low"]]
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("overview.storage_failed", f"{type(exc).__name__}: {exc}")
         return []
 
 
@@ -314,8 +327,8 @@ def _overview_recording(blob: bytes):
         state = recorder.read_state(blob)
         if state in (recorder.RECORDING, recorder.PAUSED):
             return {"state": state, "label": recorder.STATE_LABEL[state]}
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("overview.recording_failed", f"{type(exc).__name__}: {exc}")
     return None
 
 

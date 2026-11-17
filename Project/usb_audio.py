@@ -597,12 +597,18 @@ def action_install_driver() -> dict:
 
 def action_open_driver_page() -> dict:
     """Open RODE's own software page in the browser: the manual route, offered as its own button
-    rather than only after a failure, so nobody has to make something go wrong to find it."""
+    rather than only after a failure, so nobody has to make something go wrong to find it.
+
+    `webbrowser.open` reports most failures by returning False rather than raising (on Windows it
+    catches the shell's OSError itself), so both are treated as the page not opening."""
     try:
-        webbrowser.open(driver_install.PAGE_URL)
+        opened = webbrowser.open(driver_install.PAGE_URL)
     except Exception as exc:
+        diagnostics.event("driver.page_failed", f"{type(exc).__name__}: {exc}")
+        opened = False
+    if not opened:
         return {"ok": False,
-                "message": (f"The page could not be opened ({exc}). Go to {driver_install.PAGE_URL} "
+                "message": (f"The page could not be opened. Go to {driver_install.PAGE_URL} "
                             f"in your browser and look for the RODECaster Virtual Device Driver.")}
     return {"ok": True,
             "message": ("RODE's software page is opening in your browser. Look for the RODECaster "

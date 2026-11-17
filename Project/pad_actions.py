@@ -429,19 +429,25 @@ class _PreviewWriter:
     A session costs about two seconds to open and close (the pad volume mounts and dismounts), and
     a change is a single record, so each edit is queued, the newest value per setting winning, and
     the thread writes whatever is waiting in one session, holding it open while more arrive within
-    IDLE_S (soundpad.preview_write). A write that fails is reported by the next submit."""
+    IDLE_S (soundpad.preview_write). A write that fails is reported by the next submit, unless the
+    preview has ended since: `forget` starts a new generation, and a failure is reported only within
+    the generation of the edits that failed."""
 
     IDLE_S = 0.6
 
     def __init__(self):
         self._cond = threading.Condition()
         self._pending = {}       # {(grid, param): (value, kind)}, oldest first
-        self._failure = None
+        self._failure = None     # (generation, reply)
+        self._generation = 0
+        self._taken = 0          # the generation of the newest edits the writer has taken
         self._thread = None
 
     def submit(self, grid: int, param: str, value, kind: str) -> dict:
         with self._cond:
             failure, self._failure = self._failure, None
+            if failure is not None and failure[0] != self._generation:
+                failure = None
             self._pending.pop((grid, param), None)
             self._pending[(grid, param)] = (value, kind)
             if self._thread is None or not self._thread.is_alive():
@@ -449,11 +455,12 @@ class _PreviewWriter:
                                                 daemon=True)
                 self._thread.start()
             self._cond.notify()
-        return failure or {"ok": True}
+        return failure[1] if failure else {"ok": True}
 
     def forget(self, grid: int) -> None:
         """Drop what is waiting for `grid`, whose preview has ended."""
         with self._cond:
+            self._generation += 1
             self._pending = {key: v for key, v in self._pending.items() if key[0] != grid}
 
     def _take(self, wait):
@@ -461,6 +468,8 @@ class _PreviewWriter:
             if not self._pending:
                 self._cond.wait(wait)
             edits, self._pending = self._pending, {}
+            if edits:
+                self._taken = self._generation
             return edits
 
     def _run(self) -> None:
@@ -474,8 +483,9 @@ class _PreviewWriter:
             except Exception as exc:
                 diagnostics.event("preview.write_failed", str(exc))
                 with self._cond:
-                    self._failure = {"ok": False,
-                                     "message": f"Could not update live preview: {exc}"}
+                    self._failure = (self._taken,
+                                     {"ok": False,
+                                      "message": f"Could not update live preview: {exc}"})
 
 
 _preview_writer = _PreviewWriter()
@@ -508,11 +518,11 @@ def action_preview_stop(grid: int) -> dict:
 
 def cleanup_preview_on_exit() -> None:
     """When the app quits while a live preview is engaged, clear the scratch pad so no effect is
-    left on the mic. Best effort; failures are ignored."""
+    left on the mic. Best effort: a failure is logged, since it leaves the effect on the mic."""
     if _preview_grid is None:
         return
     try:
         with desk_access.hid_lock:
             soundpad.preview_stop(_preview_grid)
-    except Exception:
-        pass
+    except Exception as exc:
+        diagnostics.event("preview.exit_cleanup_failed", f"{type(exc).__name__}: {exc}")

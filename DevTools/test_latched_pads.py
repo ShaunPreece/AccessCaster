@@ -38,7 +38,8 @@ def with_pads(positions, active_flags):
                          {"padActive": active_flags[i]} if i < len(active_flags) else {})
             for i, (pos, idx, typ, name) in enumerate(positions)]
     with patched((soundpad, {"pad_nodes": lambda blob=None: pads})):
-        return soundpad.latched_pads(b""), device_page._pads_engaged(b"")
+        latched = [(p.position, p.idx, p.name) for p in soundpad.latched_pads(b"")]
+        return latched, device_page._pads_engaged(b"")
 
 
 PADS = [(8, 0, 1, "Music_Bed"), (18, 8, 2, "Voice Disguise"), (23, 14, 2, "Small Robot")]
@@ -58,7 +59,22 @@ def main() -> int:
     latched, engaged = with_pads(PADS, [False, False, True])
     check("the latched pad is found", latched, [(23, 14, "Small Robot")])
     check("and it is named on the overview by GRID position, not by padIdx",
-          engaged, [{"grid": 15, "name": "Small Robot", "kind": "voice effect"}])
+          engaged, [{"grid": 15, "name": "Small Robot",
+                     "state": "is switched on and processing a live channel"}])
+
+    print("\nA LATCHED PAD THAT IS NOT A VOICE EFFECT")
+    _, engaged = with_pads(PADS, [True, False, False])
+    check("a sound pad is not said to be processing a live channel",
+          engaged, [{"grid": 1, "name": "Music_Bed", "state": "is switched on"}])
+    _, engaged = with_pads([(9, 3, 3, "Censor")], [True])
+    check("a mixer pad says its action is in effect",
+          engaged, [{"grid": 4, "name": "Censor",
+                     "state": "is switched on, so its mixer action is still in effect"}])
+
+    print("\nA PAD WITH NO padIdx DOES NOT TAKE THE OTHERS WITH IT")
+    _, engaged = with_pads(PADS + [(30, None, 2, "Orphan")], [False, False, True, True])
+    check("the pad with no grid slot is skipped and the real one still reported",
+          [p["name"] for p in engaged], ["Small Robot"])
 
     print("\nTHE OFF-BY-ONE THIS DETECTION LIVES OR DIES BY")
     # One flag per pad, in the same order. An off-by-one here would blame Voice Disguise for Small
@@ -140,7 +156,8 @@ def main() -> int:
              20: (23, "Megaphone", 2, None)}
     released, said = [], []
     with patched((pad_shortcuts, {"refresh_pads": lambda: fresh, "_pads_on": {14}}),
-                 (soundpad, {"latched_pads": lambda: [(9, 1, "Music bed"), (23, 20, "Megaphone")],
+                 (soundpad, {"latched_pads": lambda: [soundpad.Pad(9, 1, 1, "Music bed", {}),
+                                                     soundpad.Pad(23, 20, 2, "Megaphone", {})],
                              "unlatch_pad": released.append}),
                  (pad_shortcuts.speech, {"say": said.append})):
         pad_shortcuts._pad_verify(14, 23, True)

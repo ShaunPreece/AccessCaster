@@ -147,12 +147,13 @@ _KEY_VK = {name: vk for name, vk in KEYS}
 
 
 def combo_text(mods, key: str) -> str:
-    """A combination as it is spoken and written: "Ctrl, Alt, Windows and A".
+    """A combination as it is spoken and written: "Ctrl, Alt, Windows and A", or with an empty
+    `key` the modifiers alone: "Ctrl, Alt and Windows".
 
     Commas and "and" rather than plus signs, because this is read aloud far more often than it is
     read on screen, and a screen reader announces "+" as "plus" in the middle of the phrase."""
     names = [label for name, label, _flag in MODIFIERS if name in (mods or [])]
-    return join_and(names + [key])
+    return join_and(names + [key] if key else names)
 
 
 def parse_binding(mods, key: str):
@@ -440,7 +441,7 @@ class HotkeyManager:
             self._shortcuts = out
         self.reload()
         msg = (f"Restored the {len(self._shortcuts)} default shortcuts, on "
-               f"{join_and([label for n, label, _f in MODIFIERS if n in self._mods])}.")
+               f"{combo_text(self._mods, '')}.")
         refused = self._refused_sentence()
         return {"ok": True, "message": f"{msg} {refused}" if refused else msg}
 
@@ -467,7 +468,7 @@ class HotkeyManager:
                 else:
                     used.add(s["key"])
         self.reload()
-        held = join_and([label for n, label, _f in MODIFIERS if n in tidy])
+        held = combo_text(tidy, "")
         bits = [f"Every shortcut now uses {held}."]
         for s in switched_off:
             bits.append(f"{self._labeller(s['command'])} was on the same key as another shortcut, "

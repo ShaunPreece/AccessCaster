@@ -276,17 +276,11 @@ def _output_device(voice, output: str) -> int:
 
 
 def _token(tokens, wanted: str):
-    """The SAPI token whose name is `wanted`: an exact match wins, otherwise the first
-    case-insensitive substring, as `_pick` accepts."""
+    """The SAPI token `_pick` resolves `wanted` to, or None."""
     tokens = list(tokens)
-    for t in tokens:
-        if t.GetDescription() == wanted:
-            return t
-    low = wanted.lower()
-    for t in tokens:
-        if low in t.GetDescription().lower():
-            return t
-    return None
+    names = [t.GetDescription() for t in tokens]
+    name = _pick(wanted, names)
+    return tokens[names.index(name)] if name else None
 
 
 def _scaled(pcm: bytes, percent: int) -> bytes:
@@ -418,7 +412,8 @@ def tone_and_wait(name: str, despite_off: bool = False) -> bool:
 def _tone(name: str, despite_off: bool, done: threading.Event | None) -> bool:
     try:
         path = tones.tone_path(name)
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("announcer.tone_failed", f"{name}: {type(exc).__name__}: {exc}")
         return False
     if not path:
         return False
@@ -470,7 +465,8 @@ def start_loop(name: str, delay_s: float = 0.0) -> Loop | None:
         return None
     try:
         path = tones.tone_path(name)
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("announcer.tone_failed", f"{name}: {type(exc).__name__}: {exc}")
         return None
     return Loop(path, delay_s) if path else None
 

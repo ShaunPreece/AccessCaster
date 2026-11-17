@@ -91,6 +91,7 @@ class HelpPage(wx.Panel):
     def __init__(self, frame, title, text, support=False):
         super().__init__(frame.host)
         self.Hide()
+        self.frame = frame
         # No group box: the text box carries the topic's name, and a group named the same would
         # only make the screen reader say it twice.
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -99,8 +100,16 @@ class HelpPage(wx.Panel):
         box.SetValue(text)
         if support:
             button = wx.Button(self, label="Open the support page in your browser")
-            button.Bind(wx.EVT_BUTTON, lambda _e: webbrowser.open(SUPPORT_URL))
+            button.Bind(wx.EVT_BUTTON, self._on_support)
             sizer.Add(button, 0, wx.ALL, 6)
+
+    def _on_support(self, event):
+        # `webbrowser.open` returns False, rather than raising, when no browser could be started.
+        if not webbrowser.open(SUPPORT_URL):
+            self.frame.reply(event.GetEventObject(), {
+                "ok": False,
+                "message": f"The support page could not be opened. Go to {SUPPORT_URL} in your "
+                           "browser."})
 
 
 class HelpSection:
