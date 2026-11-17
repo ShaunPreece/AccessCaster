@@ -477,7 +477,7 @@ def fire(target: str) -> dict:
     target = (target or "").strip()
     if not target:
         return _said("No pad is assigned to this shortcut yet. Choose one on the Keyboard "
-                     "shortcuts tab.", ok=False)
+                     "shortcuts page.", ok=False)
     try:
         pad_idx = int(target)
     except ValueError:

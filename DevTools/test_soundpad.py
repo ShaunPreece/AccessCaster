@@ -73,7 +73,8 @@ FX_PAD = {"grid": 5, "type": soundpad.PAD_TYPE_VOICE_FX, "name": "Radio",
 def restore_fx(effects_idx):
     health = dict(CLEAN, clean=False, duplicates=[4], effects_idx=effects_idx)
     with patched((soundpad, {
-            "safe_assign_fx_recipe": lambda *a, **k: {"ok": False, "health": health},
+            "safe_assign_fx_recipe": lambda *a, **k: {"ok": False, "health": health,
+                                                      "objects_for_pad": effects_idx.count(4)},
             "wait_for_pad_present": lambda idx: True,
             "set_pad_property": lambda grid, name, value: {"ok": True},
             "pool_health": lambda blob=None: CLEAN})):

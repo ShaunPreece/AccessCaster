@@ -305,7 +305,7 @@ def _settle_mutes(new_vec, wanted: dict) -> list:
 
 
 def _unlink_mutes(kept, pair_muted: bool, lower: int, upper: int) -> dict:
-    """Each mic's mute after an unlink. `kept` is `channels.take_link_mutes`' record.
+    """Each mic's mute after an unlink. `kept` is `channels.take_link`'s record.
 
     A pair whose mute is unchanged since the link was never muted or opened by anybody, so each mic
     gets back what it had: a muted Mic 3 linked with an open Mic 4 unlinks the same way. A pair muted
@@ -364,15 +364,16 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
     abandons the upper one off-fader, which on the RODE app leaves you with a mic you cannot hear and
     no indication why. We put the upper mic back on the fader the link emptied when that fader is
     still free, so a link followed by an unlink is a true round trip. With its processing restored by
-    the off-fader chain store, the desk ends up where it started. When there is no free fader we say
-    so rather than displacing something the user chose.
+    the off-fader chain store, the desk ends up where it started. The emptied fader is kept with the
+    link's record; with no record, or that fader taken since, the first free fader is used. When
+    there is no free fader we say so rather than displacing something the user chose.
 
     Processing follows both ways through follow_chains: linking parks BOTH mics' chains (the pair
     keeps the lower mic's strip voicing, which is what the desk does), and unlinking hands each one
     back.
 
     Mutes follow the same way. A pair is muted if EITHER mic was, so a link never opens a mic the
-    user silenced; each mic's own mute is parked (`channels.park_link_mutes`) and `_unlink_mutes`
+    user silenced; each mic's own mute is parked (`channels.park_link`) and `_unlink_mutes`
     decides what the unlink hands back."""
     gate = _stereo_link_gate()
     if gate is not None:
@@ -384,6 +385,7 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
     lower, upper = pair
     label = spec.pair_label.get(int(pair_code), f"pair {pair_code}")
     chain_note = mute_note = ""
+    kept = upper_fader = None
 
     def names(codes):
         return wording.join_and(channel_name(c, spec) for c in codes)
@@ -411,6 +413,8 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                     return {"ok": False,
                             "message": (f"There is no free fader for {label}. Move a channel off a "
                                         f"fader first, then link.")}
+                upper_fader = next((i for i, c in enumerate(vec) if c == upper and i != seat),
+                                   None)
                 for i, c in enumerate(target):
                     if c in (lower, upper):
                         target[i] = -1
@@ -422,8 +426,12 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
                             "labels": [channel_name(c, spec) for c in vec],
                             "stereo": stereo_link_state(vec, spec),
                             "message": f"{label} is not linked."}
+                kept = channels.take_link(_layout_store_key(), pair_code)
                 target[seat] = lower
-                spare = next((i for i, c in enumerate(target) if is_empty_fader(c)), None)
+                spare = (kept or {}).get("upper_fader")
+                if not (isinstance(spare, int) and 0 <= spare < len(target)
+                        and is_empty_fader(target[spare])):
+                    spare = next((i for i, c in enumerate(target) if is_empty_fader(c)), None)
                 if spare is not None:
                     target[spare] = upper
             # Mutes are read before the write, since a linked mic has no strip of its own to read
@@ -454,16 +462,15 @@ def action_set_stereo_link(pair_code: int, on: bool) -> dict:
             if on:
                 pair_muted = lower_muted or upper_muted
                 _settle_mutes(new, {int(pair_code): pair_muted})
-                channels.park_link_mutes(_layout_store_key(), pair_code, lower_muted,
-                                         upper_muted, pair_muted)
+                channels.park_link(_layout_store_key(), pair_code, lower_muted, upper_muted,
+                                   pair_muted, upper_fader)
                 if pair_muted:
                     because = [] if lower_muted and upper_muted else [
                         lower if lower_muted else upper]
                     mute_note = (f" {label} is muted, because {names(because)} was." if because
                                  else f" {label} is muted.")
             else:
-                wanted = _unlink_mutes(channels.take_link_mutes(_layout_store_key(), pair_code),
-                                       pair_muted, lower, upper)
+                wanted = _unlink_mutes(kept, pair_muted, lower, upper)
                 opened = _settle_mutes(new, wanted)
                 muted = [c for c in (lower, upper) if wanted[c] and c in new]
                 if muted:

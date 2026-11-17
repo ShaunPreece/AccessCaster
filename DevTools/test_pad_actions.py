@@ -192,6 +192,39 @@ with as_device(devices.PRO2), patched(
 check("a create that leaves the pool unclean is a failure", res["ok"], False)
 
 print()
+print("a create the desk does not take is a failure, said with a reason (T3-255, T3-259)")
+NOT_TAKEN = {"ok": False, "health": {"clean": True, "effects_idx": []}, "objects_for_pad": 0}
+stopped = []
+with as_device(devices.PRO2), patched(
+        (soundpad, {"safe_assign_fx_recipe": lambda *_a, **_k: dict(NOT_TAKEN),
+                    "_position_of": lambda idx: (None, None, None),
+                    "find_empty_grid": lambda *_a, **_k: 4,
+                    "preview_stop": lambda grid: stopped.append(grid),
+                    "pool_health": lambda *_a, **_k: {"clean": True, "missing": [3],
+                                                      "effects_idx": []},
+                    "pad_nodes": lambda blob=None: [soundpad.Pad(
+                        0, 3, soundpad.PAD_TYPE_VOICE_FX, "Megaphone", {"padColourIndex": 2})]}),
+        (soundpad.rr, {"read_model_stable": lambda **_k: b""}),
+        (soundpad.time, {"sleep": lambda _s: None})):
+    assigned = soundpad.assign_fx_to_grid(4, "Megaphone")
+    preview = soundpad.preview_start({})
+    healed = soundpad.heal_fx_pool()
+    try:
+        soundpad.restore_one("Megaphone", live=True)
+        raised = ""
+    except RuntimeError as exc:
+        raised = str(exc)
+check("Assign effect says it failed", (assigned["ok"], assigned["message"]),
+      (False, "Could not assign voice effect Megaphone to pad 4. "
+               "The desk did not create the effect."))
+check("live preview says it failed, and clears its scratch pad",
+      (preview["ok"], stopped), (False, [4]))
+check("the heal reports the pad failed, not rebuilt",
+      (healed["healed"], [f["error"] for f in healed["failed"]]),
+      ([], ["The desk did not create the effect."]))
+check("the factory restore gives the reason", raised, "The desk did not create the effect.")
+
+print()
 print("clear_all_pads stops at a pad the desk will not clear (T3-245)")
 cleared_at = []
 with as_device(devices.PRO2), patched(

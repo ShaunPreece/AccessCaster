@@ -98,14 +98,14 @@ def track_for(running):
     return running.track if running is not None else "stable"
 
 
-def index_url(running, root=ROOT, app=APP):
+def index_url(running):
     """Where this build's index lives, e.g.
     https://updates.slightperception.com/accesscaster/stable/index.json."""
-    return f"{root}{app}/{track_for(running)}/{indexfile.FILE_NAME}"
+    return f"{ROOT}{APP}/{track_for(running)}/{indexfile.FILE_NAME}"
 
 
-def signature_url(running, root=ROOT, app=APP):
+def signature_url(running):
     """The same address with .sig on the end. Built from the track rather than
     written out twice, so a stable build cannot be pointed at the beta folder
     by a typo in one of two constants."""
-    return f"{root}{app}/{track_for(running)}/{indexfile.SIGNATURE_FILE_NAME}"
+    return f"{ROOT}{APP}/{track_for(running)}/{indexfile.SIGNATURE_FILE_NAME}"

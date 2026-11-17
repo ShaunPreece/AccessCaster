@@ -307,80 +307,35 @@ def ok_cancel(dialog, sizer, ok_label, default=True):
     return ok
 
 
-class NameDialog(wx.Dialog):
-    """A name to type, then `ok_label` or Cancel. A name outside `paths.safe_name`'s rule is refused
-    in a message box of its own, and the dialog stays open on the name. With `submit`, OK runs
-    `submit(name)` off the UI thread instead of closing, and the dialog closes only on a success,
-    keeping its reply as `reply`; a refusal is shown the same way."""
-
-    MAX_NAME = 40
-    RULE = f"Up to {MAX_NAME} letters, digits, spaces, dashes or underscores."
-
-    def __init__(self, parent, title, label, value, ok_label, description, submit=None):
-        super().__init__(parent, title=title)
-        self._submit = submit
-        self._busy = False
-        self.reply = None
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
-        self.name_box = wx.TextCtrl(self, value=value, size=(320, -1))
-        self.name_box.SetMaxLength(self.MAX_NAME)
-        self.name_box.SelectAll()
-        a11y.describe(self.name_box, description)
-        sizer.Add(self.name_box, 0, wx.ALL, 10)
-        ok_cancel(self, sizer, ok_label)
-        self.SetSizerAndFit(sizer)
-        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
-        self.CentreOnParent()
-
-    def name(self):
-        return self.name_box.GetValue().strip()
-
-    def _refuse(self, text):
-        wx.MessageBox(text, "Name not used", wx.OK | wx.ICON_WARNING, self)
-        self.name_box.SetFocus()
-
-    def _on_ok(self, event):
-        if self._busy:
-            return
-        if not paths.safe_name(self.name()):
-            self._refuse(self.RULE if self.name() else "Type a name first.")
-            return
-        if self._submit is None:
-            event.Skip()
-            return
-        self._busy = True
-        call(self, self._submit, self.name(), done=self._submitted)
-
-    def _submitted(self, reply):
-        self._busy = False
-        if not reply.get("ok"):
-            self._refuse(reply.get("message") or "That name could not be used.")
-            return
-        self.reply = reply
-        self.EndModal(wx.ID_OK)
-
-
-class FormDialog(wx.Dialog):
+class FormDialog(SpeakingDialog):
     """A dialog of controls, then `ok_label` and Cancel. The subclass adds its controls to `sizer`,
     the control to land on first, then calls `finish_layout`. On OK, `request()` runs on the UI
-    thread and returns a refusal sentence, None to leave the dialog as it is (the user turned down
-    a question it asked), or a function to run off it whose reply decides: the
-    dialog closes on a success, keeping the reply as `reply`, and a refusal is shown in a message
-    box of its own titled `refused`, leaving the dialog open as it was."""
+    thread and returns a refusal sentence, None when it has dealt with OK itself (closed the
+    dialog, or the user turned down a question it asked), or a function to run off it whose reply
+    decides: the dialog closes on a success, keeping the reply as `result`, and a refusal is shown
+    in a message box of its own titled `refused`, leaving the dialog open as it was.
+
+    While that function runs, Cancel, Escape and the title bar's close only say to wait: closing
+    then would leave the work to finish unannounced."""
+
+    BUSY = "Still saving. Wait for it to finish."
+    FAILED = "That did not work."
 
     def __init__(self, parent, title, ok_label, refused):
-        super().__init__(parent, title=title)
+        super().__init__(parent, title)
         self._ok_label = ok_label
         self._refused = refused
         self._busy = False
-        self.reply = None
+        self.result = None
         self.sizer = wx.BoxSizer(wx.VERTICAL)
 
     def finish_layout(self):
         ok_cancel(self, self.sizer, self._ok_label)
+        self.sizer.Add(self.sink, 0)
         self.SetSizerAndFit(self.sizer)
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        # Escape and the title bar's close arrive as the Cancel button.
+        self.Bind(wx.EVT_BUTTON, self._on_cancel, id=wx.ID_CANCEL)
         self.CentreOnParent()
 
     def request(self):
@@ -398,6 +353,12 @@ class FormDialog(wx.Dialog):
         self._busy = True
         call(self, work, done=self._submitted)
 
+    def _on_cancel(self, event):
+        if self._busy:
+            self.say(self.BUSY)
+            return
+        event.Skip()
+
     def _refuse(self, text):
         focus = wx.Window.FindFocus()
         wx.MessageBox(text, self._refused, wx.OK | wx.ICON_WARNING, self)
@@ -407,10 +368,49 @@ class FormDialog(wx.Dialog):
     def _submitted(self, reply):
         self._busy = False
         if not reply.get("ok"):
-            self._refuse(reply.get("message") or "That did not work.")
+            self._refuse(reply.get("message") or self.FAILED)
             return
-        self.reply = reply
+        self.result = reply
         self.EndModal(wx.ID_OK)
+
+
+class NameDialog(FormDialog):
+    """A name to type, then `ok_label` or Cancel. A name outside `paths.safe_name`'s rule is refused
+    in a message box of its own, and the dialog stays open on the name. With `submit`, OK runs
+    `submit(name)` off the UI thread instead of closing, as `FormDialog` runs its work."""
+
+    MAX_NAME = 40
+    RULE = f"Up to {MAX_NAME} letters, digits, spaces, dashes or underscores."
+    FAILED = "That name could not be used."
+
+    def __init__(self, parent, title, label, value, ok_label, description, submit=None):
+        super().__init__(parent, title, ok_label, "Name not used")
+        self._submit = submit
+        self.sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
+        self.name_box = wx.TextCtrl(self, value=value, size=(320, -1))
+        self.name_box.SetMaxLength(self.MAX_NAME)
+        self.name_box.SelectAll()
+        a11y.describe(self.name_box, description)
+        self.sizer.Add(self.name_box, 0, wx.ALL, 10)
+        self.finish_layout()
+
+    def name(self):
+        return self.name_box.GetValue().strip()
+
+    def request(self):
+        name = self.name()
+        if not paths.safe_name(name):
+            return self.RULE if name else "Type a name first."
+        submit = self._submit
+        if submit is None:
+            self.EndModal(wx.ID_OK)
+            return None
+        return lambda: submit(name)
+
+    def _refuse(self, text):
+        # Back on the name, wherever the focus was: it is the name that has to change.
+        wx.MessageBox(text, self._refused, wx.OK | wx.ICON_WARNING, self)
+        self.name_box.SetFocus()
 
 
 class ListDialog(wx.Dialog):

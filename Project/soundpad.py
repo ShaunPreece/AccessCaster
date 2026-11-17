@@ -281,8 +281,12 @@ def preview_start(stack: dict, colour: int = 8, mic: int = 1) -> dict:
     pidx = grid - 1
     # Build the effect (or a silent shell if nothing is on yet). safe_assign_fx_recipe scrubs the
     # slot first so the pool can never double up. Empty stack -> a VFX pad with every engine off.
-    safe_assign_fx_recipe(pidx, PREVIEW_NAME, _sanitise_stack(stack),
-                          colour=max(0, min(11, int(colour))))
+    res = safe_assign_fx_recipe(pidx, PREVIEW_NAME, _sanitise_stack(stack),
+                                colour=max(0, min(11, int(colour))))
+    failure = _fx_create_failure(res)
+    if failure:
+        preview_stop(grid)
+        return {"ok": False, "message": f"Live preview could not start. {failure}"}
     time.sleep(0.4)
     if int(mic) != 1:
         preview_update(grid, "padEffectInput", max(0, min(3, int(mic) - 1)), "int")
@@ -502,6 +506,18 @@ def pool_health(blob: bytes | None = None) -> dict:
         "detached": detached,
         "partial": partial,
     }
+
+
+def _fx_create_failure(res: dict) -> str:
+    """Why a voice-effect create (`safe_assign_fx_recipe`'s reply) did not leave its pad exactly
+    one effect object, as a sentence, or "" when it did. A create the desk does not take leaves no
+    object and a clean pool, so the pool's health alone cannot tell it from a success."""
+    n = res["objects_for_pad"]
+    if n == 1:
+        return ""
+    return _health_message(res["health"]) or (
+        "The desk did not create the effect." if n == 0
+        else f"The desk holds {n} effect definitions for this pad, not one.")
 
 
 def _health_message(health: dict) -> str:
@@ -1946,8 +1962,14 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
     recipe, colour = spec["stack"], spec["colour"]
     res = safe_assign_fx_recipe(pidx, key, recipe, colour=colour, active=active)
     health = res["health"]
+    failure = _fx_create_failure(res)
+    if failure:
+        return {"ok": False, "message": f"Could not assign voice effect {key} to pad {grid}. "
+                                        + failure,
+                "health": health, "effect": key, "objects_for_pad": res["objects_for_pad"]}
     msg = f"Assigned voice effect {key} to pad {grid}. " + _health_message(health)
-    return {"ok": health["clean"], "message": msg, "health": health, "effect": key}
+    return {"ok": health["clean"], "message": msg, "health": health, "effect": key,
+            "objects_for_pad": res["objects_for_pad"]}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -2102,7 +2124,7 @@ def restore_one(pad_name: str, live: bool):
     res = safe_assign_fx_recipe(padidx, pad_name, recipe, colour=colour, active=False)
     diagnostics.event("pad.restore_fx", f"objects for the pad: {res['objects_for_pad']}")
     if not res["ok"]:
-        raise RuntimeError(_health_message(res["health"]))
+        raise RuntimeError(_fx_create_failure(res) or _health_message(res["health"]))
     time.sleep(1.0)
 
 
@@ -2246,9 +2268,13 @@ def heal_fx_pool(progress=None) -> dict:
         if pad and isinstance(pad.props.get("padColourIndex"), int):
             colour = pad.props["padColourIndex"]
         try:
-            safe_assign_fx_recipe(pidx, name or key, spec["stack"],
-                                  colour=int(colour), active=False)
-            healed.append({"grid": pidx + 1, "name": name, "effect": key})
+            res = safe_assign_fx_recipe(pidx, name or key, spec["stack"],
+                                        colour=int(colour), active=False)
+            failure = _fx_create_failure(res)
+            if failure:
+                failed.append({"grid": pidx + 1, "name": name, "error": failure})
+            else:
+                healed.append({"grid": pidx + 1, "name": name, "effect": key})
         except Exception as exc:
             # Carry on: five rebuilt pads and one named failure beats an abort half way through.
             failed.append({"grid": pidx + 1, "name": name, "error": str(exc)})
@@ -2440,13 +2466,19 @@ def _on_volume(root: str, rel: str) -> str:
 
 
 def pad_audio_in_use(pads) -> tuple[set, set]:
-    """What the sound pads among `pads` (Pad records) play: (the volume-relative paths, lower-cased
-    because the volume is FAT, and the grid numbers of sound pads whose file cannot be located,
-    no padFilePath or one outside the volume). A tidy keeps every file in such a pad's grid
-    folder, the one the app's own creates write to."""
+    """What `pads` (Pad records) play: (the volume-relative paths, lower-cased because the volume
+    is FAT, and the grid numbers of sound pads whose file cannot be located, no padFilePath or one
+    outside the volume). A tidy keeps every file in such a pad's grid folder, the one the app's
+    own creates write to. A Censor mixer pad's own sound is kept too: whether the desk stores it
+    on the pad volume is unconfirmed, and keeping a path that lies elsewhere costs nothing."""
     paths, open_grids = set(), set()
     for p in pads:
-        if p.idx is None or p.type != PAD_TYPE_SOUND:
+        if p.idx is None:
+            continue
+        censor = pad_volume_path(p.props.get("padMixerCensorFilePath"))
+        if censor is not None:
+            paths.add(censor.lower())
+        if p.type != PAD_TYPE_SOUND:
             continue
         rel = pad_volume_path(p.props.get("padFilePath"))
         if rel is None:
@@ -2733,6 +2765,26 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
 # not write it either, so it cannot be a difference.
 _PAD_COMPARE_FIELDS = ("name", "colour", "gain", "loop", "replay", "play_mode",
                        "mixer_mode", "mixer_trigger", "back_channel", "trigger")
+# The envelope / fade / censor groups, compared member by member over the keys the restore writes
+# (_EXTRA_PROP_OF), so the censor file path, which is never restored, is not compared.
+_PAD_COMPARE_GROUPS = ("envelope", "fade", "censor")
+
+
+def _group_matches(want, got) -> bool:
+    if not want:
+        return True
+    if not isinstance(got, dict):
+        return False
+    for key, value in want.items():
+        if value is None or key not in _EXTRA_PROP_OF:
+            continue
+        live = got.get(key)
+        if isinstance(value, bool) or isinstance(live, bool):
+            if live is None or bool(value) != bool(live):
+                return False
+        elif not _same_float32(value, live):
+            return False
+    return True
 
 # Types we are willing to skip. A voice-FX pad's effect lives in its region-B object, which the
 # model dump carries in full, so it is compared there (_fx_effect_matches). Skipping one also spares
@@ -2800,7 +2852,7 @@ def _pad_metadata_matches(saved: dict, live: dict) -> bool:
         elif want != got:
             # colour, play_mode, mixer_mode, mixer_trigger: exact.
             return False
-    return True
+    return all(_group_matches(saved.get(g), live.get(g)) for g in _PAD_COMPARE_GROUPS)
 
 
 def _pad_audio_matches(root: str, grid: int, saved_file: str, local_path: str,
@@ -3027,10 +3079,9 @@ def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = T
                     continue
                 # An unclean pool elsewhere does not fail this pad; its own object missing or
                 # duplicated does.
-                health = res["health"]
-                if health["effects_idx"].count(grid - 1) != 1:
-                    problems.append("effect: " + (_health_message(health)
-                                                  or "the effect was not created cleanly"))
+                failure = _fx_create_failure(res)
+                if failure:
+                    problems.append("effect: " + failure)
             elif ptype == PAD_TYPE_MIXER:
                 if e.get("mixer_mode") is None:
                     skipped.append(f"pad {grid} (mixer mode missing)")

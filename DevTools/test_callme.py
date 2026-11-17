@@ -297,7 +297,7 @@ s0 = w.snapshot()["slots"][0]
 check("a call seen connecting is timed exactly", (s0["since"] is not None, s0["since_exact"]),
       (True, True))
 check("its length leads the details",
-      callme.call_details(w.snapshot(), now=s0["since"] + 3900)[0], ("Call length", "1 hour 5 minutes"))
+      callme.call_details(w.snapshot(), now=s0["since"] + 3930)[0], ("Call length", "1 hour 5 minutes"))
 check("under a minute", callme.describe_length(30), "less than a minute")
 check("a call already up when the app started says 'at least'",
       callme.describe_length(600, exact=False), "at least 10 minutes")

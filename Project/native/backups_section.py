@@ -385,7 +385,7 @@ class BackupsPage(wx.Panel):
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            new, reply = dialog.name(), dialog.reply
+            new, reply = dialog.name(), dialog.result
         self.list.SetFocus()
         self.frame.say(reply.get("message") or "Renamed.")
         self.section.read(prefer=new)

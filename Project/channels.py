@@ -959,8 +959,9 @@ def write_chain(strip_idx: int, desired: dict, current: dict | None = None,
 # Stereo link makes this the common case rather than an edge case, since linking a pair evicts the
 # upper mic and the unlink that returns it may be days later. Hence a FILE, not a memory cache.
 _ORPHAN_FILE = "off_fader_chains.json"
-# Each linked pair's mic mutes as they were at the link, for the unlink to hand back.
-_LINK_MUTES_FILE = "stereo_link_mutes.json"
+# What each stereo link changed, for the unlink to hand back. The name is part of the stored data:
+# renaming the file loses the record of every pair linked now.
+_LINK_FILE = "stereo_link_mutes.json"
 
 
 def _parked_load(name: str) -> dict:
@@ -1012,16 +1013,18 @@ def take_chain(device_id: str, code: int) -> dict | None:
     return _take(_ORPHAN_FILE, device_id, code)
 
 
-def park_link_mutes(device_id: str, pair_code: int, lower: bool, upper: bool, pair: bool) -> None:
-    """Keep each mic's mute from just before `pair_code` was linked, and the pair's mute just
-    after, until the unlink."""
-    _park(_LINK_MUTES_FILE, device_id, pair_code,
-          {"lower": bool(lower), "upper": bool(upper), "pair": bool(pair)})
+def park_link(device_id: str, pair_code: int, lower: bool, upper: bool, pair: bool,
+              upper_fader: int | None) -> None:
+    """Keep what linking `pair_code` changed, until the unlink: each mic's mute from just before
+    the link, the pair's mute just after, and the fader the upper mic left, or None."""
+    _park(_LINK_FILE, device_id, pair_code,
+          {"lower": bool(lower), "upper": bool(upper), "pair": bool(pair),
+           "upper_fader": upper_fader})
 
 
-def take_link_mutes(device_id: str, pair_code: int) -> dict | None:
-    """Pop what `park_link_mutes` kept for `pair_code`, or None if the app did not make the link."""
-    return _take(_LINK_MUTES_FILE, device_id, pair_code)
+def take_link(device_id: str, pair_code: int) -> dict | None:
+    """Pop what `park_link` kept for `pair_code`, or None if the app did not make the link."""
+    return _take(_LINK_FILE, device_id, pair_code)
 
 
 def read_channels(blob: bytes | None = None) -> list:

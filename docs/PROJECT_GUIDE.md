@@ -1121,7 +1121,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   does not follow the inputs: a strip has kept its own mute through a link (the pair inherited a
   muted Mic 3 while Mic 4 was open, 2nd November 2026), and has also been seen clearing it.
   `_settle_mutes` reads back and writes the outcome. A pair is muted if EITHER mic was, so a link
-  never opens a mic the user silenced. Each mic's own mute is parked (`channels.park_link_mutes`, a
+  never opens a mic the user silenced. Each mic's own mute is parked (`channels.park_link`, a
   file, because the unlink can be days later) and `_unlink_mutes` hands it back if the pair's mute
   is unchanged since the link; a pair muted or opened while linked passes that choice to both.
   Without the parked record, a muted-plus-open link followed by an unlink mutes the open mic.

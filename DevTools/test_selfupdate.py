@@ -182,6 +182,14 @@ with tempfile.TemporaryDirectory() as folder:
     check("a connection that dies is an ordinary failure", outcome, downloader.COULD_NOT_DOWNLOAD)
     check("and no part file survives it", os.listdir(folder), [])
 
+    class _Short(_Response):
+        """A body that ends early with an empty read, as http.client ends one cut short."""
+        headers = {"Content-Length": str(len(payload))}
+    outcome, _ = downloader.download(offer_of(), folder,
+                                     open_url=lambda u: _Short(payload[:len(payload) // 2]))
+    check("a body shorter than the server declared is a failed download, not a wrong checksum",
+          (outcome, os.listdir(folder)), (downloader.COULD_NOT_DOWNLOAD, []))
+
     class _Cancel(downloader.Watcher):
         def cancelled(self):
             return True

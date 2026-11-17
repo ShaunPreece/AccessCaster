@@ -160,12 +160,12 @@ check("and the chain is parked again rather than dropped",
       channels.take_chain("DESK-TEST", 1), chain(1))
 
 print()
-print("the stereo link mute store")
-check("nothing parked reads back as None", channels.take_link_mutes("DESK-LINK", 6), None)
-channels.park_link_mutes("DESK-LINK", 6, True, False, True)
-check("a link's mutes come back intact", channels.take_link_mutes("DESK-LINK", 6),
-      {"lower": True, "upper": False, "pair": True})
-check("and taking them POPS them", channels.take_link_mutes("DESK-LINK", 6), None)
+print("the stereo link store")
+check("nothing parked reads back as None", channels.take_link("DESK-LINK", 6), None)
+channels.park_link("DESK-LINK", 6, True, False, True, 3)
+check("a link's record comes back intact", channels.take_link("DESK-LINK", 6),
+      {"lower": True, "upper": False, "pair": True, "upper_fader": 3})
+check("and taking it POPS it", channels.take_link("DESK-LINK", 6), None)
 
 print()
 print("_unlink_mutes: what each mic gets back")
@@ -195,6 +195,29 @@ with _testkit.as_device(devices.PRO2), patched(
 check("the reply is a refusal, not an exception", res["ok"], False)
 check_in("and it says the desk did not take the link", "did not take the link", res["message"])
 check_in("and where Mic 1 is now", "Mic 1 is on", res["message"])
+
+print()
+print("action_set_stereo_link: linking two pairs and unlinking them is a round trip (T3-258)")
+LAYOUT = list(devices.PRO2.fader.default_vector)
+
+
+def set_source(i, code):
+    LAYOUT[i] = code
+
+
+with _testkit.as_device(devices.PRO2), patched(
+        (faders, {"_stereo_link_gate": lambda: None, "chain_follow_on": lambda: False,
+                  "read_fader_vector": lambda blob=None, spec=None: list(LAYOUT)}),
+        (device_page, {"hardware_id": lambda: "DESK-ROUNDTRIP"}),
+        (rcp_read, {"read_model": lambda *a, **k: b"",
+                    "strip_values": lambda blob, name: [False] * 9}),
+        (rcp_transfer, {"set_fader_source": set_source})):
+    replies = [faders.action_set_stereo_link(code, on)
+               for code, on in ((4, True), (6, True), (6, False), (4, False))]
+check("every step succeeds", [r["ok"] for r in replies], [True] * 4)
+check("Mic 4 goes back to the fader it left, not the first empty one",
+      replies[2]["faders"][3], 3)
+check("and the faders end as they started", LAYOUT, list(devices.PRO2.fader.default_vector))
 
 print()
 raise SystemExit(_testkit.finish())

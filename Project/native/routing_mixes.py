@@ -265,7 +265,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         with SavePresetDialog(self, self.current, own) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            reply = dialog.reply
+            reply = dialog.result
         self.frame.reply(source, reply)
         self.read_schemes(prefer=reply.get("name"))
 

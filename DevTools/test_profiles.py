@@ -299,6 +299,18 @@ check("a null live gain against a saved one is caught", m(SAVED_SOUND, live(gain
 check_true("a field the profile did not record is ignored",
            m(dict(SAVED_SOUND, play_mode=None), live(play_mode=2)))
 
+print("\nPAD VERIFY: the envelope, fade and censor groups the restore writes are compared (T3-257)")
+ENV = {"start": 0.0, "fade_in": 0.1, "fade_out": 0.2, "stop": 1.0}
+check_true("an identical envelope matches",
+           m(dict(SAVED_SOUND, envelope=ENV), live(envelope=dict(ENV, fade_in=0.10000000149))))
+check("a changed start point is caught",
+      m(dict(SAVED_SOUND, envelope=ENV), live(envelope=dict(ENV, start=0.5))), False)
+check("no live envelope against a saved one is caught",
+      m(dict(SAVED_SOUND, envelope=ENV), live(envelope=None)), False)
+check_true("a saved None member is skipped",
+           m(dict(SAVED_SOUND, envelope=dict(ENV, start=None)),
+             live(envelope=dict(ENV, start=0.5))))
+
 print("\nPAD VERIFY: Back Channel membership (every member is written, so every member must agree)")
 SAVED_BC = {"grid": 9, "type": 3, "name": "Back Channel", "colour": 2, "mixer_mode": 3,
             "mixer_trigger": 0, "back_channel": {"padBcMic1": True, "padBcMic2": False}}
@@ -311,6 +323,25 @@ check("a member that is ON when it should be OFF is caught",
 check("a member missing from the live read is caught",
       m(SAVED_BC, dict(LIVE_BC, back_channel={"padBcMic1": True})), False)
 check("no live membership at all is caught", m(SAVED_BC, dict(LIVE_BC, back_channel=None)), False)
+
+print("\nPAD VERIFY: a Fade pad's times and a Censor pad's own-sound switch are compared")
+SAVED_FADE = dict(SAVED_BC, mixer_mode=1, back_channel=None,
+                  fade={"in_seconds": 2.0, "out_seconds": 3.0, "exclude_host": True})
+LIVE_FADE = dict(LIVE_BC, mixer_mode=1, back_channel=None,
+                 fade={"in_seconds": 2.0, "out_seconds": 3.0, "exclude_host": True})
+check_true("an identical Fade pad matches", m(SAVED_FADE, LIVE_FADE))
+check("a changed fade time is caught",
+      m(SAVED_FADE, dict(LIVE_FADE, fade=dict(LIVE_FADE["fade"], out_seconds=4.0))), False)
+check("a changed host exclusion is caught",
+      m(SAVED_FADE, dict(LIVE_FADE, fade=dict(LIVE_FADE["fade"], exclude_host=False))), False)
+SAVED_CENSOR = dict(SAVED_BC, mixer_mode=0, back_channel=None,
+                    censor={"custom": True, "file": "/old/path.wav"})
+LIVE_CENSOR = dict(LIVE_BC, mixer_mode=0, back_channel=None,
+                   censor={"custom": True, "file": "/another/path.wav"})
+check_true("a Censor pad's path is not compared, since it is never restored",
+           m(SAVED_CENSOR, LIVE_CENSOR))
+check("but its own-sound switch is",
+      m(SAVED_CENSOR, dict(LIVE_CENSOR, censor={"custom": False, "file": ""})), False)
 
 print("\nPAD VERIFY: voice-FX pads are compared by their region-B object")
 check("sound, voice FX, mixer and trigger pads are skippable",
@@ -475,6 +506,26 @@ try:
           str(root / "pads" / "3" / "X.wav"))
     check("and finds nothing rather than another file when the named one is missing",
           soundpad._pad_audio_source(str(root), 7, VOL + "pads/7/Missing.wav"), None)
+
+    # A Censor mixer pad's own sound, named by padMixerCensorFilePath, is kept by both tidies.
+    (root / "pads" / "9").mkdir(parents=True, exist_ok=True)
+    (root / "pads" / "9" / "Bleep.wav").write_bytes(b"C" * 10)
+    pads.append(soundpad.Pad(2, 8, soundpad.PAD_TYPE_MIXER, "Censor",
+                             {"padMixerCensorFilePath": VOL + "pads/9/Bleep.wav"}))
+    in_use = soundpad.pad_audio_in_use(pads)
+    check("the in-use set holds a Censor pad's own sound", "pads/9/bleep.wav" in in_use[0], True)
+    check("a sound created on grid 9 keeps it",
+          soundpad.tidy_pad_folder(str(root), 9, "New.wav", in_use), [])
+    with patched((soundpad, {"pad_nodes": lambda blob=None: pads, "_transfer_mode": no_transfer}),
+                 (soundpad.rr, {"read_model_stable": lambda **_k: b""}),
+                 (soundpad.t, {"remount_pad_storage": lambda: None,
+                               "find_pad_volume": lambda **_k: str(root),
+                               "flush_volume": lambda _root: None})):
+        res = soundpad.tidy_unused_pad_audio()
+    check("and the sweep keeps it", res["removed"], [])
+    check("every pad property naming a file is one the tidy reads",
+          sorted(n for n, _k, _v in soundpad.pr._PHASE1 if n.endswith("FilePath")),
+          ["padFilePath", "padMixerCensorFilePath"])
 finally:
     shutil.rmtree(ttmp, ignore_errors=True)
 

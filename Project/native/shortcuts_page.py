@@ -187,7 +187,7 @@ class ShortcutsPage(wx.Panel):
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            reply = dialog.reply
+            reply = dialog.result
         self._applied(reply, row["id"])
 
     def _delete(self):
@@ -226,7 +226,7 @@ class ShortcutsPage(wx.Panel):
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            reply = dialog.reply
+            reply = dialog.result
         self.list.SetFocus()
         self._applied(reply, reply.get("id"))
 
@@ -238,7 +238,7 @@ class ShortcutsPage(wx.Panel):
         with dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            reply = dialog.reply
+            reply = dialog.result
         self._applied(reply)
 
     def _on_restore(self, _event):

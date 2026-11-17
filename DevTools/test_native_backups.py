@@ -243,7 +243,18 @@ with patched((dialogs.NameDialog, {"_refuse": lambda _s, text: refused.append(te
     dialog._on_ok(wx.CommandEvent())
 check("a name outside the rule is refused, and the dialog stays", refused,
       [dialogs.NameDialog.RULE])
-check_true("nothing was handed over", dialog.reply is None)
+check_true("nothing was handed over", dialog.result is None)
+said = []
+dialog.say = lambda text, recent=False: said.append(text)
+cancel = wx.CommandEvent(wx.wxEVT_BUTTON, wx.ID_CANCEL)
+dialog._busy = True
+dialog._on_cancel(cancel)
+check("while a submit runs, Cancel, Escape and the close only say to wait",
+      (said, cancel.GetSkipped()), ([dialogs.FormDialog.BUSY], False))
+dialog._busy = False
+cancel = wx.CommandEvent(wx.wxEVT_BUTTON, wx.ID_CANCEL)
+dialog._on_cancel(cancel)
+check_true("and once it is over, Cancel closes", cancel.GetSkipped())
 dialog.Destroy()
 
 frame.window.Destroy()

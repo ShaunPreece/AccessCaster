@@ -60,8 +60,7 @@ def fetch(url, cap=indexfile.MAX_BYTES):
     return data
 
 
-def run(running, skipped, get=None, public_key_hex=None,
-        root=checks.ROOT, app=checks.APP):
+def run(running, skipped, get=None, public_key_hex=None):
     """Check the track this build follows. `running` is the version actually
     running, `skipped` the version the user chose not to hear about again.
 
@@ -77,11 +76,11 @@ def run(running, skipped, get=None, public_key_hex=None,
 
     get = get or fetch
 
-    index = get(checks.index_url(running, root, app))
+    index = get(checks.index_url(running))
     if index is None:
         return checks.CheckResult(checks.COULD_NOT_CHECK)
 
-    signature = get(checks.signature_url(running, root, app))
+    signature = get(checks.signature_url(running))
     if signature is None:
         return checks.CheckResult(checks.COULD_NOT_CHECK)
 

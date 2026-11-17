@@ -154,7 +154,14 @@ def _open_url(url):
 
 
 def _write_to(url, path, open_url, watcher):
+    """Fetch `url` into `path`. A body cut short by a closed connection ends
+    with an empty read rather than an exception, so the length the server
+    declared is checked here: otherwise a dropped download reaches the hash
+    and is reported as a wrong checksum, the outcome kept for tampering."""
+    written = 0
     with open_url(url) as response, open(path, "wb") as out:
+        headers = getattr(response, "headers", None)
+        declared = headers.get("Content-Length") if headers is not None else None
         while True:
             if watcher.cancelled():
                 raise _Stopped()
@@ -162,6 +169,9 @@ def _write_to(url, path, open_url, watcher):
             if not block:
                 break
             out.write(block)
+            written += len(block)
+    if declared is not None and declared.isdigit() and written < int(declared):
+        raise ConnectionError(f"the body ended after {written} of {declared} bytes")
 
 
 def _hash_matches(path, expected):
