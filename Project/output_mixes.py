@@ -21,7 +21,6 @@ import wording
 from desk_labels import CUSTOM, MAIN_MIX, MIX_MINUS, OUTPUT_MODE_LABEL
 from paths import safe_name
 
-
 # ----------------------------------------------------------------------------
 # Output mix matrix (the Routing > Custom cross-points), RODECASTER_PROTOCOL.txt section 5. Each
 # output has a mode (OUTPUT_MODE_LABEL); under Custom, each source can be excluded from that
@@ -336,16 +335,16 @@ def action_reset_monitor_output(output_index: int) -> dict:
 
 
 def action_reset_all_outputs() -> dict:
-    """Reset EVERY output mix on the desk: re-include and re-link every source on every output,
-    then put each output back to its default mode (devices.py, MatrixSpec.outputs default_mode).
+    """Reset EVERY output mix on the desk: put each output back to its default mode (devices.py,
+    MatrixSpec.outputs default_mode), then re-include and re-link every source on it.
 
     A wider sweep than the per-output "Reset to faders". It exists because a hand-set level silently
     breaks channel Mute: a mute only reaches cross-points that follow the fader, so an output with
     that source unlinked keeps carrying it and you still hear a muted mic in your own cans.
 
     The default modes match a factory-reset desk (the comment on devices.PRO2_MATRIX_OUTPUTS).
-    Every write is reversible and read-back verifiable, and the UI tells the user to save a profile
-    first.
+    Every write is reversible and read-back verifiable, and the UI asks first, naming a saved
+    profile as the way back.
 
     THIS IS THE "Everything normal" BUILT-IN MIX SCHEME, applied through the one scheme path
     (routing_schemes.apply). The button stays because it is where people look for it and it carries

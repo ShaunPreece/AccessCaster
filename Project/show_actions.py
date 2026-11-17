@@ -117,10 +117,10 @@ def export_and_wait(step, label: str) -> dict:
 
     IT REFUSES BEFORE SENDING ANYTHING IF THERE IS NOWHERE TO WRITE, and this is the only place that
     has to, because it is the only place an export is sent from. `read_backup_storage` computes the
-    same fact for the page, so the reset dialog can grey out its tick, but a check on that side alone
-    leaves every non-UI route asking the impossible: the command goes out, the desk refuses it
-    silently, and we poll the whole 136 kB model for up to 40 s waiting for a file that can never
-    appear.
+    same fact for the page, so the reset dialog can clear its tick and refuse one, but a check
+    there alone leaves every non-UI route asking the impossible: the command goes out, the desk
+    refuses it silently, and we poll the whole 136 kB model for up to 40 s waiting for a file that
+    can never appear.
 
     THE LIVE CASE IS A DUO. `clean_restore_reset` calls this unconditionally and the clean-restore
     gate only checks the shows CAPABILITY, which a Duo has, while a Duo has no removable storage at
@@ -281,8 +281,8 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
     export is named after whichever show was loaded, so a backup saved as "Testing New Backup Flow"
     is called "Default Show" on the drive. Reporting the desk's name therefore tells the user they
     have restored something they never chose, which is the worst sentence a restore can produce.
-    The Backups page passes the name it holds; the Shows list has none to pass and falls back to
-    the desk's.
+    Every current caller restores a show the desk made, which has no name of the user's, so none
+    passes one and the desk's name is used.
 
     TAKES A SNAPSHOT INDEX, NOT A UID AND NOT A UUID. A uid is a position that any export renumbers,
     so a page holding one is holding something that may already mean a different file; a uuid names

@@ -47,8 +47,8 @@ from wording import count, plural
 # a reinstall and do not depend on where the app is installed.
 SCHEMES_DIR = data_path("schemes")
 SCHEME_VERSION = 1
-# Seconds between device writes during an apply. Same pace as the profile restore and the
-# "reset all output mixes" sweep, both of which drive this same cross-point path reliably.
+# Seconds between device writes during an apply. A profile restore's matrix and "Reset all output
+# mixes" both go through `apply`, so this paces them too.
 WRITE_PACE = 0.03
 
 # ---- naming + listing (pure file ops, no device) ----------------------------------------------

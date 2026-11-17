@@ -224,9 +224,9 @@ def action_add_pad_shortcuts() -> dict:
 
     THE ONE THING A SHIPPED DEFAULT CANNOT DO. Defaults land only on a machine that has saved
     nothing, so anybody who has already chosen their own keys never gets it. This is the "Use the
-    SMART pad keys" switch ticked, so it stays an explicit choice rather than a start-up surprise, and it can be ticked again after switching desks - a Duo has six
-    pads in a bank where a Pro II has eight, and the missing two are added without disturbing
-    anything."""
+    SMART pad keys" switch ticked, so it stays an explicit choice rather than a start-up surprise,
+    and it can be ticked again after switching desks - a Duo has six pads in a bank where a Pro II
+    has eight, and the missing two are added without disturbing anything."""
     mgr = manager()
     res = mgr.add_scheme(_pad_scheme())
     settings_file.update(hotkeys=mgr.saveable())
