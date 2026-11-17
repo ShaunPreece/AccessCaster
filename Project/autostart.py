@@ -10,10 +10,10 @@ THE VALUE IS THE INSTALLER'S, NOT OURS, AND THAT IS DELIBERATE. Same key, same N
     HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
       "AccessCaster" = "<install path>\\AccessCaster.exe" --startup
 
-`installer.iss` sets it with `uninsdeletevalue`, so uninstalling removes it. Write it under any other
-name and an uninstall leaves a Run entry pointing at a deleted exe - a startup error every login,
-with nothing left on the machine to turn it off. `DevTools/test_autostart.py` reads `installer.iss`
-and asserts the two still agree, because nothing else would notice them drifting.
+`installer.iss` sets it with `uninsdeletevalue`, so uninstalling removes it. Write it under any
+other name and an uninstall leaves a Run entry pointing at a deleted exe - a startup error every
+login, with nothing left on the machine to turn it off. `DevTools/test_autostart.py` reads
+`installer.iss` and asserts the two still agree, because nothing else would notice them drifting.
 
 HKCU AND NEVER HKLM. Only one copy of AccessCaster runs per PC (instance.py), so a machine-wide Run
 entry would start it for every account that signs in and all but the first would be refused. That

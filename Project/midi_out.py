@@ -76,7 +76,8 @@ def _cc_message(channel: int, control: int, value: int) -> int:
 
 # --- the shared handle ---------------------------------------------------------------------------
 # One handle for the life of the process, because a pad shortcut has to be instant and the open is
-# the slow part. Guarded by a lock: two shortcuts pressed together must not interleave on one handle.
+# the slow part. Guarded by a lock: two shortcuts pressed together must not interleave on one
+# handle.
 _lock = threading.Lock()
 _handle = None
 
@@ -86,9 +87,9 @@ def _open_locked():
     if _handle is not None:
         return _handle
     port = find_port()
-    # Windows MIDI Services (midisrv) can stay up with its USB transports unloaded, so the desk is on
-    # the bus with no MIDI port; a replug does not bring it back, a restart of the service does. A
-    # process that opened winmm before that restart then fails every open until it restarts too.
+    # Windows MIDI Services (midisrv) can stay up with its USB transports unloaded, so the desk is
+    # on the bus with no MIDI port; a replug does not bring it back, a restart of the service does.
+    # A process that opened winmm before that restart then fails every open until it restarts too.
     if port is None:
         raise RuntimeError(f"Windows is not offering the desk's {PORT_NAME!r} MIDI port. "
                            f"Restarting the Windows MIDI Service, or the computer, brings it back")

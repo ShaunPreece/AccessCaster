@@ -17,6 +17,7 @@ USER_AGENT = f"AccessCaster/{__version__}"
 
 def opened(url: str, timeout: float):
     """`urlopen` with AccessCaster's own User-Agent. The caller keeps its own timeout and its own
-    size limits: a small index, a 25 MB installer and RODE's driver do not wait or weigh the same."""
+    size limits: a small index, a 25 MB installer and RODE's driver do not wait or weigh the
+    same."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     return urllib.request.urlopen(request, timeout=timeout)

@@ -1,7 +1,7 @@
 """
 AccessCaster - mic processing presets on the Channels page: the RODE app's factory set, which ships
-as mic_presets.json, and the user's own, saved from a strip's live chain; applying one, and which one
-a strip is on. Writing a preset to the strip is channels.apply_processing_preset.
+as mic_presets.json, and the user's own, saved from a strip's live chain; applying one, and which
+one a strip is on. Writing a preset to the strip is channels.apply_processing_preset.
 """
 
 from __future__ import annotations
@@ -45,9 +45,9 @@ _PRESET_PROPS = ("eqLowGain", "eqMidGain", "eqHighGain", "aphexBBDrive", "aphexA
                  # regenerated from the VoxLab knobs. Written FIRST by apply_processing_preset;
                  # the marker below is written LAST.
                  channels.CHAIN_ADVANCED_PROP,
-                 # The MODULE on/off flags. A voicing is not just parameter values, it is which parts
-                 # of the chain are engaged: without these, applying a preset to a strip with its
-                 # modules off sets every value, changes nothing audible, and reports success.
+                 # The MODULE on/off flags. A voicing is not just parameter values, it is which
+                 # parts of the chain are engaged: without these, applying a preset to a strip with
+                 # its modules off sets every value, changes nothing audible, and reports success.
                  # channelBypassProcessing is deliberately NOT here: the master on/off is the
                  # operator's control, not part of the voicing (channels.apply_processing_preset).
                  *channels.PROCESSING_MODULE_BOOLS,
@@ -147,8 +147,8 @@ def preset_now(channel: int, ch: dict):
         return None
     props = {**_load_factory_presets(), **_load_user_presets()}.get(name)
     if not props:
-        # Applied, then deleted from the preset list: we can still name it, but there is nothing left
-        # to compare against, so we do not claim either way.
+        # Applied, then deleted from the preset list: it can still be named, but there is nothing
+        # left to compare against, so it is not claimed either way.
         return {"name": name, "edited": None, "source": "record"}
     return {"name": name, "edited": not _preset_matches(props, ch), "source": "record"}
 

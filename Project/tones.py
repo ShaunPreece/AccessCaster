@@ -1,9 +1,9 @@
 """AccessCaster - the announcer's non-speech cues: short tones written as WAV files.
 
-WHY A TONE AT ALL. Mute is the one announcement that arrives
-too late to be useful as a sentence: you hit mute mid-word, and "Mic 2 muted" takes most of a second
-to say. Two tones tell you the same thing in a tenth of that, and they do not talk over the thing you
-muted for. Speech stays the default and stays available; this is an option, not a replacement.
+WHY A TONE AT ALL. Mute is the one announcement that arrives too late to be useful as a sentence:
+you hit mute mid-word, and "Mic 2 muted" takes most of a second to say. Two tones tell you the same
+thing in a tenth of that, and they do not talk over the thing you muted for. Speech stays the
+default and stays available; this is an option, not a replacement.
 
 WHY WAV FILES RATHER THAN A BEEP. `winsound.Beep` and `[Console]::Beep` play on the SYSTEM default
 output, and on the machines this app runs on the system default IS the RODECaster. A cue that goes
@@ -36,12 +36,7 @@ SAMPLE_RATE = 22050
 PEAK = 0.35                # conservative: this plays on whatever the announcer is pointed at
 FADE_S = 0.008             # a click at either end is louder than the tone; this removes both
 
-# name -> the notes to play, in order, in Hz. TWO NOTES EACH, MOVING IN OPPOSITE DIRECTIONS: a
-# single low tone and a single high tone are only tellable apart if you hear both together or
-# already know the pitch, while a PAIR that falls and a pair that rises is tellable apart in
-# isolation, on a laptop speaker, under a mix, which is where these are actually heard.
-#
-# Falling means muted, in line with every other audible convention for something switching off.
+# name -> the notes to play, in order, in Hz. The direction carries the meaning (module docstring).
 TONES = {
     "muted": (660.0, 440.0),      # E5 down to A4
     "unmuted": (440.0, 660.0),    # A4 up to E5
@@ -58,8 +53,8 @@ TONES = {
 NOTE_S = 0.07
 GAP_S = 0.025
 # The whole cue, for callers that need to know how long it occupies the speech thread (see
-# announcer.action_set_announce_mute_tones, which plays both cues in turn). TWO notes: this timing is
-# quoted for the mute pair, and the three-note job cues are not on anyone's critical path.
+# announcer.action_set_announce_mute_tones, which plays both cues in turn). TWO notes: this timing
+# is quoted for the mute pair, and the three-note job cues are not on anyone's critical path.
 DURATION_S = 2 * NOTE_S + GAP_S
 # Bumped whenever the SHAPE of a cue changes, because the file on disk is not regenerated just
 # because the code changed its mind: it is part of the file name, so a new shape is simply a

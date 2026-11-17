@@ -42,7 +42,7 @@ def export_dir() -> str:
 
 
 def _available() -> dict:
-    """What this computer actually HAS, for the machine-specific keys - see app_settings.merge_import.
+    """What this computer actually HAS, for the machine-specific keys (app_settings.merge_import).
 
     Best-effort: if a list cannot be read, the key is left out entirely, which merge_import treats
     as "cannot check, so apply it" rather than as "not available". Refusing to restore a setting

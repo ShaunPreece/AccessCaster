@@ -19,7 +19,8 @@ HOW IT MEASURES, and each of these is the answer to a way it would otherwise be 
   * **WINDOWS OUT OF THE WAY.** Windows' own level on the endpoint scales the reading, so it is set
     to unity first and any Windows mute cleared. Otherwise a slider nobody can see decides the gain.
   * **SILENT WHILE MEASURING.** The app says nothing at all during the take. Anything played aloud
-    is picked up by the microphone being measured, which would set the gain from the app's own voice.
+    is picked up by the microphone being measured, which would set the gain from the app's own
+    voice.
   * **THE 99TH PERCENTILE, NOT THE PEAK.** One cough, one desk knock or one door is not your voice,
     and gain set from it would leave you 10 dB too quiet for the whole session. The loudest single
     sample is reported as well, because the difference between the two is itself worth knowing.
@@ -56,8 +57,8 @@ def from_db(db: float) -> float:
 
 
 def percentile(values: list, fraction: float) -> float:
-    """The value `fraction` of the way up a sorted list. Plain nearest-rank: with a take's 300 readings the
-    difference between interpolation methods is far below anything that matters here."""
+    """The value `fraction` of the way up a sorted list. Plain nearest-rank: with a take's 300
+    readings the difference between interpolation methods is far below anything that matters."""
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -66,7 +67,7 @@ def percentile(values: list, fraction: float) -> float:
 
 
 def verdict(result: dict) -> dict:
-    """Turn a measurement into a decision: how many dB to move, or why we are not moving anything."""
+    """Turn a measurement into a decision: how many dB to move, or why nothing moves."""
     loud_db = result["loud_db"]
     if loud_db < MIN_USABLE_DBFS:
         # Nothing usable. Say WHICH kind of nothing, because the two have different fixes. The

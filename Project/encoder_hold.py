@@ -17,8 +17,8 @@ import desk_live
 import desk_model
 import diagnostics
 
-# The desk mutes its own hold target about 750 ms after the press edge, while still held, and a short
-# press lasts up to about 475 ms; this sits between the two.
+# The desk mutes its own hold target about 750 ms after the press edge, while still held, and a
+# short press lasts up to about 475 ms; this sits between the two.
 HOLD_S = 0.75
 _TICK_S = 0.1
 

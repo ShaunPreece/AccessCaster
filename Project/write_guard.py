@@ -3,9 +3,9 @@
 A docstring saying so is not a guard. `DevTools/_bootstrap` sets ACCESSCASTER_NO_DEVICE_WRITE for
 any script named `test_*`, exactly as it redirects the data dir and silences the announcer, so the
 rule holds for a suite that never thought about it. Every write choke point calls `refuse_in_tests`
-first: a desk write (rcp_hid), a MIDI send (midi_out), and a Windows audio change (meters and
-virtual_devices), the last because moving the default output or an endpoint's level moves the
-screen reader's speech on the machine running the test.
+first: a desk write (rcp_hid and rcp_transfer), a MIDI send (midi_out), and a Windows audio change
+(meters and virtual_devices), the last because moving the default output or an endpoint's level
+moves the screen reader's speech on the machine running the test.
 
 THE FAILURE IT PREVENTS IS SILENT AND AUDIBLE AT THE SAME TIME: a suite that reaches a real write
 fires a pad, engages a voice effect or drops the audio on a desk somebody is working on, and the

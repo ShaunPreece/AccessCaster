@@ -34,9 +34,9 @@ def update(**changes) -> None:
     not worth failing an action over, it just will not survive a restart.
 
     A file that will not parse is kept as settings.json.bad before a fresh one is started, so the
-    shortcuts, contacts and other preferences in it can still be recovered by hand. A file that cannot
-    be opened at all is left alone and this change is dropped: writing would replace every other
-    key with nothing."""
+    shortcuts, contacts and other preferences in it can still be recovered by hand. A file that
+    cannot be opened at all is left alone and this change is dropped: writing would replace every
+    other key with nothing."""
     with _lock:
         data = _read()
         if data is None:

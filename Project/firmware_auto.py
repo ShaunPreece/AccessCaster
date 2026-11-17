@@ -1,5 +1,5 @@
-"""AccessCaster - the desk's firmware check, made automatically: on the schedule AccessCaster keeps for
-its own updates (`app_updates.check_days`), and soon after a desk connects whose check is due.
+"""AccessCaster - the desk's firmware check, made automatically: on the schedule AccessCaster keeps
+for its own updates (`app_updates.check_days`), and soon after a desk connects whose check is due.
 
 ASKING, NEVER INSTALLING. A check is the touchscreen's Check for Update (`firmware.check_unasked`):
 one request, answered within a second, that changes nothing unless RODE has something newer, when

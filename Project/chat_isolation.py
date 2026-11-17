@@ -58,7 +58,7 @@ class ChatIsolation:
     Entered and restored under the HID lock.
 
     NOT the Main Multitrack USB device: switching that makes the unit RE-ENUMERATE ITS WHOLE USB
-    AUDIO FUNCTION. Measured: all four desk endpoints go inactive for a second or two, Windows falls
+    AUDIO FUNCTION: all four desk endpoints go inactive for a second or two, Windows falls
     back to the computer's own sound card, taking the screen reader with it, and on the way back
     Windows picks a different default. Twice per run.
 

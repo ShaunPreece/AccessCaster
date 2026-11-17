@@ -14,8 +14,8 @@ import channels
 # the way the RODE app's per-channel processing panel groups them.
 PROCESSING_CONTROLS = [
     # Each band is gain, then frequency, then WIDTH (Q), so the three controls for one band sit
-    # together rather than the six-then-three arrangement the property list would suggest. "Width" is
-    # the label, with Q in brackets: Q is the engineer's word and width is what it does, and a
+    # together rather than the six-then-three arrangement the property list would suggest. "Width"
+    # is the label, with Q in brackets: Q is the engineer's word and width is what it does, and a
     # screen-reader user arrowing a slider needs the second one first. Q is a control at all only
     # because it is independently writable (see channels.PROCESSING_PROPS).
     {"group": "Equaliser", "controls": [
@@ -106,7 +106,6 @@ EFFECT_PARAMS = {
 EFFECT_SPOKEN = {prop: f"{effect} {words}"
                  for effect, params in EFFECT_PARAMS.items() for prop, words in params}
 
-# An output's mix type, as outputMixMinus holds it.
 # An output's mix types, as outputMixMinus holds them.
 MAIN_MIX, MIX_MINUS, CUSTOM = 0, 1, 2
 OUTPUT_MODE_LABEL = {MAIN_MIX: "Main Mix", MIX_MINUS: "Mix Minus", CUSTOM: "Custom"}
@@ -153,7 +152,7 @@ UNIT_SETTINGS = [
     {"prop": "inactiveButtonsBrightness", "label": "Button brightness when not lit", "kind": "int",
      "min": 0, "max": 255, "step": 5,
      "detail": "0 to 255. Turn it down to darken the desk and keep lit buttons lit."},
-    # ---- THE CLOCK (selectors derived and read-back proven). -------------------------------------
+    # ---- THE CLOCK. ------------------------------------------------------------------------------
     # The timezone and daylight saving are NOT offered: both store a write and leave the clock
     # alone, because the touchscreen applies them. See device_page.UNIT_SETTINGS_NOT_ON_PAGE.
     {"prop": "systemDateTime24h", "label": "24-hour clock", "kind": "bool",
@@ -161,7 +160,7 @@ UNIT_SETTINGS = [
     {"prop": "systemDateTimeOnHome", "label": "Show the clock on the desk's home screen",
      "kind": "bool",
      "detail": "Nothing you can hear; for a sighted co-host."},
-    # ---- THE LOCKOUTS (selectors derived and read-back proven). ----------------------------------
+    # ---- THE LOCKOUTS. ---------------------------------------------------------------------------
     # They are last on the page on purpose: they are the ones that can make a working desk feel
     # broken, so the wording has to say exactly what goes quiet and that this app can always undo
     # it.

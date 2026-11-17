@@ -71,7 +71,8 @@ def settled(hardware_id: str, product_id) -> bool:
 
 
 def _note_baseline_asked() -> None:
-    """Remember that this desk has had its offer, so the dialog is a first-run event and not a nag."""
+    """Remember that this desk has had its offer, so the dialog is a first-run event and not a
+    nag."""
     here = device_page.hardware_id()
     if here and here not in _baseline_asked():
         settings_file.update(**{_BASELINE_ASKED_KEY: [*_baseline_asked(), here]})

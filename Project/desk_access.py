@@ -68,7 +68,8 @@ def cap_gate(cap: str, refusal, confirmed: bool = False) -> dict | None:
 
 # Every BackgroundJob, with the sentence that says it is running, in the order they were made.
 _jobs: list = []
-# The features whose long work is not a BackgroundJob, each as a call returning its sentence or None.
+# The features whose long work is not a BackgroundJob, each as a call returning its sentence or
+# None.
 _checks: list = []
 
 

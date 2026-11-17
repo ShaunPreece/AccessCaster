@@ -32,9 +32,9 @@ def open_folder_reply(folder: str, what: str) -> dict:
 def _open_folder_focused(folder: str) -> None:
     """Open a folder in Explorer AND PUT THE USER IN IT. Raises if it cannot be opened at all.
 
-    `os.startfile` alone opens the window BEHIND the app's: measured, with no window already at
-    that path, the foreground two seconds after the call is still AccessCaster. A window you were not
-    moved to is, to a screen-reader user, indistinguishable from nothing having happened.
+    `os.startfile` alone opens the window BEHIND the app's: with no window already at that path,
+    AccessCaster still holds the foreground two seconds after the call. A window you were not moved
+    to is, to a screen-reader user, indistinguishable from nothing having happened.
 
     Windows will not let a background process take the foreground on its own, so this borrows the
     input state of the window that HAS it (AttachThreadInput), which is the documented way.
@@ -70,8 +70,8 @@ def _open_folder_focused(folder: str) -> None:
         buf = ctypes.create_unicode_buffer(n + 1)
         u32.GetWindowTextW(hwnd, buf, n + 1)
         # PREFIX, NOT EQUALITY. Explorer titles the window with the folder name and then appends
-        # " - File Explorer" a moment later, so which of the two you see depends on how fast the poll
-        # got there.
+        # " - File Explorer" a moment later, so which of the two the poll sees depends on its
+        # timing.
         title = buf.value
         if title == want or title.startswith(want + " - "):
             found.append(hwnd)
