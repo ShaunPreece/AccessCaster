@@ -178,7 +178,7 @@ def main() -> None:
     with desk_access.hid_lock:
         blob = rcp_read.read_model(fresh=True)
     mode_before, expanded_before = recorder.split_usb_multitrack(
-        rcp_read.first(blob, "outputMultiMode", "int"))
+        rcp_read.keyed_value(blob, ("OUTPUT", 0), "outputMultiMode", kind="int"))
     if mode_before is None or expanded_before is None:
         print("Could not read the desk's USB output mode, so it could not be put back. Stopping.")
         return

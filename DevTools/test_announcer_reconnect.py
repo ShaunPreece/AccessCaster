@@ -28,7 +28,6 @@ import _bootstrap  # noqa: F401
 import _testkit
 import announcer
 import desk_live
-import desk_model
 import devices
 import rcp_hid
 import rcp_transfer
@@ -102,7 +101,7 @@ class Rig:
     def seed(self, st):
         self.seeded += 1
         # What adopting a real read would leave in the desk model.
-        desk_model.apply_push((0x0A,), "outputMultiMode", self.seeded_mode, "int")
+        _testkit.hold(rcp_transfer.OUTPUT, "outputMultiMode", self.seeded_mode, "int")
 
     def tidy(self, spoken):
         self.tidied.append(spoken)
@@ -120,7 +119,7 @@ class Rig:
         self.iface = to_iface
 
     def __enter__(self):
-        desk_model._reset()
+        _testkit.hold_desk(without=("outputMultiMode",))
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(patched(
             (rcp_transfer, {"find_control_interface": self.find}),

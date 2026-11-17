@@ -160,7 +160,7 @@ def action_hosting(on: bool) -> dict:
         if d.get("hosting_locked"):
             return {"ok": False, "message": "Incoming calls cannot be switched while a call is up."}
         with desk_access.hid_lock:
-            rcp_transfer.send_record(callme.build_hosting(on, path))
+            rcp_transfer.write_at(rcp_transfer.SIPCALLING, "sipCallHostingEnabled", "bool", on)
         # The code comes from RODE's service over the network, about a second after the switch. The
         # lock is taken per read, not across the wait, so shortcuts and the announcer carry on.
         deadline = time.monotonic() + (6.0 if on else 2.0)

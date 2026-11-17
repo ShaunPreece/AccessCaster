@@ -15,6 +15,7 @@ import pad_shortcuts
 import profile_actions
 import profiles
 import rcp_read
+import rcp_transfer
 import recorder
 import show_actions
 import shows
@@ -122,7 +123,7 @@ def _restore_silence_warnings(prof, blob) -> list:
         want = routing.get("faders")
         want_levels = routing.get("fader_levels")
         now_vec = faders.read_fader_vector(blob, spec)
-        now_levels = rcp_read.values(blob, "faderLevel")
+        now_levels = rcp_transfer.fader_levels(blob)
 
         def level_of(i, table):
             return table[i] if table and i < len(table) and isinstance(table[i], int) else None

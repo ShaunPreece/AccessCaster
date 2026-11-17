@@ -169,8 +169,8 @@ def midi_enabled():
     """
     import rcp_read
     import rcp_transfer
-    was = (rcp_read.snapshot_properties(rcp_read.read_model(fresh=True))
-           .get("systemMidiControl") or [None])[0]
+    was = rcp_read.keyed_value(rcp_read.read_model(fresh=True), rcp_transfer.SYSTEM,
+                               "systemMidiControl")
     if not was:
         rcp_transfer.set_midi_control(True)
     try:

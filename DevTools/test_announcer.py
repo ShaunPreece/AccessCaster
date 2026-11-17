@@ -20,7 +20,6 @@ import channels
 import desk_live
 import desk_model
 import devices
-import layout_fixture
 import mute_solo
 import pad_shortcuts
 import rcp_hid
@@ -1128,9 +1127,7 @@ desk_model._reset()
 check_true("unknown is distinguishable from False", not channels.usb_expanded_known())
 check("and an unknown mode hides Expanded's four from the fader write gate",
       sorted(set(devices.PRO2.fader.code_set_for(channels.usb_expanded())) & {12, 13, 14, 15}), [])
-desk_model.dump_finished(desk_model.dump_starting(),
-                         layout_fixture.skeleton(layout_fixture.PRO2_177))
-desk_model._reset()
+desk(without=("outputMultiMode",))
 with patched((usb_audio.rcp_read, {"read_model_stable": _seed_read})):
     usb_audio.seed_usb_expanded()
     check_true("the startup seed reads it", channels.usb_expanded_known())

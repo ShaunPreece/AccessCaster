@@ -26,9 +26,7 @@ def write_gate():
 
 
 # The two auto-mutes, by name: the writer, the property to read back, and what to call it.
-# Both live in the OUTPUT block and neither is duplicated anywhere else in the model, and the
-# read-back is still taken BY BLOCK rather than by first occurrence: that costs
-# nothing and is the habit that stops the next duplicate biting.
+# Both live on OUTPUT and are read back there (`auto_mute`).
 # Each entry carries its own two sentences rather than a shared template, because one phrase cannot
 # serve a plural subject and a singular one ("the monitor speakers will not mute on its own"), and
 # wording a blind operator relies on is the wrong place to save four lines.
@@ -59,7 +57,12 @@ def read_auto_mute(which: str) -> bool:
     a failed read."""
     with desk_access.hid_lock:
         blob = rcp_read.read_model()
-    return bool(rcp_read.block_value(blob, "OUTPUT", AUTO_MUTE[which]["prop"]))
+    return bool(auto_mute(blob, which))
+
+
+def auto_mute(blob: bytes, which: str):
+    """One auto-mute's raw value on OUTPUT, or None when the dump does not carry it."""
+    return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, AUTO_MUTE[which]["prop"])
 
 
 def action_set_auto_mute(which: str, on: bool) -> dict:
@@ -82,8 +85,7 @@ def action_set_auto_mute(which: str, on: bool) -> dict:
         with desk_access.hid_lock:
             getattr(rcp_transfer, spec["writer"])(bool(on))
             time.sleep(_AUTO_MUTE_SETTLE_S)
-            now = rcp_read.block_value(rcp_read.read_model_stable(fresh=True),
-                                       "OUTPUT", spec["prop"])
+            now = auto_mute(rcp_read.read_model_stable(fresh=True), which)
     except Exception as exc:
         return {"ok": False, "message": f"Could not change {spec['label'].lower()}: {exc}"}
     now = bool(now)
@@ -169,16 +171,38 @@ def action_set_output_delay(on: bool, ms: float | None) -> dict:
     return {"ok": True, "message": f"Output delay on, {int(round(seconds * 1000))} milliseconds."}
 
 
+def master_processing(blob: bytes) -> dict:
+    """The master bus's own processing, on MASTERCHANNEL, as the SEVEN keys the window and a
+    profile both use.
+
+    ONE SOURCE for the Master Mix page (window_master) and a backup (profiles.save), so a property
+    cannot be one the window changes and a profile cannot put back. The key names are the format
+    the window and the profile JSON both read, so both callers splat this straight in.
+    """
+    def master(name):
+        return rcp_read.keyed_value(blob, rcp_transfer.MASTER, name)
+
+    return {
+        "compellor_on": master("masterCompellorOn"),
+        "compellor_threshold": master("masterCompellorThreshold"),
+        "compellor_attack": master("masterCompellorAttack"),
+        "compellor_release": master("masterCompellorRelease"),
+        "compellor_gain": master("masterCompellorGain"),
+        "delay_on": master("masterDelayOn"),
+        "delay_seconds": master("masterDelaySeconds"),
+    }
+
+
 def window_master(blob: bytes) -> dict:
     """The native Master Mix page's state from one dump: the USB audio mode in its two halves, the
-    USB stream's raw switch, the master bus's processing (`rcp_read.master_processing`), and the
-    page's layout as `model`."""
-    usb_mode, usb_expanded = recorder.split_usb_multitrack(
-        rcp_read.first(blob, "outputMultiMode", "int"))
+    USB stream's raw switch, the master bus's processing (`master_processing`), and the page's
+    layout as `model`."""
+    usb_mode, usb_expanded = recorder.split_usb_multitrack(recorder.read_usb_multitrack(blob))
     return {
         "usb_multitrack": usb_mode, "usb_expanded": usb_expanded,
-        "usb_bypass": rcp_read.first(blob, "outputMultiBypass", "bool"),
-        **rcp_read.master_processing(blob),
+        "usb_bypass": rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, "outputMultiBypass",
+                                           kind="bool"),
+        **master_processing(blob),
         "model": {"usb_modes": sorted(recorder.USB_MULTITRACK_LABEL.items()),
                   "usb_expanded": sorted(recorder.USB_EXPANDED_LABEL.items()),
                   "usb_expanded_hint": recorder.USB_EXPANDED_HINT,

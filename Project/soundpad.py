@@ -2360,8 +2360,7 @@ def current_bank(blob=None):
     would put 1.5 seconds in front of a keypress."""
     if blob is None:
         blob = rr.read_model()
-    found = [v for v in rr.values(blob, "selectedBank") if isinstance(v, int)]
-    return found[0] if found else None
+    return rr.keyed_value(blob, t.GUI, "selectedBank", kind="int")
 
 
 def unlatch_all(blob=None) -> list:

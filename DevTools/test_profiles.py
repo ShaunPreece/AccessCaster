@@ -30,6 +30,7 @@ import channels
 import devices
 import fake_model
 import profiles
+import rcp_read
 import rcp_transfer
 import soundpad
 from _testkit import as_device, check, check_true, patched
@@ -37,7 +38,7 @@ from _testkit import as_device, check, check_true, patched
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
 
 
-# --- a synthetic model blob, every property on the root node (see fake_model) -------------------
+# --- a synthetic model blob, each property on its own node (see desk_dump) ---------------------
 
 def prop_int(name, value):
     return (None, name, int(value))
@@ -62,13 +63,28 @@ FADER_LEVEL_VALUES = [0, 0, 0, 0, 0, 0, 100, 64, 127]
 
 
 def desk_dump(entries, fader_levels, headphone_types):
-    """A dump of root properties, with each fader level on its own FADER node and each headphone
-    type on its own HEADPHONE node, where their writes go. A type of None is a node without one."""
+    """A dump with each property on the node that carries it on the pinned layout, where its
+    write goes: channelInputSource one per CHANNEL node, each fader level on its own FADER node
+    and each headphone type on its own HEADPHONE node (a type of None is a node without one). A
+    name no fixed node carries sits on the root."""
+    root, blocks, strips = [], {}, []
+    for _b, name, value in entries:
+        if name == "channelInputSource":
+            strips.append(value)
+            continue
+        key = next((k for k, (_p, props) in rcp_read.layout()._by_key.items()
+                    if len(k) == 2 and name in props), None)
+        if key is None:
+            root.append((name, value))
+        else:
+            blocks.setdefault(key[0], []).append((name, value))
     faders = [fake_model.node("FADER", {"faderLevel": int(v)}) for v in fader_levels]
-    headphones = [fake_model.node("HEADPHONE", {} if t is None else {"headphoneType": int(t)})
-                  for t in headphone_types]
-    return fake_model.node("Rodecaster", [(name, value) for _b, name, value in entries],
-                           [fake_model.node("PHYSICALINTERFACE", (), faders)] + headphones)
+    kids = [fake_model.node("PHYSICALINTERFACE", blocks.pop("PHYSICALINTERFACE", ()), faders)]
+    kids += [fake_model.node("CHANNEL", {"channelInputSource": c}) for c in strips]
+    kids += [fake_model.node(block, props) for block, props in blocks.items()]
+    kids += [fake_model.node("HEADPHONE", {} if t is None else {"headphoneType": int(t)})
+             for t in headphone_types]
+    return fake_model.node("Rodecaster", root, kids)
 
 
 ROOT_PROPS = (

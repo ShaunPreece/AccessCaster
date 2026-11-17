@@ -161,8 +161,8 @@ headed = (len(body) + 1).to_bytes(4, "little") + b"\x02" + body
 adopt(headed)
 desk_model.apply_push(SYSTEM, "systemFirmwareVersion", "1.7.10", "str")
 snap = desk_model.snapshot()
-check("a value that grows is read back from it", rcp_read.first(snap, "systemFirmwareVersion"),
-      "1.7.10")
+check("a value that grows is read back from it",
+      rcp_read.keyed_value(snap, rcp_transfer.SYSTEM, "systemFirmwareVersion"), "1.7.10")
 check("and the stream header's length grows with it", int.from_bytes(snap[:4], "little"),
       len(snap) - 4)
 adopt(dump())
@@ -176,7 +176,7 @@ stray = rcp_transfer.build_record("notOnAStrip", "bool", True, STRIP1)
 check("a property the node does not carry is not", desk_model.apply_write(stray), None)
 pad = rcp_transfer.build_record("padActive", "bool", True, PAD0)
 check("nor is a write to a pad, which is not a fixed node", desk_model.apply_write(pad), None)
-check("and the pad keeps its value", desk_model.values("padActive"), [False, False])
+check("and the pad keeps its value", desk_model._props[PAD0]["padActive"][0], False)
 check("a frame that is not a record is ignored", desk_model.apply_write(b"\x01\x02"), None)
 
 print("\nADDRESSING A WRITE")

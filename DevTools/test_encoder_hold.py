@@ -18,19 +18,19 @@ import mute_solo
 import rcp_read
 import rcp_transfer
 import rode_app
-from _testkit import as_device, check, hold_desk, patched, push, v_bool
+from _testkit import as_device, check, hold_desk, patched, push, v_bool, where
 from _testkit import hold as hold_value
 
 
 def watcher():
     held = []
-    desk_model._reset()
+    hold_desk()
     return encoder_hold.Watcher(held.append), held
 
 
 def select(strip):
     """The desk pushing the channel a channel button has given the encoder."""
-    desk_model.apply_push((15,), "systemChannelSelected", strip, "int")
+    desk_model.apply_push(where("systemChannelSelected"), "systemChannelSelected", strip, "int")
 
 
 def hold(w, seconds):

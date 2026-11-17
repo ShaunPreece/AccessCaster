@@ -502,10 +502,9 @@ if "level_write" in dev.caps:
               lambda v: rcp_transfer.set_fader_level(idx, v), target, cur,
               expect_extra=len(row), after_write=check_row)
 
-    mon = [v for v in rr.values(rr.read_model_stable(fresh=True), "outputMonLevel")
-           if isinstance(v, float)]
-    if mon:
-        cur = mon[0]
+    cur = rr.keyed_value(rr.read_model_stable(fresh=True), rcp_transfer.OUTPUT, "outputMonLevel",
+                         kind="float")
+    if cur is not None:
         probe("level_write: monitor speaker level (outputMonLevel on OUTPUT)",
               (at(rcp_transfer.OUTPUT), "OUTPUT", "outputMonLevel"),
               rcp_transfer.set_monitor_level, 0.25 if abs(cur - 0.25) > 0.01 else 0.5, cur)
@@ -721,10 +720,10 @@ if "recorder" in dev.caps and (not ONLY or "record" in ONLY):
         rec.send_command(rec.CMD_RECORD)
         time.sleep(1.5)
         b1, snap1 = snapshot()
-        req = rr.values(b1, "requestRecordState", "int")
+        req = rr.keyed_value(b1, rcp_transfer.RECORDER, "requestRecordState", kind="int")
         # The desk parks the field at 3 once it has read the request. That is the firmware acting,
         # not our value coming back: we sent 2.
-        consumed = bool(req) and req[0] == 3
+        consumed = req == 3
         still_idle = rec.read_state(b1) == rec.NO_DESTINATION
         added = [k for k in snap1 if k not in snap0]
         if not check_true("the request was consumed (parked at 3, and we sent 2), the desk still "
@@ -787,7 +786,7 @@ if "shows" in dev.caps and (not ONLY or "show" in ONLY):
         time.sleep(2.0)
         b1, snap1 = snapshot()
         err = sh.read_last_error(b1)
-        flag = rr.values(b1, "showControlExport", "bool")
+        flag = rr.keyed_value(b1, rcp_transfer.SHOWCONTROL, "showControlExport", kind="bool")
         added = [k for k in snap1 if k not in snap0]
         # Any non-zero error proves the desk READ the command. 8 is the one measured, so it is
         # named, but a different code is still an answer and not a failure of addressing.

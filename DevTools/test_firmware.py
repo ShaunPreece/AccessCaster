@@ -6,6 +6,7 @@ Run: python DevTools/test_firmware.py
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path; import FIRST)
@@ -16,19 +17,24 @@ import desk_firmware
 import fake_model
 import firmware
 import rcp_read
+import rcp_transfer
 import recorder
 from _testkit import check, check_in, patched
 
 
+def rows(online=True):
+    """A desk offering 1.7.7, on wifi or not, recording nothing, as `fake_model` rows."""
+    out = [("SYSTEM", name, False) for name in desk_firmware.PROPS
+           if name not in ("systemFirmwareVersion", "osUpdateAvailable", "updateVersion")]
+    out += [("SYSTEM", "systemFirmwareVersion", "1.7.6"), ("SYSTEM", "osUpdateAvailable", True),
+            ("SYSTEM", "updateVersion", "1.7.7"),
+            ("NETWORK", "wifiIpAddress", "192.168.1.20" if online else ""),
+            ("RECORDER", "recordState", recorder.READY)]
+    return out
+
+
 def desk(online=True):
-    """A desk offering 1.7.7, on wifi or not, recording nothing."""
-    rows = [("SYSTEM", name, False) for name in desk_firmware.PROPS
-            if name not in ("systemFirmwareVersion", "osUpdateAvailable", "updateVersion")]
-    rows += [("SYSTEM", "systemFirmwareVersion", "1.7.6"), ("SYSTEM", "osUpdateAvailable", True),
-             ("SYSTEM", "updateVersion", "1.7.7"),
-             ("NETWORK", "wifiIpAddress", "192.168.1.20" if online else ""),
-             ("RECORDER", "recordState", recorder.READY)]
-    return fake_model.encode(rows)
+    return fake_model.encode(rows(online))
 
 
 def reading(blob):
@@ -69,5 +75,26 @@ check("the desk was never asked to install", installs, [])
 check("the job failed", status.get("ok"), False)
 check_in("and says the update was not started", "the update was not started", status["message"])
 check_in("with the backup's own reason", "No room.", status["message"])
+
+print("a stray copy of an update flag ahead of SYSTEM is neither read nor written")
+# The stray reads False where SYSTEM's own reads True: read by first occurrence, the guard against
+# a restart that would factory-wipe the desk passes.
+stray = fake_model.encode([("GUI", "updateResetAfterFWURequested", False),
+                           ("GUI", "updateRebootRequested", False)]
+                          + [(b, n, True if n == "updateResetAfterFWURequested" else v)
+                             for b, n, v in rows()])
+check_in("the erase flag is read on SYSTEM", "erase itself",
+         desk_firmware.refusal(desk_firmware.read(stray), True, False, False))
+book = rcp_read.layout_of(stray)
+sent = []
+previous = rcp_read.pin_layout(book)
+try:
+    with patched((rcp_transfer, {"send_record": sent.append})):
+        desk_firmware.Desk(threading.Lock()).write("updateRebootRequested", True)
+finally:
+    rcp_read.pin_layout(previous)
+check("the request is written to SYSTEM's node",
+      sent, [rcp_transfer.build_path_prop_bool("updateRebootRequested", True,
+                                               book.path(rcp_transfer.SYSTEM))])
 
 sys.exit(_testkit.finish())

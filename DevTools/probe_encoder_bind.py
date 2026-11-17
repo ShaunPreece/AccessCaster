@@ -40,7 +40,8 @@ import soundpad
 
 ENCODER = ("ENCODER", 0)
 LEVELS = ("outputMonLevel", "faderLevel", "potLevel", "inputMicrophoneGain", "inputDigitalGain")
-STATE = ("encoderColour", "systemChannelSelected", "systemMixSelected", "selectedBank")
+STATE = {"encoderColour": ("ENCODER", 0), "systemChannelSelected": ("SYSTEM", 0),
+         "systemMixSelected": ("SYSTEM", 0), "selectedBank": ("GUI", 0)}
 SETTLE_S = 0.8
 
 
@@ -48,7 +49,7 @@ def read():
     """(levels, state, blob): the levels by stream position, the state by name, and the dump."""
     blob = rcp_read.read_model_stable(fresh=True)
     return ({name: list(rcp_read.values(blob, name)) for name in LEVELS},
-            {name: rcp_read.first(blob, name) for name in STATE}, blob)
+            {name: rcp_read.keyed_value(blob, key, name) for name, key in STATE.items()}, blob)
 
 
 def mic_gains(blob) -> dict:

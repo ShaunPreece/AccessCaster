@@ -57,7 +57,7 @@ def action_set_usb_multitrack(mode: int) -> dict:
     with desk_access.hid_lock:
         # READ FIRST so the input half is carried through. The desk holds both in one property, so
         # writing the mode alone would take a desk out of Expanded without being asked to.
-        old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+        old = recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
         _, expanded = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode, expanded)
         arrived = _write_usb_mode_parked(value, old)
@@ -128,7 +128,7 @@ def action_set_usb_expanded(on: bool) -> dict:
         return {"ok": False, "message": "Expanded needs on or off."}
     cleared = [] if on else _clear_extended_faders()
     with desk_access.hid_lock:
-        old = rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+        old = recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
         mode, _ = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
         arrived = _write_usb_mode_parked(value, old)
@@ -357,7 +357,7 @@ def _desk_usb_mode():
     lock."""
     try:
         with desk_access.hid_lock:
-            return rcp_read.first(rcp_read.read_model_stable(fresh=True), "outputMultiMode", "int")
+            return recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
     except Exception as exc:
         diagnostics.event("device.read_failed", "USB mode", error=str(exc))
         return None

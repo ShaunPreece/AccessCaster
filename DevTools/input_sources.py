@@ -125,7 +125,7 @@ def main() -> int:
     if not rcp_read.is_model_dump(blob):
         print("The desk did not answer with a model. Is it connected?")
         return 1
-    mode = rcp_read.first(blob, "outputMultiMode", "int")
+    mode = rcp_read.keyed_value(blob, ("OUTPUT", 0), "outputMultiMode", kind="int")
     table = read_table(blob)
     show(table, mode)
 

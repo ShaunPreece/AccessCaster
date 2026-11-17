@@ -228,7 +228,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                 try:
                     blob0 = rcp_read.read_model()
                     vec_before = faders.read_fader_vector(blob0, spec)
-                    levels_before = rcp_read.values(blob0, "faderLevel")
+                    levels_before = rcp_transfer.fader_levels(blob0)
                 except Exception as exc:
                     diagnostics.event("restore.levels_unread", str(exc))
                     vec_before = levels_before = None

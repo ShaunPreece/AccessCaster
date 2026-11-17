@@ -150,6 +150,8 @@ GUI = ("GUI", 0)                 # the display and button brightness, the select
 RECORDER = ("RECORDER", 0)
 RECORDINGS = ("RECORDINGS", 0)
 SHOWCONTROL = ("SHOWCONTROL", 0)
+CURRENTSHOW = ("CURRENTSHOW", 0)
+SIPCALLING = ("SIPCALLING", 0)  # CallMe's controls; its call slots are SIPCALLSLOTS[0..2]
 SOUNDPADS = ("SOUNDPADS", 0)
 PADEFFECTS = ("PADEFFECTS", 0)
 
@@ -186,6 +188,14 @@ def fader_key(fader_index: int) -> tuple:
     """A fader's LEVEL: PHYSICALINTERFACE.FADER[index]. The FADER nodes follow four POT nodes,
     which is why the level's second path index reads as 0x04 + fader."""
     return ("PHYSICALINTERFACE", 0, "FADER", int(fader_index))
+
+
+def fader_levels(blob: bytes) -> list:
+    """Every fader's faderLevel from a dump, indexed by fader, None where a FADER node lacks it.
+    Each is read on its own node, so a stray faderLevel elsewhere cannot shift the list."""
+    book = rcp_read.layout_of(blob)
+    count = book.count("PHYSICALINTERFACE", 0, "FADER") if book is not None else 0
+    return [rcp_read.keyed_value(blob, fader_key(i), "faderLevel") for i in range(count)]
 
 
 def set_midi_control(on: bool) -> int:
@@ -578,6 +588,11 @@ def set_unit_setting(prop: str, value) -> int:
     if kind == "float":
         return write_at(key, prop, "float", max(0.0, min(1.0, float(value))))
     return write_at(key, prop, "int", int(value))
+
+
+def unit_setting(blob: bytes, prop: str):
+    """One UNIT SETTING's value from a dump, read on the node its write goes to, or None."""
+    return rcp_read.keyed_value(blob, UNIT_SETTING_SEL[prop][0], prop)
 
 
 # ---- THE SEND LAYER --------------------------------------------------------

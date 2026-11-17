@@ -302,11 +302,12 @@ def _settle_mutes(new_vec, wanted: dict) -> list:
     THE DESK'S MUTES DO NOT FOLLOW THE INPUTS: a strip has kept its own mute through a link, so the
     pair inherited the lower mic's, and has also been seen clearing it. Neither is relied on; the
     outcome is read back and settled. A code with no strip (an upper mic left off-fader) is skipped."""
-    mutes = rcp_read.values(rcp_read.read_model(fresh=True), "channelOutputMute")
+    mutes = rcp_read.strip_values(rcp_read.read_model(fresh=True), "channelOutputMute")
     opened = []
     for code, muted in wanted.items():
         strip = next((i for i, c in enumerate(new_vec) if c == code), None)
-        if strip is None or strip >= len(mutes) or bool(mutes[strip]) == muted:
+        if (strip is None or strip >= len(mutes) or mutes[strip] is None
+                or bool(mutes[strip]) == muted):
             continue
         rcp_transfer.write_at(channels.proc_key_for_strip(strip), channels.MUTE_PROP, "bool", muted)
         if not muted:
@@ -577,7 +578,7 @@ def action_set_fader(fader_index: int, code: int) -> dict:
             # before the write, off the dump we already have; see follow_levels for the silence
             # this prevents. Gated, because a desk with no confirmed faderLevel selectors must not
             # be written to at all.
-            levels_before = (rcp_read.values(blob, "faderLevel")
+            levels_before = (rcp_transfer.fader_levels(blob)
                              if level_write_gate() is None else None)
             # Only write the faders that actually change.
             for i in range(spec.count):
@@ -652,17 +653,20 @@ def fader_levels(blob: bytes) -> dict:
     the announcements say too. `channel` names whatever sits on that fader right now."""
     spec = active_faders()
     gate = level_write_gate()
-    raw = rcp_read.values(blob, "faderLevel")
+    raw = rcp_transfer.fader_levels(blob)
     # A virtual fader's MUTE and SOLO have no control on the unit, so software is the only way to
     # reach them, which is why they sit beside its level here. Its LEVEL is not in that position:
     # the encoder cycles onto the virtual faders (announcer._encoder_ring).
     mutes = rcp_read.strip_values(blob, "channelOutputMute")
     solos = rcp_read.strip_values(blob, channels.CUE_PROP)
-    mon = rcp_read.values(blob, "outputMonLevel")
-    # The two output MUTES and the Bluetooth output LEVEL, all proven writable.
+    # The monitor level, the two output MUTES and the Bluetooth output LEVEL, all proven writable.
     # They ride on this read rather than on `read_routing_live` because they belong beside the
-    # monitor level on the Levels page, and this is the read that page already makes.
-    outs = rcp_read.snapshot_properties(blob)
+    # fader levels on the Levels page, and this is the read that page already makes.
+    def one(prop):
+        return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, prop)
+
+    mon = one("outputMonLevel")
+    bt_level = one("outputBTLevel")
     vec = read_fader_vector(blob, spec)
     def switch(values, idx):
         # None for an empty fader, so the UI can say why the switch is unavailable rather than
@@ -684,15 +688,10 @@ def fader_levels(blob: bytes) -> dict:
             "soloed": switch(solos, idx),
         })
 
-    def one(prop):
-        vals = outs.get(prop) or []
-        return vals[0] if vals else None
-
-    bt_level = one("outputBTLevel")
     return {"ok": True, "read_only": gate is not None,
             "message": (gate or {}).get("message", ""),
             "faders": faders,
-            "monitor": {"percent": (round(mon[0] * 100) if mon else None),
+            "monitor": {"percent": (None if mon is None else round(mon * 100)),
                         "muted": one("outputMonMute")},
             # The Bluetooth OUTPUT: what a paired phone hears from the desk. Nothing to do with the
             # Bluetooth INPUT channel on the Channels page, which is what the phone sends US, and the
@@ -854,7 +853,7 @@ def action_reset_faders() -> dict:
             blob = rcp_read.read_model()
             old = read_fader_vector(blob, spec)
             chains_before = channels.read_chains(blob) if chain_follow_on() else None
-            levels_before = (rcp_read.values(blob, "faderLevel")
+            levels_before = (rcp_transfer.fader_levels(blob)
                              if level_write_gate() is None else None)
             for i, code in enumerate(spec.default_vector):
                 rcp_transfer.set_fader_source(i, code)

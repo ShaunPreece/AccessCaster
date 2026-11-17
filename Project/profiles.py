@@ -105,7 +105,7 @@ UNIT_KEY = "unit"
 UNIT_NEVER_RESTORE = frozenset({"outputMonMute", "outputBTMute"})
 
 
-def _unit_settings(props: dict) -> dict:
+def _unit_settings(blob: bytes) -> dict:
     """{prop: int|float} for every unit setting the dump carries. Bools are stored as 0/1 so the
     profile round-trips through JSON unambiguously; a property the desk did not report is left out.
 
@@ -113,8 +113,7 @@ def _unit_settings(props: dict) -> dict:
     level silently."""
     out = {}
     for prop in rcp_transfer.UNIT_SETTING_SEL:
-        vals = props.get(prop) or []
-        v = vals[0] if vals else None
+        v = rcp_transfer.unit_setting(blob, prop)
         if isinstance(v, bool):
             out[prop] = int(v)
         elif isinstance(v, (int, float)):
@@ -150,14 +149,9 @@ def pads_dir(safe: str) -> str:
 
 # ---- save (build the dict from an already-read model blob; no device access) ---------------
 
-def _snapshot(blob: bytes, props: dict | None = None) -> dict:
-    """Every property in the dump, secrets redacted. Reference only; never written back.
-
-    `props` lets the caller hand in an already-walked dump (save() needs the same walk for the unit
-    settings) instead of walking 55 KB twice. NOTE: redaction MUTATES it, so anything read out of
-    that dict must be read BEFORE this is called."""
-    if props is None:
-        props = rcp_read.snapshot_properties(blob)
+def _snapshot(blob: bytes) -> dict:
+    """Every property in the dump, secrets redacted. Reference only; never written back."""
+    props = rcp_read.snapshot_properties(blob)
     redacted = sorted(n for n in props if desk_secrets.is_secret(n))
     for n in redacted:
         props[n] = [None] * len(props[n])
@@ -205,16 +199,12 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
                 f"{safe} is an as-found baseline, the only record of how a desk was before this "
                 f"app changed anything, so it cannot be replaced by an ordinary save. "
                 f"Choose another name."}
-    # ONE walk of the dump, shared by the unit settings below and by the full snapshot. Read the
-    # unit settings out of it FIRST: _snapshot redacts in place (none of these is password-shaped,
-    # but relying on that would be a trap for whoever adds the next setting).
-    all_props = rcp_read.snapshot_properties(blob)
-    unit = _unit_settings(all_props)
-    def first(n):
-        return rcp_read.first(blob, n)
+    def output(n):
+        return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, n)
 
+    unit = _unit_settings(blob)
     cis = rcp_read.strip_values(blob, "channelInputSource")
-    midi = first("systemMidiControl")
+    midi = rcp_read.keyed_value(blob, rcp_transfer.SYSTEM, "systemMidiControl")
 
     # The two levels the desk otherwise keeps to itself: each fader's faderLevel (0..127, per
     # STRIP, only the VIRTUAL slots are ours to write) and the monitor SPEAKER level
@@ -223,11 +213,9 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     # slot's value and apply writes only the slots this device has a confirmed level selector for.
     # Each is read on its own node, the one its write goes to, and one that fails to decode is
     # kept as None: the lists are POSITIONAL (index = strip, or headphone output).
-    fader_levels = []
-    for i in range(devices.get_active_device().fader.count):
-        v = rcp_read.keyed_value(blob, rcp_transfer.fader_key(i), "faderLevel")
-        fader_levels.append(int(v) if isinstance(v, (int, float)) else None)
-    mon_level = first("outputMonLevel")
+    fader_levels = [int(v) if isinstance(v, (int, float)) else None
+                    for v in rcp_transfer.fader_levels(blob)]
+    mon_level = output("outputMonLevel")
     headphone_types = master_outputs.headphone_types(blob)
 
     # THE OUTPUT MIX MATRIX IS CAPTURED AS A MIX SCHEME. routing_schemes.capture already records
@@ -270,28 +258,28 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             # (raw 0..1). See the capture comment above.
             "fader_levels": fader_levels,
             "monitor_level": mon_level,
-            "multitrack": first("recordingMultitrackMode"),
+            "multitrack": output("recordingMultitrackMode"),
             # The rest of the "what do I end up with" set. The multitrack MODE without its
             # processing bypass is half a decision: a profile taken on raw pre-fader tracks would
             # come back processed, which is not recoverable after the take. `usb_multitrack` is
             # the USB destination's own mode (see recorder.py).
-            "processing_bypass": first("recordingProcessingBypass"),
+            "processing_bypass": output("recordingProcessingBypass"),
             # And WHAT IT IS WRITTEN AS, for the same reason: a profile that restores what the take
             # contains but not whether it is a WAV or an MP3 has backed up half the decision, and
             # neither half is recoverable once the take exists.
-            "recording_format": first("recordingCompressionQuality"),
+            "recording_format": output("recordingCompressionQuality"),
             # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). A profile with
             # a bare 0-2 in `usb_multitrack` and no `usb_expanded` reads as "that output mode,
             # Standard".
-            "usb_multitrack": recorder.split_usb_multitrack(first("outputMultiMode"))[0],
-            "usb_expanded": recorder.split_usb_multitrack(first("outputMultiMode"))[1],
-            "usb_processing_bypass": first("outputMultiBypass"),
-            "monitor_auto_mute": first("outputMonAutoMute"),
-            "bt_auto_mute": first("outputBTAutoMute"),
+            "usb_multitrack": recorder.split_usb_multitrack(output("outputMultiMode"))[0],
+            "usb_expanded": recorder.split_usb_multitrack(output("outputMultiMode"))[1],
+            "usb_processing_bypass": output("outputMultiBypass"),
+            "monitor_auto_mute": output("outputMonAutoMute"),
+            "bt_auto_mute": output("outputBTAutoMute"),
             "headphone_types": headphone_types,                # one per addressable output
             # The master bus's Compellor and output delay, seven keys, built in rcp_read so the
             # page and the backup cannot drift apart.
-            **rcp_read.master_processing(blob),
+            **master_outputs.master_processing(blob),
             # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above), and
             # why not when it could not be read (a phone caller).
             "mix_scheme": mix_scheme,
@@ -301,9 +289,10 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
         # fixed output level). Read above, before _snapshot redacts the shared walk.
         UNIT_KEY: unit,
         # wifi is recorded for reference only; it is not re-applied on restore.
-        "wifi": {"ssid": first("wifiSSID") or "", "ip": first("wifiIpAddress") or ""},
+        "wifi": {"ssid": rcp_read.keyed_value(blob, rcp_transfer.NETWORK, "wifiSSID") or "",
+                 "ip": rcp_read.keyed_value(blob, rcp_transfer.NETWORK, "wifiIpAddress") or ""},
         "firmware": firmware,
-        SNAPSHOT_KEY: _snapshot(blob, all_props),
+        SNAPSHOT_KEY: _snapshot(blob),
     }
     if pads is not None:                  # optional SMART pad backup (files already copied)
         profile["pads"] = pads

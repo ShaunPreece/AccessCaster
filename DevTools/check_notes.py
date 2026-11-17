@@ -286,6 +286,135 @@ def check_private_citations() -> None:
                  f'cites the private "{m.group(0)}". State the fact instead.')
 
 
+# ---------------------------------------------------------------------------
+# 9. A property on a fixed node is read and written by its key
+# ---------------------------------------------------------------------------
+# A stray copy of a property, which only a factory reset removes, can land on any node. A read by
+# stream position or first occurrence then returns the stray, or shifts every index past it; a
+# write found by searching for the name goes to the stray. So a name any fixed node carries in the
+# saved layouts must not reach `rcp_read.values` / `find_all`, a `snapshot_properties(...)` lookup,
+# `model_tree.find_property` or `rcp_transfer.build_path_prop_bool`. A deliberate read of every
+# occurrence (a fingerprint that never indexes) says so with `# every occurrence` on its line.
+# {module: {function: index of its property-name argument}}. `first` and `block_value` are gone
+# from rcp_read; they stay here so that bringing either back fails at its first use.
+POSITIONAL = {"rcp_read": {"values": 1, "find_all": 1, "first": 1, "block_value": 2},
+              "model_tree": {"find_property": 1},
+              "rcp_transfer": {"build_path_prop_bool": 0}}
+EVERY_OCCURRENCE = "# every occurrence"
+
+
+def _fixed_names() -> set:
+    import json
+    names = set()
+
+    def walk(runs):
+        for _name, _count, props, kids in runs:
+            names.update(props)
+            walk(kids)
+    for p in sorted((REPO / "DevTools" / "fixtures").glob("layout_*.json")):
+        walk(json.loads(read(p)))
+    return names
+
+
+def _module_strings(tree) -> dict:
+    """{NAME: "value"} for every module-level `NAME = "string"` in a parsed file."""
+    import ast
+    out = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = node.value.value
+    return out
+
+
+def check_keyed_reads() -> None:
+    import ast
+    fixed = _fixed_names()
+    files = [p for p in sorted((REPO / "Project").rglob("*.py"))
+             if not {"dist", "build", ".venv"} & set(p.parts)]
+    trees = {p: ast.parse(read(p)) for p in files}
+    strings = {p.stem: _module_strings(t) for p, t in trees.items()}
+    for p, tree in trees.items():
+        where_file = p.relative_to(REPO).as_posix()
+        # rcp_read calls its own readers bare; the readers' own bodies pass a name through.
+        bare = POSITIONAL["rcp_read"] if p.stem == "rcp_read" else {}
+        inside_reader = {id(n) for d in tree.body
+                         if isinstance(d, ast.FunctionDef) and d.name in bare
+                         for n in ast.walk(d)}
+        lines = read(p).splitlines()
+        alias = {}                    # local name -> module, for `import rcp_read as rr`
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    alias[a.asname or a.name] = a.name
+        own = strings[p.stem]
+
+        def name_of(arg):
+            """The property name an argument holds, or None when it cannot be told."""
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return arg.value
+            if isinstance(arg, ast.Name):
+                return own.get(arg.id)
+            if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
+                return strings.get(alias.get(arg.value.id, ""), {}).get(arg.attr)
+            return None
+
+        def is_snapshot(expr):
+            return (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
+                    and expr.func.attr == "snapshot_properties")
+
+        reported = set()              # a nested function is walked once per enclosing scope
+
+        def flag(node, msg):
+            if EVERY_OCCURRENCE not in lines[node.lineno - 1] and id(node) not in reported:
+                reported.add(id(node))
+                fail(f"{where_file}:{node.lineno}", msg)
+
+        for fn in [tree] + [n for n in ast.walk(tree)
+                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            # Names bound to a snapshot_properties(...) dict within this scope.
+            snaps = {t.id for n in ast.walk(fn)
+                     if isinstance(n, ast.Assign) and is_snapshot(n.value)
+                     for t in n.targets if isinstance(t, ast.Name)}
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id in bare and id(node) not in inside_reader):
+                    pos = bare[node.func.id]
+                    name = name_of(node.args[pos]) if len(node.args) > pos else None
+                    if name is None or name in fixed:
+                        flag(node, f"{node.func.id} reads {name or 'a name it cannot tell'} by "
+                                   f"position or first occurrence: use keyed_value.")
+                    continue
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                owner = node.func.value
+                # snapshot_properties(blob).get(NAME), or snap.get(NAME) on a bound dict
+                if node.func.attr == "get" and node.args and (
+                        is_snapshot(owner)
+                        or (isinstance(owner, ast.Name) and owner.id in snaps)):
+                    name = name_of(node.args[0])
+                    if name in fixed:
+                        flag(node, f'reads "{name}" by first occurrence from a snapshot; read it '
+                                   f"on its node with rcp_read.keyed_value.")
+                    continue
+                if not isinstance(owner, ast.Name):
+                    continue
+                module = alias.get(owner.id)
+                pos = POSITIONAL.get(module, {}).get(node.func.attr)
+                if pos is None or len(node.args) <= pos:
+                    continue
+                name = name_of(node.args[pos])
+                if name is None:
+                    flag(node, f"{module}.{node.func.attr} with a name that is not a literal or a "
+                               f"module constant, so it cannot be checked; pass the name itself.")
+                elif name in fixed:
+                    flag(node, f'{module}.{node.func.attr} finds "{name}" by position or first '
+                               f"occurrence, and a fixed node carries it: use its key "
+                               f"(rcp_read.keyed_value, strip_values or rcp_transfer.write_at).")
+
+
 # profile_coverage.py's drift guard: a property a profile saves with no restore verdict, or one the
 # app can write with no verdict on whether a profile carries it. Run here because nothing else runs it.
 def check_profile_coverage() -> None:
@@ -310,6 +439,7 @@ def main() -> int:
     check_code_comments()
     check_private_citations()
     check_profile_coverage()
+    check_keyed_reads()
     for n in NOTES:
         print("  note: " + n)
     if not FAILS:

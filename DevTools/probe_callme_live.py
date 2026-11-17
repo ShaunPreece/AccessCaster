@@ -71,7 +71,7 @@ def host(on: bool):
     if path is None or kind != "bool" or len(path) != 1:
         raise SystemExit(f"sipCallHostingEnabled not where expected: path {path}, kind {kind}")
     print(f"sipCallHostingEnabled at path {path}: was {was}, writing {on}")
-    rcp_transfer.send_record(callme.build_hosting(on, path))
+    rcp_transfer.write_at(rcp_transfer.SIPCALLING, "sipCallHostingEnabled", "bool", on)
     # The code is issued by RODE's service over the network, so give it time to arrive.
     for _ in range(10):
         time.sleep(1.0)

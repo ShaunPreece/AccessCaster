@@ -41,9 +41,6 @@ def read_hardware() -> dict:
 
     `storageVolumeState` is the usable source for card space: the numeric
     storageVolumeFree/Capacity read 0 even when a volume is mounted (measured)."""
-    def val(prop, kind=None):
-        return rcp_read.values(blob, prop, kind)
-
     try:
         with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
@@ -55,10 +52,9 @@ def read_hardware() -> dict:
     # Parsed in ONE place (recorder.read_volumes), so this and the Recording section name the same
     # volume the same way. SLOT 1 IS THE USB PORT, not "Card slot 2".
     out["storage"] = {"volumes": recorder.read_volumes(blob)}
-    rs = val("recordState", "int")
     out["recorder"] = {
-        "state_label": recorder.STATE_LABEL.get(rs[0] if rs else None, "Unknown"),
-        "total_recordings": (val("recordingTotalCount", "int") or [None])[0],
+        "state_label": recorder.STATE_LABEL.get(recorder.read_state(blob), "Unknown"),
+        "total_recordings": recorder.total_count(blob),
     }
 
     # ---- firmware and the wired network. Neither is a connection you can make or change, so they
@@ -67,7 +63,7 @@ def read_hardware() -> dict:
     out["firmware"] = desk_firmware.version(blob)
     out["firmware_update"] = desk_firmware.update(blob)
     out["firmware_untested"] = desk_firmware.untested(blob)
-    wired = next((v for v in val("wiredConnected") if v is not None), None)
+    wired = rcp_read.keyed_value(blob, rcp_transfer.NETWORK, "wiredConnected")
     out["wired_connected"] = bool(wired) if wired is not None else None
     return out
 
@@ -124,19 +120,15 @@ def unit_settings_off_page() -> list:
 
 
 def _unit_setting_values(blob: bytes) -> dict:
-    """{prop: value} for every unit setting, read from an ALREADY-READ dump.
-
-    Reads through rcp_read.snapshot_properties, which gets EVERY property in one pass: this wants
-    every UNIT_SETTINGS name at once, so one walk beats a lookup per name.
+    """{prop: value} for every unit setting, read from an ALREADY-READ dump on the node its write
+    goes to.
 
     Bools are normalised to 0/1 so a "choice" control can compare them numerically; a property the
     dump does not carry comes back None and the UI says it could not be read rather than showing a
     zero."""
-    props = rcp_read.snapshot_properties(blob)
     out = {}
     for spec in UNIT_SETTINGS:
-        vals = props.get(spec["prop"]) or []
-        v = vals[0] if vals else None
+        v = rcp_transfer.unit_setting(blob, spec["prop"])
         if isinstance(v, bool):
             v = int(v)
         out[spec["prop"]] = v if isinstance(v, int) else None
@@ -171,9 +163,8 @@ def read_unit_settings() -> dict:
     # value is reported here and the page still makes exactly ONE call. It is NOT a UNIT_SETTINGS
     # entry and deliberately so: that spec drives the profile's restore set as well as the page, and
     # MIDI already has its own write (rcp_transfer.set_midi_control) and its own key in a profile.
-    # Adding it there would write it twice on every restore. Read off the dump we already have, by
-    # exact name for the reason in _unit_setting_values.
-    midi = (rcp_read.snapshot_properties(blob).get("systemMidiControl") or [None])[0]
+    # Adding it there would write it twice on every restore. Read off the dump we already have.
+    midi = rcp_read.keyed_value(blob, rcp_transfer.SYSTEM, "systemMidiControl")
     gate = _unit_settings_gate()
     return {"ok": True, "settings": settings, "device_name": dev.name,
             "midi": bool(midi) if midi is not None else None,
@@ -215,12 +206,12 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
     extra = ""
     try:
         with desk_access.hid_lock:
-            mute_before = (rcp_read.values(rcp_read.read_model_stable(fresh=True),
-                                           "outputMonMute") or [None])[0] if guard_mute else None
+            mute_before = (rcp_transfer.unit_setting(rcp_read.read_model_stable(fresh=True),
+                                                     "outputMonMute") if guard_mute else None)
             rcp_transfer.set_unit_setting(prop, v)
             if mute_before is not None:
-                mute_after = (rcp_read.values(rcp_read.read_model_stable(fresh=True),
-                                              "outputMonMute") or [None])[0]
+                mute_after = rcp_transfer.unit_setting(rcp_read.read_model_stable(fresh=True),
+                                                       "outputMonMute")
                 if mute_after is not None and bool(mute_after) != bool(mute_before):
                     rcp_transfer.set_unit_setting("outputMonMute", bool(mute_before))
                     extra = (" The desk un-muted the monitor speakers when it did that, so the mute "
@@ -402,8 +393,8 @@ def overview(fresh: bool = True) -> dict:
         if not empty and i < len(cues) and cues[i]:
             soloed.append({"fader": i + 1, "label": label(i)})
 
-    mon = [v for v in rcp_read.values(blob, "outputMonLevel") if isinstance(v, float)]
-    bank = [v for v in rcp_read.values(blob, "selectedBank") if isinstance(v, int)]
+    mon = rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, "outputMonLevel", kind="float")
+    bank = rcp_read.keyed_value(blob, rcp_transfer.GUI, "selectedBank", kind="int")
     return {"ok": True,
             "device_name": dev.name,
             "muted": muted,
@@ -423,10 +414,11 @@ def overview(fresh: bool = True) -> dict:
             # whether CallMe and the firmware check can work at all. `callme_hosting` lets the
             # spoken summary call an offline unit a problem only when guests expect to reach it.
             "network": dict(network.connection(blob),
-                            callme_hosting=bool(rcp_read.first(blob, "sipCallHostingEnabled"))),
+                            callme_hosting=bool(rcp_read.keyed_value(
+                                blob, rcp_transfer.SIPCALLING, "sipCallHostingEnabled"))),
             "faders": faders,
-            "monitor_percent": wording.percent(mon[0]) if mon else None,
-            "bank": (bank[0] + 1) if bank else None,       # the desk numbers banks from 0
+            "monitor_percent": wording.percent(mon) if mon is not None else None,
+            "bank": (bank + 1) if bank is not None else None,   # the desk numbers banks from 0
             "levels_ok": shape_ok,
             "routing": _overview_routing(blob),
             "message": ""}

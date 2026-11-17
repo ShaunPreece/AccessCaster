@@ -125,7 +125,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
     callme_actions.watcher()
     try:
         read_desk_once()
-        midi = desk_model.first("systemMidiControl", "bool")
+        midi = desk_model.midi_control()
         print(f"Read the desk (MIDI {'on' if midi else 'off'}, "
               f"firmware {desk_model.firmware()}).")
     except Exception as exc:

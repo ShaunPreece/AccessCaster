@@ -95,8 +95,8 @@ class FakeDesk:
         rows += [("STORAGE", "storageVolumeState",
                   "5276434432|4160749568|0|1|1" if self.storage else "0|0|0|0|0"),
                  ("STORAGE", "storageVolumeRecDestination", True)]
-        rows += [("SHOWCONTROL", "currentShowName", "Loaded"),
-                 ("SHOWCONTROL", "currentShowUUID", self.current_uuid),
+        rows += [("CURRENTSHOW", "currentShowName", "Loaded"),
+                 ("CURRENTSHOW", "currentShowUUID", self.current_uuid),
                  ("SHOWCONTROL", "showControlLastError", self.last_error)]
         return fake_model.encode(rows)
 

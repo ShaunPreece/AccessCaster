@@ -105,7 +105,7 @@ def main() -> int:
     ap.add_argument("--taken", required=True, help='when the dump was taken, "29th August 2026"')
     args = ap.parse_args()
     blob = pathlib.Path(args.blob).read_bytes()
-    firmware = rcp_read.block_value(blob, "SYSTEM", "systemFirmwareVersion") or "unknown"
+    firmware = rcp_read.keyed_value(blob, ("SYSTEM", 0), "systemFirmwareVersion") or "unknown"
     desk_name = {"PRO2": "RODECaster Pro II", "DUO": "RODECaster Duo"}[args.desk]
     out = pathlib.Path(_bootstrap.docs_path(f"FACTORY_DEFAULTS_{args.desk}.txt"))
     out.write_text(render(collect(blob), desk_name, firmware, args.taken), encoding="utf-8")

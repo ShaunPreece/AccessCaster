@@ -80,6 +80,8 @@ MODEL_MAX_DECLARED = 4 << 20
 
 # The root node's name, which every real dump opens with (see model_tree.parse).
 _ROOT_MARKER = b"Rodecaster\x00"
+# The SYSTEM node's key, as rcp_transfer.SYSTEM, which this module cannot import: it imports this.
+_SYSTEM = ("SYSTEM", 0)
 
 
 def is_model_dump(blob) -> bool:
@@ -271,7 +273,7 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
     # change. One dict lookup per dump, and the string read at most once per desk per session.
     if devices.unidentified(iface):
         try:
-            devices.note_system_name(iface, first(blob, "systemName", "str"))
+            devices.note_system_name(iface, keyed_value(blob, _SYSTEM, "systemName", kind="str"))
         except Exception as exc:    # naming the desk is never worth failing a dump for
             diagnostics.event("device.name_unread", str(exc))
     return blob
@@ -283,7 +285,7 @@ def read_model_raw(settle_ms: int = 1500, max_reads: int = 4000) -> bytes:
 # into an index and every read after it is a dict lookup. The tree parse of a 143 KB dump is 9.6 ms.
 #
 # So: `model_tree.parse` once per dump, cached, and find_all / iter_properties /
-# iter_block_properties / block_value / node_at all serve from that index.
+# iter_block_properties / node_at / keyed_value all serve from that index.
 #
 # Keyed by IDENTITY and holding a strong reference to the blob, deliberately: id() alone is unsafe
 # because a freed object's id can be reused, which would hand back another dump's index. Two entries
@@ -369,29 +371,17 @@ def find_all(blob: bytes, name: str):
 def values(blob: bytes, name: str, kind: str | None = None) -> list:
     """Just the VALUES for a property name, in stream order, optionally only those of one `kind`.
 
-    THE ONE WAY TO READ A LIST OF VALUES, and what almost every caller actually wants. find_all
-    returns (value, kind) pairs because positional reads need the kind to filter on. Filtering on
-    `kind` matters and is not cosmetic: a name can decode to more than one type across the dump, and
-    `[v for v, k in find_all(...)]` with no filter quietly lets the wrong one through.
+    FOR A LIST THAT GROWS AND SHRINKS (pads, recordings, shows, storage volumes), whose nodes have
+    no fixed key. A property on a fixed node is read with `keyed_value` or `strip_values`, where a
+    stray copy elsewhere cannot shift or replace it; DevTools/check_notes.py enforces this.
+
+    Filtering on `kind` matters and is not cosmetic: a name can decode to more than one type across
+    the dump, and `[v for v, k in find_all(...)]` with no filter quietly lets the wrong one through.
 
     Positional callers must pass `kind=None` when they need EVERY occurrence, including the
     undecodable (None, "?") ones - dropping those shifts every index past them (see find_all).
     """
     return [v for v, k in find_all(blob, name) if kind is None or k == kind]
-
-
-def first(blob: bytes, name: str, kind: str | None = None, default=None):
-    """The first MEANINGFUL value for a property name, or `default` if there is none.
-
-    Meaningful means "not None and not an empty string", and it deliberately KEEPS False and 0,
-    which are real settings. A name can occur in several blocks with only one of them filled in
-    (systemFirmwareVersion is the standing example: it reads "" in one section and the version in
-    another), so taking the literal first occurrence returns a blank often enough to matter.
-    """
-    for v in values(blob, name, kind):
-        if v is not None and v != "":
-            return v
-    return default
 
 
 def iter_properties(blob: bytes):
@@ -421,21 +411,6 @@ def iter_block_properties(blob: bytes):
     name must say which block it means.
     """
     yield from _index(blob).flat
-
-
-def block_value(blob: bytes, block: str, name: str, instance: int = 0):
-    """The value of `name` inside `block`, or None if that block does not carry it.
-
-    `instance` picks which occurrence of an ARRAY block to read (HEADPHONE 0 = Headphone 1, and so
-    on), counted over matching occurrences in dump order.
-    """
-    seen = -1
-    for hdr, prop, val, _kind in iter_block_properties(blob):
-        if hdr == block and prop == name:
-            seen += 1
-            if seen == instance:
-                return val
-    return None
 
 
 def block_values(blob: bytes, block: str, name: str, kind: str | None = None) -> list:
@@ -482,8 +457,9 @@ def keyed_node(blob: bytes, key):
     return idx.by_path.get(tuple(idx.layout.path(key)))
 
 
-def keyed_value(blob: bytes, key, name: str, default=None):
-    """The value of `name` on the node `key` names, or `default` if the node or property is absent.
+def keyed_value(blob: bytes, key, name: str, default=None, kind: str | None = None):
+    """The value of `name` on the node `key` names, or `default` if the node or property is absent,
+    or when `kind` is given and the value decodes as another kind.
 
     THE ADDRESSED READ, and the counterpart to every write. Prefer it over `values()` and an index
     for anything that belongs to one channel, output or pad: a position is only right while stream
@@ -493,9 +469,9 @@ def keyed_value(blob: bytes, key, name: str, default=None):
     node = keyed_node(blob, key)
     if node is None:
         return default
-    for pname, val, _kind in node.props:
+    for pname, val, vkind in node.props:
         if pname == name:
-            return val
+            return val if kind is None or vkind == kind else default
     return default
 
 
@@ -633,8 +609,8 @@ def _stable_key(b: bytes):
     if not parses(b):
         return None
     return (len(b),
-            tuple(values(b, "mixDisabled")),
-            tuple(values(b, "mixMute")))
+            tuple(values(b, "mixDisabled")),  # every occurrence
+            tuple(values(b, "mixMute")))  # every occurrence
 
 
 def read_model_stable(max_try: int = 6, fresh: bool = False) -> bytes:
@@ -678,24 +654,6 @@ def read_output_modes(blob: bytes) -> list:
     `outputMixMinus` of each MIXMINUSES node, in dump order (the first 11 are outputs 0-10 on a Pro
     II, verified by writing each)."""
     return block_values(blob, "MIXMINUSES", "outputMixMinus", "int")
-
-
-def master_processing(blob: bytes) -> dict:
-    """The master bus's own processing, as the SEVEN keys the window and a profile both use.
-
-    ONE SOURCE for the Master Mix page (window_state.read) and a backup (profiles.save), so a
-    property cannot be one the window changes and a profile cannot put back. The key names are the
-    format the window and the profile JSON both read, so both callers splat this straight in.
-    """
-    return {
-        "compellor_on": first(blob, "masterCompellorOn"),
-        "compellor_threshold": first(blob, "masterCompellorThreshold"),
-        "compellor_attack": first(blob, "masterCompellorAttack"),
-        "compellor_release": first(blob, "masterCompellorRelease"),
-        "compellor_gain": first(blob, "masterCompellorGain"),
-        "delay_on": first(blob, "masterDelayOn"),
-        "delay_seconds": first(blob, "masterDelaySeconds"),
-    }
 
 
 def _read_matrix(blob, prop: str, key: str, cell, cannot: str) -> dict:
@@ -781,12 +739,10 @@ if __name__ == "__main__":
 
     blob = read_model()
     d = _dev.get_active_device()
-    # systemFirmwareVersion reads "" in one section and the version in another, which is what
-    # `first` is for: it skips blanks and keeps False and 0.
-    midi = first(blob, "systemMidiControl")
+    midi = keyed_value(blob, _SYSTEM, "systemMidiControl")
     print(f"device: {d.name}")
     print(f"stream bytes: {len(blob)}")
-    print(f"systemFirmwareVersion : {first(blob, 'systemFirmwareVersion')}")
+    print(f"systemFirmwareVersion : {keyed_value(blob, _SYSTEM, 'systemFirmwareVersion')}")
     print(f"systemMidiControl     : {'ON' if midi else 'OFF'} ({midi})")
     print(f"{'channel':<12} {'gain/level':>10} {'48V':>5} {'polarity':>9} {'type':>5}")
     for entry in d.ui_channels:

@@ -63,7 +63,6 @@ class Token(NamedTuple):
 
 _lock = threading.Lock()
 _props: dict = {}                # path tuple -> {name: (value, kind)}
-_names: dict = {}                # name -> [path tuple], in dump order
 _layout: Optional[model_tree.Layout] = None
 _epoch = -1                      # the connection epoch of the adopted dump
 _read_seq = -1                   # the journal position the adopted dump started at; -1 none usable
@@ -98,7 +97,7 @@ def dump_finished(token: Token, blob: bytes) -> None:
         root, _used, _tail = model_tree.parse(blob, found)
     except Exception:
         return
-    props, names, spans, paths = {}, {}, {}, {}
+    props, spans, paths = {}, {}, {}
     for node in model_tree.walk(root):
         paths[id(node)] = tuple(node.path())
         props[paths[id(node)]] = {}
@@ -106,10 +105,9 @@ def dump_finished(token: Token, blob: bytes) -> None:
         path = paths[id(node)]
         if name not in props[path]:
             props[path][name] = next((v, k) for p, v, k in node.props if p == name)
-            names.setdefault(name, []).append(path)
             spans[(path, name)] = (start, end)
     book = model_tree.Layout(root)
-    global _props, _names, _layout, _epoch, _read_seq, _blob, _spans, _dirty, _snap
+    global _props, _layout, _epoch, _read_seq, _blob, _spans, _dirty, _snap
     with _lock:
         if token.epoch != rcp_hid.connection_epoch():
             return
@@ -117,10 +115,10 @@ def dump_finished(token: Token, blob: bytes) -> None:
         dirty = set()
         for seq, path, name, value, kind, may_add in _journal:
             if seq > token.seq and name is not None:
-                _put(props, names, path, name, value, kind, may_add)
+                _put(props, path, name, value, kind, may_add)
                 dirty.add((path, name))
         unheard = _unheard(props, dirty, token) if _reveal else []
-        _props, _names, _layout, _epoch = props, names, book, token.epoch
+        _props, _layout, _epoch = props, book, token.epoch
         _blob, _spans, _dirty, _snap = blob, spans, dirty, None
         # A journal that overflowed during the read cannot say what the read missed.
         _read_seq = token.seq if complete else -1
@@ -165,7 +163,7 @@ def apply_push(path, name: str, value, kind: str):
     with _lock:
         _seq += 1
         _journal.append((_seq, path, name, value, kind, True))
-        was = _put(_props, _names, path, name, value, kind, True)
+        was = _put(_props, path, name, value, kind, True)
         _dirty.add((path, name))
         _snap = None
         if name in STRUCTURAL and was != value:
@@ -192,7 +190,7 @@ def apply_write(frame: bytes):
             return None
         _seq += 1
         _journal.append((_seq, path, name, value, kind, False))
-        was = _put(_props, _names, path, name, value, kind, False)
+        was = _put(_props, path, name, value, kind, False)
         _dirty.add((path, name))
         _snap = None
         if name in STRUCTURAL and was != value:
@@ -218,7 +216,7 @@ def set_connected(on: bool) -> None:
     _connected = on
 
 
-def _put(props, names, path, name, value, kind, may_add):
+def _put(props, path, name, value, kind, may_add):
     node = props.get(path)
     if node is None:
         if not may_add:
@@ -228,7 +226,6 @@ def _put(props, names, path, name, value, kind, may_add):
     if held is None:
         if not may_add:
             return None
-        names.setdefault(name, []).append(path)
     node[name] = (value, kind)
     return held[0] if held is not None else None
 
@@ -288,20 +285,9 @@ def value(key, name: str, default=None):
     return held[0] if held is not None else default
 
 
-def values(name: str, kind: Optional[str] = None) -> list:
-    """Every value of `name`, in dump order, optionally only those of one `kind`: the picture's
-    counterpart to `rcp_read.values`."""
-    with _lock:
-        held = [_props[p][name] for p in _names.get(name, ())]
-    return [v for v, k in held if kind is None or k == kind]
-
-
-def first(name: str, kind: Optional[str] = None, default=None):
-    """The first meaningful value of `name` (not None, not ""), as `rcp_read.first` reads a dump."""
-    for v in values(name, kind):
-        if v is not None and v != "":
-            return v
-    return default
+def _int(key, name: str) -> Optional[int]:
+    v = value(key, name)
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
 def strip_vector() -> Optional[list]:
@@ -344,46 +330,52 @@ def pot_level(index: int) -> Optional[float]:
 
 def selected_channel() -> Optional[int]:
     """The strip a channel button has given the encoder, -1 for none, None when unknown."""
-    return first("systemChannelSelected", "int")
+    return _int(rcp_transfer.SYSTEM, "systemChannelSelected")
 
 
 def bank() -> Optional[int]:
     """The pad bank the desk is on, 0-based, or None when unknown."""
-    return first("selectedBank", "int")
+    return _int(rcp_transfer.GUI, "selectedBank")
 
 
 def record_state() -> Optional[int]:
-    return first("recordState", "int")
+    return _int(rcp_transfer.RECORDER, "recordState")
 
 
 def usb_mode() -> Optional[int]:
     """`outputMultiMode`, or None when unknown."""
-    return first("outputMultiMode", "int")
+    return _int(rcp_transfer.OUTPUT, "outputMultiMode")
 
 
 def firmware() -> Optional[str]:
-    return first("systemFirmwareVersion", "str")
+    v = value(rcp_transfer.SYSTEM, "systemFirmwareVersion")
+    return v if isinstance(v, str) and v else None
+
+
+def midi_control() -> Optional[bool]:
+    """Whether MIDI control is on, or None when unknown. A Pro II stores it as a bool and a Duo
+    as an int."""
+    v = value(rcp_transfer.SYSTEM, "systemMidiControl")
+    return bool(v) if isinstance(v, (bool, int)) else None
 
 
 def online() -> Optional[bool]:
     """Whether the unit reaches the internet, by wifi or cable, or None before the picture holds
-    the NETWORK block. A wifi address means joined; the radio being on does not. The address is
-    read on its block, as `network.connection` reads a dump: a stray of the same name can sit in
-    another."""
+    the NETWORK block. A wifi address means joined; the radio being on does not."""
     book = _layout
     if book is None or not book.has(rcp_transfer.NETWORK):
         return None
-    wired = next((v for v in values("wiredConnected") if v is not None), None)
-    return bool(value(rcp_transfer.NETWORK, "wifiIpAddress")) or bool(wired)
+    return (bool(value(rcp_transfer.NETWORK, "wifiIpAddress"))
+            or bool(value(rcp_transfer.NETWORK, "wiredConnected")))
 
 
 def _reset() -> None:
     """Forget everything. For offline tests."""
-    global _props, _names, _layout, _epoch, _read_seq, _stale_seq, _seq, _connected
+    global _props, _layout, _epoch, _read_seq, _stale_seq, _seq, _connected
     global _blob, _spans, _dirty, _snap, _reveal
     with _lock:
         _reveal = False
-        _props, _names, _layout = {}, {}, None
+        _props, _layout = {}, None
         _blob, _spans, _dirty, _snap = b"", {}, set(), None
         _epoch, _read_seq, _stale_seq, _seq, _connected = -1, -1, 0, 0, False
         _journal.clear()

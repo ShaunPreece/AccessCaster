@@ -59,7 +59,8 @@ def write(st, name, value=True):
 
 
 def wifi_on():
-    return rcp_read.block_value(rcp_read.read_model_stable(fresh=True), "NETWORK", "wifi")
+    return rcp_read.keyed_value(rcp_read.read_model_stable(fresh=True), rcp_transfer.NETWORK,
+                                "wifi")
 
 
 def progress_now():

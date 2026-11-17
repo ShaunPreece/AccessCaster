@@ -37,7 +37,6 @@ import desk_live
 import desk_model
 import devices
 import diagnostics
-import model_tree
 import rcp_hid
 import rcp_read
 import rcp_transfer
@@ -71,32 +70,27 @@ class Stopped(Exception):
 
 
 def read(blob: bytes) -> dict:
-    """{name: (path, value)} for every update property the dump carries. A name carried twice
-    keeps its first meaningful value: `systemFirmwareVersion` can be blank in one place."""
-    root = model_tree.parse(blob)[0]
-    out = {}
-    for node in model_tree.walk(root):
-        for name, value, _kind in node.props:
-            if name in PROPS and (name not in out or out[name][1] in (None, "")):
-                out[name] = (node.path(), value)
-    return out
+    """{name: value} for every update property SYSTEM carries. A name SYSTEM lacks is left out,
+    which is how `refusal` tells a desk that cannot be updated from here."""
+    node = rcp_read.keyed_node(blob, rcp_transfer.SYSTEM)
+    return {} if node is None else {n: v for n, v, _k in node.props if n in PROPS}
 
 
 def version(blob: bytes):
-    """The desk's firmware version, or None: from `blob`, else the desk model's, for a dump that
-    ended before `systemFirmwareVersion`, which sits near its tail."""
-    return rcp_read.first(blob, "systemFirmwareVersion") or desk_model.firmware()
+    """The desk's firmware version, or None: from `blob`, else the desk model's, for an empty
+    dump."""
+    return (rcp_read.keyed_value(blob, rcp_transfer.SYSTEM, "systemFirmwareVersion")
+            or desk_model.firmware())
 
 
 def update(blob: bytes) -> dict:
     """The update the desk offers: `available`, `version`, and `no_internet` when its last check
     could not reach RODE's server."""
-    def sys_val(name):
-        return rcp_read.block_value(blob, "SYSTEM", name)
-    available = bool(sys_val("appUpdateAvailable")) or bool(sys_val("osUpdateAvailable"))
-    offered_version = sys_val("updateVersion") or ""
-    return {"available": available, "version": offered_version if available else "",
-            "no_internet": bool(sys_val("updateNoInternet"))}
+    state = read(blob)
+    available = bool(state.get("appUpdateAvailable")) or bool(state.get("osUpdateAvailable"))
+    return {"available": available,
+            "version": (state.get("updateVersion") or "") if available else "",
+            "no_internet": bool(state.get("updateNoInternet"))}
 
 
 def _release(text) -> tuple | None:
@@ -116,27 +110,21 @@ def untested(blob: bytes) -> dict | None:
     return {"version": fw, "tested": floor}
 
 
-def values(state: dict) -> dict:
-    return {name: value for name, (_path, value) in state.items()}
-
-
 def offered(state: dict) -> str:
     """The version the desk offers, or "" when it offers none."""
-    v = values(state)
-    if v.get("osUpdateAvailable") or v.get("appUpdateAvailable"):
-        return v.get("updateVersion") or ""
+    if state.get("osUpdateAvailable") or state.get("appUpdateAvailable"):
+        return state.get("updateVersion") or ""
     return ""
 
 
 def refusal(state: dict, online: bool, recording: bool, in_call: bool) -> str:
     """Why an update cannot start now, or "" when it can. Checked before anything is written."""
-    v = values(state)
     missing = [p for p in ("downloadInitiateRequested", "updateInitiateRequested",
                            "updateRebootRequested", "updateResetAfterFWURequested")
                if p not in state]
     if missing:
         return "This desk does not offer installing a firmware update from AccessCaster."
-    if v.get("updateResetAfterFWURequested"):
+    if state.get("updateResetAfterFWURequested"):
         return ("The desk is set to erase itself on its next restart, so AccessCaster will not "
                 "install anything that restarts it. Install the update on the desk's screen.")
     if not offered(state):
@@ -162,9 +150,9 @@ class Desk:
         with self._lock:
             return read(rcp_read.read_model_stable(fresh=True))
 
-    def write(self, state: dict, name: str, value: bool) -> None:
+    def write(self, name: str, value: bool) -> None:
         with self._lock:
-            rcp_transfer.send_record(rcp_transfer.build_path_prop_bool(name, value, state[name][0]))
+            rcp_transfer.write_at(rcp_transfer.SYSTEM, name, "bool", value)
         diagnostics.event("firmware.write", name, value=value)
 
     def listener(self):
@@ -205,10 +193,10 @@ def _check(desk, step, target):
     step("Checking with RODE for the update.")
     state = desk.state()
     for name in REQUESTS:
-        if values(state).get(name):
-            desk.write(state, name, False)
+        if state.get(name):
+            desk.write(name, False)
     with desk.listener() as listen:
-        desk.write(state, "updateCheckRequested", True)
+        desk.write("updateCheckRequested", True)
         # The desk skips the check while it holds a download, and then says nothing at all.
         if listen.wait_for("updateChecking", CHECK_STARTS_S, match=lambda v: v is True):
             listen.wait_for("updateChecking", CHECK_WAIT_S, match=lambda v: v is False)
@@ -216,8 +204,7 @@ def _check(desk, step, target):
             diagnostics.event("firmware.check_skipped", "the desk holds a download already")
             step(f"The desk already has firmware {target} waiting, so it is not checked again.")
     state = desk.state()
-    v = values(state)
-    if v.get("updateNoInternet"):
+    if state.get("updateNoInternet"):
         raise Stopped("The desk could not reach RODE's update server, so nothing was downloaded "
                       "or changed. Check its network connection and try again.")
     if offered(state) != target:
@@ -230,14 +217,14 @@ def _download(desk, step, state, target):
     step(f"Downloading firmware {target}.")
     said, percent = 0, 0
     with desk.listener() as listen:
-        desk.write(state, "downloadInitiateRequested", True)
+        desk.write("downloadInitiateRequested", True)
         while True:
             # A download that ends with `updateDownloaded` already True from an earlier one pushes
             # nothing at the end, so a finished percentage followed by quiet is read back instead.
             got = listen.wait_any(("updateDownloadProgress", "updateDownloaded",
                                    "updateNoInternet"),
                                   FINISHED_QUIET_S if percent >= 99 else DOWNLOAD_STALL_S)
-            if got is None and percent >= 99 and values(desk.state()).get("updateDownloaded"):
+            if got is None and percent >= 99 and desk.state().get("updateDownloaded"):
                 break
             # Not cancelled: a cancel during a download holds the engine for minutes, and a
             # download left behind installs nothing.
@@ -265,10 +252,10 @@ def _download(desk, step, state, target):
 def _install(desk, step, state, target) -> bool:
     """Start the install and wait for it to end. True if the desk restarts by itself: an
     application-only install does, and is over once the desk has gone."""
-    app_only = not values(state).get("osUpdateAvailable")
+    app_only = not state.get("osUpdateAvailable")
     step(f"Installing firmware {target}. This takes a few minutes. Do not switch the desk off.")
     with desk.listener() as listen:
-        desk.write(state, "updateInitiateRequested", True)
+        desk.write("updateInitiateRequested", True)
         deadline = time.monotonic() + INSTALL_WAIT_S
         started = False
         while time.monotonic() < deadline:
@@ -294,11 +281,11 @@ def _restart(desk, step, target, restarts_itself):
     if restarts_itself or _leaves(desk, LEAVES_BY_ITSELF_S):
         return
     state = desk.state()
-    if values(state).get("updateResetAfterFWURequested"):
+    if state.get("updateResetAfterFWURequested"):
         raise Stopped(f"Firmware {target} is installed, but the desk is set to erase itself on "
                       "its next restart, so AccessCaster has not restarted it. Restart it from "
                       "its own screen when you are ready.")
-    desk.write(state, "updateRebootRequested", True)
+    desk.write("updateRebootRequested", True)
     if not _leaves(desk, LEAVES_AFTER_ASK_S):
         raise Stopped(f"Firmware {target} is installed, but the desk did not restart when asked. "
                       "Switch it off and on with the red button on the back to finish.")
@@ -329,7 +316,7 @@ def _confirm(desk, step, target) -> dict:
                 seen.add(pid)
                 diagnostics.event("firmware.desk_back", "control interface", pid=f"0x{pid:04x}")
             try:
-                version = values(desk.state()).get("systemFirmwareVersion")
+                version = desk.state().get("systemFirmwareVersion")
             except Exception as exc:
                 diagnostics.event("firmware.read_failed", "still waiting", error=str(exc))
                 version = None
@@ -350,8 +337,8 @@ def _result(desk, target, version) -> dict:
     try:
         state = desk.state()
         for name in REQUESTS:
-            if values(state).get(name):
-                desk.write(state, name, False)
+            if state.get(name):
+                desk.write(name, False)
     except Exception as exc:
         diagnostics.event("firmware.tidy_failed", "request flags left as they were",
                           error=str(exc))

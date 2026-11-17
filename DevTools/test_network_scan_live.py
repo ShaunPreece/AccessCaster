@@ -32,7 +32,8 @@ from _desk import count_changes, stray_counts
 
 def slots(blob, prefix, n=10):
     """The scan-result slots, in order, blanks included so a change of shape is visible."""
-    return [rcp_read.block_value(blob, "NETWORK", f"{prefix}{i}") or "" for i in range(1, n + 1)]
+    return [rcp_read.keyed_value(blob, rcp_transfer.NETWORK, f"{prefix}{i}") or ""
+            for i in range(1, n + 1)]
 
 
 def result_blocks(blob):

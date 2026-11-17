@@ -19,7 +19,7 @@ import time
 import desk_live
 import desk_model
 import diagnostics
-import model_tree
+import rcp_read
 import rcp_transfer
 from wording import describe_duration, spoken_date
 
@@ -221,12 +221,11 @@ def sentence(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------------------------
-# WHERE THINGS ARE. The control node (SIPCALLING) and the call slots are found by the property
-# they carry (`sipIncomingCallAccept`, `sipSlotCallState`), never by position: see read_all.
+# WHERE THINGS ARE. The control node is SIPCALLING and the call slots are SIPCALLSLOTS[0..2],
+# each found by its `model_tree.Layout` key on the dump being read: see read_all.
 # ---------------------------------------------------------------------------------------------
 
-def _root(blob: bytes):
-    return model_tree.parse(blob)[0]
+SLOT_BLOCK = "SIPCALLSLOTS"
 
 
 def _props(node) -> dict:
@@ -300,10 +299,6 @@ def build_dial(code: str, slot: int, path) -> list:
             rcp_transfer._frame(head + _block(b"\x08" + inner))]
 
 
-def build_hosting(on: bool, path) -> bytes:
-    return rcp_transfer.build_path_prop_bool("sipCallHostingEnabled", bool(on), path)
-
-
 # ---------------------------------------------------------------------------------------------
 # THE STATE, as the page and the spoken status want it
 # ---------------------------------------------------------------------------------------------
@@ -335,19 +330,20 @@ def read(blob: bytes) -> dict:
 
 
 def read_all(blob: bytes) -> tuple:
-    """(read's state, control path, slot paths) from ONE parse of the dump."""
-    root = _root(blob)
-    p, slots, ctl, slot_at = None, [], None, []
-    for n in model_tree.walk(root):
-        props = _props(n)
-        if "sipIncomingCallAccept" in props:
-            p, ctl = props, n.path()
-        elif "sipSlotCallState" in props:
-            slots.append(_slot_view(len(slots) + 1, props))
-            slot_at.append(n.path())
-    if p is None:
+    """(read's state, control path, slot paths) from one dump: SIPCALLING and each
+    SIPCALLSLOTS node, by key."""
+    control = rcp_read.keyed_node(blob, rcp_transfer.SIPCALLING)
+    p = _props(control) if control is not None else {}
+    if "sipIncomingCallAccept" not in p:
         return {"ok": False, "message": "This desk does not publish CallMe."}, None, []
-    return _state(p, slots), ctl, slot_at
+    slots, slot_at = [], []
+    for i in range(rcp_read.layout_of(blob).count(SLOT_BLOCK)):
+        node = rcp_read.keyed_node(blob, (SLOT_BLOCK, i))
+        props = _props(node) if node is not None else {}
+        if "sipSlotCallState" in props:
+            slots.append(_slot_view(len(slots) + 1, props))
+            slot_at.append(node.path())
+    return _state(p, slots), control.path(), slot_at
 
 
 def _state(p: dict, slots: list) -> dict:

@@ -204,6 +204,11 @@ USB_MULTITRACK_LABEL = {
 USB_EXPANDED_OFFSET = 3
 
 
+def read_usb_multitrack(blob: bytes):
+    """The raw `outputMultiMode` on OUTPUT, or None. `split_usb_multitrack` takes it apart."""
+    return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, "outputMultiMode", kind="int")
+
+
 def split_usb_multitrack(value):
     """`outputMultiMode` -> (output mode 0-2, expanded bool). None in, (None, None) out, so an
     offline read propagates rather than reading as Off."""
@@ -275,8 +280,12 @@ COMMANDS = {"start": CMD_RECORD, "resume": CMD_RECORD, "pause": CMD_PAUSE, "stop
 
 def read_state(blob: bytes):
     """`recordState`, or None if the dump does not carry it."""
-    vals = rcp_read.values(blob, "recordState", "int")
-    return vals[0] if vals else None
+    return rcp_read.keyed_value(blob, rcp_transfer.RECORDER, "recordState", kind="int")
+
+
+def total_count(blob: bytes):
+    """`recordingTotalCount`, how many takes the desk holds, or None."""
+    return rcp_read.keyed_value(blob, rcp_transfer.RECORDINGS, "recordingTotalCount", kind="int")
 
 
 # The unit's three fixed storage slots, in the order it reports them: slot 0 is the memory card,
@@ -435,8 +444,7 @@ def room_left(blob: bytes, dest) -> dict:
     rises with multitrack), so the sum uses the unit's own figure rather than an assumed bitrate."""
     if not dest or not dest.get("free_bytes"):
         return {"seconds": None, "words": None, "bytes_per_second": None}
-    rate = rcp_read.values(blob, "recordBytesPerSecond", "int")
-    rate = rate[0] if rate else 0
+    rate = rcp_read.keyed_value(blob, rcp_transfer.RECORDER, "recordBytesPerSecond", 0, "int")
     if rate <= 0:
         return {"seconds": None, "words": None, "bytes_per_second": None}
     seconds = int(dest["free_bytes"] / rate)
@@ -448,7 +456,7 @@ def describe(blob: bytes) -> dict:
     state = read_state(blob)
     volumes = read_volumes(blob)
     dest = destination(volumes)
-    total = rcp_read.values(blob, "recordingTotalCount", "int")
+    total = total_count(blob)
     # The live view of the drive being written to, when there is one (see read_volumes). It is the
     # SAME drive as the destination, so it is reported separately rather than as another volume.
     extra = [v for v in read_volumes(blob, include_extra=True) if v["live_view"]]
@@ -463,7 +471,7 @@ def describe(blob: bytes) -> dict:
         "writing_to": extra[0] if extra else None,
         "room": room_left(blob, extra[0] if extra else dest),
         "recordings": read_recordings(blob),
-        "total": total[0] if total else None,
+        "total": total,
     }
 
 

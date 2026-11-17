@@ -87,7 +87,7 @@ def encoder_hold_mute(strip: int) -> None:
     if _strip_toggle_gate("Muting") is not None:
         return
     with desk_access.hid_lock:
-        mutes = rcp_read.values(desk_access.desk_now(), channels.MUTE_PROP)
+        mutes = rcp_read.strip_values(desk_access.desk_now(), channels.MUTE_PROP)
         if not 0 <= strip < len(mutes) or not isinstance(mutes[strip], bool):
             return
         on = not mutes[strip]

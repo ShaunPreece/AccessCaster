@@ -368,8 +368,8 @@ def _check() -> int:
     parsed, _used, _tail = model_tree.parse(blob)
     nodes = sum(1 for _ in model_tree.walk(parsed))
     print(f"synthetic Pro II: {len(blob)} bytes, {nodes} nodes, firmware "
-          f"{rcp_read.block_value(blob, 'SYSTEM', 'systemFirmwareVersion')}, "
-          f"named {rcp_read.first(blob, 'systemName', 'str')!r}")
+          f"{rcp_read.keyed_value(blob, ('SYSTEM', 0), 'systemFirmwareVersion')}, "
+          f"named {rcp_read.keyed_value(blob, ('SYSTEM', 0), 'systemName', kind='str')!r}")
     return 0
 
 

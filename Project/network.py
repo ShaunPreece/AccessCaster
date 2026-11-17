@@ -31,12 +31,9 @@ def wireless_mics(blob) -> dict:
     dump carried no txConnected at all, which is not the same as "no mic is on" and must not be
     read out as if it were. Unverified with a paired transmitter.
     """
-    def col(name, kind=None):
-        return rcp_read.values(blob, name, kind)
-
-    conn = col("txConnected")
-    batt = col("txBatteryLevel", "int")
-    rssi = col("txRssi", "int")
+    conn = rcp_read.values(blob, "txConnected")
+    batt = rcp_read.values(blob, "txBatteryLevel", "int")
+    rssi = rcp_read.values(blob, "txRssi", "int")
     tx = [{"index": i, "connected": bool(c),
            "battery_pct": batt[i] if i < len(batt) else None,
            "rssi": rssi[i] if i < len(rssi) else None}
@@ -46,15 +43,19 @@ def wireless_mics(blob) -> dict:
             "any_connected": any(t["connected"] for t in tx)}
 
 
+def _net(blob: bytes, name: str):
+    """A value on the NETWORK node, the one its write goes to. A stray copy of a name elsewhere
+    (a `btVisible` in SYSTEM reads False while the radio is discoverable) is never read."""
+    return rcp_read.keyed_value(blob, rcp_transfer.NETWORK, name)
+
+
 def connection(blob: bytes) -> dict:
-    """How the unit reaches the internet, read BY BLOCK (see read_status for why). A wifi
-    address means joined; the radio being on does not."""
-    def net(name):
-        return rcp_read.block_value(blob, "NETWORK", name)
-    wired = next((v for v in rcp_read.values(blob, "wiredConnected") if v is not None), None)
-    ip = net("wifiIpAddress") or ""
-    return {"wifi_on": bool(net("wifi")), "wifi_ssid": net("wifiSSID") or "", "wifi_ip": ip,
-            "wired": bool(wired), "online": bool(ip) or bool(wired)}
+    """How the unit reaches the internet. A wifi address means joined; the radio being on does
+    not."""
+    wired = _net(blob, "wiredConnected")
+    ip = _net(blob, "wifiIpAddress") or ""
+    return {"wifi_on": bool(_net(blob, "wifi")), "wifi_ssid": _net(blob, "wifiSSID") or "",
+            "wifi_ip": ip, "wired": bool(wired), "online": bool(ip) or bool(wired)}
 
 
 def read_status() -> dict:
@@ -70,41 +71,31 @@ def read_status() -> dict:
         return {"ok": False,
                 "message": f"Could not read network info from the device: {exc}"}
 
-    def first(name):
-        return rcp_read.first(blob, name)
-
     def net(name):
-        """A NETWORK-block value, by block rather than by "first in the stream".
-
-        `first()` cannot be used for a name that might occur in more than one block: False is a
-        meaningful value, so it has no way to tell a real answer from the wrong block's. A stray
-        can be appended to any block by one malformed write (a stray `btVisible` in SYSTEM reads
-        False while the radio is discoverable), so a name is only unambiguous with its block.
-        """
-        return rcp_read.block_value(blob, "NETWORK", name)
+        return _net(blob, name)
 
     def slots(prefix, count, start=1):
-        """The non-blank entries of a numbered slot array (btScan1..10, wifiScan1..10)."""
+        """The non-blank entries of a numbered slot array (btScan1..10, btPairedNumber1..5)."""
         out = []
         for n in range(start, start + count):
-            v = first(f"{prefix}{n}")
+            v = net(f"{prefix}{n}")
             if v:
                 out.append(str(v))
         return out
 
-    ssid = first("wifiSSID")
-    ip = first("wifiIpAddress")
-    gateway = first("wifiGateway")
-    dhcp = first("wifiDHCP")
-    incorrect = first("wifiIncorrectPSK")
-    bt_addr = first("btConnectedAddress")
+    ssid = net("wifiSSID")
+    ip = net("wifiIpAddress")
+    gateway = net("wifiGateway")
+    dhcp = net("wifiDHCP")
+    incorrect = net("wifiIncorrectPSK")
+    bt_addr = net("btConnectedAddress")
     bt_visible = net("btVisible")
     bt_paired = slots("btPairedNumber", 5)
     return {
         "ok": True,
         "wifi": {
             # The RADIO, which is not the same fact as "connected": it can be on and not yet
-            # joined to anything. Read BY BLOCK, like everything else here that has a duplicate.
+            # joined to anything.
             "on": bool(net("wifi")),
             "ssid": ssid or "",
             "ip": ip or "",
@@ -119,7 +110,7 @@ def read_status() -> dict:
             # 1.7.6 publishes wifiPSK, and putting a password into a reply, the window and a log
             # line is not a thing to do casually. Whether the network HAS a password is
             # enough. On 1.7.6 it reads empty, so this is False there whatever is stored.
-            "has_password": bool(first("wifiPSK")),
+            "has_password": bool(net("wifiPSK")),
         },
         "bluetooth": {
             "connected_address": bt_addr or "",
@@ -168,13 +159,13 @@ def read_status() -> dict:
 
 
 def _wifi_state(blob) -> dict:
-    """Just enough of the wifi state to report a join honestly, read BY BLOCK.
+    """Just enough of the wifi state to report a join honestly.
 
     Never returns the password. `wifiPSK` is readable on older firmware, and "there is a password
     stored" is the most that should ever leave this process - not in a JSON payload, not in the
     page, not in a log."""
     def net(name):
-        return rcp_read.block_value(blob, "NETWORK", name)
+        return _net(blob, name)
     return {"on": bool(net("wifi")), "ssid": net("wifiSSID") or "",
             "ip": net("wifiIpAddress") or "", "has_password": bool(net("wifiPSK")),
             "wrong_password": bool(net("wifiIncorrectPSK"))}
@@ -313,7 +304,7 @@ def action_set_bt_visible(on: bool) -> dict:
     THE DUPLICATE MATTERS HERE. `btVisible` exists in SYSTEM as well as NETWORK, and only the
     NETWORK copy drives the radio - writing the SYSTEM one flips a stored value and leaves the unit
     invisible, with nothing in the read-back to say so. So the write goes to NETWORK and the read-back
-    is taken BY BLOCK, never by "first occurrence in the stream"."""
+    comes from the NETWORK node, never from "first occurrence in the stream"."""
     gate = _write_gate()
     if gate is not None:
         return gate
@@ -322,7 +313,7 @@ def action_set_bt_visible(on: bool) -> dict:
             rcp_transfer.write_at(rcp_transfer.NETWORK, "btVisible", "bool", bool(on))
             time.sleep(1.0)
             blob = rcp_read.read_model_stable(fresh=True)
-        now = bool(rcp_read.block_value(blob, "NETWORK", "btVisible"))
+        now = bool(_net(blob, "btVisible"))
     except Exception as exc:
         return {"ok": False, "message": f"Could not change Bluetooth discoverability: {exc}"}
     if now != bool(on):
@@ -382,7 +373,7 @@ def parse_scan_slot(raw: str) -> dict:
 def wifi_scan_slots(blob) -> list:
     """The raw results of the unit's last wifi scan, blanks dropped: the numbered slots, or the
     WIFISCANRESULT blocks (one unnumbered `wifiScanResultSSID` each) if those are empty."""
-    numbered = [rcp_read.block_value(blob, "NETWORK", f"wifiScan{n}")
+    numbered = [_net(blob, f"wifiScan{n}")
                 for n in range(1, WIFI_SCAN_SLOTS + 1)]
     found = [str(v) for v in numbered if v]
     return found or [str(v) for v in rcp_read.block_values(blob, "WIFISCANRESULT",

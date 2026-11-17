@@ -42,7 +42,7 @@ def watcher(extra=()):
            "sipCallHostingEnabled": True, "sipRodeCode": "AB12CD",
            "sipCallHostingToggleEnabled": True, "sipRemainingWebCalltime": 300,
            "sipLicenceMode": 0}
-    blob = node("Rodecaster", {}, [node("SIPSLOT", slot) for _ in DESK_SLOTS]
+    blob = node("Rodecaster", {}, [node("SIPCALLSLOTS", slot) for _ in DESK_SLOTS]
                 + [node("SIPCALLING", ctl)] + list(extra))
     desk_model.dump_finished(desk_model.dump_starting(), blob)
     said = []

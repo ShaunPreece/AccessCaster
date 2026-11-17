@@ -59,8 +59,7 @@ def _levels(blob: bytes) -> dict:
     phones = master_outputs.active_headphones()
     levels.update(
         mix=mix,
-        auto_mute={which: rcp_read.block_value(blob, "OUTPUT", spec["prop"])
-                   for which, spec in auto_mute.items()},
+        auto_mute={which: master_outputs.auto_mute(blob, which) for which in auto_mute},
         headphone_types=master_outputs.headphone_types(blob),
         model={"faders": list(faders.active_faders().level_faders),
                "monitor_mix": output_mixes.monitor_mix_model(),

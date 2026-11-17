@@ -189,8 +189,8 @@ swapped[6], swapped[7] = swapped[7], swapped[6]
 levels = [0] * 6 + [100, 20, 64]
 level_writes = []
 with fake_desk(swapped) as desk, patched(
-        (rcp_read, {"values": lambda _blob, prop: levels if prop == "faderLevel" else []}),
-        (rcp_transfer, {"set_fader_level": lambda i, v: level_writes.append((i, v))})):
+        (rcp_transfer, {"fader_levels": lambda _blob: levels,
+                        "set_fader_level": lambda i, v: level_writes.append((i, v))})):
     res = faders.action_reset_faders()
 check("each channel moved between virtual faders keeps its own level",
       sorted(level_writes), [(6, 20), (7, 100)])

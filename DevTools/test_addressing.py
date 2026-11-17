@@ -9,6 +9,9 @@ paths with the send layer replaced by a recorder, on the saved layouts of each d
   2. on a layout where a block has MOVED, every record follows it;
   3. the lookup refuses a block, a copy or a property the desk does not have, rather than guess.
 
+And the reads: every property the app reads by key resolves on each saved layout, and a stray
+copy ahead of the real node moves none of them.
+
 Run:
     python DevTools/test_addressing.py
 """
@@ -21,12 +24,17 @@ import sys
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path; import FIRST)
 import _testkit
 import channels
+import desk_access
+import desk_firmware
 import devices
 import fake_model
 import faders
 import layout_fixture as lf
+import master_outputs
 import mic_presets
 import model_tree
+import mute_solo
+import network
 import pad_records as pr
 import rcp_hid
 import rcp_read
@@ -347,5 +355,77 @@ for f in sorted(PROJECT.rglob("*.py")):
         if re.search(r"build_record\([^)]*\[0x", line):
             named.append(f"{f.name}:{n}")
 check("no literal-path record outside rcp_transfer", named, [])
+
+print("every keyed read finds its property on every saved layout")
+# A keyed read on the wrong node returns None where a first-occurrence read found the value, so a
+# page would quietly show "unknown". Each (key, property) the app reads by key is resolved here.
+KEYED_READS = (
+    [(t.SYSTEM, p) for p in ("systemFirmwareVersion", "systemMidiControl",
+                             "systemChannelSelected", "systemName") + desk_firmware.PROPS]
+    + [(t.OUTPUT, p) for p in ("outputMonLevel", "outputMonMute", "outputBTLevel", "outputBTMute",
+                               "outputMultiMode", "outputMultiBypass", "recordingMultitrackMode",
+                               "recordingCompressionQuality", "recordingProcessingBypass")]
+    + [(t.OUTPUT, spec["prop"]) for spec in master_outputs.AUTO_MUTE.values()]
+    + [(key, p) for p, (key, _kind) in t.UNIT_SETTING_SEL.items()]
+    + [(t.GUI, "selectedBank")]
+    + [(t.NETWORK, p) for p in ("wiredConnected", "wifi", "wifiSSID", "wifiIpAddress",
+                                "wifiGateway", "wifiDHCP", "wifiIncorrectPSK", "wifiPSK",
+                                "btConnectedAddress", "btVisible")]
+    + [(t.NETWORK, f"btScan{n}") for n in range(1, 11)]
+    + [(t.NETWORK, f"btPairedNumber{n}") for n in range(1, 6)]
+    + [(t.NETWORK, f"wifiScan{n}") for n in range(1, network.WIFI_SCAN_SLOTS + 1)]
+    + [(t.RECORDER, "recordState"), (t.RECORDER, "recordBytesPerSecond"),
+       (t.RECORDINGS, "recordingTotalCount"), (t.CURRENTSHOW, "currentShowName"),
+       (t.CURRENTSHOW, "currentShowUUID"), (t.SHOWCONTROL, "showControlLastError"),
+       (t.SIPCALLING, "sipCallHostingEnabled"), (t.SIPCALLING, "sipIncomingCallAccept")]
+    + [(t.MASTER, p) for p in ("masterCompellorOn", "masterCompellorThreshold",
+                               "masterCompellorAttack", "masterCompellorRelease",
+                               "masterCompellorGain", "masterDelayOn", "masterDelaySeconds")]
+    + [(t.fader_key(i), "faderLevel") for i in range(9)]
+    + [(t.channel_key(s), "channelOutputMute") for s in range(10)]
+    + [(("SIPCALLSLOTS", i), "sipSlotCallState") for i in range(3)])
+for fixture in (lf.PRO2_177, lf.PRO2_176, lf.DUO_173):
+    book = lf.load(fixture)
+    check(f"{fixture}: every keyed read resolves",
+          [(k, p) for k, p in KEYED_READS if not book.has(k, p)], [])
+
+print("a stray copy ahead of the real node moves no keyed read (T3-248)")
+# A stray channelOutputMute and faderLevel on a node ahead of CHANNEL[0] and PHYSICALINTERFACE,
+# as a wrong-selector write appends. Strip 0 is open and fader 6 is at 100: a positional read
+# would take the stray's values instead.
+stray_blob = fake_model.node("Rodecaster", (), [
+    fake_model.node("STRAYHOLDER", [("channelOutputMute", True), ("faderLevel", 7)])]
+    + [fake_model.node("PHYSICALINTERFACE", (), [
+        fake_model.node("FADER", {"faderLevel": 100 if i == 6 else 0}) for i in range(9)])]
+    + [fake_model.node("CHANNEL", {"channelOutputMute": s != 0, "channelInputSource": s})
+       for s in range(10)])
+check("strip_values gives strip 0 its own mute",
+      rcp_read.strip_values(stray_blob, "channelOutputMute")[:2], [False, True])
+check("fader_levels gives fader 6 its own level", t.fader_levels(stray_blob)[6], 100)
+check("and the list is one per FADER node, the stray not among them",
+      len(t.fader_levels(stray_blob)), 9)
+book = rcp_read.layout_of(stray_blob)
+mutes = []
+with patched((rcp_read, {"read_model": lambda **_k: stray_blob}),
+             (t, {"write_at": lambda key, name, kind, on: mutes.append((key, on))})):
+    previous = rcp_read.pin_layout(book)
+    try:
+        # Source 0 is wanted muted on the strip it now sits on, strip 0, which is open.
+        faders._settle_mutes(list(range(10)), {0: True})
+    finally:
+        rcp_read.pin_layout(previous)
+check("_settle_mutes reads strip 0's own mute and closes it", mutes, [(t.channel_key(0), True)])
+with patched((desk_access, {"desk_now": lambda: stray_blob}),
+             (mute_solo, {"_strip_toggle_gate": lambda _what: None}),
+             (mute_solo.announcer, {"announce_mute": lambda strip, on: None}),
+             (t, {"write_at": lambda key, name, kind, on: mutes.append((key, on))})):
+    mutes.clear()
+    mute_solo.encoder_hold_mute(0)
+check("encoder_hold_mute toggles strip 0's own mute, open to muted", mutes,
+      [(t.channel_key(0), True)])
+with as_device(devices.PRO2):
+    levels = faders.fader_levels(stray_blob)
+check("fader_levels reports fader 6 at its own 79 percent",
+      next(f["percent"] for f in levels["faders"] if f["index"] == 6), 79)
 
 sys.exit(_testkit.finish())

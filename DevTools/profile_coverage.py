@@ -68,7 +68,7 @@ SAVE_FUNCS = [
     # The master Compellor and output delay live in this shared helper rather than in
     # profiles.save, so its source has to be scanned too or all seven read as UNJUDGED - which
     # would report a refactor as a change to what a profile saves.
-    (rcp_read.master_processing, "rcp_read.master_processing"),
+    (master_outputs.master_processing, "master_outputs.master_processing"),
     # profile_actions.save_desk takes the firmware version a profile records from this reader.
     (desk_firmware.version, "desk_firmware.version"),
     # profiles.save reads each headphone output's type on its own node through this helper.

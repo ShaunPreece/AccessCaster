@@ -11,7 +11,6 @@ import callme
 import desk_access
 import desk_firmware
 import desk_live
-import model_tree
 import network
 import rcp_read
 import rcp_transfer
@@ -130,19 +129,16 @@ def check_unasked(hardware_id: str) -> dict:
 
 def _ask_rode(blob: bytes | None = None) -> dict:
     """Have the desk ask RODE's server for an update, and say what it found. `blob` is a read made
-    just before, to find the request's node without reading again."""
+    just before, to check the desk offers the request without reading again."""
     listener = desk_live.PushListener()
     try:
         with desk_access.hid_lock:
             if blob is None:
                 blob = rcp_read.read_model_stable(fresh=True)
-            found = model_tree.find_property(model_tree.parse(blob)[0], "updateCheckRequested")
-            if not found:
+            if "updateCheckRequested" not in desk_firmware.read(blob):
                 return {"ok": False, "message": "This desk does not offer a firmware check."}
-            path = found[0][0].path()
             listener.start()        # before the write: the desk answers within a second
-            rcp_transfer.send_record(
-                rcp_transfer.build_path_prop_bool("updateCheckRequested", True, path))
+            rcp_transfer.write_at(rcp_transfer.SYSTEM, "updateCheckRequested", "bool", True)
         listener.wait_for("updateChecking", desk_firmware.CHECK_WAIT_S, match=lambda v: v is False)
         with desk_access.hid_lock:
             blob = rcp_read.read_model_stable(fresh=True)

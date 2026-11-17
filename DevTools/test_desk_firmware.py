@@ -14,7 +14,6 @@ import desk_firmware as fw
 import devices
 from _testkit import check, check_in, patched
 
-PATH = (15,)
 FAST = {"PRESENCE_POLL_S": 0.001, "LEAVES_BY_ITSELF_S": 0.05, "LEAVES_AFTER_ASK_S": 0.05,
         "BACK_WITHIN_S": 0.5, "CHECK_WAIT_S": 0.01, "DOWNLOAD_STALL_S": 0.05,
         "FINISHED_QUIET_S": 0.01, "INSTALL_WAIT_S": 0.5}
@@ -76,9 +75,9 @@ class Desk:
     def state(self):
         if self.gone:
             raise OSError("no device")
-        return {k: (PATH, v) for k, v in self.values.items()}
+        return dict(self.values)
 
-    def write(self, state, name, value):
+    def write(self, name, value):
         self.writes.append((name, value))
         self.values[name] = value
         if not value:
@@ -121,7 +120,7 @@ def run(desk, target="1.7.7"):
 
 
 # ---- refusals, before anything is written --------------------------------------------------------
-state = {k: (PATH, v) for k, v in base().items()}
+state = dict(base())
 check("an offered update with the desk online refuses nothing", fw.refusal(state, True, False, False),
       "")
 check("the offered version is read", fw.offered(state), "1.7.7")
@@ -129,9 +128,9 @@ check_in("offline is refused", "not connected to the internet",
          fw.refusal(state, False, False, False))
 check_in("a recording is refused", "recording", fw.refusal(state, True, True, False))
 check_in("a call is refused", "CallMe call", fw.refusal(state, True, False, True))
-wipe = {k: (PATH, v) for k, v in base(updateResetAfterFWURequested=True).items()}
+wipe = dict(base(updateResetAfterFWURequested=True))
 check_in("a pending erase is refused first", "erase itself", fw.refusal(wipe, True, False, False))
-none = {k: (PATH, v) for k, v in base(osUpdateAvailable=False).items()}
+none = dict(base(osUpdateAvailable=False))
 check_in("no update is refused", "no firmware update waiting", fw.refusal(none, True, False, False))
 
 # ---- the whole update, the desk restarting by itself ---------------------------------------------
@@ -173,8 +172,8 @@ desk = Desk(base(), leaves_by_itself=False)
 real_write = desk.write
 
 
-def write_then_flag(state, name, value):
-    real_write(state, name, value)
+def write_then_flag(name, value):
+    real_write(name, value)
     if name == "updateInitiateRequested" and value:
         desk.values["updateResetAfterFWURequested"] = True
 
@@ -198,8 +197,8 @@ desk = Desk(base(updateDownloaded=True))
 real = desk.write
 
 
-def no_downloaded_push(state, name, value):
-    real(state, name, value)
+def no_downloaded_push(name, value):
+    real(name, value)
     if name == "downloadInitiateRequested" and value:
         desk.events = [e for e in desk.events if e[0] != "updateDownloaded"]
 

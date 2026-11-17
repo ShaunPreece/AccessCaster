@@ -607,12 +607,11 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **A negative result is only as good as the address AND the format it was tested with.**
 - **No blind selector scans on hardware.** An early one appended two persistent stray global props
   that shifted two read arrays by +1 and survived power-cycles.
-- **Read a property BY BLOCK and instance, never "first occurrence in the stream".** A stray copy of
-  `btVisible` in SYSTEM once made the Network page report "not discoverable" while the radio was, and
-  `MIX` / `RCSYNCMIX` share six names legitimately. Use `rcp_read.block_value()` /
-  `iter_block_properties()`. A per-strip property, the fader layout (`channelInputSource`) above
-  all, is read with `rcp_read.strip_values()` (`desk_model.strip_vector()` on the picture): one
-  stray copy read through `values()` moves every fader's channel along by one.
+- **Read a property on its node's KEY, never by position or "first occurrence in the stream".** A
+  stray copy of `btVisible` in SYSTEM once made the Network page report "not discoverable" while
+  the radio was, and one stray `channelInputSource` read through `values()` moves every fader's
+  channel along by one. The read helpers and the check that enforces this are below, under "ONE
+  WAY TO READ A FIXED NODE".
 - **`requestRecordState`, `requestDropMarker` and `requestDeleteUID` are self-clearing REQUESTS.**
   Never read one for status; read the thing it acts on (`recordState`, or the recordings list).
 - **RECORDINGS = 0x28F, PROVEN 29th August 2026** by deleting a real recording (list 20 -> 19,
@@ -1706,23 +1705,18 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **THE TWO WORKAROUNDS SHAUN REJECTED, so do not quietly reintroduce them:** capping the read with a
   fallback to the last known layout, and keeping the layout cache warm off the push stream. Both hide
   the fault instead of fixing the read.
-- **`rcp_read.values(blob, name, kind=None)` IS HOW YOU READ A LIST OF VALUES, and `first(...)` how
-  you read one.** `find_all` under them returns `(value, kind)` pairs and is only for a positional
-  read that needs the kind. Unwrapping that pair by hand is what produced 32 call sites and four
-  separate copies of `def val(prop, kind=None)` before 30th August 2026.
-- **`first` returns the first MEANINGFUL value: it skips None and `""` and KEEPS `False` and `0`.**
-  Not a nicety. A name can occur in several blocks with only one filled in, and
-  `systemFirmwareVersion` is the standing case: `""` in one section, the version in another. Taking
-  the literal first occurrence returns a blank often enough to matter. `False` and `0` are real
-  settings and must never be skipped.
-- **`find_all` HAS NOT BEEN A SUBSTRING SEARCH SINCE 29th August 2026.** It matches whole names
-  through the tree index. Three comments still warned that `screenBrightness` would match inside
-  `hwScreenBrightness` and were steering people away from the right tool; corrected 30th August
-  2026. **If you find another, fix it rather than believing it.**
-- **A NAME CAN OCCUR IN MORE THAN ONE BLOCK, and that is still real.** `MIX` and `RCSYNCMIX` share
-  six names, and a stray adds a copy wherever it lands (`btVisible` had one in SYSTEM until a factory
-  reset, and only the NETWORK copy drives the radio). Use `block_value` and say which block you mean;
-  `outputMonAutoMute` and `outputBTAutoMute` are read by block in `routing_model` for this reason.
+- **ONE WAY TO READ A FIXED NODE: by its `model_tree.Layout` key, the key its write goes to.**
+  `rcp_read.keyed_value(blob, key, name)` on a dump, `rcp_read.strip_values` for a per-strip
+  property, `rcp_transfer.fader_levels` and `unit_setting`, and `desk_model.value(key, name)` on
+  the picture. `rcp_read.values` and `find_all` are for lists that grow and shrink (pads,
+  recordings, shows, storage volumes), and `block_values` for the grids (`MIX`, `MIXMINUSES`).
+  `DevTools/check_notes.py` fails a positional read of any name a fixed node carries in the saved
+  layouts, so the rule cannot erode. A stray copy of a name lands anywhere (`btVisible` had one in
+  SYSTEM until a factory reset, and only the NETWORK copy drives the radio), and a read by
+  position or first occurrence returns the stray. The writes match: every fixed-node write goes
+  through `rcp_transfer.write_at` or `address_of`, never `find_property` plus a path builder.
+- **`find_all` matches whole names through the tree index, never a substring.** A comment warning
+  that `screenBrightness` matches inside `hwScreenBrightness` is wrong; fix it.
 - **A positional read must pass `kind=None`** so it gets EVERY occurrence including the
   undecodable `(None, "?")` ones. Dropping those shifts every index past them.
 - **EVERY INPUT VALUE, ON EVERY DESK, LIVES AT `INPUTSOURCE[source_code]`** (root child
@@ -2534,7 +2528,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   Ear-proven 29th August 2026: written True, the monitor speakers duck on a mic fader move. The
   fault was `action_set_auto_mute` reporting success from the write returning, with no read-back, so
   a switch could sit there claiming a setting the desk did not have while Shaun's speakers howled.
-  **It reads back BY BLOCK now and returns the state, and the window's switch follows the DESK, not
+  **It reads back on OUTPUT now and returns the state, and the window's switch follows the DESK, not
   the click.** It occurs once, in OUTPUT: this was never the `btVisible` duplicate trap, and the
   monitor and Bluetooth toggles are not crossed.
 - **THERE IS ONE READER: `model_tree.parse`, indexed once per dump by `rcp_read._index`, AND NO
@@ -3156,9 +3150,9 @@ shared one; a new copy is how they drifted apart the first time.
   own words**: `confirmed=True` appends `desk_access.confirmed_on(cap)`, built from `devices.DEVICES`,
   so the sentence cannot go stale when a desk gains the cap. **`faders.level_write_gate` is deliberately not on it**: it
   has a second condition beyond the cap (the device must carry confirmed faderLevel selectors).
-- **The master Compellor and output delay come from `rcp_read.master_processing`**, shared by the
-  Routing page and a profile. They were built twice, so a property added to one and not the other
-  would have been a setting the page could change and a profile could not put back.
+- **The master Compellor and output delay come from `master_outputs.master_processing`**, shared
+  by the Master Mix page and a profile, so a property cannot be one the page changes and a profile
+  cannot put back.
 
 ## The announcer, speech and pad-shortcut modules
 

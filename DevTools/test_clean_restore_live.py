@@ -81,7 +81,7 @@ def live_state(blob: bytes) -> dict:
     return {
         "mute": {n: m for n, m, _s in chans if m is not None},
         "solo": {n: s for n, _m, s in chans if s is not None},
-        "output": {w: rcp_read.block_value(blob, "OUTPUT", prop) for w, prop in OUTPUT_MUTES},
+        "output": {w: rcp_read.keyed_value(blob, ("OUTPUT", 0), prop) for w, prop in OUTPUT_MUTES},
     }
 
 

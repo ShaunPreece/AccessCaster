@@ -34,6 +34,7 @@ import pad_shortcuts
 import profile_actions
 import profiles
 import rcp_read
+import rcp_transfer
 from _testkit import check, patched
 
 devices.force_device(devices.PRO2)      # or the answer comes from whatever is on the USB port
@@ -42,8 +43,7 @@ devices.force_device(devices.PRO2)      # or the answer comes from whatever is o
 def warnings_for(prof, vec, levels):
     """Run the warning against a desk in a known state."""
     with patched((faders, {"read_fader_vector": lambda blob=None, spec=None: list(vec)}),
-                 (rcp_read, {"values": lambda blob, name, kind=None: (
-                     list(levels) if name == "faderLevel" else [])})):
+                 (rcp_transfer, {"fader_levels": lambda blob: list(levels)})):
         return backups._restore_silence_warnings(prof, b"a blob")
 
 
@@ -100,9 +100,8 @@ RESTORE_FAKES = (
     (profiles, {"apply": lambda prof, **kw: {"ok": True, "applied": 0, "failed": 0, "errs": []}}),
     (output_mixes, {"apply_matrix": lambda routing: {"ok": True, "applied": 0, "message": ""}}),
     (pad_shortcuts, {"rearm_midi": lambda: None, "pads_stale": lambda: None}),
-    (rcp_read, {"read_model": lambda *a, **k: b"blob",
-                "values": lambda blob, name, kind=None: (
-                    list(FADER7_DOWN) if name == "faderLevel" else [])}))
+    (rcp_read, {"read_model": lambda *a, **k: b"blob"}),
+    (rcp_transfer, {"fader_levels": lambda blob: list(FADER7_DOWN)}))
 
 
 def run_restore(prof):

@@ -192,7 +192,8 @@ def main() -> int:
     # in, or a Pro II capture read while a Duo is attached would be written to the Duo's file.
     dev = devices.get_active_device()
     if args.blob:
-        named = devices.device_from_system_name(rcp_read.first(blob, "systemName"))
+        named = devices.device_from_system_name(
+            rcp_read.keyed_value(blob, ("SYSTEM", 0), "systemName"))
         if named is None:
             print("the dump does not name a desk in systemName; refusing to guess which file to "
                   "write. Regenerate from the desk, or check the capture is a model dump.")
@@ -201,7 +202,7 @@ def main() -> int:
         print(f"dump names itself a {dev.name}, so writing that desk's file "
               f"(ignoring the attached {devices.get_active_device().name}).")
     out = out_path(dev)
-    fw = rcp_read.first(blob, "systemFirmwareVersion")
+    fw = rcp_read.keyed_value(blob, ("SYSTEM", 0), "systemFirmwareVersion")
 
     # A NAME ON THE DEAD LIST THAT THIS DESK DOES NOT PUBLISH IS THE LIST ROTTING, and it is worth
     # stopping for: the entry is either a typo, or a property a firmware update has taken away, and

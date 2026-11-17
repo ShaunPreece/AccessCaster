@@ -206,17 +206,13 @@ def _describe_modified(value) -> str:
 
 
 def read_current(blob: bytes) -> dict:
-    """The show the desk has loaded right now.
-
-    IT LIVES IN `CURRENTSHOW`, NOT `SHOWCONTROL`. Asking SHOWCONTROL first only works because it
-    falls through to a whole-dump search, which makes the fallback the load path. Name the right
-    block and the fallback stays a fallback.
-    """
+    """The show the desk has loaded right now, from CURRENTSHOW (not SHOWCONTROL, which carries
+    the import and export commands)."""
     return {
-        "name": str(rcp_read.block_value(blob, "CURRENTSHOW", "currentShowName")
-                    or rcp_read.first(blob, "currentShowName") or "").strip(),
-        "uuid": str(rcp_read.block_value(blob, "CURRENTSHOW", "currentShowUUID")
-                    or rcp_read.first(blob, "currentShowUUID") or ""),
+        "name": str(rcp_read.keyed_value(blob, rcp_transfer.CURRENTSHOW, "currentShowName")
+                    or "").strip(),
+        "uuid": str(rcp_read.keyed_value(blob, rcp_transfer.CURRENTSHOW, "currentShowUUID")
+                    or ""),
     }
 
 
@@ -242,13 +238,13 @@ def restore_fingerprint(blob: bytes) -> tuple:
     the shows list and the self-clearing mix flags all churn on their own and would report an effect
     where there was none.
     """
-    return tuple(tuple(rcp_read.values(blob, name)) for name in _FINGERPRINT_NAMES)
+    return tuple(tuple(rcp_read.values(blob, name))  # every occurrence
+                 for name in _FINGERPRINT_NAMES)
 
 
 def read_last_error(blob: bytes):
-    """`showControlLastError`, or None. Read BY BLOCK: a stray of the same name costs nothing to
-    ignore that way and cannot fool the read."""
-    return rcp_read.block_value(blob, "SHOWCONTROL", "showControlLastError")
+    """`showControlLastError` on SHOWCONTROL, or None."""
+    return rcp_read.keyed_value(blob, rcp_transfer.SHOWCONTROL, "showControlLastError")
 
 
 # ---------------------------------------------------------------------------

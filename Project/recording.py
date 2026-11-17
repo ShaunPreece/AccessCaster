@@ -141,14 +141,16 @@ def _payload(blob: bytes) -> dict:
     out = recorder.describe(blob)
     # Multitrack lives here rather than on Routing: it decides what a recording CONTAINS. The write
     # is `action_set_multitrack`.
-    mt = rcp_read.values(blob, "recordingMultitrackMode", "int")
-    out["multitrack"] = mt[0] if mt else None
+    def output(name, kind):
+        return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, name, kind=kind)
+
+    out["multitrack"] = output("recordingMultitrackMode", "int")
     # Normalised, because the desk stores out-of-range values (see recorder.RECORDING_FORMAT_LABEL):
     # anything non-zero IS an MP3, so the control shows MP3 rather than nothing for a stray 3.
-    fmt = rcp_read.values(blob, "recordingCompressionQuality", "int")
-    out["format"] = None if not fmt or fmt[0] is None else (0 if fmt[0] == 0 else 1)
-    pb = rcp_read.values(blob, "recordingProcessingBypass", "bool")
-    out["processing_bypass"] = bool(pb[0]) if pb else None
+    fmt = output("recordingCompressionQuality", "int")
+    out["format"] = None if fmt is None else (0 if fmt == 0 else 1)
+    pb = output("recordingProcessingBypass", "bool")
+    out["processing_bypass"] = bool(pb) if pb is not None else None
     # Known BEFORE the control is drawn, so a button that cannot work is disabled with the reason
     # attached rather than failing when it is pressed.
     refused = _gate("delete a recording")

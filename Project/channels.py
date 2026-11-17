@@ -22,7 +22,7 @@ import desk_model  # the desk as last seen: the fader layout and the USB mode
 import devices  # per-device model (channel table, fader and matrix shape) keyed by product id
 import diagnostics
 import paths as _paths  # writable data dir for the off-fader chain store
-import rcp_read as _r  # low-level model reader (values, first, read_model, read_model_stable)
+import rcp_read as _r  # low-level model reader (keyed_value, read_model, read_model_stable)
 import rcp_transfer as _t  # byte builders and the send layer (build_*, send_record, send_records_paced)
 import recorder  # outputMultiMode's two halves
 import rode_app  # RODE's app open: its fader moves are not pushed

@@ -19,7 +19,7 @@ import desk_live
 import desk_model
 import rcp_transfer
 import recorder
-from _testkit import addr, check, check_in
+from _testkit import addr, check, check_in, hold_desk
 from wording import spoken_datetime
 
 # A recordingContent string as the unit sends it. The trailing six fields are unmapped.
@@ -133,7 +133,7 @@ def pushed(watcher, state):
     watcher._push(desk_live.Push(path, "recordState", state, "int", rcp_transfer.RECORDER, was))
 
 
-desk_model._reset()
+hold_desk(without=("recordState",))
 said = []
 w = recorder.Watcher(on_change=lambda was, now: said.append(recorder.STATE_SPOKEN.get(now)))
 pushed(w, recorder.READY)
@@ -156,7 +156,7 @@ check("every transition was spoken, and in order",
              "Recording started", "Recording stopped"])
 
 print("\nAN ELAPSED TIME WE CANNOT HONESTLY GIVE")
-desk_model._reset()
+hold_desk()
 w2 = recorder.Watcher()
 # The app started while the unit was ALREADY recording: the desk model learned the state from a
 # dump, so we never saw it begin. A number here would be wrong, so there is no number.
@@ -169,7 +169,7 @@ pushed(w2, recorder.RECORDING)
 check("a repeated push does not claim the start either", w2.snapshot()["elapsed_seconds"], None)
 
 print("\nA SNAPSHOT BETWEEN THE MODEL TAKING A PUSH AND THE FOLLOWER HANDLING IT")
-desk_model._reset()
+hold_desk()
 w3 = recorder.Watcher()
 pushed(w3, recorder.READY)
 path = tuple(addr(rcp_transfer.RECORDER))
