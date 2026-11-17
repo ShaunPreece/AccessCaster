@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import desk_access
 import devices
+import diagnostics
 import faders
 import pad_shortcuts
 import profile_actions
@@ -40,7 +41,8 @@ def _removable_volume_ready() -> bool:
         with desk_access.hid_lock:
             blob = rcp_read.read_model()
         return bool(recorder.destination(recorder.read_volumes(blob)))
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("backup.storage_read_failed", str(exc))
         return False
 
 
@@ -145,8 +147,10 @@ def _restore_silence_warnings(prof, blob) -> list:
             if not want_levels:
                 out.append("It does not set fader levels, so each channel keeps whatever level "
                            "the fader it lands on is already at.")
-    except Exception:
-        return out          # a warning that crashes must never block the restore it describes
+    except Exception as exc:
+        # A warning that crashes must never block the restore it describes.
+        diagnostics.event("restore.warnings_failed", str(exc))
+        return out
     return out
 
 
@@ -167,15 +171,16 @@ def backup_restore_plan(name: str) -> dict:
         return loaded
     prof = loaded["prof"]
     paired = prof.get(profiles.SHOW_KEY) or None
-    blob = None
+    # THE PROFILE IS READ EVEN WHEN THE SHOW WILL BE USED. The two halves were saved in the same
+    # instant, so the profile is the only readable description of what the show is about to do.
     try:
         with desk_access.hid_lock:
             blob = rcp_read.read_model()
-    except Exception:
-        blob = None
-    # THE PROFILE IS READ EVEN WHEN THE SHOW WILL BE USED. The two halves were saved in the same
-    # instant, so the profile is the only readable description of what the show is about to do.
-    warnings = _restore_silence_warnings(prof, blob) if blob is not None else []
+        warnings = _restore_silence_warnings(prof, blob)
+    except Exception as exc:
+        diagnostics.event("restore.plan_read_failed", str(exc))
+        warnings = ["The desk could not be read, so there was no check for channels this backup "
+                    "would leave silent."]
     return {
         "ok": True,
         "name": loaded["safe"],
@@ -419,11 +424,12 @@ def action_show_reset(backup_first: bool = True) -> dict:
                "and the analytics answer were not part of it and are untouched, and so are the "
                "recordings on the drive. The monitor speaker level has gone back to its default, "
                "so check it before turning speakers up.")
+        msg += done["note"]
         if healed.get("message"):
             msg += " " + healed["message"]
         msg += _keep_factory_pads(step)
         if saved:
-            msg += f" To undo this, restore \"{saved['name']}\" from the Shows list."
+            msg += f" To undo this, restore \"{saved['name']}\" from the Backups page."
         return {"ok": True, "message": msg}
     return show_actions.run_job("Resetting the desk", work)
 
@@ -436,11 +442,14 @@ def _delete_show_then_profile(snapshot: int, name: str):
     about any more."""
     def work(step):
         res = show_actions.delete_work(snapshot, step)
+        if not res.get("ok") and not res.get("missing"):
+            return {"ok": False, "message": res["message"] + " Nothing was deleted from this "
+                    "computer, so the backup is still listed. Try again."}
         step("Deleting this computer's copy...")
         gone = profile_actions.delete_profile(name, force=True)
         if not gone.get("ok"):
             return gone
         tail = (" The desk's own copy went too." if res.get("ok")
-                else " The desk's own copy could not be deleted, so it is still on the drive.")
+                else " The desk's own copy had already gone from the drive.")
         return {"ok": True, "message": (gone.get("message") or "Deleted.") + tail}
     return show_actions.run_job("Deleting the backup", work)

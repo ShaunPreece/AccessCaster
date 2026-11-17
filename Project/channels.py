@@ -354,7 +354,7 @@ def _require_processing() -> None:
             f"are disabled to avoid a wrong-selector write.")
 
 
-def set_channel_processing(channel: int, prop: str, value: float) -> int:
+def set_channel_processing(channel: int | str, prop: str, value: float) -> int:
     """Set one channel-processing parameter (EQ/comp/gate/deesser/HPF/pan/VoxLab/Aphex).
 
     channel: 1-based index into PROC_CHANNEL_ORDER or a channel name (1-4 = Mic 1-4; also
@@ -368,7 +368,7 @@ def set_channel_processing(channel: int, prop: str, value: float) -> int:
     return _t.write_at(proc_key(channel), prop, "float", v)
 
 
-def apply_processing_preset(channel: int, props: dict, delay: float = 0.08) -> int:
+def apply_processing_preset(channel: int | str, props: dict, delay: float = 0.08) -> int:
     """Apply a full processing preset to any processing channel (see proc_key).
 
     `props` maps property name -> value: every float name is written as a normalised 0..1 float;
@@ -434,7 +434,7 @@ CHAIN_ADVANCED_PROP = "channelAdvancedProcessing"
 CHAIN_PRESET_MARKER_PROP = "channelCurrentFxPreset"
 
 
-def set_channel_advanced(channel: int, on: bool) -> int:
+def set_channel_advanced(channel: int | str, on: bool) -> int:
     """Set a strip's processing MODE: True = advanced (modules + params), False = simple (the three
     VoxLab knobs). Compact bool on the channel's own processing node, i.e. the same record shape
     as any module toggle. Writing this flips the mode and changes NO
@@ -444,14 +444,14 @@ def set_channel_advanced(channel: int, on: bool) -> int:
     return _t.write_at(proc_key(channel), CHAIN_ADVANCED_PROP, "bool", bool(on))
 
 
-def set_channel_preset_marker(channel: int, index: int) -> int:
+def set_channel_preset_marker(channel: int | str, index: int) -> int:
     """Set which preset NAME a strip displays (channelCurrentFxPreset; -1 = custom). Write this LAST,
     after every parameter, or the device will blank it again."""
     _require_processing()
     return _t.write_at(proc_key(channel), CHAIN_PRESET_MARKER_PROP, "int", int(index))
 
 
-def set_processing_module(channel: int, module: str, on: bool) -> int:
+def set_processing_module(channel: int | str, module: str, on: bool) -> int:
     """Enable/disable a per-channel PROCESSING module on any processing channel (mics + BT/USB1/
     Chat/USB2/CallMe1; see proc_key). `module` is a key in PROCESSING_MODULE_ON (hpf / eq /
     compressor / noiseGate / deesser / aphex / pan / eqHigh / eqMid / eqLow), or the raw <module>On
@@ -467,7 +467,7 @@ def set_processing_module(channel: int, module: str, on: bool) -> int:
     return _t.write_at(key, prop, "bool", on)
 
 
-def set_processing_enabled(channel: int, on: bool) -> int:
+def set_processing_enabled(channel: int | str, on: bool) -> int:
     """Master per-channel PROCESSING on/off (the panel's 'Processing' toggle). The device property is
     INVERTED: channelBypassProcessing (compact bool) on the channel's processing node - True =
     bypassed/OFF. So processing ON => channelBypassProcessing False. Do NOT name it

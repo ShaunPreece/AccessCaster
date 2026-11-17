@@ -168,7 +168,8 @@ def read_catalogue() -> dict:
     try:
         items = commands.catalogue(include_device=True)
         complete = True
-    except Exception:
+    except Exception as exc:
+        diagnostics.event("shortcuts.catalogue_read_failed", str(exc))
         items = commands.catalogue(include_device=False)
         complete = False
     _labels.clear()

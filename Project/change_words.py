@@ -54,15 +54,16 @@ def _unnamed(kind: str, number: int, exc: Exception) -> None:
     diagnostics.event("change_words.unnamed", f"{kind} {number}", error=f"{exc}")
 
 
-def source_name(code: int) -> str:
-    """A matrix SOURCE code as it is spoken, e.g. 'Mic 1'.
+def source_name(code: int, spec=None) -> str:
+    """A matrix SOURCE code as it is spoken, e.g. 'Mic 1', named by `spec` (a FaderSpec, the
+    connected desk's by default). Every reply and announcement that names a source comes here.
 
     `labels_for`, NOT `code_label`: a fader can HOLD a stereo-linked pair (codes 4, 5, 6) even
     though a pair is never something you assign, and code_label covers only the assignable set, so
     a linked Mic 1 + 2 would be announced as "Source 4"."""
     try:
         dev = devices.get_active_device()
-        label = dev.fader.labels_for(channels.usb_expanded()).get(code)
+        label = (spec or dev.fader).labels_for(channels.usb_expanded()).get(code)
         if label:
             return label
         for s in dev.matrix.sources_for(True):
@@ -133,7 +134,8 @@ def _input_name(key) -> Optional[str]:
         return None
     try:
         entry = devices.get_active_device().channel_for_input_key(key)
-    except Exception:
+    except Exception as exc:
+        _unnamed("input", key[1], exc)
         entry = None
     return source_name(entry["source_code"]) if entry else source_name(key[1])
 

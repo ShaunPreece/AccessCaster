@@ -55,9 +55,8 @@ def write_gate():
 def matrix_model() -> dict:
     """Static layout of the output mix matrix for the UI, for the CONNECTED device."""
     m = active_matrix()
-    outputs = m.outputs or devices.PRO2.matrix.outputs
-    sources = (m.sources_for(channels.usb_expanded())
-               or devices.PRO2.matrix.sources_for(channels.usb_expanded()))
+    outputs = m.outputs
+    sources = m.sources_for(channels.usb_expanded())
     read_only = write_gate() is not None
     # The read-only variant of this note reaches a desk without the cap, instead of the page
     # promising writes it cannot do.
@@ -350,8 +349,7 @@ def action_reset_all_outputs() -> dict:
     (routing_schemes.apply). The button stays because it is where people look for it and it carries
     its own confirmation, but there is no second copy of the sweep to drift."""
     b = routing_schemes.builtin(routing_schemes.BUILTIN_NORMAL)
-    if b is None:                       # no matrix outputs on this device model at all
-        return {"ok": False, "message": "This device exposes no output mixes to reset."}
+    assert b is not None                # `builtins` lists it for every desk
     return _apply_scheme(b["scheme"], b["name"])
 
 

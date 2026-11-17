@@ -363,6 +363,58 @@ check_in("it says what survives: recordings", "recording", res["message"])
 check_in("it warns about the monitor level", "monitor", res["message"])
 check_in("and it names the undo", "to undo this", res["message"])
 
+check("a wake that ran says nothing more", "if a mic is silent" in res["message"].lower(), False)
+
+print("a reset whose channel wake cannot run")
+# THE FAULT THE WAKE COVERS IS INVISIBLE IN THE MODEL, so a wake that could not run is the only
+# warning there is: the reply has to say how to wake a silent mic by hand.
+reset_desk()
+with patched((show_actions, {"wake_channels": lambda: {"ok": False, "woken": [],
+                                                       "message": "not answering"}})):
+    res = run_job(backups.action_show_reset(backup_first=False))
+check("the reset still reports success", res["ok"], True)
+check_in("and says how to wake a silent mic", "if a mic is silent", res["message"])
+
+reset_desk()
+DESK.backups.insert(0, {"snapshot": 9, "uuid": "show-B", "name": "Yesterday"})
+with patched((show_actions, {"wake_channels": lambda: {"ok": True, "woken": [1],
+                                                       "failed": [2], "message": ""}})):
+    res = run_job(show_actions.action_show_import(9))
+check("an import whose wake missed a mic still restores", res["ok"], True)
+check_in("and says how to wake a silent mic", "if a mic is silent", res["message"])
+
+print("deleting both halves of a backup")
+# THE SHOW GOES FIRST, AND A FAILED SHOW DELETE KEEPS THE PROFILE: the profile is the only name
+# the user knows the backup by, so deleting it would leave 24 MB on the drive under the desk's name.
+_profile_deletes = []
+
+
+def _delete_profile(name, force=False):
+    _profile_deletes.append(name)
+    return {"ok": True, "message": f"Deleted {name}."}
+
+
+with patched((profile_actions, {"delete_profile": _delete_profile})):
+    reset_desk()
+    DESK.delete_does_nothing = True
+    res = run_job(backups._delete_show_then_profile(1, "mine"))
+    check("a show delete that did not take fails the whole delete", res["ok"], False)
+    check("and the profile was kept", _profile_deletes, [])
+    check_in("saying the backup is still listed", "still listed", res["message"])
+
+    reset_desk()
+    res = run_job(backups._delete_show_then_profile(999, "mine"))
+    check("a show already gone from the drive still lets the profile go", res["ok"], True)
+    check("the profile was deleted", _profile_deletes, ["mine"])
+    check_in("and it says the desk's copy had already gone", "already gone", res["message"])
+
+    _profile_deletes.clear()
+    reset_desk()
+    res = run_job(backups._delete_show_then_profile(1, "mine"))
+    check("both halves go", res["ok"], True)
+    check("the show left the drive", [b["snapshot"] for b in DESK.backups], [2])
+    check("and the profile went", _profile_deletes, ["mine"])
+
 print("THE ONE THAT MATTERS: the backup fails, so the reset must not happen")
 reset_desk()
 DESK.export_does_nothing = True

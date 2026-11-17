@@ -13,6 +13,7 @@ import announcer
 import change_words
 import channels
 import desk_access
+import desk_labels
 import diagnostics
 import faders
 import output_mixes
@@ -39,7 +40,7 @@ def _mute_reach_message(who: str, sources) -> str:
         return f"{who} muted. Could not check whether any output still hears it."
     still = []
     for oi, label in ((o["index"], o["label"]) for o in output_mixes.active_matrix().outputs):
-        if lv["modes"].get(oi) != 2:
+        if lv["modes"].get(oi) != desk_labels.CUSTOM:
             continue
         for s in sources:
             cell = lv["levels"].get(oi, {}).get(s) or {}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 
 import announcer
+import change_words
 import channels
 import desk_access
 import device_page
@@ -178,12 +179,10 @@ def fader_label(i: int, spec=None) -> str:
 
 
 def channel_name(code, spec=None) -> str:
-    # labels_for, not code_label: a fader can HOLD a stereo-linked pair even though a pair is never
-    # something you assign, and "channel code 4" is no use to anyone reading the layout aloud.
-    spec = spec or active_faders()
+    """The channel on a fader as it is spoken, or "empty (no channel)" for an empty strip."""
     if is_empty_fader(code):
         return "empty (no channel)"
-    return spec.labels_for(channels.usb_expanded()).get(code, f"channel code {code}")
+    return change_words.source_name(code, spec)
 
 
 def follow_levels(old_vec, new_vec, levels_before, spec) -> str:

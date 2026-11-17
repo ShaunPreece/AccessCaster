@@ -225,7 +225,7 @@ def reset_and_wait(step) -> dict:
             return {"ok": False,
                     "message": ("The desk took the command but its show has not changed, so the "
                                 "reset does not look like it happened. Nothing has been lost; "
-                                "check the Shows list in a moment.")}
+                                "check the Backups page in a moment.")}
         # Not answering: the command has almost certainly applied, and nothing about it can be
         # verified at all.
         return {"ok": False,
@@ -234,19 +234,19 @@ def reset_and_wait(step) -> dict:
                             + "The reset itself was almost certainly carried out, but nothing can "
                               "be checked while the desk is not responding. Unplug the USB cable "
                               "in the socket nearest the power inlet, wait a few seconds and plug "
-                              "it back in, then look at the Shows list. If it still does not come "
-                              "back, try that once or twice more, and if it will not appear at "
+                              "it back in, then look at the Backups page. If it still does not "
+                              "come back, try that once or twice more, and if it will not appear at "
                               "all, disconnect the power, hold the red button on the back for "
                               "sixty seconds, then reconnect the power supply on its own and "
                               "switch the desk on. Nothing is lost either way.")}
-    wake_channels()              # a reset leaves the same silent-channel fault; see wake_channels
+    note = wake_note()           # a reset leaves the same silent-channel fault; see wake_channels
     # THE OTHER THING A RESET LEAVES BROKEN - the voice-FX pads' effect definitions - IS HEALED BY
     # THE CALLER, NOT HERE, and deliberately. soundpad.heal_fx_pool rebuilds six pads at about
     # fifteen seconds each, and a CLEAN PROFILE RESTORE is about to rewrite the whole pad grid
     # anyway, so healing here would spend ninety seconds building pads that are cleared moments
     # later. Each caller runs it once its own pad phase is finished; it is a no-op when nothing is
     # missing, so the ordering costs nothing when the profile did carry the pads.
-    return {"ok": True}
+    return {"ok": True, "note": note}
 
 
 def clean_restore_reset(step) -> dict:
@@ -271,18 +271,11 @@ def clean_restore_reset(step) -> dict:
         return done
     return {"ok": True,
             "message": (f"Reset the desk to factory settings first, after backing it up as "
-                        f"\"{saved['show']['name']}\".")}
+                        f"\"{saved['show']['name']}\".{done['note']}")}
 
 
-def action_show_import(snapshot: int, as_name: str = "") -> dict:
+def action_show_import(snapshot: int) -> dict:
     """Restore the whole desk from an exported show.
-
-    `as_name` IS THE NAME THE USER GAVE IT, and it exists because the unit does not keep one: every
-    export is named after whichever show was loaded, so a backup saved as "Testing New Backup Flow"
-    is called "Default Show" on the drive. Reporting the desk's name therefore tells the user they
-    have restored something they never chose, which is the worst sentence a restore can produce.
-    Every current caller restores a show the desk made, which has no name of the user's, so none
-    passes one and the desk's name is used.
 
     TAKES A SNAPSHOT INDEX, NOT A UID AND NOT A UUID. A uid is a position that any export renumbers,
     so a page holding one is holding something that may already mean a different file; a uuid names
@@ -310,7 +303,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
             # unit's own refusal (error 1) is reported below; it is never guessed in advance.
             before = shows.restore_fingerprint(blob)
             err_before = shows.read_last_error(blob)
-            shown = as_name or match["name"]     # see the docstring: the user's name wins
+            shown = match["name"]
             step(f"Restoring \"{shown}\". This also moves the monitor level.")
             shows.send_import(match["uid"])
         target_uuid = match.get("uuid")
@@ -365,8 +358,7 @@ def action_show_import(snapshot: int, as_name: str = "") -> dict:
                                 f"\"{shown}\" yet. Check the list in a moment.")}
         # THE ENGINE CAN COME BACK WITH A CHANNEL SILENT. See wake_channels: the model looks
         # perfect, so this cannot be conditional on detecting anything.
-        wake_channels()
-        return {"ok": True, "message": f"Restored \"{shown}\". {tail}"}
+        return {"ok": True, "message": f"Restored \"{shown}\". {tail}{wake_note()}"}
     return run_job("Restoring the show", work)
 
 
@@ -403,7 +395,7 @@ def wake_channels() -> dict:
     if not rcp_read.is_model_dump(blob):
         return {"ok": False, "woken": [],
                 "message": "The desk is not answering, so its mic channels could not be woken."}
-    woken = []
+    woken, failed = [], []
     for ch in channels.MIC_CHANNELS:
         try:
             now = channels.mic_gain(blob, ch)
@@ -419,10 +411,21 @@ def wake_channels() -> dict:
             woken.append(ch)
         except Exception as exc:          # one channel failing must not leave the rest unwoken
             diagnostics.event("wake.channel_failed", str(exc), mic=ch)
-    return {"ok": True, "woken": woken,
+            failed.append(ch)
+    return {"ok": True, "woken": woken, "failed": failed,
             "message": (f"Nudged {wording.count(len(woken), 'mic channel')} so the desk's audio "
                         f"engine picks them up again." if woken
                         else "No mic channels needed waking.")}
+
+
+def wake_note() -> str:
+    """Run `wake_channels` and return a sentence for a restore or reset reply: empty when every mic
+    with a gain was woken, otherwise how to wake a silent one by hand. The fault it covers is
+    invisible in the model, so a wake that could not run is the only warning the user gets."""
+    res = wake_channels()
+    if res.get("ok") and not res.get("failed"):
+        return ""
+    return " If a mic is silent, turn its gain one step and back."
 
 
 def action_show_delete(snapshot: int) -> dict:
@@ -451,7 +454,9 @@ def delete_work(snapshot: int, step) -> dict:
         current, blob = _read_shows_now()
         match = shows.find_by_snapshot(current, snapshot)
         if match is None:
-            return {"ok": False,
+            # `missing` lets a caller deleting both halves of a backup tell "already gone" from
+            # "could not be deleted".
+            return {"ok": False, "missing": True,
                     "message": "That backup is no longer on the drive. The list has been "
                                "refreshed."}
         step(f"Deleting \"{match['name']}\"...")

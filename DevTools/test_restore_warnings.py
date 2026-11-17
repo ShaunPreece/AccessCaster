@@ -128,6 +128,21 @@ if got:
 new = {"routing": {"faders": SWAPPED, "fader_levels": ALL_UP}, "pads": []}
 check("a profile carrying its own levels does NOT", len(run_restore(new)), 0)
 
+print("a desk that cannot be read is not taken as nothing to warn about")
+
+
+def _unreadable():
+    raise OSError("desk gone")
+
+
+with patched((profiles, {"load": lambda name: {"ok": True, "safe": "p",
+                                                "prof": {"routing": {"faders": SWAPPED}}}}),
+             (rcp_read, {"read_model": _unreadable})):
+    plan = backups.backup_restore_plan("p")
+check("the plan is still offered", plan["ok"], True)
+check("and it says silence was not checked",
+      any("could not be read" in w for w in plan["warnings"]), True)
+
 print("a pad the restore could not clear is reported with its reason (T3-247)")
 words = profile_actions._pad_restore_words(
     {"results": []}, {"cleared": [], "failed": [9],
