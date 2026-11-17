@@ -330,8 +330,9 @@ class HotkeyManager:
         applied ONCE, BY ASKING: an explicit action, never a start-up side effect.
 
         Skips a command that is already bound (you asked for the scheme, not for duplicates) and a
-        key that is already taken by something else (yours wins; ours is the newcomer). Reports both,
-        because a set that silently dropped half of itself would look like the feature was broken.
+        key that is already taken by something else (yours wins; ours is the newcomer). Reports
+        both, because a set that silently dropped half of itself would look like the feature was
+        broken.
 
         `rows` is [(command, mods, key, speak)], the same shape as `defaults`; the set lands on the
         shared chord whatever `mods` says."""
@@ -486,8 +487,8 @@ class HotkeyManager:
 
     def _clash(self, shortcut_id: str, mods, key: str):
         """The LABEL of another shortcut already on this combination, or None. Our own clash, caught
-        before Windows sees it: Windows would just refuse the second registration and the error would
-        blame "another program" when the other program is us."""
+        before Windows sees it: Windows would just refuse the second registration and the error
+        would blame "another program" when the other program is us."""
         with self._lock:
             holder = self._holder(key, mods, except_id=shortcut_id)
         return None if holder is None else self._labeller(holder["command"])
@@ -572,13 +573,14 @@ class HotkeyManager:
 
     def _apply_now(self, registered: dict) -> None:
         """Unregister everything and register what the list now says. ONLY called on the pump thread
-        (see the module docstring). Rebuilding wholesale rather than diffing is deliberate: there are
-        a handful of hotkeys, the call is microseconds, and a diff is where the stale-registration
-        bugs would live.
+        (see the module docstring). Rebuilding wholesale rather than diffing is deliberate: there
+        are a handful of hotkeys, the call is microseconds, and a diff is where the
+        stale-registration bugs would live.
 
         A registration Windows REFUSES is recorded against the shortcut that caused it and shown on
         the page. That is the whole reason RegisterHotKey is the right mechanism: the clash is
-        reported at binding time instead of the shortcut silently doing nothing when you press it."""
+        reported at binding time instead of the shortcut silently doing nothing when you press
+        it."""
         with self._applied:
             gen = self._requested_gen
         for hk_id in list(registered):

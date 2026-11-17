@@ -41,6 +41,10 @@ import threading
 import time
 from ctypes import wintypes
 
+import win32api
+import win32con
+import win32gui
+import win32process
 import wx
 
 import announcer
@@ -54,10 +58,6 @@ import instance
 import rode_app
 import service
 import speech
-import win32api
-import win32con
-import win32gui
-import win32process
 from native import dialogs
 from native.dialogs import TextDialog
 from native.frame import MainFrame
@@ -150,7 +150,7 @@ class TrayApp:
         self._ended = False               # `_end_now` has run
         self._window_gone = False         # quit has closed the window and its dialogs
         self._last_open = float("-inf")
-        self._notice = "app"              # what the last notification was about: "app" or "firmware"
+        self._notice = "app"              # what the last notification was about: app or firmware
         self._create_window()
         self._add_icon()
         app_updates.notify = self._notify
@@ -215,11 +215,11 @@ class TrayApp:
             self.frame.check_updates()
 
     def _show_from_any_thread(self) -> bool | None:
-        """`app_window.show`. The Open AccessCaster shortcut calls this on the hotkey thread, inline,
-        where the foreground right exists (hotkeys._FOREGROUND_COMMANDS). The window is shown on
-        the wx thread by a SENT message, so the shortcut's handler is still running when it returns,
-        and the raise happens back on the calling thread. None while quitting: there is no window
-        to show."""
+        """`app_window.show`. The Open AccessCaster shortcut calls this on the hotkey thread,
+        inline, where the foreground right exists (hotkeys._FOREGROUND_COMMANDS). The window is
+        shown on the wx thread by a SENT message, so the shortcut's handler is still running when
+        it returns, and the raise happens back on the calling thread. None while quitting: there is
+        no window to show."""
         if self._quitting:
             return None
         if threading.get_ident() == self._ui_thread:

@@ -27,7 +27,6 @@ from desk_labels import (  # what each setting is called, shared with the announ
     unit_setting_words,
 )
 
-
 # What Device > Hardware shows from `read_hardware`, for following the desk. Storage is
 # followed through recordState, which the desk pushes when a card or drive goes in or out: its
 # `storageVolumeState` is left out because a recording ticks its free space down throughout.
@@ -37,10 +36,7 @@ HARDWARE_PROPS = frozenset(("recordState", "recordingTotalCount", "systemFirmwar
 
 def read_hardware() -> dict:
     """Device > Hardware from one model dump, no writes: the cards and drive with their free space,
-    the recorder's state and take count, the firmware and the wired network.
-
-    `storageVolumeState` is the usable source for card space: the numeric
-    storageVolumeFree/Capacity read 0 even when a volume is mounted (measured)."""
+    the recorder's state and take count, the firmware and the wired network."""
     try:
         with desk_access.hid_lock:
             blob = rcp_read.read_model_stable()
@@ -92,17 +88,18 @@ assert all(p in rcp_transfer.UNIT_SETTING_SEL for p in UNIT_SETTING_BY_PROP), \
 # anything that is neither. Same shape as profile_coverage.NOT_SAVED: an omission is a written
 # decision, not a gap nobody noticed.
 UNIT_SETTINGS_NOT_ON_PAGE = {
-    "outputMonMute": "Has its own control: Routing > Levels, 'Mute the monitor speakers'. A second "
-                     "copy on the Device page would be two controls for one setting, which is worse "
-                     "than none.",
+    "outputMonMute": "Has its own control: Routing > Levels, 'Mute the monitor speakers'. A "
+                     "second copy on the Device page would be two controls for one setting, which "
+                     "is worse than none.",
     "outputBTMute": "Has its own control beside the monitor mute, for the same reason.",
-    "outputBTLevel": "Has its own control: the Bluetooth output level, next to the two mutes. It is "
-                     "a level rather than a desk preference, so it belongs with the other levels.",
-    "systemDateTimezone": "DELIBERATELY NOT OFFERED. Measured display-only on this desk (three "
-                          "indices, three takes, one UTC second), and at the touchscreen sitting "
-                          "the desk's own Time Zone field would not open either. Writing it would "
-                          "change nothing a user could see, so offering it would be a lie. Still "
-                          "saved and restored by a profile, because it is real stored state.",
+    "outputBTLevel": "Has its own control: the Bluetooth output level, next to the two mutes. It "
+                     "is a level rather than a desk preference, so it belongs with the other "
+                     "levels.",
+    "systemDateTimezone": "DELIBERATELY NOT OFFERED. Display-only: a take's timestamp is the same "
+                          "UTC second whatever it holds, and the desk's own Time Zone field on the "
+                          "touchscreen does not open. Writing it would change nothing a user could "
+                          "see, so offering it would be a lie. Still saved and restored by a "
+                          "profile, because it is real stored state.",
     "systemDateTimeDaylightSavings": "NOT OFFERED, for the same reason as the timezone: a write is "
                                      "stored and reads back, and the clock on the desk's screen "
                                      "stays where it was. The touchscreen "
@@ -214,11 +211,11 @@ def action_set_unit_setting(prop: str, value: int) -> dict:
                                                        "outputMonMute")
                 if mute_after is not None and bool(mute_after) != bool(mute_before):
                     rcp_transfer.set_unit_setting("outputMonMute", bool(mute_before))
-                    extra = (" The desk un-muted the monitor speakers when it did that, so the mute "
-                             "has been put back on."
+                    extra = (" The desk un-muted the monitor speakers when it did that, so the "
+                             "mute has been put back on."
                              if mute_before else
-                             " The desk muted the monitor speakers when it did that, so the mute has "
-                             "been taken back off.")
+                             " The desk muted the monitor speakers when it did that, so the mute "
+                             "has been taken back off.")
     except Exception as exc:
         return {"ok": False, "message": f"Could not set {spec['label']}: {exc}"}
     return {"ok": True, "value": v, "message": f"{spec['label']}: {said}.{extra}"}
@@ -250,8 +247,9 @@ def _overview_routing(blob: bytes) -> dict:
         return {"ok": False, "reason": state.get("reason") or "The routing could not be read.",
                 "notes": []}
     # NAMED FROM EVERY SOURCE, COUNTED FROM THE LIVE ONES. The desk keeps a cross-point for Game,
-    # Music, A and B in both modes, but in Standard nothing can feed them, so a note that counts them
-    # says "USB 2 carries only Game, Music, A and B" about an output that carries nothing at all.
+    # Music, A and B in both modes, but in Standard nothing can feed them, so a note that counts
+    # them says "USB 2 carries only Game, Music, A and B" about an output that carries nothing at
+    # all.
     src_label = {s["index"]: s["label"] for s in (dev.matrix.all_sources or ())}
     live = {s["index"] for s in (dev.matrix.sources_for(channels.usb_expanded()) or ())}
     notes = []
@@ -453,15 +451,15 @@ def read_status() -> dict:
         interfaces = [i.describe() for i in found]
         iface = rcp_hid.find_control_interface()
         # WHICH KIND OF NOTHING IS IT? The finder returns MI_09 or None and never guesses (see its
-        # docstring), so telling "no desk at all" from "a desk on the wrong port" is done here, where
-        # the answer is a sentence for a person rather than a value for a caller.
+        # docstring), so telling "no desk at all" from "a desk on the wrong port" is done here,
+        # where the answer is a sentence for a person rather than a value for a caller.
         #
-        # The desk has TWO USB ports and this protocol works over exactly one interface, MI_09, which
-        # is on USB 1, the port nearest the power inlet. USB 2 presents its own device (PID 0x0026,
-        # MI_03) that carries the audio and answers no read: every report-1 command comes back
-        # empty. So a cable in USB 2 alone looks like a connected unit to anyone watching the
-        # lights while the app can do nothing with it, and that state invites a whole causal theory
-        # about the protocol when the real answer is which cable is plugged in.
+        # The desk has TWO USB ports and this protocol works over exactly one interface, MI_09,
+        # which is on USB 1, the port nearest the power inlet. USB 2 presents its own device
+        # (PID 0x0026, MI_03) that carries the audio and answers no read: every report-1 command
+        # comes back empty. So a cable in USB 2 alone looks like a connected unit to anyone
+        # watching the lights while the app can do nothing with it, and that state invites a whole
+        # causal theory about the protocol when the real answer is which cable is plugged in.
         if iface is None:
             others = [i for i in found if i.is_control]
             if others:
@@ -495,15 +493,15 @@ def read_status() -> dict:
             # ONE COMMAND, `I`, AND NEVER `VER` OR THE `U` PING. With the desk in Expanded, either
             # of those two makes it drop RODE's virtual `System (RODECaster)` playback endpoint
             # about 17 seconds later; Windows surprise-removes and re-adds it, and a screen reader
-            # on that output loses its speech for a few seconds. Measured one command at a time:
-            # `I` and a model dump are clean. `I` answering is proof enough that the desk is
-            # responding, and the identity below comes from the USB serial, so nothing is lost.
+            # on that output loses its speech for a few seconds. `I` and a model dump leave the
+            # endpoint alone. `I` answering is proof enough that the desk is responding, and the
+            # identity below comes from the USB serial, so nothing is lost.
             with rcp_hid.RodeCaster.open_path(iface, "device status") as dev:
                 info = dev.get_info()
             online = bool(info)
             # THE UNIT'S IDENTITY IS ITS USB SERIAL. It survives factory resets and power cycles
-            # unchanged, and comes free with the enumeration without opening anything. `VER` was
-            # never a substitute: it changes across a reboot, so anything filed under it is orphaned.
+            # unchanged, and comes free with the enumeration without opening anything. `VER` is no
+            # substitute: it changes across a reboot, so anything filed under it is orphaned.
             _note_id(device_name, iface.serial_number)
             return {
                 "connected": True,

@@ -19,7 +19,6 @@ import recorder
 import speech
 import wording
 
-
 # THE RECORDER. Start, pause and stop from software, and say what the unit is doing.
 #
 # TWO THINGS SHAPE THIS CODE:

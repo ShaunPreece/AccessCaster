@@ -398,7 +398,8 @@ def parse_recording(uid, content: str) -> dict:
     if len(parts) < 5:
         return {"uid": uid, "name": str(content), "seconds": None, "when": "", "path": "",
                 "duration": describe_duration(None)}
-    # A millisecond epoch has 13 digits until the year 2286; nothing else in the record is that long.
+    # A millisecond epoch has 13 digits until the year 2286; nothing else in the record is that
+    # long.
     at = next((i for i in range(3, len(parts) - 1)
                if parts[i].isdigit() and len(parts[i]) >= 12), None)
     seconds = None
@@ -480,8 +481,8 @@ def describe(blob: bytes) -> dict:
 # what actually happened - which is the only honest way round, since the request field self-clears.
 
 def send_command(value: int) -> None:
-    """Write `requestRecordState`. Nothing is verified here: see recording.action_record, which reads
-    the state back rather than trusting the write."""
+    """Write `requestRecordState`. Nothing is verified here: see recording.action_record, which
+    reads the state back rather than trusting the write."""
     rcp_transfer.write_at(rcp_transfer.RECORDER, "requestRecordState", "int", int(value))
 
 
@@ -518,7 +519,8 @@ def build_delete_request(uid: int) -> bytes:
 
 def delete_recording(uid: int) -> None:
     """Send the delete request. VERIFIES NOTHING - the field self-clears either way, so the caller
-    must re-read the recordings list and check the UID has gone (recording.action_delete_recording)."""
+    must re-read the recordings list and check the UID has gone
+    (recording.action_delete_recording)."""
     rcp_transfer.send_record(build_delete_request(uid))
 
 
@@ -586,7 +588,8 @@ class Watcher:
         if state is None:
             return
         with self._lock:
-            # A push from a state outside a take witnessed the start; a repeat, or a resume, did not.
+            # A push from a state outside a take witnessed the start; a repeat, or a resume, did
+            # not.
             self._advance(state, timed=push.was not in (RECORDING, PAUSED))
         if push.was != state and self._on_change:
             try:

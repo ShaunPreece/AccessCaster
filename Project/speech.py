@@ -10,9 +10,7 @@ opens it for every phrase and its voices pad each one with silence (66 to 86 ms 
 word on Hazel, 650 ms after), so in a fast run of phrases, a fader moving, each new number cuts
 off the last before any of it is heard.
 
-`enabled` IS THE ANNOUNCEMENTS SWITCH, and `say` enforces it because every phrase passes through
-`say`: roughly half the speech comes from outside the announcer (the recorder, CallMe, the
-virtual-devices follow-up after a USB mode change). `announcer.py` sets and clears it.
+`enabled` IS THE ANNOUNCEMENTS SWITCH, enforced in `_submit`; `announcer.py` sets and clears it.
 """
 from __future__ import annotations
 
@@ -478,8 +476,8 @@ def start_loop(name: str, delay_s: float = 0.0) -> Loop | None:
 
 
 def action_set_announce_volume(percent: int) -> dict:
-    """How loud announcements are. It scales our own samples, so this changes OUR speech only and never
-    Windows volume, another app, or the desk's audio. The confirmation is spoken, which is the
+    """How loud announcements are. It scales our own samples, so this changes OUR speech only and
+    never Windows volume, another app, or the desk's audio. The confirmation is spoken, which is the
     point: it arrives at the new level, so you hear what you have chosen straight away."""
     global volume
     volume = clamp_volume(percent)
@@ -517,9 +515,9 @@ def action_set_announce_voice(voice: str) -> dict:
 
 
 def action_set_announce_output(output: str) -> dict:
-    """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it is the device our
-    own player opens, so it does not move the system default device, and it does not
-    touch the screen reader or any other program. It exists because the default output is often
+    """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it is the device
+    our own player opens, so it does not move the system default device, and it does not touch the
+    screen reader or any other program. It exists because the default output is often
     the RODECaster itself, and then announcements vanish the moment another channel is soloed."""
     return _choose("output", output)
 

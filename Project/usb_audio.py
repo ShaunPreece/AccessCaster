@@ -72,8 +72,8 @@ def _clear_extended_faders() -> list:
     THE TOUCHSCREEN DOES THIS AND THE DESK DOES NOT. Leaving Expanded on the unit's screen asks
     "All extended inputs will be unassigned" and empties those faders; the same change written over
     USB leaves them assigned to inputs nothing can feed, so the faders go dead. Each channel's
-    processing is parked by `faders.follow_chains`, exactly as when a channel is moved off a fader by
-    hand. Holds the HID lock. Writes nothing when no fader carries one of the four."""
+    processing is parked by `faders.follow_chains`, exactly as when a channel is moved off a fader
+    by hand. Holds the HID lock. Writes nothing when no fader carries one of the four."""
     spec = faders.active_faders()
     extended = {code for code, _label in spec.expanded_sources}
     if not extended or faders.fader_write_gate() is not None:
@@ -508,7 +508,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
         # so nothing is waited for and the user is told what the four need.
         return " Game, Music, A and B also need this computer to receive every channel."
     if not arrived and st.connected:
-        return ""       # the desk stayed on the bus and the service stays bound: nothing to wait for
+        return ""   # the desk stayed on the bus and the service stays bound: nothing to wait for
     # The bind itself is announced by RODE's driver, so only the parked default is ours to say.
     parking = _virtual_devices_parking
     return (f" Windows sound is on {parking.name} until RODE's driver connects."

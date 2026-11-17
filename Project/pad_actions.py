@@ -59,7 +59,8 @@ def soundpad_model() -> dict:
 def max_user_pads() -> int:
     """Highest 1-based grid number a pad action may target on the ACTIVE device (Pro II = 56 on
     a 8/bank x 7-user-bank grid; Duo = 42 on a 6/bank grid). Device-aware so a Duo action cannot
-    address a slot beyond its 48-slot model. Pad WRITES are also gated by soundpad's pad_write cap."""
+    address a slot beyond its 48-slot model. Pad WRITES are also gated by soundpad's pad_write
+    cap."""
     return devices.get_active_device().pad.max_user_pads
 
 
@@ -108,8 +109,8 @@ def _pad_name_from_filename(filename: str) -> str:
 
 
 def action_add_sound(pad_n: int, filename: str, raw: bytes, replay: bool = True) -> dict:
-    """Put the uploaded sound on the pad via the PROVEN clear+create path (soundpad.create_sound),
-    NEVER an overwrite-in-place. create_sound clears the slot if occupied, then creates a fresh
+    """Put the uploaded sound on the pad by clear and create (soundpad.create_sound), NEVER an
+    overwrite in place. create_sound clears the slot if occupied, then creates a fresh
     sound pad writing pads/<grid>/sound.<ext>, and is gated on a clean effect-object pool.
 
     NO CONVERSION: the unit's pad player accepts WAV at every rate (22k-192k), bit depth
@@ -159,7 +160,8 @@ def action_set_replay(grid: int, on: bool) -> dict:
 
 
 def action_set_pad_gain(grid: int, db: float) -> dict:
-    """Set per-pad output volume (padGain, dB) on an existing pad, in place. Read-back verifiable."""
+    """Set per-pad output volume (padGain, dB) on an existing pad, in place. Read-back
+    verifiable."""
     return _pad_write(grid, "Could not change the pad's volume",
                       lambda: soundpad.set_pad_property(grid, "padGain", db))
 
@@ -202,8 +204,8 @@ def action_set_pad_trigger(grid: int, field: str, value: int) -> dict:
     ONE field per request, like every other live pad edit, so each change is read back and spoken on
     its own. `field` is validated against soundpad.TRIGGER_EDIT (the same spec that builds the
     window's controls and the write ranges), so an unknown field is REFUSED rather than quietly
-    ignored - a silent no-op on a pad mapping is the worst outcome here, since nothing about the desk
-    would look wrong afterwards."""
+    ignored - a silent no-op on a pad mapping is the worst outcome here, since nothing about the
+    desk would look wrong afterwards."""
     known = {f["key"]: f for f in soundpad.TRIGGER_EDIT}
     if field == "custom":
         def _custom():
@@ -247,8 +249,8 @@ def action_set_pad_fade(grid: int, field: str, seconds: float) -> dict:
 
 
 def action_set_pad_flag(grid: int, name: str, on: bool) -> dict:
-    """The two named per-pad switches: a Fade pad excluding the host, and a Censor pad using your own
-    sound instead of the beep. Named (soundpad.PAD_FLAG) rather than taking a property, so a
+    """The two named per-pad switches: a Fade pad excluding the host, and a Censor pad using your
+    own sound instead of the beep. Named (soundpad.PAD_FLAG) rather than taking a property, so a
     caller cannot ask for an arbitrary pad write."""
     return _pad_write(grid, "Could not change that pad setting",
                       lambda: soundpad.set_pad_flag(grid, name, on))
@@ -332,7 +334,8 @@ def export_dir() -> str:
 
 
 def action_export_pad(pad: int) -> dict:
-    """Copy one pad's sound off the unit into the exports folder. Reads the unit; changes nothing."""
+    """Copy one pad's sound off the unit into the exports folder. Reads the unit; changes
+    nothing."""
     return _pad_write(pad, f"Could not export pad {pad}",
                       lambda: soundpad.export_pad_audio(int(pad), export_dir()))
 
@@ -362,8 +365,9 @@ def action_assign_fx(grid: int, effect: str) -> dict:
 
 
 def action_create_special_pad(grid: int, type_str: str) -> dict:
-    """Create a Mixer-action pad ("mixer:0".."mixer:4") or a MIDI Trigger pad ("trigger") on `grid`.
-    Both are pool-safe (no region-B writes). Clears the slot first if occupied (soundpad does this)."""
+    """Create a Mixer-action pad ("mixer:0".."mixer:4") or a MIDI Trigger pad ("trigger") on
+    `grid`. Both are pool-safe (no region-B writes). Clears the slot first if occupied (soundpad
+    does this)."""
     def _make():
         if type_str.startswith("mixer:"):
             return soundpad.create_mixer(grid, int(type_str.split(":", 1)[1]))
