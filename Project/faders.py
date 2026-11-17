@@ -629,8 +629,8 @@ def action_set_fader(fader_index: int, code: int) -> dict:
 # usable without sight (its target is chosen by touch and it silently unbinds), which is why these
 # matter. Both are confirmed writes; see RODECASTER_PROTOCOL.txt 6.1.
 def level_write_gate():
-    """Fader and monitor LEVEL writes. The one gate with a second condition beyond the cap: the
-    device must also have a virtual fader, so it cannot use desk_access.cap_gate alone."""
+    """Fader and monitor LEVEL writes. Beyond the cap, the device must also have a virtual fader,
+    so this cannot use desk_access.cap_gate alone."""
     dev = devices.get_active_device()
     if "level_write" not in dev.caps or not dev.fader.level_faders:
         return {"ok": False,
@@ -753,9 +753,9 @@ def action_set_monitor_speaker_level(percent: int) -> dict:
 
 
 # A channel button pressed twice puts the encoder on the virtual faders and the monitor. Selecting a
-# strip and then none does the same from software, and overrides a target the touchscreen chose: an
-# encoder that was turning Mic 1's gain with systemChannelSelected already at -1 turned the monitor
-# level afterwards (measured on a Pro II). The strip is selected, never turned, so no gain moves.
+# strip and then none does the same from software, and overrides a target the touchscreen chose
+# even while systemChannelSelected already reads -1: on a Pro II, an encoder turning Mic 1's gain
+# that way turns the monitor level afterwards. The strip is selected, never turned, so no gain moves.
 _ENCODER_SELECT_SETTLE_S = 0.8
 ENCODER_HOME = "Encoder on the virtual faders and monitor."
 
@@ -781,7 +781,7 @@ def action_set_output_mute(which: str, on: bool) -> dict:
     for when somebody walks in, and the only other way to do it is a control on the unit you have to
     find by touch.
 
-    The two are one endpoint rather than two because they are the same idea with a different target,
+    The two are one function rather than two because they are the same idea with a different target,
     and because the message has to draw the SAME distinction in both directions: muting an output
     changes what somebody HEARS, never what is recorded or streamed."""
     targets = {

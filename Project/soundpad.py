@@ -5,8 +5,9 @@ ALL pad logic lives HERE and the app calls into it, so no second copy can drift.
 never overwritten in place by a create: that truncates its WAV. A new sound is always clear then
 create.
 
-LAYERING: pad_records.py stays underneath as the low-level byte-builder (it has the byte-for-byte
-selftest vs the captures). soundpad.py is the operations layer over it. Nothing else holds pad logic.
+LAYERING: pad_records.py stays underneath as the low-level byte-builder, its bytes checked by
+DevTools/test_pad_records.py. soundpad.py is the operations layer over it. Nothing else holds pad
+logic.
 
 THE ONE RULE (SOUNDPADS.md): keep the region-B effect-object pool clean (one object per FX pad).
 Every mutating op cleans the pool first (clean_pool) and re-reports health, because a stray object
@@ -742,8 +743,8 @@ def free_effect_subhandle(target_idx: int) -> int:
     WHY REUSE, NOT APPEND: the LIVE FX engine binds a pad to the FIRST region-B effect-object whose
     effectsIdx == padIdx. An effect appended at the end leaves the first object empty, so the engine
     binds silence and the pad goes dead after a reboot. The RODE app writes to the pad's FIRST
-    matching object, so that index is reused. A hard-coded 0x0B,
-    the total object count, or a plain append each silence this pad's effect or another's.
+    matching object, so that index is reused. For a pad that already has an object, a hard-coded
+    0x0B, the total object count or a plain append each silence this pad's effect or another's.
     """
     objects = effect_objects()
     return next((o.index for o in objects if o.effects_idx == target_idx), len(objects))
@@ -1937,8 +1938,8 @@ def assign_fx_to_grid(grid: int, effect_name: str, active: bool = False) -> dict
     SELF-HEALING: instead of refusing on a polluted pool, safe_assign_fx_recipe scrubs the target
     slot (clears any pad, GCs any leftover orphan object for this padIdx) and then does the proven
     create, so it cannot leave a duplicate. Reports health after. `active` defaults False so
-    assigning an effect leaves the pad at REST (matching the factory) and never leaves a mic processing; the live preview path
-    passes active=True itself."""
+    assigning an effect leaves the pad at REST (matching the factory) and never leaves a mic
+    processing; the live preview path passes active=True itself."""
     pidx = grid - 1
     key = _resolve_recipe(effect_name)
     spec = all_recipes()[key]
@@ -2201,10 +2202,10 @@ def heal_fx_pool(progress=None) -> dict:
     object at 65, because RODE's factory default show ships the FX pad records with their
     `effectsIdx` pointers and no objects for them to point at. The firmware garbage-collects an
     object the moment no pad claims it but never allocates one (SOUNDPADS.md section 5), and only
-    an explicit effects block (a 0x9d frame) allocates. So `newFromDefault` drops the pad table, the GC takes all six objects with it,
-    the default show writes the records back, and nothing re-allocates. The user gets six voice-FX
-    pads with the right name, type and colour that make no sound and process no mic - the exact class
-    of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
+    an explicit effects block (a 0x9d frame) allocates. So `newFromDefault` drops the pad table,
+    the GC takes all six objects with it, the default show writes the records back, and nothing
+    re-allocates. The user gets six voice-FX pads with the right name, type and colour that make
+    no sound and process no mic - the exact class of fault nothing on screen can show. Object 65 survives because it belongs to no pad, so the
     pad-keyed GC never reaches it.
 
     A show IMPORT is NOT affected: an exported show carries the objects. It is the DEFAULT show
@@ -2605,8 +2606,8 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
 # PURPOSE (no remountPadStorage, no file writes), which is why clearing a pad raises no Windows
 # "problem with this drive" toast. It drops the pad RECORD and its region-B effect object and leaves
 # the wav on the pad volume, and a new sound create writes a NEW file beside it under its own name. So
-# without this sweep every replacement and every restore-to-defaults leaks the previous audio:
-# measured on a working desk, 53.3 MB of 73.0 MB was files no pad pointed at.
+# without this sweep every replacement and every restore-to-defaults leaks the previous audio, and
+# on a desk in regular use most of the pad volume (53 MB of 73 MB) is files no pad points at.
 #
 # DELETED OUTRIGHT, NOT ARCHIVED, and for a better reason than tidiness: these pads get played into
 # calls and voicemails, so the owner has to know where that audio ends up, and a hidden copy of it
@@ -2957,12 +2958,11 @@ def unchanged_pads(pads: list, src_dir: str, progress=None) -> set:
 def restore_pads(pads: list, src_dir: str, progress=None, verify_first: bool = True) -> dict:
     """Rebuild a backed-up pad set onto the unit (clear+create each, lowest grid first). Sound
     files come from src_dir/<grid>/<file>. CALLER HOLDS THE HID LOCK, and should also hold ONE
-    `rcp_transfer.transfer_session()` around this: without it every
-    create enters transfer mode, remounts the volume and leaves again for itself - sixteen cycles
-    for sixteen pads, each one popping a Windows device sound as the volume mounts. While a session
-    is held, the per-pad transfer-mode calls do nothing. Returns {ok,
-    results, skipped, health}. Waits for each pad to register before the next create (the stale-handle
-    guard against a stale free handle)."""
+    `rcp_transfer.transfer_session()` around this: without it every create enters transfer mode,
+    remounts the volume and leaves again for itself - sixteen cycles for sixteen pads, each one
+    popping a Windows device sound as the volume mounts. While a session is held, the per-pad
+    transfer-mode calls do nothing. Returns {ok, results, skipped, unchanged, health}. Waits for
+    each pad to register before the next create (see wait_for_pad_present)."""
     results = []
     skipped = []
     ok = True
