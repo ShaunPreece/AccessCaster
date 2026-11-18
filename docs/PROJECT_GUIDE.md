@@ -2029,6 +2029,12 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   let the slider's position and the written legs disagree.
 - **EVERY PAN IS WORDED BY `desk_labels.pan_offset_words`**; `pan_words` converts a position to
   an offset and calls it, so the reply and the announcer word one pan the same way.
+- **EVERY PROCESSING VALUE IS WORDED BY `desk_labels.processing_words`**, from the
+  `PROCESSING_UNITS` table (ranges and curves in the protocol spec, 4.4): the window's sliders,
+  the reply to a write and a change made elsewhere all call it, so one knob is never spoken in two
+  units. A slider still runs 0 to 100 along the knob's own travel, like the desk's encoder, and
+  only its words are in real units. `test_native_channels` pins the table to values read off
+  RODE's app.
 - **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
   or entering Custom moves the output's cross-points on the desk, which it does not push. Its own
   cross-point writes need nothing: the desk pushes back neither `mixDisabled` nor `outputMixMinus`

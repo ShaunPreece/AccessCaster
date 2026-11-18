@@ -592,6 +592,44 @@ dB/Hz/ms). The index is the fader strip the channel sits on, on both desks (4.1)
   - VoxLab:    channelDepth, channelSparkle, channelPunch
   - Aphex:     aphexBBDrive, aphexAEMix, aphexBBTune, aphexAETune
 
+  REAL UNITS. The 0..1 value is the position along the knob's travel. The engine's range
+  table (rc_audio_mixer, firmware 1.7.7) holds each knob's low, high and default, and lists
+  the logarithmic knobs separately; RODE's app (2.0.115) displays exactly these values,
+  read at 0.25 and 0.75 on every knob, 18th November 2026. With x the 0..1 value:
+    linear  low + (high - low) * x
+    square  low + (high - low) * x * x
+    log     low * (high / low) ** x
+  eqLowGain / eqMidGain / eqHighGain   -12 .. 12 dB        linear
+  eqLowShelf                           20 .. 200 Hz        square
+  eqMidBell                            200 .. 2000 Hz      square
+  eqHighBell                           2000 .. 12000 Hz    square
+  eqLowQ / eqMidQ / eqHighQ            0.1 .. 10           linear (no Q control in RODE's
+                                                           app; the factory 0.3/0.5/0.3 fit)
+  hpfFrequency                         20 .. 200 Hz        square
+  hpfSlope                             6 .. 24 dB/octave   linear
+  compressorThreshold                  -60 .. 0 dB         linear
+  compressorRatio                      1.5 .. 4.5 :1       square
+  compressorAttack                     0.1 .. 10 ms        log
+  compressorRelease                    5 .. 200 ms         log
+  compressorGain                       0 .. 9 dB           linear
+  noiseGateThreshold                   -60 .. 0 dB         linear
+  noiseGateAttack                      0.1 .. 1000 ms      log
+  noiseGateHold / noiseGateRelease     50 .. 2000 ms       log
+  noiseGateHysteresis                  0 .. 100 %          linear
+  noiseGateRange                       UNKNOWN: RODE's app showed 0.25 as -13 dB once and
+                                       -16 dB later, 0.3 as -29 dB and 0.5 as -100 dB
+  deesserThreshold                     -60 .. 0 dB         linear
+  deesserRatio                         1 .. 10 :1          square
+  deesserAttack                        0.1 .. 10 ms        log
+  deesserRelease                       50 .. 2000 ms       log
+  deesserGain                          0 .. 9 dB           linear
+  deesserFrequency                     1000 .. 8000 Hz     log (the factory 0.7559 is
+                                       5000 Hz on a square curve, so it reads as 4816 Hz)
+  aphexBBDrive / aphexAEMix            0 .. 100 %          linear
+  aphexBBTune                          60 .. 312 Hz        square
+  aphexAETune                          600 .. 5000 Hz      square
+  channelDepth, channelSparkle and channelPunch are macros with no unit.
+
 MODULE TOGGLES (compact bool, same selector):
   - hpfOn, eqOn, compressorOn, noiseGateOn, deesserOn, aphexOn, channelPanOn,
     eqHighOn, eqMidOn, eqLowOn

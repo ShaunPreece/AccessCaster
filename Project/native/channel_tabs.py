@@ -12,7 +12,7 @@ import channel_actions
 import mic_presets
 import mute_solo
 import pan_link
-from desk_labels import EFFECT_PARAMS, pan_offset_words, pan_words
+from desk_labels import EFFECT_PARAMS, pan_offset_words, pan_words, processing_words
 from native import a11y
 from native.calls import call
 from native.channel_jobs import AutoGain
@@ -394,7 +394,8 @@ class ParamTab(Tab):
                     lambda pct, prop=ctrl["prop"]: channel_actions.action_set_channel_param(
                         name, prop, pct / 100),
                     *page.field("params", ctrl["prop"], scale=100),
-                    words=pan_words if ctrl.get("pan") else percent_words, unread=50))
+                    words=lambda pct, prop=ctrl["prop"]: processing_words(prop, pct / 100),
+                    unread=50))
                 if ctrl.get("pan"):
                     self.pan_controls.append(slider.acc)
             if legs:

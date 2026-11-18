@@ -244,7 +244,8 @@ def action_delete_routing_scheme(name: str) -> dict:
 # Set how loud each source is in ONE output (e.g. your headphones), independent of the recording
 # and other outputs. Uses the matrix cross-point level (mixLevelWithAnchor): the output must be in
 # Custom mode, then we unlink the one source and set its absolute level. Reading is reliable (the
-# 13*source+output grid formula), so we prefill and can reset cleanly. Refused during a SIP call.
+# 13*source+output grid formula), so we prefill and can reset cleanly. A CallMe call leaves the
+# grid's shape alone, and a level moved during one is heard.
 # The monitor-mix outputs are the headphone/monitor outputs (matrix indices 0-4); we intersect
 # this with what the CONNECTED device actually exposes (below), so the Duo shows only its Headphone
 # 1/2 and the Pro II shows Headphone 1-4 + Monitor. Source labels + indices come straight from the
@@ -268,7 +269,7 @@ def monitor_mix_model() -> dict:
     """Static layout for the Monitor mix UI (the outputs + sources the connected device exposes)."""
     read_only = write_gate() is not None
     note = ("How loud each source is in the chosen output, without changing the recording or "
-            "other outputs. Moving one makes it a custom mix. Not available during a phone call.")
+            "other outputs. Moving one makes it a custom mix.")
     if read_only:
         note = ("Shows how loud each source is in each headphone output on this device. Changing "
                 "these levels is not enabled here yet, so the sliders are read-only.")

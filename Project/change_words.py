@@ -205,11 +205,9 @@ def describe(name: str, value, kind: str, key, was) -> Optional[Change]:
                           f"{who} {desk_labels.MODULE_LABEL_BY_PROP[name].lower()} "
                           f"{_on_off(value)}", ("processing", strip))
         if name in desk_labels.PROCESSING_SPOKEN and kind == "float":
-            pct = wording.percent(value)
-            said = (desk_labels.pan_words(pct) if name in desk_labels.PAN_PROPS
-                    else f"{pct} percent")
             return Change((name, strip),
-                          f"{who} {desk_labels.PROCESSING_SPOKEN[name].lower()} {said}",
+                          f"{who} {desk_labels.PROCESSING_SPOKEN[name].lower()} "
+                          f"{desk_labels.processing_words(name, value)}",
                           ("processing", strip))
         return None
 

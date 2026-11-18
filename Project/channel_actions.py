@@ -24,7 +24,7 @@ from desk_labels import (
     PROCESSING_CONTROLS,
     PROCESSING_MODULES,
     PROCESSING_SPOKEN,
-    pan_words,
+    processing_words,
 )
 
 _PROCESSING_CONTROL_BY_PROP = {c["prop"]: c for g in PROCESSING_CONTROLS for c in g["controls"]}
@@ -269,8 +269,7 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
     ch = channels.ui_channel(name)
     if ch is None:
         return {"ok": False, "message": f"Unknown channel: {name}."}
-    ctrl = _PROCESSING_CONTROL_BY_PROP.get(prop)
-    if ctrl is None:
+    if prop not in _PROCESSING_CONTROL_BY_PROP:
         return {"ok": False, "message": f"Unknown processing control: {prop}."}
     try:
         v = max(0.0, min(1.0, float(value01)))
@@ -278,7 +277,6 @@ def action_set_channel_param(name: str, prop: str, value01: float) -> dict:
         return {"ok": False, "message": "Value must be a number from 0 to 1."}
     with desk_access.hid_lock:
         channels.set_channel_processing(name, prop, v)
-    pct = round(v * 100)
-    where = pan_words(pct) if ctrl.get("pan") else f"{pct} percent"
     return {"ok": True,
-            "message": f"{ch['label']} {PROCESSING_SPOKEN[prop].lower()} set to {where}."}
+            "message": f"{ch['label']} {PROCESSING_SPOKEN[prop].lower()} set to "
+                       f"{processing_words(prop, v)}."}

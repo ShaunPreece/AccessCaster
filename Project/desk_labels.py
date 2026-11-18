@@ -7,11 +7,13 @@ so a label changed here changes the control and the spoken change together.
 from __future__ import annotations
 
 import channels
+import wording
 
-# Channel-processing controls exposed in the UI. Every parameter is a normalised
-# 0..1 float on the device (we present it as 0-100 percent); the property name
-# drives it (see channels.set_channel_processing / PROCESSING_PROPS). Grouped
-# the way the RODE app's per-channel processing panel groups them.
+# Channel-processing controls exposed in the UI. Every parameter is a normalised 0..1 float on the
+# device, the position along the knob's travel; a slider runs 0 to 100 along that same travel and
+# speaks the real value (`processing_words`). The property name drives it (see
+# channels.set_channel_processing / PROCESSING_PROPS). Grouped the way the RODE app's per-channel
+# processing panel groups them.
 PROCESSING_CONTROLS = [
     # Each band is gain, then frequency, then WIDTH (Q), so the three controls for one band sit
     # together rather than the six-then-three arrangement the property list would suggest. "Width"
@@ -80,6 +82,103 @@ PROCESSING_SPOKEN = {c["prop"]: (c["label"] if g["group"] in ("Pan", "Tone shapi
 PROCESSING_SPOKEN.update({"aphexBBTune": "Big bottom tune", "aphexAETune": "Aural exciter tune"})
 PAN_PROPS = frozenset(c["prop"] for g in PROCESSING_CONTROLS for c in g["controls"]
                       if c.get("pan"))
+
+# Each processing knob's real range and curve: (low, high, curve, unit). The engine's own range
+# table (rc_audio_mixer) holds the same lows, highs and defaults, and lists the "log" knobs
+# separately; RODE's app displays exactly these values at every knob position read. A position x
+# from 0 to 1 is:
+#   "linear"  low + (high - low) * x
+#   "square"  low + (high - low) * x squared, so the bottom of the travel is finer
+#   "log"     low * (high / low) ** x
+# A knob with no entry is spoken as a percent: the gate's range, whose unit RODE's app shows
+# inconsistently and the engine's table does not give, and Depth, Sparkle and Punch, which are
+# macros with no unit.
+PROCESSING_UNITS = {
+    "eqLowGain": (-12, 12, "linear", "dB"),
+    "eqMidGain": (-12, 12, "linear", "dB"),
+    "eqHighGain": (-12, 12, "linear", "dB"),
+    "eqLowShelf": (20, 200, "square", "Hz"),
+    "eqMidBell": (200, 2000, "square", "Hz"),
+    "eqHighBell": (2000, 12000, "square", "Hz"),
+    # RODE's app has no Q control, so Q's curve is the engine's range with the factory defaults
+    # (0.3, 0.5, 0.3), which land on it exactly.
+    "eqLowQ": (0.1, 10, "linear", "Q"),
+    "eqMidQ": (0.1, 10, "linear", "Q"),
+    "eqHighQ": (0.1, 10, "linear", "Q"),
+    "hpfFrequency": (20, 200, "square", "Hz"),
+    "hpfSlope": (6, 24, "linear", "dB/oct"),
+    "compressorThreshold": (-60, 0, "linear", "dB"),
+    "compressorRatio": (1.5, 4.5, "square", "ratio"),
+    "compressorAttack": (0.1, 10, "log", "ms"),
+    "compressorRelease": (5, 200, "log", "ms"),
+    "compressorGain": (0, 9, "linear", "dB"),
+    "noiseGateThreshold": (-60, 0, "linear", "dB"),
+    "noiseGateAttack": (0.1, 1000, "log", "ms"),
+    "noiseGateHold": (50, 2000, "log", "ms"),
+    "noiseGateRelease": (50, 2000, "log", "ms"),
+    "noiseGateHysteresis": (0, 100, "linear", "%"),
+    "deesserThreshold": (-60, 0, "linear", "dB"),
+    "deesserRatio": (1, 10, "square", "ratio"),
+    "deesserAttack": (0.1, 10, "log", "ms"),
+    "deesserRelease": (50, 2000, "log", "ms"),
+    "deesserGain": (0, 9, "linear", "dB"),
+    "deesserFrequency": (1000, 8000, "log", "Hz"),
+    "aphexBBDrive": (0, 100, "linear", "%"),
+    "aphexAEMix": (0, 100, "linear", "%"),
+    "aphexBBTune": (60, 312, "square", "Hz"),
+    "aphexAETune": (600, 5000, "square", "Hz"),
+}
+
+
+def processing_value(prop: str, position: float) -> float:
+    """A knob's real value at `position` (0 to 1 along its travel). Only for a knob in
+    PROCESSING_UNITS."""
+    low, high, curve, _unit = PROCESSING_UNITS[prop]
+    x = max(0.0, min(1.0, float(position)))
+    if curve == "log":
+        return low * (high / low) ** x
+    return low + (high - low) * (x * x if curve == "square" else x)
+
+
+def _number(value: float, places: int | None = None) -> str:
+    """A number as spoken: `places` decimals, or by default as many as its size needs (2 below
+    10, 1 below 100, none above), with trailing zeros dropped and never "-0"."""
+    if places is None:
+        size = abs(value)
+        places = 2 if size < 10 else 1 if size < 100 else 0
+    text = f"{value:.{places}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
+
+def unit_words(value: float, unit: str) -> str:
+    """A real value with its unit in words, as a screen reader should say it: "-20 decibels",
+    "3.2 to 1", "1.68 kilohertz"."""
+    if unit == "dB":
+        return f"{_number(value, 1)} decibels"
+    if unit == "dB/oct":
+        return f"{_number(value, 1)} decibels per octave"
+    if unit == "ratio":
+        return f"{_number(value, 1)} to 1"
+    if unit == "%":
+        return f"{_number(value, 0)} percent"
+    if unit == "ms":
+        return f"{_number(value)} milliseconds"
+    if unit == "Hz":
+        return (f"{_number(value / 1000)} kilohertz" if value >= 1000
+                else f"{_number(value)} hertz")
+    return _number(value)
+
+
+def processing_words(prop: str, position: float) -> str:
+    """THE one place a processing knob's value is turned into words, for the window, its replies
+    and the spoken changes alike. `position` is the desk's 0 to 1."""
+    if prop in PAN_PROPS:
+        return pan_words(wording.percent(position))
+    if prop in PROCESSING_UNITS:
+        return unit_words(processing_value(prop, position), PROCESSING_UNITS[prop][3])
+    return f"{wording.percent(position)} percent"
 
 # Module on/off toggles shown in the UI, with screen-reader labels. `prop` is the key of the
 # module's state in a channel record's `modules`, which is not always `key` + "On" (pan's is
