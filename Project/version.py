@@ -34,11 +34,33 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.1.1"
+__version__ = "3.2.0"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
+    ("3.2.0", [
+        ("Processing in real units",
+         "The EQ, high-pass filter, compressor, noise gate, de-esser and Aphex controls now show "
+         "and speak real values, such as -20 decibels, 3 to 1, 1.68 kilohertz or 21 "
+         "milliseconds, instead of percent. The noise gate's range is still a percent."),
+
+        ("Auto gain and level check sounds",
+         "Their start, stop and clipping sounds now play where the announcer speaks, so they are "
+         "heard even when Windows' default output is somewhere else."),
+
+        ("A backup for each desk, and an automatic firmware check",
+         "Each desk you connect is offered its own as-found backup, even a second desk plugged in "
+         "later. AccessCaster checks for new desk firmware on its own update schedule and shows "
+         "one Windows notification per desk; choosing it opens the install question."),
+
+        ("Fixes",
+         "Solos, mutes and fader levels are read from each fader's own settings, so a stray "
+         "setting on the desk cannot shift them. Lists no longer read themselves out again when "
+         "the desk updates them. The SMART pads no longer offer a processing shortcut that did "
+         "nothing. Monitor mixes no longer say they are unavailable during a phone call, because "
+         "they work."),
+    ]),
     ("3.1.1", [
         ("Updating no longer gets stuck",
          "Installing an update could stop with Setup saying it was unable to close all "

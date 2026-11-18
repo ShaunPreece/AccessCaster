@@ -26,7 +26,8 @@ where you can:
 
 - **Microphone channels**: input gain, 48V phantom power, polarity, and mic type on each mic input.
 - **Channel processing**: EQ, compressor, noise gate, de-esser, high-pass filter, pan, Aphex, and
-  the VoxLab depth / sparkle / punch controls, per channel.
+  the VoxLab depth / sparkle / punch controls, per channel, shown and spoken in real units
+  (decibels, hertz, milliseconds).
 - **Effects**: echo and reverb per channel.
 - **Levels and routing**: non-mic channel levels, the output routing matrix (Monitor Mix and
   per-output source levels), and the fader layout (which channel sits on each fader).
@@ -66,7 +67,8 @@ where you can:
   the fallback when this computer has none.
 - **Presets and mix presets**: mic-processing presets, and mix presets that save the output mixes
   under a name, either the whole desk or a single output.
-- **Firmware**: check whether RODE has a newer firmware for the unit, and hear the answer.
+- **Firmware**: check whether RODE has newer firmware for the unit, be told when it does, and
+  install it.
 - **Device settings**: the unit's own display, buttons and haptics, and how its clock is shown
   (24-hour or 12-hour, whether the time appears on its screen). The time itself is not settable
   from here: the unit sets its own over the network, and only its touchscreen applies a timezone

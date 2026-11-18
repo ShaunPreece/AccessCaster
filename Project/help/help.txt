@@ -164,7 +164,7 @@ Tells the desk which mic is plugged in, so it can set its preamp up to suit. App
 Mic channels only. Apply a ready-made voicing or save your own. The list shows which preset the channel is on, or says it has been changed since.
 
 * Processing
-The desk's studio chain: equaliser, compressor (evens out loud and quiet), noise gate (cuts noise between words), de-esser (tames harsh s sounds), high-pass filter (removes rumble), tone shaping and pan. With Advanced processing off, Tone shaping sets the other modules for you, so their values move on their own; switch it on to set each module yourself. Pan does nothing while processing is off.
+The desk's studio chain: equaliser, compressor (evens out loud and quiet), noise gate (cuts noise between words), de-esser (tames harsh s sounds), high-pass filter (removes rumble), tone shaping and pan. With Advanced processing off, Tone shaping sets the other modules for you, so their values move on their own; switch it on to set each module yourself. Pan does nothing while processing is off. Each setting shows its real value, in decibels, hertz, milliseconds or a ratio such as 3 to 1; the noise gate's range is a percent.
 
 * Effects
 Mic channels only: echo and reverb, each with its own switch and settings.
