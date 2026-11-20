@@ -60,7 +60,7 @@ def fetch(url, cap=indexfile.MAX_BYTES):
     return data
 
 
-def run(running, skipped, get=None, public_key_hex=None):
+def run(running, skipped, get=None, public_key_hex=None, platform=checks.PLATFORM):
     """Check the track this build follows. `running` is the version actually
     running, `skipped` the version the user chose not to hear about again.
 
@@ -74,13 +74,17 @@ def run(running, skipped, get=None, public_key_hex=None):
         log("no public key is built in, so no request was made")
         return checks.CheckResult(checks.COULD_NOT_CHECK)
 
+    if platform is None:
+        log("no build is published for this platform, so no request was made")
+        return checks.CheckResult(checks.COULD_NOT_CHECK)
+
     get = get or fetch
 
-    index = get(checks.index_url(running))
+    index = get(checks.index_url(running, platform))
     if index is None:
         return checks.CheckResult(checks.COULD_NOT_CHECK)
 
-    signature = get(checks.signature_url(running))
+    signature = get(checks.signature_url(running, platform))
     if signature is None:
         return checks.CheckResult(checks.COULD_NOT_CHECK)
 

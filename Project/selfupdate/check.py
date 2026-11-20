@@ -8,16 +8,33 @@ an off-by-one in the comparison shows up as a user never being offered
 anything, which looks exactly like no release having happened.
 """
 
+import sysconfig
+
 from . import indexfile
 from .versions import UpdateVersion
 
-# Where the index files and installers live. One bucket, app then track
-# inside, so the download link is permanent and the version lives in the index
-# rather than in a filename.
+# Where the index files and installers live. One bucket, then app, platform
+# and track, so the download link is permanent and the version lives in the
+# index rather than in a filename.
 ROOT = "https://updates.slightperception.com/"
 
 # AccessCaster's folder in the bucket. The publishing tool knows the same name.
 APP = "accesscaster"
+
+# The bucket's folder for each build, keyed by sysconfig.get_platform(), which
+# names the architecture the interpreter was BUILT for. That is this build's
+# own architecture: an x64 build running emulated on an ARM64 PC is still the
+# x64 build, and is updated with x64 installers.
+_PLATFORMS = {"win-amd64": "windows-x64", "win-arm64": "windows-arm64"}
+
+
+def platform_for(build):
+    """The bucket folder for a sysconfig platform name, or None where nothing
+    is published."""
+    return _PLATFORMS.get(build)
+
+
+PLATFORM = platform_for(sysconfig.get_platform())
 
 # The running version is the current one, or newer. Says nothing.
 UP_TO_DATE = "up to date"
@@ -98,14 +115,15 @@ def track_for(running):
     return running.track if running is not None else "stable"
 
 
-def index_url(running):
+def index_url(running, platform=PLATFORM):
     """Where this build's index lives, e.g.
-    https://updates.slightperception.com/accesscaster/stable/index.json."""
-    return f"{ROOT}{APP}/{track_for(running)}/{indexfile.FILE_NAME}"
+    https://updates.slightperception.com/accesscaster/windows-x64/stable/index.json."""
+    return f"{ROOT}{APP}/{platform}/{track_for(running)}/{indexfile.FILE_NAME}"
 
 
-def signature_url(running):
-    """The same address with .sig on the end. Built from the track rather than
-    written out twice, so a stable build cannot be pointed at the beta folder
-    by a typo in one of two constants."""
-    return f"{ROOT}{APP}/{track_for(running)}/{indexfile.SIGNATURE_FILE_NAME}"
+def signature_url(running, platform=PLATFORM):
+    """The same address with .sig on the end. Built from the platform and
+    track rather than written out twice, so a stable build cannot be pointed at
+    the beta folder by a typo in one of two constants."""
+    return (f"{ROOT}{APP}/{platform}/{track_for(running)}/"
+            f"{indexfile.SIGNATURE_FILE_NAME}")

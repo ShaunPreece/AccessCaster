@@ -88,10 +88,16 @@ check("the next version after a skip is offered",
       checks.decide(running, good, "2.63.5").verdict, checks.AVAILABLE)
 check("an unreadable running version offers nothing",
       checks.decide(None, good, "").verdict, checks.COULD_NOT_CHECK)
-check("the stable index lives in AccessCaster's folder", checks.index_url(running),
-      "https://updates.slightperception.com/accesscaster/stable/index.json")
-check("a beta build reads the beta folder", checks.signature_url(V("2.64.0-beta.1")),
-      "https://updates.slightperception.com/accesscaster/beta/index.json.sig")
+check("the stable index lives in AccessCaster's x64 folder",
+      checks.index_url(running, "windows-x64"),
+      "https://updates.slightperception.com/accesscaster/windows-x64/stable/index.json")
+check("a beta build reads the beta folder",
+      checks.signature_url(V("2.64.0-beta.1"), "windows-arm64"),
+      "https://updates.slightperception.com/accesscaster/windows-arm64/beta/index.json.sig")
+# These strings are the bucket's folder names, which UpdateKit's publisher writes.
+check("an x64 build is windows-x64", checks.platform_for("win-amd64"), "windows-x64")
+check("an ARM64 build is windows-arm64", checks.platform_for("win-arm64"), "windows-arm64")
+check("a 32-bit build has no folder", checks.platform_for("win32"), None)
 
 print("\nHOW OFTEN")
 check("never is never due", interval.is_due(interval.NEVER, 0, 1e9), False)
@@ -132,6 +138,8 @@ check("the skip holds over the whole round trip",
 asked = []
 checker.run(running, "", get=lambda u: asked.append(u), public_key_hex="")
 check("no key means no request is even made", asked, [])
+checker.run(running, "", get=lambda u: asked.append(u), public_key_hex=key_hex, platform=None)
+check("no published platform means no request is made", asked, [])
 check_true("the shipped key is a real one", signing.is_configured())
 check("a signature of the wrong length is refused",
       signing.verify(document, b"x" * 63, key_hex), False)
