@@ -34,11 +34,30 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
+    ("3.3.0", [
+        ("Sliders in JAWS",
+         "Every slider now speaks its value in words, such as -20 decibels, in JAWS as well as "
+         "NVDA. Before, JAWS said a percent, and on a display scaled above 100 percent some "
+         "sliders were silent as you moved them. Up arrow and Page Up now raise a slider, as Right "
+         "arrow does. AccessCaster no longer repeats a value after you move a slider, since your "
+         "screen reader has already read it."),
+
+        ("Speak slider values as",
+         "A new choice on App settings, Announcements: hear a slider's real value, its percent "
+         "along the slider, or both, in either order. It covers every slider with a unit, such as "
+         "a channel's level, the processing controls, a pad's volume and the output delay, and "
+         "gain changes made on the desk."),
+
+        ("Sharper on scaled displays",
+         "On a display scaled above 100 percent, the window is drawn at full resolution instead "
+         "of stretched."),
+    ]),
+
     ("3.2.0", [
         ("Processing in real units",
          "The EQ, high-pass filter, compressor, noise gate, de-esser and Aphex controls now show "
