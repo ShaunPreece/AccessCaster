@@ -91,7 +91,7 @@ class _EffectBox:
                 page, box, box_sizer, f"{effect.label} {control.label.lower()}",
                 -12 if control.semitones else 0, 12 if control.semitones else 100,
                 page.streamer(control), *self._field(control.param),
-                words=semitone_words if control.semitones else percent_words, quiet=True))
+                words=semitone_words if control.semitones else percent_words))
         for _control, slider in self.sliders.values():
             slider.show()
         self.show()

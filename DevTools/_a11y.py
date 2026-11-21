@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import wx
 from _testkit import check
+from native.slider import SliderCtrl
 
-NAMED_BY_LABEL = (wx.TextCtrl, wx.Choice, wx.ComboBox, wx.ListBox, wx.Slider, wx.SpinCtrl,
+NAMED_BY_LABEL = (wx.TextCtrl, wx.Choice, wx.ComboBox, wx.ListBox, SliderCtrl, wx.SpinCtrl,
                   wx.SpinCtrlDouble, wx.ListCtrl, wx.TreeCtrl)
 SELF_NAMED = (wx.Button, wx.CheckBox, wx.RadioButton, wx.ToggleButton)
 

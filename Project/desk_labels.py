@@ -129,6 +129,14 @@ PROCESSING_UNITS = {
     "aphexAETune": (600, 5000, "square", "Hz"),
 }
 
+# How a knob with a real unit is spoken, chosen on App settings, Announcements: its real value, its
+# percent along the travel (the desk's own encoder's view), or both in either order. Set by
+# `app_settings_actions`, read by `processing_words`.
+PROCESSING_SPEECH = {"units": "Real units", "percent": "Percent",
+                     "units_percent": "Real units then percent",
+                     "percent_units": "Percent then real units"}
+processing_speech = "units"
+
 
 def processing_value(prop: str, position: float) -> float:
     """A knob's real value at `position` (0 to 1 along its travel). Only for a knob in
@@ -176,9 +184,13 @@ def processing_words(prop: str, position: float) -> str:
     and the spoken changes alike. `position` is the desk's 0 to 1."""
     if prop in PAN_PROPS:
         return pan_words(wording.percent(position))
-    if prop in PROCESSING_UNITS:
-        return unit_words(processing_value(prop, position), PROCESSING_UNITS[prop][3])
-    return f"{wording.percent(position)} percent"
+    percent = f"{wording.percent(position)} percent"
+    unit = PROCESSING_UNITS.get(prop, (None,) * 4)[3]
+    if unit is None or unit == "%":
+        return percent
+    real = unit_words(processing_value(prop, position), unit)
+    return {"units": real, "percent": percent, "units_percent": f"{real}, {percent}",
+            "percent_units": f"{percent}, {real}"}.get(processing_speech, real)
 
 # Module on/off toggles shown in the UI, with screen-reader labels. `prop` is the key of the
 # module's state in a channel record's `modules`, which is not always `key` + "On" (pan's is

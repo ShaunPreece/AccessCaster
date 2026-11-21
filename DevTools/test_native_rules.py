@@ -5,6 +5,8 @@
     twice. Focus is placed by creation order.
   * NO wx.Simplebook TO SWITCH PAGES, and a wx.Notebook only for a channel page's tabs: both move the
     focus into each page they show, which pulls it out of the Categories tree.
+  * NO wx.Slider: JAWS reads a native slider as a percent of its range and ignores its value text,
+    so every slider is `native.slider.SliderCtrl`.
   * THE PLATFORM LAYER IS IMPORTED IN ONE PLACE EACH: `native.win` only by `native.a11y` and
     `native.announce`, so a port to another platform has one file to replace for each.
 
@@ -45,7 +47,7 @@ def _calls(node, name):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == name]
 
 
-focus_in_init, books, win_imports, dialogs = [], [], [], []
+focus_in_init, books, win_imports, dialogs, sliders = [], [], [], [], []
 for path in FILES:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -58,6 +60,9 @@ for path in FILES:
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr == "Simplebook":
             books.append(f"{path.name}:{node.lineno} Simplebook")
+        if isinstance(node, ast.Attribute) and node.attr == "Slider" and (
+                isinstance(node.value, ast.Name) and node.value.id == "wx"):
+            sliders.append(f"{path.name}:{node.lineno}")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "Notebook" and path.name not in NOTEBOOK_ALLOWED):
             books.append(f"{path.name}:{node.lineno} Notebook")
@@ -70,6 +75,7 @@ for path in FILES:
 print("THE NATIVE WINDOW'S SOURCE RULES")
 check("no dialog sets the focus from its constructor", focus_in_init, [])
 check("no Simplebook, and a Notebook only for a channel page's tabs", books, [])
+check("no native wx.Slider", sliders, [])
 check("only a11y and announce import the platform layer", win_imports, [])
 check("the rules saw the dialogs", len(dialogs) > 10, True)
 

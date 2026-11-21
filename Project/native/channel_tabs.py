@@ -502,4 +502,4 @@ class EffectsTab(Tab):
                     lambda pct, p=param: channel_actions.action_set_channel_effect_param(
                         name, p, pct / 100),
                     *page.field("effects", effect + "_params", param, scale=100),
-                    words=percent_words, unread=50, quiet=True))
+                    words=percent_words, unread=50))

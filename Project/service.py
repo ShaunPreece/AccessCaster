@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 
 import announcer
+import app_settings_actions
 import app_updates
 import autogain_actions
 import callme_actions
@@ -79,6 +80,7 @@ def start(announce=True, register_shortcuts=True, greeting=announcer.GREETING_ST
                       shortcuts=register_shortcuts)
     announcer.load_settings()
     speech.load_settings()
+    app_settings_actions.load_settings()
     install_announcer_hooks()
     # Auto gain and the level check run on threads of their own, outside desk_access's jobs, and a
     # quit part-way through either leaves a mic unprocessed and the Chat mix carrying it alone.

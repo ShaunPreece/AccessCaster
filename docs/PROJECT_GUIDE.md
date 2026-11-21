@@ -1997,11 +1997,20 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A PAGE HAS NO GROUP BOX OF ITS OWN** (`pages.page_body`). The tree has just named it, so a group
   named the same repeats the name on the way in. `MainFrame.go_to` says nothing, so the control
   that calls it names the page ("Go to Wireless connections").
-- **DESCRIPTIONS AND A SLIDER'S VALUE IN WORDS COME FROM `native.a11y.describe`**, an MSAA
-  override of those two answers only. Override anything else (name, role, state) and the control
-  stops reading as the native control it is.
+- **A NATIVE CONTROL'S DESCRIPTION COMES FROM `native.a11y.describe`**, an MSAA override of the
+  description and value only. Override anything else (name, role, state) and the control stops
+  reading as the native control it is.
+- **EVERY SLIDER IS `native.slider.SliderCtrl`, NEVER `wx.Slider`.** JAWS reads the native Windows
+  slider from its own position, as a percent of its range, and ignores the value text it is given,
+  so "-20 decibels" is heard as "67 percent". `SliderCtrl` is drawn by the app and answers MSAA
+  itself (`a11y.slider`), so every screen reader reads its value text. Its keys follow the ARIA
+  slider pattern (Up and Right raise it), and it handles Tab, Ctrl+Tab and Enter itself because it
+  takes every key to get the arrows.
+- **A SLIDER SPEAKS ONLY A REFUSAL** (`controls.Slider`). The screen reader reads each new value as
+  it is arrowed, so a reply after a success repeats what was just heard.
 - **REPLIES ARE SPOKEN WITH `frame.say`**, a UIA notification the screen reader voices, not the
-  app's own SAPI voice. `recent=True` for a slider's replies, so a newer one replaces an older one.
+  app's own SAPI voice. `recent=True` for a list's or number box's replies, so a newer one
+  replaces an older one.
 - **MIC TYPE, THE PROCESSING PRESET AND BOTH HALVES OF THE USB MODE ARE APPLIED BY A BUTTON, NEVER
   BY THE LIST.** Arrowing a closed native list fires a change per item; a mic type or a preset
   replaces the processing chain (a voicing moves the gain too), and a USB mode write tears the
@@ -2033,7 +2042,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `PROCESSING_UNITS` table (ranges and curves in the protocol spec, 4.4): the window's sliders,
   the reply to a write and a change made elsewhere all call it, so one knob is never spoken in two
   units. A slider still runs 0 to 100 along the knob's own travel, like the desk's encoder, and
-  only its words are in real units. `test_native_channels` pins the table to values read off
+  only its words are in real units. `desk_labels.processing_speech` (App settings, Announcements)
+  chooses real units, percent or both, for all three at once. `test_native_channels` pins the table to values read off
   RODE's app.
 - **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
   or entering Custom moves the output's cross-points on the desk, which it does not push. Its own

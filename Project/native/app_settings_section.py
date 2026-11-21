@@ -14,6 +14,7 @@ import announcer
 import app_settings_actions
 import app_updates
 import clip_warning
+import desk_labels
 import speech
 from native import a11y
 from native.calls import call
@@ -97,6 +98,14 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
             description="A tone is one long beep for recording, two for paused, three for "
                         "stopped, whether you press record here, with a shortcut or on the desk.",
             guard=self._unread)
+        self.processing_speech = Choice(
+            self, parent, sizer, "Speak processing values as",
+            list(desk_labels.PROCESSING_SPEECH.items()),
+            app_settings_actions.action_set_processing_speech, *self.field("processing_speech"),
+            description="For the equaliser, filter, compressor, noise gate, de-esser and Aphex "
+                        "controls: their real value, such as -20 decibels, the percent along "
+                        "the knob's travel, or both.",
+            guard=self._unread)
         self.voice = Choice(self, parent, sizer, "Announcement voice", [("", "Windows default voice")],
                             speech.action_set_announce_voice, *self.field("voice"),
                             description="Choosing one plays a sample. Your screen reader keeps "
@@ -113,12 +122,11 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         a11y.describe(refresh, "Use after plugging in headphones or installing a voice.")
         refresh.Bind(wx.EVT_BUTTON, self._on_refresh)
         sizer.Add(refresh, 0, wx.ALL, 6)
-        # Quiet: `speech.action_set_announce_volume` says each new level in the announcer's own
-        # voice, at that level.
+        # `speech.action_set_announce_volume` says each new level in the announcer's own voice, at
+        # that level.
         self.volume = Slider(self, parent, sizer, "Announcement volume", 0, 100,
                              speech.action_set_announce_volume, *self.field("volume"),
-                             words=lambda v: "silent" if v == 0 else f"{v} percent", quiet=True,
-                             accepted=self._volume_set)
+                             words=lambda v: "silent" if v == 0 else f"{v} percent")
         self.volume.slider.SetLineSize(5)
         self.volume.slider.SetPageSize(20)
         self.volume.acc.description = ("Announcements only. Windows, your screen reader and the "
@@ -138,11 +146,6 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
             return f"Windows reported no {kind} to this computer, so there is nothing to choose."
         return None
 
-    def _volume_set(self, reply):
-        # At zero `speech.action_set_announce_volume` says nothing, so the window says it.
-        if reply.get("volume") == 0:
-            self.frame.reply(self.volume.slider, reply)
-
     def read(self, announce=False):
         def done(reply):
             self.show(reply)
@@ -158,7 +161,8 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
                              + [(name, name) for name in data.get("voices") or []])
         self.output.set_items([("", "Windows default output")]
                               + [(name, name) for name in data.get("outputs") or []])
-        for control in (self.record_feedback, self.voice, self.output, self.volume):
+        for control in (self.record_feedback, self.processing_speech, self.voice, self.output,
+                        self.volume):
             control.show()
 
     def _on_refresh(self, event):

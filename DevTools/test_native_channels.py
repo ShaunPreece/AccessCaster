@@ -179,6 +179,18 @@ check("processing values are worded with their units",
         ("eqLowGain", 0.5), ("noiseGateRange", 0.3), ("channelPan", 0.5))],
       ["-20 decibels", "1.7 to 1", "1.68 kilohertz", "70 hertz", "0.32 milliseconds",
        "12 decibels per octave", "0 decibels", "30 percent", "centre"])
+spoken = {}
+for mode in desk_labels.PROCESSING_SPEECH:
+    desk_labels.processing_speech = mode
+    spoken[mode] = [desk_labels.processing_words(p, x) for p, x in
+                    (("compressorThreshold", 2 / 3), ("aphexBBDrive", 0.4), ("channelPan", 0.5))]
+desk_labels.processing_speech = "units"
+check("processing values are spoken as chosen; a percent knob and pan once whatever the choice",
+      spoken,
+      {"units": ["-20 decibels", "40 percent", "centre"],
+       "percent": ["67 percent", "40 percent", "centre"],
+       "units_percent": ["-20 decibels, 67 percent", "40 percent", "centre"],
+       "percent_units": ["67 percent, -20 decibels", "40 percent", "centre"]})
 check("every processing control is worded by the one function",
       sorted(p for g in desk_labels.PROCESSING_CONTROLS for c in g["controls"]
              for p in [c["prop"]]

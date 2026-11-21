@@ -15,6 +15,7 @@ import wx
 from native import a11y
 from native.calls import LatestWins, call
 from native.pages import labelled
+from native.slider import SliderCtrl
 
 
 def record_field(record, *path):
@@ -101,11 +102,11 @@ class Switch:
 
 class Slider:
     """A labelled slider from `lo` to `hi`. `words(value)` is its value as the screen reader reads
-    it. `send(value)` goes through `LatestWins`; the reply to the last write is spoken once the
-    slider has been still, unless `quiet`, when only a refusal is spoken. A value the desk did not
-    report shows at `unread` and reads "not read yet" until it is moved."""
+    it. `send(value)` goes through `LatestWins`. Only a refusal is spoken: the screen reader has
+    already read the new value, so a success would repeat it. A value the desk did not report shows
+    at `unread` and reads "not read yet" until it is moved."""
 
-    HANDS_OFF_S = 2.0      # longer than LatestWins' settle, so the last write has returned
+    HANDS_OFF_S = 2.0      # long enough for the desk's echo of the last write to have arrived
     # While a slider keeps moving (an arrow key held), its newest value still goes out this often.
     # Only sliders: a list sending every item arrowed past would apply each one.
     MAX_WAIT_MS = 300
@@ -115,19 +116,17 @@ class Slider:
     FOCUSED_SETTLE_MS = 400
 
     def __init__(self, page, parent, sizer, label, lo, hi, send, current, remember, words,
-                 unread=None, quiet=False, accepted=None):
+                 unread=None, accepted=None):
         self.page = page
         self._accepted = accepted
-        self.slider = labelled(parent, sizer, label, lambda p: wx.Slider(
-            p, minValue=lo, maxValue=hi, size=(260, -1)))
+        self.slider = labelled(parent, sizer, label,
+                               lambda p: SliderCtrl(p, label, lo, hi, self._value_words))
         self._current = current
         self._remember = remember
         self._words = words
         self._unread = lo if unread is None else unread
-        self._quiet = quiet
-        self.acc = a11y.describe(self.slider, value=self._value_words)
-        self._writer = LatestWins(page, send, self._done, settled=self._settled,
-                                  max_wait_ms=self.MAX_WAIT_MS)
+        self.acc = self.slider.acc
+        self._writer = LatestWins(page, send, self._done, max_wait_ms=self.MAX_WAIT_MS)
         self._moved_at = 0.0
         self._landing = None
         self.slider.Bind(wx.EVT_SLIDER, self._on_slider)
@@ -162,6 +161,7 @@ class Slider:
         text = self.slider.GetContainingSizer().GetItem(0).GetWindow()
         if text.GetLabel() != label:
             text.SetLabel(label)
+            self.slider.SetLabel(label)
 
     def _on_slider(self, _event):
         self._moved_at = time.monotonic()
@@ -182,10 +182,6 @@ class Slider:
         self.page.frame.say(reply.get("message") or "Could not make that change.")
         if self._current() is not None:
             self.slider.SetValue(self._current())
-
-    def _settled(self, _value, reply):
-        if reply.get("ok") and not self._quiet:
-            self.page.frame.reply(self.slider, reply, recent=True)
 
 
 class _Field:

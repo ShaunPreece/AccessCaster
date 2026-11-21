@@ -15,6 +15,7 @@ import app_settings
 import autostart  # the HKCU Run entry, shared with installer.iss
 import callme
 import clip_warning
+import desk_labels
 import diagnostics
 import folders
 import meters
@@ -34,7 +35,33 @@ def read_announce() -> dict:
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
             "clip_warning": clip_warning.clip_warning_on(),
+            "processing_speech": desk_labels.processing_speech,
             "running": announcer.running()}
+
+
+def load_settings() -> None:
+    """Take the saved choices this module owns from the settings file, once, at `service.start`."""
+    apply_settings(settings_file.load())
+
+
+def apply_settings(changes: dict) -> None:
+    """Push saved or restored choices into the module state that reads them."""
+    if changes.get("processing_speech") in desk_labels.PROCESSING_SPEECH:
+        desk_labels.processing_speech = changes["processing_speech"]
+
+
+def action_set_processing_speech(mode: str) -> dict:
+    """How a processing knob with a real unit is spoken: `desk_labels.PROCESSING_SPEECH`."""
+    if mode not in desk_labels.PROCESSING_SPEECH:
+        return {"ok": False, "message": f"{mode!r} is not one of the choices."}
+    desk_labels.processing_speech = mode
+    settings_file.update(processing_speech=mode)
+    return {"ok": True, "processing_speech": mode, "message": {
+        "units": "Processing values will be spoken in real units, such as decibels.",
+        "percent": "Processing values will be spoken as a percent.",
+        "units_percent": "Processing values will be spoken in real units, then as a percent.",
+        "percent_units": "Processing values will be spoken as a percent, then in real units.",
+    }[mode]}
 
 
 def export_dir() -> str:
@@ -127,6 +154,7 @@ def action_import(payload) -> dict:
     # be pushed into them or it would not take effect until a restart.
     speech.apply_settings(changes)
     announcer.apply_settings(changes)
+    apply_settings(changes)
     return {"ok": True, "report": report,
             "message": app_settings.describe_import(report) + "".join(notes)}
 
