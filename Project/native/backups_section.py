@@ -24,8 +24,8 @@ from native import a11y
 from native.backup_dialogs import BaselineDialog, ResetDialog
 from native.calls import call
 from native.dialogs import NameDialog, confirm, follow_job, report
-from native.pages import (FollowDesk, Page, Reader, add_button, labelled, modal_open, page_body,
-                          read_only, reply_text, select, set_items, set_text)
+from native.pages import (FollowDesk, Page, Reader, add_button, dip, gap, labelled, modal_open,
+                          page_body, read_only, reply_text, select, set_items, set_text)
 
 TITLE = "Backups"
 RESET_TITLE = "Start again from factory settings"
@@ -253,11 +253,11 @@ class BackupsPage(wx.Panel):
         self.backup = wx.Button(parent, label="Back up the desk now")
         self.backup_acc = a11y.describe(self.backup, "")
         self.backup.Bind(wx.EVT_BUTTON, self._on_backup)
-        sizer.Add(self.backup, 0, wx.ALL, 6)
+        sizer.Add(self.backup, 0, wx.ALL, gap(6))
 
         self.list = labelled(parent, sizer, "Backup",
                              lambda p: wx.ListBox(p, choices=["Reading the backups."],
-                                                  size=(420, 180)))
+                                                  size=dip(p, 420, 180)))
         self.list.Bind(wx.EVT_LISTBOX, lambda _e: self._show_detail())
         row = wx.BoxSizer(wx.HORIZONTAL)
         # The chosen backup's detail is on Restore, the press it informs, and not on the list: a
@@ -266,7 +266,7 @@ class BackupsPage(wx.Panel):
         self.restore_acc = a11y.describe(self.restore, "")
         self.rename = add_button(parent, row, "Rename selected backup", self._on_rename)
         self.delete = add_button(parent, row, "Delete selected backup", self._on_delete)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
 
         self.about = read_only(parent, sizer, "About backups", height=150, scroll=True)
         # Hidden while the as-found backup is complete or there is none.
@@ -275,7 +275,7 @@ class BackupsPage(wx.Panel):
                                      "settings stay as they were found.")
         self.add_pads.Bind(wx.EVT_BUTTON, self._on_add_pads)
         self.add_pads.Hide()
-        sizer.Add(self.add_pads, 0, wx.ALL, 6)
+        sizer.Add(self.add_pads, 0, wx.ALL, gap(6))
 
     @property
     def data(self):
@@ -452,7 +452,7 @@ class ResetPage(wx.Panel):
         self.button = wx.Button(parent, label=RESET_TITLE)
         self.acc = a11y.describe(self.button, "")
         self.button.Bind(wx.EVT_BUTTON, self._on_reset)
-        sizer.Add(self.button, 0, wx.ALL, 6)
+        sizer.Add(self.button, 0, wx.ALL, gap(6))
         self.show()
 
     @property

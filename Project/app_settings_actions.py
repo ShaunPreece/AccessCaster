@@ -35,7 +35,7 @@ def read_announce() -> dict:
             "voice": speech.chosen_voice, "output": speech.chosen_output,
             "voices": lists["voices"], "outputs": lists["outputs"],
             "clip_warning": clip_warning.clip_warning_on(),
-            "processing_speech": desk_labels.processing_speech,
+            "value_speech": desk_labels.value_speech,
             "running": announcer.running()}
 
 
@@ -46,21 +46,21 @@ def load_settings() -> None:
 
 def apply_settings(changes: dict) -> None:
     """Push saved or restored choices into the module state that reads them."""
-    if changes.get("processing_speech") in desk_labels.PROCESSING_SPEECH:
-        desk_labels.processing_speech = changes["processing_speech"]
+    if changes.get("value_speech") in desk_labels.VALUE_SPEECH:
+        desk_labels.value_speech = changes["value_speech"]
 
 
-def action_set_processing_speech(mode: str) -> dict:
-    """How a processing knob with a real unit is spoken: `desk_labels.PROCESSING_SPEECH`."""
-    if mode not in desk_labels.PROCESSING_SPEECH:
+def action_set_value_speech(mode: str) -> dict:
+    """How a slider's value with a real unit is spoken: `desk_labels.VALUE_SPEECH`."""
+    if mode not in desk_labels.VALUE_SPEECH:
         return {"ok": False, "message": f"{mode!r} is not one of the choices."}
-    desk_labels.processing_speech = mode
-    settings_file.update(processing_speech=mode)
-    return {"ok": True, "processing_speech": mode, "message": {
-        "units": "Processing values will be spoken in real units, such as decibels.",
-        "percent": "Processing values will be spoken as a percent.",
-        "units_percent": "Processing values will be spoken in real units, then as a percent.",
-        "percent_units": "Processing values will be spoken as a percent, then in real units.",
+    desk_labels.value_speech = mode
+    settings_file.update(value_speech=mode)
+    return {"ok": True, "value_speech": mode, "message": {
+        "units": "Slider values will be spoken in real units, such as decibels.",
+        "percent": "Slider values will be spoken as a percent.",
+        "units_percent": "Slider values will be spoken in real units, then as a percent.",
+        "percent_units": "Slider values will be spoken as a percent, then in real units.",
     }[mode]}
 
 

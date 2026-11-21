@@ -575,11 +575,8 @@ class UnitPage(_Reader, scrolled.ScrolledPanel):
                           [(value, text) for value, text in spec["choices"]], send,
                           *self.field(prop), description=spec["detail"], guard=self._guard)
         lo, hi = int(spec["min"]), int(spec["max"])
-        span = max(1, hi - lo)
         slider = Slider(self, parent, sizer, spec["label"], lo, hi, send, *self.field(prop),
-                        words=lambda v: f"{v} of {hi}, about {round((v - lo) * 100 / span)} "
-                                        "percent",
-                        unread=hi)
+                        words=lambda v: f"{v} of {hi}", unread=hi, real_unit=True)
         slider.slider.SetLineSize(int(spec.get("step") or 1))
         slider.slider.SetPageSize(int(spec.get("step") or 1) * 5)
         slider.acc.description = spec["detail"]

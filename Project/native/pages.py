@@ -112,7 +112,7 @@ def page_body(panel, grow=False):
     outer = wx.BoxSizer(wx.VERTICAL)
     panel.SetSizer(outer)
     body = wx.BoxSizer(wx.VERTICAL)
-    outer.Add(body, 1 if grow else 0, wx.EXPAND | wx.ALL, 4)
+    outer.Add(body, 1 if grow else 0, wx.EXPAND | wx.ALL, gap(4))
     return body, panel
 
 
@@ -120,7 +120,7 @@ def group(parent, sizer, title, proportion=0):
     """A named group box inside `sizer`, which a screen reader announces on the way into it.
     Returns (sizer, parent) as `page_body` does."""
     box = wx.StaticBoxSizer(wx.VERTICAL, parent, title)
-    sizer.Add(box, proportion, wx.EXPAND | wx.ALL, 4)
+    sizer.Add(box, proportion, wx.EXPAND | wx.ALL, gap(4))
     return box, box.GetStaticBox()
 
 
@@ -131,35 +131,50 @@ def add_button(parent, sizer, label, handler, description=""):
         a11y.describe(button, description)
     button.Bind(wx.EVT_BUTTON, handler)
     if sizer.GetOrientation() == wx.HORIZONTAL:
-        sizer.Add(button, 0, wx.RIGHT, 8)
+        sizer.Add(button, 0, wx.RIGHT, gap(8))
     else:
-        sizer.Add(button, 0, wx.ALL, 6)
+        sizer.Add(button, 0, wx.ALL, gap(6))
     return button
+
+
+def dip(window, width, height=-1):
+    """A size written for a display at 100 percent, in pixels on `window`'s display. The process
+    is DPI aware (`native.display`), so wx takes every size in real pixels; -1 stays the
+    control's own size."""
+    return window.FromDIP(wx.Size(width, height))
+
+
+def gap(pixels):
+    """A border or spacing written for a display at 100 percent, in pixels on the primary display.
+    Sizers take borders in real pixels, as `dip` explains for sizes."""
+    return wx.Window.FromDIP(pixels, None)
 
 
 def labelled(parent, sizer, label, control_factory):
     """A static label then its control on one line. The label is created FIRST because that is what
     names the control: Windows takes a control's name from the static text just before it."""
     line = wx.BoxSizer(wx.HORIZONTAL)
-    line.Add(wx.StaticText(parent, label=label), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+    line.Add(wx.StaticText(parent, label=label), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, gap(8))
     control = control_factory(parent)
     line.Add(control, 0)
-    sizer.Add(line, 0, wx.ALL, 6)
+    sizer.Add(line, 0, wx.ALL, gap(6))
     return control
 
 
 def reading_box(parent, width=460, height=60, scroll=False, value=""):
     """A read-only text box for a reading: it takes the focus, so it is met in the tab order and
     read with its label, which static text is not. `height` None is one line; `scroll` gives a long
-    report a scroll bar. Its label is the static text created just before it.
+    report a scroll bar; `width` and `height` are as `dip` takes them. Its label is the static
+    text created just before it.
 
     Always multi-line, even for one line: wx makes a text box a tab stop only while it is editable
     or multi-line, so a single-line read-only box is never reached by Tab."""
     style = wx.TE_MULTILINE | wx.TE_READONLY | (0 if scroll else wx.TE_NO_VSCROLL)
-    box = wx.TextCtrl(parent, value=value, size=(width, -1 if height is None else height),
-                      style=style)
+    size = dip(parent, width, -1 if height is None else height)
+    box = wx.TextCtrl(parent, value=value, size=size, style=style)
     if height is None:
-        box.SetInitialSize((width, box.GetSizeFromTextSize(box.GetTextExtent("Ag")).height))
+        box.SetInitialSize(
+            (size.width, box.GetSizeFromTextSize(box.GetTextExtent("Ag")).height))
     return box
 
 
@@ -241,7 +256,7 @@ class MessagePage(wx.Panel):
         if button:
             self.button = wx.Button(parent, label=button)
             self.button.Bind(wx.EVT_BUTTON, lambda _e: on_button())
-            sizer.Add(self.button, 0, wx.ALL, 6)
+            sizer.Add(self.button, 0, wx.ALL, gap(6))
 
     def set_text(self, text):
         self.text.SetValue(text)

@@ -8,6 +8,7 @@ one.
 import wx
 
 from native.dialogs import ok_cancel, paragraphs
+from native.pages import dip, gap
 
 # `NetworksDialog.choice` for "Network not listed": a network the user names themselves.
 NOT_LISTED = {}
@@ -27,12 +28,13 @@ class NetworksDialog(wx.Dialog):
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.list = None
         if networks:
-            sizer.Add(wx.StaticText(self, label="Networks found"), 0, wx.LEFT | wx.TOP, 10)
-            self.list = wx.ListBox(self, choices=[n["spoken"] for n in networks], size=(360, 120))
+            sizer.Add(wx.StaticText(self, label="Networks found"), 0, wx.LEFT | wx.TOP, gap(10))
+            self.list = wx.ListBox(self, choices=[n["spoken"] for n in networks],
+                                   size=dip(self, 360, 120))
             self.list.SetSelection(0)
             self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
             self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda _e: self._chosen())
-            sizer.Add(self.list, 0, wx.ALL, 10)
+            sizer.Add(self.list, 0, wx.ALL, gap(10))
         if note:
             paragraphs(self, sizer, note)
         row = wx.BoxSizer(wx.HORIZONTAL)
@@ -40,8 +42,8 @@ class NetworksDialog(wx.Dialog):
         if networks:
             buttons.insert(0, (wx.ID_OK, "Join"))
         for button_id, label in buttons:
-            row.Add(wx.Button(self, button_id, label), 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+            row.Add(wx.Button(self, button_id, label), 0, wx.ALL, gap(5))
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, gap(7))
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, lambda _e: self._chosen(), id=wx.ID_OK)
         self.Bind(wx.EVT_BUTTON, self._not_listed, id=NOT_LISTED_ID)
@@ -75,7 +77,7 @@ class JoinDialog(wx.Dialog):
         self._listed = name
         self._needs_password = bool(name) and not network.get("open")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        grid = wx.FlexGridSizer(2, 8, 8)
+        grid = wx.FlexGridSizer(2, gap(8), gap(8))
         # Windows names a box after the static text created just before it, and the dialog lands
         # on the first box created, so for a listed network the password's pair is created first
         # and only laid out second.
@@ -93,7 +95,7 @@ class JoinDialog(wx.Dialog):
             if pair:
                 grid.Add(pair[0], 0, wx.ALIGN_CENTER_VERTICAL)
                 grid.Add(pair[1], 0)
-        sizer.Add(grid, 0, wx.ALL, 10)
+        sizer.Add(grid, 0, wx.ALL, gap(10))
         if not name:
             paragraphs(self, sizer, "Type the name exactly, capitals included, and leave the "
                                      "password empty for an open network.")
@@ -107,7 +109,7 @@ class JoinDialog(wx.Dialog):
 
     def _pair(self, label, value, style=0):
         text = wx.StaticText(self, label=label)
-        box = wx.TextCtrl(self, value=value, size=(280, -1), style=style | wx.TE_PROCESS_ENTER)
+        box = wx.TextCtrl(self, value=value, size=dip(self, 280), style=style | wx.TE_PROCESS_ENTER)
         return text, box
 
     def _refuse(self, text, box):

@@ -15,7 +15,7 @@ import paths
 import speech
 from native import a11y, announce
 from native.calls import call
-from native.pages import Speaker, reply_text
+from native.pages import Speaker, dip, gap, reply_text
 
 _WRAP_DIP = 440
 
@@ -57,7 +57,7 @@ def paragraphs(dialog, sizer, text):
     for para in text.split("\n\n"):
         item = wx.StaticText(dialog, label=para)
         item.Wrap(dialog.FromDIP(_WRAP_DIP))
-        sizer.Add(item, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        sizer.Add(item, 0, wx.LEFT | wx.RIGHT | wx.TOP, gap(12))
         items.append(item)
     return items
 
@@ -74,8 +74,8 @@ class TextDialog(wx.Dialog):
         row = wx.BoxSizer(wx.HORIZONTAL)
         made = [wx.Button(self, button_id, label) for button_id, label in buttons]
         for button in made:
-            row.Add(button, 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+            row.Add(button, 0, wx.ALL, gap(5))
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, gap(7))
         self.SetSizerAndFit(sizer)
         # Every button ends the dialog with its own id, including ones wx has no default for.
         self.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(event.GetId()))
@@ -98,16 +98,16 @@ class BackupFirstDialog(SpeakingDialog):
         self.backup_first = wx.CheckBox(self, label=tick_label)
         self.backup_first.SetValue(ticked)
         a11y.describe(self.backup_first, tick_help)
-        sizer.Add(self.backup_first, 0, wx.ALL, 12)
+        sizer.Add(self.backup_first, 0, wx.ALL, gap(12))
         go = wx.Button(self, wx.ID_OK, label=go_label)
         cancel = wx.Button(self, wx.ID_CANCEL, label="Cancel")
         cancel.SetDefault()
         # The tab order starts on Cancel, so that is where the focus lands.
         cancel.MoveBeforeInTabOrder(self.backup_first)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        row.Add(go, 0, wx.ALL, 5)
-        row.Add(cancel, 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+        row.Add(go, 0, wx.ALL, gap(5))
+        row.Add(cancel, 0, wx.ALL, gap(5))
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, gap(7))
         sizer.Add(self.sink, 0)
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, lambda _e: self.EndModal(wx.ID_OK), id=wx.ID_OK)
@@ -164,7 +164,7 @@ class JobDialog(SpeakingDialog):
             self.SetEscapeId(wx.ID_NONE)
             self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
             self.Bind(wx.EVT_CLOSE, self._on_close)
-        sizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
+        sizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, gap(12))
         sizer.Add(self.sink, 0)
         self.button = button
         self.SetSizerAndFit(sizer)
@@ -303,7 +303,7 @@ def ok_cancel(dialog, sizer, ok_label, default=True):
     buttons.AddButton(ok)
     buttons.AddButton(wx.Button(dialog, wx.ID_CANCEL, label="Cancel"))
     buttons.Realize()
-    sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+    sizer.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, gap(10))
     return ok
 
 
@@ -386,12 +386,12 @@ class NameDialog(FormDialog):
     def __init__(self, parent, title, label, value, ok_label, description, submit=None):
         super().__init__(parent, title, ok_label, "Name not used")
         self._submit = submit
-        self.sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
-        self.name_box = wx.TextCtrl(self, value=value, size=(320, -1))
+        self.sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, gap(10))
+        self.name_box = wx.TextCtrl(self, value=value, size=dip(self, 320))
         self.name_box.SetMaxLength(self.MAX_NAME)
         self.name_box.SelectAll()
         a11y.describe(self.name_box, description)
-        self.sizer.Add(self.name_box, 0, wx.ALL, 10)
+        self.sizer.Add(self.name_box, 0, wx.ALL, gap(10))
         self.finish_layout()
 
     def name(self):
@@ -420,11 +420,11 @@ class ListDialog(wx.Dialog):
     def __init__(self, parent, title, label, names, ok_label, labels=None, note=""):
         super().__init__(parent, title=title)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, 10)
+        sizer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.TOP, gap(10))
         self.names = names
-        self.list = wx.ListBox(self, choices=labels or names, size=(360, 120))
+        self.list = wx.ListBox(self, choices=labels or names, size=dip(self, 360, 120))
         self.list.SetSelection(0)
-        sizer.Add(self.list, 0, wx.ALL, 10)
+        sizer.Add(self.list, 0, wx.ALL, gap(10))
         if note:
             paragraphs(self, sizer, note)
         ok_cancel(self, sizer, ok_label, default=False)

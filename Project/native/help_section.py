@@ -16,7 +16,7 @@ import webbrowser
 
 import wx
 
-from native.pages import Page, read_only
+from native.pages import Page, gap, read_only
 from paths import resource_path
 from version import __version__
 
@@ -101,7 +101,7 @@ class HelpPage(wx.Panel):
         if support:
             button = wx.Button(self, label="Open the support page in your browser")
             button.Bind(wx.EVT_BUTTON, self._on_support)
-            sizer.Add(button, 0, wx.ALL, 6)
+            sizer.Add(button, 0, wx.ALL, gap(6))
 
     def _on_support(self, event):
         # `webbrowser.open` returns False, rather than raising, when no browser could be started.

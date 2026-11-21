@@ -9,7 +9,7 @@ import wx
 import channels
 from native.channel_jobs import LevelCheck
 from native.channel_tabs import build_tabs
-from native.pages import MessagePage, Page, page_body
+from native.pages import MessagePage, Page, gap, page_body
 
 TITLE = "Channels and Processing"
 
@@ -132,7 +132,7 @@ class ChannelPage(wx.Panel):
                        if rec["kind"] == "mic" else None)
         sizer, parent = page_body(self, grow=True)
         self.book = wx.Notebook(parent)
-        sizer.Add(self.book, 1, wx.EXPAND | wx.ALL, 4)
+        sizer.Add(self.book, 1, wx.EXPAND | wx.ALL, gap(4))
         self.tabs = build_tabs(self)
         for tab in self.tabs:
             self.book.AddPage(tab, tab.title)

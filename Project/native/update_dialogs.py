@@ -20,6 +20,7 @@ import desk_access
 from selfupdate import phrases
 from native.calls import call
 from native.dialogs import JobDialog, paragraphs, report
+from native.pages import dip, gap
 
 INSTALL, SKIP, LATER = wx.ID_OK, wx.ID_NO, wx.ID_CANCEL
 POLL_MS = 400
@@ -42,16 +43,16 @@ class DecisionDialog(wx.Dialog):
         super().__init__(parent, title=offer["title"])
         sizer = wx.BoxSizer(wx.VERTICAL)
         paragraphs(self, sizer, offer["summary"])
-        sizer.Add(wx.StaticText(self, label="What changed"), 0, wx.LEFT | wx.TOP, 12)
-        notes = wx.TextCtrl(self, value=offer["notes"], size=(460, 200),
+        sizer.Add(wx.StaticText(self, label="What changed"), 0, wx.LEFT | wx.TOP, gap(12))
+        notes = wx.TextCtrl(self, value=offer["notes"], size=dip(self, 460, 200),
                             style=wx.TE_MULTILINE | wx.TE_READONLY)
-        sizer.Add(notes, 0, wx.ALL, 12)
+        sizer.Add(notes, 0, wx.ALL, gap(12))
         paragraphs(self, sizer, offer["after"])
         row = wx.BoxSizer(wx.HORIZONTAL)
         for button_id, label in ((INSTALL, "Install now"), (SKIP, "Skip this version"),
                                  (LATER, "Later")):
-            row.Add(wx.Button(self, button_id, label), 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+            row.Add(wx.Button(self, button_id, label), 0, wx.ALL, gap(5))
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, gap(7))
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(event.GetId()))
         self.SetEscapeId(LATER)

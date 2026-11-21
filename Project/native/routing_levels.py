@@ -15,7 +15,7 @@ from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Slider, Switch, percent_words, set_choices
 from native.dialogs import confirm
-from native.pages import group, labelled, page_body, select
+from native.pages import gap, group, labelled, page_body, select
 
 TITLE = "Levels"
 MODE_WORDS = {
@@ -105,7 +105,7 @@ class LevelsPage(scrolled.ScrolledPanel):
             lambda: self._fader_value("soloed"), lambda _on: None)
         clear = wx.Button(parent, label="Clear all solos")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
-        sizer.Add(clear, 0, wx.ALL, 6)
+        sizer.Add(clear, 0, wx.ALL, gap(6))
 
     def _fader_value(self, key):
         return self.levels["faders"][self._fader_position][key]
@@ -189,7 +189,7 @@ class LevelsPage(scrolled.ScrolledPanel):
                 words=percent_words)
         reset = wx.Button(box, label="Reset this output to follow the faders")
         reset.Bind(wx.EVT_BUTTON, self._on_mix_reset)
-        box_sizer.Add(reset, 0, wx.ALL, 6)
+        box_sizer.Add(reset, 0, wx.ALL, gap(6))
         self._mix_index = self.mix_outputs[self.mix_output.GetSelection()]["index"]
 
     def _mix_cell(self, source):
@@ -262,7 +262,7 @@ class LevelsPage(scrolled.ScrolledPanel):
             a11y.describe(choice, "High sensitivity is louder. Change it with care.")
             apply = wx.Button(parent, label=f"Apply {output} type")
             apply.Bind(wx.EVT_BUTTON, lambda e, p=position: self._on_apply_type(e, p))
-            sizer.Add(apply, 0, wx.ALL, 6)
+            sizer.Add(apply, 0, wx.ALL, gap(6))
             self.hp_types.append(AppliedChoice(choice))
 
     def _show_headphones(self, force=False):

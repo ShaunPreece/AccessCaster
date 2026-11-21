@@ -1,1 +1,2 @@
-"""Windows' half of the platform interface in `native.announce` and `native.a11y`."""
+"""Windows' half of the platform interface in `native.announce`, `native.a11y` and
+`native.display`."""

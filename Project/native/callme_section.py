@@ -22,8 +22,8 @@ from native import a11y
 from native.calls import call
 from native.controls import Switch, record_field, set_choices
 from native.dialogs import confirm, ok_cancel
-from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only, select,
-                          set_items, set_text)
+from native.pages import (Reader, StatusPages, add_button, dip, gap, labelled, page_body,
+                          read_only, select, set_items, set_text)
 
 TITLE = "CallMe"
 PAGES = [("call", "Current call"), ("dial", "Make a call"), ("incoming", "Incoming calls"),
@@ -197,13 +197,13 @@ class CallPage(wx.Panel):
         self.wifi = wx.Button(parent, label="Go to Wireless connections")
         a11y.describe(self.wifi, "Device, Wireless connections: join a wifi network there.")
         self.wifi.Bind(wx.EVT_BUTTON, lambda _e: self.frame.go_to("status", "network"))
-        self.ready_sizer.Add(self.wifi, 0, wx.ALL, 6)
+        self.ready_sizer.Add(self.wifi, 0, wx.ALL, gap(6))
         self.fader = labelled(parent, self.ready_sizer, "Fader for CallMe 1",
                               lambda p: wx.Choice(p))
         self.put = wx.Button(parent, label="Put CallMe 1 on this fader")
         a11y.describe(self.put, "The channel on that fader comes off it.")
         self.put.Bind(wx.EVT_BUTTON, self._on_put)
-        self.ready_sizer.Add(self.put, 0, wx.ALL, 6)
+        self.ready_sizer.Add(self.put, 0, wx.ALL, gap(6))
 
         self.now = read_only(parent, sizer, "Now")
         row = wx.BoxSizer(wx.HORIZONTAL)
@@ -218,7 +218,7 @@ class CallPage(wx.Panel):
         self.extend = add_button(parent, row, "Extend the call", self._on_extend)
         a11y.describe(self.extend, "Offered in the last five minutes of a call on a plan with an "
                                    "hour limit.")
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
         self.details = read_only(parent, sizer, "Call details", height=80)
         self._show_ready([])
 
@@ -315,21 +315,21 @@ class DialPage(wx.Panel):
         self.contacts = []           # as listed; empty when the list holds a note
         sizer, parent = page_body(self)
         self.code = labelled(parent, sizer, "Their CallMe code", lambda p: wx.TextCtrl(
-            p, size=(260, -1), style=wx.TE_PROCESS_ENTER))
+            p, size=dip(p, 260), style=wx.TE_PROCESS_ENTER))
         a11y.describe(self.code, "Or a guest link they have sent you. Enter calls.")
         self.code.Bind(wx.EVT_TEXT_ENTER, self._on_dial)
         self.dial = wx.Button(parent, label="Call")
         self.dial.Bind(wx.EVT_BUTTON, self._on_dial)
-        sizer.Add(self.dial, 0, wx.ALL, 6)
+        sizer.Add(self.dial, 0, wx.ALL, gap(6))
 
         self.list = labelled(parent, sizer, "Contact", lambda p: wx.ListBox(
-            p, size=(420, 160)))
+            p, size=dip(p, 420, 160)))
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.call_contact = add_button(parent, row, "Call selected contact", self._on_call_contact)
         self.edit = add_button(parent, row, "Edit selected contact", self._on_edit)
         self.delete = add_button(parent, row, "Delete selected contact", self._on_delete)
         self.add = add_button(parent, row, "Add a contact", self._on_add)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
 
     def show(self, prefer=None):
         chosen = self._chosen()
@@ -414,14 +414,14 @@ class ContactDialog(wx.Dialog):
         self._busy = False
         self.reply = None
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, 10)
+        sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, gap(10))
         self.name_box = wx.TextCtrl(self, value=contact["name"] if contact else "",
-                                    size=(320, -1))
-        sizer.Add(self.name_box, 0, wx.ALL, 10)
-        sizer.Add(wx.StaticText(self, label="CallMe code"), 0, wx.LEFT, 10)
-        self.code_box = wx.TextCtrl(self, value=self._was, size=(320, -1))
+                                    size=dip(self, 320))
+        sizer.Add(self.name_box, 0, wx.ALL, gap(10))
+        sizer.Add(wx.StaticText(self, label="CallMe code"), 0, wx.LEFT, gap(10))
+        self.code_box = wx.TextCtrl(self, value=self._was, size=dip(self, 320))
         a11y.describe(self.code_box, "Or their guest link.")
-        sizer.Add(self.code_box, 0, wx.ALL, 10)
+        sizer.Add(self.code_box, 0, wx.ALL, gap(10))
         ok_cancel(self, sizer, "Save")
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
@@ -467,7 +467,7 @@ class IncomingPage(wx.Panel):
         a11y.describe(self.link, "Opens in any web browser. Nothing to install.")
         self.copy = wx.Button(parent, label="Copy the guest link")
         self.copy.Bind(wx.EVT_BUTTON, self._on_copy)
-        sizer.Add(self.copy, 0, wx.ALL, 6)
+        sizer.Add(self.copy, 0, wx.ALL, gap(6))
 
     def show(self):
         data = self.section.data

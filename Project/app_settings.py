@@ -37,7 +37,7 @@ PORTABLE = (
     "announcer_record_tones",      # the tick box an older export carries
     "record_mute_announcer",
     "clip_warning",
-    "processing_speech",
+    "value_speech",
     "callme_contacts",
     "callme_auto_extend",
     "callme_ringtone",

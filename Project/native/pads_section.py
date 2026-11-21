@@ -15,8 +15,8 @@ from native import a11y
 from native.pad_dialogs import ChangeDialog, SettingsDialog, list_label, where
 from native.pad_fx import FxPage
 from native.pad_maint import MaintPage, run_job
-from native.pages import (FollowDesk, Reader, StatusPages, labelled, page_body, read_only,
-                          reply_text, select, set_items, set_text)
+from native.pages import (FollowDesk, Reader, StatusPages, dip, gap, labelled, page_body,
+                          read_only, reply_text, select, set_items, set_text)
 
 TITLE = "SMART pads"
 PAGES = [("pads", "Pads"), ("fx", "Voice effects"), ("maint", "Pad maintenance")]
@@ -93,7 +93,7 @@ class PadsPage(wx.Panel):
         self.section = section
         self.frame = section.frame
         sizer, parent = page_body(self)
-        self.list = labelled(parent, sizer, "Pad", lambda p: wx.ListBox(p, size=(420, 300)))
+        self.list = labelled(parent, sizer, "Pad", lambda p: wx.ListBox(p, size=dip(p, 420, 300)))
         a11y.describe(self.list, "Press Enter to edit a pad's settings, or to give an empty pad "
                                  "something to do.")
         # On the list itself, so Enter is the list's before the page or the window sees it.
@@ -102,11 +102,11 @@ class PadsPage(wx.Panel):
         row = wx.BoxSizer(wx.HORIZONTAL)
         edit = wx.Button(parent, label="Edit this pad's settings")
         edit.Bind(wx.EVT_BUTTON, lambda _e: self._edit())
-        row.Add(edit, 0, wx.RIGHT, 8)
+        row.Add(edit, 0, wx.RIGHT, gap(8))
         change = wx.Button(parent, label="Change what this pad does")
         change.Bind(wx.EVT_BUTTON, lambda _e: self._change())
         row.Add(change, 0)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
         # Why pads cannot be changed, when they cannot: a read-only desk, or an effect pool the
         # desk needs tidied first. Hidden when there is nothing to say.
         self.grids = []          # the grid of each list item, as last shown

@@ -2006,6 +2006,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   itself (`a11y.slider`), so every screen reader reads its value text. Its keys follow the ARIA
   slider pattern (Up and Right raise it), and it handles Tab, Ctrl+Tab and Enter itself because it
   takes every key to get the arrows.
+- **THE PROCESS IS PER-MONITOR DPI AWARE, AND EVERY SIZE AND SIZER BORDER GOES THROUGH
+  `pages.dip` OR `pages.gap`** (`native.display`, declared when `native` is imported). JAWS cannot
+  confirm a `SliderCtrl`'s value through its focus object, so as it is arrowed JAWS reads the text
+  on screen at the slider's position. In an unaware process on a scaled display that position is
+  doubled, and a slider far enough right or down is silent; a 100 percent display never shows it.
+  Aware, a bare pixel size is half what was meant at 200 percent, so `test_native_rules` refuses
+  one. JAWS names the app after wxPython's core module (`_core.cp312-win_amd64.pyd`, Insert+Q), so
+  a JAWS script for it carries that name and loads for every wxPython app.
 - **A SLIDER SPEAKS ONLY A REFUSAL** (`controls.Slider`). The screen reader reads each new value as
   it is arrowed, so a reply after a success repeats what was just heard.
 - **REPLIES ARE SPOKEN WITH `frame.say`**, a UIA notification the screen reader voices, not the
@@ -2042,9 +2050,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   `PROCESSING_UNITS` table (ranges and curves in the protocol spec, 4.4): the window's sliders,
   the reply to a write and a change made elsewhere all call it, so one knob is never spoken in two
   units. A slider still runs 0 to 100 along the knob's own travel, like the desk's encoder, and
-  only its words are in real units. `desk_labels.processing_speech` (App settings, Announcements)
-  chooses real units, percent or both, for all three at once. `test_native_channels` pins the table to values read off
+  only its words are in real units. `test_native_channels` pins the table to values read off
   RODE's app.
+- **EVERY VALUE WITH A REAL UNIT GOES THROUGH `desk_labels.value_words`**, which applies Speak
+  slider values as (`value_speech`, App settings, Announcements): real units, percent along the
+  travel, or both. `processing_words` calls it, a `controls.Slider` with `real_unit=True` calls it
+  through `range_words`, and so does the announcer's gain. A new slider with a unit (decibels,
+  seconds, a count of a maximum) takes `real_unit=True`, or the setting silently skips it.
 - **THE OUTPUT MIXES PAGE RE-READS AFTER A MODE WRITE** (`routing_mixes.OutputMixesPage`): leaving
   or entering Custom moves the output's cross-points on the desk, which it does not push. Its own
   cross-point writes need nothing: the desk pushes back neither `mixDisabled` nor `outputMixMinus`

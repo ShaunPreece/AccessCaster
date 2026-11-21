@@ -18,7 +18,7 @@ from native.calls import call
 from native.controls import Slider, percent_words, set_choices
 from native.dialogs import JobDialog, TextDialog, confirm
 from native.pad_dialogs import READ_ONLY
-from native.pages import group, labelled, page_body, select, set_items
+from native.pages import dip, gap, group, labelled, page_body, select, set_items
 
 TITLE = "Voice effects"
 NONE_SAVED = "You have not created any effects yet."
@@ -78,7 +78,7 @@ class _EffectBox:
         if not effect.controls:
             a11y.describe(self.include, "No settings: it is simply on or off.")
         self.include.Bind(wx.EVT_CHECKBOX, lambda _e: page.included(self))
-        box_sizer.Add(self.include, 0, wx.ALL, 6)
+        box_sizer.Add(self.include, 0, wx.ALL, gap(6))
         self.values = {c.param: c.default for c in effect.controls}
         self.sliders = {}
         self.advanced = None
@@ -86,12 +86,13 @@ class _EffectBox:
             if control.advanced and self.advanced is None:
                 self.advanced = wx.CheckBox(box, label=f"Advanced {effect.label.lower()} controls")
                 self.advanced.Bind(wx.EVT_CHECKBOX, lambda _e: page.relayout(self.show))
-                box_sizer.Add(self.advanced, 0, wx.ALL, 6)
+                box_sizer.Add(self.advanced, 0, wx.ALL, gap(6))
             self.sliders[control.param] = (control, Slider(
                 page, box, box_sizer, f"{effect.label} {control.label.lower()}",
                 -12 if control.semitones else 0, 12 if control.semitones else 100,
                 page.streamer(control), *self._field(control.param),
-                words=semitone_words if control.semitones else percent_words))
+                words=semitone_words if control.semitones else percent_words,
+                real_unit=control.semitones))
         for _control, slider in self.sliders.values():
             slider.show()
         self.show()
@@ -128,7 +129,7 @@ class FxPage(scrolled.ScrolledPanel):
         self._build_preview(box, box_sizer)
         self.effects = [_EffectBox(self, box, box_sizer, effect) for effect in EFFECTS]
         self.name = labelled(box, box_sizer, "Effect name", lambda p: wx.TextCtrl(
-            p, size=(240, -1), style=wx.TE_PROCESS_ENTER))
+            p, size=dip(p, 240), style=wx.TE_PROCESS_ENTER))
         self.name.SetMaxLength(40)
         self.name.Bind(wx.EVT_TEXT_ENTER, self._on_save)
         self.colour = labelled(box, box_sizer, "Pad colour", lambda p: wx.Choice(p))
@@ -136,16 +137,16 @@ class FxPage(scrolled.ScrolledPanel):
         a11y.describe(save, "Adds it to the voice effects a pad can be given. Saving changes no "
                             "pad.")
         save.Bind(wx.EVT_BUTTON, self._on_save)
-        box_sizer.Add(save, 0, wx.ALL, 6)
+        box_sizer.Add(save, 0, wx.ALL, gap(6))
 
         saved_sizer, saved_box = group(parent, sizer, "Your saved effects")
         self.saved = labelled(saved_box, saved_sizer, "Saved effect", lambda p: wx.ListBox(
-            p, size=(300, 120)))
+            p, size=dip(p, 300, 120)))
         delete = wx.Button(saved_box, label="Delete this effect")
         a11y.describe(delete, "Removes it from the voice effects a pad can be given. A pad already "
                               "using it keeps it.")
         delete.Bind(wx.EVT_BUTTON, self._on_delete)
-        saved_sizer.Add(delete, 0, wx.ALL, 6)
+        saved_sizer.Add(delete, 0, wx.ALL, gap(6))
         self.show()
         self.SetupScrolling(scroll_x=False)
 
@@ -160,7 +161,7 @@ class FxPage(scrolled.ScrolledPanel):
                                     "hear each change as you make it. The pad is emptied again "
                                     "when you turn this off.")
         self.preview.Bind(wx.EVT_CHECKBOX, self._on_preview)
-        sizer.Add(self.preview, 0, wx.ALL, 6)
+        sizer.Add(self.preview, 0, wx.ALL, gap(6))
         self.mic = labelled(parent, sizer, "Preview through", lambda p: wx.Choice(p))
         a11y.describe(self.mic, "Talk into this mic to hear the effect.")
         self.mic.Bind(wx.EVT_CHOICE, self._on_mic)

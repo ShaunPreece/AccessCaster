@@ -20,7 +20,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Slider, Switch, record_field
 from native.dialogs import confirm, report
-from native.pages import AFTER_FOCUS_MS, Page, add_button, page_body, read_only, set_text
+from native.pages import AFTER_FOCUS_MS, Page, add_button, gap, page_body, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
 from native.update_dialogs import decide
 
@@ -98,13 +98,13 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
             description="A tone is one long beep for recording, two for paused, three for "
                         "stopped, whether you press record here, with a shortcut or on the desk.",
             guard=self._unread)
-        self.processing_speech = Choice(
-            self, parent, sizer, "Speak processing values as",
-            list(desk_labels.PROCESSING_SPEECH.items()),
-            app_settings_actions.action_set_processing_speech, *self.field("processing_speech"),
-            description="For the equaliser, filter, compressor, noise gate, de-esser and Aphex "
-                        "controls: their real value, such as -20 decibels, the percent along "
-                        "the knob's travel, or both.",
+        self.value_speech = Choice(
+            self, parent, sizer, "Speak slider values as",
+            list(desk_labels.VALUE_SPEECH.items()),
+            app_settings_actions.action_set_value_speech, *self.field("value_speech"),
+            description="For every slider with a real value, such as a level, a processing "
+                        "setting or a delay: that value, such as -20 decibels, the percent along "
+                        "the slider's travel, or both.",
             guard=self._unread)
         self.voice = Choice(self, parent, sizer, "Announcement voice", [("", "Windows default voice")],
                             speech.action_set_announce_voice, *self.field("voice"),
@@ -121,7 +121,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         refresh = wx.Button(parent, label="Refresh voices and outputs")
         a11y.describe(refresh, "Use after plugging in headphones or installing a voice.")
         refresh.Bind(wx.EVT_BUTTON, self._on_refresh)
-        sizer.Add(refresh, 0, wx.ALL, 6)
+        sizer.Add(refresh, 0, wx.ALL, gap(6))
         # `speech.action_set_announce_volume` says each new level in the announcer's own voice, at
         # that level.
         self.volume = Slider(self, parent, sizer, "Announcement volume", 0, 100,
@@ -161,7 +161,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
                              + [(name, name) for name in data.get("voices") or []])
         self.output.set_items([("", "Windows default output")]
                               + [(name, name) for name in data.get("outputs") or []])
-        for control in (self.record_feedback, self.processing_speech, self.voice, self.output,
+        for control in (self.record_feedback, self.value_speech, self.voice, self.output,
                         self.volume):
             control.show()
 

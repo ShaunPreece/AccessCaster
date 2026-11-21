@@ -20,8 +20,8 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Switch, record_field
 from native.dialogs import JobDialog, confirm, report
-from native.pages import (Reader, StatusPages, add_button, labelled, page_body, read_only, select,
-                          set_items)
+from native.pages import (Reader, StatusPages, add_button, dip, gap, labelled, page_body,
+                          read_only, select, set_items)
 
 TITLE = "Recording"
 PAGES = [("recorder", "Recorder"), ("recordings", "Recordings"), ("storage", "Card and drive")]
@@ -196,7 +196,7 @@ class RecorderPage(wx.Panel):
         self.marker = add_button(parent, row, "Drop a marker", self._on_marker)
         a11y.describe(self.marker, "Puts a marker your editor can find at this point of the "
                                    "recording.")
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
         # Below the buttons, so one Tab after a press reaches what the unit is doing.
         self.now = read_only(parent, sizer, "Now")
 
@@ -318,13 +318,13 @@ class RecordingsPage(wx.Panel):
         self.takes = []              # the recordings as listed; empty when the list holds a note
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Recording", lambda p: wx.ListBox(
-            p, size=(460, 220)))
+            p, size=dip(p, 460, 220)))
         a11y.describe(self.list, LIST_HINT)
         self.delete = wx.Button(parent, label="Delete selected recording")
         a11y.describe(self.delete, "Deletes it from the card or drive. This cannot be undone; you "
                                    "are asked to confirm.")
         self.delete.Bind(wx.EVT_BUTTON, self._on_delete)
-        sizer.Add(self.delete, 0, wx.ALL, 6)
+        sizer.Add(self.delete, 0, wx.ALL, gap(6))
 
     def show(self):
         data = self.section.data
@@ -374,7 +374,7 @@ class StoragePage(wx.Panel):
         self.shown = []              # the volumes as listed
         sizer, parent = page_body(self)
         self.list = labelled(parent, sizer, "Card or drive", lambda p: wx.ListBox(
-            p, size=(460, 80)))
+            p, size=dip(p, 460, 80)))
         a11y.describe(self.list, STORAGE_HINT)
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.eject = add_button(parent, row, "Eject", self._on_eject)
@@ -382,7 +382,7 @@ class StoragePage(wx.Panel):
         a11y.describe(self.reconnect, "Brings back a card or drive ejected from here, without "
                                       "taking it out.")
         self.erase = add_button(parent, row, "Erase", self._on_erase)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
 
     def show(self):
         chosen = self._chosen()

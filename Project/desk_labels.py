@@ -129,13 +129,28 @@ PROCESSING_UNITS = {
     "aphexAETune": (600, 5000, "square", "Hz"),
 }
 
-# How a knob with a real unit is spoken, chosen on App settings, Announcements: its real value, its
-# percent along the travel (the desk's own encoder's view), or both in either order. Set by
-# `app_settings_actions`, read by `processing_words`.
-PROCESSING_SPEECH = {"units": "Real units", "percent": "Percent",
-                     "units_percent": "Real units then percent",
-                     "percent_units": "Percent then real units"}
-processing_speech = "units"
+# How a value with a real unit is spoken, chosen on App settings, Announcements: its real value, its
+# percent along the control's travel (the desk's own encoder's view), or both in either order. Set
+# by `app_settings_actions`, read by `value_words`.
+VALUE_SPEECH = {"units": "Real units", "percent": "Percent",
+                "units_percent": "Real units then percent",
+                "percent_units": "Percent then real units"}
+value_speech = "units"
+
+
+def value_words(real: str, position: float) -> str:
+    """THE one place the speech setting is applied: `real` is the value in words with its unit,
+    `position` how far along its control's travel it is, 0 to 1. Both are the one value, so
+    they are joined by "or", a word rather than a comma: a screen reader set to speak punctuation
+    says "comma"."""
+    percent = f"{wording.percent(position)} percent"
+    return {"units": real, "percent": percent, "units_percent": f"{real} or {percent}",
+            "percent_units": f"{percent} or {real}"}.get(value_speech, real)
+
+
+def range_words(real: str, value: float, lo: float, hi: float) -> str:
+    """`value_words` for a value on a control running from `lo` to `hi`."""
+    return value_words(real, (value - lo) / (hi - lo) if hi > lo else 0.0)
 
 
 def processing_value(prop: str, position: float) -> float:
@@ -184,13 +199,10 @@ def processing_words(prop: str, position: float) -> str:
     and the spoken changes alike. `position` is the desk's 0 to 1."""
     if prop in PAN_PROPS:
         return pan_words(wording.percent(position))
-    percent = f"{wording.percent(position)} percent"
     unit = PROCESSING_UNITS.get(prop, (None,) * 4)[3]
     if unit is None or unit == "%":
-        return percent
-    real = unit_words(processing_value(prop, position), unit)
-    return {"units": real, "percent": percent, "units_percent": f"{real}, {percent}",
-            "percent_units": f"{percent}, {real}"}.get(processing_speech, real)
+        return f"{wording.percent(position)} percent"
+    return value_words(unit_words(processing_value(prop, position), unit), position)
 
 # Module on/off toggles shown in the UI, with screen-reader labels. `prop` is the key of the
 # module's state in a channel record's `modules`, which is not always `key` + "On" (pan's is

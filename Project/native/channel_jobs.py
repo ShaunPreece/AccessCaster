@@ -11,6 +11,7 @@ import level_check
 from native import a11y
 from native.calls import call
 from native.dialogs import JobDialog, TextDialog
+from native.pages import gap
 
 
 def countdown_words(left):
@@ -138,7 +139,7 @@ class LevelCheck:
         a11y.describe(button, self.DESCRIPTION)
         button.Bind(wx.EVT_BUTTON, lambda _e: self._press(button, name))
         button.Bind(wx.EVT_KILL_FOCUS, self._on_leave)
-        sizer.Add(button, 0, wx.ALL, 6)
+        sizer.Add(button, 0, wx.ALL, gap(6))
         self._buttons = [b for b in self._buttons if b] + [button]
         return button
 

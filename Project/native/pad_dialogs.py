@@ -12,7 +12,7 @@ from native import a11y
 from native.calls import call
 from native.controls import Choice, Number, Slider, Switch, percent_words
 from native.dialogs import SpeakingDialog, confirm, ok_cancel
-from native.pages import group, labelled, read_only, reading_box
+from native.pages import dip, gap, group, labelled, read_only, reading_box
 
 READ_ONLY = "Editing SMART pads is not enabled on this device yet."
 DEFAULT_MAPPING = ("This pad is on the default mapping, so this does nothing. Turn on the custom "
@@ -69,7 +69,7 @@ class SettingsDialog(SpeakingDialog):
         elif kind == soundpad.PAD_TYPE_TRIGGER:
             self._build_trigger(sizer)
         close = wx.Button(self, wx.ID_CANCEL, "Close")
-        sizer.Add(close, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        sizer.Add(close, 0, wx.ALIGN_RIGHT | wx.ALL, gap(10))
         sizer.Add(self.sink, 0)
         self.SetEscapeId(wx.ID_CANCEL)
         for control in self._controls:
@@ -115,14 +115,14 @@ class SettingsDialog(SpeakingDialog):
     def _build_name(self, sizer):
         """The name, written by Rename or Enter rather than per keystroke."""
         line = wx.BoxSizer(wx.HORIZONTAL)
-        line.Add(wx.StaticText(self, label="Name"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        line.Add(wx.StaticText(self, label="Name"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, gap(8))
         self.name = wx.TextCtrl(self, value=(self.pad["name"] or "").replace("_", " "),
-                                size=(240, -1), style=wx.TE_PROCESS_ENTER)
+                                size=dip(self, 240), style=wx.TE_PROCESS_ENTER)
         self.name.SetMaxLength(40)
-        line.Add(self.name, 0, wx.RIGHT, 8)
+        line.Add(self.name, 0, wx.RIGHT, gap(8))
         rename = wx.Button(self, label="Rename")
         line.Add(rename, 0)
-        sizer.Add(line, 0, wx.ALL, 6)
+        sizer.Add(line, 0, wx.ALL, gap(6))
         self.name.Bind(wx.EVT_TEXT_ENTER, self._on_rename)
         rename.Bind(wx.EVT_BUTTON, self._on_rename)
 
@@ -148,7 +148,7 @@ class SettingsDialog(SpeakingDialog):
         self._add(Slider(self, self, sizer, "Volume", -120, 24,
                          self._write(pad_actions.action_set_pad_gain, scale=2),
                          *self.field("gain", scale=2),
-                         words=lambda units: f"{units / 2:g} dB", unread=-24))
+                         words=lambda units: f"{units / 2:g} dB", unread=-24, real_unit=True))
         self._add(Choice(self, self, sizer, "How the pad plays",
                          [(m["value"], m["label"]) for m in model["play_modes"]],
                          self._write(pad_actions.action_set_play_mode), *self.field("play_mode"),
@@ -199,7 +199,8 @@ class SettingsDialog(SpeakingDialog):
             for f in model["extra_edit"]["fade"]:
                 slider = self._add(Slider(self, box, box_sizer, f["label"], 0, int(f["max"] * 2),
                                           self._write(pad_actions.action_set_pad_fade, f["key"], scale=2),
-                                          *self.field("fade", f["key"], scale=2), words=_seconds))
+                                          *self.field("fade", f["key"], scale=2), words=_seconds,
+                                          real_unit=True))
                 slider.acc.description = f["help"]
             self._add(Switch(self, box, box_sizer, "Leave the host's mic out of the fade",
                              self._write(pad_actions.action_set_pad_flag, "fade_exclude_host"),
@@ -333,14 +334,14 @@ class ChangeDialog(SpeakingDialog):
 
         self.sound_line = wx.BoxSizer(wx.HORIZONTAL)
         self.sound_line.Add(wx.StaticText(self, label="Sound file"), 0,
-                            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+                            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, gap(8))
         self.file = reading_box(self, width=260, height=None, value="None chosen")
         a11y.describe(self.file, "WAV or MP3, written to the pad exactly as it is.")
-        self.sound_line.Add(self.file, 0, wx.RIGHT, 8)
+        self.sound_line.Add(self.file, 0, wx.RIGHT, gap(8))
         self.choose = wx.Button(self, label="Choose a file")
         self.choose.Bind(wx.EVT_BUTTON, self._on_choose)
         self.sound_line.Add(self.choose, 0)
-        sizer.Add(self.sound_line, 0, wx.ALL, 6)
+        sizer.Add(self.sound_line, 0, wx.ALL, gap(6))
 
         self.recipes = list(model["recipes"])
         self.fx = labelled(self, sizer, "Voice effect", lambda p: wx.Choice(p, choices=self.recipes))

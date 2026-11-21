@@ -32,7 +32,7 @@ from native.dialogs import modal_dialogs
 from native.device_section import DeviceSection
 from native.help_section import HelpSection
 from native.pads_section import PadsSection
-from native.pages import Speaker
+from native.pages import Speaker, dip, gap
 from native.recording_section import RecordingSection
 from native.routing_section import RoutingSection
 
@@ -56,7 +56,9 @@ NO_DESK_TITLE = f"{APP_TITLE}, no desk connected"
 
 class MainFrame(Speaker, wx.Frame):
     def __init__(self, quit_app):
-        super().__init__(None, title=APP_TITLE, size=(980, 680))
+        # No window exists yet to scale by, so by the primary display.
+        super().__init__(None, title=APP_TITLE,
+                         size=wx.Window.FromDIP(wx.Size(980, 680), None))
         self._quit_app = quit_app
         root = wx.Panel(self)
         # A static text created just before a control names it, the standard Win32 labelling.
@@ -85,12 +87,12 @@ class MainFrame(Speaker, wx.Frame):
             self._fill_branch(section)
 
         left = wx.BoxSizer(wx.VERTICAL)
-        left.Add(tree_label, 0, wx.BOTTOM, 4)
+        left.Add(tree_label, 0, wx.BOTTOM, gap(4))
         left.Add(self.tree, 1, wx.EXPAND)
-        left.SetMinSize((260, -1))
+        left.SetMinSize(dip(self, 260))
         outer = wx.BoxSizer(wx.HORIZONTAL)
-        outer.Add(left, 0, wx.EXPAND | wx.ALL, 8)
-        outer.Add(self.host, 1, wx.EXPAND | wx.ALL, 8)
+        outer.Add(left, 0, wx.EXPAND | wx.ALL, gap(8))
+        outer.Add(self.host, 1, wx.EXPAND | wx.ALL, gap(8))
         outer.Add(sink, 0)
         root.SetSizer(outer)
         # The desk summary (DeviceSection): a native status bar, which a screen reader reads on

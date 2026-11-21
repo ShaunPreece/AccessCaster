@@ -11,7 +11,7 @@ from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Slider, Switch, percent_words
 from native.dialogs import JobDialog, confirm
-from native.pages import labelled, page_body, read_only
+from native.pages import gap, labelled, page_body, read_only
 
 TITLE = "Master Mix"
 READ_ONLY = "Changing this is not enabled on this device yet."
@@ -91,7 +91,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         apply = wx.Button(parent, label="Confirm what this computer receives")
         a11y.describe(apply, self.model["usb_drop_hint"])
         apply.Bind(wx.EVT_BUTTON, self._on_apply_receives)
-        sizer.Add(apply, 0, wx.ALL, 6)
+        sizer.Add(apply, 0, wx.ALL, gap(6))
 
         self.sends = labelled(parent, sizer, "What this computer sends (USB 1 Input)",
                               lambda p: wx.Choice(p, choices=[
@@ -101,7 +101,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         apply = wx.Button(parent, label="Confirm what this computer sends")
         a11y.describe(apply, self.model["usb_expanded_drop_hint"])
         apply.Bind(wx.EVT_BUTTON, self._on_apply_sends)
-        sizer.Add(apply, 0, wx.ALL, 6)
+        sizer.Add(apply, 0, wx.ALL, gap(6))
 
         self.bypass = self._add(Switch(
             self, parent, sizer, "Send the separate tracks raw",
@@ -179,11 +179,11 @@ class MasterMixPage(scrolled.ScrolledPanel):
         self.install_acc = a11y.describe(self.install, DRIVER_UNKNOWN)
         self.install.Bind(wx.EVT_BUTTON, self._on_install)
         self.install.Hide()
-        sizer.Add(self.install, 0, wx.ALL, 6)
+        sizer.Add(self.install, 0, wx.ALL, gap(6))
         self.driver_page = wx.Button(parent, label="Open RODE's software page")
         self.driver_page_acc = a11y.describe(self.driver_page, DRIVER_UNKNOWN)
         self.driver_page.Bind(wx.EVT_BUTTON, self._on_driver_page)
-        sizer.Add(self.driver_page, 0, wx.ALL, 6)
+        sizer.Add(self.driver_page, 0, wx.ALL, gap(6))
 
     def _on_show(self, event):
         event.Skip()
@@ -294,7 +294,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
                          guard=self._guard))
         delay = self._add(Slider(self, parent, sizer, "Output delay time", 0, DELAY_MAX_MS,
                                  self._send_delay_ms, *self.field("delay_seconds", scale=1000),
-                                 words=milliseconds))
+                                 words=milliseconds, real_unit=True))
         delay.slider.SetLineSize(10)
         delay.slider.SetPageSize(100)
 

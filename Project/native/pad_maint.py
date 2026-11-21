@@ -15,7 +15,7 @@ from native.calls import call
 from native.controls import set_choices
 from native.dialogs import JobDialog, ListDialog, confirm, follow_job, report
 from native.pad_dialogs import READ_ONLY, content, where
-from native.pages import add_button, page_body, reply_text, select
+from native.pages import add_button, dip, gap, page_body, reply_text, select
 
 TITLE = "Pad maintenance"
 
@@ -76,23 +76,23 @@ class MaintPage(wx.Panel):
 
         line = wx.BoxSizer(wx.HORIZONTAL)
         line.Add(wx.StaticText(parent, label="Sound pad"), 0,
-                 wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+                 wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, gap(8))
         self.sound_pads = []
-        self.export_choice = wx.Choice(parent, size=(320, -1))
+        self.export_choice = wx.Choice(parent, size=dip(parent, 320))
         a11y.describe(self.export_choice, "Only sound pads have a file to export: a voice effect "
                                           "is a recipe the desk builds, not a recording.")
         line.Add(self.export_choice, 0)
-        sizer.Add(line, 0, wx.ALL, 6)
+        sizer.Add(line, 0, wx.ALL, gap(6))
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.export = wx.Button(parent, label="Export this pad's sound")
         a11y.describe(self.export, "Copies the sound to Documents, AccessCaster, Pad exports. The "
                                    "pad on the desk is unchanged.")
         self.export.Bind(wx.EVT_BUTTON, self._on_export)
-        row.Add(self.export, 0, wx.RIGHT, 8)
+        row.Add(self.export, 0, wx.RIGHT, gap(8))
         folder = wx.Button(parent, label="Open the exports folder")
         folder.Bind(wx.EVT_BUTTON, self._on_open_folder)
         row.Add(folder, 0)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
         self.show()
 
     @property

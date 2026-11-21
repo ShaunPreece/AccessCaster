@@ -20,6 +20,7 @@ import time
 
 import change_words
 import channels
+import desk_labels
 import desk_live
 import desk_model
 import devices
@@ -347,7 +348,10 @@ def handle_push(push, st: dict) -> None:
             st["gain_said"] = (who, ival)
             if not is_self_echo(("gain", who)):
                 # Number first, as for any level that moved (see change_words.level_words).
-                _say(f"{ival} d B, {who}")
+                lo, hi = ((channels.GAIN_MIN_DB, channels.GAIN_MAX_DB)
+                          if name == "inputMicrophoneGain"
+                          else (channels.LEVEL_MIN_DB, channels.LEVEL_MAX_DB))
+                _say(f"{desk_labels.range_words(f'{ival} d B', ival, lo, hi)}, {who}")
         return
     if name == "faderLevel":
         # The VIRTUAL fader level, 0-127. This is the encoder's own report of

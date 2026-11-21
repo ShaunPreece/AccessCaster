@@ -18,7 +18,7 @@ from native.calls import call
 from native.channel_jobs import AutoGain
 from native.controls import AppliedChoice, Slider, Switch, percent_words
 from native.dialogs import DeletePresetDialog
-from native.pages import group, labelled
+from native.pages import dip, gap, group, labelled
 
 # Which tab each parameter group (desk_labels.PROCESSING_CONTROLS) goes on, so the
 # tab strip stays one row. A group not listed here gets a tab of its own.
@@ -139,7 +139,7 @@ class SettingsTab(Tab):
             lambda on: mute_solo.action_set_channel_solo(name, on), *field("solo")))
         clear = wx.Button(self, label="Clear every solo")
         clear.Bind(wx.EVT_BUTTON, self._on_clear_solos)
-        self.sizer.Add(clear, 0, wx.ALL, 6)
+        self.sizer.Add(clear, 0, wx.ALL, gap(6))
 
         self.wireless = None
         if is_mic:
@@ -155,13 +155,14 @@ class SettingsTab(Tab):
                       else (data["level_min_db"], data["level_max_db"]))
             self.add(Slider(page, self, self.sizer, "Level", lo, hi,
                             lambda db: channel_actions.action_set_channel_level(name, db),
-                            *field("level_db"), words=lambda db: f"{db} decibels"))
+                            *field("level_db"), words=lambda db: f"{db} decibels",
+                            real_unit=True))
         # Auto gain sets a mic's preamp gain, which nothing else has. The level check works on
         # every channel but Chat: it listens on the Chat output, which leaves the caller out.
         if is_mic:
             auto = wx.Button(self, label="Set gain automatically")
             auto.Bind(wx.EVT_BUTTON, lambda _e: AutoGain(page, auto).run())
-            self.sizer.Add(auto, 0, wx.ALL, 6)
+            self.sizer.Add(auto, 0, wx.ALL, gap(6))
         if name != "Chat":
             page.section.level_check.button(self, self.sizer, name)
 
@@ -180,7 +181,7 @@ class SettingsTab(Tab):
                 # desk move the gain and replace the whole processing chain.
                 apply = wx.Button(self, label="Apply mic type")
                 apply.Bind(wx.EVT_BUTTON, self._on_apply_mic_type)
-                self.sizer.Add(apply, 0, wx.ALL, 6)
+                self.sizer.Add(apply, 0, wx.ALL, gap(6))
 
     def show(self, rec):
         super().show(rec)
@@ -260,18 +261,18 @@ class PresetsTab(Tab):
         # change per item.
         apply = wx.Button(self, label="Apply preset")
         apply.Bind(wx.EVT_BUTTON, self._on_apply)
-        self.sizer.Add(apply, 0, wx.ALL, 6)
+        self.sizer.Add(apply, 0, wx.ALL, gap(6))
 
         self.new_name = labelled(self, self.sizer, "Save current settings as a preset",
-                                 lambda p: wx.TextCtrl(p, size=(260, -1),
+                                 lambda p: wx.TextCtrl(p, size=dip(p, 260),
                                                        style=wx.TE_PROCESS_ENTER))
         self.new_name.Bind(wx.EVT_TEXT_ENTER, self._on_save)
         save = wx.Button(self, label="Save preset")
         save.Bind(wx.EVT_BUTTON, self._on_save)
-        self.sizer.Add(save, 0, wx.ALL, 6)
+        self.sizer.Add(save, 0, wx.ALL, gap(6))
         delete = wx.Button(self, label="Delete a preset")
         delete.Bind(wx.EVT_BUTTON, self._on_delete)
-        self.sizer.Add(delete, 0, wx.ALL, 6)
+        self.sizer.Add(delete, 0, wx.ALL, gap(6))
 
     def show(self, rec):
         now = rec.get("preset_now")

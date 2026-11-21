@@ -11,7 +11,7 @@ from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Switch, set_choices
 from native.dialogs import DeletePresetDialog, FormDialog, NameDialog, confirm
-from native.pages import group, labelled, page_body, select
+from native.pages import dip, gap, group, labelled, page_body, select
 
 TITLE = "Output mixes"
 READ_ONLY = "Changing output mixes is not enabled on this device yet."
@@ -45,7 +45,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         # and leaving Custom discards that output's custom mix.
         apply_mode = wx.Button(parent, label="Confirm mix type change")
         apply_mode.Bind(wx.EVT_BUTTON, self._on_apply_mode)
-        sizer.Add(apply_mode, 0, wx.ALL, 6)
+        sizer.Add(apply_mode, 0, wx.ALL, gap(6))
 
         self.sources_sizer, sources = group(parent, sizer, "Sources")
         self.sources_box = sources
@@ -203,7 +203,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
         delete = wx.Button(parent, label="Delete a preset...")
         delete.Bind(wx.EVT_BUTTON, self._on_delete_scheme)
         for button in (apply, save, delete):
-            sizer.Add(button, 0, wx.ALL, 6)
+            sizer.Add(button, 0, wx.ALL, gap(6))
 
     def read_schemes(self, prefer=None):
         """Read the preset list (files, not the desk). `prefer` is a saved preset's name to choose
@@ -295,7 +295,7 @@ class OutputMixesPage(scrolled.ScrolledPanel):
                              "Bluetooth, Chat, USB 2 and CallMe to Mix Minus, all following the "
                              "faders. Wipes any custom mix.")
         reset.Bind(wx.EVT_BUTTON, self._on_reset)
-        sizer.Add(reset, 0, wx.ALL, 6)
+        sizer.Add(reset, 0, wx.ALL, gap(6))
 
     def _on_reset(self, event):
         source = event.GetEventObject()
@@ -329,15 +329,15 @@ class SavePresetDialog(FormDialog):
         super().__init__(parent, "Save the mixes as a preset", "Save", "Preset not saved")
         self._output = output
         self._existing = existing
-        self.sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, 10)
-        self.name_box = wx.TextCtrl(self, size=(300, -1))
+        self.sizer.Add(wx.StaticText(self, label="Name"), 0, wx.LEFT | wx.TOP, gap(10))
+        self.name_box = wx.TextCtrl(self, size=dip(self, 300))
         self.name_box.SetMaxLength(NameDialog.MAX_NAME)
         a11y.describe(self.name_box, NameDialog.RULE)
-        self.sizer.Add(self.name_box, 0, wx.ALL, 10)
+        self.sizer.Add(self.name_box, 0, wx.ALL, gap(10))
         self.scope = wx.RadioBox(self, label="What to save",
                                  choices=["Every output's mix", f"Only the {output['label']} mix"],
                                  style=wx.RA_SPECIFY_ROWS)
-        self.sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
+        self.sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, gap(10))
         self.finish_layout()
 
     def request(self):

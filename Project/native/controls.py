@@ -12,9 +12,10 @@ import time
 
 import wx
 
+from desk_labels import range_words
 from native import a11y
 from native.calls import LatestWins, call
-from native.pages import labelled
+from native.pages import dip, gap, labelled
 from native.slider import SliderCtrl
 
 
@@ -63,7 +64,7 @@ class Switch:
         self._remember = remember
         self._guard = guard
         self.box.Bind(wx.EVT_CHECKBOX, self._on_box)
-        sizer.Add(self.box, 0, wx.ALL, 6)
+        sizer.Add(self.box, 0, wx.ALL, gap(6))
 
     def show(self):
         on = self._current() is True
@@ -102,9 +103,11 @@ class Switch:
 
 class Slider:
     """A labelled slider from `lo` to `hi`. `words(value)` is its value as the screen reader reads
-    it. `send(value)` goes through `LatestWins`. Only a refusal is spoken: the screen reader has
-    already read the new value, so a success would repeat it. A value the desk did not report shows
-    at `unread` and reads "not read yet" until it is moved."""
+    it. With `real_unit`, those words carry a unit, and the speech setting (`desk_labels.value_words`)
+    decides whether the percent along the slider's travel is said instead or as well. `send(value)`
+    goes through `LatestWins`. Only a refusal is spoken: the screen reader has already read the new
+    value, so a success would repeat it. A value the desk did not report shows at `unread` and reads
+    "not read yet" until it is moved."""
 
     HANDS_OFF_S = 2.0      # long enough for the desk's echo of the last write to have arrived
     # While a slider keeps moving (an arrow key held), its newest value still goes out this often.
@@ -116,9 +119,10 @@ class Slider:
     FOCUSED_SETTLE_MS = 400
 
     def __init__(self, page, parent, sizer, label, lo, hi, send, current, remember, words,
-                 unread=None, accepted=None):
+                 unread=None, accepted=None, real_unit=False):
         self.page = page
         self._accepted = accepted
+        self._range = (lo, hi) if real_unit else None
         self.slider = labelled(parent, sizer, label,
                                lambda p: SliderCtrl(p, label, lo, hi, self._value_words))
         self._current = current
@@ -171,7 +175,8 @@ class Slider:
         value = self.slider.GetValue()
         if self._current() is None and value == self._unread:
             return "not read yet"
-        return self._words(value)
+        words = self._words(value)
+        return range_words(words, value, *self._range) if self._range else words
 
     def _done(self, value, reply):
         if reply.get("ok"):
@@ -263,7 +268,7 @@ class Number(_Field):
     def __init__(self, page, parent, sizer, label, lo, hi, send, current, remember,
                  description="", guard=None, accepted=None):
         spin = labelled(parent, sizer, label, lambda p: wx.SpinCtrl(
-            p, min=lo, max=hi, size=(90, -1), style=wx.SP_ARROW_KEYS | wx.TE_PROCESS_ENTER))
+            p, min=lo, max=hi, size=dip(p, 90), style=wx.SP_ARROW_KEYS | wx.TE_PROCESS_ENTER))
         super().__init__(page, spin, send, current, remember, description, guard, accepted)
         spin.Bind(wx.EVT_SPINCTRL, self._on_change)
 

@@ -5,6 +5,7 @@ import wx
 
 from native import a11y
 from native.dialogs import BackupFirstDialog, paragraphs
+from native.pages import gap
 
 RESET_TEXT = (
     "This puts every setting and every SMART pad back to how the desk left the factory, including "
@@ -73,12 +74,12 @@ class BaselineDialog(wx.Dialog):
         a11y.describe(self.include_pads, (
             f"About {seconds} second{'' if seconds == 1 else 's'} per pad, and the only copy of "
             "the pads as they came. They can be added later from the Backups page."))
-        sizer.Add(self.include_pads, 0, wx.ALL, 12)
+        sizer.Add(self.include_pads, 0, wx.ALL, gap(12))
         skip = wx.Button(self, wx.ID_NO, label="Not now")
         row = wx.BoxSizer(wx.HORIZONTAL)
-        row.Add(skip, 0, wx.ALL, 5)
-        row.Add(save, 0, wx.ALL, 5)
-        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, 7)
+        row.Add(skip, 0, wx.ALL, gap(5))
+        row.Add(save, 0, wx.ALL, gap(5))
+        sizer.Add(row, 0, wx.ALIGN_RIGHT | wx.ALL, gap(7))
         save.SetDefault()
         self.SetSizerAndFit(sizer)
         self.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(event.GetId()))

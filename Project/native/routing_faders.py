@@ -9,7 +9,7 @@ import faders
 from native import a11y
 from native.calls import call
 from native.controls import AppliedChoice, Switch, set_choices
-from native.pages import labelled, page_body, select
+from native.pages import gap, labelled, page_body, select
 
 TITLE = "Fader assignment"
 READ_ONLY = "Changing the fader layout is not enabled on this device yet."
@@ -39,11 +39,11 @@ class FadersPage(scrolled.ScrolledPanel):
         # item, and each change would move a channel and its processing.
         change = wx.Button(parent, label="Confirm fader change")
         change.Bind(wx.EVT_BUTTON, self._on_change)
-        sizer.Add(change, 0, wx.ALL, 6)
+        sizer.Add(change, 0, wx.ALL, gap(6))
         reset = wx.Button(parent, label="Reset faders to default")
         a11y.describe(reset, "The desk's default channel on each fader.")
         reset.Bind(wx.EVT_BUTTON, self._on_reset)
-        sizer.Add(reset, 0, wx.ALL, 6)
+        sizer.Add(reset, 0, wx.ALL, gap(6))
 
         self.links = []
         pairs = model.get("stereo_pairs") or []

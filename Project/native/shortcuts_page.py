@@ -11,8 +11,8 @@ import shortcuts
 from native import a11y
 from native.calls import call
 from native.dialogs import FormDialog, paragraphs, confirm
-from native.pages import (AFTER_FOCUS_MS, add_button, labelled, page_body, reply_text, select,
-                          set_items)
+from native.pages import (AFTER_FOCUS_MS, add_button, dip, gap, labelled, page_body, reply_text,
+                          select, set_items)
 from native.controls import Switch, set_choices
 
 LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
@@ -70,7 +70,7 @@ class ShortcutsPage(wx.Panel):
                         "from your screen reader. Turning this off releases every combination.",
             guard=self._unread, accepted=lambda reply: self.show(reply.get("state")))
         self.list = labelled(parent, sizer, "Your shortcuts", lambda p: wx.ListBox(
-            p, choices=["Reading the shortcuts."], size=(460, 220)))
+            p, choices=["Reading the shortcuts."], size=dip(p, 460, 220)))
         self.list_acc = a11y.describe(self.list, LIST_HINT)
         # On the list itself, so Enter and Delete are the list's before the page sees them.
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
@@ -81,14 +81,14 @@ class ShortcutsPage(wx.Panel):
         self.add = add_button(parent, row, "Add a shortcut", self._on_add)
         self.mods = add_button(parent, row, "Change the keys to hold", self._on_mods)
         self.restore = add_button(parent, row, "Restore default shortcuts", self._on_restore)
-        sizer.Add(row, 0, wx.ALL, 6)
+        sizer.Add(row, 0, wx.ALL, gap(6))
         # Partly ticked while some of the pad scheme is bound. Ticking adds what is missing;
         # unticking deletes it.
         self.pad_set = wx.CheckBox(parent, label="Use the SMART pad keys", style=wx.CHK_3STATE)
         a11y.describe(self.pad_set, "The number keys play the pads of the bank the desk is on, "
                                     "Dash and Equals change bank, and P says what is playing.")
         self.pad_set.Bind(wx.EVT_CHECKBOX, self._on_pad_set)
-        sizer.Add(self.pad_set, 0, wx.ALL, 6)
+        sizer.Add(self.pad_set, 0, wx.ALL, gap(6))
 
     def _unread(self):
         return "The shortcuts have not been read yet." if self.state is None else None
@@ -281,10 +281,10 @@ class EditDialog(FormDialog):
         # Ticked means NOT on: the box reads "Turn this shortcut off".
         self.off = wx.CheckBox(self, label="Turn this shortcut off")
         self.off.SetValue(not row.get("enabled"))
-        self.sizer.Add(self.off, 0, wx.ALL, 10)
+        self.sizer.Add(self.off, 0, wx.ALL, gap(10))
         self.speak = wx.CheckBox(self, label="Speak when pressed")
         self.speak.SetValue(row.get("speak", True))
-        self.sizer.Add(self.speak, 0, wx.ALL, 10)
+        self.sizer.Add(self.speak, 0, wx.ALL, gap(10))
         self.finish_layout()
 
     def request(self):
@@ -305,7 +305,7 @@ class ModsDialog(FormDialog):
         for mod in state.get("modifiers") or []:
             box = wx.CheckBox(self, label=mod["label"])
             box.SetValue(mod["id"] in (state.get("mods") or []))
-            self.sizer.Add(box, 0, wx.ALL, 8)
+            self.sizer.Add(box, 0, wx.ALL, gap(8))
             self.boxes.append((mod["id"], box))
         self.finish_layout()
 
@@ -325,7 +325,7 @@ class AddDialog(FormDialog):
         self.category.SetSelection(0)
         self.category.Bind(wx.EVT_CHOICE, lambda _e: self._fill())
         self.command = labelled(self, self.sizer, "What it does", lambda p: wx.Choice(
-            p, size=(360, -1)))
+            p, size=dip(p, 360)))
         self.keys = state.get("keys") or []
         self.key = labelled(self, self.sizer, "Key to press", lambda p: wx.Choice(p))
         set_choices(self.key, self.keys)

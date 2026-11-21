@@ -237,8 +237,13 @@ check("a dim time off the list is listed as it is",
       dim.control.GetString(dim.control.GetSelection()), "Currently 45")
 check("a switch shows the desk's value", unit.controls["outputMonFixed"].box.GetValue(), True)
 check("a brightness lands on its slider", unit.controls["screenBrightness"].slider.GetValue(), 180)
-check("and is read as a fraction and a percentage",
-      unit.controls["screenBrightness"]._value_words(), "180 of 255, about 71 percent")
+brightness_words = {}
+for mode in ("units", "units_percent"):
+    desk_labels.value_speech = mode
+    brightness_words[mode] = unit.controls["screenBrightness"]._value_words()
+desk_labels.value_speech = "units"
+check("and is read as a fraction, with its percent as the speech setting asks", brightness_words,
+      {"units": "180 of 255", "units_percent": "180 of 255 or 71 percent"})
 check("MIDI rides on the same read", unit.midi.box.GetValue(), True)
 check_in("a setting the desk did not report says so", "did not report",
          unit.controls["metering"].acc.description)
