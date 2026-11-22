@@ -188,15 +188,15 @@ for cap in ("input_mic_write", "processing", "channel_read", "matrix_read", "mat
             "output_write", "pad_write", "fader_write", "unit_settings", "level_write",
             "chain_follow", "stereo_link", "network_write", "recorder", "shows"):
     check(f"Duo cap {cap}", cap in devices.DUO.caps, True)
-# THE DUO CLAIMS EVERY CAP THE PRO II DOES BUT ONE, and that one is listed here by name so a new
+# THE DUO CLAIMS EVERY CAP THE PRO II DOES BUT TWO, and those are listed here by name so a new
 # Pro II cap still cannot silently skip the Duo.
 # `recorder` and `shows` are on by the TREE-then-ENGINE route with the hardware missing: the
 # recorder CONSUMES a record request (255 -> 3) and SHOWCONTROL answers an impossible export with
 # error 8 in one second. Read the comments on both caps in devices.py before treating either as
 # witnessed - an engine answering proves an ADDRESS is live, never that a FEATURE works, and nobody
 # has made a recording or a show on a Duo.
-# `storage_write` is OFF: no Duo here has had a card or drive in it.
-DUO_CAPS_OFF = ["storage_write"]
+# `storage_write` and `card_transfer` are OFF: no Duo here has had a card or drive in it.
+DUO_CAPS_OFF = ["card_transfer", "storage_write"]
 check("the Duo claims every cap the Pro II does, bar the ones named off",
       sorted(devices.PRO2.caps - devices.DUO.caps), DUO_CAPS_OFF)
 # The Duo has ONE legal pair where the Pro II has three, and that is a property of the INPUTS, not
