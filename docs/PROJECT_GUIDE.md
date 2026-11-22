@@ -401,11 +401,23 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   inside a block (a cross-point's `13 * source + output`, a fader's copy) stays arithmetic in the
   code; the block's own position never does. `DevTools/test_addressing.py` drives every write path
   against the saved Pro II 1.7.6 and 1.7.7 and Duo 1.7.3 layouts, checks each record is
-  byte-identical to the address used before the lookup, checks every record follows a moved block,
-  and fails on any literal path in `Project/` outside `rcp_transfer`.
+  byte-identical to the address used before the lookup, checks every record follows a moved block
+  and a block cut into runs, and fails on any literal path in `Project/` outside `rcp_transfer`.
   - **THE LOOKUP IS THE STRAY GUARD.** It refuses a key the desk lacks and a property the node does
     not carry (`model_tree.AddressUnknown`). Every property the app writes is published on its node
     before the first write, on both desks, so a missing name means the wrong node.
+  - **THE SAME FIRMWARE DOES NOT MEAN THE SAME ORDER.** A second Pro II on 1.7.7, read under product
+    id `0x0092` (`outputMultiMode` 1) on 22nd November 2026, publishes the same blocks and copies
+    with CHANNEL at root child `0x1A`, MIX at `0x37` and INPUTSOURCE at `0xDF`, and with CHANNEL,
+    EFFECTS_PARAMETERS, MIXMINUSES, MIX and INPUTSOURCE each cut into runs that other blocks sit
+    between (MIX is 156, 91 and 143 nodes; the table is in RODECASTER_PROTOCOL section 1). A key's
+    copy counts through every run of its block, which is the desk's own numbering: `inputId` reads
+    0 to 29 across the three INPUTSOURCE runs. So a read or a write by key is right there with no
+    table for it, and **a block is never to be taken as one contiguous run**: `base + copy` from a
+    block's first node lands in another block past the first run. That desk carries the strays of
+    writes sent to the other layout's positions (`inputPower` on an RCSYNCMIX cell at `0x26F`,
+    `transferModeType` on AUDIO at `0x0F`, `wifi` on a STREAMERXMIXPRESET at `0x10`), and
+    `test_addressing` drives every write on its layout (`layout_fixture.PRO2_177_PID0092`).
   - **NO READABLE MODEL, NO WRITE.** With no layout and no dump, `rcp_read.layout` raises rather
     than fall back to a remembered position.
   - **A LISTENER NAMES A PUSH WITH `rcp_read.push_key`**, which uses the last layout known, or the
@@ -713,7 +725,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   one, and this is read aloud on every encoder turn.
 - **THE DESK COMES BACK FROM A RE-ENUMERATION UNDER A DIFFERENT USB PRODUCT ID, because the id
   encodes the audio configuration.** Measured on a Pro II, fw 1.7.6, against `outputMultiMode`:
-  0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`. The HID path
+  0 gives PID `0x0037`, 2 gives `0x0092`, 3 gives `0x0078` and 5 gives `0x0094`; on a second Pro
+  II, 1 gives `0x0092` and 4 gives `0x0094`, so pre-fader and post-fader share an id. The HID path
   changes with it, so **NO LONG-LIVED READER MAY CACHE ITS `RodeInterface`** - resolve it again on
   every reopen, as the desk listener (`desk_live`) does. Caching it is what made the
   announcer go silent for good after a USB setting was changed in the app itself: the read failed,

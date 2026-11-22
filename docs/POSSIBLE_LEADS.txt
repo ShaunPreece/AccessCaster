@@ -241,13 +241,14 @@ LEAD 10: which USB product ids are 0x0079 and 0x0095, and does pre-fader Expande
 RODE's Virtual Device Driver service names four product ids in its string table:
 0x0078, 0x0079, 0x0094 and 0x0095. We measured 0x0078 (Expanded, mix only: System alone)
 and 0x0094 (Expanded, post-fader multitrack: nine Fader endpoints plus System). Pre-fader
-multitrack with Expanded (outputMultiMode 4) was never enumerated, and the Duo was never
-put into Expanded at all, so 0x0079 and 0x0095 are either the pre-fader pair or the Duo's
-pair, and nothing here says which.
+multitrack with Expanded (outputMultiMode 4) reads 0x0094 too, on a second Pro 2, so a
+Pro 2 uses neither 0x0079 nor 0x0095 in any of its six modes and they are most likely the
+Duo's pair, which was never put into Expanded at all. Which endpoints pre-fader Expanded
+gets was not looked at on that unit.
 
-**What to run.** Write outputMultiMode 4 on a Pro 2, or 3 and 5 on a Duo, read the new
-product id off the bus, and see whether the service's tray icon reports connected and
-which endpoints appear in Windows' recording devices. Two minutes with either desk. The
+**What to run.** Write outputMultiMode 3 and 5 on a Duo and read the new product id off
+the bus; or 4 on a Pro 2. Either way, see whether the service's tray icon reports
+connected and which endpoints appear in Windows' recording devices. Two minutes. The
 service binds on only some arrivals (PROJECT_GUIDE part 2 under Expanded), so an
 unbound result needs a second arrival before it counts.
 

@@ -95,9 +95,41 @@ IDENTIFIER. Writing outputMultiMode re-enumerates the unit, and it returns under
 different PID carrying the same serial. Measured on a Pro II, fw 1.7.6:
 
   outputMultiMode   0 -> 0x0037    (standard, no multitrack)
+                    1 -> 0x0092    (standard, pre-fader multitrack)
                     2 -> 0x0092    (standard, post-fader multitrack)
                     3 -> 0x0078    (expanded input, no multitrack)
+                    4 -> 0x0094    (expanded input, pre-fader multitrack)
                     5 -> 0x0094    (expanded input, post-fader multitrack)
+
+1 and 4 were measured on a second Pro II, fw 1.7.6, 7th October 2026. So pre-fader
+and post-fader share a PID in both input modes, and all six modes of a Pro II are
+accounted for by four PIDs.
+
+THE ROOT'S ORDER IS NOT THE SAME IN EVERY DUMP OF A PRO II. That second unit, read
+under PID 0x0092 (mode 1) on fw 1.7.6 and 1.7.7, publishes the same blocks and the
+same number of copies of each as the layout the positions in this document come
+from, in another order, with five blocks cut into runs that other blocks sit
+between (root position of each run's first node):
+
+  RECORDER 0x02   GUI 0x05   HEADPHONE 0x07   OUTPUT 0x0B   MASTERCHANNEL 0x0C
+  SYSTEM 0x0D   NETWORK 0x0E   AUDIO 0x0F   SHOWCONTROL 0xED   RECORDINGS 0xEE
+  SOUNDPADS 0xF4   PADEFFECTS 0xF6
+  CHANNEL              9 at 0x1A,   1 at 0xFA
+  EFFECTS_PARAMETERS  10 at 0x23,   1 at 0xFB
+  MIXMINUSES          10 at 0x2D,   3 at 0xFC
+  MIX                156 at 0x37,  91 at 0xFF,  143 at 0x17D
+  INPUTSOURCE         12 at 0xDF,   7 at 0x161,  11 at 0x295
+
+A block's copies still count straight through its runs: inputId reads 0 to 29 over
+the three INPUTSOURCE runs and effectsIdx 0 to 10 over the two EFFECTS_PARAMETERS
+runs, so INPUTSOURCE[16] is the fifth node of the second run and the cross-point
+MIX[13 * 16 + 0] is root child 0x133. In Expanded (mode 4, PID 0x0094) that unit's
+tree is the same, outputMultiMode apart. It has not been read in mode 0, so whether
+the order follows the USB mode or the unit is open. Either way a root position is
+a fact about one dump: every position below is the first layout's, and a host must
+find a node by its block name and copy on the desk in front of it. On this layout
+0x026E + n is an RCSYNCMIX cell, 0x0F is AUDIO and 0x10 a STREAMERXMIXPRESET, and
+a write addressed there appends a stray.
 
 RODE's Virtual Device Driver service binds to the desk by these PIDs: its string
 table names 0x0078, 0x0079, 0x0094 and 0x0095. It creates its nine Fader

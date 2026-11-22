@@ -27,6 +27,10 @@ import rcp_hid
 # its other modes). An unknown id therefore falls through to DEFAULT rather than naming the desk,
 # which is right for a Pro II and wrong for a Duo in Expanded. Identifying by the dump's own
 # `systemName` is the fix; see `device_from_system_name` below and PROJECT_GUIDE part 2.
+#
+# NOR DOES AN ID NAME A LAYOUT. A Pro II read under 0x0092 publishes its blocks in another order
+# than one read under 0x0037, several of them in more than one run, so nothing here or anywhere
+# else may hold a block's position: `model_tree.Layout` finds each node on the attached desk.
 PID_PRO2 = 0x0037
 PID_DUO = 0x0050
 
