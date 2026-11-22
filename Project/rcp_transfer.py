@@ -514,7 +514,7 @@ def set_monitor_level(level01: float) -> int:
 
 
 def set_headphone_type(value: int, output: int = 0) -> int:
-    """headphoneType amp profile: 0=NTH-100, 1=High Sensitivity (louder), 2=Low Sensitivity.
+    """headphoneType amp profile: 0=NTH-100, 1=High Sensitivity, 2=Low Sensitivity.
     `output` picks the headphone output, 0 = Headphone 1; callers take it from the active device's
     HeadphoneTypeSpec, which lists only the confirmed ones."""
     return write_at(headphone_key(output), "headphoneType", "int", value)

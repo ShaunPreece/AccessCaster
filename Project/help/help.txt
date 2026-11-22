@@ -198,7 +198,7 @@ These silence an output, not a channel, so your mixes, the recording and your st
 How loud each source is in one output, without changing the others or the recording. For example, turn your own mic down in your headphones only.
 
 * Headphones
-The amp type for each headphone output. High sensitivity is for quiet headphones and can be loud. On a Pro 2, only headphones 1 and 2 can be set.
+The amp type for each headphone output. A change of type changes how loud that output is, so turn your headphones down before you apply one. On a Pro 2, only headphones 1 and 2 can be set.
 
 * USB audio
 On the Master Mix page. What this computer receives is either one mixed pair, or every channel separately so a program can record them apart; Send the separate tracks raw leaves the desk's processing off those, for processing later. What this computer sends is either one stereo input, or Expanded: four separate inputs, Game, Music, A and B, each on a fader of its own. Changing either drops the desk's audio for a few seconds, your screen reader included if it speaks through the desk.

@@ -853,6 +853,10 @@ HEADPHONE TYPE, GLOBAL selectors 0x09 (HP1) and 0x0A (HP2):
   Pro II has 4 HP outputs (4 headphoneType slots); Duo has 2 HP jacks (HP1 0x09 /
   HP2 0x0A). CONFIRMED value 2 (Low Sensitivity) exists; some code writers only
   drive HP1 with 0/1 as an implementation limit, not a protocol one.
+  All three values measured on a second Pro II, 7th October 2026, by a dump either
+  side of each change in RODE's app on headphone 1: "RODE NTH-100" 0 (and the
+  factory value on all four), "Low Sensitivity" 0 -> 2, "High Sensitivity" 2 -> 1,
+  with nothing else in the tree moving but knob positions.
 
 
 --------------------------------------------------------------------------------

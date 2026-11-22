@@ -39,6 +39,9 @@ OUTPUTS = [
      "mute_note": "Silences what a paired phone hears; everything else carries on."},
 ]
 AUTO_MUTE_NOTE = "Mutes the output while a mic is live, so speakers cannot feed back into the mics."
+# No type is called the louder one: which it is has been heard both ways (PROJECT_GUIDE part 2).
+HEADPHONE_TYPE_HINT = ("A change of type changes how loud this output is. Turn your headphones "
+                       "down before you apply one.")
 
 
 class LevelsPage(scrolled.ScrolledPanel):
@@ -250,7 +253,7 @@ class LevelsPage(scrolled.ScrolledPanel):
 
     def _build_headphones(self, parent, sizer):
         """An amp type per headphone output, applied by its button: arrowing a closed list fires a
-        change per item, and High sensitivity is loud."""
+        change per item, and a change of type changes how loud the output is."""
         hp = self.model["headphones"]
         self.hp_types = []
         if not hp["outputs"]:
@@ -259,7 +262,7 @@ class LevelsPage(scrolled.ScrolledPanel):
         for position, output in enumerate(hp["outputs"]):
             choice = labelled(parent, sizer, f"{output} type",
                               lambda p: wx.Choice(p, choices=labels))
-            a11y.describe(choice, "High sensitivity is louder. Change it with care.")
+            a11y.describe(choice, HEADPHONE_TYPE_HINT)
             apply = wx.Button(parent, label=f"Apply {output} type")
             apply.Bind(wx.EVT_BUTTON, lambda e, p=position: self._on_apply_type(e, p))
             sizer.Add(apply, 0, wx.ALL, gap(6))

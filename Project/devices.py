@@ -301,8 +301,11 @@ class HeadphoneTypeSpec:
       outputs : (HEADPHONE index, label) per addressable headphone output, in UI order.
       values  : (int, label) per selectable amp type, in UI order.
 
+    The three values are RODE's app's own, each read off a Pro II either side of a change made in
+    that app. Which of them is the loudest is not settled (PROJECT_GUIDE part 2), so no label or
+    hint may say.
+
     NOT CONFIRMED:
-      * value 2 = "Low sensitivity" - the RODE app's label; the value itself is unverified.
       * HP2 on the PRO II specifically (confirmed on the Duo).
       * The Pro II's Headphone 3/4 outputs (HEADPHONE[2] and [3]) are deliberately NOT listed: what
         they do has not been confirmed.

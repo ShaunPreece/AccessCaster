@@ -2741,6 +2741,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **The HEADPHONE blocks carry no level at all** - only `headphoneType` and `headphoneColour`. The
   level is on the POT, which is a different node under a different parent; looking under HEADPHONE
   and concluding the knobs are unreadable is the obvious wrong turn.
+- **WHICH HEADPHONE TYPE IS LOUDER IS NOT SETTLED, SO THE APP NAMES NO DIRECTION.** By ear on a
+  second Pro II, 7th October 2026, High sensitivity (1) was clearly the quietest and NTH-100 (0)
+  and Low sensitivity (2) about equally loud; RODE's app asks before going from High to Low
+  ("this will increase the headphone output") and not from NTH-100 to Low. That is the opposite of
+  "High sensitivity is louder", which the control's hint used to say. Until both desks have been
+  heard, the hint says only that a change of type changes the loudness and to turn the headphones
+  down first, which is right either way. Do not put a direction back without hearing it.
 - **The knobs have NO TACTILE INDICATOR**, which is why this matters: there is no way to know where
   one is set by touch, so reading it out is the only route.
 
