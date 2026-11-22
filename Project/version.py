@@ -34,11 +34,19 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.3.0"
+__version__ = "3.3.1"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
+    ("3.3.1", [
+        ("Up and Down arrows on sliders in JAWS",
+         "In JAWS, Up and Down arrow on a slider said the value from before the key, so each press "
+         "seemed a step behind and arrowing back never landed where you started. Each press now "
+         "says the new value, as Left and Right arrow always did. The slider itself always moved "
+         "one step at a time."),
+    ]),
+
     ("3.3.0", [
         ("Sliders in JAWS",
          "Every slider now speaks its value in words, such as -20 decibels, in JAWS as well as "
