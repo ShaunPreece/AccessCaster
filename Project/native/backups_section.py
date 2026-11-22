@@ -18,6 +18,7 @@ import backups
 import baseline
 import device_page
 import profile_actions
+import profiles
 import show_actions
 import wording
 from native import a11y
@@ -36,6 +37,9 @@ HOLDS = ("A backup holds the desk's settings and your SMART pads: channels, proc
          "the worst moment, and passwords, so wifi and phone-call credentials are never stored.")
 APP_SETTINGS = ("Your keyboard shortcuts and other AccessCaster preferences are not part of a "
                 "backup of the desk. App settings saves them to a file.")
+SETUP_HINT = ("Puts back the fader layout, the fader levels and each channel's input, effects "
+              "and processing from the selected backup, and leaves everything else on the desk "
+              "as it is. For switching between setups.")
 
 
 def _read():
@@ -141,6 +145,21 @@ def restore_text(label, question):
     if info.get("ok"):
         text += "\n\n" + restore_time(info)
     return text
+
+
+def setup_text(label, question):
+    """The question before a setup-only restore: what it would leave silent first, then what goes
+    back and, as much the point, what does not."""
+    warnings = question["plan"].get("warnings") or []
+    warn = ("Warning. " + " ".join(warnings) + "\n\n") if warnings else ""
+    return (warn + f"This puts back only the setup saved in {label}: which channel is on which "
+            "fader, linked pairs included, the virtual fader levels, and each channel's input "
+            "settings, effects and processing.\n\n"
+            "Everything else stays as it is now: recording and USB settings, the output mixes, "
+            "the headphone types, the monitor speaker level, the desk's own settings and your "
+            "SMART pads. The desk's sound devices do not drop out.\n\n"
+            "It takes about half a minute. The desk is then read back, and anything that did not "
+            "end up as saved is named.")
 
 
 def restore_time(info):
@@ -264,6 +283,10 @@ class BackupsPage(wx.Panel):
         # description that changes under a focused list is read again over the item landed on.
         self.restore = add_button(parent, row, "Restore selected backup", self._on_restore)
         self.restore_acc = a11y.describe(self.restore, "")
+        # A BUTTON OF ITS OWN, not a choice inside the question: the label says what the press does
+        # before it is made, and the question that follows describes one thing rather than two.
+        self.restore_setup = add_button(parent, row, "Restore setup only", self._on_restore_setup)
+        a11y.describe(self.restore_setup, SETUP_HINT)
         self.rename = add_button(parent, row, "Rename selected backup", self._on_rename)
         self.delete = add_button(parent, row, "Delete selected backup", self._on_delete)
         sizer.Add(row, 0, wx.ALL, gap(6))
@@ -352,22 +375,38 @@ class BackupsPage(wx.Panel):
         call(self, _restore_question, self._handle(backup),
              done=lambda question: self._ask_restore(backup, question))
 
-    def _ask_restore(self, backup, question):
+    def _on_restore_setup(self, _event):
+        if self._none_chosen():
+            return
+        backup = self._chosen()
+        if backup["kind"] == "unit":
+            self.frame.say(backups.SETUP_NEEDS_PROFILE)
+            return
+        call(self, _restore_question, self._handle(backup),
+             done=lambda question: self._ask_restore(backup, question, profiles.SCOPE_SETUP))
+
+    def _ask_restore(self, backup, question, scope=profiles.SCOPE_EVERYTHING):
         if not question["plan"].get("ok"):
             self.frame.say(question["plan"].get("message") or "That backup could not be read.")
             return
-        if not confirm(self, f"Restore {backup['name']}?", restore_text(backup["name"], question),
-                       "Restore"):
+        setup = scope == profiles.SCOPE_SETUP
+        name = backup["name"]
+        if not confirm(self, f"Restore the setup from {name}?" if setup else f"Restore {name}?",
+                       (setup_text if setup else restore_text)(name, question),
+                       "Restore setup" if setup else "Restore"):
             return
         handle = self._handle(backup)
-        reply = follow_job(self, "Restoring backup", f"Restoring {backup['name']} to the desk.",
-                           lambda: backups.action_restore_backup(handle),
+        reply = follow_job(self, "Restoring setup" if setup else "Restoring backup",
+                           f"Restoring the setup from {name} to the desk." if setup
+                           else f"Restoring {name} to the desk.",
+                           lambda: backups.action_restore_backup(handle, scope=scope),
                            # The two halves report through different jobs, and the start says
                            # which one is running.
                            lambda started: (show_actions.show_job_status if started.get("via") == "show"
                                             else profile_actions.profile_restore_status))
-        report(self, ("Backup restored", "Restore failed"), reply)
-        self.restore.SetFocus()
+        report(self, ("Setup restored", "Restore failed") if setup
+               else ("Backup restored", "Restore failed"), reply)
+        (self.restore_setup if setup else self.restore).SetFocus()
         self.frame.desk_rewritten()
 
     def _on_rename(self, _event):

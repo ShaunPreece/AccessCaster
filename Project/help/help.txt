@@ -301,7 +301,10 @@ Each backup is kept in two places when it can be: the desk's own copy on its car
 Name it and press Back up now. It takes seconds, plus about a second for each pad. Using a name again replaces that backup.
 
 * Restore selected backup
-Puts the desk back from this computer's copy, which takes a minute or two, longer with many pads. It moves the monitor speaker level, so turn your speakers down first. A backup marked "made on the desk" was taken on the touchscreen or in RODE's app, so it has no copy here and is restored the desk's own way instead, which can occasionally lock the desk up: the dialog tells you before you start.
+Puts the desk back from this computer's copy, which takes a minute or two, longer with many pads. It moves the monitor speaker level, so turn your speakers down first. A backup marked "made on the desk" was taken on the touchscreen or in RODE's app, so it has no copy here and is restored the desk's own way instead, which can occasionally lock the desk up: the dialog tells you before you start. When a restore from this computer's copy finishes, the desk is read back and the result says whether everything matches the backup, or names the settings that differ.
+
+* Restore setup only
+For moving between set-ups, such as a line source on one fader for one show and four microphones for another. It puts back which channel is on which fader, linked pairs included, the virtual fader levels, and each channel's input settings, effects and processing. Everything else stays as it is now: the recording and USB settings, the output mixes, the headphone types, the monitor speaker level, the desk's own settings and your SMART pads. The desk's sound devices do not drop out, and it takes about half a minute. Save each set-up as a backup first; a backup made on the desk cannot be used this way.
 
 * Rename and delete
 Renaming only changes the name on this computer, so a backup made on the desk cannot be renamed. Deleting removes both copies and cannot be undone.
