@@ -274,4 +274,140 @@ check("a press the desk ignores hears nothing",
       recording._await_record(listen, recorder.RECORDING), {})
 check("and gives up within the margin", listen.timeouts, [recording._RECORD_ANSWER_S])
 
+print("\nTHE CARD ON THIS COMPUTER: transferModeType 1 on SYSTEM, and 0 to take it back")
+import devices  # noqa: E402
+import fake_model  # noqa: E402
+import folders  # noqa: E402
+import layout_fixture as lf  # noqa: E402
+import rcp_read  # noqa: E402
+from _testkit import as_device, check_true, decode_record, on_layout, patched  # noqa: E402
+
+check("handing the card over is transferModeType 1 on SYSTEM",
+      decode_record(recorder.build_card_transfer(True))[:4],
+      (addr(rcp_transfer.SYSTEM), "transferModeType", 1, "int"))
+check("taking it back is 0 on the same node",
+      decode_record(recorder.build_card_transfer(False))[:4],
+      (addr(rcp_transfer.SYSTEM), "transferModeType", 0, "int"))
+with on_layout(lf.PRO2_177_PID0092):
+    rec = recorder.build_card_transfer(True)
+check("on a desk whose SYSTEM is root child 0x0D, the record RODE's app sends, byte for byte",
+      rec[5:5 + int.from_bytes(rec[1:5], "little")].hex(),
+      "010101010d" + b"transferModeType\x00".hex() + "010501" + "01000000")
+
+
+def system_dump(mode, stray=None):
+    """A dump whose SYSTEM carries `mode`, behind a block carrying a stray copy when one is given."""
+    ahead = [fake_model.node("AUDIO", {"transferModeType": stray})] if stray is not None else []
+    return fake_model.node("Rodecaster", (), ahead + [
+        fake_model.node("SYSTEM", {"transferModeType": mode})])
+
+
+check("the mode is read on SYSTEM", recorder.transfer_mode(system_dump(1)), 1)
+check_true("which is the card on the computer", recorder.card_out(system_dump(1)))
+check_true("2 is the pad storage, not the card", not recorder.card_out(system_dump(2)))
+check_true("a stray copy ahead of SYSTEM is not the mode", not recorder.card_out(system_dump(0, 1)))
+
+
+class CardDesk:
+    """As much of a desk, and of Windows, as handing the card over touches: the recorder, the card
+    slot, the recordings, and the desk's drive, which holds a volume while the card is out."""
+
+    def __init__(self, state=recorder.READY, mode=0, card=True, windows=True):
+        self.state, self.mode, self.card, self.windows = state, mode, card, windows
+        self.log = []                # what was done, in order
+
+    def dump(self, **_asked):
+        out = self.mode == recorder.CARD_TRANSFER
+        slot = "64000000000|32000000000|1|1|1" if self.card and not out else "0|0|1|0|0"
+        takes = [] if out else [fake_model.node("RECORDING", {"recordingUID": n,
+                                                              "recordingContent": CONTENT})
+                                for n in (1, 2)]
+        return fake_model.node("Rodecaster", (), [
+            fake_model.node("RECORDER", {
+                "recordState": recorder.NO_DESTINATION if out or not self.card else self.state}),
+            fake_model.node("SYSTEM", {"transferModeType": self.mode}, [
+                fake_model.node("STORAGEVOLUME", {"storageVolumeState": slot,
+                                                  "storageVolumeRecDestination": True,
+                                                  "storageVolumeEject": False})]),
+            fake_model.node("RECORDINGS", {"recordingTotalCount": len(takes)}, takes)])
+
+    def send(self, record):
+        _path, name, value, _kind, _end = decode_record(record)
+        self.log.append((name, value))
+        self.mode = value
+        return len(record)
+
+    def roots(self):
+        return ["E:\\"] if self.mode == recorder.CARD_TRANSFER and self.windows else []
+
+    def run(self, on, dev=devices.PRO2):
+        with as_device(dev), patched(
+                (rcp_read, {"read_model_stable": self.dump}),
+                (rcp_transfer, {"send_record": self.send, "desk_volume_roots": self.roots,
+                                "dismount_volume": lambda root: self.log.append(("dismount", root))}),
+                (folders, {"open_folder_reply": lambda folder, _what: self.log.append(
+                    ("explorer", folder)) or {"ok": True, "message": ""}}),
+                (recording.os.path, {"isdir": lambda _path: True}),
+                (recording.time, {"sleep": lambda _s: None}),
+                (recording, {"_CARD_WAIT_S": 0.0})):
+            return recording.action_card_to_computer(on)
+
+
+desk = CardDesk()
+reply = desk.run(True)
+check_true("opening the card succeeds", reply["ok"], reply.get("message"))
+check("one write, then File Explorer on its recordings", desk.log,
+      [("transferModeType", 1), ("explorer", "E:\\RODECaster")])
+check_in("the reply names the drive", "as drive E:", reply["message"])
+check("the page is told it is open, and where", reply["recorder"]["card"],
+      {"open": True, "drive": "E:", "note": ""})
+recording._note_context(reply["recorder"])
+check("the state sentence says why nothing can be recorded",
+      recording._sentence(reply["recorder"]), recording.CARD_OUT_SENTENCE)
+try:
+    with patched((rcp_transfer, {"send_record": desk.send})):
+        rcp_transfer.set_transfer_mode(True)
+    refused = ""
+except RuntimeError as exc:
+    refused = str(exc)
+check("pad transfer mode is refused while the card is out", refused, rcp_transfer.CARD_OUT_REFUSAL)
+check("and sends nothing", desk.log[-1], ("explorer", "E:\\RODECaster"))
+del desk.log[:]
+check_in("opening it twice says it is open", "already open", desk.run(True)["message"])
+check("and writes nothing", desk.log, [])
+
+reply = desk.run(False)
+check_true("giving it back succeeds", reply["ok"], reply.get("message"))
+check("Windows lets go of the volume before the desk takes the media away", desk.log,
+      [("dismount", "E:\\"), ("transferModeType", 0)])
+check_in("the recordings are counted off the desk again", "2 recordings", reply["message"])
+check("the page is told it is back", reply["recorder"]["card"]["open"], False)
+check_true("and pad transfer mode is free again", not rcp_transfer.card_out())
+del desk.log[:]
+check_in("giving it back twice says where it is", "already in the desk",
+         desk.run(False)["message"])
+check("and writes nothing", desk.log, [])
+
+for label, refusing, words in (
+        ("a take running", CardDesk(state=recorder.RECORDING), "Stop the recording first"),
+        ("a paused take", CardDesk(state=recorder.PAUSED), "Stop the recording first"),
+        ("no card in the desk", CardDesk(card=False), "no memory card"),
+        ("the pad storage holding transfer mode", CardDesk(mode=2), "SMART pad sounds")):
+    reply = refusing.run(True)
+    check_in(f"{label} refuses", words, reply["message"])
+    check(f"{label} writes nothing", (reply["ok"], refusing.log), (False, []))
+
+slow = CardDesk(windows=False)
+reply = slow.run(True)
+check_in("a card Windows never shows is a failure that says so", "did not show", reply["message"])
+check("and the page still offers to give it back", (reply["ok"], reply["recorder"]["card"]["open"]),
+      (False, True))
+check("with no folder opened", slow.log, [("transferModeType", 1)])
+
+duo = CardDesk()
+reply = duo.run(True, devices.DUO)
+check_in("a desk it is not confirmed on refuses by name", "RODECaster Duo", reply["message"])
+check("and writes nothing", (reply["ok"], duo.log), (False, []))
+rcp_transfer.note_card_out(False)
+
 sys.exit(_testkit.finish())

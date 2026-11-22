@@ -272,6 +272,18 @@ check("and so is a drive going in", bool(SAID), True)
 announcer.record_feedback = "speak"
 speech.tone = _tone
 
+print("\nTHE CARD HANDED TO THIS COMPUTER IS NOT A CARD PULLED OUT")
+# The desk pushes the same two states for it, seconds after the write, so the self-echo window
+# has closed by then: the hand-over itself says it is in flight.
+reset(announcing=True)
+recording._card["moving"] = True
+recording._state_changed(recorder.READY, recorder.NO_DESTINATION)
+recording._state_changed(recorder.NO_DESTINATION, recorder.READY)
+check("neither way is spoken while this app is moving the card", SAID, [])
+recording._card["moving"] = False
+recording._state_changed(recorder.READY, recorder.NO_DESTINATION)
+check("a card pulled out afterwards is", bool(SAID), True)
+
 print("\nTHE CHOICE IS SAVED, AND THE EARLIER TICK BOX STILL MEANS WHAT IT DID")
 check("the old tick box on reads as tones", announcer._saved_record_feedback(
     {"announcer_record_tones": True}), "tone")
