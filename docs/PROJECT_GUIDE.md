@@ -2002,18 +2002,21 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   reading as the native control it is.
 - **EVERY SLIDER IS `native.slider.SliderCtrl`, NEVER `wx.Slider`.** JAWS reads the native Windows
   slider from its own position, as a percent of its range, and ignores the value text it is given,
-  so "-20 decibels" is heard as "67 percent". `SliderCtrl` is drawn by the app and answers MSAA
-  itself (`a11y.slider`), so every screen reader reads its value text. Its keys follow the ARIA
-  slider pattern (Up and Right raise it), and it handles Tab, Ctrl+Tab and Enter itself because it
-  takes every key to get the arrows.
+  so "-20 decibels" is heard as "67 percent". `SliderCtrl` is drawn by the app, so every screen
+  reader reads its value text. Its keys follow the ARIA slider pattern (Up and Right raise it), and
+  it handles Tab, Ctrl+Tab and Enter itself because it takes every key to get the arrows.
+- **ON WINDOWS A SLIDER IS A UIA SLIDER WITH NO MSAA OF ITS OWN** (`native.win.uia_slider`, through
+  `a11y.slider`). Give it a wx.Accessible and JAWS reads it through MSAA, where Up and Down speak the
+  value from before the key, so arrowing back never seems to land where it started; Left and Right,
+  and NVDA, are right either way. Windows answers MSAA clients from the UIA provider. Its shared
+  plumbing is `native.win.uia_com`, which `uia_notify` uses too.
 - **THE PROCESS IS PER-MONITOR DPI AWARE, AND EVERY SIZE AND SIZER BORDER GOES THROUGH
-  `pages.dip` OR `pages.gap`** (`native.display`, declared when `native` is imported). JAWS cannot
-  confirm a `SliderCtrl`'s value through its focus object, so as it is arrowed JAWS reads the text
-  on screen at the slider's position. In an unaware process on a scaled display that position is
-  doubled, and a slider far enough right or down is silent; a 100 percent display never shows it.
-  Aware, a bare pixel size is half what was meant at 200 percent, so `test_native_rules` refuses
-  one. JAWS names the app after wxPython's core module (`_core.cp312-win_amd64.pyd`, Insert+Q), so
-  a JAWS script for it carries that name and loads for every wxPython app.
+  `pages.dip` OR `pages.gap`** (`native.display`, declared when `native` is imported). Unaware, on a
+  scaled display Windows stretches the window and JAWS scales a custom control's position twice,
+  which left an MSAA slider far enough right or down silent as it was arrowed. Aware, a bare pixel
+  size is half what was meant at 200 percent, so `test_native_rules` refuses one. JAWS names the
+  app after wxPython's core module (`_core.cp312-win_amd64.pyd`, Insert+Q), so a JAWS script for it
+  carries that name and loads for every wxPython app.
 - **A SLIDER SPEAKS ONLY A REFUSAL** (`controls.Slider`). The screen reader reads each new value as
   it is arrowed, so a reply after a success repeats what was just heard.
 - **REPLIES ARE SPOKEN WITH `frame.say`**, a UIA notification the screen reader voices, not the

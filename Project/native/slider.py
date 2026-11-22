@@ -3,7 +3,7 @@
 The native Windows slider (msctls_trackbar32) is read by JAWS from its own position, as a percent
 of its range, whatever value text the app gives it, so "-20 decibels" is heard as "67 percent".
 This control is not of that class, so every screen reader reads the value text it is given
-(`a11y.slider`).
+(`a11y.slider`, a UIA slider on Windows).
 
 It offers the part of wx.Slider's interface the app uses (GetValue, SetValue, SetLineSize,
 SetPageSize, GetMin, GetMax) and posts wx.EVT_SLIDER when the user moves it, never when the app
@@ -57,13 +57,25 @@ class SliderCtrl(wx.Control):
     def SetPageSize(self, size):
         self._page = max(1, int(size))
 
+    @property
+    def line_size(self):
+        return self._line
+
+    @property
+    def page_size(self):
+        return self._page
+
+    def set_from_reader(self, value):
+        """A screen reader setting the value, which counts as the user's own move."""
+        self._set(round(value), by_user=True)
+
     def _set(self, value, by_user):
         value = max(self._lo, min(self._hi, int(value)))
         if value == self._value:
             return
         self._value = value
         self.Refresh()
-        a11y.value_changed(self)
+        self.acc.changed()
         if by_user:
             event = wx.CommandEvent(wx.wxEVT_SLIDER, self.GetId())
             event.SetEventObject(self)

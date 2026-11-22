@@ -2,9 +2,8 @@
 positions in real pixels.
 
 Undeclared, Windows stretches the window on a scaled display and reports positions in scaled units,
-and JAWS scales a custom control's position twice. JAWS reads a control its scripts cannot confirm
-(`native.slider.SliderCtrl`) at that position, and reads nothing once the doubled position is off
-the screen, so a slider far enough right or down is silent as it is arrowed.
+and JAWS scales a custom control's position twice, so a control it reads by position is read from
+the wrong place, or not at all once the doubled position is off the screen.
 """
 import ctypes
 from ctypes import wintypes
