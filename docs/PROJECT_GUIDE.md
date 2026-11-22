@@ -1311,6 +1311,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   inference says 114" looks damning until you look at the 221 the two disagree about, and every one
   of them is `'-1|0'`: a placeholder cell for a source slot the desk does not fill. The grid is 30
   source rows wide and a desk uses 13 of them.
+  **Compare level and anchor AS NUMBERS** (`rcp_read.LINK_EPS`), never as text. The desk formats
+  the two halves separately: a linked fader at the bottom reads `'-3.00258e-06|0'` or
+  `'9.87202e-08|0'` and one at its first step `'0.00787401|0.00787402'` (a second Pro II, fw
+  1.7.6 and 1.7.7, 7th October and 14th November 2026). A text compare calls each unlinked, a mix
+  scheme then captures a manual level for it, and applying that scheme sends a real unlink: the
+  source stops following its fader in that output.
 
 - **A CHANNEL MUTE DOES NOT SILENCE AN UNLINKED CROSS-POINT.** `channelOutputMute` reaches each
   mix through the cross-points that follow the fader; one unlinked at a manual level keeps playing.
