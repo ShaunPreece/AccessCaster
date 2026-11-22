@@ -41,6 +41,7 @@ def payload(state=recorder.READY, takes=(), vols=None, multitrack=0, **values):
     data = {"ok": True, "state": state, "recordings": list(takes), "multitrack": multitrack,
             "format": 0, "processing_bypass": False, "can_delete": True, "delete_note": "",
             "storage_writable": True, "writable": True,
+            "card": {"open": False, "drive": "", "note": ""},
             "volumes": vols if vols is not None else [
                 volume(0, "Memory card"), volume(1, "USB drive", inserted=True),
                 volume(2, "Internal storage", inserted=True, can_record=False)]}
@@ -295,6 +296,55 @@ check_true("and the recorder is read again", reads)
 section.show(payload(takes=[take(5, "REC0005")], can_delete=False, delete_note="Not here."), "")
 takes._on_delete(None)
 check("a desk that cannot delete says why", frame.said[-1], "Not here.")
+
+# ---- the memory card on this computer --------------------------------------------------------
+OPEN_CARD, RETURN_CARD = recording_section.OPEN_CARD, recording_section.RETURN_CARD
+CARD_OUT = {"open": True, "drive": "E:", "note": ""}
+
+
+def fake_card(on):
+    calls.append(("card", on))
+    if on:
+        return {"ok": True, "message": "The memory card is open on this computer as drive E:.",
+                "recorder": payload(state=recorder.NO_DESTINATION, card=CARD_OUT)}
+    return {"ok": True, "message": "The memory card is back in the desk, with 1 recording on it.",
+            "recorder": payload(takes=[take(5, "REC0005")])}
+
+
+section.show(payload(takes=[take(5, "REC0005")]), "")
+check("with the card in the desk the button offers to open it", takes.card.GetLabel(), OPEN_CARD)
+with patched(sync, (recording, {"action_card_to_computer": fake_card})):
+    reads.clear()
+    said = len(frame.said)
+    takes._on_card(press(takes.card))
+    check("the press hands the card over", calls[-1], ("card", True))
+    check("and the button becomes the way back", takes.card.GetLabel(), RETURN_CARD)
+    check("the wait is said, and the new label is the rest", frame.said[said:],
+          ["Opening the card, please wait."])
+    check("the list says where the recordings went", takes.list.GetString(0),
+          "Nothing to list: the memory card is open on this computer, as drive E:.")
+    check("with nothing in it to delete", takes._chosen(), None)
+    check_true("and the recorder is read again", reads)
+    rec._on_transport(press(rec.transport))
+    check("Start recording says the card is why it cannot", frame.said[-1],
+          recording_section.CARD_OUT)
+    takes._on_card(press(takes.card))
+    check("the same button gives the card back", calls[-1], ("card", False))
+    check("and offers to open it again", takes.card.GetLabel(), OPEN_CARD)
+    check("with the recordings listed once more", takes.list.GetString(0),
+          "REC0005, 2 minutes, recorded Monday at 10:00")
+    count = len(calls)
+    section.show(payload(state=recorder.RECORDING), "")
+    takes._on_card(press(takes.card))
+    check("the card cannot be opened during a take", frame.said[-1], "Stop the recording first.")
+    section.show(payload(card={"open": False, "drive": "", "note": "Not on this desk."}), "")
+    takes._on_card(press(takes.card))
+    check("a desk that cannot hand its card over says why", frame.said[-1], "Not on this desk.")
+    check("and neither refusal reached the desk", len(calls), count)
+section.show(payload(state=recorder.NO_DESTINATION, card={"open": True, "drive": "", "note": ""}),
+             "")
+check("a card whose drive is not known yet is still said to be open", takes.list.GetString(0),
+      "Nothing to list: the memory card is open on this computer.")
 
 section.show(payload(), "")
 with patched(sync, (recording, {"action_storage_eject": lambda index, on: calls.append(
