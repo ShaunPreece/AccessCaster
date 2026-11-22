@@ -570,6 +570,34 @@ with patched(ANY_PROFILE):
              final["message"])
     check_in("naming the backup that undoes it", "after backing it up", final["message"])
 
+print("a SETUP restore: no reset, no matrix, no pads, and the desk read back")
+reset_desk()
+PADDED = (profiles_mod, {"load": lambda name: {"ok": True, "safe": "p", "prof": {
+    "pads": [{"grid": 1}], "routing": {"mix_scheme": {"outputs": {}}}}}})
+touched = []
+with patched(PADDED,
+             (profile_actions.output_mixes, {"apply_matrix": lambda r: touched.append("matrix")}),
+             (profile_actions.soundpad, {"restore_pads": lambda *a, **k: touched.append("pads")}),
+             (profile_actions.rcp_read, {"read_model_stable": lambda **_k: b""}),
+             (profile_actions.channels, {"read_channels": lambda _blob: []}),
+             (profiles_mod, {"check": lambda prof, blob, chans, **k: touched.append(
+                 ("check", k["scope"])) or {"checked": 3, "differ": []}})):
+    refused = profile_actions.restore_profile("p", clean=True, scope="setup")
+    check("it cannot reset the desk first", refused["ok"], False)
+    check_in("and says which restore can", "Restore everything", refused["message"])
+    check("an unknown scope is refused", profile_actions.restore_profile("p", scope="bits")["ok"],
+          False)
+    started = profile_actions.restore_profile("p", scope="setup")
+    check("it starts", started.get("ok"), True)
+    wait_for_job(profile_actions.restore_job.status, 30, 0.05)
+    final = profile_actions.restore_job.status()
+    check("the output mixes and the pads are left alone, and the desk is checked", touched,
+          [("check", "setup")])
+    check("nothing was sent to the desk's backup commands", DESK.calls, [])
+    check_in("the result says it was the setup", "Restored the setup from p", final["message"])
+    check_in("and what the check found", "all 3 settings checked match the profile",
+             final["message"])
+
 print("a clean restore whose backup fails changes NOTHING")
 reset_desk()
 DESK.export_does_nothing = True

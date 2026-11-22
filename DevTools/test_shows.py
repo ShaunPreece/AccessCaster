@@ -104,12 +104,14 @@ def params(fn):
 # ONE backup takes a NAME, not a handle: the user names it, and the app decides underneath whether
 # that means a show plus a profile or a profile alone.
 check("backup takes a name", params(backups.action_backup_now), ["name"])
-check("restore takes a name, then clean", params(backups.action_restore_backup), ["name", "clean"])
+check("restore takes a name, then clean, then how much", params(backups.action_restore_backup),
+      ["name", "clean", "scope"])
 # Import and delete take a SNAPSHOT INDEX: a uid is a position any export renumbers, and a uuid
 # names the show rather than the file so several backups share one.
 check("import takes snapshot", params(show_actions.action_show_import)[0], "snapshot")
 check("delete takes snapshot", params(show_actions.action_show_delete)[0], "snapshot")
-check("restore takes clean", params(profile_actions.restore_profile), ["name", "clean"])
+check("restore takes clean, and how much", params(profile_actions.restore_profile),
+      ["name", "clean", "scope"])
 
 print("the write gate")
 check("Pro II may write shows", "shows" in devices.PRO2.caps, True)
