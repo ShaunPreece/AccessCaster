@@ -29,6 +29,11 @@ FIXTURES = _bootstrap.devtools_path("fixtures")
 PRO2_177 = "pro2_1.7.7"
 PRO2_176 = "pro2_1.7.6"
 DUO_173 = "duo_1.7.3"
+# A Pro II on 1.7.7 sending pre-fader multitrack over USB (`outputMultiMode` 1, product id 0x0092).
+# The same blocks and copies as PRO2_177 in another order: CHANNEL, EFFECTS_PARAMETERS, MIXMINUSES,
+# MIX and INPUTSOURCE each sit in several runs, with other blocks between them. The strays that
+# writes to another layout's positions had appended to the desk it was taken from are left out.
+PRO2_177_PID0092 = "pro2_1.7.7_pid0092"
 
 
 def _runs(nodes, fixed: bool) -> list:
@@ -92,7 +97,7 @@ if __name__ == "__main__":
         with open(sys.argv[1], "rb") as fh:
             print("wrote", save(fh.read(), sys.argv[2]))
         sys.exit(0)
-    for name in (PRO2_177, PRO2_176, DUO_173):
+    for name in (PRO2_177, PRO2_176, DUO_173, PRO2_177_PID0092):
         book = load(name)
         print(f"{name}: {book.count('MIX')} MIX, {book.count('CHANNEL')} CHANNEL, "
               f"{book.count('PHYSICALINTERFACE', 0, 'FADER')} FADER")
