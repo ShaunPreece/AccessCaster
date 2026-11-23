@@ -61,6 +61,8 @@ def out_path() -> Path:
 # soundpad.backup_pads', so the save path is the union of all of these.
 SAVE_FUNCS = [
     (profiles.save, "profiles.save"),
+    # The master and output section, which a save stores and a restore is checked against.
+    (profiles._master_settings, "profiles._master_settings"),
     (channels.read_channels, "channels.read_channels"),
     (rcp_read.read_matrix_state, "rcp_read.read_matrix_state"),
     (rcp_read.read_matrix_levels, "rcp_read.read_matrix_levels"),
