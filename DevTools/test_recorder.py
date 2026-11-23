@@ -278,9 +278,8 @@ print("\nTHE CARD ON THIS COMPUTER: transferModeType 1 on SYSTEM, and 0 to take 
 import devices  # noqa: E402
 import fake_model  # noqa: E402
 import folders  # noqa: E402
-import layout_fixture as lf  # noqa: E402
 import rcp_read  # noqa: E402
-from _testkit import as_device, check_true, decode_record, on_layout, patched  # noqa: E402
+from _testkit import as_device, check_true, decode_record, patched  # noqa: E402
 
 check("handing the card over is transferModeType 1 on SYSTEM",
       decode_record(recorder.build_card_transfer(True))[:4],
@@ -288,8 +287,15 @@ check("handing the card over is transferModeType 1 on SYSTEM",
 check("taking it back is 0 on the same node",
       decode_record(recorder.build_card_transfer(False))[:4],
       (addr(rcp_transfer.SYSTEM), "transferModeType", 0, "int"))
-with on_layout(lf.PRO2_177_PID0092):
+# The desk it was measured on publishes SYSTEM as root child 0x0D, where the saved layout has 0x0F.
+elsewhere = fake_model.node("Rodecaster", (), [fake_model.node("OTHER", {"x": 0})
+                                               for _ in range(0x0D)]
+                            + [fake_model.node("SYSTEM", {"transferModeType": 0})])
+previous = rcp_read.pin_layout(rcp_read.layout_of(elsewhere))
+try:
     rec = recorder.build_card_transfer(True)
+finally:
+    rcp_read.pin_layout(previous)
 check("on a desk whose SYSTEM is root child 0x0D, the record RODE's app sends, byte for byte",
       rec[5:5 + int.from_bytes(rec[1:5], "little")].hex(),
       "010101010d" + b"transferModeType\x00".hex() + "010501" + "01000000")
