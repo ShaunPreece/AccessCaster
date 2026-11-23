@@ -840,4 +840,92 @@ for label, handle, flushed, first in (
     check(f"{label}: and so is the PowerShell exit code",
           [(k, f.get("exit_code")) for k, _d, f in events[1:]], [("transfer.flush_failed", 1)])
 
+
+# --- a linked pair, its two inputs, and an empty fader --------------------------------------------
+import layout_fixture as lf  # noqa: E402
+
+print("\nRESTORE: a linked pair, its two inputs, and an empty fader")
+# The desk this pins: the Mic 3 + 4 pair on fader 3 carrying a LINE source. The pair only passes
+# line audio while inputs 3 and 4 are themselves set to Line-in, and both are off-fader while
+# linked, so their channel records hold the input settings and no processing.
+PAIR_CHAIN = {"bools": {"channelBypassProcessing": True}, "floats": {"eqLowGain": 0.5},
+              "fx_bools": {"echoOn": False}, "fx_floats": {}, "marker": -1}
+
+
+def off_fader_mic(n):
+    return {"name": f"Mic{n}", "label": f"Mic {n}", "kind": "mic", "level_db": 45, "mic_type": 0,
+            "phantom": False, "polarity": False, "instrument_gain": 20, "advanced": None,
+            "processing_on": None, "modules": {"eqOn": None}, "params": {"eqLowGain": None},
+            "preset_index": None, "effects": {"echo": None, "reverb": None,
+                                              "echo_params": {"echoMix": None},
+                                              "reverb_params": {}}}
+
+
+def apply_all(prof, dev=devices.PRO2, fader_count=9):
+    """Apply with every write recorded, the effects and a pair's chain included."""
+    with as_device(dev), recorder() as calls, patched(
+            (channels, {n: _recording(n) for n in ("set_channel_effect", "set_channel_effect_param",
+                                                   "write_chain")}),
+            (profiles, {"_mic_types_now": lambda: {}, "_await_voicing": lambda *_a, **_k: None})):
+        res = profiles.apply(prof, fader_count=fader_count, fader_code_set=dev.fader.code_set)
+        return list(calls), res
+
+
+pair_prof = dict(profile(faders=[0, 1, 6, 9, 7, 8, -1, 11, 10],
+                         **{profiles.PAIR_CHAINS_KEY: {"6": PAIR_CHAIN}}),
+                 channels=[off_fader_mic(3), off_fader_mic(4)])
+calls, res = apply_all(pair_prof)
+check("the pair goes on its fader and the empty fader is emptied",
+      [a for a in args_of(calls, "set_fader_source") if a[1] in (6, -1)], [(2, 6), (6, -1)])
+check("every fader of the layout is written", len(args_of(calls, "set_fader_source")), 9)
+check("inputs 3 and 4 get their mic type back while off-fader",
+      args_of(calls, "set_mic_type"), [(3, 0), (4, 0)])
+check("and their gain, phantom and polarity",
+      (args_of(calls, "set_mic_gain"), args_of(calls, "set_phantom"),
+       args_of(calls, "set_polarity")),
+      ([(3, 45), (4, 45)], [(3, False), (4, False)], [(3, False), (4, False)]))
+check("nothing is written to a strip they do not have",
+      [n for n in names_of(calls) if n in ("set_processing_enabled", "set_channel_processing",
+                                           "set_channel_effect", "set_processing_module")], [])
+check("the pair's own strip gets its chain", args_of(calls, "write_chain"), [(2, PAIR_CHAIN)])
+check_true("after the layout and the inputs",
+           names_of(calls).index("write_chain") > names_of(calls).index("set_mic_type")
+           > names_of(calls).index("set_fader_source"))
+check("and nothing fails", res["errs"], [])
+old_calls, old_res = apply_all(dict(pair_prof, routing=dict(
+    pair_prof["routing"], **{profiles.PAIR_CHAINS_KEY: None})))
+check("a profile saved before pairs kept a chain still links the pair, and writes no chain",
+      ((2, 6) in args_of(old_calls, "set_fader_source"), args_of(old_calls, "write_chain"),
+       old_res["errs"]), (True, [], []))
+duo_calls, _res = apply_all(pair_prof, devices.DUO, 10)
+check("a desk with no such pair is not handed its code, and still gets the empty fader",
+      [a for a in args_of(duo_calls, "set_fader_source") if a[1] in (6, -1)], [(6, -1)])
+check("nor a chain for it", args_of(duo_calls, "write_chain"), [])
+
+# What a save records for a pair, from a dump of the Pro II's shape with the pair on fader 3.
+PAIR_VEC = [0, 1, 6, 9, 7, 8, -1, 11, 10]
+desk_values = {(rcp_transfer.channel_key(s), "channelInputSource"): c
+               for s, c in enumerate(PAIR_VEC + [9])}
+desk_values.update({
+    (rcp_transfer.channel_key(2), "channelBypassProcessing"): True,
+    (rcp_transfer.channel_key(2), "eqLowGain"): 0.5,
+    (rcp_transfer.input_key(2), "inputMicrophoneGain"): 45,
+    (rcp_transfer.input_key(3), "inputMicrophoneGain"): 45,
+})
+pair_desk = lf.skeleton(lf.PRO2_177, desk_values)
+with as_device(devices.PRO2):
+    saved_chains = profiles._pair_chains(pair_desk, PAIR_VEC)
+    desk_chans = channels.read_channels(pair_desk)
+check("a save keeps the chain of the strip a pair sits on, under its code", list(saved_chains),
+      ["6"])
+check("as that strip holds it", (saved_chains["6"]["bools"]["channelBypassProcessing"],
+                                 saved_chains["6"]["floats"]["eqLowGain"]), (True, 0.5))
+by_name = {c["name"]: c for c in desk_chans}
+check("the linked mics are saved off-fader, with their input settings",
+      [(by_name[n]["on_fader"], by_name[n]["level_db"], by_name[n]["mic_type"])
+       for n in ("Mic3", "Mic4")], [(False, 45, 0), (False, 45, 0)])
+with as_device(devices.PRO2):
+    check("no pair on a fader, nothing kept",
+          profiles._pair_chains(pair_desk, [0, 1, 2, 3, 10, 11, 7, 8, 9]), {})
+
 sys.exit(_testkit.finish())

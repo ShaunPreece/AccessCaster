@@ -1052,6 +1052,16 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   there before, so restore writes levels straight AFTER the layout.
 - **`profiles.apply` restores THE FADER LAYOUT FIRST**, before channel processing. It used to be
   last, so a profile saved with a reordered layout restored its voicings onto the wrong channels.
+- **THE LAYOUT RESTORE WRITES AN EMPTY FADER (-1) AND A STEREO PAIR'S CODE, though neither is
+  assignable** (`profiles._layout_codes`). Limited to `FaderSpec.code_set` it skipped both: an
+  empty fader kept a channel the profile had just put on another fader too, and a fader that held
+  a pair kept one of its mics, so a profile saved with Mic 3 + 4 linked never linked them again.
+  Writing the pair code alone is the whole of a link (see stereo link). A pair is no channel, so
+  the chain of the strip it sits on is saved apart, under `routing.pair_chains` by pair code, and
+  written with `channels.write_chain` after the channels. The pair's two inputs keep their own
+  channel records, read at INPUTSOURCE, and those ARE restored while the mics are off-fader:
+  that is what makes a line source on a linked pair pass audio again, since the pair only carries
+  line level while both inputs are set to Line-in (a second Pro II, by ear).
 - **CHOOSING A MIC VOICING ALSO REPLACES THE WHOLE PROCESSING CHAIN, and writing the old type back
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
   (Depth, Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, all three EQ
