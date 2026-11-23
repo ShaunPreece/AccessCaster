@@ -309,8 +309,12 @@ def action_delete_backup(name: str, force: bool = False) -> dict:
     return res
 
 
-def action_restore_backup(name: str, clean: bool = False) -> dict:
+def action_restore_backup(name: str, clean: bool = False,
+                          scope: str = profiles.SCOPE_EVERYTHING) -> dict:
     """RESTORE A BACKUP, from this computer's copy. See RESTORE_USES_THE_PROFILE below.
+
+    `scope` is how much of it (profiles.SCOPES): everything, or the setup alone, which only this
+    computer's copy can give. The desk's own copy goes back whole or not at all.
 
     THE SHOW IMPORT CRASHES THE DESK ABOUT ONE TIME IN SIX, so this does not use it. On a Pro II:
 
@@ -342,6 +346,8 @@ def action_restore_backup(name: str, clean: bool = False) -> dict:
     # profile save/restore another), so a page that guessed wrong would poll a job that is not
     # running and watch a finished restore in silence.
     if name.startswith("show:"):
+        if scope != profiles.SCOPE_EVERYTHING:
+            return {"ok": False, "message": SETUP_NEEDS_PROFILE}
         try:
             res = show_actions.action_show_import(int(name.split(":", 1)[1]))
         except ValueError:
@@ -359,9 +365,13 @@ def action_restore_backup(name: str, clean: bool = False) -> dict:
     # RESTORE_USES_THE_PROFILE, never the paired show, however available the show is; the docstring
     # holds the measurement behind that. The pairing is still made and still exported, so backing up
     # is unaffected and a paired backup is not stranded - only which half is read back.
-    res = profile_actions.restore_profile(name)
+    res = profile_actions.restore_profile(name, scope=scope)
     res["via"] = "profile"
     return res
+
+
+SETUP_NEEDS_PROFILE = ("This backup was made on the desk itself, which puts its own backups back "
+                       "whole. Only a backup held on this computer can restore the setup alone.")
 
 
 def factory_backup_name() -> str:

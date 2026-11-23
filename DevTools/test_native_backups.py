@@ -130,17 +130,53 @@ fakes = (backups_section, {"follow_job": fake_follow,
                            "confirm": lambda _p, title, text, _a: questions.append(text) or True})
 
 page.list.SetSelection(2)
-with patched(fakes, (backups, {"action_restore_backup": lambda name: {"ok": True, "via": "profile",
-                                                                     "started": True}})):
+restores = []
+
+
+def fake_restore(via):
+    def restore(name, scope="everything"):
+        restores.append((name, scope))
+        return {"ok": True, "via": via, "started": True}
+    return restore
+
+
+with patched(fakes, (backups, {"action_restore_backup": fake_restore("profile")})):
     page._ask_restore(page._chosen(), question)
 check("a restore follows the profile restore",
       jobs[-1], ("Restoring backup", profile_actions.profile_restore_status))
+check("and puts everything back", restores[-1], ("Tuesday", "everything"))
 check("and the whole desk is read again", frame.rewritten, 1)
-with patched(fakes, (backups, {"action_restore_backup": lambda name: {"ok": True, "via": "show",
-                                                                     "started": True}})):
+with patched(fakes, (backups, {"action_restore_backup": fake_restore("show")})):
     page._ask_restore(page._chosen(), question)
 check("one through the desk's copy follows the show job",
       jobs[-1], ("Restoring backup", show_actions.show_job_status))
+
+# Restore setup only: its own button, its own question, the same job.
+sync = (backups_section, {"call": lambda _o, fn, *a, done=None: done(fn(*a)),
+                          "_restore_question": lambda _name: question})
+with patched(fakes, sync, (backups, {"action_restore_backup": fake_restore("profile")})):
+    page._on_restore_setup(None)
+check("Restore setup only asks for the setup alone", restores[-1], ("Tuesday", "setup"))
+check("under its own title", jobs[-1], ("Restoring setup", profile_actions.profile_restore_status))
+check("and reports as a setup", reports[-1], "Setup restored")
+check_true("its question leads with the warning too", questions[-1].startswith("Warning. Main"))
+check_in("says what goes back", "which channel is on which fader", questions[-1])
+check_in("and what is left alone", "SMART pads", questions[-1])
+check_in("and that nothing drops out", "do not drop out", questions[-1])
+check_in("and that the desk is read back", "read back", questions[-1])
+section.data = data([backup("Show", kind="unit")])
+page.show()
+count = len(restores)
+with patched(fakes, sync, (backups, {"action_restore_backup": fake_restore("show")})):
+    page._on_restore_setup(None)
+check("a backup the desk made cannot give its setup alone", frame.said[-1],
+      backups.SETUP_NEEDS_PROFILE)
+check("and nothing is started", len(restores), count)
+check_in("the desk's own copy refuses it too", "whole",
+         backups.action_restore_backup("show:3", scope="setup")["message"])
+section.data = data([backup("Sunday"), backup("Monday"), backup("Tuesday", kind="paired")],
+                    baseline={"name": "Monday", "pads": 5})
+page.show()
 
 deletes = []
 answers = iter([{"ok": False, "baseline": True, "message": "This is the as-found backup."},

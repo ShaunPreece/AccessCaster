@@ -840,4 +840,234 @@ for label, handle, flushed, first in (
     check(f"{label}: and so is the PowerShell exit code",
           [(k, f.get("exit_code")) for k, _d, f in events[1:]], [("transfer.flush_failed", 1)])
 
+
+# --- HOW MUCH A RESTORE PUTS BACK: everything, or the setup alone ---------------------------------
+import copy  # noqa: E402
+
+import layout_fixture as lf  # noqa: E402
+from _testkit import check_in  # noqa: E402
+
+print("\nRESTORE SCOPE: the setup alone leaves the master, the monitor, MIDI and the desk settings")
+MIC2 = {"name": "Mic2", "label": "Mic 2", "kind": "mic", "level_db": 30, "mic_type": 5,
+        "phantom": True, "polarity": False, "instrument_gain": 20, "advanced": True,
+        "processing_on": True, "modules": {"eqOn": True}, "params": {"eqLowGain": 0.25},
+        "preset_index": -1, "effects": {"echo": False, "reverb": True,
+                                        "echo_params": {"echoMix": 0.5}, "reverb_params": {}}}
+USB1 = {"name": "USB1", "label": "USB 1 (Main Stereo)", "kind": "line", "level_db": -12,
+        "processing_on": False}
+whole_prof = dict(profile(multitrack=1, processing_bypass=False, recording_format=0,
+                          usb_multitrack=1, usb_expanded=False, usb_processing_bypass=False,
+                          monitor_auto_mute=True, bt_auto_mute=False, compellor_on=True,
+                          compellor_gain=0.2, delay_on=False),
+                  midi=True, channels=[MIC2, USB1],
+                  **{profiles.UNIT_KEY: {"screenBrightness": 200}})
+SETUP_ONLY = {"set_fader_source", "set_fader_level", "set_mic_type", "set_mic_gain", "set_phantom",
+              "set_polarity", "set_instrument_gain", "set_channel_level", "set_channel_advanced",
+              "set_processing_enabled", "set_processing_module", "set_channel_processing",
+              "set_channel_preset_marker", "set_channel_effect", "set_channel_effect_param"}
+REST = {"set_midi_control", "set_monitor_level", "set_headphone_type", "set_multitrack_mode",
+        "set_recording_processing_bypass", "set_recording_format", "set_usb_multitrack_mode",
+        "set_usb_multitrack_bypass", "set_monitor_auto_mute", "set_bt_auto_mute",
+        "set_master_compellor", "set_master_compellor_param", "set_output_delay",
+        "set_unit_setting"}
+
+
+def apply_scoped(prof, scope, dev=devices.PRO2, fader_count=9):
+    """Apply with every write recorded, the effects, the format and a pair's chain included.
+    Returns (calls, result, the progress sentences)."""
+    said = []
+    with as_device(dev), recorder() as calls, patched(
+            (channels, {n: _recording(n) for n in ("set_channel_effect", "set_channel_effect_param",
+                                                   "write_chain")}),
+            (rcp_transfer, {"set_recording_format": _recording("set_recording_format")}),
+            (profiles, {"_mic_types_now": lambda: {}, "_await_voicing": lambda *_a, **_k: None})):
+        res = profiles.apply(prof, fader_count=fader_count, fader_code_set=dev.fader.code_set,
+                             progress=said.append, scope=scope)
+        return list(calls), res, said
+
+
+everything, res_all, said_all = apply_scoped(whole_prof, profiles.SCOPE_EVERYTHING)
+setup, res_setup, said_setup = apply_scoped(whole_prof, profiles.SCOPE_SETUP)
+check("everything writes the setup and the rest", set(names_of(everything)), SETUP_ONLY | REST)
+check("the setup alone writes none of the rest", set(names_of(setup)) & REST, set())
+check("and all of the setup", set(names_of(setup)), SETUP_ONLY)
+check("write for write what everything sends for those", setup,
+      [c for c in everything if c[0] in SETUP_ONLY])
+check("the default is everything",
+      names_of(apply_pro2(whole_prof)[0]),
+      [n for n in names_of(everything) if n in RECORDED_TRANSFER + RECORDED_CHANNELS])
+check("nothing is reported as unrestorable either way", (res_all["errs"], res_setup["errs"]),
+      ([], []))
+check("the setup's progress names no monitor level and no master",
+      [s for s in said_setup if "monitor" in s or "master" in s or "own settings" in s], [])
+check_in("but still the fader levels", "Restoring fader levels.", " ".join(said_setup))
+check_in("everything still says monitor", "Restoring fader and monitor levels.",
+         " ".join(said_all))
+try:
+    apply_scoped(whole_prof, "some")
+    refused = False
+except ValueError:
+    refused = True
+check_true("a scope that is not one is refused before anything is written", refused)
+
+print("\nRESTORE: a linked pair, its two inputs, and an empty fader")
+# The desk this pins: the Mic 3 + 4 pair on fader 3 carrying a LINE source. The pair only passes
+# line audio while inputs 3 and 4 are themselves set to Line-in, and both are off-fader while
+# linked, so their channel records hold the input settings and no processing.
+PAIR_CHAIN = {"bools": {"channelBypassProcessing": True}, "floats": {"eqLowGain": 0.5},
+              "fx_bools": {"echoOn": False}, "fx_floats": {}, "marker": -1}
+
+
+def off_fader_mic(n):
+    return {"name": f"Mic{n}", "label": f"Mic {n}", "kind": "mic", "level_db": 45, "mic_type": 0,
+            "phantom": False, "polarity": False, "instrument_gain": 20, "advanced": None,
+            "processing_on": None, "modules": {"eqOn": None}, "params": {"eqLowGain": None},
+            "preset_index": None, "effects": {"echo": None, "reverb": None,
+                                              "echo_params": {"echoMix": None},
+                                              "reverb_params": {}}}
+
+
+pair_prof = dict(profile(faders=[0, 1, 6, 9, 7, 8, -1, 11, 10],
+                         **{profiles.PAIR_CHAINS_KEY: {"6": PAIR_CHAIN}}),
+                 channels=[off_fader_mic(3), off_fader_mic(4)])
+for scope in profiles.SCOPES:
+    calls, res, _said = apply_scoped(pair_prof, scope)
+    check(f"{scope}: the pair goes on its fader and the empty fader is emptied",
+          [a for a in args_of(calls, "set_fader_source") if a[1] in (6, -1)], [(2, 6), (6, -1)])
+    check(f"{scope}: every fader of the layout is written", len(args_of(calls, "set_fader_source")),
+          9)
+    check(f"{scope}: inputs 3 and 4 get their mic type back while off-fader",
+          args_of(calls, "set_mic_type"), [(3, 0), (4, 0)])
+    check(f"{scope}: and their gain, phantom and polarity",
+          (args_of(calls, "set_mic_gain"), args_of(calls, "set_phantom"),
+           args_of(calls, "set_polarity")),
+          ([(3, 45), (4, 45)], [(3, False), (4, False)], [(3, False), (4, False)]))
+    check(f"{scope}: nothing is written to a strip they do not have",
+          [n for n in names_of(calls) if n in ("set_processing_enabled", "set_channel_processing",
+                                               "set_channel_effect", "set_processing_module")], [])
+    check(f"{scope}: the pair's own strip gets its chain", args_of(calls, "write_chain"),
+          [(2, PAIR_CHAIN)])
+    check_true(f"{scope}: after the layout and the inputs",
+               names_of(calls).index("write_chain") > names_of(calls).index("set_mic_type")
+               > names_of(calls).index("set_fader_source"))
+    check(f"{scope}: and nothing fails", res["errs"], [])
+duo_calls, _res, _said = apply_scoped(pair_prof, profiles.SCOPE_SETUP, devices.DUO, 10)
+check("a desk with no such pair is not handed its code, and still gets the empty fader",
+      [a for a in args_of(duo_calls, "set_fader_source") if a[1] in (6, -1)], [(6, -1)])
+check("nor a chain for it", args_of(duo_calls, "write_chain"), [])
+
+# What a save records for a pair, from a dump of the Pro II's shape with the pair on fader 3.
+PAIR_VEC = [0, 1, 6, 9, 7, 8, -1, 11, 10]
+desk_values = {(rcp_transfer.channel_key(s), "channelInputSource"): c
+               for s, c in enumerate(PAIR_VEC + [9])}
+desk_values.update({
+    (rcp_transfer.channel_key(2), "channelBypassProcessing"): True,
+    (rcp_transfer.channel_key(2), "eqLowGain"): 0.5,
+    (rcp_transfer.channel_key(1), "eqLowGain"): 0.25,
+    (rcp_transfer.channel_key(1), "channelBypassProcessing"): False,
+    (rcp_transfer.input_key(1), "inputMicrophoneGain"): 27,
+    (rcp_transfer.input_key(1), "inputPower"): 1,
+    (rcp_transfer.input_key(1), "inputMicrophoneType"): 5,
+    (rcp_transfer.input_key(2), "inputMicrophoneGain"): 45,
+    (rcp_transfer.input_key(3), "inputMicrophoneGain"): 45,
+    (rcp_transfer.fader_key(6), "faderLevel"): 96,
+    (rcp_transfer.OUTPUT, "outputMonLevel"): 0.4,
+    (rcp_transfer.OUTPUT, "outputMultiMode"): 1,
+})
+pair_desk = lf.skeleton(lf.PRO2_177, desk_values)
+with as_device(devices.PRO2):
+    saved_chains = profiles._pair_chains(pair_desk, PAIR_VEC)
+    desk_chans = channels.read_channels(pair_desk)
+check("a save keeps the chain of the strip a pair sits on, under its code", list(saved_chains),
+      ["6"])
+check("as that strip holds it", (saved_chains["6"]["bools"]["channelBypassProcessing"],
+                                 saved_chains["6"]["floats"]["eqLowGain"]), (True, 0.5))
+by_name = {c["name"]: c for c in desk_chans}
+check("the linked mics are saved off-fader, with their input settings",
+      [(by_name[n]["on_fader"], by_name[n]["level_db"], by_name[n]["mic_type"])
+       for n in ("Mic3", "Mic4")], [(False, 45, 0), (False, 45, 0)])
+with as_device(devices.PRO2):
+    check("no pair on a fader, nothing kept",
+          profiles._pair_chains(pair_desk, [0, 1, 2, 3, 10, 11, 7, 8, 9]), {})
+
+print("\nTHE CHECK AFTER A RESTORE: the desk read back against the profile")
+with as_device(devices.PRO2):
+    as_saved = {"version": 2, "midi": False, "channels": copy.deepcopy(desk_chans),
+                "routing": {"faders": PAIR_VEC, "fader_levels": rcp_transfer.fader_levels(pair_desk),
+                            "monitor_level": 0.4, **profiles._master_settings(pair_desk),
+                            profiles.PAIR_CHAINS_KEY: saved_chains},
+                profiles.UNIT_KEY: profiles._unit_settings(pair_desk)}
+
+
+def checked(prof, scope=profiles.SCOPE_EVERYTHING):
+    with as_device(devices.PRO2):
+        return profiles.check(prof, pair_desk, desk_chans, fader_count=9,
+                              fader_code_set=devices.PRO2.fader.code_set, scope=scope)
+
+
+match = checked(as_saved)
+check("a desk that is as the profile says differs in nothing", match["differ"], [])
+check_true("having compared a good many settings", match["checked"] > 100, str(match["checked"]))
+check_true("fewer for the setup alone", checked(as_saved, profiles.SCOPE_SETUP)["checked"]
+           < match["checked"])
+check("said as one sentence", profiles.check_words(match),
+      f"Read the desk back: all {match['checked']} settings checked match the profile.")
+
+off = copy.deepcopy(as_saved)
+next(c for c in off["channels"] if c["name"] == "Mic2")["level_db"] = 30
+one = checked(off, profiles.SCOPE_SETUP)
+check("a gain the desk did not take is named, with both values", one["differ"],
+      ["Mic 2 gain reads 27, the profile says 30"])
+check("and the sentence counts it in the singular", profiles.check_words(one),
+      f"Read the desk back: 1 setting of {one['checked']} differs. "
+      "Mic 2 gain reads 27, the profile says 30.")
+next(c for c in off["channels"] if c["name"] == "Mic2")["phantom"] = False
+next(c for c in off["channels"] if c["name"] == "Mic3")["mic_type"] = 2
+off["routing"]["faders"] = [0, 1, 2, 9, 7, 8, 3, 11, 10]
+off["routing"]["fader_levels"] = list(off["routing"]["fader_levels"])
+off["routing"]["fader_levels"][6] = 100
+off["routing"]["monitor_level"] = 0.9
+off["routing"]["usb_multitrack"] = 2
+off["midi"] = True
+many = checked(off, profiles.SCOPE_SETUP)
+check("a fader is named by what it holds, a pair and an empty one included", many["differ"][:2],
+      ["fader 3 reads Mic 3 + 4, the profile says Mic 3",
+       "fader 7 reads no channel, the profile says Mic 4"])
+check_in("a level by its number", "fader 7 level reads 96, the profile says 100",
+         "; ".join(many["differ"]))
+check_in("a switch as on or off", "Mic 2 phantom power reads on, the profile says off",
+         "; ".join(many["differ"]))
+check_in("a mic type by its name", "Mic 3 mic type reads Line-in, the profile says Dynamic",
+         "; ".join(many["differ"]))
+check("the setup's check leaves the monitor, the USB mode and MIDI out",
+      [d for d in many["differ"] if "monitor" in d or "USB" in d or "MIDI" in d], [])
+whole = checked(off)
+check("everything's check has them",
+      sorted(d for d in whole["differ"] if "monitor" in d or "USB" in d or "MIDI" in d),
+      ["MIDI control reads off, the profile says on",
+       "USB multitrack reads Pre-Fader, the profile says Post-Fader",
+       "the monitor speaker level reads 0.4, the profile says 0.9"])
+words = profiles.check_words(many)
+check_true("a long list names the first few and counts the rest",
+           words.count(";") == profiles.CHECK_NAMED
+           and words.endswith(f"and {len(many['differ']) - profiles.CHECK_NAMED} more."), words)
+chain_off = copy.deepcopy(as_saved)
+chain_off["routing"][profiles.PAIR_CHAINS_KEY] = {"6": dict(
+    saved_chains["6"], floats=dict(saved_chains["6"]["floats"], eqLowGain=0.9))}
+check("a pair's strip is one setting, and says which value is off first",
+      checked(chain_off, profiles.SCOPE_SETUP)["differ"],
+      ["Mic 3 + 4 processing differs from the profile in 1 value, the first being eqLowGain"])
+near = copy.deepcopy(as_saved)
+next(c for c in near["channels"] if c["name"] == "Mic2")["params"]["eqLowGain"] = 0.2505
+check("a float a hair off is the same setting", checked(near)["differ"], [])
+
+RES = {"applied": 12, "failed": 0, "errs": []}
+check("the result carries the check in place of the advice to go and look",
+      profiles.restore_result("Show", RES, one)["message"],
+      "Restored profile Show: applied 12 settings. " + profiles.check_words(one))
+check_in("a setup says it was the setup", "Restored the setup from Show: applied 12 settings.",
+         profiles.restore_result("Show", RES, match, profiles.SCOPE_SETUP)["message"])
+check_in("with no check the advice stays", "Open Channels, Processing or Routing",
+         profiles.restore_result("Show", RES)["message"])
+
 sys.exit(_testkit.finish())

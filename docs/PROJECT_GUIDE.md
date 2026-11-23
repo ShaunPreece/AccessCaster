@@ -1052,6 +1052,27 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   there before, so restore writes levels straight AFTER the layout.
 - **`profiles.apply` restores THE FADER LAYOUT FIRST**, before channel processing. It used to be
   last, so a profile saved with a reordered layout restored its voicings onto the wrong channels.
+- **THE LAYOUT RESTORE WRITES AN EMPTY FADER (-1) AND A STEREO PAIR'S CODE, though neither is
+  assignable** (`profiles._layout_codes`). Limited to `FaderSpec.code_set` it skipped both: an
+  empty fader kept a channel the profile had just put on another fader too, and a fader that held
+  a pair kept one of its mics, so a profile saved with Mic 3 + 4 linked never linked them again.
+  Writing the pair code alone is the whole of a link (see stereo link). A pair is no channel, so
+  the chain of the strip it sits on is saved apart, under `routing.pair_chains` by pair code, and
+  written with `channels.write_chain` after the channels. The pair's two inputs keep their own
+  channel records, read at INPUTSOURCE, and those ARE restored while the mics are off-fader:
+  that is what makes a line source on a linked pair pass audio again, since the pair only carries
+  line level while both inputs are set to Line-in (a second Pro II, by ear).
+- **A RESTORE HAS A SCOPE (`profiles.SCOPES`).** Everything, or the setup alone: the layout, the
+  virtual fader levels and the channels, and none of MIDI, the master and output section, the
+  monitor speaker level, the output mixes, the desk's own settings or the pads. So a setup restore
+  never writes `outputMultiMode` and the desk's USB audio never re-enumerates under it. It cannot
+  be combined with the reset of a clean restore. `test_profiles` asserts the split write for write.
+- **A RESTORE ENDS BY READING THE DESK BACK (`profiles.check`)** and comparing it with the profile
+  over exactly what that scope writes, and the reply says how many settings differ and names the
+  first few. The count of writes sent proves nothing about what the desk holds. Mutes, the output
+  mix matrix and the pads are outside it, as they are outside the per-setting restore. Floats
+  within `CHECK_FLOAT_EPS` are the same setting: in simple mode the desk derives part of a chain
+  and lands a hair off what was written.
 - **CHOOSING A MIC VOICING ALSO REPLACES THE WHOLE PROCESSING CHAIN, and writing the old type back
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
   (Depth, Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, all three EQ

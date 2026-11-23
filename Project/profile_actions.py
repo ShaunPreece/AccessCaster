@@ -151,10 +151,19 @@ def profile_restore_status() -> dict:
     return restore_job.status()
 
 
-def restore_profile(name: str, clean: bool = False) -> dict:
+def restore_profile(name: str, clean: bool = False, scope: str = profiles.SCOPE_EVERYTHING) -> dict:
     """Start a background restore: apply the settings, then (if the profile carries pads) rebuild
     the SMART pad grid. The window polls `profile_restore_status` for progress. profiles.apply
     and soundpad.restore_pads do the device writes and assume the caller holds the HID lock.
+
+    `scope` IS HOW MUCH GOES BACK (profiles.SCOPES). SCOPE_SETUP writes the fader layout, the
+    virtual fader levels and the channels and nothing else: no master or output section, so no USB
+    re-enumeration, no output mixes and no pads. It is for moving between setups saved as whole
+    profiles without undoing whatever else has been changed since. It never resets first: a reset
+    is the opposite of leaving the rest alone.
+
+    EITHER WAY THE DESK IS READ BACK AT THE END and compared with the profile (profiles.check), so
+    the reply says what did not land rather than leaving the user to walk three pages.
 
     `clean` PICKS BETWEEN TWO GENUINELY DIFFERENT OPERATIONS, and the page names both rather than
     choosing for the user:
@@ -180,7 +189,14 @@ def restore_profile(name: str, clean: bool = False) -> dict:
     refusal = _other_desk_refusal(prof)
     if refusal:
         return refusal
-    pad_list = prof.get("pads") or []
+    if scope not in profiles.SCOPES:
+        return {"ok": False, "message": f"{scope} is not a way to restore a profile."}
+    whole = scope == profiles.SCOPE_EVERYTHING
+    if clean and not whole:
+        return {"ok": False, "message": "Restoring the setup only leaves the rest of the desk as "
+                                        "it is, so it cannot reset the desk first. Restore "
+                                        "everything to do that."}
+    pad_list = (prof.get("pads") or []) if whole else []
     # Refuse a clean restore we cannot actually do CLEANLY, rather than silently doing a merge and
     # calling it clean. Someone who asked for an exact match needs to know they did not get one.
     if clean:
@@ -234,22 +250,24 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                     vec_before = levels_before = None
                     level_note = (" The fader levels could not be read first, so they did not "
                                   "follow their channels. Check the virtual faders' levels.")
-            res = profiles.apply(prof, fader_count=faders.active_faders().vector_length,
-                                 fader_code_set=faders.active_faders().code_set, progress=job.step)
+            res = profiles.apply(prof, fader_count=spec.vector_length,
+                                 fader_code_set=spec.code_set, progress=job.step, scope=scope)
             if levels_before is not None:
                 level_note = faders.follow_levels(vec_before, faders.read_fader_vector(spec=spec),
                                                   levels_before, spec)
-        # A PROFILE CARRIES `systemMidiControl`, so one taken while MIDI was off has just switched
-        # the MIDI port back off and every sound-pad shortcut with it. Forget that we armed it and
-        # the next pad press arms it again - which is why arming is per-press-until-done rather than
-        # once at startup.
-        pad_shortcuts.rearm_midi()
-        # A restore can also rewrite the whole pad grid, so the shortcut layer's map is wrong.
-        pad_shortcuts.pads_stale()
-        # Output mix matrix + monitor-mix levels (v2 profiles only).
-        job.step("Settings done. Restoring output routing...")
-        with desk_access.hid_lock:
-            mx_res = output_mixes.apply_matrix(prof.get("routing") or {})
+        mx_res = None
+        if whole:
+            # A PROFILE CARRIES `systemMidiControl`, so one taken while MIDI was off has just
+            # switched the MIDI port back off and every sound-pad shortcut with it. Forget that we
+            # armed it and the next pad press arms it again - which is why arming is
+            # per-press-until-done rather than once at startup.
+            pad_shortcuts.rearm_midi()
+            # A restore can also rewrite the whole pad grid, so the shortcut layer's map is wrong.
+            pad_shortcuts.pads_stale()
+            # Output mix matrix + monitor-mix levels (v2 profiles only).
+            job.step("Settings done. Restoring output routing...")
+            with desk_access.hid_lock:
+                mx_res = output_mixes.apply_matrix(prof.get("routing") or {})
         pad_res = None
         pad_tidy = None
         pad_extra = None
@@ -281,7 +299,21 @@ def restore_profile(name: str, clean: bool = False) -> dict:
             with desk_access.hid_lock:
                 healed = soundpad.heal_fx_pool(progress=job.step)
 
-        msg = profiles.restore_result(safe, res)["message"] + level_note
+        # THE CHECK COMES LAST, after the matrix and the pads, so it reads the desk as the restore
+        # leaves it. A desk that cannot be read is said so: no sentence would read as "all match".
+        job.step("Reading the desk back to check it.")
+        checked, check_note = None, ""
+        try:
+            with desk_access.hid_lock:
+                blob = rcp_read.read_model_stable(fresh=True)
+                checked = profiles.check(prof, blob, channels.read_channels(blob),
+                                         fader_count=spec.vector_length,
+                                         fader_code_set=spec.code_set, scope=scope)
+        except Exception as exc:
+            diagnostics.event("restore.check_failed", str(exc))
+            check_note = " The desk could not be read back afterwards, so nothing was checked."
+        msg = profiles.restore_result(safe, res, checked, scope)["message"] + check_note
+        msg += level_note
         if reset_note:
             msg = reset_note + " " + msg
         if mx_res and not mx_res.get("skipped"):
@@ -294,8 +326,10 @@ def restore_profile(name: str, clean: bool = False) -> dict:
 
     return restore_job.start(_work, total=len(pad_list),
                               message=("Backing the desk up before resetting it..." if clean
-                                       else "Applying settings, please wait."),
-                              started="Restoring the profile.")
+                                       else "Applying settings, please wait." if whole
+                                       else "Applying the setup, please wait."),
+                              started="Restoring the profile." if whole
+                              else "Restoring the setup from the profile.")
 
 
 def _other_desk_refusal(prof: dict) -> dict | None:

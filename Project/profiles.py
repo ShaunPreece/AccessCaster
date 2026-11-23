@@ -15,7 +15,10 @@ pads/ folder (pads_dir) and records their metadata under "pads".
 FORMAT: a profile is a FOLDER, profiles/<name>/profile.json (version 2), holding its pads/ audio
 beside it.
 
-LOCK BOUNDARY: save() and load() are pure (file ops + an already-read model blob). apply()
+A RESTORE PUTS BACK EVERYTHING OR THE SETUP ALONE (SCOPES), and either way check() compares the
+desk, read back afterwards, with what that scope wrote.
+
+LOCK BOUNDARY: save(), load() and check() are pure (file ops + an already-read model blob). apply()
 performs the device WRITES and assumes THE CALLER HOLDS the HID lock (`desk_access.hid_lock`):
 `profile_actions` takes it, reads the model under it, and hands the blob or loaded profile here.
 """
@@ -104,6 +107,32 @@ UNIT_KEY = "unit"
 # They ARE saved, so the full snapshot still records how the desk was found.
 UNIT_NEVER_RESTORE = frozenset({"outputMonMute", "outputBTMute"})
 
+# ---- how much of a profile a restore puts back --------------------------------------------------
+# EVERYTHING is the whole profile. SETUP is what changes when the desk is re-plugged for another
+# job, and nothing else: which channel is on which fader, the virtual fader levels, and each
+# channel's input settings, effects and processing. It leaves alone everything a setup is not: the
+# master and output section (multitrack, the USB mode, auto-mutes, headphone types, Compellor,
+# delay), the output mixes, the monitor speaker level, MIDI, the desk's own settings and the pads.
+# So swapping setups never re-enumerates the desk's USB audio and never undoes a tweak made since.
+SCOPE_EVERYTHING = "everything"
+SCOPE_SETUP = "setup"
+SCOPES = (SCOPE_EVERYTHING, SCOPE_SETUP)
+
+# ---- a linked pair's own strip -------------------------------------------------------------------
+# {str(pair code): chain} under routing, for each stereo pair on a fader when the profile was
+# saved, in the shape of channels.read_chains. A pair is a fader code of its own and no channel, so
+# the per-channel records cannot hold the processing of the strip it sits on; its two inputs'
+# own settings (type, gain, phantom, polarity) are in their channel records, read at their
+# INPUTSOURCE nodes, which a link does not take away.
+PAIR_CHAINS_KEY = "pair_chains"
+
+# How far apart two floats may be and still be the same setting, when a restore is checked. Wider
+# than the desk's own rounding, because in simple mode it derives part of a chain from the three
+# VoxLab knobs and lands a hair off the value written.
+CHECK_FLOAT_EPS = 0.002
+# How many differences the check names before it only counts them: the sentence is listened to.
+CHECK_NAMED = 4
+
 
 def _unit_settings(blob: bytes) -> dict:
     """{prop: int|float} for every unit setting the dump carries. Bools are stored as 0/1 so the
@@ -166,6 +195,48 @@ def _snapshot(blob: bytes) -> dict:
     }
 
 
+def _master_settings(blob: bytes) -> dict:
+    """The master and output section as a profile holds it, read from a dump: what a save stores
+    and what a restore is checked against, so the two cannot drift apart."""
+    def output(n):
+        return rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, n)
+
+    usb_mode, usb_expanded = recorder.split_usb_multitrack(output("outputMultiMode"))
+    return {
+        "multitrack": output("recordingMultitrackMode"),
+        # The rest of the "what do I end up with" set. The multitrack MODE without its processing
+        # bypass is half a decision: a profile taken on raw pre-fader tracks would come back
+        # processed, which is not recoverable after the take. `usb_multitrack` is the USB
+        # destination's own mode (see recorder.py).
+        "processing_bypass": output("recordingProcessingBypass"),
+        # And WHAT IT IS WRITTEN AS, for the same reason: a profile that restores what the take
+        # contains but not whether it is a WAV or an MP3 has backed up half the decision, and
+        # neither half is recoverable once the take exists.
+        "recording_format": output("recordingCompressionQuality"),
+        # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). A profile with a
+        # bare 0-2 in `usb_multitrack` and no `usb_expanded` reads as "that output mode, Standard".
+        "usb_multitrack": usb_mode,
+        "usb_expanded": usb_expanded,
+        "usb_processing_bypass": output("outputMultiBypass"),
+        "monitor_auto_mute": output("outputMonAutoMute"),
+        "bt_auto_mute": output("outputBTAutoMute"),
+        "headphone_types": master_outputs.headphone_types(blob),    # one per addressable output
+        # The master bus's Compellor and output delay, seven keys, built in master_outputs so the
+        # page and the backup cannot drift apart.
+        **master_outputs.master_processing(blob),
+    }
+
+
+def _pair_chains(blob: bytes, faders) -> dict:
+    """{str(pair code): chain} for each stereo pair on a fader (PAIR_CHAINS_KEY)."""
+    pairs = devices.get_active_device().fader.pair_map
+    held = [(strip, code) for strip, code in enumerate(faders) if code in pairs]
+    if not held:
+        return {}
+    chains = channels.read_chains(blob)
+    return {str(code): chains[strip] for strip, code in held if strip < len(chains)}
+
+
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
          product_id=None, device_name=None, baseline=False, show=None, hardware_id="") -> dict:
     """Build the full profile from an ALREADY-READ model `blob` + channel read `chans`, and write
@@ -216,7 +287,6 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     fader_levels = [int(v) if isinstance(v, (int, float)) else None
                     for v in rcp_transfer.fader_levels(blob)]
     mon_level = output("outputMonLevel")
-    headphone_types = master_outputs.headphone_types(blob)
 
     # THE OUTPUT MIX MATRIX IS CAPTURED AS A MIX SCHEME. routing_schemes.capture already records
     # the WHOLE matrix - every output's mode, every cross-point's include/exclude, its link state
@@ -235,6 +305,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
     mix = routing_schemes.capture(safe, blob)
     mix_scheme = mix["scheme"] if mix.get("ok") else None
     matrix_note = "" if mix.get("ok") else mix.get("message", "matrix not readable")
+    pair_chains = _pair_chains(blob, cis[:fader_count])
 
     profile = {
         "version": PROFILE_VERSION,
@@ -258,32 +329,12 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             # (raw 0..1). See the capture comment above.
             "fader_levels": fader_levels,
             "monitor_level": mon_level,
-            "multitrack": output("recordingMultitrackMode"),
-            # The rest of the "what do I end up with" set. The multitrack MODE without its
-            # processing bypass is half a decision: a profile taken on raw pre-fader tracks would
-            # come back processed, which is not recoverable after the take. `usb_multitrack` is
-            # the USB destination's own mode (see recorder.py).
-            "processing_bypass": output("recordingProcessingBypass"),
-            # And WHAT IT IS WRITTEN AS, for the same reason: a profile that restores what the take
-            # contains but not whether it is a WAV or an MP3 has backed up half the decision, and
-            # neither half is recoverable once the take exists.
-            "recording_format": output("recordingCompressionQuality"),
-            # SAVED AS THE TWO SETTINGS IT IS, not as the raw int (see recorder.py). A profile with
-            # a bare 0-2 in `usb_multitrack` and no `usb_expanded` reads as "that output mode,
-            # Standard".
-            "usb_multitrack": recorder.split_usb_multitrack(output("outputMultiMode"))[0],
-            "usb_expanded": recorder.split_usb_multitrack(output("outputMultiMode"))[1],
-            "usb_processing_bypass": output("outputMultiBypass"),
-            "monitor_auto_mute": output("outputMonAutoMute"),
-            "bt_auto_mute": output("outputBTAutoMute"),
-            "headphone_types": headphone_types,                # one per addressable output
-            # The master bus's Compellor and output delay, seven keys, built in master_outputs so
-            # the page and the backup cannot drift apart.
-            **master_outputs.master_processing(blob),
+            **_master_settings(blob),
             # THE WHOLE output mix matrix, as a mix scheme (see the capture comment above), and
             # why not when it could not be read (a phone caller).
             "mix_scheme": mix_scheme,
             "matrix_note": matrix_note,
+            PAIR_CHAINS_KEY: pair_chains,
         },
         # The unit's own settings (display, button brightness, haptics, REC button, listen mode,
         # fixed output level).
@@ -515,15 +566,21 @@ class _Restore:
         return {"applied": self.applied, "failed": self.failed, "errs": self.errs}
 
 
-def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
+def apply(prof, *, fader_count, fader_code_set, progress=None, scope=SCOPE_EVERYTHING) -> dict:
     """Apply a loaded profile to the device. Returns {applied, failed, errs}. Paces the writes and
     keeps going past an individual failure, so one odd value cannot abort the whole restore.
+
+    `scope` is how much of it: SCOPE_EVERYTHING, or SCOPE_SETUP for the fader layout, the virtual
+    fader levels and the channels alone (see SCOPES).
 
     THE CALLER MUST HOLD THE HID LOCK (this module does no locking). progress, if given, is called
     with a short human sentence at each section boundary, so a caller polling from a UI has
     something to say during the ~20 seconds of paced writes instead of one frozen message."""
+    if scope not in SCOPES:
+        raise ValueError(f"no restore scope {scope!r}")
+    whole = scope == SCOPE_EVERYTHING
     rs = _Restore(progress)
-    if prof.get("midi") is not None:
+    if whole and prof.get("midi") is not None:
         rs.write("MIDI control", lambda: rcp_transfer.set_midi_control(bool(prof["midi"])))
     routing = prof.get("routing") or {}
     # THE FADER LAYOUT GOES FIRST, and the levels straight after it, before any channel processing.
@@ -531,12 +588,28 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     # so the layout decides where each of them has to be written. Written later, every restored
     # chain lands against the OLD layout and then has the layout moved out from under it.
     _restore_layout(rs, routing, fader_count, fader_code_set)
-    _restore_levels(rs, routing)
+    _restore_levels(rs, routing, monitor=whole)
     _restore_channels(rs, prof.get("channels") or [])
-    _restore_master(rs, routing)
-    # The unit's own settings go last: none of them affects where another write lands.
-    _restore_unit(rs, prof.get(UNIT_KEY) or {})
+    _restore_pairs(rs, routing, fader_count, fader_code_set)
+    if whole:
+        _restore_master(rs, routing)
+        # The unit's own settings go last: none of them affects where another write lands.
+        _restore_unit(rs, prof.get(UNIT_KEY) or {})
     return rs.result()
+
+
+def _layout_codes(fader_code_set) -> set:
+    """What a restore may put on a fader: an assignable channel, NOTHING (-1), and on a desk that
+    links inputs, one of its stereo pairs.
+
+    THE LAST TWO ARE NOT ASSIGNABLE AND MUST STILL BE RESTORED. Skip an empty fader and it keeps
+    the channel it had, which the profile has just put on another fader as well. Skip a pair and
+    the fader keeps one of its two mics, the other stays wherever it was, and a line source wired
+    to that pair of inputs goes silent with every setting reading as saved. Writing the code alone
+    is the whole of a link (faders.action_set_stereo_link)."""
+    dev = devices.get_active_device()
+    pairs = set(dev.fader.pair_map) if "stereo_link" in dev.caps else set()
+    return set(fader_code_set) | {-1} | pairs
 
 
 def _restore_layout(rs, routing, fader_count, fader_code_set):
@@ -545,24 +618,43 @@ def _restore_layout(rs, routing, fader_count, fader_code_set):
     faders = routing.get("faders") or []
     if "fader_write" in devices.get_active_device().caps:
         rs.step("Restoring the fader layout.")
+        allowed = _layout_codes(fader_code_set)
         for i, code in enumerate(faders):
-            if i < fader_count and code is not None and code in fader_code_set:
+            if i < fader_count and code is not None and code in allowed:
                 rs.write(f"fader {i + 1}",
                          lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
     elif any(c is not None for c in faders):
         rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
 
 
-def _restore_levels(rs, routing):
-    """The virtual fader levels and the monitor speaker level. Gated on the device's own
-    "level_write" cap AND on it having a virtual fader, the same refusal the Levels page's
-    sliders make. Older profiles carry neither key and skip the whole block."""
+def _restore_pairs(rs, routing, fader_count, fader_code_set):
+    """The processing of each strip a stereo pair sits on (PAIR_CHAINS_KEY), after the layout has
+    put the pair there and the channels have set its two inputs. Older profiles carry none."""
+    saved = routing.get(PAIR_CHAINS_KEY) or {}
+    dev = devices.get_active_device()
+    if not saved or "fader_write" not in dev.caps:
+        return
+    allowed = _layout_codes(fader_code_set)
+    for strip, code in enumerate((routing.get("faders") or [])[:fader_count]):
+        chain = saved.get(str(code))
+        if chain is None or code not in dev.fader.pair_map or code not in allowed:
+            continue
+        label = dev.fader.pair_label.get(code, f"pair {code}")
+        rs.step(f"Restoring {label}.")
+        rs.write(f"{label} processing",
+                 lambda strip=strip, chain=chain: channels.write_chain(strip, chain))
+
+
+def _restore_levels(rs, routing, monitor=True):
+    """The virtual fader levels and, with `monitor`, the monitor speaker level. Gated on the
+    device's own "level_write" cap AND on it having a virtual fader, the same refusal the Levels
+    page's sliders make. Older profiles carry neither key and skip the whole block."""
     dev = devices.get_active_device()
     lvl_faders = dev.fader.level_faders if "level_write" in dev.caps else ()
     saved_levels = routing.get("fader_levels") or []
-    mon_level = routing.get("monitor_level")
+    mon_level = routing.get("monitor_level") if monitor else None
     if lvl_faders:
-        rs.step("Restoring fader and monitor levels.")
+        rs.step("Restoring fader and monitor levels." if monitor else "Restoring fader levels.")
         for idx in lvl_faders:
             if idx < len(saved_levels) and saved_levels[idx] is not None:
                 rs.write(f"fader {idx + 1} level", lambda idx=idx, v=saved_levels[idx]:
@@ -798,11 +890,205 @@ def _restore_unit(rs, unit):
         rs.write(prop, lambda prop=prop, v=v: rcp_transfer.set_unit_setting(prop, v))
 
 
-def restore_result(safe, res) -> dict:
-    """Format the user-facing message for a completed restore."""
+# ---- the check after a restore (pure: an already-read blob and channel read) ------------------
+# A restore counts the writes it SENT. Whether the desk holds them is a different fact: a voicing
+# still applying throws a chain write away, a channel with no fader has no strip to take one, and
+# the desk clamps what it does not like. So the desk is read back and compared with the profile,
+# setting by setting, over exactly what that scope writes, and what differs is said by name.
+
+def _same(saved, now) -> bool:
+    if isinstance(saved, bool) or isinstance(now, bool):
+        return now is not None and bool(saved) == bool(now)
+    if isinstance(saved, (int, float)) and isinstance(now, (int, float)):
+        return abs(float(saved) - float(now)) <= CHECK_FLOAT_EPS
+    return saved == now
+
+
+def _said(value, names=None) -> str:
+    """A value as the sentence says it: on or off, a name where there is one, a short number."""
+    if value is None:
+        return "nothing"
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if names is not None and value in names:
+        return str(names[value])
+    if isinstance(value, float):
+        return f"{value:.3f}".rstrip("0").rstrip(".") or "0"
+    return str(value)
+
+
+class _Check:
+    """The comparisons of one check: how many were made, and each difference as a phrase."""
+
+    def __init__(self):
+        self.checked = 0
+        self.differ = []
+
+    def same(self, what, saved, now, names=None):
+        """Compare one setting the profile holds. A setting it does not hold is not checked."""
+        if saved is None:
+            return
+        self.checked += 1
+        if isinstance(saved, bool) and now is not None:
+            now = bool(now)
+        if not _same(saved, now):
+            self.differ.append(f"{what} reads {_said(now, names)}, the profile says "
+                               f"{_said(saved, names)}")
+
+    def result(self) -> dict:
+        return {"checked": self.checked, "differ": self.differ}
+
+
+def check(prof, blob: bytes, chans: list, *, fader_count, fader_code_set,
+          scope=SCOPE_EVERYTHING) -> dict:
+    """Compare the desk, as `blob` and its channel read `chans` hold it, with what a restore of
+    `prof` in `scope` writes. Returns {checked, differ: [phrase]}. No device access.
+
+    WHAT IS LEFT OUT IS WHAT A RESTORE LEAVES OUT: mutes, which are never written back, the output
+    mix matrix, which has its own count in the reply, and the pads."""
+    dev = devices.get_active_device()
+    ck = _Check()
+    routing = prof.get("routing") or {}
+    vec = rcp_read.strip_values(blob, "channelInputSource")
+    names = dict(dev.fader.all_labels)
+    names[-1] = "no channel"
+    if "fader_write" in dev.caps:
+        allowed = _layout_codes(fader_code_set)
+        for i, code in enumerate((routing.get("faders") or [])[:fader_count]):
+            if code is not None and code in allowed:
+                ck.same(f"fader {i + 1}", int(code), vec[i] if i < len(vec) else None, names)
+    if "level_write" in dev.caps:
+        levels = rcp_transfer.fader_levels(blob)
+        saved_levels = routing.get("fader_levels") or []
+        for i in dev.fader.level_faders:
+            if i < len(saved_levels):
+                ck.same(f"fader {i + 1} level", saved_levels[i],
+                        levels[i] if i < len(levels) else None)
+    now_chans = {c.get("name"): c for c in chans or []}
+    lines = channels.line_level_channels()
+    for ch in prof.get("channels") or []:
+        _check_channel(ck, ch, now_chans.get(ch.get("name")) or {}, lines)
+    _check_pairs(ck, routing, blob, vec, fader_count)
+    if scope == SCOPE_EVERYTHING:
+        _check_whole(ck, prof, routing, blob)
+    return ck.result()
+
+
+def _check_channel(ck, ch, now, lines):
+    """One channel: what `_restore_mic`, the line level and `_restore_processing` write."""
+    label = ch.get("label") or ch.get("name")
+    if ch.get("kind") == "mic":
+        if ch.get("name") not in _MIC_NAME_TO_INT:
+            return
+        ck.same(f"{label} mic type", ch.get("mic_type"), now.get("mic_type"), channels.MIC_TYPE)
+        ck.same(f"{label} gain", ch.get("level_db"), now.get("level_db"))
+        ck.same(f"{label} phantom power", ch.get("phantom"), now.get("phantom"))
+        ck.same(f"{label} polarity invert", ch.get("polarity"), now.get("polarity"))
+        ck.same(f"{label} instrument gain", ch.get("instrument_gain"), now.get("instrument_gain"))
+        fx, fx_now = ch.get("effects") or {}, now.get("effects") or {}
+        for eff in ("echo", "reverb"):
+            ck.same(f"{label} {eff}", fx.get(eff), fx_now.get(eff))
+        for group in ("echo_params", "reverb_params"):
+            for p, v in (fx.get(group) or {}).items():
+                ck.same(f"{label} {p}", v, (fx_now.get(group) or {}).get(p))
+    elif ch.get("name") in lines:
+        ck.same(f"{label} level", ch.get("level_db"), now.get("level_db"))
+    ck.same(f"{label} advanced processing", ch.get("advanced"), now.get("advanced"))
+    ck.same(f"{label} processing", ch.get("processing_on"), now.get("processing_on"))
+    for mod, on in (ch.get("modules") or {}).items():
+        ck.same(f"{label} {mod}", on, (now.get("modules") or {}).get(mod))
+    for prop, v in (ch.get("params") or {}).items():
+        if prop in channels.PRESET_FLOAT_PROPS:
+            ck.same(f"{label} {prop}", v, (now.get("params") or {}).get(prop))
+    ck.same(f"{label} preset name", ch.get("preset_index"), now.get("preset_index"))
+
+
+def _check_pairs(ck, routing, blob, vec, fader_count):
+    """Each saved pair's strip (PAIR_CHAINS_KEY), counted as one setting: its processing."""
+    saved = routing.get(PAIR_CHAINS_KEY) or {}
+    dev = devices.get_active_device()
+    chains = channels.read_chains(blob) if saved else []
+    for strip, code in enumerate((routing.get("faders") or [])[:fader_count]):
+        chain = saved.get(str(code))
+        if chain is None or code not in dev.fader.pair_map:
+            continue
+        label = dev.fader.pair_label.get(code, f"pair {code}")
+        ck.checked += 1
+        if strip >= len(vec) or vec[strip] != code or strip >= len(chains):
+            continue                # the layout line has already said the pair is not there
+        off = [p for group in ("bools", "floats", "fx_bools", "fx_floats")
+               for p, v in (chain.get(group) or {}).items()
+               if v is not None and chains[strip][group].get(p) is not None
+               and not _same(v, chains[strip][group].get(p))]
+        if off:
+            ck.differ.append(f"{label} processing differs from the profile in "
+                             f"{count(len(off), 'value')}, the first being {off[0]}")
+
+
+def _check_whole(ck, prof, routing, blob):
+    """What only SCOPE_EVERYTHING writes: MIDI, the monitor speaker level, the master and output
+    section, and the desk's own settings."""
+    dev = devices.get_active_device()
+    ck.same("MIDI control", prof.get("midi"),
+            rcp_read.keyed_value(blob, rcp_transfer.SYSTEM, "systemMidiControl"))
+    if "level_write" in dev.caps and dev.fader.level_faders:
+        ck.same("the monitor speaker level", routing.get("monitor_level"),
+                rcp_read.keyed_value(blob, rcp_transfer.OUTPUT, "outputMonLevel"))
+    if "output_write" in dev.caps:
+        now = _master_settings(blob)
+        words = {"multitrack": "multitrack recording", "processing_bypass": "raw multitrack",
+                 "recording_format": "the recording format", "usb_multitrack": "USB multitrack",
+                 "usb_expanded": "USB Expanded", "usb_processing_bypass": "raw USB multitrack",
+                 "monitor_auto_mute": "monitor auto-mute", "bt_auto_mute": "Bluetooth auto-mute",
+                 "compellor_on": "the Compellor", "compellor_threshold": "Compellor threshold",
+                 "compellor_attack": "Compellor attack", "compellor_release": "Compellor release",
+                 "compellor_gain": "Compellor gain", "delay_on": "output delay",
+                 "delay_seconds": "output delay time"}
+        named = {"multitrack": rcp_transfer.MULTITRACK_MODES,
+                 "usb_multitrack": rcp_transfer.MULTITRACK_MODES,
+                 "recording_format": rcp_transfer.RECORDING_FORMATS}
+        for key, what in words.items():
+            # The delay time is written only with the delay switch, and the USB halves together.
+            if key == "delay_seconds" and routing.get("delay_on") is None:
+                continue
+            if key == "usb_expanded" and routing.get("usb_multitrack") is None:
+                continue
+            ck.same(what, routing.get(key), now.get(key), named.get(key))
+        spec = dev.headphones
+        for i, saved in enumerate((routing.get("headphone_types") or [])[:len(spec.outputs)]):
+            have = now["headphone_types"]
+            if saved in spec.value_codes:
+                ck.same(f"{spec.outputs[i][1]} type", saved, have[i] if i < len(have) else None,
+                        spec.value_label)
+    if "unit_settings" in dev.caps:
+        now_unit = _unit_settings(blob)
+        for prop, v in sorted((prof.get(UNIT_KEY) or {}).items()):
+            if (prop in rcp_transfer.UNIT_SETTING_SEL and prop not in UNIT_NEVER_RESTORE
+                    and isinstance(v, (int, float))):
+                ck.same(prop, v, now_unit.get(prop))
+
+
+def check_words(result: dict) -> str:
+    """The check as ONE sentence for someone listening: that everything matches, or how many
+    settings differ and the first few by name."""
+    checked, differ = result["checked"], result["differ"]
+    if not differ:
+        return f"Read the desk back: all {count(checked, 'setting')} checked match the profile."
+    named = differ[:CHECK_NAMED]
+    more = len(differ) - len(named)
+    verb = "differs" if len(differ) == 1 else "differ"
+    return (f"Read the desk back: {count(len(differ), 'setting')} of {checked} {verb}. "
+            + "; ".join(named) + (f"; and {more} more" if more else "") + ".")
+
+
+def restore_result(safe, res, checked=None, scope=SCOPE_EVERYTHING) -> dict:
+    """Format the user-facing message for a completed restore. `checked` is `check`'s result when
+    the desk was read back, and then its sentence replaces the advice to go and look."""
     applied, failed, errs = res["applied"], res["failed"], res["errs"]
-    msg = f"Restored profile {safe}: applied {applied} settings"
+    what = "profile" if scope == SCOPE_EVERYTHING else "the setup from"
+    msg = f"Restored {what} {safe}: applied {applied} settings"
     if failed:
         msg += f", {failed} could not be set ({'; '.join(errs)})"
-    msg += ". Open Channels, Processing or Routing to read them back and confirm."
+    msg += ". " + (check_words(checked) if checked is not None else
+                   "Open Channels, Processing or Routing to read them back and confirm.")
     return {"ok": True, "applied": applied, "failed": failed, "message": msg}
