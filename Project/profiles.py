@@ -104,6 +104,14 @@ UNIT_KEY = "unit"
 # They ARE saved, so the full snapshot still records how the desk was found.
 UNIT_NEVER_RESTORE = frozenset({"outputMonMute", "outputBTMute"})
 
+# ---- a linked pair's own strip -------------------------------------------------------------------
+# {str(pair code): chain} under routing, for each stereo pair on a fader when the profile was
+# saved, in the shape of channels.read_chains. A pair is a fader code of its own and no channel, so
+# the per-channel records cannot hold the processing of the strip it sits on; its two inputs'
+# own settings (type, gain, phantom, polarity) are in their channel records, read at their
+# INPUTSOURCE nodes, which a link does not take away.
+PAIR_CHAINS_KEY = "pair_chains"
+
 
 def _unit_settings(blob: bytes) -> dict:
     """{prop: int|float} for every unit setting the dump carries. Bools are stored as 0/1 so the
@@ -164,6 +172,16 @@ def _snapshot(blob: bytes) -> dict:
         "value_count": sum(len(v) for v in props.values()),
         "redacted": redacted,
     }
+
+
+def _pair_chains(blob: bytes, faders) -> dict:
+    """{str(pair code): chain} for each stereo pair on a fader (PAIR_CHAINS_KEY)."""
+    pairs = devices.get_active_device().fader.pair_map
+    held = [(strip, code) for strip, code in enumerate(faders) if code in pairs]
+    if not held:
+        return {}
+    chains = channels.read_chains(blob)
+    return {str(code): chains[strip] for strip, code in held if strip < len(chains)}
 
 
 def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=None,
@@ -284,6 +302,7 @@ def save(safe: str, blob: bytes, chans: list, firmware, fader_count: int, pads=N
             # why not when it could not be read (a phone caller).
             "mix_scheme": mix_scheme,
             "matrix_note": matrix_note,
+            PAIR_CHAINS_KEY: _pair_chains(blob, cis[:fader_count]),
         },
         # The unit's own settings (display, button brightness, haptics, REC button, listen mode,
         # fixed output level).
@@ -533,10 +552,25 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     _restore_layout(rs, routing, fader_count, fader_code_set)
     _restore_levels(rs, routing)
     _restore_channels(rs, prof.get("channels") or [])
+    _restore_pairs(rs, routing, fader_count, fader_code_set)
     _restore_master(rs, routing)
     # The unit's own settings go last: none of them affects where another write lands.
     _restore_unit(rs, prof.get(UNIT_KEY) or {})
     return rs.result()
+
+
+def _layout_codes(fader_code_set) -> set:
+    """What a restore may put on a fader: an assignable channel, NOTHING (-1), and on a desk that
+    links inputs, one of its stereo pairs.
+
+    THE LAST TWO ARE NOT ASSIGNABLE AND MUST STILL BE RESTORED. Skip an empty fader and it keeps
+    the channel it had, which the profile has just put on another fader as well. Skip a pair and
+    the fader keeps one of its two mics, the other stays wherever it was, and a line source wired
+    to that pair of inputs goes silent with every setting reading as saved. Writing the code alone
+    is the whole of a link (faders.action_set_stereo_link)."""
+    dev = devices.get_active_device()
+    pairs = set(dev.fader.pair_map) if "stereo_link" in dev.caps else set()
+    return set(fader_code_set) | {-1} | pairs
 
 
 def _restore_layout(rs, routing, fader_count, fader_code_set):
@@ -545,12 +579,31 @@ def _restore_layout(rs, routing, fader_count, fader_code_set):
     faders = routing.get("faders") or []
     if "fader_write" in devices.get_active_device().caps:
         rs.step("Restoring the fader layout.")
+        allowed = _layout_codes(fader_code_set)
         for i, code in enumerate(faders):
-            if i < fader_count and code is not None and code in fader_code_set:
+            if i < fader_count and code is not None and code in allowed:
                 rs.write(f"fader {i + 1}",
                          lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
     elif any(c is not None for c in faders):
         rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
+
+
+def _restore_pairs(rs, routing, fader_count, fader_code_set):
+    """The processing of each strip a stereo pair sits on (PAIR_CHAINS_KEY), after the layout has
+    put the pair there and the channels have set its two inputs. Older profiles carry none."""
+    saved = routing.get(PAIR_CHAINS_KEY) or {}
+    dev = devices.get_active_device()
+    if not saved or "fader_write" not in dev.caps:
+        return
+    allowed = _layout_codes(fader_code_set)
+    for strip, code in enumerate((routing.get("faders") or [])[:fader_count]):
+        chain = saved.get(str(code))
+        if chain is None or code not in dev.fader.pair_map or code not in allowed:
+            continue
+        label = dev.fader.pair_label.get(code, f"pair {code}")
+        rs.step(f"Restoring {label}.")
+        rs.write(f"{label} processing",
+                 lambda strip=strip, chain=chain: channels.write_chain(strip, chain))
 
 
 def _restore_levels(rs, routing):
