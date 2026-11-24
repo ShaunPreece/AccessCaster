@@ -44,6 +44,21 @@ MODIFIERS = [
     ("shift", "Shift", MOD_SHIFT),
 ]
 
+# THE HOUSE CHORD (`hotkeys`), Ctrl+Alt+Shift: clear of NVDA's Insert and Caps Lock layers, JAWS'
+# Insert layer and Narrator's Caps Lock layer.
+#
+# IT IS NOT CTRL+ALT+WINDOWS, because the pad scheme needs the NUMBER ROW. Ctrl+Alt+Windows is
+# commonly refused all nine digits, and Ctrl+Alt+Shift is given every key the app ships on: the six
+# letters, the nine digits, Dash and Equals. Ctrl+Alt alone is no good either; 1 to 4 are commonly
+# held. `DevTools/probe_free_chords.py` checks which chords a machine grants.
+#
+# THE HOLDER IS NOT WINDOWS, and the obvious explanation is wrong. Windows does own Win+digit for
+# the taskbar, and Ctrl+Win+digit and Alt+Win+digit with it, but Ctrl+Alt+Win+digit is not a Windows
+# shortcut at all: an ordinary application can be holding it. So the rule is not "avoid the Windows
+# key", it is that a popular chord plus the number row is contested and you cannot know by whom.
+# RegisterHotKey refusing is the only authority; do not reason about what "should" be free.
+DEFAULT_MODS = ("ctrl", "alt", "shift")
+
 
 def _key_codes() -> dict:
     codes = {chr(c): c for c in range(ord("A"), ord("Z") + 1)}

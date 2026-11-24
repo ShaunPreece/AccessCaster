@@ -3127,8 +3127,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   going out on air. Decided in ONE place, `commands.speaks_by_default`, so the shipped set and a
   hand-added shortcut agree. Bank changes still speak (where you are is not audible) and failures
   speak whatever the flag says.
-- **THE APP'S MODIFIER CHORD IS CTRL+ALT+SHIFT, AND IT IS ONE CHORD FOR EVERYTHING** (Shaun, 2nd
-  September 2026: "having 2 different chords isn't good"). It was Ctrl+Alt+Windows until the pad
+- **THE APP'S MODIFIER CHORD IS ONE CHORD FOR EVERYTHING** (Shaun, 2nd September 2026: "having 2
+  different chords isn't good"), the platform's `DEFAULT_MODS`: Ctrl+Alt+Shift on Windows, and
+  Option+Shift+Command on a Mac, where Control+Option is VoiceOver's own key and
+  Control+Shift+Command with 3, 4 or 5 takes a screenshot. It was Ctrl+Alt+Windows until the pad
   scheme needed the NUMBER ROW, which that chord could not have. **The holder was NOT Windows**,
   though Windows does own Win+digit for the taskbar: `Ctrl+Alt+Win+digit` is not a Windows shortcut
   at all, and on Shaun's PC it was `InstaAccess.exe`, his own webcam project, using it for camera

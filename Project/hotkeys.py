@@ -17,13 +17,14 @@ stalled pump would swallow the next press.
 
 ACCESSIBILITY RULES, and they are the reason for the validation in `parse_binding`:
 
-  - AT LEAST ONE OF CTRL, ALT OR WINDOWS is required. A hotkey takes that key away from every other
-    program on the machine, screen reader included, so a bare key or a Shift+key is refused rather
-    than allowed to break someone's typing.
-  - THE DEFAULT COMBINATION IS CTRL+ALT+SHIFT, and it is the ONLY one the app ships on (see
-    DEFAULT_MODS for why it is not Ctrl+Alt+Windows). It stays clear of NVDA's Insert and Caps Lock
-    layers, JAWS' Insert layer and Narrator's Caps Lock layer, so the shortcuts do not have to be
-    re-learnt per screen reader.
+  - AT LEAST ONE OF CTRL, ALT OR WINDOWS (Control, Option or Command on a Mac) is required. A hotkey
+    takes that key away from every other program on the machine, screen reader included, so a bare
+    key or a Shift+key is refused rather than allowed to break someone's typing.
+  - ONE CHORD FOR THE WHOLE APP, `DEFAULT_MODS`, the platform's: every shipped shortcut is on it
+    and every new one starts on it, so there is one thing to hold down and the only question left
+    is which key. It stays clear of the screen readers' own keys, so the shortcuts do not have to
+    be re-learnt per screen reader. The user can change it (`HotkeyManager.set_mods`), which moves
+    every shortcut at once.
   - A held key fires ONCE. Without that, holding a key fires the action over and over.
   - EVERY ACTION SPEAKS ITS RESULT, UNLESS THAT SHORTCUT IS SET TO STAY QUIET. When a hotkey fires,
     focus is in another application, so the window cannot report anything: the spoken reply is
@@ -40,6 +41,7 @@ The platform supplies:
   - `MODIFIERS`: [(id, label, flag)] in the order a combination is spoken and written, for the ids
     "ctrl", "alt", "win" and "shift", which are what the settings file stores.
   - `KEY_CODES`: {key name: the system's code for it}, for every name in `KEYS`.
+  - `DEFAULT_MODS`: the house chord, as modifier ids.
   - `Pump(apply, press)`: the thread hotkeys are registered and delivered on. `start()` begins it
     and returns once `apply()` has run on it; `request_apply()` runs `apply()` there again;
     `stop()` unregisters everything and ends it; `running()` and `on_pump()` say whether it is
@@ -56,9 +58,9 @@ import threading
 from wording import OS_NAME, join_and, join_or
 
 if sys.platform == "win32":
-    from win.hotkeys import KEY_CODES, MODIFIERS, Pump
+    from win.hotkeys import DEFAULT_MODS, KEY_CODES, MODIFIERS, Pump
 elif sys.platform == "darwin":
-    from mac.hotkeys import KEY_CODES, MODIFIERS, Pump
+    from mac.hotkeys import DEFAULT_MODS, KEY_CODES, MODIFIERS, Pump
 else:
     raise ImportError(f"No global hotkeys for {sys.platform}: the Windows one is win/hotkeys.py")
 
@@ -72,24 +74,6 @@ _STRONG_MODS = ("ctrl", "alt", "win")
 # "Ctrl, Alt or Windows": a shortcut needs one of these.
 STRONG_WORDS = join_or([label for name, label, _flag in MODIFIERS if name in _STRONG_MODS])
 
-# THE HOUSE CHORD. Every shipped shortcut is on it and every new one starts on it. ONE CHORD FOR
-# THE WHOLE APP: two chords is one too many, so there is one thing to hold down and the only
-# question left is which key.
-#
-# IT IS NOT CTRL+ALT+WINDOWS, because the pad scheme needs the NUMBER ROW. Ctrl+Alt+Windows is
-# commonly refused all nine digits, and Ctrl+Alt+Shift is given every key the app ships on: the six
-# letters, the nine digits, Dash and Equals. Ctrl+Alt alone is no good either; 1 to 4 are commonly
-# held. `DevTools/probe_free_chords.py` checks which chords a machine grants.
-#
-# THE HOLDER IS NOT WINDOWS, and the obvious explanation is wrong. Windows does own Win+digit for
-# the taskbar, and Ctrl+Win+digit and Alt+Win+digit with it, but Ctrl+Alt+Win+digit is not a Windows
-# shortcut at all: an ordinary application can be holding it. So the rule is not "avoid the Windows
-# key", it is that a popular chord plus the number row is contested and you cannot know by whom.
-# RegisterHotKey refusing is the only authority; do not reason about what "should" be free.
-#
-# This is the chord a fresh install starts on. The user can change it (HotkeyManager.set_mods),
-# which moves every shortcut at once: shortcuts do not carry modifiers of their own choosing.
-DEFAULT_MODS = ("ctrl", "alt", "shift")
 
 
 # THE TWO KEYS AT THE END OF THE NUMBER ROW. Named as constants because the shipped pad scheme
