@@ -11,8 +11,9 @@ import ctypes
 import struct
 from dataclasses import dataclass
 
+from mac import cf
+
 _CoreAudio = ctypes.CDLL("/System/Library/Frameworks/CoreAudio.framework/CoreAudio")
-_CF = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
 
 
 def _code(text: str) -> int:
@@ -29,7 +30,6 @@ _SCOPE_GLOBAL = _code("glob")
 _SCOPE_INPUT = _code("inpt")
 _SCOPE_OUTPUT = _code("outp")
 _ELEMENT_MAIN = 0
-_UTF8 = 0x08000100
 
 
 class _Address(ctypes.Structure):
@@ -45,12 +45,6 @@ _CoreAudio.AudioObjectGetPropertyData.argtypes = [
     ctypes.c_uint32, ctypes.POINTER(_Address), ctypes.c_uint32, ctypes.c_void_p,
     ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
 _CoreAudio.AudioObjectGetPropertyData.restype = ctypes.c_int32
-_CF.CFStringGetLength.argtypes = [ctypes.c_void_p]
-_CF.CFStringGetLength.restype = ctypes.c_long
-_CF.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long,
-                                   ctypes.c_uint32]
-_CF.CFStringGetCString.restype = ctypes.c_bool
-_CF.CFRelease.argtypes = [ctypes.c_void_p]
 
 
 @dataclass(frozen=True)
@@ -87,11 +81,9 @@ def _string(object_id: int, selector: int) -> str:
     if status or not ref.value:
         return ""
     try:
-        room = _CF.CFStringGetLength(ref) * 4 + 1
-        text = ctypes.create_string_buffer(room)
-        return text.value.decode("utf-8") if _CF.CFStringGetCString(ref, text, room, _UTF8) else ""
+        return cf.text(ref)
     finally:
-        _CF.CFRelease(ref)
+        cf.release(ref)
 
 
 def _channels(device_id: int, scope: int) -> int:
