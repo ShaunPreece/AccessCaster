@@ -17,6 +17,8 @@ import sys
 
 if sys.platform == "win32":
     from win.speech_engine import Synth, apartment
+elif sys.platform == "darwin":
+    from mac.speech_engine import Synth, apartment
 else:
     raise ImportError(f"No speech engine for {sys.platform}: the Windows one is "
                       "win/speech_engine.py")

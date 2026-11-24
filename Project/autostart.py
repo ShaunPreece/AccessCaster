@@ -25,6 +25,8 @@ from wording import TRAY
 
 if sys.platform == "win32":
     from win.autostart import command_for, current, install, remove
+elif sys.platform == "darwin":
+    from mac.autostart import command_for, current, install, remove
 else:
     raise ImportError(f"No sign-in entry for {sys.platform}: the Windows one is "
                       "win/autostart.py")

@@ -6,7 +6,9 @@ first import of it. build_installer.ps1 runs this in its venv before the freeze 
 package that is missing or on a different version from its pin.
 
 Reads ProjectBuilds/requirements-build.txt, following its `-r` includes. Every requirement in
-those files is an exact `name==version` pin; anything else is reported rather than guessed at.
+those files is an exact `name==version` pin, optionally for one system only (`; sys_platform ==
+"win32"`), and a pin for another system is skipped; anything else is reported rather than guessed
+at.
 Exit code 0 when everything matches, 1 otherwise, with one line per problem.
 """
 
@@ -15,7 +17,8 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
-_PIN = re.compile(r'^([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s;#]+)$')
+_PIN = re.compile(r'^([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s;#]+)'
+                  r'''(?:\s*;\s*sys_platform\s*==\s*["']([^"']+)["'])?$''')
 
 
 def _pins(path, seen=None):
@@ -35,6 +38,8 @@ def _pins(path, seen=None):
         m = _PIN.match(line)
         if not m:
             raise SystemExit(f'{path.name}: not an exact pin, so it cannot be checked: {line!r}')
+        if m.group(3) and m.group(3) != sys.platform:
+            continue
         yield m.group(1), m.group(2), path.name
 
 

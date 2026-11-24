@@ -11,6 +11,8 @@ import sys
 
 if sys.platform == "win32":
     from win.app_window import raise_window
+elif sys.platform == "darwin":
+    from mac.app_window import raise_window
 else:
     raise ImportError(f"No window raise for {sys.platform}: the Windows one is win/app_window.py")
 

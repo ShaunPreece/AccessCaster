@@ -41,6 +41,8 @@ import write_guard
 
 if sys.platform == "win32":
     from win.midi_out import close_port, find, open_port, ports, send
+elif sys.platform == "darwin":
+    from mac.midi_out import close_port, find, open_port, ports, send
 else:
     raise ImportError(f"No MIDI output for {sys.platform}: the Windows one is win/midi_out.py")
 

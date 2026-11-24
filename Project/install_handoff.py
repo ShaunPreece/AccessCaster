@@ -12,6 +12,8 @@ import sys
 
 if sys.platform == "win32":
     from win.install_handoff import start
+elif sys.platform == "darwin":
+    from mac.install_handoff import start
 else:
     raise ImportError(f"No installer hand-off for {sys.platform}: the Windows one is "
                       "win/install_handoff.py")

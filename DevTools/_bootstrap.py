@@ -77,12 +77,13 @@ def _own_desktop() -> None:
                          f"{ctypes.get_last_error()}), so its windows would take the focus.")
 
 
-# A WINDOW SUITE NEVER TAKES THE USER'S FOCUS. A `test_native_*` suite builds real wx windows, and a
-# modal dialog activates as it opens, so it would take the keyboard focus from whatever the user is
+# A WINDOW SUITE NEVER TAKES THE USER'S FOCUS. A `test_native_*` suite, and `test_win_update_quit`,
+# build real wx windows, and a modal dialog activates as it opens, so it would take the keyboard focus from whatever the user is
 # in. On a desktop of its own a window can never be the user's foreground window, while a modal loop
 # still runs exactly as it does on screen. The windows are only walked through wx, never through UI
 # Automation, so nothing a suite checks needs them to be visible.
-if sys.platform == "win32" and os.path.basename(sys.argv[0] or "").startswith("test_native_"):
+_WINDOW_SUITES = ("test_native_", "test_win_update_quit")
+if sys.platform == "win32" and os.path.basename(sys.argv[0] or "").startswith(_WINDOW_SUITES):
     _own_desktop()
 
 # A LIVE SUITE NEVER SHARES THE DESK WITH THE RUNNING APP: two processes writing to it interleave

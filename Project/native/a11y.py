@@ -11,14 +11,16 @@ which is drawn by the app: role slider, named by the window's label, `value()` a
 returns an object with a changeable `description` and `changed()`, which tells screen readers the
 value has changed.
 
-Each platform supplies its own. There is none outside Windows, so on any other platform this
-import fails rather than leaving every description unread.
+Each platform supplies its own. macOS's is a stand-in that leaves every description unread; on
+any other platform this import fails rather than doing the same.
 """
 import sys
 
 if sys.platform == "win32":
     from native.win.accessible import describe
     from native.win.uia_slider import slider
+elif sys.platform == "darwin":
+    from native.mac.a11y import describe, slider
 else:
     raise ImportError(f"No control descriptions for {sys.platform}: the Windows ones are in "
                       "native/win/accessible.py and native/win/uia_slider.py")

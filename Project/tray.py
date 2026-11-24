@@ -65,6 +65,8 @@ from wording import OS_NAME
 
 if sys.platform == "win32":
     from win.tray import Icon, find_running, open_log, open_running, show_refusal, window_to_raise
+elif sys.platform == "darwin":
+    from mac.tray import Icon, find_running, open_log, open_running, show_refusal, window_to_raise
 else:
     raise ImportError(f"No tray icon for {sys.platform}: the Windows one is win/tray.py")
 

@@ -11,6 +11,8 @@ import sys
 
 if sys.platform == "win32":
     from win.folders import open_focused
+elif sys.platform == "darwin":
+    from mac.folders import open_focused
 else:
     raise ImportError(f"No folder opener for {sys.platform}: the Windows one is win/folders.py")
 

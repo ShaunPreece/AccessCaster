@@ -39,6 +39,9 @@ from wording import OS_NAME
 if sys.platform == "win32":
     from win.meters import (EndpointReader, list_endpoints, read_level, remote_session,
                             write_level, write_mute)
+elif sys.platform == "darwin":
+    from mac.meters import (EndpointReader, list_endpoints, read_level, remote_session,
+                            write_level, write_mute)
 else:
     raise ImportError(f"No level meters for {sys.platform}: the Windows ones are win/meters.py")
 

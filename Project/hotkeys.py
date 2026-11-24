@@ -57,6 +57,8 @@ from wording import OS_NAME, join_and, join_or
 
 if sys.platform == "win32":
     from win.hotkeys import KEY_CODES, MODIFIERS, Pump
+elif sys.platform == "darwin":
+    from mac.hotkeys import KEY_CODES, MODIFIERS, Pump
 else:
     raise ImportError(f"No global hotkeys for {sys.platform}: the Windows one is win/hotkeys.py")
 

@@ -13,6 +13,8 @@ import sys
 
 if sys.platform == "win32":
     from win.instance import claim
+elif sys.platform == "darwin":
+    from mac.instance import claim
 else:
     raise ImportError(f"No single-instance lock for {sys.platform}: the Windows one is "
                       "win/instance.py")

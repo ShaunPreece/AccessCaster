@@ -22,6 +22,8 @@ import sys
 
 if sys.platform == "win32":
     from win.desk_drives import desk_roots, dismount, flush, name, quiet_errors
+elif sys.platform == "darwin":
+    from mac.desk_drives import desk_roots, dismount, flush, name, quiet_errors
 else:
     raise ImportError(f"No desk drive lookup for {sys.platform}: the Windows one is "
                       "win/desk_drives.py")

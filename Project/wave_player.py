@@ -20,6 +20,8 @@ import sys
 
 if sys.platform == "win32":
     from win.wave_player import CLOSE_AFTER_S, DEFAULT_DEVICE, Player, Signal
+elif sys.platform == "darwin":
+    from mac.wave_player import CLOSE_AFTER_S, DEFAULT_DEVICE, Player, Signal
 else:
     raise ImportError(f"No sound player for {sys.platform}: the Windows one is "
                       "win/wave_player.py")

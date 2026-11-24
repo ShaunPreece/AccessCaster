@@ -26,6 +26,9 @@ import diagnostics
 if sys.platform == "win32":
     from win.rode_app import PROCESS
     from win.rode_app import running as _running
+elif sys.platform == "darwin":
+    from mac.rode_app import PROCESS
+    from mac.rode_app import running as _running
 else:
     raise ImportError(f"No process lookup for {sys.platform}: the Windows one is win/rode_app.py")
 

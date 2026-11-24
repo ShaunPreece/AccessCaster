@@ -3277,7 +3277,8 @@ shared one; a new copy is how they drifted apart the first time.
   rather than an opt-in call because an opt-in is what a new test forgets. The probes and the
   capture tools are not tests and keep the real data dir, which is the point of running them.
 - **A `test_native_*` SUITE RUNS ON A DESKTOP OF ITS OWN** (`_bootstrap._own_desktop`, keyed on
-  the name). A modal dialog activates as it opens, and on the user's desktop it takes their
+  the name: `_WINDOW_SUITES`, so a window suite renamed out of `test_native_` must be added
+  there). A modal dialog activates as it opens, and on the user's desktop it takes their
   keyboard focus; on the `AccessCasterTests` desktop it can never be the foreground window, and its
   modal loop runs unchanged. `SetThreadDesktop` refuses a thread that already owns a window, so the
   move must stay ahead of the wx import. A window suite checks its windows through wx only, never

@@ -45,6 +45,8 @@ import wording
 
 if sys.platform == "win32":
     from win.driver_install import INSTALLER_SUFFIX, ZIP_URL, launch, signature
+elif sys.platform == "darwin":
+    from mac.driver_install import INSTALLER_SUFFIX, ZIP_URL, launch, signature
 else:
     raise ImportError(f"No driver installer for {sys.platform}: the Windows one is "
                       "win/driver_install.py")

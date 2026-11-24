@@ -42,6 +42,10 @@ if sys.platform == "win32":
     from win.virtual_devices import (default_to_system as _default_to_system, driver_state,
                                      hold_default, park_default, service_state, sync_endpoints,
                                      virtual_endpoint_counts, watch_endpoints)
+elif sys.platform == "darwin":
+    from mac.virtual_devices import (default_to_system as _default_to_system, driver_state,
+                                     hold_default, park_default, service_state, sync_endpoints,
+                                     virtual_endpoint_counts, watch_endpoints)
 else:
     raise ImportError(f"No virtual devices for {sys.platform}: the Windows ones are "
                       "win/virtual_devices.py")

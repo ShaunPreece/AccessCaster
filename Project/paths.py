@@ -9,8 +9,8 @@ install folder may not be a good place to WRITE user data. This module draws the
     running from source.
 
   - data_path(*parts): WRITABLE user data that the app creates and the user owns (saved
-    profiles, custom presets, the tray's settings). Always under %LOCALAPPDATA%\\AccessCaster so
-    it is writable regardless of where the app is installed, and so it survives reinstall and
+    profiles, custom presets, the tray's settings). Always under %LOCALAPPDATA%\\AccessCaster (on
+    macOS, ~/Library/Application Support/AccessCaster) so it is writable regardless of where the app is installed, and so it survives reinstall and
     uninstall.
 """
 
@@ -31,8 +31,8 @@ if getattr(sys, "frozen", False):
 else:
     RESOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Writable per-user data dir. LOCALAPPDATA is set on every modern Windows; the user profile is the
-# fallback when it is not.
+# Writable per-user data dir: LOCALAPPDATA on Windows, the user profile when it is not set, and
+# Application Support on macOS.
 #
 # ACCESSCASTER_DATA_DIR OVERRIDES IT WHOLESALE, and exists so a TEST cannot write to the user's
 # real profiles, schemes and parked chains (see DevTools/_bootstrap). Read once at import, like
@@ -43,7 +43,10 @@ def _user_data_dir() -> str:
     override = os.environ.get("ACCESSCASTER_DATA_DIR")
     if override:
         return override
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    if sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     return os.path.join(base, "AccessCaster")
 
 
