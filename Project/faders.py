@@ -630,6 +630,47 @@ def action_set_fader(fader_index: int, code: int) -> dict:
             "labels": [channel_name(c, spec) for c in new], "message": " ".join(parts)}
 
 
+def layout_codes(spec, expanded: bool) -> frozenset:
+    """Every code a WHOLE saved layout may put on a fader: the channels assignable in this USB mode,
+    an empty strip (-1), and the stereo-linked pairs where linking is writable.
+
+    Wider than `code_set_for`, the gate for one fader change, because one change keeps the layout
+    valid a step at a time and empties a fader or links a pair through its own action, while a
+    layout saved off the desk arrives valid as a whole."""
+    codes = spec.code_set_for(expanded) | {-1}
+    if _stereo_link_gate() is None:
+        codes |= frozenset(spec.pair_map)
+    return codes
+
+
+def restore_layout(target, spec, expanded: bool, write) -> dict:
+    """Put a whole saved layout on the desk, writing only the faders that differ, with each
+    channel's processing following it as on a change made by hand (`follow_chains`): a channel the
+    layout leaves off-fader has its chain parked rather than overwritten.
+
+    `write(i, code)` performs one fader write, so the profile restore can count and pace them. A
+    link the layout removes has its record dropped, since the unlink that would take it never
+    happens. Caller holds the HID lock. Returns {"refused": [(fader index, code)], "note": str}."""
+    allowed = layout_codes(spec, expanded)
+    blob = rcp_read.read_model()
+    old = read_fader_vector(blob, spec)
+    chains_before = channels.read_chains(blob) if chain_follow_on() else None
+    refused = []
+    for i, code in enumerate(target[:spec.vector_length]):
+        if code is None or (i < len(old) and old[i] == code):
+            continue
+        if code in allowed:
+            write(i, int(code))
+        else:
+            refused.append((i, code))
+    new = read_fader_vector(spec=spec)
+    for pair in spec.pair_map:
+        if pair in old and pair not in new:
+            channels.take_link(_layout_store_key(), pair)
+    note = follow_chains(old, new, chains_before) if chains_before is not None else ""
+    return {"refused": refused, "note": note}
+
+
 # --- Virtual fader levels + monitor level --------------------------------------------------------
 # The two levels the desk normally keeps to itself: the VIRTUAL faders (7-9 on the Pro II) have no
 # physical fader, and the monitor speaker level has no control in the RODE app either, so without

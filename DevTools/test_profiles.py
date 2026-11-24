@@ -29,10 +29,12 @@ import _testkit
 import channels
 import devices
 import fake_model
+import faders
 import profiles
 import rcp_read
 import rcp_transfer
 import soundpad
+import usb_audio
 from _testkit import as_device, check, check_true, patched
 
 profiles.RESTORE_PACE = 0          # no need to pace writes that never leave the process
@@ -539,24 +541,40 @@ RECORDED_TRANSFER = ("set_midi_control", "set_fader_source", "set_fader_level",
                      "set_monitor_level", "set_headphone_type", "set_multitrack_mode",
                      "set_monitor_auto_mute", "set_bt_auto_mute", "set_master_compellor",
                      "set_master_compellor_param", "set_output_delay", "set_unit_setting",
-                     "set_recording_processing_bypass", "set_usb_multitrack_mode",
-                     "set_usb_multitrack_bypass")
+                     "set_recording_processing_bypass", "set_usb_multitrack_bypass")
 RECORDED_CHANNELS = ("set_mic_gain", "set_mic_type", "set_phantom", "set_polarity",
                      "set_instrument_gain", "set_channel_level", "set_channel_advanced",
                      "set_processing_enabled", "set_processing_module", "set_channel_processing",
-                     "set_channel_preset_marker")
+                     "set_channel_preset_marker", "take_link")
 
 
 def _recording(name: str):
     return lambda *a, **k: CALLS.append((name, a))
 
 
+# The layout the desk holds when a restore starts. A restore writes only the faders that differ, so
+# the default of nothing at all makes every saved fader a write.
+DESK_FADERS: list = [None] * 10
+
+
 @contextlib.contextmanager
-def recorder():
-    """Replace the device-write functions with recorders for the block, yielding the call log."""
+def recorder(desk_faders=None, chain_follow=False):
+    """Replace the device reads and writes with recorders for the block, yielding the call log.
+    The USB mode is recorded at `usb_audio.switch_usb_mode`, the one path that changes it."""
     CALLS.clear()
-    with patched((rcp_transfer, {n: _recording(n) for n in RECORDED_TRANSFER}),
-                 (channels, {n: _recording(n) for n in RECORDED_CHANNELS})):
+    vec = list(desk_faders if desk_faders is not None else DESK_FADERS)
+
+    def set_fader_source(i, code):
+        CALLS.append(("set_fader_source", (i, code)))
+        vec[i] = code
+
+    with patched((rcp_transfer, {**{n: _recording(n) for n in RECORDED_TRANSFER},
+                                 "set_fader_source": set_fader_source}),
+                 (channels, {n: _recording(n) for n in RECORDED_CHANNELS}),
+                 (usb_audio, {"switch_usb_mode": _recording("switch_usb_mode")}),
+                 (rcp_read, {"read_model": lambda **_k: b""}),
+                 (faders, {"read_fader_vector": lambda blob=None, spec=None: list(vec),
+                           "chain_follow_on": lambda: chain_follow})):
         yield CALLS
 
 
@@ -578,9 +596,10 @@ def profile(**routing):
     return {"version": 2, "channels": [], "routing": r}
 
 
-def apply_pro2(prof):
-    with as_device(devices.PRO2), recorder() as calls:
-        res = profiles.apply(prof, fader_spec=devices.PRO2.fader)
+def apply_pro2(prof, desk=None, device=devices.PRO2):
+    """Restore `prof` onto a Pro II (or a variant of one) whose faders hold `desk`."""
+    with as_device(device), recorder(desk) as calls:
+        res = profiles.apply(prof, fader_spec=device.fader)
         return list(calls), res
 
 
@@ -669,7 +688,7 @@ calls_mt, res_mt = apply_pro2(profile(multitrack=2, processing_bypass=True,
                                       usb_multitrack=1, usb_processing_bypass=True))
 check("the recorder's mode", args_of(calls_mt, "set_multitrack_mode"), [(2,)])
 check("the recorder's raw switch", args_of(calls_mt, "set_recording_processing_bypass"), [(True,)])
-check("the USB mode", args_of(calls_mt, "set_usb_multitrack_mode"), [(1,)])
+check("the USB mode", args_of(calls_mt, "switch_usb_mode"), [(1,)])
 check("the USB raw switch", args_of(calls_mt, "set_usb_multitrack_bypass"), [(True,)])
 check("nothing reported as unrestorable", res_mt["errs"], [])
 calls_off, _ = apply_pro2(profile(multitrack=0, processing_bypass=False,
@@ -680,7 +699,7 @@ check_true("False is a VALUE, not a missing key: the raw switches are still writ
 calls_none, res_none = apply_pro2(profile())
 check("a profile taken before these existed writes none of them",
       args_of(calls_none, "set_recording_processing_bypass")
-      + args_of(calls_none, "set_usb_multitrack_mode")
+      + args_of(calls_none, "switch_usb_mode")
       + args_of(calls_none, "set_usb_multitrack_bypass"), [])
 check("and that is not a failure", res_none["errs"], [])
 
@@ -689,15 +708,15 @@ check("and that is not a failure", res_none["errs"], [])
 # and dropping the flag would put the desk back to Standard without being asked to.
 calls_exp, _ = apply_pro2(profile(usb_multitrack=2, usb_expanded=True))
 check("Expanded composes into the output mode: post-fader plus expanded is 5",
-      args_of(calls_exp, "set_usb_multitrack_mode"), [(5,)])
+      args_of(calls_exp, "switch_usb_mode"), [(5,)])
 calls_std, _ = apply_pro2(profile(usb_multitrack=2, usb_expanded=False))
 check("and Standard is the bare mode again",
-      args_of(calls_std, "set_usb_multitrack_mode"), [(2,)])
+      args_of(calls_std, "switch_usb_mode"), [(2,)])
 # THE BACKWARDS-COMPATIBLE CASE, and it is the common one: every profile saved before Expanded was
 # known holds a bare 0-2 and no flag, which is exactly "that mode, Standard".
 calls_old, _ = apply_pro2(profile(usb_multitrack=1))
 check("a profile with no expanded key restores as Standard",
-      args_of(calls_old, "set_usb_multitrack_mode"), [(1,)])
+      args_of(calls_old, "switch_usb_mode"), [(1,)])
 
 print("\nRESTORE: an Expanded layout onto a desk in Standard")
 # Game, Music, A and B (12-15) are fader sources only in Expanded. The restore has to put the desk in
@@ -709,7 +728,7 @@ with patched((channels, {"usb_expanded": lambda: False})):
 check("the Expanded four land on their faders",
       [a for a in args_of(calls_up, "set_fader_source") if a[1] >= 12], [(6, 12), (7, 13), (8, 14)])
 check_true("the USB mode is written before the first fader source",
-           names_of(calls_up).index("set_usb_multitrack_mode")
+           names_of(calls_up).index("switch_usb_mode")
            < names_of(calls_up).index("set_fader_source"))
 check("and nothing is reported as unrestorable", res_up["errs"], [])
 # With no saved mode the desk stays as it is, so in Standard the four are refused, and SAID.
@@ -718,13 +737,41 @@ with patched((channels, {"usb_expanded": lambda: False})):
 check("with the desk left in Standard, none of the four is written",
       [a for a in args_of(calls_no, "set_fader_source") if a[1] >= 12], [])
 check("and each is named in the result", len([e for e in res_no["errs"] if "fader" in e]), 3)
-# A linked pair is not placed by a restore either, and an empty fader is left alone, unreported.
-calls_pair, res_pair = apply_pro2(profile(faders=[4, -1, 2, 3, 10, 11, 7, 8, 9]))
-check("a linked pair is named, an empty fader is not",
-      [e for e in res_pair["errs"] if "fader" in e],
-      ["fader 1: Mic 1 + 2 cannot be placed by a restore, not restored"])
-check("and neither is written", [a for a in args_of(calls_pair, "set_fader_source") if a[0] < 2],
-      [])
+
+print("\nRESTORE: empty faders and stereo links are part of the layout")
+# Switching between two saved setups has to clear a fader the second one leaves empty and relink a
+# pair it links, or the first setup's channel stays on that fader. Only the faders that differ are
+# written, as on a change made by hand.
+PRO2_DEFAULT = list(devices.PRO2.fader.default_vector)
+calls_pair, res_pair = apply_pro2(profile(faders=[4, -1, 2, 3, 10, 11, 7, 8, 9]),
+                                  desk=PRO2_DEFAULT)
+check("the link goes on and the fader it frees is emptied, and nothing else is written",
+      args_of(calls_pair, "set_fader_source"), [(0, 4), (1, -1)])
+check("and nothing is reported as unrestorable", res_pair["errs"], [])
+calls_unpair, _ = apply_pro2(profile(faders=PRO2_DEFAULT), desk=[4, -1, 2, 3, 10, 11, 7, 8, 9])
+check("a restore that unlinks writes both mics back",
+      args_of(calls_unpair, "set_fader_source"), [(0, 0), (1, 1)])
+check("and drops the link's record, since no unlink will take it",
+      [a[1] for a in args_of(calls_unpair, "take_link")], [4])
+# The chain follows the channel, as on a change made by hand: a mic the link takes off its fader
+# has its processing parked rather than lost under whatever moves onto its strip.
+followed = []
+with patched((channels, {"read_chains": lambda _blob: ["chains"]}),
+             (faders, {"follow_chains": lambda old, new, before: followed.append((old, new))
+                       or "Processing followed."})):
+    with as_device(devices.PRO2), recorder(PRO2_DEFAULT, chain_follow=True):
+        res_follow = profiles.apply(profile(faders=[4, -1, 2, 3, 10, 11, 7, 8, 9]),
+                                    fader_spec=devices.PRO2.fader)
+check("the processing follows the layout, old to new",
+      followed, [(PRO2_DEFAULT, [4, -1, 2, 3, 10, 11, 7, 8, 9])])
+check("and what it did reaches the result", res_follow["notes"], ["Processing followed."])
+calls_nolink, res_nolink = apply_pro2(
+    profile(faders=[4, -1, 2, 3, 10, 11, 7, 8, 9]), desk=PRO2_DEFAULT,
+    device=dataclasses.replace(devices.PRO2, caps=devices.PRO2.caps - {"stereo_link"}))
+check("where linking is not writable, the pair is named and not written",
+      ([e for e in res_nolink["errs"] if "fader" in e],
+       [a for a in args_of(calls_nolink, "set_fader_source") if a[0] == 0]),
+      (["fader 1: Mic 1 + 2 cannot be placed on this desk now, not restored"], []))
 
 print("\nONE FADER GATE: nothing outside devices.py builds its own")
 # `FaderSpec.code_set` knows only the Standard sources. A caller that gates on it directly has a
@@ -751,7 +798,7 @@ with as_device(devices.DUO), recorder() as duo_mt:
     duo_mt = list(duo_mt)
 check("all four land on the Duo too",
       args_of(duo_mt, "set_multitrack_mode") + args_of(duo_mt, "set_recording_processing_bypass")
-      + args_of(duo_mt, "set_usb_multitrack_mode") + args_of(duo_mt, "set_usb_multitrack_bypass"),
+      + args_of(duo_mt, "switch_usb_mode") + args_of(duo_mt, "set_usb_multitrack_bypass"),
       [(2,), (True,), (1,), (True,)])
 
 print("\nRESTORE: an older profile with no level keys writes no levels")

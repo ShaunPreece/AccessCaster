@@ -57,13 +57,31 @@ def action_set_usb_multitrack(mode: int) -> dict:
     with desk_access.hid_lock:
         # READ FIRST so the input half is carried through. The desk holds both in one property, so
         # writing the mode alone would take a desk out of Expanded without being asked to.
-        old = recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
+        old = _usb_mode_now()
         _, expanded = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode, expanded)
-        arrived = _write_usb_mode_parked(value, old)
+        tail = switch_usb_mode(value, old)
     return {"ok": True,
-            "message": (f"Receiving {recorder.USB_MULTITRACK_LABEL[mode].lower()}."
-                        + _virtual_devices_follow(value, arrived))}
+            "message": f"Receiving {recorder.USB_MULTITRACK_LABEL[mode].lower()}." + tail}
+
+
+def _usb_mode_now():
+    """`outputMultiMode` from a fresh read. Caller holds the HID lock."""
+    return recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
+
+
+def switch_usb_mode(value: int, old=None) -> str:
+    """Write `outputMultiMode` (the composed 0-5) and bring RODE's virtual devices into line: the
+    one way this app changes the USB mode, for the Routing page and a profile restore alike.
+
+    A bare `rcp_transfer.set_usb_multitrack_mode` skips the parked default, so RODE's service can
+    lose the desk's arrival to whatever is playing to its main output, and only the follow-up's
+    retries (more drop-outs) win it back. `old` is the mode before the write; None reads it.
+    Caller holds the HID lock. Returns the sentence the reply should end with, often empty."""
+    if old is None:
+        old = _usb_mode_now()
+    arrived = _write_usb_mode_parked(value, old)
+    return _virtual_devices_follow(value, arrived)
 
 
 def _clear_extended_faders() -> list:
@@ -128,17 +146,16 @@ def action_set_usb_expanded(on: bool) -> dict:
         return {"ok": False, "message": "Expanded needs on or off."}
     cleared = [] if on else _clear_extended_faders()
     with desk_access.hid_lock:
-        old = recorder.read_usb_multitrack(rcp_read.read_model_stable(fresh=True))
+        old = _usb_mode_now()
         mode, _ = recorder.split_usb_multitrack(old)
         value = recorder.join_usb_multitrack(mode or 0, bool(on))
-        arrived = _write_usb_mode_parked(value, old)
+        follow = switch_usb_mode(value, old)
     tail = ("" if on or not cleared else
             f" {wording.join_and(cleared)} came off their faders.")
     # The one step left to the user, said once the driver's state is known.
     next_step = f" {recorder.USB_EXPANDED_NEXT}" if on else ""
     return {"ok": True,
-            "message": (f"Expanded is {'on' if on else 'off'}.{tail}"
-                        + _virtual_devices_follow(value, arrived) + next_step)}
+            "message": f"Expanded is {'on' if on else 'off'}.{tail}" + follow + next_step}
 
 
 def seed_usb_expanded() -> None:

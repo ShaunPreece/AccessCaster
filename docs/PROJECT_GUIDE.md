@@ -1053,9 +1053,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **`profiles.apply` restores THE USB MODE, THEN THE FADER LAYOUT, before channel processing.**
   Processing lands per strip, so a layout written after it restores voicings onto the wrong
   channels. The USB mode goes before the layout because Game, Music, A and B are fader sources only
-  in Expanded: the layout is gated with `FaderSpec.code_set_for` in the mode just set, and a source
-  it refuses is named in the result. Nothing outside `devices.py` gates on the Standard-only
-  `code_set` / `code_order`; `test_profiles.py` checks that.
+  in Expanded. The mode is written through `usb_audio.switch_usb_mode`, never a bare
+  `set_usb_multitrack_mode`, so Windows' default is parked for RODE's driver. The layout is written
+  by `faders.restore_layout`, gated by `faders.layout_codes` in the mode just set: empty faders and
+  stereo links come back with it, chains follow as on a change by hand, and a source it refuses is
+  named in the result. Nothing outside `devices.py` gates on the Standard-only `code_set` /
+  `code_order`; `test_profiles.py` checks that.
 - **CHOOSING A MIC VOICING ALSO REPLACES THE WHOLE PROCESSING CHAIN, and writing the old type back
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
   (Depth, Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, all three EQ

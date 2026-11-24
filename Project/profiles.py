@@ -30,11 +30,13 @@ import channels
 import desk_secrets
 import devices
 import diagnostics
+import faders
 import master_outputs
 import rcp_read
 import rcp_transfer
 import recorder
 import routing_schemes
+import usb_audio
 from paths import data_path, safe_name, write_json
 from wording import count
 
@@ -470,6 +472,7 @@ class _Restore:
         self.applied = 0
         self.failed = 0
         self.errs = []
+        self.notes = []
         self._progress = progress
 
     def step(self, msg):
@@ -511,8 +514,15 @@ class _Restore:
         self.failed += 1
         self.errs.append(what)
 
+    def note(self, sentence):
+        """A sentence for the end of the result that is not a failure: what happened to the
+        processing of a moved channel, or what RODE's driver is doing after a USB mode change."""
+        if sentence and sentence.strip():
+            self.notes.append(sentence.strip())
+
     def result(self) -> dict:
-        return {"applied": self.applied, "failed": self.failed, "errs": self.errs}
+        return {"applied": self.applied, "failed": self.failed, "errs": self.errs,
+                "notes": self.notes}
 
 
 def apply(prof, *, fader_spec, progress=None) -> dict:
@@ -552,26 +562,32 @@ def _restore_layout(rs, routing, fader_spec, expanded):
     """The fader layout, on a device with the "fader_write" cap; refused, and the user told,
     elsewhere.
 
-    The gate is `FaderSpec.code_set_for`, the same one a fader change made by hand passes, taken
-    for the mode the desk is in once `_restore_usb_mode` has run. A saved source it refuses (a
-    stereo-linked pair, or one of the Expanded four when the mode could not be set) is named in
-    the result rather than skipped unheard. An empty slot is left as it is."""
-    faders = routing.get("faders") or []
-    if "fader_write" in devices.get_active_device().caps:
-        rs.step("Restoring the fader layout.")
-        allowed = fader_spec.code_set_for(bool(expanded))
-        labels = fader_spec.labels_for(bool(expanded))
-        for i, code in enumerate(faders[:fader_spec.vector_length]):
-            if code is None or code == -1:
-                continue
-            if code in allowed:
-                rs.write(f"fader {i + 1}",
-                         lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
-            else:
-                rs.refuse(f"fader {i + 1}: {labels.get(code, f'source {code}')} cannot be "
-                          f"placed by a restore, not restored")
-    elif any(c is not None for c in faders):
-        rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
+    Written by `faders.restore_layout`, gated by `faders.layout_codes` in the mode the desk is in
+    once `_restore_usb_mode` has run. Empty faders and stereo links are part of the layout and come
+    back with it. A saved source the gate refuses (one of the Expanded four when the mode could not
+    be set, or a link on a desk where linking is not writable) is named in the result."""
+    saved = routing.get("faders") or []
+    if "fader_write" not in devices.get_active_device().caps:
+        if any(c is not None for c in saved):
+            rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
+        return
+    if not any(c is not None for c in saved):
+        return
+    rs.step("Restoring the fader layout.")
+    try:
+        res = faders.restore_layout(
+            saved, fader_spec, bool(expanded),
+            lambda i, code: rs.write(f"fader {i + 1}",
+                                     lambda: rcp_transfer.set_fader_source(i, code)))
+    except Exception as exc:
+        rs.refuse(f"fader layout: the desk's current layout could not be read ({exc}), "
+                  f"not restored")
+        return
+    labels = fader_spec.labels_for(bool(expanded))
+    for i, code in res["refused"]:
+        rs.refuse(f"fader {i + 1}: {labels.get(code, f'source {code}')} cannot be placed on "
+                  f"this desk now, not restored")
+    rs.note(res["note"])
 
 
 def _restore_levels(rs, routing):
@@ -749,7 +765,7 @@ def _restore_usb_mode(rs, r):
     def usb_mode(mode):
         rs.step("Setting what the desk sends this computer. Its audio devices will drop out "
                 "for a couple of seconds.")
-        rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(mode, expanded))
+        rs.note(usb_audio.switch_usb_mode(recorder.join_usb_multitrack(mode, expanded)))
 
     failed = rs.failed
     if rs.choice("USB multitrack", r["usb_multitrack"], rcp_transfer.MULTITRACK_MODES,
@@ -840,5 +856,8 @@ def restore_result(safe, res) -> dict:
     msg = f"Restored profile {safe}: applied {applied} settings"
     if failed:
         msg += f", {failed} could not be set ({'; '.join(errs)})"
-    msg += ". Open Channels, Processing or Routing to read them back and confirm."
+    msg += "."
+    if res.get("notes"):
+        msg += " " + " ".join(res["notes"])
+    msg += " Open Channels, Processing or Routing to read them back and confirm."
     return {"ok": True, "applied": applied, "failed": failed, "message": msg}

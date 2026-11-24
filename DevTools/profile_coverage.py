@@ -179,10 +179,10 @@ RESTORED_BY = {
                                    "(rcp_transfer.set_recording_format), and only for a value in "
                                    "RECORDING_FORMATS.",
     "outputMultiMode": "profiles.apply, gated on output_write "
-                       "(rcp_transfer.set_usb_multitrack_mode). The USB destination's own "
-                       "mode; it lives on Routing > USB audio, not the Recording page. Saved and "
-                       "restored as the TWO settings it carries, usb_multitrack plus usb_expanded, "
-                       "composed into one write.",
+                       "(usb_audio.switch_usb_mode), before the fader layout. The USB "
+                       "destination's own mode; it lives on Routing > USB audio, not the "
+                       "Recording page. Saved and restored as the TWO settings it carries, "
+                       "usb_multitrack plus usb_expanded, composed into one write.",
     "outputMultiBypass": "profiles.apply, gated on output_write "
                          "(rcp_transfer.set_usb_multitrack_bypass).",
     "outputMonAutoMute": "profiles.apply, gated on output_write.",
