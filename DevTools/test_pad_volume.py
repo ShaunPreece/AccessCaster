@@ -29,6 +29,7 @@ import _testkit
 import desk_drives
 import rcp_transfer as t
 from _testkit import check, check_true
+from wording import OS_NAME
 
 mounted: set[str] = set()            # drives holding a readable `pads` folder
 desk: set[str] = {"F:\\", "G:\\"}    # drives on the desk's USB device
@@ -38,6 +39,7 @@ real_state = t._volume_state
 t._volume_state = lambda root: ((t.READY, "") if root in mounted
                                 else other.get(root, (t.ABSENT, "size 0")))
 desk_drives.desk_roots = lambda: set(desk)
+desk_drives.name = lambda root: root[:2]   # the roots here are Windows drives
 t.remount_pad_storage = lambda: remounts.append(1)
 
 
@@ -94,16 +96,16 @@ print("A WAIT THAT GIVES UP SAYS WHY")
 other["G:\\"] = (t.UNREADABLE, "[WinError 5] Access is denied")
 find()
 check("a drive that will not read is named, with the error", t.pad_volume_problem(),
-      "The desk's pad storage appeared as G:, but Windows could not read it ([WinError 5] Access "
+      f"The desk's pad storage appeared as G:, but {OS_NAME} could not read it ([WinError 5] Access "
       "is denied). Security software that blocks or scans removable drives can cause this.")
 other.clear()
 find()
 check("a drive that never got a volume", t.pad_volume_problem(),
-      "The desk's pad storage drive, F:, G:, stayed empty in Windows.")
+      f"The desk's pad storage drive, F:, G:, stayed empty in {OS_NAME}.")
 desk.clear()
 find()
 check("no desk drive at all", t.pad_volume_problem(),
-      "Windows did not show the desk's pad storage as a drive. Check the desk is connected "
+      f"{OS_NAME} did not show the desk's pad storage as a drive. Check the desk is connected "
       "directly by USB.")
 desk.update({"F:\\", "G:\\"})
 

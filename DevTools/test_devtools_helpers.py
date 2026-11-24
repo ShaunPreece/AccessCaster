@@ -34,7 +34,6 @@ import _testkit
 import capture_analyze
 import devices
 import fake_model
-import probe_bind_hold
 import probe_dead_props_write
 import property_coverage
 import property_list
@@ -99,11 +98,13 @@ after = _desk.stray_counts(fake_model.encode([("SYSTEM", "systemName", "x"),
 check("an added name, a vanished one and a moved count", _desk.count_changes(before, after),
       (["wifiSSID"], ["btVisible"], ["systemName"]))
 
-print("\nTHE BIND PROBE'S VERDICT")
-check_true("a trial whose holder held nothing says so rather than raising",
-           "nothing was held" in probe_bind_hold.verdict(5.0, None, None))
-check("a bind after the release", probe_bind_hold.verdict(12.0, 1.0, 11.0),
-      "bound 1.00s AFTER release")
+if sys.platform == "win32":                 # the probe drives Windows' audio endpoints
+    import probe_bind_hold
+    print("\nTHE BIND PROBE'S VERDICT")
+    check_true("a trial whose holder held nothing says so rather than raising",
+               "nothing was held" in probe_bind_hold.verdict(5.0, None, None))
+    check("a bind after the release", probe_bind_hold.verdict(12.0, 1.0, 11.0),
+          "bound 1.00s AFTER release")
 
 print("\nTHE SCHEMES TEST PUTS THE MIXES BACK WHEN A READ FAILS PART WAY")
 baseline = {"outputs": {"Chat": {"mode": 1, "sources": {}}}}

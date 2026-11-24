@@ -113,10 +113,15 @@ document = index_json()
 files = {}
 
 
+# Any published platform: the round trip is the same for each, and the machine running this may
+# have none.
+PLATFORM = "windows-x64"
+
+
 def serve(doc, sig):
     files.clear()
-    files[checks.index_url(running)] = doc
-    files[checks.signature_url(running)] = sig
+    files[checks.index_url(running, PLATFORM)] = doc
+    files[checks.signature_url(running, PLATFORM)] = sig
 
 
 def get(url):
@@ -125,18 +130,22 @@ def get(url):
 
 serve(document, private.sign(document))
 check("a signed newer index is offered",
-      checker.run(running, "", get=get, public_key_hex=key_hex).verdict, checks.AVAILABLE)
+      checker.run(running, "", get=get, public_key_hex=key_hex,
+                   platform=PLATFORM).verdict, checks.AVAILABLE)
 serve(document + b" ", private.sign(document))
 check("one changed byte fails it",
-      checker.run(running, "", get=get, public_key_hex=key_hex).verdict, checks.COULD_NOT_CHECK)
+      checker.run(running, "", get=get, public_key_hex=key_hex,
+                   platform=PLATFORM).verdict, checks.COULD_NOT_CHECK)
 serve(document, Ed25519PrivateKey.generate().sign(document))
 check("another key's signature is refused",
-      checker.run(running, "", get=get, public_key_hex=key_hex).verdict, checks.COULD_NOT_CHECK)
+      checker.run(running, "", get=get, public_key_hex=key_hex,
+                   platform=PLATFORM).verdict, checks.COULD_NOT_CHECK)
 serve(document, private.sign(document))
 check("the skip holds over the whole round trip",
-      checker.run(running, "2.64.0", get=get, public_key_hex=key_hex).verdict, checks.SKIPPED)
+      checker.run(running, "2.64.0", get=get, public_key_hex=key_hex,
+                   platform=PLATFORM).verdict, checks.SKIPPED)
 asked = []
-checker.run(running, "", get=lambda u: asked.append(u), public_key_hex="")
+checker.run(running, "", get=lambda u: asked.append(u), public_key_hex="", platform=PLATFORM)
 check("no key means no request is even made", asked, [])
 checker.run(running, "", get=lambda u: asked.append(u), public_key_hex=key_hex, platform=None)
 check("no published platform means no request is made", asked, [])
