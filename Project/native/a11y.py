@@ -6,9 +6,8 @@ value in words, asked each time a screen reader reads it. Name, role and state a
 control, so it still reads as the native checkbox or button it is. It returns an object whose
 `description` can be changed later.
 
-`slider(window, value, description="")` is the whole accessibility of `native.slider.SliderCtrl`,
-which is drawn by the app: role slider, named by the window's label, `value()` as its value. It
-returns an object with a changeable `description` and `changed()`, which tells screen readers the
+`slider(window, value, description="")` is the whole accessibility of `native.slider.SliderCtrl`:
+role slider, named by the window's label, `value()` as its value. It returns an object with a changeable `description` and `changed()`, which tells screen readers the
 value has changed.
 
 Each platform supplies its own. macOS's is a stand-in that leaves every description unread; on

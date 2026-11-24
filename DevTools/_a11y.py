@@ -21,11 +21,12 @@ for a pass by hand.
 from __future__ import annotations
 
 import wx
+import wx.dataview as dv
 from _testkit import check
 from native.slider import SliderCtrl
 
 NAMED_BY_LABEL = (wx.TextCtrl, wx.Choice, wx.ComboBox, wx.ListBox, SliderCtrl, wx.SpinCtrl,
-                  wx.SpinCtrlDouble, wx.ListCtrl, wx.TreeCtrl)
+                  wx.SpinCtrlDouble, wx.ListCtrl, wx.TreeCtrl, dv.DataViewCtrl)
 SELF_NAMED = (wx.Button, wx.CheckBox, wx.RadioButton, wx.ToggleButton)
 
 

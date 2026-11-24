@@ -26,6 +26,7 @@ from native.app_settings_section import AppSettingsSection
 from native.backups_section import BackupsSection
 from native.callme_section import CallMeSection
 from native.calls import call
+from native.category_tree import CategoryTree
 from native.channels_section import ChannelsSection
 from native.desk_state import DeskState
 from native.dialogs import modal_dialogs
@@ -63,15 +64,13 @@ class MainFrame(Speaker, wx.Frame):
         root = wx.Panel(self)
         # A static text created just before a control names it, the standard Win32 labelling.
         tree_label = wx.StaticText(root, label="Categories")
-        self.tree = wx.TreeCtrl(root, style=wx.TR_HIDE_ROOT | wx.TR_HAS_BUTTONS
-                                | wx.TR_LINES_AT_ROOT | wx.TR_SINGLE)
+        self.tree = CategoryTree(root, self._on_select)
         # The pages share one host and are shown and hidden directly. wx.Simplebook would do the
         # same job, but it moves the focus into each page it switches to, which pulls focus out of
         # the tree on every arrow press.
         self.host = wx.Panel(root)
         self.host.SetSizer(wx.BoxSizer(wx.VERTICAL))
         self._shown = None
-        self._rebuilding = False
 
         # Never shown: the window the screen-reader notifications are raised from.
         sink = wx.StaticText(root, label="", size=(1, 1))
@@ -80,11 +79,9 @@ class MainFrame(Speaker, wx.Frame):
         self.desk = DeskState(self)
         self.desk.subscribe(self._desk_event)
         self.sections = [section(self) for section in SECTIONS]
-        tree_root = self.tree.AddRoot(APP_TITLE)
-        self._branches = []
         for section in self.sections:
-            self._branches.append(self.tree.AppendItem(tree_root, section.title))
-            self._fill_branch(section)
+            self._place_built(section)
+            self.tree.add_branch(section.title, section.pages)
 
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(tree_label, 0, wx.BOTTOM, gap(4))
@@ -102,11 +99,10 @@ class MainFrame(Speaker, wx.Frame):
         self.status = self.CreateStatusBar(style=wx.STB_SIZEGRIP | wx.FULL_REPAINT_ON_RESIZE)
         self.status.SetStatusText("Reading the desk.")
 
-        self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self._on_select)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_key)
         self.Bind(wx.EVT_CLOSE, self._on_close)
         self.Bind(wx.EVT_ACTIVATE, self._on_activate)
-        self.tree.SelectItem(self._branches[0])
+        self.tree.select(0)
         self._fit_to_screen()
 
     def _fit_to_screen(self):
@@ -147,11 +143,8 @@ class MainFrame(Speaker, wx.Frame):
         """Show the page `key` of the section `route`, and move the focus into it. Nothing names
         the page on the way in, so the control that calls this names it ("Go to Wireless
         connections")."""
-        section = next(s for s in self.sections if s.route == route)
-        branch = self._branches[self.sections.index(section)]
-        item = next((child for child in self._children(branch)
-                     if self.tree.GetItemData(child).key == key), branch)
-        self.tree.SelectItem(item)
+        index = next(i for i, s in enumerate(self.sections) if s.route == route)
+        self.tree.select(index, key)
         self._focus_page()
 
     def reread(self, route):
@@ -213,41 +206,21 @@ class MainFrame(Speaker, wx.Frame):
 
     # ---- the tree --------------------------------------------------------------------------
 
-    def _fill_branch(self, section):
-        branch = self._branches[self.sections.index(section)]
+    def _place_built(self, section):
         for page in section.pages:
             if page.built:
                 self._place(page.window)
-        self.tree.SetItemData(branch, section.pages[0])
-        if len(section.pages) > 1:
-            for page in section.pages:
-                self.tree.AppendItem(branch, page.title, data=page)
 
     def pages_changed(self, section):
         """Rebuild `section`'s branch, keeping the selection on the same page where it survives."""
-        branch = self._branches[self.sections.index(section)]
-        selected = self.tree.GetSelection()
-        was_inside = selected.IsOk() and self.tree.GetItemParent(selected) == branch
-        key = self.tree.GetItemData(selected).key if was_inside else None
-        self._rebuilding = True
-        self.tree.DeleteChildren(branch)
-        self._fill_branch(section)
-        if was_inside:
-            match = next((child for child in self._children(branch)
-                          if self.tree.GetItemData(child).key == key), branch)
-            self.tree.SelectItem(match)
-        self._rebuilding = False
-        current = self.tree.GetSelection()
-        if current.IsOk():
-            self._show(self.tree.GetItemData(current))
+        self._place_built(section)
+        self.tree.set_pages(self.sections.index(section), section.pages)
 
-    def _on_select(self, event):
-        # The tree changes selection as its items are deleted on close and during a rebuild.
-        if not self or self.IsBeingDeleted() or self._rebuilding:
+    def _on_select(self, page):
+        # The tree changes selection as its items are deleted on close.
+        if not self or self.IsBeingDeleted():
             return
-        item = event.GetItem()
-        if item.IsOk():
-            self._show(self.tree.GetItemData(item))
+        self._show(page)
 
     def _place(self, window):
         """Put a page's window in the host, hidden, once."""
@@ -271,22 +244,7 @@ class MainFrame(Speaker, wx.Frame):
         self.host.Layout()
         self.host.Thaw()
 
-    def _children(self, item):
-        children = []
-        child, cookie = self.tree.GetFirstChild(item)
-        while child.IsOk():
-            children.append(child)
-            child, cookie = self.tree.GetNextChild(item, cookie)
-        return children
-
-    def _branch_of(self, item):
-        parent = self.tree.GetItemParent(item)
-        return item if parent == self.tree.GetRootItem() else parent
-
     # ---- keys ------------------------------------------------------------------------------
-
-    def _tree_has_focus(self):
-        return wx.Window.FindFocus() is self.tree
 
     def _focus_page(self):
         # NavigateIn does not reach controls that sit inside a group box.
@@ -315,30 +273,27 @@ class MainFrame(Speaker, wx.Frame):
         return None
 
     def _step_page(self, step):
-        item = self.tree.GetSelection()
-        branch = self._branch_of(item)
-        siblings = self._children(branch)
+        # A selected section stands for its first page, which is also the first one under it.
+        branch, page = self.tree.selected()
+        siblings = self.tree.pages(branch) if branch is not None else []
         if not siblings:
             return
-        if item == branch:
-            item = siblings[0]
-        index = next(i for i, s in enumerate(siblings) if s == item)
-        in_page = not self._tree_has_focus()
-        self.tree.SelectItem(siblings[(index + step) % len(siblings)])
+        index = next(i for i, s in enumerate(siblings) if s is page)
+        in_page = not self.tree.has_focus()
+        self.tree.select(branch, siblings[(index + step) % len(siblings)].key)
         if in_page:
             self._focus_page()
 
     def _on_key(self, event):
         key, mods = event.GetKeyCode(), event.GetModifiers()
         if key == wx.WXK_F6 and mods == wx.MOD_NONE:
-            if self._tree_has_focus():
+            if self.tree.has_focus():
                 self._focus_page()
             else:
                 self.tree.SetFocus()
             return
         if key == wx.WXK_F5 and mods == wx.MOD_NONE:
-            section = self.sections[self._branches.index(
-                self._branch_of(self.tree.GetSelection()))]
+            section = self.sections[self.tree.selected()[0]]
             if hasattr(section, "refresh"):
                 section.refresh(True)
             return
@@ -351,8 +306,8 @@ class MainFrame(Speaker, wx.Frame):
             return
         if mods == wx.MOD_ALT and ord("1") <= key <= ord("9"):
             index = key - ord("1")
-            if index < len(self._branches):
-                self.tree.SelectItem(self._branches[index])
+            if index < len(self.sections):
+                self.tree.select(index)
                 self.tree.SetFocus()
                 return
         event.Skip()

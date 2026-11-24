@@ -1,21 +1,41 @@
-"""A horizontal slider drawn by the app, in place of the native one (wx.Slider).
+"""The window's slider, `SliderCtrl`: whichever control the platform's screen reader can use.
 
-The native Windows slider (msctls_trackbar32) is read by JAWS from its own position, as a percent
-of its range, whatever value text the app gives it, so "-20 decibels" is heard as "67 percent".
-This control is not of that class, so every screen reader reads the value text it is given
-(`a11y.slider`, a UIA slider on Windows).
+On Windows that is `DrawnSlider`, drawn by the app. JAWS reads the native Windows slider
+(msctls_trackbar32) from its own position, as a percent of its range, whatever value text the app
+gives it, so "-20 decibels" is heard as "67 percent". The drawn one is not of that class, so every
+screen reader reads the value text it is given (`a11y.slider`, a UIA slider on Windows).
 
-It offers the part of wx.Slider's interface the app uses (GetValue, SetValue, SetLineSize,
-SetPageSize, GetMin, GetMax) and posts wx.EVT_SLIDER when the user moves it, never when the app
-calls SetValue. Keys follow the ARIA slider pattern: Right and Up raise it, Left and Down lower it,
-Page Up and Page Down move a page, Home and End go to the ends.
+On macOS that is `SystemSlider`, wx.Slider, which is an NSSlider there: VoiceOver cannot enter a
+control the app draws.
+
+Both offer the part of wx.Slider's interface the app uses (GetValue, SetValue, SetLineSize,
+SetPageSize, GetMin, GetMax), post wx.EVT_SLIDER when the user moves them, never when the app calls
+SetValue, and carry `acc` from `a11y.slider`. Keys follow the ARIA slider pattern: Right and Up
+raise it, Left and Down lower it, Page Up and Page Down move a page, Home and End go to the ends.
 """
+import sys
+
 import wx
 
 from native import a11y
 
 
-class SliderCtrl(wx.Control):
+def _plain(event):
+    return not (event.ControlDown() or event.AltDown() or event.ShiftDown() or event.MetaDown())
+
+
+def _step_target(key, plain, value, lo, hi, line, page):
+    """Where an unmodified slider key moves the value, or None for any other key."""
+    if not plain:
+        return None
+    steps = {wx.WXK_RIGHT: line, wx.WXK_UP: line, wx.WXK_LEFT: -line, wx.WXK_DOWN: -line,
+             wx.WXK_PAGEUP: page, wx.WXK_PAGEDOWN: -page}
+    if key in steps:
+        return value + steps[key]
+    return {wx.WXK_HOME: lo, wx.WXK_END: hi}.get(key)
+
+
+class DrawnSlider(wx.Control):
     def __init__(self, parent, label, lo, hi, value_words, size=(260, -1)):
         # WANTS_CHARS so the arrow keys reach the control rather than moving the focus, which
         # makes the control responsible for Tab, Ctrl+Tab and Enter (`_on_key`).
@@ -84,17 +104,10 @@ class SliderCtrl(wx.Control):
 
     def _on_key(self, event):
         key = event.GetKeyCode()
-        plain = not (event.ControlDown() or event.AltDown() or event.ShiftDown()
-                     or event.MetaDown())
-        steps = {wx.WXK_RIGHT: self._line, wx.WXK_UP: self._line,
-                 wx.WXK_LEFT: -self._line, wx.WXK_DOWN: -self._line,
-                 wx.WXK_PAGEUP: self._page, wx.WXK_PAGEDOWN: -self._page}
-        if plain and key in steps:
-            self._set(self._value + steps[key], by_user=True)
-        elif plain and key == wx.WXK_HOME:
-            self._set(self._lo, by_user=True)
-        elif plain and key == wx.WXK_END:
-            self._set(self._hi, by_user=True)
+        plain = _plain(event)
+        target = _step_target(key, plain, self._value, self._lo, self._hi, self._line, self._page)
+        if target is not None:
+            self._set(target, by_user=True)
         elif key == wx.WXK_TAB and not event.AltDown():
             flags = (wx.NavigationKeyEvent.IsBackward if event.ShiftDown()
                      else wx.NavigationKeyEvent.IsForward)
@@ -163,3 +176,57 @@ class SliderCtrl(wx.Control):
         dc.DrawRectangle(x - thumb, self.FromDIP(4), 2 * thumb, height - self.FromDIP(8))
         if self.HasFocus():
             wx.RendererNative.Get().DrawFocusRect(self, dc, wx.Rect(0, 0, *self.GetClientSize()))
+
+
+class SystemSlider(wx.Slider):
+    def __init__(self, parent, label, lo, hi, value_words, size=(260, -1)):
+        super().__init__(parent, value=lo, minValue=lo, maxValue=hi, name=label)
+        self.SetInitialSize(wx.Size(self.FromDIP(size[0]), -1))
+        self.SetLabel(label)
+        self.SetPageSize(max(1, (hi - lo) // 10))
+        self.acc = a11y.slider(self, value_words)
+        self.Bind(wx.EVT_SLIDER, self._on_moved)
+        # The keys move by the line and page sizes the app sets, which NSSlider has no notion of.
+        self.Bind(wx.EVT_KEY_DOWN, self._on_key)
+
+    def SetValue(self, value):
+        if value != self.GetValue():
+            super().SetValue(value)
+            self.acc.changed()
+
+    @property
+    def line_size(self):
+        return self.GetLineSize()
+
+    @property
+    def page_size(self):
+        return self.GetPageSize()
+
+    def set_from_reader(self, value):
+        """A screen reader setting the value, which counts as the user's own move."""
+        self._move(round(value))
+
+    def _on_moved(self, event):
+        self.acc.changed()
+        event.Skip()
+
+    def _move(self, value):
+        value = max(self.GetMin(), min(self.GetMax(), int(value)))
+        if value == self.GetValue():
+            return
+        super().SetValue(value)
+        event = wx.CommandEvent(wx.wxEVT_SLIDER, self.GetId())
+        event.SetEventObject(self)
+        event.SetInt(value)
+        self.GetEventHandler().ProcessEvent(event)
+
+    def _on_key(self, event):
+        target = _step_target(event.GetKeyCode(), _plain(event), self.GetValue(), self.GetMin(),
+                              self.GetMax(), self.GetLineSize(), self.GetPageSize())
+        if target is None:
+            event.Skip()
+        else:
+            self._move(target)
+
+
+SliderCtrl = SystemSlider if sys.platform == "darwin" else DrawnSlider

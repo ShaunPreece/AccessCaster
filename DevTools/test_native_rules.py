@@ -5,8 +5,9 @@
     twice. Focus is placed by creation order.
   * NO wx.Simplebook TO SWITCH PAGES, and a wx.Notebook only for a channel page's tabs: both move the
     focus into each page they show, which pulls it out of the Categories tree.
-  * NO wx.Slider: JAWS reads a native slider as a percent of its range and ignores its value text,
-    so every slider is `native.slider.SliderCtrl`.
+  * NO wx.Slider OUTSIDE `native/slider.py`: JAWS reads the native Windows slider as a percent of
+    its range and ignores its value text, so every slider is `native.slider.SliderCtrl`, which is
+    wx.Slider only on macOS.
   * THE PLATFORM LAYER IS IMPORTED IN ONE PLACE EACH: `native.win` only by `native.a11y`,
     `native.announce` and `native.display`, so a port to another platform has one file to
     replace for each.
@@ -75,7 +76,8 @@ for path in FILES:
         if isinstance(node, ast.Attribute) and node.attr == "Simplebook":
             books.append(f"{path.name}:{node.lineno} Simplebook")
         if isinstance(node, ast.Attribute) and node.attr == "Slider" and (
-                isinstance(node.value, ast.Name) and node.value.id == "wx"):
+                isinstance(node.value, ast.Name) and node.value.id == "wx") and (
+                path.name != "slider.py"):
             sliders.append(f"{path.name}:{node.lineno}")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "Notebook" and path.name not in NOTEBOOK_ALLOWED):
@@ -99,7 +101,7 @@ for path in FILES:
 print("THE NATIVE WINDOW'S SOURCE RULES")
 check("no dialog sets the focus from its constructor", focus_in_init, [])
 check("no Simplebook, and a Notebook only for a channel page's tabs", books, [])
-check("no native wx.Slider", sliders, [])
+check("no wx.Slider outside native/slider.py", sliders, [])
 check("only a11y, announce and display import the platform layer", win_imports, [])
 check("no size or sizer border written as bare pixels", pixel_sizes, [])
 check("the rules saw the dialogs", len(dialogs) > 10, True)

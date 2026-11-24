@@ -1945,12 +1945,16 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **NOTHING IN `native/` OUTSIDE `native/win/` AND `native/mac/` CALLS A SYSTEM API.** Screen
   reader speech and control descriptions go through `native.announce` and `native.a11y`, which
   import the platform's own. Import `native.win` directly, or add a Win32 call to a page, and the
-  Mac has to hunt for it. The Categories tree is a `wx.TreeCtrl` on purpose: on Windows it is the
-  native tree view, where `wx.dataview.DataViewTreeCtrl` is a control wx draws itself. **On macOS
-  the roles reverse:** VoiceOver cannot enter a `wx.TreeCtrl` or the app's drawn `SliderCtrl`, and
-  operates `DataViewTreeCtrl` (an NSOutlineView) and `wx.Slider` (an NSSlider) like any Mac
-  control (24th November 2026, `DevTools/probe_mac_voiceover.py`). Every other control the window
-  uses is the system's own on both.
+  Mac has to hunt for it.
+- **THE CATEGORIES TREE AND THE SLIDER ARE A DIFFERENT wx CLASS ON EACH PLATFORM**
+  (`native.category_tree.CategoryTree`, `native.slider.SliderCtrl`), so each is the control the
+  screen reader can use. On Windows the tree is `wx.TreeCtrl`, the native tree view, where
+  `wx.dataview` draws its own, and the slider is drawn by the app (below). **On macOS the roles
+  reverse:** VoiceOver cannot enter a `wx.TreeCtrl` or a drawn control, and operates
+  `wx.dataview.DataViewCtrl` (an NSOutlineView) and `wx.Slider` (an NSSlider) like any Mac
+  control (24th November 2026, `DevTools/probe_mac_voiceover.py`). Reach the tree only through
+  `CategoryTree`'s own methods, never a wx tree call, or the other platform's breaks. Every other
+  control the window uses is the system's own on both.
 - **NO `wx.Simplebook` OR `wx.Notebook` TO SWITCH THE PAGES.** Both move the focus into each page
   they show, which pulls it out of the Categories tree on every arrow press. `MainFrame._show`
   shows and hides the pages itself.
@@ -2010,11 +2014,13 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A NATIVE CONTROL'S DESCRIPTION COMES FROM `native.a11y.describe`**, an MSAA override of the
   description and value only. Override anything else (name, role, state) and the control stops
   reading as the native control it is.
-- **EVERY SLIDER IS `native.slider.SliderCtrl`, NEVER `wx.Slider`.** JAWS reads the native Windows
-  slider from its own position, as a percent of its range, and ignores the value text it is given,
-  so "-20 decibels" is heard as "67 percent". `SliderCtrl` is drawn by the app, so every screen
-  reader reads its value text. Its keys follow the ARIA slider pattern (Up and Right raise it), and
-  it handles Tab, Ctrl+Tab and Enter itself because it takes every key to get the arrows.
+- **EVERY SLIDER IS `native.slider.SliderCtrl`, NEVER `wx.Slider` DIRECTLY.** JAWS reads the
+  native Windows slider from its own position, as a percent of its range, and ignores the value
+  text it is given, so "-20 decibels" is heard as "67 percent". On Windows `SliderCtrl` is drawn by
+  the app, so every screen reader reads its value text; on macOS it is `wx.Slider`. Its keys follow
+  the ARIA slider pattern (Up and Right raise it) and move by the line and page sizes the app sets,
+  on both. The drawn one handles Tab, Ctrl+Tab and Enter itself because it takes every key to get
+  the arrows.
 - **ON WINDOWS A SLIDER IS A UIA SLIDER WITH NO MSAA OF ITS OWN** (`native.win.uia_slider`, through
   `a11y.slider`). Give it a wx.Accessible and JAWS reads it through MSAA, where Up and Down speak the
   value from before the key, so arrowing back never seems to land where it started; Left and Right,

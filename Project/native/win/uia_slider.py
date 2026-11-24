@@ -1,4 +1,4 @@
-"""Windows' `a11y.slider`: `native.slider.SliderCtrl` as a UIA Slider, with the RangeValue pattern
+"""Windows' `a11y.slider`: `native.slider.DrawnSlider` as a UIA Slider, with the RangeValue pattern
 (its numbers) and the Value pattern (its value in words, such as "-20 decibels").
 
 THE SLIDER HAS NO MSAA OF ITS OWN. Windows answers an MSAA client from this provider. JAWS reads a
